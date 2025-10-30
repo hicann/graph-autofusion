@@ -1,0 +1,71 @@
+{
+  "binFileName": "te_superkernel_2",
+  "binFileSuffix": ".o",
+  "blockDim": 32,
+  "coreType": "MIX",
+  "intercoreSync": 1,
+  "kernelName": "te_superkernel_2",
+  "magic": "RT_DEV_BINARY_MAGIC_ELF",
+  "memoryStamping": [],
+  "opParaSize": 8,
+  "parameters": [],
+  "sha256": "17a8a08ed355a1229243b664251f5a0fa5a8c22e356622bc09177196f15c4c9e",
+  "taskRation": "0:1",
+  "optionalInputMode": "gen_placeholder",
+  "optionalOutputMode": "gen_placeholder",
+  "supportSuperKernel": 1,
+  "SuperkernelInfo": {
+    "kernelList": {
+      "aicore": [
+        {
+          "func_name": "is_inf__kernel0",
+          "split_mode": 4,
+          "blockDim": 32,
+          "sub_operator_kernel_type": "KERNEL_TYPE_AIV_ONLY",
+          "sub_operator_early_start_set_flag": false,
+          "sub_operator_early_start_wait_flag": false,
+          "streamid": 1,
+          "send_event_list": [],
+          "recv_event_list": [],
+          "arg_list": {
+            "param_offset": 1,
+            "notify_param_offset": null,
+            "wait_param_offset": null
+          }
+        },
+        {
+          "func_name": "pows__kernel0",
+          "split_mode": 4,
+          "blockDim": 1,
+          "sub_operator_kernel_type": "KERNEL_TYPE_AIV_ONLY",
+          "sub_operator_early_start_set_flag": false,
+          "sub_operator_early_start_wait_flag": false,
+          "streamid": 1,
+          "send_event_list": [],
+          "recv_event_list": [],
+          "arg_list": {
+            "param_offset": 4,
+            "notify_param_offset": null,
+            "wait_param_offset": null
+          }
+        },
+        {
+          "func_name": "is_inf__kernel0",
+          "split_mode": 4,
+          "blockDim": 32,
+          "sub_operator_kernel_type": "KERNEL_TYPE_AIV_ONLY",
+          "sub_operator_early_start_set_flag": false,
+          "sub_operator_early_start_wait_flag": false,
+          "streamid": 1,
+          "send_event_list": [],
+          "recv_event_list": [],
+          "arg_list": {
+            "param_offset": 8,
+            "notify_param_offset": null,
+            "wait_param_offset": null
+          }
+        }
+      ]
+    }
+  }
+}
