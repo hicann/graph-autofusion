@@ -1,0 +1,29 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+/venv
+/.venv
+venv/
+.venv/
+
+# Build artifacts
+build/
+build_out/
+dist/
+*.egg-info/
+
+# Test outputs
+.pytest_cache/
+super_kernel/tests/generated/
+
+# Coverage reports
+super_kernel/coverage/
+
+# Type checker caches
+.mypy_cache/
+
+# IDE settings
+.vscode/
+.idea/
