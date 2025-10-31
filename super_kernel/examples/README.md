@@ -12,7 +12,7 @@
   └── superkernel_compare.py      # 使用super_kernel与不使用super_kernel的数据进行对比
 ```
 ## 前置说明
-确保已根据[《构建指南》](../../doc/build.md)完成前置环境准备和环境变量配置，确保已构建出cann-graph-autofusion_${cann_version}_linux-${arch}.run包。
+确保已根据[《构建指南》](../../doc/build.md)完成前置环境准备和环境变量配置，确保已构建出`cann-graph-autofusion_${cann_version}_linux-${arch}.run`包。
 
 ## 依赖安装
 

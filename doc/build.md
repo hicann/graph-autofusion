@@ -30,21 +30,21 @@ chmod +x Ascend-cann-toolkit_${cann_version}_linux-${arch}.run
 - 安装过程如有其他问题请参阅：CANN 社区版-环境准备-[软件安装](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/83RC1alpha001/softwareinst/instg/instg_quick.html?Mode=PmIns&OS=Debian&Software=cannToolKit)。 
 
 
-4. **安装社区版CANN ops包 **
-
-   运行python样例时需安装本包，若仅编译源码或运行C++样例，则跳过本操作。
+### 安装社区版CANN ops包
 
    根据产品型号和环境架构，下载对应`cann-${soc_name}-ops-${cann_version}_linux-${arch}.run`包，下载链接如下：
-    - Atlas A3 训练系列产品/Atlas A3 推理系列产品：[ops x86_64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/20251030_test/Ascend-cann-A3-ops_8.5.0.alpha001_linux-x86_64.run)、[ops aarch64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/20251030_test/Ascend-cann-A3-ops_8.5.0.alpha001_linux-arch64.run)。
-
-    ```bash
-    # 确保安装包具有可执行权限
-    chmod +x Ascend-cann-${soc_name}-ops-${cann_version}_linux-${arch}.run
-    # 安装命令
-    ./Ascend-cann-${soc_name}-ops-${cann_version}_linux-${arch}.run --full --install-path=${ascend_install_path}
-    ```
-    - \$\{soc\_name\}：表示NPU型号名称，即\$\{soc\_version\}删除“ascend”后剩余的内容。
-    - \$\{ascend\_install\_path\}：表示指定安装路径，需要与toolkit包安装在相同路径，默认安装在`/usr/local/Ascend`目录。
+   
+   - Atlas A3 训练系列产品/Atlas A3 推理系列产品：[ops x86_64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/20251030_test/Ascend-cann-A3-ops_8.5.0.alpha001_linux-x86_64.run)、[ops aarch64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/20251030_test/Ascend-cann-A3-ops_8.5.0.alpha001_linux-arch64.run)。
+   
+   ```bash
+   # 确保安装包具有可执行权限
+   chmod +x Ascend-cann-${soc_name}-ops-${cann_version}_linux-${arch}.run
+   # 安装命令
+   ./Ascend-cann-${soc_name}-ops-${cann_version}_linux-${arch}.run --full --install-path=${ascend_install_path}
+   ```
+   
+   - \$\{soc\_name\}：表示NPU型号名称，即\$\{soc\_version\}删除“ascend”后剩余的内容。
+   - \$\{ascend\_install\_path\}：表示指定安装路径，需要与toolkit包安装在相同路径，默认安装在`/usr/local/Ascend`目录。
 
 ### 源码下载
 
@@ -61,6 +61,7 @@ git clone https://gitcode.com/cann/graph-autofusion.git
     ```
 2. 安装依赖：
     ```shell
+    cd graph-autofusion
     pip3 install -r super_kernel/requirements-dev.txt
     ```
 
@@ -75,7 +76,7 @@ git clone https://gitcode.com/cann/graph-autofusion.git
     # 如果之前未指定路径安装，则：
     # root 用户，ascend_install_path=/usr/local/Ascend
     # 非 root 用户，ascend_install_path=${HOME}/Ascend
-    source ${ascend_install_path}/latest/bin/set_env.bash
+    source ${ascend_install_path}/latest/bin/setenv.bash
 ```
 
 ### 执行构建
