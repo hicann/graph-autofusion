@@ -48,7 +48,7 @@
 
   如果您在本项目中发现了某些功能缺失，希望对其进行新增，欢迎您新建Issue进行反馈和跟踪处理。
 
-  您可以按照[提交Issue/处理Issue任务](https://gitcode.com/cann/community#提交Issue处理Issue任务)指引新建 `Feature-Request|功能建议` 类Issue对新增功能进行说明，并提供您的设计方案，
+  您可以按照[提交Issue/处理Issue任务](https://gitcode.com/cann/community#提交Issue处理Issue任务)指引新建 `Requirement|需求建议` 类Issue对新增功能进行说明，并提供您的设计方案，
   然后在评论框中输入“/assign”或“/assign @yourself”，将该Issue分配给您进行跟踪实现。
 
 
