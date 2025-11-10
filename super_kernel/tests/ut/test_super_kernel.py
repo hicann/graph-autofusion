@@ -80,25 +80,26 @@ class TestSuperKernel:
     def teardown_method(self):
         print(f"--------------TearDown-------------")
 
-    def test_super_kernel_sub_op_add_compile(self):
+    def test_super_kernel_sub_op_add_compile(self, tmp_dir):
         with mock.patch("builtins.open", new_callable=mock.mock_open, read_data="{}"):
             with mock.patch("json.load", return_value=sub_op_add_json):
                 with mock.patch("subprocess.run"):
-                    with mock.patch.object(CommonUtility, 'is_support_super_kernel', return_value = True):
-                        with mock.patch("superkernel.super_kernel.super_kernel_compile"):
-                            kernel_info = {
-                                "op_list": [
-                                    {
-                                        "bin_path": "",
-                                        "json_path": "",
-                                        "kernel_name": "add"
-                                    }],
-                            }
-                            super_kernel_optype = "test_add"
-                            compile(kernel_info, super_kernel_optype)
-                            code_gen_path = os.path.join(CommonUtility.get_kernel_meta_dir(), super_kernel_optype + "kernel.cpp")
-                            gloden_code_path = os.path.join(GLODEN_FILE_PATH, super_kernel_optype + "kernel.cpp")
-                            assert compare_files(code_gen_path, gloden_code_path)
+                    with mock.patch.object(CommonUtility, 'is_support_super_kernel', return_value=True):
+                        with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir):
+                            with mock.patch("superkernel.super_kernel.super_kernel_compile"):
+                                kernel_info = {
+                                    "op_list": [
+                                        {
+                                            "bin_path": "",
+                                            "json_path": "",
+                                            "kernel_name": "add"
+                                        }],
+                                }
+                                super_kernel_optype = "test_add"
+                                compile(kernel_info, super_kernel_optype)
+                                code_gen_path = os.path.join(CommonUtility.get_kernel_meta_dir(), super_kernel_optype + "kernel.cpp")
+                                gloden_code_path = os.path.join(GLODEN_FILE_PATH, super_kernel_optype + "kernel.cpp")
+                                assert compare_files(code_gen_path, gloden_code_path)
 
     def test_gen_early_start_config_pre_op_is_aiv(self):
         info_dict = {
