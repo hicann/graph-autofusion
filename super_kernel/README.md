@@ -68,29 +68,9 @@ super_kernel/
 └── requirements-dev.txt   # python 依赖配置文件
 ```
 
-## 构建
+## 构建与安装
 
-参考[前置环境准备](../doc/build.md#前置环境准备)并确保已完成。
-
-```shell
-# 构建
-python3 -m build --wheel ./super_kernel/
-```
-执行完成后会在`./super_kernel/dist`下会生成`superkernel-*-py3-none-any.whl`。
-
-## 安装与卸载
-
-`./super_kernel/dist/superkernel-*-py3-none-any.whl`来自前面[构建](#构建)环节构建生成。
-```shell
-# 安装
-pip3 install ./super_kernel/dist/superkernel-*-py3-none-any.whl
-
-# 查看是否安装成功
-pip3 show superkernel
-
-# 卸载
-pip3 uninstall superkernel
-```
+参考[执行构建](../doc/build.md#执行构建)。
 
 ## 开发者
 
