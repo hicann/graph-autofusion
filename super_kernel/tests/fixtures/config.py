@@ -69,7 +69,8 @@ def tmp_dir(request):
 
 @pytest.fixture(scope="session")
 def data_dir():
-    return Path(__file__).resolve().parents[1] / "data"
+    return Path(__file__).resolve().parents[1] / "st" / "data"
+
 
 # 为所有测试用例创建临时的 PassContext，避免用例之间互相影响
 @pytest.fixture(autouse=True)

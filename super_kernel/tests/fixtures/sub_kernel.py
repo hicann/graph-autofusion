@@ -29,7 +29,7 @@ def compile_sub_kernel(kernel_meta_dir, op_name, op_type, func, extend_op_info: 
     set_current_compile_soc_info("Ascend910_9391")
 
     # compile_op 函数一开始就会对 global_var_storage 做 reset，因此直接如下配置是无法生效的：
-    # global_var_storage.set_variable("ascendc_compile_debug_config", True)
+    # code: global_var_storage.set_variable("ascendc_compile_debug_config", True)
     # 这样配置才能生效
     current_build_config()[op_debug_config] = ["dump_cce", ]
 
@@ -55,11 +55,12 @@ def compile_sub_kernel(kernel_meta_dir, op_name, op_type, func, extend_op_info: 
 
         func()
 
+
 class SubkernelPath:
     def __init__(self, path, name):
         self.root = path
         self.name = name
-    
+
     def o(self):
         return self.root / "kernel_meta" / (self.name + ".o")
 
@@ -85,6 +86,7 @@ def subkernel_is_inf(tmp_dir):
     y["format"] = "ND"
     y["ori_format"] = "ND"
     y["dtype"] = "float16"
+
 
 def make_1_in_1_out_subkernel_fixture(
         impl_module_name,  # 实现模块名（如 "is_inf"）
@@ -173,6 +175,7 @@ subkernel_is_finite_split_mode1 = make_1_in_1_out_subkernel_fixture(
     extend_op_info=NEW_EXTEND_OP_INFO
 )
 
+
 @pytest.fixture
 def subkernel_inf(request):
     # request.param 接收来自 parametrize 的参数，即你写的 "subkernel_is_inf" 字符串
@@ -180,10 +183,12 @@ def subkernel_inf(request):
     # 使用 request.getfixturevalue 根据字符串名字动态获取对应的夹具值
     return request.getfixturevalue(fixture_name)
 
+
 @pytest.fixture
 def subkernel_finite(request):
     fixture_name = request.param
     return request.getfixturevalue(fixture_name)
+
 
 @pytest.fixture(scope="session")
 def subkernel_pows_default(tmp_dir):

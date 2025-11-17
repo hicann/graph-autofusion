@@ -14,10 +14,10 @@ super_kernel/
   src/
     superkernel/    # 核心业务代码
   tests/
+    fixtures/     # 运行环境配置、子内核编译等夹具
     ut/             # 单元测试
     st/
       data/         # 黄金数据样本
-      fixtures/     # 运行环境配置、子内核编译等夹具
       scenarios/    # 端到端测试脚本
       utils/        # 通用校验与工具函数
     generated/      # 测试运行时产生的临时产物（不纳入版本库）
@@ -29,10 +29,10 @@ super_kernel/
 
 ## 固定夹具
 
-- `tmp_dir`（`st/fixtures/config.py`）：为每次测试会话提供独立的 `tests/generated/<timestamp>_<pid>` 目录，并在测试结束后清理。
-- `data_dir`（`st/fixtures/config.py`）：定位至 `tests/st/data/`，便于场景读取黄金文件或配置。
-- `soc_version`（`st/fixtures/config.py`）：指定默认 SoC 信息，当前默认值为 `Ascend910_9391`；如需使用其他版本，可在场景内覆盖或增加新的 fixture。
-- `subkernel` 编译夹具（位于 `st/fixtures/sub_kernel.py`）：包含 `subkernel_is_inf_default`、`subkernel_is_inf_split_mode1`、`subkernel_is_finite_default` 等。测试用例可借助 `subkernel_inf` / `subkernel_finite` 这类间接 fixture 组合不同配置。
+- `tmp_dir`（`fixtures/config.py`）：为每次测试会话提供独立的 `tests/generated/<timestamp>_<pid>` 目录，并在测试结束后清理。
+- `data_dir`（`fixtures/config.py`）：定位至 `tests/st/data/`，便于场景读取黄金文件或配置。
+- `soc_version`（`fixtures/config.py`）：指定默认 SoC 信息，当前默认值为 `Ascend910_9391`；如需使用其他版本，可在场景内覆盖或增加新的 fixture。
+- `subkernel` 编译夹具（位于 `fixtures/sub_kernel.py`）：包含 `subkernel_is_inf_default`、`subkernel_is_inf_split_mode1`、`subkernel_is_finite_default` 等。测试用例可借助 `subkernel_inf` / `subkernel_finite` 这类间接 fixture 组合不同配置。
 
 开发者在新增夹具时，请保持作用域、资源释放策略与现有实现一致。
 

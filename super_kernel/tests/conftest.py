@@ -14,6 +14,11 @@
 from pathlib import Path
 import pytest
 
+pytest_plugins = [
+    "fixtures.config",
+    "fixtures.sub_kernel",
+]
+
 
 def pytest_collection_modifyitems(config, items):
     """
