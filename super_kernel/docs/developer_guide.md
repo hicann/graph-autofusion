@@ -19,7 +19,7 @@ super_kernel/
     st/
       data/         # 黄金数据样本
       scenarios/    # 端到端测试脚本
-      utils/        # 通用校验与工具函数
+    utils/          # 通用校验与工具函数
     generated/      # 测试运行时产生的临时产物（不纳入版本库）
   docs/             # 项目文档
   examples/         # 示例或演示脚本

@@ -61,7 +61,8 @@ super_kernel/
 │   └── superkernel        # SuperKernel 业务代码
 ├── tests                  # 测试工程目录
 │   ├── st                 # System Test
-│   └── ut                 # Unit Test
+│   ├── ut                 # Unit Test
+│   └── utils              # 通用校验与工具函数
 ├── CMakeLists.txt         # CMake 配置文件
 ├── pyproject.toml         # 项目元信息与打包配置
 ├── README.md
