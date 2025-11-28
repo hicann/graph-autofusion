@@ -351,5 +351,359 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
         code_gen = gen_op_end_debug_sync_all(super_operator)
         assert code_gen == ""
 
+    @staticmethod
+    def test_print_params_addr():
+        kernel_info = {
+            "op_list": [],
+        }
+        with mock.patch.object(CommonUtility, 'is_c310', return_value=False):
+            super_operator = SuperOperatorInfos(kernel_info, "test_print_params_addr")
+            super_operator.super_kernel_params = ["param1", "param2"]
+            code_gen = print_params_addr(super_operator.super_kernel_params)
+            result = ''
+            index = 0
+            result += 'AscendC::printf("ffts_addr: %p\\n", ffts_addr); //para index: 0\n'
+            index += 1
+            for param in super_operator.super_kernel_params:
+                result += f'AscendC::printf("{param}: %p\\n", {param}); //para index: {index}\n'
+                index += 1
+            assert code_gen == result
+    
+    @staticmethod
+    def test_tpl_of_gen_switch_case_call():
+        kernel_info = {
+            "op_list": [],
+        }
+        info_dict = {
+            "bin_path": "",
+            "json_path": "",
+            "kernel_name": "add"
+        }
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            sub_operator = SubOperatorInfos(0, info_dict, 0, {})
+            super_operator = SuperOperatorInfos(kernel_info, "test_tpl_of_gen_switch_case_call")
+
+            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            code_gen = tpl_of_gen_switch_case_call(sub_operator.start_block_idx, sub_operator, super_operator)
+
+            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            code_gen = tpl_of_gen_switch_case_call(sub_operator.start_block_idx, sub_operator, super_operator)
+            assert "AscendC::GetBlockIdx" in code_gen
+
+    @staticmethod
+    def test_gen_switch_case_call_block_of_dynamic_op():
+        kernel_info = {
+            "op_list": [],
+        }
+        info_dict = {
+            "bin_path": "",
+            "json_path": "",
+            "kernel_name": "add"
+        }
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            sub_operator = SubOperatorInfos(0, info_dict, 0, {})
+            super_operator = SuperOperatorInfos(kernel_info, "test_gen_switch_case_call_block_of_dynamic_op")
+            pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
+            next_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
+
+            sub_operator.sub_op_task_type = SubOperatorType.DYNAMIC_OP
+            sub_operator.switch_func_called_flag = False
+
+            pre_sub_operator = None
+            super_operator.enable_double_stream = False
+
+            code_gen = gen_switch_case_call_block_of_dynamic_op(super_operator, \
+                                                                next_sub_operator, \
+                                                                sub_operator, \
+                                                                pre_sub_operator)
+
+            assert "pipe_barrier(PIPE_ALL);\n" in code_gen \
+                and "AscendC::SyncAll<false>(); // reason3: dynamic gen_switch_case_block when no pre op\n" in code_gen
+    
+    @staticmethod
+    def test_gen_clear_wait_sync_addr_code():
+        kernel_info = {
+            "op_list": [],
+        }
+        info_dict = {
+            "bin_path": "",
+            "json_path": "",
+            "kernel_name": "add"
+        }
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            super_operator = SuperOperatorInfos(kernel_info, "test_gen_clear_wait_sync_addr_code")
+            super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                        SubOperatorInfos(0, info_dict, 0, {})]
+            for op in super_operator.info_base:
+                op.recv_event_list = info_dict.get('recv_event_list', [100, 101])
+            super_operator.info_base[0].kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            super_operator.info_base[1].kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            code_gen = gen_clear_wait_sync_addr_code(super_operator)
+
+            assert "if ASCEND_IS_AIC {\n" in code_gen and f"    if (get_block_idx() == 0) {{\n" in code_gen
+            assert "if ASCEND_IS_AIV {\n" in code_gen and f"    if (AscendC::GetBlockIdx() == 0) {{\n" in code_gen
+            assert f"*(reinterpret_cast<__gm__ uint64_t*>" in code_gen
+
+    @staticmethod
+    def test_process_gen_stream_send_code():
+        kernel_info = {
+            "op_list": [],
+        }
+        info_dict = {
+            "bin_path": "",
+            "json_path": "",
+            "kernel_name": "add"
+        }
+        super_operator = SuperOperatorInfos(kernel_info, "test_process_gen_stream_send_code")
+        super_operator.cub_op_list = [SubOperatorInfos(1, info_dict, 0, {})]
+        super_operator.vec_op_list = [SubOperatorInfos(1, info_dict, 0, {})]
+        op = SubOperatorInfos(0, info_dict, 0, {})
+        arch = 'aic'
+        need_flag = True
+        
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            arch = 'aic'
+            need_flag = True
+            code = "init_code_str"
+            code_gen = process_gen_stream_send_code(super_operator, op, arch, need_flag, code)
+            assert "init_code_str" in code_gen
+
+            arch = 'aic'
+            need_flag = False
+            code = "init_code_str"
+            code = "init_code_str"
+            code_gen = process_gen_stream_send_code(super_operator, op, arch, need_flag, code)
+            assert f"   pipe_barrier(PIPE_ALL);\n" in code_gen
+
+            arch = 'aiv'
+            need_flag = True
+            code = "init_code_str"
+            code_gen = process_gen_stream_send_code(super_operator, op, arch, need_flag, code)
+            assert "init_code_str" in code_gen
+
+            arch = 'aiv'
+            need_flag = False
+            code = "init_code_str"
+            code_gen = process_gen_stream_send_code(super_operator, op, arch, need_flag, code)
+            assert f"   pipe_barrier(PIPE_ALL);\n" in code_gen
+
+    @staticmethod
+    def test_gen_2_real_stream_send_code():
+        kernel_info = {
+            "op_list": [],
+        }
+        info_dict = {
+            "bin_path": "",
+            "json_path": "",
+            "kernel_name": "add"
+        }
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            super_operator = SuperOperatorInfos(kernel_info, "test_gen_2_real_stream_send_code")
+            super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                        SubOperatorInfos(0, info_dict, 0, {})]
+            super_operator.cub_op_list = [SubOperatorInfos(1, info_dict, 0, {})]
+            op = SubOperatorInfos(0, info_dict, 0, {})
+            op.send_info = {"op1": "cub:cub", "op2": "cub:vec", "op3": "vec:vec", "op4": "vec:cub"}
+
+            arch = 'aic'
+            op.index = 0
+            super_operator.info_base[-1].index = 0
+            code_gen = gen_2_real_stream_send_code(super_operator, op, arch)
+
+            op.index = 1
+            super_operator.info_base[-1].index = 0
+            code_gen = gen_2_real_stream_send_code(super_operator, op, arch)
+
+            assert "wait_flag_dev(AscendC::SYNC_AIC_FLAG);" in code_gen
+            assert "ffts_cross_core_sync(PIPE_MTE3, AscendC::GetffstMsg(0x02, AscendC::SYNC_AIC_AIV_FLAG));" in code_gen
+
+            arch = 'aiv'
+            code_gen = gen_2_real_stream_send_code(super_operator, op, arch)
+
+            assert "wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);" in code_gen
+            assert "ffts_cross_core_sync(PIPE_MTE3, AscendC::GetffstMsg(0x02, AscendC::SYNC_AIV_FLAG));" in code_gen
+
+    @staticmethod
+    def test_gen_2_real_stream_recv_code():
+
+        info_dict = {
+            "bin_path": "",
+            "json_path": "",
+            "kernel_name": "add"
+        }
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            op = SubOperatorInfos(0, info_dict, 0, {})
+            op.recv_info = {"op1": "vec:cub", "op2": "cub:vec"}
+
+            arch = 'aic'
+            code_gen = gen_2_real_stream_recv_code(op, arch)
+            assert "wait_flag_dev(AscendC::SYNC_AIV_FLAG);\n" in code_gen
+
+            arch = 'aiv'
+            code_gen = gen_2_real_stream_recv_code(op, arch)
+            assert "wait_flag_dev(AscendC::SYNC_AIC_AIV_FLAG);\n" in code_gen
+
+    @staticmethod
+    def test_gen_2_real_stream_sync_code():
+        kernel_info = {
+            "op_list": [],
+        }
+        info_dict = {
+            "bin_path": "",
+            "json_path": "",
+            "kernel_name": "add"
+        }
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            super_operator = SuperOperatorInfos(kernel_info, "test_gen_2_real_stream_sync_code")
+            super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                        SubOperatorInfos(0, info_dict, 0, {})]
+            pre_op = SubOperatorInfos(0, info_dict, 0, {})
+            cur_op = SubOperatorInfos(0, info_dict, 0, {})
+
+            pre_op.index = 0
+            super_operator.info_base[-1].index = 1
+            
+            pre_op.send_info = {"op1": "cub:cub", "op2": "cub:vec", "op3": "vec:vec", "op4": "vec:cub"}
+            cur_op.recv_info = {"op1": "vec:cub", "op2": "cub:vec"}
+            
+            code_gen = gen_2_real_stream_sync_code(super_operator, pre_op, cur_op, 'aic')
+            assert "ffts_cross_core_sync(PIPE_MTE3, AscendC::GetffstMsg(0x02, AscendC::SYNC_AIC_AIV_FLAG));" in code_gen
+            assert "wait_flag_dev(AscendC::SYNC_AIV_FLAG);\n" in code_gen
+
+            code_gen = gen_2_real_stream_sync_code(super_operator, pre_op, cur_op, 'aiv')
+            assert "ffts_cross_core_sync(PIPE_MTE3, AscendC::GetffstMsg(0x02, AscendC::SYNC_AIV_FLAG));" in code_gen
+            assert "wait_flag_dev(AscendC::SYNC_AIC_AIV_FLAG);\n" in code_gen
+
+    @staticmethod
+    def test_gen_sync_and_event_code_for_two_stream():
+        kernel_info = {
+            "op_list": [],
+        }
+        info_dict = {
+            "bin_path": "",
+            "json_path": "",
+            "kernel_name": "add"
+        }
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            super_operator = SuperOperatorInfos(kernel_info, "test_gen_sync_and_event_code_for_two_stream")
+            super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                        SubOperatorInfos(0, info_dict, 0, {})]
+            pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
+            sub_operator = SubOperatorInfos(0, info_dict, 0, {})
+            sub_operator.wait_block = "wait_code"
+            
+            pre_sub_operator.send_event_list = [100]
+            sub_operator.recv_event_list = [101]
+            
+            arch = 'aic'
+            pre_sub_operator.notify_block = {"aic": "notify_code", "aiv": "notify_code"}
+            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            code_gen = gen_sync_and_event_code_for_two_stream(super_operator, pre_sub_operator, sub_operator, arch)
+            assert "AscendC::SyncAll<false>(); // reason3: for continues notify/wait event" in code_gen
+
+            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            code_gen = gen_sync_and_event_code_for_two_stream(super_operator, pre_sub_operator, sub_operator, arch)
+            assert "wait_flag_dev(AscendC::SYNC_AIC_FLAG);" in code_gen
+
+            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            code_gen = gen_sync_and_event_code_for_two_stream(super_operator, pre_sub_operator, sub_operator, arch)
+            assert "wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);" in code_gen
+
+            sub_operator.recv_event_list = []
+            code_gen = gen_sync_and_event_code_for_two_stream(super_operator, pre_sub_operator, sub_operator, arch)
+            assert "notify_code" in code_gen
+
+    @staticmethod
+    def test_gen_2_real_stream_code_by_arch():
+        kernel_info = {
+            "op_list": [],
+        }
+        info_dict = {
+            "bin_path": "",
+            "json_path": "",
+            "kernel_name": "add"
+        }
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator = SuperOperatorInfos(kernel_info, "test_gen_2_real_stream_code_by_arch")
+                super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                            SubOperatorInfos(0, info_dict, 0, {})]
+                sub_ops = [SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {}), \
+                            SubOperatorInfos(0, info_dict, 0, {})]
+                
+                arch = 'aic'
+                super_kernel_params_str = ''
+                exits_dynamic_op = True
+                super_operator.split_mode = 4
+                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                                                          arch, \
+                                                          super_kernel_params_str, \
+                                                          exits_dynamic_op, \
+                                                          sub_ops)
+
+                assert "uint64_t aic_func_addr_split3 = 0;" in code_gen
+
+                super_operator.preload_mode = SuperKernelPreLoadMode.PreLoadByWhole
+
+                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                                                          arch, \
+                                                          super_kernel_params_str, \
+                                                          exits_dynamic_op, \
+                                                          sub_ops)
+                
+                assert "AscendC::PreLoad(8);" in code_gen
+
+                super_operator.preload_mode = SuperKernelPreLoadMode.PreLoadStepByStep
+                sub_ops[1].preload_call_block = "sub_operator.preload_call_block"
+
+                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                                                          arch, \
+                                                          super_kernel_params_str, \
+                                                          exits_dynamic_op, \
+                                                          sub_ops)
+                assert "sub_operator.preload_call_block" in code_gen
+
+                super_operator.preload_mode = SuperKernelPreLoadMode.PreloadByAdanvanceStep
+                sub_ops[2].preload_call_block = "next_sub_operator.preload_call_block"
+                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                                                          arch, \
+                                                          super_kernel_params_str, \
+                                                          exits_dynamic_op, \
+                                                          sub_ops)
+                assert "next_sub_operator.preload_call_block" in code_gen
+                
+
+                super_operator.datacache_mode = SuperKernelDataCacheMode.DataCacheLoadAdancanceStep
+                sub_ops[1].data_cache_preload_call = "sub_operator.data_cache_preload_call"
+                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                                                          arch, \
+                                                          super_kernel_params_str, \
+                                                          exits_dynamic_op, \
+                                                          sub_ops)
+
+                assert "sub_operator.data_cache_preload_call" in code_gen
+                sub_ops[2].data_cache_preload_call = "next_sub_operator.data_cache_preload_call"
+                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                                                          arch, \
+                                                          super_kernel_params_str, \
+                                                          exits_dynamic_op, \
+                                                          sub_ops)
+                assert "next_sub_operator.data_cache_preload_call" in code_gen
+
+                sub_ops[2].send_event_list = [100]
+                sub_ops[2].notify_block = {"aic": "notify_code", "aiv": "notify_code"}
+
+                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                                                          arch, \
+                                                          super_kernel_params_str, \
+                                                          exits_dynamic_op, \
+                                                          sub_ops)
+                mock_raise.assert_called_once_with(ERR_CODE, \
+f"last op of super kernel must not have any send event, op:{sub_ops[2].kernel_name}, \
+event_list:{sub_ops[2].send_event_list}")
+
+
+
 if __name__ == "__main__":
     pytest.main()
