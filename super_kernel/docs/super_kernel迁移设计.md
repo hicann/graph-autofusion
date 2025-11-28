@@ -99,7 +99,6 @@
 |tbe.tvm.error_mgr.TBE_DEFAULT_PYTHON_ERROR_CODE| 异常码 | "EB0500" |
 |tbe.common.buildcfg.get_current_build_config| 获取编译上下文信息 | get_compile_config_info |
 |tbe.common.buildcfg.buildcfg.op_debug_config| 获取日志级别 | 集成进get_compile_config_info接口中 |
-|ascendc_compile_gen_code.gen_dci_codes| clean cache需确认是否SuperKernel需要 | 待确认 |
 | log_utils及相关接口 | 日志模板 | 直接使用 |
 | ascendc_common_utility及相关接口 | 工具模板 | 当前阶段一先直接使用 |
 | global_storage.global_var_storage | 全局变量设置 | 分析是否可以删除 |

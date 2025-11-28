@@ -162,11 +162,6 @@ extern "C"  __global__ __attribute__((aligned(256))) __aicore__ void auto_gen_te
 
     }
 
-#if defined(__DAV_C310__) || defined(__DAV_310R6__) || (__NPU_ARCH__ == 5102)
-    pipe_barrier(PIPE_ALL);
-    dsb(mem_dsb_t::DSB_ALL);
-    dci();
-#endif
 }
 
 #if TILING_KEY_VAR == 0UL

@@ -170,11 +170,6 @@ extern "C"  __global__ __attribute__((aligned(512))) __aicore__ void auto_gen_te
     pipe_barrier(PIPE_ALL);
     dcci((__gm__ uint64_t*)0, cache_line_t::ENTIRE_DATA_CACHE, dcci_dst_t::CACHELINE_OUT);
 
-#if defined(__DAV_C310__) || defined(__DAV_310R6__) || (__NPU_ARCH__ == 5102)
-    pipe_barrier(PIPE_ALL);
-    dsb(mem_dsb_t::DSB_ALL);
-    dci();
-#endif
 }
 
 #if TILING_KEY_VAR == 0UL

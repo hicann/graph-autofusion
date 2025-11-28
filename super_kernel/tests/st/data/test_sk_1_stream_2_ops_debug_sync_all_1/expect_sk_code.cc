@@ -170,11 +170,6 @@ extern "C"  __global__ __attribute__((aligned(512))) __aicore__ void auto_gen_te
 
     ffts_cross_core_sync(PIPE_MTE3, AscendC::GetffstMsg(0x0, AscendC::SYNC_AIV_ONLY_ALL));
     wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
-#if defined(__DAV_C310__) || defined(__DAV_310R6__) || (__NPU_ARCH__ == 5102)
-    pipe_barrier(PIPE_ALL);
-    dsb(mem_dsb_t::DSB_ALL);
-    dci();
-#endif
 }
 
 #if TILING_KEY_VAR == 0UL

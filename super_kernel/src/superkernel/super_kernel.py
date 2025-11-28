@@ -15,7 +15,7 @@ super kernel
 import os
 import stat
 from tbe.tikcpp.super_kernel_utility import get_soc_spec, KernelMetaType, \
-    CommonUtility, gen_func_align_attribute, gen_dci_codes
+    CommonUtility, gen_func_align_attribute
 from tbe.tikcpp.super_kernel_op_compile import super_kernel_compile, gen_file_header
 from tbe.tikcpp.super_kernel_constants import SuperKernelPreLoadMode, SuperKernelDataCacheMode, \
     SuperKernelEarlyStartMode, SubOperatorType, SuperKernelDebugDcciAllMode, SuperKernelDebugSyncAllMode, \
@@ -973,8 +973,6 @@ not have any send event, op:{sub_operator.kernel_name}, event_list:{sub_operator
         pre_sub_operator = sub_operator
 
     super_kernel_file += gen_clear_wait_sync_addr_code(super_operator)
-
-    super_kernel_file += gen_dci_codes()
 
     super_kernel_file += indent_code_func(gen_profiling_start_and_end_record(super_operator, False))
 
