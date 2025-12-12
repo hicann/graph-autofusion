@@ -55,7 +55,7 @@ set(SCENE_OUT_PUT
 )
 configure_file(
     ${SCENE_OUT_PUT}
-    ${STAGING_DIR}/graph_autofusion/
+    ${STAGING_DIR}/share/info/graph_autofusion/
     COPYONLY
 )
 set(OPS_VERSION_OUT_PUT
@@ -63,25 +63,29 @@ set(OPS_VERSION_OUT_PUT
 )
 configure_file(
     ${OPS_VERSION_OUT_PUT}
-    ${STAGING_DIR}/graph_autofusion/
+    ${STAGING_DIR}/share/info/graph_autofusion/
     COPYONLY
 )
 configure_file(
     ${CSV_OUTPUT}
-    ${STAGING_DIR}/graph_autofusion/script
+    ${STAGING_DIR}/share/info/graph_autofusion/script
     COPYONLY
 )
 # makeself打包
 file(STRINGS ${CPACK_CMAKE_BINARY_DIR}/makeself.txt script_output)
 string(REPLACE " " ";" makeself_param_string "${script_output}")
 
+list(LENGTH makeself_param_string LIST_LENGTH)
+math(EXPR INSERT_INDEX "${LIST_LENGTH} - 2")
+list(INSERT makeself_param_string ${INSERT_INDEX} "${STAGING_DIR}")
+
 message(STATUS "script output: ${script_output}")
 message(STATUS "makeself: ${makeself_param_string}")
 
 execute_process(COMMAND bash ${MAKESELF_EXE}
         --header ${MAKESELF_HEADER_EXE}
-        --help-header graph_autofusion/script/help.info
-        ${makeself_param_string} graph_autofusion/script/install.sh
+        --help-header share/info/graph_autofusion/script/help.info
+        ${makeself_param_string} share/info/graph_autofusion/script/install.sh
         WORKING_DIRECTORY ${STAGING_DIR}
         RESULT_VARIABLE EXEC_RESULT
         ERROR_VARIABLE  EXEC_ERROR

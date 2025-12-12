@@ -34,15 +34,7 @@ get_install_param() {
 get_install_dir() {
     local install_info="$curpath/../ascend_install.info"
     local hetero_arch=$(get_install_param "GRAPH_AUTOFUSION_Hetero_Arch_Flag" "${install_info}")
-    if [ "$param_mult_ver" = "multi_version" ]; then
-        if [ "$hetero_arch" = "y" ]; then
-            echo "$(realpath $curpath/../../../../../latest)/graph_autofusion"
-        else
-            echo "$(realpath $curpath/../../../latest)/graph_autofusion"
-        fi
-    else
-        echo "$(realpath $curpath/..)"
-    fi
+    echo "$(realpath $curpath/../../../..)"
 }
 
 INSTALL_DIR="$(get_install_dir)"

@@ -30,7 +30,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/third_party/makeself-fetch.cmake)
 
 set(script_prefix ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package/graph_autofusion/scripts)
 install(DIRECTORY ${script_prefix}/
-    DESTINATION graph_autofusion/script
+    DESTINATION share/info/graph_autofusion/script
     FILE_PERMISSIONS
     OWNER_READ OWNER_WRITE OWNER_EXECUTE  # 文件权限
     GROUP_READ GROUP_EXECUTE
@@ -50,7 +50,7 @@ set(SCRIPTS_FILES
 )
 
 install(FILES ${SCRIPTS_FILES}
-    DESTINATION graph_autofusion/script
+    DESTINATION share/info/graph_autofusion/script
 )
 set(COMMON_FILES
     ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/install_common_parser.sh
@@ -74,13 +74,13 @@ set(CONF_FILES
     ${CMAKE_SOURCE_DIR}/scripts/package/common/cfg/path.cfg
 )
 install(FILES ${CMAKE_SOURCE_DIR}/version.info
-    DESTINATION .
+    DESTINATION share/info/graph_autofusion
 )
 install(FILES ${CONF_FILES}
     DESTINATION graph_autofusion/conf
 )
 install(FILES ${PACKAGE_FILES}
-    DESTINATION graph_autofusion/script
+    DESTINATION share/info/graph_autofusion/script
 )
 install(FILES ${LATEST_MANGER_FILES}
     DESTINATION latest_manager
@@ -97,7 +97,7 @@ set(BIN_FILES
     ${CMAKE_SOURCE_DIR}/scripts/package/graph_autofusion/scripts/setenv.fish
 )
 install(FILES ${BIN_FILES}
-    DESTINATION graph_autofusion/bin
+    DESTINATION share/info/graph_autofusion/bin
 )
 
 # ============= CPack =============

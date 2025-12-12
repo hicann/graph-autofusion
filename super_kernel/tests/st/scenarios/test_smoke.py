@@ -78,7 +78,7 @@ from utils import validate_codegen_output, validate_compile_options
              "-D__ASCENDC_ENABLE_WAIT_PRE_TASK_END",
              "-D__ASCENDC_SUPERKERNEL_EARLY_START_V2",
          ]),
-        # # 新配置7：split-mode=1
+        # 新配置7：split-mode=1
         # ("subkernel_is_inf_split_mode1", "subkernel_is_finite_split_mode1", "compile-options=-g:split-mode=1:", "test_sk_1_stream_2_ops_split_mode_1",
         #  [
         #     "-D__ASCENDC_ENABLE_SET_NEXT_TASK_START",
@@ -101,14 +101,14 @@ def test_sk_1_stream_2_ops(
 ):
     kernel_meta_dir = tmp_dir / golden_codegen_path
 
-    from tbe.tikcpp.global_storage import global_var_storage
+    from asc_op_compile_base.asc_op_compiler.global_storage import global_var_storage
     global_var_storage.set_variable("ascendc_compile_debug_config", True)
 
-    from tbe.common.platform.platform_info import set_current_compile_soc_info
+    from asc_op_compile_base.common.platform.platform_info import set_current_compile_soc_info
     set_current_compile_soc_info(soc_version)
 
-    from tbe.tvm.contrib.ccec import current_build_config
-    from tbe.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, op_debug_config, tbe_debug_level
+    from asc_op_compile_base.common.ccec import current_build_config
+    from asc_op_compile_base.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, op_debug_config, tbe_debug_level
 
     current_build_config()[kernel_meta_parent_dir] = str(kernel_meta_dir)
     current_build_config()[op_debug_config] = ["dump_cce"]
@@ -180,14 +180,14 @@ def test_sk_1_stream_3_ops(
 ):
     kernel_meta_dir = tmp_dir / golden_codegen_path
 
-    from tbe.tikcpp.global_storage import global_var_storage
+    from asc_op_compile_base.asc_op_compiler.global_storage import global_var_storage
     global_var_storage.set_variable("ascendc_compile_debug_config", True)
 
-    from tbe.common.platform.platform_info import set_current_compile_soc_info
+    from asc_op_compile_base.common.platform.platform_info import set_current_compile_soc_info
     set_current_compile_soc_info(soc_version)
 
-    from tbe.tvm.contrib.ccec import current_build_config
-    from tbe.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, op_debug_config, tbe_debug_level
+    from asc_op_compile_base.common.ccec import current_build_config
+    from asc_op_compile_base.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, op_debug_config, tbe_debug_level
 
     current_build_config()[kernel_meta_parent_dir] = str(kernel_meta_dir)
     current_build_config()[op_debug_config] = ["dump_cce"]

@@ -14,10 +14,10 @@ super kernel
 """
 import os
 import stat
-from tbe.tikcpp.super_kernel_utility import get_soc_spec, KernelMetaType, \
+from asc_op_compile_base.asc_op_compiler.super_kernel_utility import get_soc_spec, KernelMetaType, \
     CommonUtility, gen_func_align_attribute
-from tbe.tikcpp.super_kernel_op_compile import super_kernel_compile, gen_file_header
-from tbe.tikcpp.super_kernel_constants import SuperKernelPreLoadMode, SuperKernelDataCacheMode, \
+from asc_op_compile_base.asc_op_compiler.super_kernel_op_compile import super_kernel_compile, gen_file_header
+from asc_op_compile_base.asc_op_compiler.super_kernel_constants import SuperKernelPreLoadMode, SuperKernelDataCacheMode, \
     SuperKernelEarlyStartMode, SubOperatorType, SuperKernelDebugDcciAllMode, SuperKernelDebugSyncAllMode, \
     SuperKernelFeedSyncAllMode, SuperKernelProfilingMode, ERR_CODE
 from .super_kernel_compile_base import gen_super_dump_code

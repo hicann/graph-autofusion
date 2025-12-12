@@ -19,7 +19,7 @@ docker_root=""
 sourcedir="$PWD/graph_autofusion"
 curpath=$(dirname $(readlink -f "$0"))
 common_func_path="${curpath}/common_func.inc"
-pkg_version_path="${curpath}/../../version.info"
+pkg_version_path="${curpath}/../version.info"
 chip_type="all"
 feature_type="all"
 
@@ -73,7 +73,7 @@ get_install_param() {
     echo "${_param}"
 }
 
-install_info="${common_parse_dir}/graph_autofusion/ascend_install.info"
+install_info="${common_parse_dir}/share/info/graph_autofusion/ascend_install.info"
 if [ -f "$install_info" ]; then
     chip_type=$(get_install_param "GRAPH_AUTOFUSION_Chip_Type" "${install_info}")
     feature_type=$(get_install_param "GRAPH_AUTOFUSION_Feature_Type" "${install_info}")
@@ -111,7 +111,7 @@ create_latest_linux_softlink() {
     if [ "$pkg_is_multi_version" = "true" ] && [ "$hetero_arch" = "y" ]; then
         local linux_path="$(realpath $common_parse_dir/..)"
         local arch_path="$(basename $linux_path)"
-        local latest_path="$(realpath $linux_path/../..)/latest"
+        local latest_path="$(realpath $linux_path/../..)/cann"
         if [ -d "$latest_path" ]; then
             if [ ! -e "$latest_path/$arch_path" ] || [ -L "$latest_path/$arch_path" ]; then
                 ln -srfn "$linux_path" "$latest_path"
@@ -144,7 +144,7 @@ new_upgrade() {
     # 执行安装
     custom_options="--custom-options=--common-parse-dir=$common_parse_dir,--logfile=$logfile,--stage=upgrade,--quiet=$is_quiet,--pylocal=$pylocal,--hetero-arch=$hetero_arch"
     sh "$curpath/install_common_parser.sh" --package="graph_autofusion" --install --username="$username" --usergroup="$usergroup" --set-cann-uninstall --upgrade \
-        --version=$pkg_version --version-dir=$pkg_version_dir \
+        --version=$pkg_version --version-dir=$pkg_version_dir --use-share-info \
         $setenv_option $in_install_for_all --docker-root="$docker_root" --chip="$chip_type" --feature="$feature_type" \
         $custom_options "$common_parse_type" "$input_install_dir" "$curpath/filelist.csv"
     if [ $? -ne 0 ]; then

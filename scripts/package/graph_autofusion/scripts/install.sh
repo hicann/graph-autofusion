@@ -19,7 +19,7 @@ version_compat_func_path="${curpath}/version_compatiable.inc"
 common_func_v2_path="${curpath}/common_func_v2.inc"
 version_cfg_path="${curpath}/version_cfg.inc"
 graph_autofusion_func_path="${curpath}/graph_autofusion_func.sh"
-pkg_version_path="${curpath}/../../version.info"
+pkg_version_path="${curpath}/../version.info"
 install_info_old="/etc/ascend_install.info"
 run_dir="$(echo "$2" | cut -d'-' -f 3-)"
  
@@ -1236,9 +1236,9 @@ else
 fi
  
 if [ "$pkg_is_multi_version" = "true" ] && [ "$hetero_arch" != "y" ]; then
-    default_dir="${pkg_install_path}/$pkg_version_dir/graph_autofusion"
+    default_dir="${pkg_install_path}/$pkg_version_dir/share/info/graph_autofusion"
 else
-    default_dir="${pkg_install_path}/graph_autofusion"
+    default_dir="${pkg_install_path}/share/info/graph_autofusion"
 fi
 install_info="${default_dir}/ascend_install.info"
  
@@ -1318,7 +1318,7 @@ if [ "$input_install_for_all" = "n" ]; then
     fi
 fi
  
-uninstall_none_multi_version "$pkg_install_path/graph_autofusion"
+uninstall_none_multi_version "$pkg_install_path/share/info/graph_autofusion"
 check_install_for_all
 create_default_install_dir_for_common_user
 log_base_version
@@ -1347,20 +1347,6 @@ if [ "x$version_installed" != "x" -a "$version_installed" != "none" ] || [ -f "$
         exit_uninstall_log 0
     # 升级场景
     elif [ "$upgrade" = "y" ]; then
-        if [ -n "$pkg_version_dir" ]; then
-            if [ "$hetero_arch" = "y" ]; then
-                get_package_upgrade_install_info_hetero "upgrade_install_info"
-            else
-                get_package_upgrade_install_info "upgrade_install_info" "$pkg_install_path" "graph_autofusion"
-            fi
-            if [ -z "$upgrade_install_info" ]; then
-                log "ERROR" "Can not find softlink for this package in latest directory, upgrade failed"
-                log_operation "Upgrade" "failed"
-                exit_install_log 1
-            elif [ "$(realpath $upgrade_install_info)" != "$(realpath $install_info)" ]; then
-                uninstall_run "uninstall" "n" "y" "$upgrade_install_info"
-            fi
-        fi
         unchattr_files
         uninstall_run "uninstall" "n" "n"
         save_user_files_to_log "$default_dir"
@@ -1419,23 +1405,9 @@ else
                 exit_install_log 1
             fi
         else
-            if [ "$hetero_arch" = "y" ]; then
-                get_package_upgrade_install_info_hetero "upgrade_install_info"
-            else
-                get_package_upgrade_install_info "upgrade_install_info" "$pkg_install_path" "graph_autofusion"
-            fi
-            if [ -f "$upgrade_install_info" ]; then
-                create_default_dir && cp "$upgrade_install_info" "$install_info"
-                migrate_user_assets_v2
-                [ "$hetero_arch" = "y" ] && update_install_info_hetero "$install_info" "$pkg_version_dir"
-                uninstall_run "uninstall" "n" "y" "$upgrade_install_info"
-                upgrade_run "upgrade"
-                exit_install_log 0
-            else
-                log "ERROR" "ERR_NO:0x0080;ERR_DES:Runfile is not installed in ${pkg_install_path}, upgrade failed"
-                log_operation "Upgrade" "failed"
-                exit_install_log 1
-            fi
+            log "ERROR" "ERR_NO:0x0080;ERR_DES:Runfile is not installed in ${pkg_install_path}, upgrade failed"
+            log_operation "Upgrade" "failed"
+            exit_install_log 1
         fi
     # 安装场景
     elif [ "$run_install" = "y" ] || [ "$full_install" = "y" ] || [ "$devel_install" = "y" ]; then

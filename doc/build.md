@@ -76,7 +76,7 @@ git clone https://gitcode.com/cann/graph-autofusion.git
     # 如果之前未指定路径安装，则：
     # root 用户，ascend_install_path=/usr/local/Ascend
     # 非 root 用户，ascend_install_path=${HOME}/Ascend
-    source ${ascend_install_path}/latest/bin/setenv.bash
+    source ${ascend_install_path}/cann/bin/setenv.bash
 ```
 
 ### 执行构建

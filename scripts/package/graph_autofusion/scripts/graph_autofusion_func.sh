@@ -77,8 +77,8 @@ is_same_arch_pkg_installed() {
 
 get_package_upgrade_install_info_hetero() {
     local _outvar="$1"
-    local path_latest="$docker_root$input_install_path/latest"
-    local path_hetero="$docker_root$input_install_path/latest/$arch_scripts_path"
+    local path_latest="$docker_root$input_install_path/cann"
+    local path_hetero="$docker_root$input_install_path/cann/$arch_scripts_path"
     if [ -d "$path_latest" ] && [ -d "$path_hetero" ]; then
         local install_info=$(find "$path_hetero" -type f -name 'ascend_install.info' | grep 'graph_autofusion/ascend_install.info')
         if [ -n "$install_info" ]; then

@@ -14,14 +14,13 @@
 from pathlib import Path
 import pytest
 
-from tbe.common.context.op_context import OpContext
-from tbe.common.context import op_info
-from tbe.common.context import get_context
-from tbe.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, op_debug_config, tbe_debug_level
-from tbe.common.buildcfg.buildcfg import build_config
-from tbe.tvm.contrib.ccec import current_build_config
-from tbe.common.platform.platform_info import set_current_compile_soc_info
-
+from asc_op_compile_base.common.context.op_context import OpContext
+from asc_op_compile_base.common.context import op_info
+from asc_op_compile_base.common.context import get_context
+from asc_op_compile_base.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, op_debug_config, tbe_debug_level
+from asc_op_compile_base.common.buildcfg.buildcfg import build_config
+from asc_op_compile_base.common.ccec import current_build_config
+from asc_op_compile_base.common.platform.platform_info import set_current_compile_soc_info
 
 def compile_sub_kernel(kernel_meta_dir, op_name, op_type, func, extend_op_info: dict = None):
     current_build_config()[kernel_meta_parent_dir] = kernel_meta_dir
@@ -102,7 +101,7 @@ def make_1_in_1_out_subkernel_fixture(
         kernel_meta_dir = Path(tmp_dir) / f"subkernel_{op_name}"
 
         # 2. 动态导入实现模块和函数
-        module = __import__(f"impl.dynamic.{impl_module_name}", fromlist=[func_name])
+        module = __import__(f"impl.ops_math.dynamic.{impl_module_name}", fromlist=[func_name])
         func = getattr(module, func_name)
 
         # 3. 定义输入参数（可根据需要扩展）
@@ -194,7 +193,7 @@ def subkernel_finite(request):
 def subkernel_pows_default(tmp_dir):
     kernel_meta_dir = Path(tmp_dir) / "subkernel_pows"
 
-    from impl.dynamic import pows
+    from impl.ops_math.dynamic import pows
     x = {}
     x["shape"] = [1024]
     x["ori_shape"] = [1024]

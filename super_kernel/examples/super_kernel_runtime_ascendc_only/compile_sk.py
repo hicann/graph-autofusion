@@ -21,15 +21,14 @@ from superkernel import super_kernel
 from utils import SkCompileContext
 
 # TODO: AscendC需要重构部分，需要与tbe解耦
-from tbe.common.context.op_context import OpContext
-from tbe.common.context import op_info
-from tbe.common.context import get_context
-from tbe.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, op_debug_config, tbe_debug_level
-from tbe.common.buildcfg.buildcfg import build_config
-from tbe.tvm.contrib.ccec import current_build_config
-from tbe.common.platform.platform_info import set_current_compile_soc_info
-from tbe.tikcpp.global_storage import global_var_storage
-
+from asc_op_compile_base.common.context.op_context import OpContext
+from asc_op_compile_base.common.context import op_info
+from asc_op_compile_base.common.context import get_context
+from asc_op_compile_base.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, op_debug_config, tbe_debug_level
+from asc_op_compile_base.common.buildcfg.buildcfg import build_config
+from asc_op_compile_base.common.ccec import current_build_config
+from asc_op_compile_base.common.platform.platform_info import set_current_compile_soc_info
+from asc_op_compile_base.asc_op_compiler.global_storage import global_var_storage
 
 MAGIC_MAPPING = {
     "RT_DEV_BINARY_MAGIC_PLAIN": 0xabceed50,
@@ -241,7 +240,7 @@ def compile_subkernel(ctx: SkCompileContext):
             kernel_meta_dir = Path(tmp_dir) / f"subkernel_{op_name}"
 
             # 2. 动态导入实现模块和函数
-            module = __import__(f"impl.dynamic.{impl_module_name}", fromlist=[func_name])
+            module = __import__(f"impl.ops_math.dynamic.{impl_module_name}", fromlist=[func_name])
             func = getattr(module, func_name)
 
             # 3. 动态创建输入输出参数

@@ -19,9 +19,9 @@ import subprocess
 import math
 import threading
 from contextlib import contextmanager
-from tbe.tikcpp.super_kernel_utility import get_soc_spec, KernelMetaType, \
+from asc_op_compile_base.asc_op_compiler.super_kernel_utility import get_soc_spec, KernelMetaType, \
     CommonUtility, AscendCLogLevel, CompileStage, STR_TO_KERNEL_TYPE_V220
-from tbe.tikcpp.super_kernel_constants import SuperKernelEarlyStartMode, SubOperatorType, \
+from asc_op_compile_base.asc_op_compiler.super_kernel_constants import SuperKernelEarlyStartMode, SubOperatorType, \
     STR_TO_SUPER_TASK_TYPE, SuperKernelFeedSyncAllMode, SuperKernelProfilingMode, ERR_CODE
 
 

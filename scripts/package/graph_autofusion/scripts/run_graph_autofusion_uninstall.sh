@@ -53,8 +53,8 @@ else
 fi
 logfile="${log_dir}/ascend_install.log"
 
-SOURCE_INSTALL_COMMON_PARSER_FILE="${common_parse_dir}/graph_autofusion/script/install_common_parser.sh"
-SOURCE_FILELIST_FILE="${common_parse_dir}/graph_autofusion/script/filelist.csv"
+SOURCE_INSTALL_COMMON_PARSER_FILE="${common_parse_dir}/share/info/graph_autofusion/script/install_common_parser.sh"
+SOURCE_FILELIST_FILE="${common_parse_dir}/share/info/graph_autofusion/script/filelist.csv"
 
 get_install_param() {
     local _key="$1"
@@ -74,7 +74,7 @@ get_install_param() {
     echo "${_param}"
 }
 
-install_info="${common_parse_dir}/graph_autofusion/ascend_install.info"
+install_info="${common_parse_dir}/share/info/graph_autofusion/ascend_install.info"
 if [ -f "$install_info" ]; then
     hetero_arch=$(get_install_param "GRAPH_AUTOFUSION_Hetero_Arch_Flag" "${install_info}")
 fi
@@ -101,18 +101,18 @@ log() {
 log "INFO" "step into run_graph_autofusion_uninstall.sh ......"
 log "INFO" "uninstall target dir $common_parse_dir, type $common_parse_type."
 
-if [ ! -d "$common_parse_dir/graph_autofusion" ]; then
-    log "ERROR" "ERR_NO:0x0001;ERR_DES:path $common_parse_dir/graph_autofusion is not exist."
+if [ ! -d "$common_parse_dir/share/info/graph_autofusion" ]; then
+    log "ERROR" "ERR_NO:0x0001;ERR_DES:path $common_parse_dir/share/info/graph_autofusion is not exist."
     exit 1
 fi
 
 new_uninstall() {
-    if [ -f "${common_parse_dir}/graph_autofusion/data/version.info" ]; then
+    if [ -f "${common_parse_dir}/share/info/graph_autofusion/data/version.info" ]; then
         log "INFO" "need to uninstall costmodel files."
-        bash "${common_parse_dir}/graph_autofusion/data/script/install.sh" -- -- --uninstall --install-path="${common_parse_dir}"
+        bash "${common_parse_dir}/share/info/graph_autofusion/data/script/install.sh" -- -- --uninstall --install-path="${common_parse_dir}"
     fi
 
-    if [ ! -d "${common_parse_dir}/graph_autofusion" ]; then
+    if [ ! -d "${common_parse_dir}/share/info/graph_autofusion" ]; then
         log "INFO" "no need to uninstall graph_autofusion files."
         return 0
     fi
@@ -125,7 +125,7 @@ new_uninstall() {
         if [ -e "$package_db_info" ]; then
             local linux_path="$(realpath $common_parse_dir/..)"
             local arch_path="$(basename $linux_path)"
-            local latest_path="$(realpath $linux_path/../..)/latest"
+            local latest_path="$(realpath $linux_path/../..)/cann"
             local pkgs="$(cut -d'|' -f2 $package_db_info | sort -u)"
             if [ "$pkgs" = "graph_autofusion" ]; then
                 if [ -L "$latest_path/$arch_path" ] && [ "$(realpath $linux_path)" = "$(realpath $latest_path/$arch_path)" ]; then
@@ -142,7 +142,7 @@ new_uninstall() {
     # 执行卸载
     custom_options="--custom-options=--common-parse-dir=$common_parse_dir,--logfile=$logfile,--stage=uninstall,--quiet=$is_quiet,--hetero-arch=$hetero_arch"
     sh "$SOURCE_INSTALL_COMMON_PARSER_FILE" --package="graph_autofusion" --uninstall --username="$username" --usergroup="$usergroup" ${recreate_softlink_option} \
-        --version=$pkg_version --version-dir=$pkg_version_dir \
+        --version=$pkg_version --version-dir=$pkg_version_dir --use-share-info \
         --docker-root="$docker_root" $custom_options "$common_parse_type" "$input_install_dir" "$SOURCE_FILELIST_FILE"
     if [ $? -ne 0 ]; then
         log "ERROR" "ERR_NO:0x0090;ERR_DES:failed to uninstall package."

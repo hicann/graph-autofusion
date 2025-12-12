@@ -174,23 +174,22 @@ remove_last_license() {
     fi
 }
 
-WHL_SOFTLINK_INSTALL_DIR_PATH="${common_parse_dir}/graph_autofusion/python/site-packages"
 WHL_INSTALL_DIR_PATH="${common_parse_dir}/python/site-packages"
 
 custom_uninstall() {
-    if [ -z "$common_parse_dir/graph_autofusion" ]; then
+    if [ -z "$common_parse_dir/share/info/graph_autofusion" ]; then
         log "ERROR" "ERR_NO:0x0001;ERR_DES:graph_autofusion directory is empty"
         exit 1
     fi
 
     if [ "$hetero_arch" != "y" ]; then
-        local arch_name="$(get_arch_name $common_parse_dir/graph_autofusion)"
-        local ref_dir="$common_parse_dir/graph_autofusion/lib64/stub/linux/$arch_name"
-        remove_stub_softlink "$ref_dir" "$common_parse_dir/graph_autofusion/lib64/stub"
+        local arch_name="$(get_arch_name $common_parse_dir/share/info/graph_autofusion)"
+        local ref_dir="$common_parse_dir/share/info/graph_autofusion/lib64/stub/linux/$arch_name"
+        remove_stub_softlink "$ref_dir" "$common_parse_dir/share/info/graph_autofusion/lib64/stub"
     else
-        local arch_name="$(get_arch_name $common_parse_dir/graph_autofusion)"
-        local ref_dir="$common_parse_dir/graph_autofusion/lib64/stub/linux/$arch_name"
-        remove_stub_softlink "$ref_dir" "$common_parse_dir/graph_autofusion/lib64/stub"
+        local arch_name="$(get_arch_name $common_parse_dir/share/info/graph_autofusion)"
+        local ref_dir="$common_parse_dir/share/info/graph_autofusion/lib64/stub/linux/$arch_name"
+        remove_stub_softlink "$ref_dir" "$common_parse_dir/share/info/graph_autofusion/lib64/stub"
     fi
 
     if [ "$hetero_arch" != "y" ]; then
@@ -203,8 +202,7 @@ custom_uninstall() {
         log "INFO" "superkernel python package uninstalled successfully!"
     fi
 
-    test -d "$WHL_SOFTLINK_INSTALL_DIR_PATH" && rm -rf "$WHL_SOFTLINK_INSTALL_DIR_PATH" > /dev/null 2>&1
-    remove_empty_dir "${common_parse_dir}/graph_autofusion/python"
+    remove_empty_dir "${common_parse_dir}/share/info/graph_autofusion/python"
 
     if [ "$hetero_arch" != "y" ]; then
         if [ -d "${WHL_INSTALL_DIR_PATH}" ]; then

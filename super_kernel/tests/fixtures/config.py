@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from tbe.common.buildcfg.buildcfg import build_config
+from asc_op_compile_base.common.buildcfg.buildcfg import build_config
 
 @pytest.fixture(scope="session")
 def soc_version():
