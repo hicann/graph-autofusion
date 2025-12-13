@@ -16,7 +16,7 @@
   ```
 ### 安装社区版cann-toolkit包
 
-根据实际环境，下载对应`Ascend-cann-toolkit_${cann_version}_linux-${arch}.run`包，下载链接为[toolkit x86_64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/community/ge/Ascend-cann-toolkit_8.5.0.alpha001_linux-x86_64.run)、[toolkit aarch64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/community/ge/Ascend-cann-toolkit_8.5.0.alpha001_linux-aarch64.run)。
+根据实际环境，下载对应`Ascend-cann-toolkit_${cann_version}_linux-${arch}.run`包，下载链接为[toolkit x86_64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/20251212_newest/Ascend-cann-toolkit_8.5.0_linux-x86_64.run)、[toolkit aarch64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/20251212_newest/Ascend-cann-toolkit_8.5.0_linux-aarch64.run)。
 
 ```shell
 # 确保安装包具有可执行权限
@@ -34,13 +34,13 @@ chmod +x Ascend-cann-toolkit_${cann_version}_linux-${arch}.run
 
    根据产品型号和环境架构，下载对应`cann-${soc_name}-ops-${cann_version}_linux-${arch}.run`包，下载链接如下：
    
-   - Atlas A3 训练系列产品/Atlas A3 推理系列产品：[ops x86_64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/20251030_test/Ascend-cann-A3-ops_8.5.0.alpha001_linux-x86_64.run)、[ops aarch64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/20251030_test/Ascend-cann-A3-ops_8.5.0.alpha001_linux-arch64.run)。
+   - Atlas A3 训练系列产品/Atlas A3 推理系列产品：[ops x86_64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/20251212_newest/Ascend-cann-910_93-ops_8.5.0_linux-x86_64.run)、[ops aarch64包](https://ascend-cann.obs.cn-north-4.myhuaweicloud.com/CANN/20251212_newest/Ascend-cann-910_93-ops_8.5.0_linux-aarch64.run)。
    
    ```bash
    # 确保安装包具有可执行权限
-   chmod +x Ascend-cann-${soc_name}-ops-${cann_version}_linux-${arch}.run
+   chmod +x Ascend-cann-${soc_name}-ops_${cann_version}_linux-${arch}.run
    # 安装命令
-   ./Ascend-cann-${soc_name}-ops-${cann_version}_linux-${arch}.run --full --install-path=${ascend_install_path}
+   ./Ascend-cann-${soc_name}-ops_${cann_version}_linux-${arch}.run --install --install-path=${ascend_install_path}
    ```
    
    - \$\{soc\_name\}：表示NPU型号名称，即\$\{soc\_version\}删除“ascend”后剩余的内容。
@@ -134,7 +134,7 @@ git clone https://gitcode.com/cann/graph-autofusion.git
 - --install-path  指定安装路径，不指定则默认安装在`/usr/local/Ascend`（root 用户）或`${HOME}/Ascend`（非 root 用户）目录。
 - --quiet         静默安装，跳过人机交互环节。  
 - --pylocal       安装 run 包时，是否将包内的 .whl 跟随 run 包安装路径来安装。  
-  - 若选择该参数，则 .whl 安装在`${ascend_install_path}/latest/python/site-packages`路径下。
+  - 若选择该参数，则 .whl 安装在`${ascend_install_path}/cann/python/site-packages`路径下。
   - 若不选择该参数，则 .whl 安装在本地 python 路径下，例如`/usr/local/python3.7.5/lib/python3.7/site-packages`。
 - 更多安装选项请用 --help 选项查看。  
 
