@@ -649,16 +649,9 @@ prompt_set_env() {
     if [ -n "$pkg_version_dir" ] && [ "$hetero_arch" != "y" ]; then
         install_path="$install_path/$pkg_version_dir"
     fi
-    if [ "$hetero_arch" = "y" ]; then
-        echo "Please make sure that
-            - PATH includes ${install_path}/graph_autofusion/bin
-            - LD_LIBRARY_PATH includes ${install_path}/graph_autofusion/lib64"
-    else
-        echo "Please make sure that
-            - PATH includes ${install_path}/graph_autofusion/bin
-            - LD_LIBRARY_PATH includes ${install_path}/graph_autofusion/lib64
-            - PYTHONPATH includes ${install_path}/graph_autofusion/python/site-packages"
-    fi
+    echo "Please make sure that
+        - PATH includes ${install_path}/bin
+        - LD_LIBRARY_PATH includes ${install_path}/lib64"
 }
  
 check_docker_path() {
