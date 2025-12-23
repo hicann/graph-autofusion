@@ -33,6 +33,7 @@ if [ $1 ]; then
     common_parse_type="$3"
     pylocal="$5"
     docker_root="$7"
+    pkg_version_dir="$9"
 fi
 
 if [ "x${docker_root}" != "x" ]; then
@@ -44,7 +45,6 @@ fi
 get_version "pkg_version" "$pkg_version_path"
 is_multi_version_pkg "pkg_is_multi_version" "$pkg_version_path"
 if [ "$pkg_is_multi_version" = "true" ] && [ "$hetero_arch" != "y" ]; then
-    get_version_dir "pkg_version_dir" "$pkg_version_path"
     common_parse_dir="$common_parse_dir/$pkg_version_dir"
 fi
 

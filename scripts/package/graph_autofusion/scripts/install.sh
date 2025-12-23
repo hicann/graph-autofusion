@@ -698,7 +698,7 @@ install_run() {
         new_echo "INFO" "install ${graph_autofusion_install_path_param} ${graph_autofusion_install_type}"
         log "INFO" "install ${graph_autofusion_install_path_param} ${graph_autofusion_install_type}"
         bash "${curpath}/run_graph_autofusion_install.sh" "install" "${graph_autofusion_input_install_path}" "${graph_autofusion_install_type}" \
-            "${is_quiet}" "${pylocal}" "${input_setenv}" "${docker_root}" "${in_install_for_all}"
+            "${is_quiet}" "${pylocal}" "${input_setenv}" "${docker_root}" "${in_install_for_all}" "$pkg_version_dir"
         if [ $? -eq 0 ]; then
             update_version_info_version
             log "INFO" "graph_autofusion package installed successfully! The new version takes effect immediately."
@@ -740,7 +740,7 @@ upgrade_run() {
         new_echo "INFO" "upgrade ${graph_autofusion_install_path_param} ${graph_autofusion_install_type}"
         log "INFO" "upgrade ${graph_autofusion_install_path_param} ${graph_autofusion_install_type}"
         bash "${curpath}/run_graph_autofusion_upgrade.sh" "upgrade" "${graph_autofusion_input_install_path}" "${graph_autofusion_install_type}" \
-            "${is_quiet}" "${pylocal}" "${input_setenv}" "${docker_root}" "${in_install_for_all}"
+            "${is_quiet}" "${pylocal}" "${input_setenv}" "${docker_root}" "${in_install_for_all}" "$pkg_version_dir"
         if [ $? -eq 0 ]; then
             update_version_info_version
             log "INFO" "graph_autofusion package upgraded successfully! The new version takes effect immediately."
@@ -790,7 +790,7 @@ uninstall_run() {
         new_echo "INFO" "uninstall ${graph_autofusion_install_path_param} ${graph_autofusion_install_type}"
         log "INFO" "uninstall ${graph_autofusion_install_path_param} ${graph_autofusion_install_type}"
         bash "$upgrade_default_dir/script/run_graph_autofusion_uninstall.sh" "uninstall" "${graph_autofusion_input_install_path}" "${graph_autofusion_install_type}" "${is_quiet}" \
-            "${is_docker_install}" "${docker_root}" "${is_recreate_softlink}"
+            "${is_docker_install}" "${docker_root}" "${is_recreate_softlink}" "$pkg_version_dir"
         if [ $? -eq 0 ]; then
             if [ "$is_remove_info_files" = "y" ]; then
                 test -f "$upgrade_install_info" && rm -f "$upgrade_install_info"

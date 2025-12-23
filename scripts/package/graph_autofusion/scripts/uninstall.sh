@@ -176,7 +176,7 @@ get_install_param() {
 
 hetero_arch=$(get_install_param "GRAPH_AUTOFUSION_Hetero_Arch_Flag" "${ASCEND_INSTALL_INFO_FILE}")
 export hetero_arch
-get_version_dir "version_dir" "$version_info_file"
+version_dir="$(basename "$(readlink -f "$install_path_param/../../..")")"
 
 get_pkg_install_path_param() {
     if [ -n "$version_dir" ] && [ "$hetero_arch" != "y" ]; then
@@ -251,7 +251,7 @@ uninstall_run() {
     fi
     if [ $? -eq 0 ]; then
         log "INFO" "${RUN_CMD} ${graph_autofusion_install_path_param} ${graph_autofusion_install_type}"
-        bash "${UNINSTALL_SHELL}" "${RUN_CMD}" "${graph_autofusion_install_path_param}" "${graph_autofusion_install_type}" "${IS_QUIET}" "n" "" "y"
+        bash "${UNINSTALL_SHELL}" "${RUN_CMD}" "${graph_autofusion_install_path_param}" "${graph_autofusion_install_type}" "${IS_QUIET}" "n" "" "y" "$version_dir"
         if [ $? -eq 0 ]; then
             rm -f "${ASCEND_INSTALL_INFO_FILE}"
             rm -f "${version_info_file}"
