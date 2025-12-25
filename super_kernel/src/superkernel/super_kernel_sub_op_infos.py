@@ -90,6 +90,8 @@ class SubOperatorInfos:
         self.data_cache_preload_call: str = ""
         self.sub_kernel_names: list = []
         self.split_mode = op_options.get('split-mode', 4)
+        self.call_dcci_before_kernel_start: bool = False
+        self.call_dcci_after_kernel_end: bool = False
         # code_gen of dynamic op
         self._gen_code_for_dynamic_op()
 
@@ -107,6 +109,27 @@ class SubOperatorInfos:
         self.notify_param_offset = 0
         self.wait_param_offset = 0
         self.with_sync_all: bool = False
+
+    
+    @staticmethod
+    def gen_dcci_all_block():
+        return "dcci((__gm__ uint64_t*)0, cache_line_t::ENTIRE_DATA_CACHE, dcci_dst_t::CACHELINE_OUT);\n\n"
+
+
+    def gen_dcci_before_kernel_start_call_block(self):
+        dcci_call_block = ""
+        if self.call_dcci_before_kernel_start:
+            dcci_call_block += "// option: dcci-before-kernel-start\n"
+            dcci_call_block += self.gen_dcci_all_block()
+        return dcci_call_block
+
+
+    def gen_dcci_after_kernel_end_call_block(self):
+        dcci_call_block = ""
+        if self.call_dcci_after_kernel_end:
+            dcci_call_block += "// option: dcci-after-kernel-end\n"
+            dcci_call_block += self.gen_dcci_all_block()
+        return dcci_call_block
 
 
     def gen_profiling_for_notify(self, index, end_flag):
@@ -270,6 +293,10 @@ param_offset={self.wait_param_offset + index}\n"
                     [param + f"_{self.index}" for param in sub_operater_infos["sub_operator_params"]]
                 self.early_start_set_flag = sub_operater_infos['sub_operator_early_start_set_flag']
                 self.early_start_wait_flag = sub_operater_infos['sub_operator_early_start_wait_flag']
+                self.call_dcci_before_kernel_start = \
+                    sub_operater_infos.get('sub_operator_call_dcci_before_kernel_start', False)
+                self.call_dcci_after_kernel_end = \
+                    sub_operater_infos.get('sub_operator_call_dcci_after_kernel_end', False)
                 if self.early_start_mode == SuperKernelEarlyStartMode.EarlyStartDisable \
                     and (self.early_start_set_flag or self.early_start_wait_flag):
                     CommonUtility().ascendc_raise_python_err(ERR_CODE, \
@@ -434,12 +461,16 @@ GM_ADDR __ac_dynamic_block_dim_{self.index}, GM_ADDR __ac_wait_lock_{self.index}
         if enable_double_stream:
             self.kernel_call_block += indent_code_func(\
                 f"AscendC::SyncAll<false>(); // reason: double stream need syncall to wait switch func\n")
+        aiv_func_addr = self.gen_param_code('aiv_func_addr')
+        aic_func_addr = self.gen_param_code('aic_func_addr')
+        self.kernel_call_block += self.gen_dcci_before_kernel_start_call_block()
+        self.kernel_call_block += \
+            f"call_func_of_{self.kernel_name}({self.param_offset}, {aiv_func_addr}, {aic_func_addr}, dy_blockDim);\n"
+        self.kernel_call_block += self.gen_dcci_after_kernel_end_call_block()
         if self.kernel_type in [KernelMetaType.KERNEL_TYPE_AIV_ONLY, KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0]:
             self.kernel_call_block += f"if ASCEND_IS_AIV {{\n"
         else:
             self.kernel_call_block += f"if ASCEND_IS_AIC {{\n"
-        aiv_func_addr = self.gen_param_code('aiv_func_addr')
-        aic_func_addr = self.gen_param_code('aic_func_addr')
         wait_lock_offset = self.param_offset + len(self.kernel_params) + \
             self.extra_kernel_params.index(f'__ac_wait_lock_{self.index}')
         self.kernel_call_block += f"""
@@ -449,7 +480,6 @@ GM_ADDR __ac_dynamic_block_dim_{self.index}, GM_ADDR __ac_wait_lock_{self.index}
         dcci(lockAddr, 0, 2);
     }}
 }}
-call_func_of_{self.kernel_name}({self.param_offset}, {aiv_func_addr}, {aic_func_addr}, dy_blockDim);\n
 """
         
 
@@ -657,11 +687,14 @@ f"""else {{
         return code
 
 
-    def gen_call_func(self, indent_code, core_type, block_type):
+    def gen_call_func(self, indent_code, core_type, block_type, is_preload=False):
         vector_call_func_block = f"if {core_type} {{\n"
         split_times = len(indent_code)
         block_dim = self.block_dim
         vector_call_func_block += f"  if ({block_type}() < {block_dim}) {{\n"
+        if not is_preload:
+            vector_call_func_block += indent_code_func(self.gen_dcci_before_kernel_start_call_block())
+
         if split_times > 1:
             vector_call_func_block += "    uint8_t coreid = (uint8_t)get_coreid();\n"
             vector_call_func_block += f"    if ((coreid % {split_times}) == 0) {{\n"
@@ -674,6 +707,9 @@ f"""else {{
             vector_call_func_block += "    }\n\n"
         else:
             vector_call_func_block += indent_code_func(indent_code[0], "      ")
+
+        if not is_preload:
+            vector_call_func_block += indent_code_func(self.gen_dcci_after_kernel_end_call_block())
         vector_call_func_block += "  }\n\n"
         vector_call_func_block += "}\n\n"
         return vector_call_func_block
@@ -684,6 +720,8 @@ f"""else {{
         split_times = len(indent_code)
         block_dim = self.block_dim
         vector_call_func_block += f"  if ({block_type}() < {block_dim}) {{\n"
+        vector_call_func_block += indent_code_func(self.gen_dcci_before_kernel_start_call_block())
+
         if split_times > 1:
             vector_call_func_block += "    uint8_t coreid = (uint8_t)get_coreid();\n"
             vector_call_func_block += f"    if ((coreid % {split_times}) == 0) {{\n"
@@ -699,6 +737,8 @@ f"""else {{
             vector_call_func_block += "    }\n\n"
         else:
             vector_call_func_block += indent_code_func(indent_code[0], "      ")
+
+        vector_call_func_block += indent_code_func(self.gen_dcci_after_kernel_end_call_block())
         vector_call_func_block += "  } "
         vector_call_func_block += self.sub_op_gen_feed_sync_all_code(True)
         vector_call_func_block += "}\n\n"
@@ -794,7 +834,8 @@ f"""else {{
             self.kernel_call_block_with_syncall = \
                 self.gen_call_func_with_syncall(func_call, "ASCEND_IS_AIV", f"AscendC::GetBlockIdx")
             preload_call_block = self._gen_preload_list(aicore_kernel_name, self.aiv_text_len)
-            self.preload_call_block = self.gen_call_func(preload_call_block, "ASCEND_IS_AIV", f"AscendC::GetBlockIdx")
+            self.preload_call_block = \
+                self.gen_call_func(preload_call_block, "ASCEND_IS_AIV", f"AscendC::GetBlockIdx", is_preload=True)
             self.set_early_start_complement_blocks("ASCEND_IS_AIV", f"AscendC::GetBlockIdx() >= {self.block_dim}")
             self.set_early_start_complement_blocks("ASCEND_IS_AIC", "true")
         elif self.kernel_type == KernelMetaType.KERNEL_TYPE_AIC_ONLY:
@@ -807,7 +848,8 @@ f"""else {{
             self.kernel_call_block_with_syncall = \
                 self.gen_call_func_with_syncall(func_call, "ASCEND_IS_AIC", "get_block_idx")
             preload_call_block = self._gen_preload_list(aicore_kernel_name, self.aic_text_len)
-            self.preload_call_block = self.gen_call_func(preload_call_block, "ASCEND_IS_AIC", "get_block_idx")
+            self.preload_call_block = \
+                self.gen_call_func(preload_call_block, "ASCEND_IS_AIC", "get_block_idx", is_preload=True)
             self.set_early_start_complement_blocks("ASCEND_IS_AIC", f"get_block_idx() >= {self.block_dim}")
             self.set_early_start_complement_blocks("ASCEND_IS_AIV", "true")
         elif self.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0:
@@ -820,7 +862,8 @@ f"""else {{
             self.kernel_call_block_with_syncall = \
                 self.gen_call_func_with_syncall(func_call, "ASCEND_IS_AIV", f"AscendC::GetBlockIdx")
             preload_call_block = self._gen_preload_list(aicore_kernel_name, self.aiv_text_len)
-            self.preload_call_block = self.gen_call_func(preload_call_block, "ASCEND_IS_AIV", f"AscendC::GetBlockIdx")
+            self.preload_call_block = \
+                self.gen_call_func(preload_call_block, "ASCEND_IS_AIV", f"AscendC::GetBlockIdx", is_preload=True)
             self.set_early_start_complement_blocks("ASCEND_IS_AIV", f"AscendC::GetBlockIdx() >= {self.block_dim}")
             self.set_early_start_complement_blocks("ASCEND_IS_AIC", "true")
         elif self.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0:
@@ -833,7 +876,8 @@ f"""else {{
             self.kernel_call_block_with_syncall = \
                 self.gen_call_func_with_syncall(func_call, "ASCEND_IS_AIC", "get_block_idx")
             preload_call_block = self._gen_preload_list(aicore_kernel_name, self.aic_text_len)
-            self.preload_call_block = self.gen_call_func(preload_call_block, "ASCEND_IS_AIC", "get_block_idx")
+            self.preload_call_block = \
+                self.gen_call_func(preload_call_block, "ASCEND_IS_AIC", "get_block_idx", is_preload=True)
             self.set_early_start_complement_blocks("ASCEND_IS_AIC", f"get_block_idx() >= {self.block_dim}")
             self.set_early_start_complement_blocks("ASCEND_IS_AIV", "true")
         elif self.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1:  
@@ -847,7 +891,8 @@ f"""else {{
             self.kernel_call_block_with_syncall = \
                 self.gen_call_func_with_syncall(func_call, "ASCEND_IS_AIC", "get_block_idx")
             preload_call_block = self._gen_preload_list(aicore_kernel_name, self.aic_text_len)
-            self.preload_call_block = self.gen_call_func(preload_call_block, "ASCEND_IS_AIC", "get_block_idx")
+            self.preload_call_block = \
+                self.gen_call_func(preload_call_block, "ASCEND_IS_AIC", "get_block_idx", is_preload=True)
             aicore_kernel_name = self.called_kernel_name[f"dav-{chip_version}-vec"]["func_name"]
             self.sub_kernel_names.append(aicore_kernel_name)
             self.kernel_declare += self._gen_sub_kernel_decare_once(aicore_kernel_name, params_with_type)
@@ -857,7 +902,8 @@ f"""else {{
             self.kernel_call_block_with_syncall += \
                 self.gen_call_func_with_syncall(func_call, "ASCEND_IS_AIV", "get_block_idx")
             preload_call_block = self._gen_preload_list(aicore_kernel_name, self.aiv_text_len)
-            self.preload_call_block += self.gen_call_func(preload_call_block, "ASCEND_IS_AIV", "get_block_idx")
+            self.preload_call_block += \
+                self.gen_call_func(preload_call_block, "ASCEND_IS_AIV", "get_block_idx", is_preload=True)
             self.set_early_start_complement_blocks("ASCEND_IS_AIC", f"get_block_idx() >= {self.block_dim}")
             self.set_early_start_complement_blocks("ASCEND_IS_AIV", f"get_block_idx() >= {self.block_dim}")
         elif self.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2:
@@ -870,7 +916,8 @@ f"""else {{
             self.kernel_call_block_with_syncall = \
                 self.gen_call_func_with_syncall(func_call, "ASCEND_IS_AIC", "get_block_idx")
             preload_call_block = self._gen_preload_list(aicore_kernel_name, self.aic_text_len)
-            self.preload_call_block = self.gen_call_func(preload_call_block, "ASCEND_IS_AIC", "get_block_idx")
+            self.preload_call_block = \
+                self.gen_call_func(preload_call_block, "ASCEND_IS_AIC", "get_block_idx", is_preload=True)
             aicore_kernel_name = self.called_kernel_name[f"dav-{chip_version}-vec"]["func_name"]
             self.sub_kernel_names.append(aicore_kernel_name)
             self.kernel_declare += self._gen_sub_kernel_decare_once(aicore_kernel_name, params_with_type)
@@ -880,7 +927,8 @@ f"""else {{
             self.kernel_call_block_with_syncall += \
                 self.gen_call_func_with_syncall(func_call, "ASCEND_IS_AIV", "get_block_idx")
             preload_call_block = self._gen_preload_list(aicore_kernel_name, self.aiv_text_len)
-            self.preload_call_block += self.gen_call_func(preload_call_block, "ASCEND_IS_AIV", "get_block_idx")
+            self.preload_call_block += \
+                self.gen_call_func(preload_call_block, "ASCEND_IS_AIV", "get_block_idx", is_preload=True)
             self.set_early_start_complement_blocks("ASCEND_IS_AIC", f"get_block_idx() >= {self.block_dim}")
             self.set_early_start_complement_blocks("ASCEND_IS_AIV", f"get_block_idx() >= {self.block_dim}")
         else:

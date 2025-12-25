@@ -991,7 +991,7 @@ constexpr uint32_t ONE_PROFILING_HEAD_SIZE = 16;
 constexpr uint32_t ONE_PROFILING_DATA_SIZE = 16;
 __aicore__ inline bool ProfilingAreaIsValid()
 {
-    return (*((__gm__ uint64_t*)g_profiling_base_addr) == PROFILING_MAGIC_NUMBER) && 
+    return (*((__gm__ uint64_t*)g_profiling_base_addr) == PROFILING_MAGIC_NUMBER) &&
         ((*((__gm__ uint64_t*)g_profiling_working_addr)) < (*((__gm__ uint64_t*)g_profiling_max_addr)));
 }
 
@@ -1003,7 +1003,7 @@ __aicore__ inline uint8_t GetProfilingBlockIdx()
         return get_block_idx() + 50;
     }
 }
- 
+
 __aicore__ inline void RecordProfiling()
 {
     if (g_profiling_off) {
@@ -1020,7 +1020,7 @@ __aicore__ inline void RecordProfiling()
     }
     dcci((__gm__ uint64_t*)g_profiling_working_addr, 0, 2);
 }
- 
+
 __aicore__ inline void RecordProfiling(uint32_t index, uint8_t profilingType, bool startFlag)
 {
     if (g_profiling_off) {
@@ -1042,7 +1042,7 @@ __aicore__ inline void RecordProfiling(uint32_t index, uint8_t profilingType, bo
     }
     dcci((__gm__ uint64_t*)g_profiling_working_addr, 0, 2);
 }
- 
+
 __aicore__ inline void InitProfiling(uint32_t taskId, GM_ADDR profilingPtr)
 {
     g_profiling_off = false;

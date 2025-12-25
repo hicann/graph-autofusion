@@ -18,12 +18,13 @@ import subprocess
 import math
 import shutil
 
-from asc_op_compile_base.asc_op_compiler.super_kernel_utility import AscendCLogLevel, CompileStage, CommonUtility, get_op_debug_config, \
-    KernelMetaType
+from asc_op_compile_base.asc_op_compiler.super_kernel_utility import AscendCLogLevel, CompileStage, CommonUtility, \
+    get_op_debug_config, KernelMetaType
 from asc_op_compile_base.asc_op_compiler.super_kernel_option_parse import parse_super_kernel_options
-from asc_op_compile_base.asc_op_compiler.super_kernel_constants import SuperKernelLinkMode, SuperKernelPreLoadMode, SuperKernelDataCacheMode, \
-    SuperKernelEarlyStartMode, SubOperatorType, SuperKernelStreamFusionMode, SuperKernelDebugDcciAllMode, \
-    SuperKernelDebugSyncAllMode, SuperKernelFeedSyncAllMode, SuperKernelProfilingMode, AI_CORE_STR, ERR_CODE
+from asc_op_compile_base.asc_op_compiler.super_kernel_constants import SuperKernelLinkMode, SuperKernelPreLoadMode, \
+    SuperKernelDataCacheMode, SuperKernelEarlyStartMode, SubOperatorType, SuperKernelStreamFusionMode, \
+    SuperKernelDebugDcciAllMode, SuperKernelDebugSyncAllMode, SuperKernelFeedSyncAllMode, SuperKernelProfilingMode, \
+    AI_CORE_STR, ERR_CODE
 from .super_kernel_sub_op_infos import SubOperatorInfos
 
 
@@ -58,7 +59,7 @@ def split_dynamic_o_in_super_kernel(orign_bin_path, rename_file_path, i, compile
     if os.path.exists(new_bin_path):
         str_lst = f'WARNING: ALLREADY EXISTS split .o path: {new_bin_path}'
         CommonUtility.dump_compile_log([str_lst], CompileStage.SPLIT_SUB_OBJS, compile_log_path)
-    cmds = ['cp'] + ['-rf'] + [f'{orign_bin_path}'] + [f'{new_bin_path}']
+    cmds = ['cp'] + ['-rfL'] + [f'{orign_bin_path}'] + [f'{new_bin_path}']
     try:
         CommonUtility.dump_compile_log(cmds, CompileStage.SPLIT_SUB_OBJS, compile_log_path)
         subprocess.run(cmds)
@@ -288,7 +289,7 @@ class SuperOperatorInfos:
     def remove_info_by_name(self, send_op_name, recv_op_name, is_delete_recv_info, update_content=""):
         """delete sync event
         Args:
-            send_op_name (str): sent op name 
+            send_op_name (str): sent op name
             recv_op_name (str): recv op name
             is_delete_recv_info (bool): process recv_info or send_info
             update_content (res): delete directly if update_content is "" else replace dict by update_content
@@ -501,11 +502,9 @@ class SuperOperatorInfos:
                 recv_info: {sub_op.recv_info}", AscendCLogLevel.LOG_DEBUG)
 
     def creat_compile_log(self):
-        op_debug_config_val = get_op_debug_config()
-        if "dump_cce" in op_debug_config_val:
-            kernel_meta_dir = CommonUtility.get_kernel_meta_dir()
-            distinct_tag = CommonUtility.get_distinct_filename_tag()
-            self.compile_log_path = os.path.join(kernel_meta_dir, self.kernel_name + distinct_tag + '.log')
+        kernel_meta_dir = CommonUtility.get_kernel_meta_dir()
+        distinct_tag = CommonUtility.get_distinct_filename_tag()
+        self.compile_log_path = os.path.join(kernel_meta_dir, self.kernel_name + distinct_tag + '.log')
 
 
     def sub_op_connect_set(self, former_op, op):
@@ -529,7 +528,7 @@ class SuperOperatorInfos:
 f"ERROR: super kernel do not support self send/receive pair within 1 real stream: oplist: {self.op_list} "))
                 elif connect_set:
                     self.inner_event_id_set.update(connect_set)
-                
+
 
 
     def check_sp_has_two_real_stream(self):
@@ -576,6 +575,30 @@ f"ERROR: super kernel do not support self send/receive pair within 1 real stream
             sub_op.code_gen(self.inner_event_id_set, self.enable_double_stream)
             param_offset += len(sub_op.kernel_params) + len(sub_op.extra_kernel_params)
 
+
+    def update_superkernel_blockdim_by_debug_options(self):
+        debug_aic_num = self.op_options.get('debug-aic-num', 0)
+        debug_aiv_num = self.op_options.get('debug-aiv-num', 0)
+
+        if debug_aic_num == 0 and debug_aiv_num == 0:
+            return
+        if debug_aic_num > 0 and debug_aiv_num == 0:
+            self.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+            self.block_dim = debug_aic_num
+        elif debug_aic_num == 0 and debug_aiv_num > 0:
+            self.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
+            self.block_dim = debug_aiv_num
+        elif debug_aic_num == debug_aiv_num:
+            self.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            self.block_dim = debug_aic_num
+        elif debug_aiv_num == 2 * debug_aic_num:
+            self.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+            self.block_dim = debug_aic_num
+        else:
+            CommonUtility().ascendc_raise_python_err(ERR_CODE, (\
+f"ERROR: ratio of super kernel debug-aic-num {debug_aic_num} to debug-aiv-num {debug_aiv_num} is invalid."))
+
+
     def get_finale_type_and_block_dim(self, final_kernel_type, max_aic_num, max_aiv_num):
         # get kernel type of super kernel
         if final_kernel_type == 0b1:
@@ -601,6 +624,9 @@ f"ERROR: super kernel do not support self send/receive pair within 1 real stream
                 self.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
                 max_1_2_aiv_block_dim = math.ceil(max_aiv_num / 2)
                 self.block_dim = max_aic_num if max_aic_num >= max_1_2_aiv_block_dim else max_1_2_aiv_block_dim
+
+        self.update_superkernel_blockdim_by_debug_options()
+
 
     def get_summary_type_and_options(self):
         """set superkernel kernel type and block dim."""
@@ -676,7 +702,7 @@ f"ERROR: super kernel do not support self send/receive pair within 1 real stream
         if os.path.exists(new_bin_path):
             str_lst = f'WARNING: ALLREADY EXISTS split .o path: {new_bin_path}'
             CommonUtility.dump_compile_log([str_lst], CompileStage.SPLIT_SUB_OBJS, self.compile_log_path)
-        cmds = ['cp'] + ['-rf'] + [f'{orign_bin_path}'] + [f'{new_bin_path}']
+        cmds = ['cp'] + ['-rfL'] + [f'{orign_bin_path}'] + [f'{new_bin_path}']
         try:
             CommonUtility.dump_compile_log(cmds, CompileStage.SPLIT_SUB_OBJS, self.compile_log_path)
             subprocess.run(cmds)
@@ -760,7 +786,7 @@ f"ERROR: super kernel do not support self send/receive pair within 1 real stream
                 asc_opc_path_link = os.path.dirname(asc_opc_path)
                 asc_opc_real_path = os.path.realpath(asc_opc_path_link)
                 ascend_home_path = os.path.realpath(
-                    os.path.join(asc_opc_real_path, "..", ".."))
+                        os.path.join(asc_opc_real_path, "..", ".."))
             else:
                 ascend_home_path = "/usr/local/Ascend/latest"
 
@@ -887,7 +913,7 @@ split_dynamic_o_in_super_kernel(orign_bin_path, rename_file_path_list[i - 1], i,
             "debug_option": self.debug_option,
             "debug_size": self.debug_size,
             "split_mode": self.split_mode,
-            "op_list" : self.op_list,
+            "op_list": self.op_list,
             "sp_options": self.op_options,
             "workspace_size": self.workspace_size,
             "param_offset": param_offset,
@@ -896,5 +922,3 @@ split_dynamic_o_in_super_kernel(orign_bin_path, rename_file_path_list[i - 1], i,
             "send_event_list": send_event_list,
             "recv_event_list": recv_event_list
         }
-
-

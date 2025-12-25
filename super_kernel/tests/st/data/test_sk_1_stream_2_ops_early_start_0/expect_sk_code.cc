@@ -120,8 +120,10 @@ extern "C"  __global__ __attribute__((aligned(512))) __aicore__ void auto_gen_te
 
     //begin func call of sub operator pows__kernel0
     // begin inter ops barrier
-    AscendC::SyncAll<false>(); // reason2: inter op barrier when EarlyStartDisable 
+    // reason2: inter op barrier when EarlyStartDisable
 
+    ffts_cross_core_sync(PIPE_MTE3, AscendC::GetffstMsg(0x0, AscendC::SYNC_AIV_ONLY_ALL));
+    wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
     if ASCEND_IS_AIV {
       if (AscendC::GetBlockIdx() < 1) {
         uint8_t coreid = (uint8_t)get_coreid();
