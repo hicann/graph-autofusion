@@ -91,7 +91,7 @@ chmod_start() {
 # 运行结束授权
 chmod_end() {
     local current_install_path="$pkg_install_path"
-    if [ "$pkg_is_multi_version" = "true" ] && [ "$hetero_arch" != "y" ]; then
+    if [ "$pkg_is_multi_version" = "true" ]; then
         current_install_path="$current_install_path/$pkg_version_dir"
     fi
  
@@ -371,9 +371,6 @@ is_valid_path() {
             fi
         else
             local install_path="$pkg_install_path"
-            if [ "$hetero_arch" = "y" ]; then
-                install_path="$(realpath $install_path/../..)"
-            fi
             local ret=0
             if [ $(id -u) -eq 0 ]; then
                 parent_dirs_permission_check "$install_path" && ret=$? || ret=$?
@@ -497,10 +494,6 @@ create_default_install_dir_for_common_user() {
         if [ ! -d "$pkg_install_path" ]; then
             create_install_dir "$pkg_install_path" "$username:$usergroup"
         fi
-        if [ "$hetero_arch" = "y" ]; then
-            local parent_dir="$(dirname "$pkg_install_path")"
-            create_install_dir "$parent_dir" "$username:$usergroup"
-        fi
     fi
 }
  
@@ -509,7 +502,7 @@ create_default_dir() {
     if [ ! -d "$default_dir" ]; then
         create_install_dir "$default_dir" "${username}":"${usergroup}"
     fi
-    if [ -n "$pkg_version_dir" ] && [ "$hetero_arch" != "y" ]; then
+    if [ -n "$pkg_version_dir" ]; then
         create_install_dir "$(dirname $default_dir)" "$username:$usergroup"
     fi
     [ -d "$default_dir" ] && return 0
@@ -577,7 +570,7 @@ update_install_param() {
     if [ ! -f "${_file}" ]; then
         exit 1
     fi
-    local install_info_key_array="GRAPH_AUTOFUSION_Install_Type GRAPH_AUTOFUSION_Chip_Type GRAPH_AUTOFUSION_Feature_Type GRAPH_AUTOFUSION_UserName GRAPH_AUTOFUSION_UserGroup GRAPH_AUTOFUSION_Install_Path_Param GRAPH_AUTOFUSION_Arch_Linux_Path GRAPH_AUTOFUSION_Hetero_Arch_Flag"
+    local install_info_key_array="GRAPH_AUTOFUSION_Install_Type GRAPH_AUTOFUSION_UserName GRAPH_AUTOFUSION_UserGroup GRAPH_AUTOFUSION_Install_Path_Param"
     for key_param in ${install_info_key_array}; do
         if [ "${key_param}" = "${_key}" ]; then
             _param=$(grep -i "${_key}=" "${_file}")
@@ -599,7 +592,7 @@ get_install_param() {
     if [ ! -f "${_file}" ]; then
         exit 1
     fi
-    local install_info_key_array="GRAPH_AUTOFUSION_Install_Type GRAPH_AUTOFUSION_Chip_Type GRAPH_AUTOFUSION_Feature_Type GRAPH_AUTOFUSION_UserName GRAPH_AUTOFUSION_UserGroup GRAPH_AUTOFUSION_Install_Path_Param GRAPH_AUTOFUSION_Arch_Linux_Path GRAPH_AUTOFUSION_Hetero_Arch_Flag"
+    local install_info_key_array="GRAPH_AUTOFUSION_Install_Type GRAPH_AUTOFUSION_UserName GRAPH_AUTOFUSION_UserGroup GRAPH_AUTOFUSION_Install_Path_Param"
     for key_param in ${install_info_key_array}; do
         if [ "${key_param}" = "${_key}" ]; then
             _param=$(grep -i "${_key}=" "${_file}" | cut -d"=" -f2-)
@@ -609,44 +602,20 @@ get_install_param() {
     echo "${_param}"
 }
  
-update_install_info_feature() {
-    local operation="$1"
-    if [ "$featuremode" = "all" ] || [ "$operation" = "Upgrade" ]; then
-        update_install_param "GRAPH_AUTOFUSION_Feature_Type" "$featuremode" "$install_info"
-        return
-    fi
-    local current_featuremode=$(get_install_param "GRAPH_AUTOFUSION_Feature_Type" "$install_info")
-    if [ -z "$current_featuremode" ] || [ "$current_featuremode" = "all" ]; then
-        update_install_param "GRAPH_AUTOFUSION_Feature_Type" "$featuremode" "$install_info"
-        return
-    fi
-    local version_in_runpkg="$(get_version_in_runpkg)"
-    if [ "$version_in_runpkg" != "$version_installed" ]; then
-        update_install_param "GRAPH_AUTOFUSION_Feature_Type" "$featuremode" "$install_info"
-        return
-    fi
-    featuremode=$(echo "$current_featuremode,$featuremode" | tr ',' '\n' | sort -u | tr '\n' ',' | sed -e 's/^,\+\|,\+$//g')
-    update_install_param "GRAPH_AUTOFUSION_Feature_Type" "$featuremode" "$install_info"
-}
- 
 update_install_info() {
     chmod_start
     if [ ! -f "$install_info" ]; then
         create_file "$install_info" "$username":"$usergroup" 640
     fi
     update_install_param "GRAPH_AUTOFUSION_Install_Type" "$installmode" "$install_info"
-    update_install_param "GRAPH_AUTOFUSION_Chip_Type" "$chipmode" "$install_info"
-    update_install_info_feature
     update_install_param "GRAPH_AUTOFUSION_UserName" "$username" "$install_info"
     update_install_param "GRAPH_AUTOFUSION_UserGroup" "$usergroup" "$install_info"
     update_install_param "GRAPH_AUTOFUSION_Install_Path_Param" "$install_path_param" "$install_info"
-    update_install_param "GRAPH_AUTOFUSION_Arch_Linux_Path" "$arch_linux_path" "$install_info"
-    update_install_param "GRAPH_AUTOFUSION_Hetero_Arch_Flag" "$hetero_arch" "$install_info"
 }
  
 prompt_set_env() {
     local install_path="$1"
-    if [ -n "$pkg_version_dir" ] && [ "$hetero_arch" != "y" ]; then
+    if [ -n "$pkg_version_dir" ]; then
         install_path="$install_path/$pkg_version_dir"
     fi
     echo "Please make sure that
@@ -719,7 +688,6 @@ install_run() {
 upgrade_run() {
     local operation="Upgrade"
     local graph_autofusion_install_path_param=""
-    update_install_info_feature "$operation"
     if [ -f "$install_info" ]; then
         local graph_autofusion_input_install_path=$(get_install_param "GRAPH_AUTOFUSION_Install_Path_Param" "${install_info}")
         local graph_autofusion_install_type=$(get_install_param "GRAPH_AUTOFUSION_Install_Type" "${install_info}")
@@ -876,37 +844,8 @@ check_install_for_all() {
     fi
 }
  
-pre_check() {
-    local check_shell_path="${curpath}/../bin/prereq_check.bash"
-    if [ ! -f "${check_shell_path}" ]; then
-        log "WARNING" "${check_shell_path} not exist."
-        return 0
-    fi
-    if [ "x$is_quiet" = "xy" ]; then
-        bash "${check_shell_path}" --quiet
-    else
-        bash "${check_shell_path}" --no-quiet
-    fi
-}
- 
-uninstall_none_multi_version() {
-    if [ "$hetero_arch" = "y" ]; then
-        return
-    fi
-    local install_path="$1"
-    if [ "$pkg_is_multi_version" = "true" ] && [ ! -L "$install_path" ] && [ -d "$install_path" ]; then
-        if [ "$full_install" = "y" ] || [ "$run_install" = "y" ] || [ "$devel_install" = "y" ] || [ "$upgrade" = "y" ] || [ "$uninstall" = "y" ]; then
-            local path_version="$install_path/version.info"
-            local path_install="$install_path/ascend_install.info"
-            if [ -f "$path_version" ] && [ -f "$path_install" ] && [ -f "$install_path/script/uninstall.sh" ]; then
-                $install_path/script/uninstall.sh
-            fi
-        fi
-    fi
-}
- 
 migrate_user_assets_v2() {
-    if [ "$pkg_is_multi_version" = "true" ] && [ "$hetero_arch" != "y" ]; then
+    if [ "$pkg_is_multi_version" = "true" ]; then
         get_package_last_installed_version_dir "last_installed_dir" "$pkg_install_path" "graph_autofusion"
         if [ -n "$last_installed_dir" ]; then
             last_installed_dir="$pkg_install_path/$last_installed_dir"
@@ -931,32 +870,22 @@ devel_install=n
 uninstall=n
 upgrade=n
 installmode=""
-chip_flag=n
-chipmode="all"
-feature_flag=n
-featuremode="all"
 pylocal=n
 install_path_cmd="--install-path"
 input_install_path=""
 install_top_path=""
 in_install_for_all=""
 docker_root=""
-setenv=""
 input_path_flag=n
 input_install_for_all=n
 is_docker_install=n
-input_pre_check=n
 input_setenv=n
 uninstall_path_cmd="--uninstall"
-uninstall_path_param=""
 upgrade_path_cmd="--upgrade"
-upgrade_path_param=""
-docker_cmd="--docker"
 is_quiet=n
 check=n
 install_path_param=""
 g_param_check_flag=""
-hetero_arch=n
  
 if [ $(id -u) -eq 0 ]; then
     input_install_for_all=y
@@ -1042,15 +971,6 @@ do
         input_path_flag=y
         shift
         ;;
-    --chip=*)
-        chip_flag=y
-        shift
-        ;;
-    --feature=*)
-        featuremode=$(echo "$1" | cut -d"=" -f2-)
-        feature_flag=y
-        shift
-        ;;
     --install-for-all)
         input_install_for_all=y
         in_install_for_all="--install_for_all"
@@ -1067,15 +987,6 @@ do
         fi
         is_docker_install=y
         check_docker_path "${docker_root}"
-        shift
-        ;;
-    --pre-check)
-        input_pre_check=y
-        shift
-        ;;
-    --setenv)
-        input_setenv=y
-        setenv="--setenv"
         shift
         ;;
     --uninstall)
@@ -1128,24 +1039,12 @@ done
 if [ "${is_quiet}" = "y" ]; then
     if [ "${upgrade}" = "y" ] || [ "${full_install}" = "y" ] || [ "${run_install}" = "y" ] || [ "${devel_install}" = "y" ] || [ "${uninstall}" = "y" ]; then
         is_quiet=y
-    elif [ "${input_pre_check}" = "y" ] || [ "${check}" = "y" ]; then
+    elif [ "${check}" = "y" ]; then
         is_quiet=y
     else
-        log "ERROR" "'--quiet' is not supported to used by this way, please use with '--full', '--devel', '--run', '--upgrade', '--uninstall', '--check' or '--pre-check'"
+        log "ERROR" "'--quiet' is not supported to used by this way, please use with '--full', '--devel', '--run', '--upgrade', '--uninstall', '--check'"
         exit 1
     fi
-fi
- 
-# 检查chip参数是否冲突
-if [ "${chip_flag}" = "y" ] && [ "${uninstall}" = "y" ]; then
-    log "ERROR" "'--chip' is not supported to used by this way, please use with '--full', '--devel', '--run', '--upgrade'"
-    exit 1
-fi
- 
-# 检查feature参数是否冲突
-if [ "${feature_flag}" = "y" ] && [ "${uninstall}" = "y" ]; then
-    log "ERROR" "'--feature' is not supported to used by this way, please use with '--full', '--devel', '--run', '--upgrade'"
-    exit 1
 fi
  
 if [ "${pylocal}" = "y" ]; then
@@ -1157,7 +1056,7 @@ fi
  
 # 卸载参数只支持单独使用
 if [ "$uninstall" = "y" ]; then
-    if [ "$upgrade" = "y" ] || [ "$full_install" = "y" ] || [ "$run_install" = "y" ] || [ "$devel_install" = "y" ] || [ "$docker_install" = "y" ] || [ "$check" = "y" ] || [ "$input_pre_check" = "y" ]; then
+    if [ "$upgrade" = "y" ] || [ "$full_install" = "y" ] || [ "$run_install" = "y" ] || [ "$devel_install" = "y" ] || [ "$docker_install" = "y" ] || [ "$check" = "y" ]; then
         log "ERROR" "ERR_NO:0x0004;ERR_DES:Unsupported parameters, operation failed."
         exit 1
     fi
@@ -1170,56 +1069,21 @@ if [ "$docker_install" = "y" ]; then
 fi
  
 # 检查必选参数
-if [ "${upgrade}" = "n" ] && [ "${full_install}" = "n" ] && [ "${run_install}" = "n" ] && [ "${devel_install}" = "n" ] && [ "${uninstall}" = "n" ] && [ "${input_pre_check}" = "n" ] && [ "${check}" = "n" ]; then
-    log "ERROR" "ERR_NO:0x0004;One of parameters '--full', '--devel', '--run', '--upgrade', '--uninstall', '--check' or '--pre-check' must be used."
+if [ "${upgrade}" = "n" ] && [ "${full_install}" = "n" ] && [ "${run_install}" = "n" ] && [ "${devel_install}" = "n" ] && [ "${uninstall}" = "n" ] && [ "${check}" = "n" ]; then
+    log "ERROR" "ERR_NO:0x0004;One of parameters '--full', '--devel', '--run', '--upgrade', '--uninstall', '--check' must be used."
     exit 1
-fi
- 
-if [ "$featuremode" != "all" ]; then
-    contain_feature "ret" "$featuremode" "$curpath/filelist.csv"
-    if [ "$ret" = "false" ]; then
-        log "WARNING" "graph_autofusion package doesn't contain features $featuremode, skip installation."
-        exit 0
-    fi
 fi
  
 #######################################################
 is_multi_version_pkg "pkg_is_multi_version" "$pkg_version_path"
 get_version_dir "pkg_version_dir" "$pkg_version_path"
  
-if [ "$full_install" = "y" ] || [ "$run_install" = "y" ] || [ "$devel_install" = "y" ] || [ "$upgrade" = "y" ] || [ "$uninstall" = "y" ]; then
+if [ "$full_install" = "y" ] || [ "$run_install" = "y" ] || [ "$devel_install" = "y" ] || [ "$upgrade" = "y" ] || [ "$uninstall" = "y" ] || [ "$check" = "y" ]; then
     input_install_path=$(relative_path_to_absolute_path "${input_install_path}")
     get_install_path
  
-    if [ "$(is_same_arch_pkg_installed)" = "y" ]; then
-        hetero_arch="y"
-    fi
-    if [ "$upgrade" = "y" ] || [ "$uninstall" = "y" ]; then
-        hetero_arch_pkg_installed="$(is_hetero_arch_pkg_installed)"
-        if [ "$hetero_arch_pkg_installed" = "installed-hetero" ]; then
-            hetero_arch="y"
-        elif [ "$hetero_arch_pkg_installed" = "installed-normal" ]; then
-            hetero_arch="n"
-        elif [ "$hetero_arch_pkg_installed" = "installed-hetero-to-be-upgraded" ]; then
-            hetero_arch="y"
-        elif [ "$hetero_arch_pkg_installed" = "installed-normal-to-be-upgraded" ]; then
-            hetero_arch="n"
-        elif [ "$hetero_arch_pkg_installed" = "no" ]; then
-            log "ERROR" "ERR_NO:0x0080;ERR_DES:Runfile is not installed in ${input_install_path}, operation failed!"
-            exit 1
-        fi
-    fi
-    export hetero_arch
- 
     install_top_path="$(dirname $input_install_path)"
     install_path_param="${input_install_path}"
-    if [ "$hetero_arch" = "y" ]; then
-        if [ "$pkg_is_multi_version" = "true" ]; then
-            install_path_param="$install_path_param/$pkg_version_dir/$arch_scripts_path"
-        else
-            install_path_param="$install_path_param/$arch_scripts_path"
-        fi
-    fi
 fi
  
 if [ "$is_docker_install" = "y" ]; then
@@ -1228,7 +1092,7 @@ else
     pkg_install_path="${install_path_param}"
 fi
  
-if [ "$pkg_is_multi_version" = "true" ] && [ "$hetero_arch" != "y" ]; then
+if [ "$pkg_is_multi_version" = "true" ]; then
     default_dir="${pkg_install_path}/$pkg_version_dir/share/info/graph_autofusion"
 else
     default_dir="${pkg_install_path}/share/info/graph_autofusion"
@@ -1241,47 +1105,22 @@ else
     start_install_log
 fi
  
-if [ "$hetero_arch" = "y" ]; then
-    log "INFO" "package is running in hetero arch mode!"
-fi
- 
-# 执行预检查
-if [ "$input_pre_check" = "y" ]; then
-    log "INFO" "graph_autofusion do pre check started."
-    pre_check
-    if [ $? -ne 0 ]; then
-        log "WARNING" "graph_autofusion do pre check failed."
-    else
-        log "INFO" "graph_autofusion do pre check finished."
-    fi
-    if [ "$full_install" = "n" ] && [ "$run_install" = "n" ] && [ "$devel_install" = "n" ] && [ "$upgrade" = "n" ]; then
-        exit_install_log 0
-    fi
-fi
- 
 # 版本兼容性检查
 if [ "$check" = "y" ]; then
     ver_check
-    if [ -z "$pkg_version_dir" ]; then
-        preinstall_check --install-path="$install_path_param" --script-dir="$curpath" --package="graph_autofusion" --logfile="$logfile" --docker-root="$docker_root"
-        if [ $? -ne 0 ]; then
-            exit_install_log 1
-        else
-            log "INFO" "version compatibility check successfully!"
-        fi
-    fi
-    if [ "$full_install" = "n" ] && [ "$run_install" = "n" ] && [ "$devel_install" = "n" ] && [ "$upgrade" = "n" ]; then
-        exit_install_log 0
+    preinstall_check --install-path="$pkg_install_path/$pkg_version_dir" --script-dir="$curpath" --package="graph_autofusion" --logfile="$logfile" --docker-root="$docker_root"
+    if [ $? -ne 0 ]; then
+        exit_install_log 1
+    else
+        log "INFO" "version compatibility check successfully!"
     fi
 elif [ "$full_install" = "y" ] || [ "$run_install" = "y" ] || [ "$devel_install" = "y" ] || [ "$upgrade" = "y" ]; then
     ver_check
-    if [ -z "$pkg_version_dir" ]; then
-        preinstall_process --install-path="$install_path_param" --script-dir="$curpath" --package="graph_autofusion" --logfile="$logfile" --docker-root="$docker_root"
-        if [ $? -ne 0 ]; then
-            exit_install_log 1
-        else
-            log "INFO" "version compatibility check successfully!"
-        fi
+    preinstall_process --install-path="$pkg_install_path/$pkg_version_dir" --script-dir="$curpath" --package="graph_autofusion" --logfile="$logfile" --docker-root="$docker_root"
+    if [ $? -ne 0 ]; then
+        exit_install_log 1
+    else
+        log "INFO" "version compatibility check successfully!"
     fi
 fi
  
@@ -1310,15 +1149,13 @@ if [ "$input_install_for_all" = "n" ]; then
         fi
     fi
 fi
- 
-uninstall_none_multi_version "$pkg_install_path/share/info/graph_autofusion"
+
 check_install_for_all
 create_default_install_dir_for_common_user
 log_base_version
-if [ "$upgrade" != "y" ] || [ "$hetero_arch_pkg_installed" != "installed-hetero-to-be-upgraded" ]; then
+if [ "$upgrade" != "y" ]; then
     is_valid_path
 fi
-[ "$hetero_arch" = "y" ] && replace_filelist
  
 if [ "$full_install" = "y" ] || [ "$run_install" = "y" ] || [ "$devel_install" = "y" ]; then
     create_default_dir

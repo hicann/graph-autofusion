@@ -14,21 +14,17 @@ usergroup="$(id -gn)"
 is_quiet=n
 pylocal=n
 in_install_for_all=n
-setenv_flag=n
 docker_root=""
 sourcedir="$PWD/graph_autofusion"
 curpath=$(dirname $(readlink -f "$0"))
 common_func_path="${curpath}/common_func.inc"
 pkg_version_path="${curpath}/../version.info"
-chip_type="all"
-feature_type="all"
 
 . "${common_func_path}"
 
 if [ $1 ]; then
     input_install_dir="$2"
     is_quiet="$4"
-    setenv_flag="$6"
     in_install_for_all="$8"
     common_parse_type="$3"
     pylocal="$5"
@@ -44,7 +40,7 @@ fi
 
 get_version "pkg_version" "$pkg_version_path"
 is_multi_version_pkg "pkg_is_multi_version" "$pkg_version_path"
-if [ "$pkg_is_multi_version" = "true" ] && [ "$hetero_arch" != "y" ]; then
+if [ "$pkg_is_multi_version" = "true" ]; then
     common_parse_dir="$common_parse_dir/$pkg_version_dir"
 fi
 
@@ -55,30 +51,7 @@ else
 fi
 logfile="${log_dir}/ascend_install.log"
 
-get_install_param() {
-    local _key="$1"
-    local _file="$2"
-    local _param=""
-
-    if [ ! -f "${_file}" ]; then
-        exit 1
-    fi
-    local install_info_key_array="GRAPH_AUTOFUSION_Install_Type GRAPH_AUTOFUSION_Chip_Type GRAPH_AUTOFUSION_Feature_Type GRAPH_AUTOFUSION_UserName GRAPH_AUTOFUSION_UserGroup GRAPH_AUTOFUSION_Install_Path_Param GRAPH_AUTOFUSION_Arch_Linux_Path GRAPH_AUTOFUSION_Hetero_Arch_Flag"
-    for key_param in ${install_info_key_array}; do
-        if [ "${key_param}" = "${_key}" ]; then
-            _param=$(grep -i "${_key}=" "${_file}" | cut -d"=" -f2-)
-            break
-        fi
-    done
-    echo "${_param}"
-}
-
 install_info="${common_parse_dir}/share/info/graph_autofusion/ascend_install.info"
-if [ -f "$install_info" ]; then
-    chip_type=$(get_install_param "GRAPH_AUTOFUSION_Chip_Type" "${install_info}")
-    feature_type=$(get_install_param "GRAPH_AUTOFUSION_Feature_Type" "${install_info}")
-    hetero_arch=$(get_install_param "GRAPH_AUTOFUSION_Hetero_Arch_Flag" "${install_info}")
-fi
 
 # 写日志
 log() {
@@ -136,16 +109,11 @@ new_upgrade() {
     fi
     echo_progress 10
 
-    local setenv_option=""
-    if [ "${setenv_flag}" = y ]; then
-        setenv_option="--setenv"
-    fi
-
     # 执行安装
-    custom_options="--custom-options=--common-parse-dir=$common_parse_dir,--logfile=$logfile,--stage=upgrade,--quiet=$is_quiet,--pylocal=$pylocal,--hetero-arch=$hetero_arch"
+    custom_options="--custom-options=--common-parse-dir=$common_parse_dir,--logfile=$logfile,--stage=upgrade,--quiet=$is_quiet,--pylocal=$pylocal"
     sh "$curpath/install_common_parser.sh" --package="graph_autofusion" --install --username="$username" --usergroup="$usergroup" --set-cann-uninstall --upgrade \
         --version=$pkg_version --version-dir=$pkg_version_dir --use-share-info \
-        $setenv_option $in_install_for_all --docker-root="$docker_root" --chip="$chip_type" --feature="$feature_type" \
+        $in_install_for_all --docker-root="$docker_root" \
         $custom_options "$common_parse_type" "$input_install_dir" "$curpath/filelist.csv"
     if [ $? -ne 0 ]; then
         log "ERROR" "ERR_NO:0x0085;ERR_DES:failed to install package."

@@ -88,17 +88,6 @@ install(FILES ${LATEST_MANGER_FILES}
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/package/latest_manager/scripts/
     DESTINATION latest_manager
 )
-set(BIN_FILES
-    ${CMAKE_SOURCE_DIR}/scripts/package/graph_autofusion/scripts/prereq_check.bash
-    ${CMAKE_SOURCE_DIR}/scripts/package/graph_autofusion/scripts/prereq_check.csh
-    ${CMAKE_SOURCE_DIR}/scripts/package/graph_autofusion/scripts/prereq_check.fish
-    ${CMAKE_SOURCE_DIR}/scripts/package/graph_autofusion/scripts/setenv.bash
-    ${CMAKE_SOURCE_DIR}/scripts/package/graph_autofusion/scripts/setenv.csh
-    ${CMAKE_SOURCE_DIR}/scripts/package/graph_autofusion/scripts/setenv.fish
-)
-install(FILES ${BIN_FILES}
-    DESTINATION share/info/graph_autofusion/bin
-)
 
 # ============= CPack =============
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")

@@ -164,7 +164,7 @@ get_install_param() {
     if [ ! -f "${_file}" ]; then
         exit 1
     fi
-    local install_info_key_array="GRAPH_AUTOFUSION_Install_Type GRAPH_AUTOFUSION_Feature_Type GRAPH_AUTOFUSION_UserName GRAPH_AUTOFUSION_UserGroup GRAPH_AUTOFUSION_Install_Path_Param GRAPH_AUTOFUSION_Arch_Linux_Path GRAPH_AUTOFUSION_Hetero_Arch_Flag"
+    local install_info_key_array="GRAPH_AUTOFUSION_Install_Type GRAPH_AUTOFUSION_UserName GRAPH_AUTOFUSION_UserGroup GRAPH_AUTOFUSION_Install_Path_Param"
     for key_param in ${install_info_key_array}; do
         if [ "${key_param}" = "${_key}" ]; then
             _param=$(grep -i "${_key}=" "${_file}" | cut -d"=" -f2-)
@@ -174,12 +174,10 @@ get_install_param() {
     echo "${_param}"
 }
 
-hetero_arch=$(get_install_param "GRAPH_AUTOFUSION_Hetero_Arch_Flag" "${ASCEND_INSTALL_INFO_FILE}")
-export hetero_arch
 version_dir="$(basename "$(readlink -f "$install_path_param/../../..")")"
 
 get_pkg_install_path_param() {
-    if [ -n "$version_dir" ] && [ "$hetero_arch" != "y" ]; then
+    if [ -n "$version_dir" ]; then
         realpath "$install_path_param/../../../.."
     else
         realpath "$install_path_param/../../.."
@@ -188,15 +186,7 @@ get_pkg_install_path_param() {
 
 get_install_top_path() {
     local pkg_install_path_param="$(get_pkg_install_path_param)"
-    if [ "$hetero_arch" = "y" ]; then
-        if [ -n "$version_dir" ]; then
-            realpath "$pkg_install_path_param/../../../.."
-        else
-            realpath "$pkg_install_path_param/../../.."
-        fi
-    else
-        realpath "$pkg_install_path_param/.."
-    fi
+    realpath "$pkg_install_path_param/.."
 }
 
 save_user_files_to_log() {
@@ -283,32 +273,14 @@ do
         IS_QUIET="y"
         shift
         ;;
-    --hetero-arch)
-        in_hetero_arch="y"
-        shift
-        ;;
     *)
         if [ "x$1" != "x" ]; then
-            err_no0x0004 "$1 . Only support '--quiet' and '--hetero-arch'."
+            err_no0x0004 "$1 . Only support '--quiet'."
         fi
         break
         ;;
     esac
 done
-
-if [ "$hetero_arch" != "y" ]; then
-    arch_path="$(dirname "$install_path_param")/$arch_scripts_path_hetero/graph_autofusion/script/uninstall.sh"
-    ret=0
-    if [ -f "$arch_path" ]; then
-        bash "$arch_path"
-        ret=$?
-    elif [ "$in_hetero_arch" = "y" ]; then
-        log "WARNING" "no hetero arch graph_autofusion package installed!"
-    fi
-    if [ "$in_hetero_arch" = "y" ]; then
-        exit $ret
-    fi
-fi
 
 # 输出执行开始日志
 start_log
