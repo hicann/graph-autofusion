@@ -166,6 +166,7 @@ superkernel_run_example() {
   ${PYTHON_CMD} ${BASEPATH}/super_kernel/examples/super_kernel_base/superkernel_scope.py
   ${PYTHON_CMD} ${BASEPATH}/super_kernel/examples/super_kernel_profiling/superkernel_compare.py
   ${PYTHON_CMD} ${BASEPATH}/super_kernel/examples/super_kernel_runtime_ascendc_only/superkernel_runtime_ascendc_basic.py
+  echo "Run all examples success"
 }
 
 superkernel_ut() {

@@ -10,6 +10,8 @@
 │  └── superkernel_scope.py       # 通过super_kernel完成算子融合
 └── super_kernel_profiling        # 展示profiling的样例
   └── superkernel_compare.py      # 使用super_kernel与不使用super_kernel的数据进行对比
+└── super_kernel_runtime_ascendc_only        # 极简super_kernel样例
+   └── superkernel_runtime_ascendc_basic.py  # 通过ascendc编译super_kernel完成算子融合，并使用runtime运行时环境执行
 ```
 ## 前置说明
 确保已根据[《构建指南》](../../doc/build.md)完成前置环境准备和环境变量配置，确保已构建出`cann-graph-autofusion_${cann_version}_linux-${arch}.run`包。
@@ -41,6 +43,8 @@
 [用例1](super_kernel_base/README.md)
 
 [用例2](super_kernel_profiling/README.md)
+
+[用例3](super_kernel_runtime_ascendc_only/README.md)
 
 ## 参考
 
