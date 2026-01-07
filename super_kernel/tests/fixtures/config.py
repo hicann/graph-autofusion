@@ -33,7 +33,40 @@ def pytest_addoption(parser):
         default=False,
         help="保留测试生成的临时文件，不自动删除"
     )
+    parser.addoption(
+        "--replace-st-golden",
+        action="store_true",
+        default=False,
+        help="将新生成的JSON和kernel.cpp文件替换tests/st/data目录下对应的golden文件"
+    )
 
+
+def save_golden_files(tmp_path, tests_root):
+    save_dir = tests_root / "tests/st/data"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    saved_count = 0
+    for pattern in ["test_sk_*/kernel_meta/*.json", "test_sk_*/kernel_meta/*_kernel.cpp"]:
+        for file_path in tmp_path.glob(pattern):
+            # 移除 kernel_meta 并重命名
+            parts = [p for p in file_path.relative_to(tmp_path).parts if p != "kernel_meta"]
+            # 根据文件类型重命名，将文件重命名为golden文件名
+            if file_path.suffix == ".json": 
+                new_filename = "expect_compiled_json.json" 
+            elif file_path.suffix == ".cpp": 
+                new_filename = "expect_sk_code.cc" 
+            else: 
+                new_filename = file_path.name
+            
+            dest_path = save_dir / Path(*parts[:-1]) / new_filename
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            # 替换
+            shutil.copy2(file_path, dest_path)
+            saved_count += 1
+    
+    print(f"共替换 {saved_count} 个golden文件到: {save_dir}")
+ 
+    
 @pytest.fixture(scope="session")
 def tmp_dir(request):
     """Provide a dedicated temp directory for codegen outputs per test session."""
@@ -56,6 +89,8 @@ def tmp_dir(request):
         yield tmp_path
     finally:
         keep_generated = request.config.getoption("--keep-generated")
+        replace_st_golden = request.config.getoption("--replace-st-golden")  # 获取新选项
+        
         if not keep_generated:
             shutil.rmtree(tmp_path, ignore_errors=True)
             if not base_dir.exists():
@@ -66,6 +101,10 @@ def tmp_dir(request):
                 base_dir.rmdir()
         else:
             print(f"已保留临时文件目录: {tmp_path}")
+            
+        if replace_st_golden:
+            save_golden_files(tmp_path, tests_root)
+
 
 @pytest.fixture(scope="session")
 def data_dir():
