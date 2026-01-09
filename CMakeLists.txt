@@ -10,6 +10,8 @@
 cmake_minimum_required(VERSION 3.16.0)
 project(graph-autofusion)
 
+set(CMAKE_C_FLAGS_RELEASE "")
+set(CMAKE_CXX_FLAGS_RELEASE "")
 SET(CMAKE_C_COMPILER_WORKS TRUE)
 SET(CMAKE_CXX_COMPILER_WORKS TRUE)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
