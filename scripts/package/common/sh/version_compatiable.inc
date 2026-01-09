@@ -143,11 +143,10 @@ _check_version_compatiable() {
     )"
         if [ "$err_msgs" != "" ]; then
             while read err_msg; do
-                comm_log "ERROR" "$err_msg"
+                comm_log "WARNING" "$err_msg"
             done <<EOF
 $err_msgs
 EOF
-            return 1
         fi
     fi
 
@@ -167,11 +166,10 @@ EOF
     )"
     if [ "$err_msgs" != "" ]; then
         while read err_msg; do
-            comm_log "ERROR" "$err_msg"
+            comm_log "WARNING" "$err_msg"
         done <<EOF
 $err_msgs
 EOF
-        return 1
     fi
     return 0
 }
