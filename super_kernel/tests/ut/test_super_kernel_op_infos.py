@@ -1,134 +1,76 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and contiditions of
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
-# ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 
 """Minimal smoke test ensuring the UT harness executes."""
 
+import logging
 import os
-import sys
-import pytest
+import subprocess
 from unittest import mock
-import importlib
-from utils import compare_files
-from superkernel.super_kernel_op_infos import *
-
-THIS_FILE_NAME = __file__
-FILE_PATH = os.path.dirname(os.path.realpath(THIS_FILE_NAME))
-UTILS_FILE_PATH = os.path.join(FILE_PATH, "../")
-sys.path.append(UTILS_FILE_PATH)
-SUPER_KERNEL_PATH = os.path.join(FILE_PATH, "../../src")
-sys.path.append(SUPER_KERNEL_PATH)
-GLODEN_FILE_PATH = os.path.join(FILE_PATH, "./golden")
-
-sub_op_add_json = {
-    "binFileName": "te_op_add",
-    "binFileSuffix": ".o",
-    "blockDim": 36,
-    "kernelName": "te_op_add",
-    "sha256": "12345",
-    "workspace": {
-        "num": 1,
-        "size": [
-            32
-        ],
-        "type": [
-            0
-        ]
-    },
-    "sub_operator_params": [
-        "input_x",
-        "input_y",
-        "output_z",
-        "workspace"
-    ],
-    "sub_operator_kernel_type": "KERNEL_TYPE_AIV_ONLY",
-    "sub_operator_kernel_name": {
-        "AiCore": {
-            "func_name": "add_aiv",
-            "obj_files": "add_aiv.o"
-        },
-        "dav-c220-cube": {
-            "func_name": "add_aic",
-            "obj_files": "add_aic.o"
-        },
-        "dav-c220-vec": {
-            "func_name": "add_aiv",
-            "obj_files": "add_aiv.o"
-        }
-    },
-    "sub_operator_early_start_set_flag": False,
-    "sub_operator_early_start_wait_flag": False,
-    "timestamp_option": False,
-    "debugBufSize": 0,
-    "debugOptions": ""
-}
+import pytest
+from asc_op_compile_base.asc_op_compiler.super_kernel_utility import CommonUtility, KernelMetaType
+from asc_op_compile_base.asc_op_compiler.super_kernel_constants import SuperKernelEarlyStartMode, \
+    SubOperatorType, SuperKernelStreamFusionMode, SuperKernelFeedSyncAllMode
+from superkernel.super_kernel_sub_op_infos import SubOperatorInfos
+from superkernel.super_kernel_op_infos import SuperOperatorInfos, gen_symbol_rename_file, \
+    split_dynamic_o_in_super_kernel, get_sub_op_streamid
+from ut.test_super_kernel import sub_op_add_json, kernel_info, info_dict
 
 
 class TestSuperKernelOpInfos:
     @staticmethod
     def setup_method():
-        print(f"---------------SetUp---------------")
+        logging.info("---------------SetUp---------------")
 
     @staticmethod
     def teardown_method():
-        print(f"--------------TearDown-------------")
+        logging.info("--------------TearDown-------------")
 
     @staticmethod
     def test_gen_symbol_rename_file(tmp_dir):
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         sub_operator = SubOperatorInfos(0, info_dict, 0, {})
-        with mock.patch("json.load", return_value=sub_op_add_json):
-            with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir):
-                with mock.patch.object(CommonUtility, 'get_chip_version', return_value="c220"):
-                    rename_file_path_list = []
-                    kernel_meta_dir = CommonUtility.get_kernel_meta_dir()
-                    sub_operator.split_mode = 2
-                    for i in range(1, sub_operator.split_mode):
-                        rename_file_name = f'{sub_operator.kernel_name}_rename_file_{i}.txt'
-                        rename_file_path_list.append(os.path.join(kernel_meta_dir, rename_file_name))
+        with mock.patch("json.load", return_value=sub_op_add_json), \
+        mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir), \
+        mock.patch.object(CommonUtility, 'get_chip_version', return_value="c220"):
+            rename_file_path_list = []
+            kernel_meta_dir = CommonUtility.get_kernel_meta_dir()
+            sub_operator.split_mode = 2
+            for i in range(1, sub_operator.split_mode):
+                rename_file_name = f'{sub_operator.kernel_name}_rename_file_{i}.txt'
+                rename_file_path_list.append(os.path.join(kernel_meta_dir, rename_file_name))
 
-                    dynamic_func_names = {
-                        "tiling_key": {
-                            "dav-c220-cube": "cube_kernel_name"
-                        }
-                    }
-                    new_kernel_names_list = gen_symbol_rename_file(dynamic_func_names, rename_file_path_list,
-                                                                   sub_operator.split_mode)
-                    assert new_kernel_names_list == [["cube_kernel_name_split1"]]
+            dynamic_func_names = {
+                "tiling_key": {
+                    "dav-c220-cube": "cube_kernel_name"
+                }
+            }
+            new_kernel_names_list = gen_symbol_rename_file(dynamic_func_names, rename_file_path_list,
+                                                            sub_operator.split_mode)
+            assert new_kernel_names_list == [["cube_kernel_name_split1"]]
 
     @staticmethod
     def test_split_dynamic_o_in_super_kernel(tmp_dir):
-        kernel_info = {
-            "op_list": [],
-        }
         super_operator = SuperOperatorInfos(kernel_info, "test_split_dynamic_o_in_super_kernel")
         tmp_dir_str = str(tmp_dir)
         orign_bin_path = os.path.join(tmp_dir_str, "original.o")
         rename_file = os.path.join(tmp_dir_str, "rename.txt")
-
         with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir_str):
             with mock.patch('subprocess.run'):
                 with mock.patch('os.path.exists') as mock_exists:
                     filename = os.path.basename(orign_bin_path) 
                     kernel_meta_dir = CommonUtility.get_kernel_meta_dir() 
                     new_bin_path_exist_mock = os.path.join(kernel_meta_dir, filename[:-2] + f"_split1.o") 
-
-                    mock_exists.side_effect = lambda path: path == new_bin_path_exist_mock
-                    new_bin_path = split_dynamic_o_in_super_kernel(
-                        orign_bin_path, rename_file, 1, super_operator.compile_log_path
-                    )
+                    new_bin_path = split_dynamic_o_in_super_kernel(orign_bin_path, \
+                        rename_file, 1, super_operator.compile_log_path)
                     assert new_bin_path_exist_mock == new_bin_path
 
             with mock.patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, "test_command")):
@@ -148,23 +90,13 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_gen_op_options():
-        kernel_info = {
-            "op_list": [],
-        }
         super_operator = SuperOperatorInfos(kernel_info, "test_gen_op_options")
         super_operator.enable_double_stream = True
         super_operator.gen_op_options()
-        assert super_operator.early_start_mode == SuperKernelEarlyStartMode.EarlyStartDisable
+        assert super_operator.early_start_mode.value == SuperKernelEarlyStartMode.EarlyStartDisable.value
 
     @staticmethod
     def test_split_op_by_kernel_type():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_split_by_type")
             sub_op1 = SubOperatorInfos(0, info_dict, 0, {})
@@ -179,13 +111,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_get_task_type():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_get_task_type")
             op = SubOperatorInfos(0, info_dict, 0, {})
@@ -201,13 +126,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_gen_sync_name():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_sync_name")
             pre_op = SubOperatorInfos(0, info_dict, 0, {})
@@ -239,13 +157,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_insert_sync_event():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_insert_sync_event")
             pre_op = SubOperatorInfos(0, info_dict, 0, {})
@@ -271,13 +182,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_insert_sync_by_stream_idx():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_insert_sync_by_stream_idx")
             op1 = SubOperatorInfos(0, info_dict, 0, {})
@@ -299,13 +203,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_insert_sync_by_event():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_insert_sync_by_event")
 
@@ -329,13 +226,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_insert_sync_for_notify():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_sync_notify")
 
@@ -362,13 +252,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_remove_info_by_name():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_remove_info_by_name")
 
@@ -395,8 +278,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_get_remain_events():
-        kernel_info = {"op_list": []}
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_get_remain_events")
 
@@ -407,13 +288,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_get_idx():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_get_idx")
 
@@ -434,13 +308,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_judge_remove():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_judge_remove")
 
@@ -474,13 +341,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_remove_crossed_line_sync():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_remove_crossed_line_sync")
             
@@ -535,13 +395,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_remove_multi_send_info():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_remove_multi_send_info")
             op1 = SubOperatorInfos(0, info_dict, 0, {})
@@ -590,13 +443,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_remove_multi_recv_info():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_remove_multi_recv_info")
             op1 = SubOperatorInfos(0, info_dict, 0, {})
@@ -643,12 +489,6 @@ class TestSuperKernelOpInfos:
 
     @staticmethod
     def test_print_vec_cub_list_info():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch.object(CommonUtility, 'print_compile_log') as mock_print_compile_log:
             with mock.patch("json.load", return_value=sub_op_add_json):
                 super_operator = SuperOperatorInfos(kernel_info, "test_print_vec_cub_list_info")
@@ -692,12 +532,6 @@ recv_info: {'op1': 'cub:vec'}\
 
     @staticmethod
     def test_optimize_sync_pass():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             with mock.patch.object(CommonUtility, 'print_compile_log') as mock_print_compile_log:
                 super_operator = SuperOperatorInfos(kernel_info, "test_optimize_sync_pass")
@@ -741,27 +575,18 @@ recv_info: {'op1': 'cub:vec'}\
 
     @staticmethod
     def test_creat_compile_log(tmp_dir):
-        kernel_info = {"op_list": []}
         distinct_tag = "distinct_tag_mock"
-        with mock.patch("json.load", return_value=sub_op_add_json):
-            with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir):
-                with mock.patch.object(CommonUtility, 'get_distinct_filename_tag', return_value=distinct_tag):
-                    with mock.patch("superkernel.super_kernel_op_infos.get_op_debug_config" , \
-                                    return_value="dump_cce"):
-                        super_operator = SuperOperatorInfos(kernel_info, "test_creat_compile_log")
-                        super_operator.creat_compile_log()
-                        goden_path = os.path.join(tmp_dir, super_operator.kernel_name + distinct_tag + '.log') 
-                        assert super_operator.compile_log_path == goden_path 
+        with mock.patch("json.load", return_value=sub_op_add_json), \
+        mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir), \
+        mock.patch.object(CommonUtility, 'get_distinct_filename_tag', return_value=distinct_tag), \
+        mock.patch("superkernel.super_kernel_op_infos.get_op_debug_config", return_value="dump_cce"):
+            super_operator = SuperOperatorInfos(kernel_info, "test_creat_compile_log")
+            super_operator.creat_compile_log()
+            goden_path = os.path.join(tmp_dir, super_operator.kernel_name + distinct_tag + '.log') 
+            assert super_operator.compile_log_path == goden_path 
 
     @staticmethod
     def test_sub_op_connect_set():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-        
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_sub_op_connect_set")
             
@@ -775,13 +600,6 @@ recv_info: {'op1': 'cub:vec'}\
 
     @staticmethod
     def test_find_all_inner_event_id_set():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-        
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_find_all_inner_event_id_set")
             
@@ -804,13 +622,6 @@ recv_info: {'op1': 'cub:vec'}\
 
     @staticmethod
     def test_check_sp_has_two_real_stream():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-        
         with mock.patch("json.load", return_value=sub_op_add_json):
             with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_ascendc_raise_python_err:
                 super_operator = SuperOperatorInfos(kernel_info, "test_check_sp_has_two_real_stream")
@@ -841,7 +652,6 @@ recv_info: {'op1': 'cub:vec'}\
                 
     @staticmethod
     def test_get_finale_type_and_block_dim():
-        kernel_info = {"op_list": []}
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_get_finale_type_and_block_dim")
             
@@ -870,13 +680,6 @@ recv_info: {'op1': 'cub:vec'}\
                 
     @staticmethod
     def test_get_summary_type_and_options(tmp_dir):
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-        
         with mock.patch("json.load", return_value=sub_op_add_json):
             with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir):
                 super_operator = SuperOperatorInfos(kernel_info, "test_get_summary_type_and_options")
@@ -922,7 +725,6 @@ recv_info: {'op1': 'cub:vec'}\
 
     @staticmethod
     def test_find_sub_kernel_name():
-        kernel_info = {"op_list": []}
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_find_sub_name")
             origin_names = ["kernel_mix_aiv_func", "kernel_mix_aic_func"]
@@ -933,47 +735,36 @@ recv_info: {'op1': 'cub:vec'}\
 
     @staticmethod
     def test_split_o_in_super_kernel(tmp_dir):
-        kernel_info = {
-            "op_list": [],
-        }
         super_operator = SuperOperatorInfos(kernel_info, "test_split_o_in_super_kernel")
         tmp_dir_str = str(tmp_dir)
         orign_bin_path = os.path.join(tmp_dir_str, "original.o")
         origin_kernel_name = "origin_kernel_name_mock"
 
         
-        with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir_str):
-            with mock.patch('subprocess.run'):
-                with mock.patch('os.path.exists'):
-                    with mock.patch.object(CommonUtility, 'dump_compile_log') as mock_dump_compile_log:
-                        new_bin_path_goden = os.path.join(tmp_dir_str, "original_split1.o")
-                        new_kernel_name_goden = f"{origin_kernel_name}_split1" 
-                        new_bin_path, new_kernel_name = super_operator.split_o_in_super_kernel( \
-                                                            orign_bin_path, origin_kernel_name, 1 \
-                                                        )
+        with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir_str), \
+        mock.patch('subprocess.run'), \
+        mock.patch('os.path.exists'), \
+        mock.patch.object(CommonUtility, 'dump_compile_log') as mock_dump_compile_log:
+            new_bin_path_goden = os.path.join(tmp_dir_str, "original_split1.o")
+            new_kernel_name_goden = f"{origin_kernel_name}_split1" 
+            new_bin_path, new_kernel_name = super_operator.split_o_in_super_kernel( \
+                orign_bin_path, origin_kernel_name, 1)
 
-                        mock_dump_compile_log.assert_called()
-                        assert new_bin_path_goden == new_bin_path
-                        assert new_kernel_name_goden == new_kernel_name
+            mock_dump_compile_log.assert_called()
+            assert new_bin_path_goden == new_bin_path
+            assert new_kernel_name_goden == new_kernel_name
 
-            with mock.patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, "test_command")):
-                with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
-                    with mock.patch.object(CommonUtility, 'dump_compile_log') as mock_dump_compile_log:
-                        new_bin_path, new_kernel_name = super_operator.split_o_in_super_kernel( \
-                                                            orign_bin_path, origin_kernel_name, 1 \
-                                                        )
-                        mock_dump_compile_log.assert_called()
-                        mock_raise.assert_called()
+        with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir_str), \
+        mock.patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, "test_command")), \
+        mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise, \
+        mock.patch.object(CommonUtility, 'dump_compile_log') as mock_dump_compile_log:
+            new_bin_path, new_kernel_name = super_operator.split_o_in_super_kernel( \
+                orign_bin_path, origin_kernel_name, 1)
+            mock_dump_compile_log.assert_called()
+            mock_raise.assert_called()
 
     @staticmethod
     def test_gen_super_kernel_params():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-        
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_super_kernel_params")
             op1 = SubOperatorInfos(0, info_dict, 0, {})
@@ -996,13 +787,6 @@ recv_info: {'op1': 'cub:vec'}\
 
     @staticmethod
     def test_get_ws_size():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-        
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_get_ws_size")
             op1 = SubOperatorInfos(0, info_dict, 0, {})
@@ -1016,13 +800,6 @@ recv_info: {'op1': 'cub:vec'}\
             
     @staticmethod
     def test_calc_workspace_size():
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-        
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_calc_workspace_size")
             super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
@@ -1043,8 +820,6 @@ recv_info: {'op1': 'cub:vec'}\
             
     @staticmethod
     def test_add_define_options():
-        kernel_info = {"op_list": []}
-        
         with mock.patch("json.load", return_value=sub_op_add_json):
             exist_dynamic_sub_ops = True
             super_operator = SuperOperatorInfos(kernel_info, "test_add_define_options")
@@ -1066,82 +841,86 @@ recv_info: {'op1': 'cub:vec'}\
             assert "-DASCENDC_DUMP=0" in options
     
     @staticmethod
-    def test_gen_compile_info(tmp_dir):
-        kernel_info = {"op_list": []}
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-        
-        with mock.patch("json.load", return_value=sub_op_add_json):
-            with mock.patch.dict(os.environ, {"BISHENG_REAL_PATH": "/mock/bisheng"}):
-                with mock.patch('subprocess.run'):
-                    with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir):
-                        super_operator = SuperOperatorInfos(kernel_info, "test_gen_compile_info")
-                        sub_operator = SubOperatorInfos(0, info_dict, 0, {})
-                        sub_operator.param_offset = "param_offset1"
-                        super_operator.info_base = [sub_operator]
-                        
-                        sub_operator.dynamic_bin = None
-                        sub_operator.split_mode = 2
-                        sub_operator.split_mode_in_json = 2
-                        sub_operator.sub_kernel_names = ["kernel_mix_aic"]
-                        sub_operator.aic_bin = os.path.join("aic_bin_mock", "original.o")
-                        super_operator.gen_compile_info()
-                        assert sub_operator.aic_bin == super_operator.compile_info["sub_operator"][0]['aic_bin']
-                        assert sub_operator.aic_bin[:-2] + "_split1.o" \
-                            == super_operator.compile_info["sub_operator"][1]['aic_bin']
-                        assert sub_operator.sub_kernel_names \
-                            == super_operator.compile_info["sub_operator"][0]['sub_kernel_names']
+    def test_gen_compile_info_aic(tmp_dir):
+        with mock.patch("json.load", return_value=sub_op_add_json), \
+        mock.patch.dict(os.environ, {"BISHENG_REAL_PATH": "/mock/bisheng"}), \
+        mock.patch('subprocess.run'), \
+        mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir):
+            super_operator = SuperOperatorInfos(kernel_info, "test_gen_compile_info_aic")
+            sub_operator = SubOperatorInfos(0, info_dict, 0, {})
+            sub_operator.param_offset = "param_offset1"
+            super_operator.info_base = [sub_operator]
+            sub_operator.dynamic_bin = None
+            sub_operator.split_mode = 2
+            sub_operator.split_mode_in_json = 2
+            sub_operator.sub_kernel_names = ["kernel_mix_aic"]
+            sub_operator.aic_bin = os.path.join("aic_bin_mock", "original.o")
+            super_operator.gen_compile_info()
+            assert sub_operator.aic_bin == super_operator.compile_info["sub_operator"][0]['aic_bin']
+            assert sub_operator.aic_bin[:-2] + "_split1.o" \
+                == super_operator.compile_info["sub_operator"][1]['aic_bin']
+            assert sub_operator.sub_kernel_names \
+                == super_operator.compile_info["sub_operator"][0]['sub_kernel_names']
+            
+            sub_operator.split_mode_in_json = None
+            sub_operator.aic_bin = os.path.join("aic_bin_mock", "original.o")
+            filename = os.path.basename(sub_operator.aic_bin) 
+            aic_split_o_path_goden = os.path.join(tmp_dir, filename[:-2] + "_split1.o") 
+            super_operator.gen_compile_info()
+            assert aic_split_o_path_goden == super_operator.compile_info["sub_operator"][1]['aic_bin']
+            assert "kernel_mix_aic_split1" \
+                in super_operator.compile_info["sub_operator"][1]['sub_kernel_names']
+            
+            sub_operator.called_kernel_name = {}
+            sub_operator.called_kernel_name["dynamic_func_names"] = {
+                                        "tiling_key": {
+                                            "dav-c220-cube": "cube_kernel_name"
+                                        }
+                                    }
+            tmp_dir_str = str(tmp_dir)
+            sub_operator.dynamic_bin = os.path.join(tmp_dir_str, "original.o")
+            with mock.patch('os.environ.get', return_value=None), \
+            mock.patch("superkernel.super_kernel_op_infos.get_op_debug_config", \
+            return_value="dump_cce"):
+                super_operator.gen_compile_info()
+                assert sub_operator.dynamic_bin \
+                    == super_operator.compile_info["sub_operator"][0]['dynamic_bin']
+                assert sub_operator.dynamic_bin[:-2] + "_split1.o" == \
+                    super_operator.compile_info["sub_operator"][1]['dynamic_bin']
+                assert ['cube_kernel_name_split1'] \
+                    == super_operator.compile_info["sub_operator"][1]['sub_kernel_names']
 
-                        sub_operator.sub_kernel_names = ["kernel_mix_aiv"]
-                        sub_operator.aiv_bin = os.path.join("aiv_bin_mock", "original.o")
-                        super_operator.gen_compile_info()
-                        assert sub_operator.aiv_bin == super_operator.compile_info["sub_operator"][0]['aiv_bin']
-                        assert sub_operator.aiv_bin[:-2] + "_split1.o" \
-                            == super_operator.compile_info["sub_operator"][1]['aiv_bin']
-                        assert sub_operator.sub_kernel_names \
-                            == super_operator.compile_info["sub_operator"][0]['sub_kernel_names']
-                        
-                        sub_operator.split_mode_in_json = None
-                        sub_operator.sub_kernel_names = ["kernel_mix_aic"]
-                        sub_operator.aic_bin = os.path.join("aic_bin_mock", "original.o")
-                        filename = os.path.basename(sub_operator.aic_bin) 
-                        aic_split_o_path_goden = os.path.join(tmp_dir, filename[:-2] + "_split1.o") 
-                        super_operator.gen_compile_info()
-                        assert aic_split_o_path_goden == super_operator.compile_info["sub_operator"][1]['aic_bin']
-                        assert "kernel_mix_aic_split1" \
-                            in super_operator.compile_info["sub_operator"][1]['sub_kernel_names']
+    @staticmethod
+    def test_gen_compile_info_aiv(tmp_dir):
+        with mock.patch("json.load", return_value=sub_op_add_json), \
+        mock.patch.dict(os.environ, {"BISHENG_REAL_PATH": "/mock/bisheng"}), \
+        mock.patch('subprocess.run'), \
+        mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir):
+            super_operator = SuperOperatorInfos(kernel_info, "test_gen_compile_info_aiv")
+            sub_operator = SubOperatorInfos(0, info_dict, 0, {})
+            sub_operator.param_offset = "param_offset1"
+            super_operator.info_base = [sub_operator]
+            sub_operator.dynamic_bin = None
+            sub_operator.split_mode = 2
+            sub_operator.split_mode_in_json = 2
 
-                        sub_operator.sub_kernel_names = ["kernel_mix_aiv"]
-                        sub_operator.aiv_bin = os.path.join("aiv_bin_mock", "original.o")
-                        filename = os.path.basename(sub_operator.aiv_bin) 
-                        aiv_split_o_path_goden = os.path.join(tmp_dir, filename[:-2] + "_split1.o") 
-                        super_operator.gen_compile_info()
-                        assert aiv_split_o_path_goden == super_operator.compile_info["sub_operator"][1]['aiv_bin']
-                        assert "kernel_mix_aiv_split1" \
-                            in super_operator.compile_info["sub_operator"][1]['sub_kernel_names']
-                        
-                        sub_operator.called_kernel_name = {}
-                        sub_operator.called_kernel_name["dynamic_func_names"] = {
-                                                    "tiling_key": {
-                                                        "dav-c220-cube": "cube_kernel_name"
-                                                    }
-                                                }
-                        tmp_dir_str = str(tmp_dir)
-                        sub_operator.dynamic_bin = os.path.join(tmp_dir_str, "original.o")
-                        with mock.patch('os.environ.get', return_value=None):
-                            with mock.patch("superkernel.super_kernel_op_infos.get_op_debug_config", \
-                                            return_value="dump_cce"):
-                                super_operator.gen_compile_info()
-                                assert sub_operator.dynamic_bin \
-                                    == super_operator.compile_info["sub_operator"][0]['dynamic_bin']
-                                assert sub_operator.dynamic_bin[:-2] + "_split1.o" == \
-                                    super_operator.compile_info["sub_operator"][1]['dynamic_bin']
-                                assert ['cube_kernel_name_split1'] \
-                                    == super_operator.compile_info["sub_operator"][1]['sub_kernel_names']
-
+            sub_operator.sub_kernel_names = ["kernel_mix_aiv"]
+            sub_operator.aiv_bin = os.path.join("aiv_bin_mock", "original.o")
+            super_operator.gen_compile_info()
+            assert sub_operator.aiv_bin == super_operator.compile_info["sub_operator"][0]['aiv_bin']
+            assert sub_operator.aiv_bin[:-2] + "_split1.o" \
+                == super_operator.compile_info["sub_operator"][1]['aiv_bin']
+            assert sub_operator.sub_kernel_names \
+                == super_operator.compile_info["sub_operator"][0]['sub_kernel_names']
+            
+            sub_operator.split_mode_in_json = None
+            sub_operator.aiv_bin = os.path.join("aiv_bin_mock", "original.o")
+            filename = os.path.basename(sub_operator.aiv_bin) 
+            aiv_split_o_path_goden = os.path.join(tmp_dir, filename[:-2] + "_split1.o") 
+            super_operator.gen_compile_info()
+            assert aiv_split_o_path_goden == super_operator.compile_info["sub_operator"][1]['aiv_bin']
+            assert "kernel_mix_aiv_split1" \
+                in super_operator.compile_info["sub_operator"][1]['sub_kernel_names']
 
 if __name__ == "__main__":
     pytest.main()

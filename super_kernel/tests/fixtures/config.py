@@ -48,9 +48,9 @@ def save_golden_files(tmp_path, tests_root):
     saved_count = 0
     for pattern in ["test_sk_*/kernel_meta/*.json", "test_sk_*/kernel_meta/*_kernel.cpp"]:
         for file_path in tmp_path.glob(pattern):
-            # 移除 kernel_meta 并重命名
+            # 移除路径中的 kernel_meta 字符
             parts = [p for p in file_path.relative_to(tmp_path).parts if p != "kernel_meta"]
-            # 根据文件类型重命名，将文件重命名为golden文件名
+            # 根据文件类型重命名，使新命名与golden文件名一致
             if file_path.suffix == ".json": 
                 new_filename = "expect_compiled_json.json" 
             elif file_path.suffix == ".cpp": 
@@ -60,7 +60,7 @@ def save_golden_files(tmp_path, tests_root):
             
             dest_path = save_dir / Path(*parts[:-1]) / new_filename
             dest_path.parent.mkdir(parents=True, exist_ok=True)
-            # 替换
+            # 根据一致的文件名实现替换
             shutil.copy2(file_path, dest_path)
             saved_count += 1
     
@@ -89,8 +89,13 @@ def tmp_dir(request):
         yield tmp_path
     finally:
         keep_generated = request.config.getoption("--keep-generated")
-        replace_st_golden = request.config.getoption("--replace-st-golden")  # 获取新选项
+        replace_st_golden = request.config.getoption("--replace-st-golden") 
         
+        # 先判断是否用临时文件替换golden文件
+        if replace_st_golden:
+            save_golden_files(tmp_path, tests_root)
+        
+        # 再判断是否保留临时文件
         if not keep_generated:
             shutil.rmtree(tmp_path, ignore_errors=True)
             if not base_dir.exists():
@@ -101,14 +106,15 @@ def tmp_dir(request):
                 base_dir.rmdir()
         else:
             print(f"已保留临时文件目录: {tmp_path}")
-            
-        if replace_st_golden:
-            save_golden_files(tmp_path, tests_root)
 
 
 @pytest.fixture(scope="session")
 def data_dir():
     return Path(__file__).resolve().parents[1] / "st" / "data"
+
+@pytest.fixture(scope="session")
+def json_dir():
+    return Path(__file__).resolve().parents[1] / "st" / "json_for_test_smoke"
 
 
 # 为所有测试用例创建临时的 PassContext，避免用例之间互相影响

@@ -21,6 +21,12 @@ super_kernel/tests/generated/
 # Coverage reports
 super_kernel/coverage/
 
+# UT temporary files
+super_kernel/kernel_meta
+
+# ST temporary files
+super_kernel/generated/
+
 # Type checker caches
 .mypy_cache/
 

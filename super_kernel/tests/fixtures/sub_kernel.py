@@ -11,11 +11,8 @@
 # ----------------------------------------------------------------------------------------------------------------------
 
 
-import json
 from pathlib import Path
-
 import pytest
-
 from impl.ops_math.dynamic import pows
 from asc_op_compile_base.common.buildcfg.buildcfg import build_config
 from asc_op_compile_base.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, \
@@ -25,52 +22,6 @@ from asc_op_compile_base.common.context import get_context, op_info
 from asc_op_compile_base.common.context.op_context import OpContext
 from asc_op_compile_base.common.platform.platform_info import set_current_compile_soc_info
 
-
-def update_kernel_metadata(kernel_meta_dir, op_name, op_type, extend_op_info: dict = None):
-    json_file = next((Path(kernel_meta_dir) / "kernel_meta").glob("*.json"))
-    if not json_file.exists():
-        raise FileNotFoundError(f"Required kernel metadata file not found: {json_file}")
-    with open(json_file, 'r') as f:
-        json_data = json.load(f)
-
-    if op_type == "IsInf":
-        json_data["sub_operator_kernel_type"] = kernel_type_list[0]
-    else:
-        json_data["sub_operator_kernel_type"] = kernel_type_list[1]
-    with open(json_file, 'w') as f:
-        json.dump(json_data, f, indent=2)
-
-    # 将新配置信息写入JSON
-    if extend_op_info and 'task_type' in extend_op_info and op_type == "IsInf":
-        json_file = Path(kernel_meta_dir) / "kernel_meta" / ("is_inf" + ".json")
-        if not json_file.exists():
-            raise FileNotFoundError(f"Required kernel metadata file not found: {json_file}")
-        with open(json_file, 'r') as f:
-            json_data = json.load(f)
-        json_data["sub_operator_kernel_name"]["dynamic_func_names"] = {
-            "2": {
-                "AiCore": "is_inf__kernel0_middle",
-                "dav-c220-cube": "cube_kernel_name",
-                "kernel_type": kernel_type_list[0]
-            },
-            
-        }
-        json_data["timestamp_option"] = True
-        json_data["debugOptions"] = "printf"
-        json_data["debugBufSize"] = 78643200
-        json_data["sub_op_with_sync_all"] = True
-        with open(json_file, 'w') as f:
-            json.dump(json_data, f, indent=2)
-
-    if op_name == "IsInf_Json_Split_None":
-        json_file = Path(kernel_meta_dir) / "kernel_meta" / ("is_inf" + ".json")
-        if not json_file.exists():
-            raise FileNotFoundError(f"Required kernel metadata file not found: {json_file}")
-        with open(json_file, 'r') as f:
-            json_data = json.load(f)
-        json_data.pop("split_mode", None)
-        with open(json_file, 'w') as f:
-            json.dump(json_data, f, indent=2)
 
 def compile_sub_kernel(kernel_meta_dir, op_name, op_type, func, extend_op_info: dict = None):
     current_build_config()[kernel_meta_parent_dir] = kernel_meta_dir
@@ -102,9 +53,7 @@ def compile_sub_kernel(kernel_meta_dir, op_name, op_type, func, extend_op_info: 
         get_context().set_graph_op_info(opinfo)
         get_context().add_addition('super_kernel_sub_info', sp_info)
         func()
-        
-    update_kernel_metadata(kernel_meta_dir, op_name, op_type, extend_op_info)
-        
+                
         
 class SubkernelPath:
     def __init__(self, path, name):
@@ -115,7 +64,7 @@ class SubkernelPath:
         return self.root / "kernel_meta" / (self.name + ".o")
 
     def json(self):
-        return self.root / "kernel_meta" / (self.name + ".json")
+        return self.name + ".json"
 
 
 @pytest.fixture(scope="function")
@@ -227,14 +176,6 @@ subkernel_is_finite_split_mode1 = make_1_in_1_out_subkernel_fixture(
     extend_op_info=NEW_EXTEND_OP_INFO
 )
 
-subkernel_is_inf_json_split_none = make_1_in_1_out_subkernel_fixture(
-    impl_module_name="is_inf",
-    func_name="is_inf",
-    op_name="IsInf_Json_Split_None",
-    op_type="IsInf",
-    extend_op_info=None  # 原有默认配置
-)
-
 
 @pytest.fixture
 def subkernel_inf(request):
@@ -285,21 +226,3 @@ def subkernel_pows_default(tmp_dir):
 def subkernel_pows(request):
     fixture_name = request.param
     return request.getfixturevalue(fixture_name)
-
-kernel_type_list = []
-
-
-@pytest.fixture(scope="function")
-def kernel_type(request):
-    global kernel_type_list
-    kernel_type_list = request.param
-    return kernel_type_list
-
-
-subkernel_is_inf_dynamic = make_1_in_1_out_subkernel_fixture(
-    impl_module_name="is_inf",
-    func_name="is_inf",
-    op_name="IsInf_Dynamic",
-    op_type="IsInf",
-    extend_op_info={"task_type": "dynamic"}
-)

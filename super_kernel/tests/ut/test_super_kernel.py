@@ -12,11 +12,22 @@
 
 """Minimal smoke test ensuring the UT harness executes."""
 
+import logging
 import os
 import sys
-import pytest
 from unittest import mock
-import importlib
+import pytest
+from utils import compare_files
+from superkernel.super_kernel import *
+from superkernel.super_kernel import compile as sk_compile
+from asc_op_compile_base.asc_op_compiler.super_kernel_utility import KernelMetaType, \
+    CommonUtility
+from asc_op_compile_base.asc_op_compiler.super_kernel_constants import SuperKernelPreLoadMode, \
+    SuperKernelDataCacheMode, SuperKernelEarlyStartMode, SubOperatorType, SuperKernelDebugDcciAllMode, \
+    SuperKernelDebugSyncAllMode, SuperKernelFeedSyncAllMode, SuperKernelProfilingMode
+from superkernel.super_kernel_sub_op_infos import SubOperatorInfos
+from superkernel.super_kernel_op_infos import SuperOperatorInfos
+
 
 THIS_FILE_NAME = __file__
 FILE_PATH = os.path.dirname(os.path.realpath(THIS_FILE_NAME))
@@ -26,8 +37,6 @@ SUPER_KERNEL_PATH = os.path.join(FILE_PATH, "../../src")
 sys.path.append(SUPER_KERNEL_PATH)
 GLODEN_FILE_PATH = os.path.join(FILE_PATH, "./golden")
 
-from utils import validate_codegen_output, validate_compile_options, compare_files
-from superkernel.super_kernel import *
 
 sub_op_add_json = {
     "binFileName": "te_op_add",
@@ -72,56 +81,79 @@ sub_op_add_json = {
     "debugOptions": ""
 }
 
+kernel_info = {"op_list": []}
+info_dict = {
+    "bin_path": "",
+    "json_path": "",
+    "kernel_name": "add"
+}
+
 
 class TestSuperKernel:
     @staticmethod
     def setup_method():
-        print(f"---------------SetUp---------------")
+        logging.info("---------------SetUp---------------")
 
     @staticmethod
     def teardown_method():
-        print(f"--------------TearDown-------------")
-
+        logging.info("--------------TearDown-------------")
+          
     @staticmethod
     def test_super_kernel_sub_op_add_compile(tmp_dir):
-        with mock.patch("builtins.open", new_callable=mock.mock_open, read_data="{}"):
-            with mock.patch("json.load", return_value=sub_op_add_json):
-                with mock.patch("subprocess.run"):
-                    with mock.patch.object(CommonUtility, 'is_support_super_kernel', return_value=True):
-                        with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir):
-                            with mock.patch("superkernel.super_kernel.super_kernel_compile"):
-                                kernel_info = {
-                                    "op_list": [
-                                        {
-                                            "bin_path": "",
-                                            "json_path": "",
-                                            "kernel_name": "add"
-                                        }],
-                                }
-                                super_kernel_optype = "test_add"
-                                compile(kernel_info, super_kernel_optype)
-                                code_gen_path = os.path.join(CommonUtility.get_kernel_meta_dir(),
-                                                             super_kernel_optype + "kernel.cpp")
-                                gloden_code_path = os.path.join(GLODEN_FILE_PATH, super_kernel_optype + "kernel.cpp")
-                                assert compare_files(code_gen_path, gloden_code_path)
+        with mock.patch("builtins.open", new_callable=mock.mock_open, read_data="{}"), \
+        mock.patch("json.load", return_value=sub_op_add_json), \
+        mock.patch("subprocess.run"), \
+        mock.patch.object(CommonUtility, 'is_support_super_kernel', return_value=True), \
+        mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir), \
+        mock.patch("superkernel.super_kernel.super_kernel_compile"):
+            kernel_info_compile1 = {
+                "op_list": [
+                    {
+                        "bin_path": "",
+                        "json_path": "",
+                        "kernel_name": "add"
+                    }],
+            }
+            super_kernel_optype = "test_add"
+            sk_compile(kernel_info_compile1, super_kernel_optype)
+            code_gen_path = os.path.join(CommonUtility.get_kernel_meta_dir(),
+                                            super_kernel_optype + "kernel.cpp")
+            gloden_code_path = os.path.join(GLODEN_FILE_PATH, super_kernel_optype + "kernel.cpp")
+            assert compare_files(code_gen_path, gloden_code_path)
+           
+    @staticmethod
+    def test_super_kernel_sub_op_add_compile(tmp_dir):
+        with mock.patch("builtins.open", new_callable=mock.mock_open, read_data="{}"), \
+        mock.patch("json.load", return_value=sub_op_add_json), \
+        mock.patch("subprocess.run"), \
+        mock.patch.object(CommonUtility, 'is_support_super_kernel', return_value=True), \
+        mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir), \
+        mock.patch("superkernel.super_kernel.super_kernel_compile"):
+            kernel_info_compile1 = {
+                "op_list": [
+                    {
+                        "bin_path": "",
+                        "json_path": "",
+                        "kernel_name": "add"
+                    }],
+            }
+            super_kernel_optype = "test_add"
+            sk_compile(kernel_info_compile1, super_kernel_optype)
+            code_gen_path = os.path.join(CommonUtility.get_kernel_meta_dir(),
+                                            super_kernel_optype + "kernel.cpp")
+            gloden_code_path = os.path.join(GLODEN_FILE_PATH, super_kernel_optype + "kernel.cpp")
+            assert compare_files(code_gen_path, gloden_code_path)
 
-                    with mock.patch.object(CommonUtility, 'is_support_super_kernel', return_value=False):
-                        with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
-                            with mock.patch("superkernel.super_kernel.super_kernel_compile"):
-                                kernel_info = {
-                                    "op_list": ""
-                                }
-                                super_kernel_optype = "test_add"
-                                compile(kernel_info, super_kernel_optype)
-                                mock_raise.assert_called()
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                kernel_info_compile2 = {
+                    "op_list": ""
+                }
+                super_kernel_optype = "test_add"
+                sk_compile(kernel_info_compile2, super_kernel_optype)
+                mock_raise.assert_called()
 
     @staticmethod
     def test_gen_early_start_config_pre_op_is_aiv():
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
@@ -146,11 +178,7 @@ class TestSuperKernel:
 
     @staticmethod
     def test_gen_early_start_config_pre_op_is_aic():
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
+        
         with mock.patch("json.load", return_value=sub_op_add_json):
             pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
@@ -175,11 +203,6 @@ class TestSuperKernel:
 
     @staticmethod
     def test_gen_early_start_config_pre_op_is_mix():
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
@@ -204,11 +227,6 @@ class TestSuperKernel:
 
     @staticmethod
     def test_gen_early_start_config_pre_op_raise():
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
@@ -300,14 +318,6 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
 
     @staticmethod
     def test_gen_inter_ops_barrier():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_inter_ops_barrier")
             pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
@@ -331,9 +341,6 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
 
     @staticmethod
     def test_gen_op_end_debug_dcci_all():
-        kernel_info = {
-            "op_list": [],
-        }
         super_operator = SuperOperatorInfos(kernel_info, "test_gen_op_end_debug_dcci_all")
         super_operator.debug_dcci_all_mode = SuperKernelDebugDcciAllMode.DebugDcciAllEnable
         code_gen = gen_op_end_debug_dcci_all(super_operator)
@@ -345,9 +352,6 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
 
     @staticmethod
     def test_gen_op_end_debug_sync_all():
-        kernel_info = {
-            "op_list": [],
-        }
         super_operator = SuperOperatorInfos(kernel_info, "test_gen_op_end_debug_sync_all")
         super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
         super_operator.debug_sync_all_mode = SuperKernelDebugSyncAllMode.DebugSyncAllEnable
@@ -360,9 +364,6 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
 
     @staticmethod
     def test_gen_2_real_stream_op_end_debug_sync_all_by_arch():
-        kernel_info = {
-            "op_list": [],
-        }
         super_operator = SuperOperatorInfos(kernel_info, "test_gen_2_real_stream_op_end_debug_sync_all_by_arch")
         super_operator.debug_sync_all_mode = SuperKernelDebugSyncAllMode.DebugSyncAllEnable
         code_gen = gen_2_real_stream_op_end_debug_sync_all_by_arch(super_operator, "aiv")
@@ -377,9 +378,6 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
 
     @staticmethod
     def test_print_params_addr():
-        kernel_info = {
-            "op_list": [],
-        }
         with mock.patch.object(CommonUtility, 'is_c310', return_value=False):
             super_operator = SuperOperatorInfos(kernel_info, "test_print_params_addr")
             super_operator.super_kernel_params = ["param1", "param2"]
@@ -395,14 +393,6 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
             
     @staticmethod
     def test_tpl_of_gen_switch_case_call():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             super_operator = SuperOperatorInfos(kernel_info, "test_tpl_of_gen_switch_case_call")
@@ -436,14 +426,6 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
 
     @staticmethod
     def test_gen_switch_case_call_block_of_dynamic_op():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_switch_case_call_block_of_dynamic_op")
@@ -466,14 +448,6 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
 
     @staticmethod
     def test_gen_clear_wait_sync_addr_code():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_clear_wait_sync_addr_code")
             super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
@@ -510,14 +484,6 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
             
     @staticmethod
     def test_process_gen_stream_send_code():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         super_operator = SuperOperatorInfos(kernel_info, "test_process_gen_stream_send_code")
         super_operator.cub_op_list = [SubOperatorInfos(1, info_dict, 0, {})]
         super_operator.vec_op_list = [SubOperatorInfos(1, info_dict, 0, {})]
@@ -560,14 +526,6 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
 
     @staticmethod
     def test_gen_2_real_stream_send_code():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_2_real_stream_send_code")
             super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
@@ -615,11 +573,6 @@ ffts_cross_core_sync(PIPE_MTE3, AscendC::GetffstMsg(0x02, AscendC::SYNC_AIV_FLAG
 
     @staticmethod
     def test_gen_2_real_stream_recv_code():
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             op = SubOperatorInfos(0, info_dict, 0, {})
             op.recv_info = {"op1": "vec:cub", "op2": "cub:vec"}
@@ -644,14 +597,6 @@ wait_flag_dev(AscendC::SYNC_AIC_AIV_FLAG);
 
     @staticmethod
     def test_gen_2_real_stream_sync_code():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_2_real_stream_sync_code")
             super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
@@ -701,14 +646,6 @@ wait_flag_dev(AscendC::SYNC_AIC_AIV_FLAG);
 
     @staticmethod
     def test_gen_sync_and_event_code_for_two_stream():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_sync_and_event_code_for_two_stream")
             super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
@@ -756,18 +693,10 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);\n
             assert goden_code == code_gen
 
     @staticmethod
-    def test_gen_2_real_stream_code_by_arch():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
+    def test_gen_2_real_stream_code_by_arch_dynamic():
         with mock.patch("json.load", return_value=sub_op_add_json):
             with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
-                super_operator = SuperOperatorInfos(kernel_info, "test_gen_2_real_stream_code_by_arch")
+                super_operator = SuperOperatorInfos(kernel_info, "test_gen_2_real_stream_code_by_arch_dynamic")
                 super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
                                             SubOperatorInfos(0, info_dict, 0, {})]
                 sub_ops = [SubOperatorInfos(0, info_dict, 0, {}), \
@@ -778,13 +707,13 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);\n
                 super_kernel_params_str = ''
                 exits_dynamic_op = True
                 super_operator.split_mode = 4
-                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                code_gen1 = gen_2_real_stream_code_by_arch(super_operator, \
                                                           arch, \
                                                           super_kernel_params_str, \
                                                           exits_dynamic_op, \
                                                           sub_ops)
-                goden_code = """\
-__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(void) {
+                goden_code1 = """\
+__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_dynamic_kernel_aic(void) {
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
@@ -800,17 +729,32 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(v
     //begin func call of sub operator 
 }\n
 """
-                assert goden_code == code_gen
+                assert goden_code1 == code_gen1
 
+    @staticmethod
+    def test_gen_2_real_stream_code_by_arch_preload_mode_preload_by_whole():
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator = SuperOperatorInfos(kernel_info, \
+                    "test_gen_2_real_stream_code_by_arch_preload_mode_preload_by_whole")
+                super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                            SubOperatorInfos(0, info_dict, 0, {})]
+                sub_ops = [SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {})]
+
+                arch = 'aic'
+                super_kernel_params_str = ''
+                exits_dynamic_op = True
+                super_operator.split_mode = 4
                 super_operator.preload_mode = SuperKernelPreLoadMode.PreLoadByWhole
-
-                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                code_gen2 = gen_2_real_stream_code_by_arch(super_operator, \
                                                           arch, \
                                                           super_kernel_params_str, \
                                                           exits_dynamic_op, \
                                                           sub_ops)
-                goden_code = """\
-__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(void) {
+                goden_code2 = """\
+__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_preload_mode_preload_by_whole_kernel_aic(void) {
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
@@ -827,18 +771,33 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(v
     //begin func call of sub operator 
 }\n
 """
-                assert goden_code == code_gen
+                assert goden_code2 == code_gen2
 
+    @staticmethod
+    def test_gen_2_real_stream_code_by_arch_preload_mode_preload_step_by_step():
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator = SuperOperatorInfos(kernel_info, \
+                    "test_gen_2_real_stream_code_by_arch_preload_mode_preload_step_by_step")
+                super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                            SubOperatorInfos(0, info_dict, 0, {})]
+                sub_ops = [SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {})]
+
+                arch = 'aic'
+                super_kernel_params_str = ''
+                exits_dynamic_op = True
+                super_operator.split_mode = 4
                 super_operator.preload_mode = SuperKernelPreLoadMode.PreLoadStepByStep
                 sub_ops[1].preload_call_block = "sub_operator.preload_call_block"
-
-                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                code_gen3 = gen_2_real_stream_code_by_arch(super_operator, \
                                                           arch, \
                                                           super_kernel_params_str, \
                                                           exits_dynamic_op, \
                                                           sub_ops)
-                goden_code = """\
-__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(void) {
+                goden_code3 = """\
+__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_preload_mode_preload_step_by_step_kernel_aic(void) {
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
@@ -854,17 +813,34 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(v
     sub_operator.preload_call_block    //begin func call of sub operator 
 }\n
 """
-                assert goden_code == code_gen
+                assert goden_code3 == code_gen3
 
-                super_operator.preload_mode = SuperKernelPreLoadMode.PreloadByAdanvanceStep
+    @staticmethod
+    def test_gen_2_real_stream_code_by_arch_preload_by_adanvance_step():
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator = SuperOperatorInfos(kernel_info, \
+                    "test_gen_2_real_stream_code_by_arch_preload_by_adanvance_step")
+                super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                            SubOperatorInfos(0, info_dict, 0, {})]
+                sub_ops = [SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {})]
+
+                arch = 'aic'
+                super_kernel_params_str = ''
+                exits_dynamic_op = True
+                super_operator.split_mode = 4
+                sub_ops[1].preload_call_block = "sub_operator.preload_call_block"
                 sub_ops[2].preload_call_block = "next_sub_operator.preload_call_block"
-                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                super_operator.preload_mode = SuperKernelPreLoadMode.PreloadByAdanvanceStep
+                code_gen4 = gen_2_real_stream_code_by_arch(super_operator, \
                                                           arch, \
                                                           super_kernel_params_str, \
                                                           exits_dynamic_op, \
                                                           sub_ops)
-                goden_code = """\
-__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(void) {
+                goden_code4 = """\
+__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_preload_by_adanvance_step_kernel_aic(void) {
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
@@ -880,17 +856,37 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(v
     next_sub_operator.preload_call_block    //begin func call of sub operator 
 }\n
 """
-                assert goden_code == code_gen
+                assert goden_code4 == code_gen4
 
+    @staticmethod
+    def test_gen_2_real_stream_code_by_arch_sub_data_cache_preload_call():
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator = SuperOperatorInfos(kernel_info, \
+                    "test_gen_2_real_stream_code_by_arch_sub_data_cache_preload_call")
+                super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                            SubOperatorInfos(0, info_dict, 0, {})]
+                sub_ops = [SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {})]
+
+                arch = 'aic'
+                super_kernel_params_str = ''
+                exits_dynamic_op = True
+                super_operator.split_mode = 4
+                sub_ops[1].preload_call_block = "sub_operator.preload_call_block"
+                sub_ops[2].preload_call_block = "next_sub_operator.preload_call_block"
+                super_operator.preload_mode = SuperKernelPreLoadMode.PreloadByAdanvanceStep
                 super_operator.datacache_mode = SuperKernelDataCacheMode.DataCacheLoadAdancanceStep
                 sub_ops[1].data_cache_preload_call = "sub_operator.data_cache_preload_call"
-                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                
+                code_gen5 = gen_2_real_stream_code_by_arch(super_operator, \
                                                           arch, \
                                                           super_kernel_params_str, \
                                                           exits_dynamic_op, \
                                                           sub_ops)
-                goden_code = """\
-__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(void) {
+                goden_code5 = """\
+__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_sub_data_cache_preload_call_kernel_aic(void) {
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
@@ -909,15 +905,37 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(v
 
 }\n
 """
-                assert goden_code == code_gen
+                assert goden_code5 == code_gen5
+
+    @staticmethod
+    def test_gen_2_real_stream_code_by_arch_next_sub_data_cache_preload_call():
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator = SuperOperatorInfos(kernel_info, \
+                    "test_gen_2_real_stream_code_by_arch_next_sub_data_cache_preload_call")
+                super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                            SubOperatorInfos(0, info_dict, 0, {})]
+                sub_ops = [SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {})]
+
+                arch = 'aic'
+                super_kernel_params_str = ''
+                exits_dynamic_op = True
+                super_operator.split_mode = 4
+                sub_ops[1].preload_call_block = "sub_operator.preload_call_block"
+                sub_ops[2].preload_call_block = "next_sub_operator.preload_call_block"
+                super_operator.preload_mode = SuperKernelPreLoadMode.PreloadByAdanvanceStep
+                sub_ops[1].data_cache_preload_call = "sub_operator.data_cache_preload_call"
+                super_operator.datacache_mode = SuperKernelDataCacheMode.DataCacheLoadAdancanceStep
                 sub_ops[2].data_cache_preload_call = "next_sub_operator.data_cache_preload_call"
-                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                code_gen6 = gen_2_real_stream_code_by_arch(super_operator, \
                                                           arch, \
                                                           super_kernel_params_str, \
                                                           exits_dynamic_op, \
                                                           sub_ops)
-                goden_code = """\
-__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(void) {
+                goden_code6 = """\
+__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_next_sub_data_cache_preload_call_kernel_aic(void) {
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
@@ -936,18 +954,39 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(v
 
 }\n
 """
-                assert goden_code == code_gen
+                assert goden_code6 == code_gen6
 
+    @staticmethod
+    def test_gen_2_real_stream_code_by_arch_notify_block():
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator = SuperOperatorInfos(kernel_info, "test_gen_2_real_stream_code_by_arch_notify_block")
+                super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                            SubOperatorInfos(0, info_dict, 0, {})]
+                sub_ops = [SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {}), \
+                           SubOperatorInfos(0, info_dict, 0, {})]
+
+                arch = 'aic'
+                super_kernel_params_str = ''
+                exits_dynamic_op = True
+                super_operator.split_mode = 4
+                sub_ops[1].preload_call_block = "sub_operator.preload_call_block"
+                sub_ops[2].preload_call_block = "next_sub_operator.preload_call_block"
+                super_operator.preload_mode = SuperKernelPreLoadMode.PreloadByAdanvanceStep
+                sub_ops[1].data_cache_preload_call = "sub_operator.data_cache_preload_call"
+                super_operator.datacache_mode = SuperKernelDataCacheMode.DataCacheLoadAdancanceStep
+                sub_ops[2].data_cache_preload_call = "next_sub_operator.data_cache_preload_call"
                 sub_ops[2].send_event_list = [100]
                 sub_ops[2].notify_block = {"aic": "notify_code", "aiv": "notify_code"}
-                code_gen = gen_2_real_stream_code_by_arch(super_operator, \
+                code_gen7 = gen_2_real_stream_code_by_arch(super_operator, \
                                                           arch, \
                                                           super_kernel_params_str, \
                                                           exits_dynamic_op, \
                                                           sub_ops)
                 mock_raise.assert_called()
-                goden_code = """\
-__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(void) {
+                goden_code7 = """\
+__aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_notify_block_kernel_aic(void) {
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
@@ -966,13 +1005,10 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_kernel_aic(v
 
     notify_code}\n
 """
-                assert goden_code == code_gen
+                assert goden_code7 == code_gen7
 
     @staticmethod
     def test_gen_profling_func_code():
-        kernel_info = {
-            "op_list": [],
-        }
         super_operator = SuperOperatorInfos(kernel_info, "test_gen_profling_func_code")
 
         super_operator.profiling_mode = SuperKernelProfilingMode.ProfilingEnable
@@ -983,89 +1019,11 @@ __BLOCK_LOCAL__ __inline__ __gm__ uint8_t* g_profiling_base_addr;
 __BLOCK_LOCAL__ __inline__ __gm__ uint8_t* g_profiling_working_addr;
 __BLOCK_LOCAL__ __inline__ __gm__ uint8_t* g_profiling_max_addr;
 __BLOCK_LOCAL__ __inline__ bool g_profiling_off;
-__BLOCK_LOCAL__ __inline__ uint32_t g_percore_size;
-constexpr uint64_t PROFILING_MAGIC_NUMBER = 0xbdca8756;
-constexpr uint32_t PROFILING_WORKINF_PTR_OFFSET = 8;
-constexpr uint32_t PROFILING_MAX_PTR_OFFSET = 16;
-constexpr uint32_t ONE_PROFILING_HEAD_SIZE = 16;
-constexpr uint32_t ONE_PROFILING_DATA_SIZE = 16;
-__aicore__ inline bool ProfilingAreaIsValid()
-{
-    return (*((__gm__ uint64_t*)g_profiling_base_addr) == PROFILING_MAGIC_NUMBER) &&
-        ((*((__gm__ uint64_t*)g_profiling_working_addr)) < (*((__gm__ uint64_t*)g_profiling_max_addr)));
-}
-
-__aicore__ inline uint8_t GetProfilingBlockIdx()
-{
-    if ASCEND_IS_AIV {
-        return get_block_idx() * get_subblockdim() + get_subblockid();
-    } else {
-        return get_block_idx() + 50;
-    }
-}
-
-__aicore__ inline void RecordProfiling()
-{
-    if (g_profiling_off) {
-        return;
-    }
-    uint8_t blockIdx = GetProfilingBlockIdx();
-    uint64_t workAddr = *((__gm__ uint64_t*)g_profiling_working_addr);
-    *((__gm__ uint64_t*)workAddr) = ((uint64_t)g_profiling_task_id << 32) | (((uint64_t)blockIdx) << 8) | 0xff;
-    *((__gm__ uint64_t*)workAddr + 1) = static_cast<uint64_t>(AscendC::GetSystemCycle());
-    dcci((__gm__ uint64_t*)workAddr, 0, 2);
-    *((__gm__ uint64_t*)g_profiling_working_addr) += ONE_PROFILING_DATA_SIZE;
-    if (!ProfilingAreaIsValid()) {
-        g_profiling_off = true;
-    }
-    dcci((__gm__ uint64_t*)g_profiling_working_addr, 0, 2);
-}
-
-__aicore__ inline void RecordProfiling(uint32_t index, uint8_t profilingType, bool startFlag)
-{
-    if (g_profiling_off) {
-        return;
-    }
-    uint8_t blockIdx = GetProfilingBlockIdx();
-    uint64_t workAddr = *((__gm__ uint64_t*)g_profiling_working_addr);
-    if (startFlag) {
-        *((__gm__ uint64_t*)workAddr) = ((uint64_t)index << 32) | (((uint64_t)profilingType & 0xf) << 8) | 0x0;
-    } else {
-        *((__gm__ uint64_t*)workAddr) =
-            ((uint64_t)index << 32) | (1 << 12) | (((uint64_t)profilingType & 0xf) << 8) | 0x0;
-    }
-    *((__gm__ uint64_t*)workAddr + 1) = static_cast<uint64_t>(AscendC::GetSystemCycle());
-    dcci((__gm__ uint64_t*)workAddr, 0, 2);
-    *((__gm__ uint64_t*)g_profiling_working_addr) += ONE_PROFILING_DATA_SIZE;
-    if (!ProfilingAreaIsValid()) {
-        g_profiling_off = true;
-    }
-    dcci((__gm__ uint64_t*)g_profiling_working_addr, 0, 2);
-}
-
-__aicore__ inline void InitProfiling(uint32_t taskId, GM_ADDR profilingPtr)
-{
-    g_profiling_off = false;
-    uint8_t blockIdx = GetProfilingBlockIdx();
-    g_percore_size = *((__gm__ uint32_t*)(profilingPtr + 12));
-    g_profiling_base_addr = profilingPtr + 64 + blockIdx * g_percore_size;
-    g_profiling_working_addr = g_profiling_base_addr + PROFILING_WORKINF_PTR_OFFSET;
-    g_profiling_max_addr = g_profiling_base_addr + PROFILING_MAX_PTR_OFFSET;
-    if (!ProfilingAreaIsValid()) {
-        g_profiling_off = true;
-        return;
-    }
-    g_profiling_task_id = taskId;
-    RecordProfiling();
-}
 """
-        assert goden_code == code_gen
+        assert goden_code in code_gen
 
     @staticmethod
     def test_gen_profiling_start_and_end_record():
-        kernel_info = {
-            "op_list": [],
-        }
         super_operator = SuperOperatorInfos(kernel_info, "test_gen_profiling_start_and_end_record")
 
         super_operator.profiling_mode = SuperKernelProfilingMode.ProfilingEnable
@@ -1077,15 +1035,6 @@ __aicore__ inline void InitProfiling(uint32_t taskId, GM_ADDR profilingPtr)
 
     @staticmethod
     def test_gen_2_real_stream_super_kernel_file():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
-
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_2_real_stream_super_kernel_file")
             super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {})]
@@ -1117,14 +1066,6 @@ __aicore__ inline void InitProfiling(uint32_t taskId, GM_ADDR profilingPtr)
 
     @staticmethod
     def test_judge_need_feed_sync_all():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_judge_need_feed_sync_all")
             sub_op = SubOperatorInfos(0, info_dict, 0, {})
@@ -1156,14 +1097,6 @@ __aicore__ inline void InitProfiling(uint32_t taskId, GM_ADDR profilingPtr)
 
     @staticmethod
     def test_gen_feed_syncall_var_init_code():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_feed_syncall_var_init_code")
             sub_op = SubOperatorInfos(0, info_dict, 0, {})
@@ -1199,13 +1132,10 @@ if ASCEND_IS_AIV {
             assert sync_flag == True
 
     @staticmethod
-    def test_gen_clear_syncall_worskspace():
-        kernel_info = {
-            "op_list": [],
-        }
+    def test_gen_clear_syncall_worskspace_aic_1_0():
         with mock.patch("json.load", return_value=sub_op_add_json):
             with mock.patch.object(CommonUtility, 'is_c310', return_value=True):
-                super_operator = SuperOperatorInfos(kernel_info, "test_gen_clear_syncall_worskspace")
+                super_operator = SuperOperatorInfos(kernel_info, "test_gen_clear_syncall_worskspace_aic_1_0")
 
                 super_operator.feed_sync_all_mode = SuperKernelFeedSyncAllMode.FeedSyncAllDisable
                 code_gen = gen_clear_syncall_worskspace(super_operator)
@@ -1234,6 +1164,13 @@ if ASCEND_IS_AIV {
 """
                 assert goden_code == code_gen
 
+    @staticmethod
+    def test_gen_clear_syncall_worskspace_aiv_1_0():
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            with mock.patch.object(CommonUtility, 'is_c310', return_value=True):
+                super_operator = SuperOperatorInfos(kernel_info, "test_gen_clear_syncall_worskspace_aiv_1_0")
+                super_operator.workspace_size = 1024
+                super_operator.feed_sync_all_mode = SuperKernelFeedSyncAllMode.FeedSyncAllEnable
                 super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
                 code_gen = gen_clear_syncall_worskspace(super_operator)
                 goden_code = """\
@@ -1255,6 +1192,13 @@ if ASCEND_IS_AIV {
 """
                 assert goden_code == code_gen
 
+    @staticmethod
+    def test_gen_clear_syncall_worskspace_aic_1_2():
+        with mock.patch("json.load", return_value=sub_op_add_json):
+            with mock.patch.object(CommonUtility, 'is_c310', return_value=True):
+                super_operator = SuperOperatorInfos(kernel_info, "test_gen_clear_syncall_worskspace_aic_1_2")
+                super_operator.workspace_size = 1024
+                super_operator.feed_sync_all_mode = SuperKernelFeedSyncAllMode.FeedSyncAllEnable
                 super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
                 code_gen = gen_clear_syncall_worskspace(super_operator)
                 goden_code = """\
@@ -1283,14 +1227,6 @@ if ASCEND_IS_AIC {
 
     @staticmethod
     def test_gen_sync_and_event_code():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_gen_sync_and_event_code")
             pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
@@ -1333,135 +1269,99 @@ if ASCEND_IS_AIC {
             assert goden_code == code_gen
 
     @staticmethod
-    def test_gen_super_kernel_file():
-        kernel_info = {
-            "op_list": [],
-        }
-        info_dict = {
-            "bin_path": "",
-            "json_path": "",
-            "kernel_name": "add"
-        }
+    def test_gen_super_kernel_file_2_steam():
         with mock.patch("json.load", return_value=sub_op_add_json):
             with mock.patch.object(CommonUtility, 'is_c310', return_value=True):
-                super_operator = SuperOperatorInfos(kernel_info, "test_gen_super_kernel_file")
+                super_operator = SuperOperatorInfos(kernel_info, "test_gen_super_kernel_file_2_steam")
 
                 super_operator.enable_double_stream = True
                 gen_super_kernel_file(super_operator)
+                gloden_code_path = os.path.join(GLODEN_FILE_PATH, "test_gen_super_kernel_file_2_stream.cpp")
+                assert compare_files(super_operator.kernel_file, gloden_code_path)
+
+    @staticmethod
+    def test_gen_super_kernel_file_timestamp():
+        with mock.patch("json.load", return_value=sub_op_add_json), \
+        mock.patch.object(CommonUtility, 'is_c310', return_value=True):
+            super_operator = SuperOperatorInfos(kernel_info, "test_gen_super_kernel_file_timestamp")
+            super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                        SubOperatorInfos(0, info_dict, 0, {}), \
+                                        SubOperatorInfos(0, info_dict, 0, {})]
+            for sub_op in super_operator.info_base:
+                sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+                sub_op.recv_event_list = [100]
+                sub_op.send_event_list = [100]
+                sub_op.wait_block = "sub_op.wait_block"
+                sub_op.notify_block = "sub_op.notify_block"
+            sub_operator = super_operator.info_base[1]
+            next_sub_operator = super_operator.info_base[2]
+            sub_operator.dynamic_impl_func_block = "dynamic_impl_func_block"
+            sub_operator.sub_op_task_type = SubOperatorType.DYNAMIC_OP
+            super_operator.feed_sync_all_mode = SuperKernelFeedSyncAllMode.FeedSyncAllEnable
+            super_operator.profiling_mode = SuperKernelProfilingMode.ProfilingEnable
+            super_operator.split_mode = 2
+            super_operator.preload_mode = SuperKernelPreLoadMode.PreLoadByWhole
+            sub_operator.preload_call_block = "sub_operator.preload_call_block"
+            next_sub_operator.preload_call_block = "next_sub_operator.preload_call_block"
+            sub_operator.data_cache_preload_call = "sub_operator.data_cache_preload_call"
+            next_sub_operator.data_cache_preload_call = "next_sub_operator.data_cache_preload_call"
+            super_operator.datacache_mode = SuperKernelDataCacheMode.DataCacheLoadAdancanceStep
+
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator.timestamp_option = True
+                gen_super_kernel_file(super_operator)
+                mock_raise.assert_called()
                 with open(super_operator.kernel_file, 'r') as f:
                     code_gen = f.read()
-                    goden_code = """\
-\n#if 1
-#include "kernel_operator.h"
+                    assert "#if defined ASCENDC_DUMP || defined ASCENDC_TIME_STAMP_ON" in code_gen
 
-template<bool aic_flag>
-__aicore__ inline void NotifyFunc(GM_ADDR notify_lock_addr)
-{
-    if constexpr (aic_flag) {
-        if (get_block_idx() == 0) {
-            __gm__ uint64_t* notifyLock = reinterpret_cast<__gm__ uint64_t*>(notify_lock_addr);
-            *notifyLock = 1;
-            dcci(notifyLock, 0, 2);
-        }
-    } else {
-        if (AscendC::GetBlockIdx() == 0) {
-            __gm__ uint64_t* notifyLock = reinterpret_cast<__gm__ uint64_t*>(notify_lock_addr);
-            *notifyLock = 1;
-            dcci(notifyLock, 0, 2);
-        }
-    }
-}
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator.timestamp_option = False
+                gen_super_kernel_file(super_operator)
+                mock_raise.assert_called()
+                with open(super_operator.kernel_file, 'r') as f:
+                    code_gen = f.read()
+                    assert "#if defined ASCENDC_DUMP || defined ASCENDC_TIME_STAMP_ON" not in code_gen
 
+    @staticmethod
+    def test_gen_super_kernel_file_preload_call_block():
+        with mock.patch("json.load", return_value=sub_op_add_json), \
+        mock.patch.object(CommonUtility, 'is_c310', return_value=True):
+            super_operator = SuperOperatorInfos(kernel_info, "test_gen_super_kernel_file_preload_call_block")
 
-template<bool aic_flag>
-__aicore__ inline void WaitFunc(GM_ADDR wait_lock_addr)
-{
-    if constexpr (aic_flag) {
-        __gm__ volatile uint64_t* waitLock = reinterpret_cast<__gm__ uint64_t*>(wait_lock_addr);
-        if (get_block_idx() == 0) {
-            dcci(waitLock, 0, 2);
-            while(*waitLock != 1) {
-                dcci(waitLock, 0, 2);
-            }
-        }
-    } else {
-        __gm__ volatile uint64_t* waitLock = reinterpret_cast<__gm__ uint64_t*>(wait_lock_addr);
-        if (AscendC::GetBlockIdx() == 0) {
-            dcci(waitLock, 0, 2);
-            while(*waitLock != 1) {
-                dcci(waitLock, 0, 2);
-            }
-        }
-    }
-}
+            super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
+                                        SubOperatorInfos(0, info_dict, 0, {}), \
+                                        SubOperatorInfos(0, info_dict, 0, {})]
+            for sub_op in super_operator.info_base:
+                sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+                sub_op.recv_event_list = [100]
+                sub_op.send_event_list = [100]
+                sub_op.wait_block = "sub_op.wait_block"
+                sub_op.notify_block = "sub_op.notify_block"
+            sub_operator = super_operator.info_base[1]
+            next_sub_operator = super_operator.info_base[2]
+            sub_operator.dynamic_impl_func_block = "dynamic_impl_func_block"
+            sub_operator.sub_op_task_type = SubOperatorType.DYNAMIC_OP
+            super_operator.timestamp_option = False
+            next_sub_operator.preload_call_block = "next_sub_operator.preload_call_block"
+            next_sub_operator.data_cache_preload_call = "next_sub_operator.data_cache_preload_call"
 
-extern "C"  __global__ __attribute__((aligned(512))) __aicore__ void auto_gen_test_gen_super_kernel_file_kernel(void) {
-    GM_ADDR *param_base = (GM_ADDR *)get_para_base();
-    GM_ADDR ffts_addr = param_base[0];
-    if (ffts_addr != nullptr) {
-        set_ffts_base_addr((uint64_t)ffts_addr);
-    }
-
-}\n
-"""
-                    assert goden_code == code_gen
-
-                super_operator.enable_double_stream = False
-                super_operator.info_base = [SubOperatorInfos(0, info_dict, 0, {}), \
-                                            SubOperatorInfos(0, info_dict, 0, {}), \
-                                            SubOperatorInfos(0, info_dict, 0, {})]
-                for sub_op in super_operator.info_base:
-                    sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
-                    sub_op.recv_event_list = [100]
-                    sub_op.send_event_list = [100]
-                    sub_op.wait_block = "sub_op.wait_block"
-                    sub_op.notify_block = "sub_op.notify_block"
-                sub_operator = super_operator.info_base[1]
-                next_sub_operator = super_operator.info_base[2]
-                sub_operator.dynamic_impl_func_block = "dynamic_impl_func_block"
-                sub_operator.sub_op_task_type = SubOperatorType.DYNAMIC_OP
-                super_operator.timestamp_option = True
-                super_operator.feed_sync_all_mode = SuperKernelFeedSyncAllMode.FeedSyncAllEnable
-                super_operator.profiling_mode = SuperKernelProfilingMode.ProfilingEnable
-                super_operator.split_mode = 2
-                super_operator.preload_mode = SuperKernelPreLoadMode.PreLoadByWhole
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator.preload_mode = SuperKernelPreLoadMode.PreLoadStepByStep
+                gen_super_kernel_file(super_operator)
+                mock_raise.assert_called()
                 sub_operator.preload_call_block = "sub_operator.preload_call_block"
-                next_sub_operator.preload_call_block = "next_sub_operator.preload_call_block"
-                sub_operator.data_cache_preload_call = "sub_operator.data_cache_preload_call"
-                next_sub_operator.data_cache_preload_call = "next_sub_operator.data_cache_preload_call"
-                super_operator.datacache_mode = SuperKernelDataCacheMode.DataCacheLoadAdancanceStep
+                with open(super_operator.kernel_file, 'r') as f:
+                    code_gen = f.read()
+                    assert "sub_operator.preload_call_block" in code_gen
 
-                with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
-                    gen_super_kernel_file(super_operator)
-                    mock_raise.assert_called()
-                    with open(super_operator.kernel_file, 'r') as f:
-                        code_gen = f.read()
-                        assert "#if defined ASCENDC_DUMP || defined ASCENDC_TIME_STAMP_ON" in code_gen
-
-                with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
-                    super_operator.timestamp_option = False
-                    gen_super_kernel_file(super_operator)
-                    mock_raise.assert_called()
-                    with open(super_operator.kernel_file, 'r') as f:
-                        code_gen = f.read()
-                        assert "#if defined ASCENDC_DUMP || defined ASCENDC_TIME_STAMP_ON" not in code_gen
-
-                with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
-                    super_operator.preload_mode = SuperKernelPreLoadMode.PreLoadStepByStep
-                    gen_super_kernel_file(super_operator)
-                    mock_raise.assert_called()
-                    sub_operator.preload_call_block = "sub_operator.preload_call_block"
-                    with open(super_operator.kernel_file, 'r') as f:
-                        code_gen = f.read()
-                        assert "sub_operator.preload_call_block" in code_gen
-
-                with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
-                    super_operator.preload_mode = SuperKernelPreLoadMode.PreloadByAdanvanceStep
-                    gen_super_kernel_file(super_operator)
-                    mock_raise.assert_called()
-                    with open(super_operator.kernel_file, 'r') as f:
-                        code_gen = f.read()
-                        assert "next_sub_operator.preload_call_block" in code_gen
+            with mock.patch.object(CommonUtility, 'ascendc_raise_python_err') as mock_raise:
+                super_operator.preload_mode = SuperKernelPreLoadMode.PreloadByAdanvanceStep
+                gen_super_kernel_file(super_operator)
+                mock_raise.assert_called()
+                with open(super_operator.kernel_file, 'r') as f:
+                    code_gen = f.read()
+                    assert "next_sub_operator.preload_call_block" in code_gen
 
 
 if __name__ == "__main__":
