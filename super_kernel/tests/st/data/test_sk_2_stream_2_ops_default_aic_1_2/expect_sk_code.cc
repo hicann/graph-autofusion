@@ -379,13 +379,13 @@ extern "C"  __global__ __attribute__((aligned(512))) __aicore__ void auto_gen_te
 }
 
 #if TILING_KEY_VAR == 0UL
-#if defined(__DAV_C220_CUBE__)
+#if (defined(__DAV_CUBE__) && __NPU_ARCH__ == 2201)
 static const struct FunLevelMixCoreType te_superkernel_2_stream_2_ops_mix_aic_section __attribute__ ((used, section (".ascend.meta.te_superkernel_2_stream_2_ops_mix_aic"))) = { {{F_TYPE_KTYPE, sizeof(unsigned int)}, K_TYPE_MIX_AIC_MAIN},    {{F_TYPE_MIX_TASK_RATION, sizeof(unsigned int)}, 1, 2} };
 #endif
 #endif
 
 #if TILING_KEY_VAR == 0UL
-#if defined(__DAV_C220_VEC__)
+#if (defined(__DAV_VEC__) && __NPU_ARCH__ == 2201)
 static const struct FunLevelMixCoreType te_superkernel_2_stream_2_ops_mix_aiv_section __attribute__ ((used, section (".ascend.meta.te_superkernel_2_stream_2_ops_mix_aiv"))) = { {{F_TYPE_KTYPE, sizeof(unsigned int)}, K_TYPE_MIX_AIC_MAIN},    {{F_TYPE_MIX_TASK_RATION, sizeof(unsigned int)}, 1, 2} };
 #endif
 #endif

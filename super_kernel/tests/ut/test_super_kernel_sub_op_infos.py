@@ -17,9 +17,9 @@ from unittest import mock
 from ut.test_super_kernel import sub_op_add_json, info_dict
 from superkernel.super_kernel_sub_op_infos import SubOperatorInfos
 import pytest
-from asc_op_compile_base.asc_op_compiler.super_kernel_constants import SuperKernelProfilingMode
-from asc_op_compile_base.asc_op_compiler.super_kernel_utility import KernelMetaType, CommonUtility
-from asc_op_compile_base.asc_op_compiler.super_kernel_constants import SuperKernelEarlyStartMode
+from asc_op_compile_base.asc_op_compiler.super_kernel_utility import CommonUtility
+from superkernel.super_kernel_constants import SuperKernelEarlyStartMode, \
+    SuperKernelKernelType, SuperKernelProfilingMode
 
 
 class TestSuperKernelSubOpInfos:
@@ -70,7 +70,7 @@ class TestSuperKernelSubOpInfos:
                 sub_op.notify_param_offset = 5
                 sub_op.kernel_name = "test_kernel"
                 
-                sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+                sub_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
                 inner_event_id_set = []
                 sub_op.gen_notify_from_outside(inner_event_id_set, False)
                 goden_code = """\
@@ -83,7 +83,7 @@ if ASCEND_IS_AIC {
 """
                 assert goden_code == sub_op.notify_block
                 
-                sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+                sub_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
                 sub_op.gen_notify_from_outside(inner_event_id_set, False)
                 goden_code = """\
 if ASCEND_IS_AIV {
@@ -104,7 +104,7 @@ if ASCEND_IS_AIV {
                 sub_op.wait_param_offset = 8
                 sub_op.kernel_name = "test_kernel"
 
-                sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+                sub_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
                 inner_event_id_set = []
                 sub_op.gen_wait_from_outside(inner_event_id_set, False)
                 goden_code = """\
@@ -117,7 +117,7 @@ if ASCEND_IS_AIC {
 """
                 assert goden_code == sub_op.wait_block
 
-                sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+                sub_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
                 sub_op.gen_wait_from_outside(inner_event_id_set, False)
                 goden_code = """\
 if ASCEND_IS_AIV {
@@ -176,26 +176,26 @@ if ASCEND_IS_AIV {
                 }
                 sub_op.kernel_params = ["kernel_params"]
                 code_gen = sub_op.gen_switch_case_block_of_dynamic_op(kernel_info, "tiling_key", \
-                    KernelMetaType.KERNEL_TYPE_AIV_ONLY)
+                    SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY)
                 goden_code = \
 """
 aiv_func_addr = (uint64_t)(test_kernel);
     aiv_func_addr_split1 = (uint64_t)(test_kernel_split1);
     aiv_func_addr_split2 = (uint64_t)(test_kernel_split2);
     aiv_func_addr_split3 = (uint64_t)(test_kernel_split3);
-dy_block_dim = ((uint64_t)0) << 32 | (*blockDimAddr);
+dy_block_num = ((uint64_t)0) << 32 | (*blockNumAddr);
 """
                 assert code_gen == goden_code
                 
                 code_gen = sub_op.gen_switch_case_block_of_dynamic_op(kernel_info, "tiling_key", \
-                    KernelMetaType.KERNEL_TYPE_AIC_ONLY)
+                    SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY)
                 goden_code = \
 """
 aic_func_addr = (uint64_t)(test_kernel);
     aic_func_addr_split1 = (uint64_t)(test_kernel_split1);
     aic_func_addr_split2 = (uint64_t)(test_kernel_split2);
     aic_func_addr_split3 = (uint64_t)(test_kernel_split3);
-dy_block_dim = ((uint64_t)1) << 32 | (*blockDimAddr);
+dy_block_num = ((uint64_t)1) << 32 | (*blockNumAddr);
 """
                 assert code_gen == goden_code
 
@@ -210,31 +210,31 @@ dy_block_dim = ((uint64_t)1) << 32 | (*blockDimAddr);
                 sub_op.kernel_params = ["kernel_params"]
                 
                 code_gen = sub_op.gen_switch_case_block_of_dynamic_op(kernel_info, "tiling_key", \
-                    KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0)
+                    SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0)
                 goden_code = \
 """
 aiv_func_addr = (uint64_t)(test_kernel_aiv);
     aiv_func_addr_split1 = (uint64_t)(test_kernel_aiv_split1);
     aiv_func_addr_split2 = (uint64_t)(test_kernel_aiv_split2);
     aiv_func_addr_split3 = (uint64_t)(test_kernel_aiv_split3);
-dy_block_dim = ((uint64_t)4) << 32 | (*blockDimAddr);
+dy_block_num = ((uint64_t)4) << 32 | (*blockNumAddr);
 """
                 assert code_gen == goden_code
                 
                 code_gen = sub_op.gen_switch_case_block_of_dynamic_op(kernel_info, "tiling_key", \
-                    KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0)
+                    SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0)
                 goden_code = \
 """
 aic_func_addr = (uint64_t)(test_kernel_aic);
     aic_func_addr_split1 = (uint64_t)(test_kernel_aic_split1);
     aic_func_addr_split2 = (uint64_t)(test_kernel_aic_split2);
     aic_func_addr_split3 = (uint64_t)(test_kernel_aic_split3);
-dy_block_dim = ((uint64_t)5) << 32 | (*blockDimAddr);
+dy_block_num = ((uint64_t)5) << 32 | (*blockNumAddr);
 """
                 assert code_gen == goden_code
 
                 code_gen = sub_op.gen_switch_case_block_of_dynamic_op(kernel_info, "tiling_key", \
-                    KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2)
+                    SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2)
                 goden_code = \
 """
 aiv_func_addr = (uint64_t)(test_kernel_aiv);
@@ -245,7 +245,7 @@ aic_func_addr = (uint64_t)(test_kernel_aic);
     aic_func_addr_split1 = (uint64_t)(test_kernel_aic_split1);
     aic_func_addr_split2 = (uint64_t)(test_kernel_aic_split2);
     aic_func_addr_split3 = (uint64_t)(test_kernel_aic_split3);
-dy_block_dim = ((uint64_t)7) << 32 | (*blockDimAddr);
+dy_block_num = ((uint64_t)7) << 32 | (*blockNumAddr);
 """
                 assert code_gen == goden_code
                 
@@ -327,9 +327,9 @@ if (*tilingKeyAddr < 200) {
             goden_code = \
 """
 // begin implement of dynamic op test_kernel
-static __aicore__ void switch_func_of_test_kernel(GM_ADDR __ac_dynamic_tiling_key_0, GM_ADDR __ac_dynamic_block_dim_0, GM_ADDR __ac_wait_lock_0, uint64_t& aiv_func_addr, uint64_t& aic_func_addr, uint64_t& dy_block_dim) {
+static __aicore__ void switch_func_of_test_kernel(GM_ADDR __ac_dynamic_tiling_key_0, GM_ADDR __ac_dynamic_block_num_0, GM_ADDR __ac_wait_lock_0, uint64_t& aiv_func_addr, uint64_t& aic_func_addr, uint64_t& dy_block_num) {
     __gm__ uint64_t* tilingKeyAddr = reinterpret_cast<__gm__ uint64_t*>(__ac_dynamic_tiling_key_0);
-    __gm__ uint64_t* blockDimAddr = reinterpret_cast<__gm__ uint64_t*>(__ac_dynamic_block_dim_0);
+    __gm__ uint64_t* blockNumAddr = reinterpret_cast<__gm__ uint64_t*>(__ac_dynamic_block_num_0);
     __gm__ volatile uint64_t* lockAddr = reinterpret_cast<__gm__ uint64_t*>(__ac_wait_lock_0);
     dcci(lockAddr, 0, 2);
     while(*lockAddr != 1) {
@@ -339,7 +339,7 @@ static __aicore__ void switch_func_of_test_kernel(GM_ADDR __ac_dynamic_tiling_ke
     if (*tilingKeyAddr == 0) {
 
     aiv_func_addr = (uint64_t)(kernel);
-    dy_block_dim = ((uint64_t)0) << 32 | (*blockDimAddr);
+    dy_block_num = ((uint64_t)0) << 32 | (*blockNumAddr);
 
 }
     return;
@@ -376,7 +376,7 @@ if ((coreid % 3) == 0) {
     def test_gen_kernel_call_block():
         with mock.patch("json.load", return_value=sub_op_add_json):
             sub_op = SubOperatorInfos(0, info_dict, 0, {})
-            sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            sub_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             sub_op.param_offset = 0
             sub_op.kernel_params = ["param1"]
             sub_op.extra_kernel_params = ["__ac_wait_lock_0"]
@@ -385,7 +385,7 @@ if ((coreid % 3) == 0) {
             sub_op.gen_kernel_call_block(False)
             goden_code = \
 """\
-call_func_of_(0, aiv_func_addr, aic_func_addr, dy_blockDim);
+call_func_of_(0, aiv_func_addr, aic_func_addr, dy_blockNum);
 if ASCEND_IS_AIV {
 
     if (AscendC::GetBlockIdx() == 0) {
@@ -401,7 +401,7 @@ if ASCEND_IS_AIV {
             goden_code = \
 """\
     AscendC::SyncAll<false>(); // reason: double stream need syncall to wait switch func
-call_func_of_(0, aiv_func_addr, aic_func_addr, dy_blockDim);
+call_func_of_(0, aiv_func_addr, aic_func_addr, dy_blockNum);
 if ASCEND_IS_AIV {
 
     if (AscendC::GetBlockIdx() == 0) {

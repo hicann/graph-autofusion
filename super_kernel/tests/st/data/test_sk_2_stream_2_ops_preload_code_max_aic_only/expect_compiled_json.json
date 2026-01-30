@@ -9,14 +9,14 @@
   "memoryStamping": [],
   "opParaSize": 8,
   "parameters": [],
-  "sha256": "8ac462cfd169aeb2d1398ef827c075dc099352ad76ddacc1f3fcbfd7b39a9a7b",
+  "sha256": "11cc55d523fc25e0b4fb43ee53101ccffa0350985d04e2c2839b954177de4842",
   "taskRation": "1:0",
   "optionalInputMode": "gen_placeholder",
   "optionalOutputMode": "gen_placeholder",
   "supportSuperKernel": 1,
   "SuperkernelInfo": {
     "kernelList": {
-      "dav-c220-cube": [
+      "aicore": [
         {
           "func_name": "is_inf__kernel0",
           "split_mode": 4,

@@ -17,9 +17,9 @@ import os
 import subprocess
 from unittest import mock
 import pytest
-from asc_op_compile_base.asc_op_compiler.super_kernel_utility import CommonUtility, KernelMetaType
-from asc_op_compile_base.asc_op_compiler.super_kernel_constants import SuperKernelEarlyStartMode, \
-    SubOperatorType, SuperKernelStreamFusionMode, SuperKernelFeedSyncAllMode
+from asc_op_compile_base.asc_op_compiler.super_kernel_utility import CommonUtility
+from superkernel.super_kernel_constants import SuperKernelEarlyStartMode, \
+    SubOperatorType, SuperKernelStreamFusionMode, SuperKernelFeedSyncAllMode, SuperKernelKernelType
 from superkernel.super_kernel_sub_op_infos import SubOperatorInfos
 from superkernel.super_kernel_op_infos import SuperOperatorInfos, gen_symbol_rename_file, \
     split_dynamic_o_in_super_kernel, get_sub_op_streamid
@@ -100,9 +100,9 @@ class TestSuperKernelOpInfos:
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_split_by_type")
             sub_op1 = SubOperatorInfos(0, info_dict, 0, {})
-            sub_op1.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            sub_op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             sub_op2 = SubOperatorInfos(1, info_dict, 0, {})
-            sub_op2.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            sub_op2.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             super_operator.info_base = [sub_op1, sub_op2]
 
             super_operator.split_op_by_kernel_type()
@@ -115,13 +115,13 @@ class TestSuperKernelOpInfos:
             super_operator = SuperOperatorInfos(kernel_info, "test_get_task_type")
             op = SubOperatorInfos(0, info_dict, 0, {})
 
-            op.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             assert super_operator.get_task_type(op) == "cub"
 
-            op.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             assert super_operator.get_task_type(op) == "vec"
 
-            op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
             assert super_operator.get_task_type(op) == "mix"
 
     @staticmethod
@@ -131,28 +131,28 @@ class TestSuperKernelOpInfos:
             pre_op = SubOperatorInfos(0, info_dict, 0, {})
             current_op = SubOperatorInfos(1, info_dict, 0, {})
 
-            pre_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
-            current_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            pre_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
+            current_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
             assert super_operator.gen_sync_name(pre_op, current_op) == "cub:vec;vec:cub"
 
-            pre_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
-            current_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            pre_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
+            current_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             assert super_operator.gen_sync_name(pre_op, current_op) == "vec:cub"
 
-            pre_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
-            current_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            pre_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
+            current_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             assert super_operator.gen_sync_name(pre_op, current_op) == "cub:vec"
 
-            pre_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
-            current_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            pre_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
+            current_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
             assert super_operator.gen_sync_name(pre_op, current_op) == "cub:vec"
 
-            pre_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
-            current_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            pre_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
+            current_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
             assert super_operator.gen_sync_name(pre_op, current_op) == "vec:cub"
 
-            pre_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
-            current_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            pre_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
+            current_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             assert super_operator.gen_sync_name(pre_op, current_op) == "cub:vec"
 
     @staticmethod
@@ -162,8 +162,8 @@ class TestSuperKernelOpInfos:
             pre_op = SubOperatorInfos(0, info_dict, 0, {})
             current_op = SubOperatorInfos(1, info_dict, 0, {})
 
-            pre_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
-            current_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            pre_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
+            current_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             pre_op.kernel_name_for_multi_stream = "pre_op_kernel_name"
             current_op.kernel_name_for_multi_stream = "current_op_kernel_name"
             super_operator.cub_op_list = [pre_op]
@@ -172,8 +172,8 @@ class TestSuperKernelOpInfos:
             assert pre_op.send_info['current_op_kernel_name'] == 'cub:vec'
             assert current_op.recv_info['pre_op_kernel_name'] == 'cub:vec'
 
-            pre_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
-            current_op.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            pre_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
+            current_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             super_operator.cub_op_list = [current_op]
             super_operator.vec_op_list = [pre_op]
             super_operator.insert_sync_event(pre_op, current_op)
@@ -186,10 +186,10 @@ class TestSuperKernelOpInfos:
             super_operator = SuperOperatorInfos(kernel_info, "test_insert_sync_by_stream_idx")
             op1 = SubOperatorInfos(0, info_dict, 0, {})
             op1.stream_index = 0
-            op1.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             op2 = SubOperatorInfos(1, info_dict, 0, {})
             op2.stream_index = 0
-            op2.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op2.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
 
             op1.kernel_name_for_multi_stream = "pre_op_kernel_name"
             op2.kernel_name_for_multi_stream = "current_op_kernel_name"
@@ -208,11 +208,11 @@ class TestSuperKernelOpInfos:
 
             op1 = SubOperatorInfos(0, info_dict, 0, {})
             op1.send_event_list = [100]
-            op1.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
 
             op2 = SubOperatorInfos(0, info_dict, 0, {})
             op2.recv_event_list = [100]
-            op2.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op2.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
 
             op1.kernel_name_for_multi_stream = "pre_op_kernel_name"
             op2.kernel_name_for_multi_stream = "current_op_kernel_name"
@@ -230,14 +230,14 @@ class TestSuperKernelOpInfos:
             super_operator = SuperOperatorInfos(kernel_info, "test_sync_notify")
 
             op1 = SubOperatorInfos(0, info_dict, 0, {})
-            op1.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
             op1.notify_block = {'aic': 'notify_code', 'aiv': 'notify_code'}
             op1.tmp_notify_block = {'aic': 'aic_tmp_notify', 'aiv': 'aiv_tmp_notify'}
             op1.stream_index = 0
             op1.send_info = ['cub']
 
             op2 = SubOperatorInfos(1, info_dict, 0, {})
-            op2.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op2.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             op2.stream_index = 1
             op2.kernel_name_for_multi_stream = 'cub'
 
@@ -346,19 +346,19 @@ class TestSuperKernelOpInfos:
             
             op1 = SubOperatorInfos(0, info_dict, 0, {})
             op1.kernel_name_for_multi_stream = "op1"
-            op1.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             
             op2 = SubOperatorInfos(1, info_dict, 0, {})
             op2.kernel_name_for_multi_stream = "op2"
-            op2.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op2.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             
             op3 = SubOperatorInfos(2, info_dict, 0, {})
             op3.kernel_name_for_multi_stream = "op3"
-            op3.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op3.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             
             op4 = SubOperatorInfos(3, info_dict, 0, {})
             op4.kernel_name_for_multi_stream = "op4"
-            op4.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op4.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
 
             super_operator.cub_op_list = [op1, op3]
             super_operator.vec_op_list = [op2, op4]
@@ -399,13 +399,13 @@ class TestSuperKernelOpInfos:
             super_operator = SuperOperatorInfos(kernel_info, "test_remove_multi_send_info")
             op1 = SubOperatorInfos(0, info_dict, 0, {})
             op1.kernel_name_for_multi_stream = "vec_op1"
-            op1.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             op2 = SubOperatorInfos(1, info_dict, 0, {})
             op2.kernel_name_for_multi_stream = "cub_op2"
-            op2.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op2.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             op3 = SubOperatorInfos(2, info_dict, 0, {})
             op3.kernel_name_for_multi_stream = "cub_op3"
-            op3.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op3.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             
             op1.send_info = {"cub_op2": "vec:cub", "cub_op3": "vec:cub"}
             op1.recv_info = {}
@@ -421,13 +421,13 @@ class TestSuperKernelOpInfos:
 
             op4 = SubOperatorInfos(3, info_dict, 0, {})
             op4.kernel_name_for_multi_stream = "cub_op4"
-            op4.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op4.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             op5 = SubOperatorInfos(4, info_dict, 0, {})
             op5.kernel_name_for_multi_stream = "vec_op5"
-            op5.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op5.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             op6 = SubOperatorInfos(5, info_dict, 0, {})
             op6.kernel_name_for_multi_stream = "vec_op6"
-            op6.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op6.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             
             op4.send_info = {"vec_op5": "cub:vec", "vec_op6": "cub:vec"}
             op4.recv_info = {}
@@ -447,13 +447,13 @@ class TestSuperKernelOpInfos:
             super_operator = SuperOperatorInfos(kernel_info, "test_remove_multi_recv_info")
             op1 = SubOperatorInfos(0, info_dict, 0, {})
             op1.kernel_name_for_multi_stream = "cub_op1"
-            op1.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             op2 = SubOperatorInfos(1, info_dict, 0, {})
             op2.kernel_name_for_multi_stream = "cub_op2"
-            op2.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op2.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             op3 = SubOperatorInfos(2, info_dict, 0, {})
             op3.kernel_name_for_multi_stream = "vec_op3"
-            op3.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op3.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             
             op1.send_info = {"vec_op3": "cub:vec"}
             op2.send_info = {"vec_op3": "cub:vec"}
@@ -468,13 +468,13 @@ class TestSuperKernelOpInfos:
             
             op4 = SubOperatorInfos(3, info_dict, 0, {})
             op4.kernel_name_for_multi_stream = "vec_op4"
-            op4.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op4.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             op5 = SubOperatorInfos(4, info_dict, 0, {})
             op5.kernel_name_for_multi_stream = "vec_op5"
-            op5.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            op5.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             op6 = SubOperatorInfos(5, info_dict, 0, {})
             op6.kernel_name_for_multi_stream = "cub_op6"
-            op6.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            op6.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             
             op4.send_info = {"cub_op6": "vec:cub"}
             op5.send_info = {"cub_op6": "vec:cub"}
@@ -538,16 +538,16 @@ recv_info: {'op1': 'cub:vec'}\
                 
                 vec_op0 = SubOperatorInfos(0, info_dict, 0, {})
                 vec_op0.kernel_name_for_multi_stream = "vec_op0"
-                vec_op0.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+                vec_op0.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
                 cub_op1 = SubOperatorInfos(1, info_dict, 0, {})
                 cub_op1.kernel_name_for_multi_stream = "cub_op1"
-                cub_op1.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+                cub_op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
                 cub_op2 = SubOperatorInfos(2, info_dict, 0, {})
                 cub_op2.kernel_name_for_multi_stream = "cub_op2"
-                cub_op2.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+                cub_op2.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
                 vec_op3 = SubOperatorInfos(3, info_dict, 0, {})
                 vec_op3.kernel_name_for_multi_stream = "vec_op3"
-                vec_op3.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+                vec_op3.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
 
                 vec_op0.send_info = {"cub_op1": "vec:cub", "cub_op2": "vec:cub"}
                 vec_op0.recv_info = {}
@@ -579,7 +579,7 @@ recv_info: {'op1': 'cub:vec'}\
         with mock.patch("json.load", return_value=sub_op_add_json), \
         mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir), \
         mock.patch.object(CommonUtility, 'get_distinct_filename_tag', return_value=distinct_tag), \
-        mock.patch("superkernel.super_kernel_op_infos.get_op_debug_config", return_value="dump_cce"):
+        mock.patch("superkernel.super_kernel_op_infos.get_current_build_config", return_value="dump_cce"):
             super_operator = SuperOperatorInfos(kernel_info, "test_creat_compile_log")
             super_operator.creat_compile_log()
             goden_path = os.path.join(tmp_dir, super_operator.kernel_name + distinct_tag + '.log') 
@@ -651,32 +651,32 @@ recv_info: {'op1': 'cub:vec'}\
                 
                 
     @staticmethod
-    def test_get_finale_type_and_block_dim():
+    def test_get_finale_type_and_block_num():
         with mock.patch("json.load", return_value=sub_op_add_json):
-            super_operator = SuperOperatorInfos(kernel_info, "test_get_finale_type_and_block_dim")
+            super_operator = SuperOperatorInfos(kernel_info, "test_get_finale_type_and_block_num")
             
-            super_operator.get_finale_type_and_block_dim(0b1, 10, 20)
-            assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
-            assert super_operator.block_dim == 20
+            super_operator.get_finale_type_and_block_num(0b1, 10, 20)
+            assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0
+            assert super_operator.block_num == 20
             
-            super_operator.get_finale_type_and_block_dim(0b10, 10, 20)
-            assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
-            assert super_operator.block_dim == 10
+            super_operator.get_finale_type_and_block_num(0b10, 10, 20)
+            assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
+            assert super_operator.block_num == 10
 
-            super_operator.get_finale_type_and_block_dim(0b100, 10, 20)
-            assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
-            assert super_operator.block_dim == 20
+            super_operator.get_finale_type_and_block_num(0b100, 10, 20)
+            assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0
+            assert super_operator.block_num == 20
             
-            super_operator.get_finale_type_and_block_dim(0b1000, 10, 20)
-            assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
-            assert super_operator.block_dim == 10
+            super_operator.get_finale_type_and_block_num(0b1000, 10, 20)
+            assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
+            assert super_operator.block_num == 10
 
-            super_operator.get_finale_type_and_block_dim(0b10000, 10, 20)
-            assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
-            assert super_operator.block_dim == 10
+            super_operator.get_finale_type_and_block_num(0b10000, 10, 20)
+            assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
+            assert super_operator.block_num == 10
 
-            super_operator.get_finale_type_and_block_dim(0b100000, 10, 20)
-            assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+            super_operator.get_finale_type_and_block_num(0b100000, 10, 20)
+            assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
                 
     @staticmethod
     def test_get_summary_type_and_options(tmp_dir):
@@ -684,7 +684,7 @@ recv_info: {'op1': 'cub:vec'}\
             with mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir):
                 super_operator = SuperOperatorInfos(kernel_info, "test_get_summary_type_and_options")
                 op1 = SubOperatorInfos(0, info_dict, 0, {})
-                op1.block_dim = 10
+                op1.block_num = 10
                 op1.timestamp_option = True
                 op1.debug_size = 2
                 super_operator.debug_size = 1
@@ -692,35 +692,35 @@ recv_info: {'op1': 'cub:vec'}\
                 super_operator.debug_option = "debug_option1,debug_option3"
                 super_operator.info_base = [op1]
 
-                op1.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+                op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
                 super_operator.get_summary_type_and_options()
-                assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
+                assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0
                 assert super_operator.debug_option == "debug_option1,debug_option3,debug_option2"
 
-                op1.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+                op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
                 super_operator.get_summary_type_and_options()
-                assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+                assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
                 assert super_operator.debug_option == "debug_option1,debug_option3,debug_option2"
 
-                op1.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
+                op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0
                 super_operator.get_summary_type_and_options()
-                assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
+                assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0
                 assert super_operator.debug_option == "debug_option1,debug_option3,debug_option2"
 
-                op1.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+                op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
                 super_operator.get_summary_type_and_options()
-                assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+                assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
                 assert super_operator.debug_option == "debug_option1,debug_option3,debug_option2"
 
-                op1.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+                op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
                 super_operator.get_summary_type_and_options()
-                assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+                assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
                 assert super_operator.debug_option == "debug_option1,debug_option3,debug_option2"
 
-                op1.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+                op1.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
                 super_operator.debug_option = ""
                 super_operator.get_summary_type_and_options()
-                assert super_operator.kernel_type == KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+                assert super_operator.kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
                 assert super_operator.debug_option == "debug_option1,debug_option2"
 
     @staticmethod
@@ -802,19 +802,19 @@ recv_info: {'op1': 'cub:vec'}\
     def test_calc_workspace_size():
         with mock.patch("json.load", return_value=sub_op_add_json):
             super_operator = SuperOperatorInfos(kernel_info, "test_calc_workspace_size")
-            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             op1 = SubOperatorInfos(0, info_dict, 0, {})
             op2 = SubOperatorInfos(0, info_dict, 0, {})
             op3 = SubOperatorInfos(0, info_dict, 0, {})
             op4 = SubOperatorInfos(0, info_dict, 0, {})
             super_operator.info_base = [op1, op2, op3, op4]
-            super_operator.block_dim = 1
+            super_operator.block_num = 1
             super_operator.feed_sync_all_mode = SuperKernelFeedSyncAllMode.FeedSyncAllEnable
 
             super_operator.calc_workspace_size()
             assert super_operator.workspace_size == 1024
 
-            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+            super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
             super_operator.calc_workspace_size()
             assert super_operator.workspace_size == 1024
             
@@ -880,7 +880,7 @@ recv_info: {'op1': 'cub:vec'}\
             tmp_dir_str = str(tmp_dir)
             sub_operator.dynamic_bin = os.path.join(tmp_dir_str, "original.o")
             with mock.patch('os.environ.get', return_value=None), \
-            mock.patch("superkernel.super_kernel_op_infos.get_op_debug_config", \
+            mock.patch("superkernel.super_kernel_op_infos.get_current_build_config", \
             return_value="dump_cce"):
                 super_operator.gen_compile_info()
                 assert sub_operator.dynamic_bin \

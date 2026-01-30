@@ -9,7 +9,7 @@
   "memoryStamping": [],
   "opParaSize": 8,
   "parameters": [],
-  "sha256": "be7ce90aea9585a60d52cff9908beee57f0b4aea2c59c9859e35ffbf2e4423ea",
+  "sha256": "81ea40ecaa0d93aaa8831db530d3a3806d74ac8175e7f0a96eb9ae02d3f64788",
   "taskRation": "1:0",
   "optionalInputMode": "gen_placeholder",
   "optionalOutputMode": "gen_placeholder",
@@ -18,7 +18,7 @@
   "debugBufSize": 78643200,
   "SuperkernelInfo": {
     "kernelList": {
-      "dav-c220-cube": [
+      "aicore": [
         {
           "func_name": "is_inf__kernel0",
           "split_mode": 4,

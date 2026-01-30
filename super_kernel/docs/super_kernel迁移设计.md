@@ -85,7 +85,7 @@
 | ascendc_compile_base.gen_super_kernel_link_obj_sequence | 获取所有子kernel的二进制 |super_kernel_compile.py |
 | ascendc_compile_base.localization_sub_op_func_sym | 拆分子kernel二进制后，修改子kernel global符号为local |super_kernel_compile.py |
 | ascendc_compile_base.localize_symbol_of_sk | 修改SuperKernel的global符号为local |super_kernel_compile.py |
-| compile_op.super_kernel_compile | SuperKernel编译入口 |super_kernel_compile.py |
+| compile_op.compile_super_kernel | SuperKernel编译入口 |super_kernel_compile.py |
 
 如下接口，ascendc_sub_super_kernel.py、ascendc_super_kernel.py、ascendc_super_operator_infos.py文件有使用，需在super_kernel_utils.py新增接口封装，避免ascendc开源整改引入问题，影响SuperKernel功能：
 

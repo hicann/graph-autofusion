@@ -218,6 +218,7 @@ def superkernel_compare():
     config = CompilerConfig()
     npu_backend = tng.get_npu_backend(compiler_config=config)
 
+    #在npu上执行有superkernel配置的模型
     no_sk_model = Network(False).npu()
     sk_model = Network(True).npu()
     

@@ -134,9 +134,9 @@ extern "C"  __aicore__ void is_inf__kernel0_middle_split3(uint64_t args_offset);
 
 
 // begin implement of dynamic op is_inf__kernel0
-static __aicore__ void switch_func_of_is_inf__kernel0(GM_ADDR __ac_dynamic_tiling_key_0, GM_ADDR __ac_dynamic_block_dim_0, GM_ADDR __ac_wait_lock_0, uint64_t& aiv_func_addr, uint64_t& aiv_func_addr_split1, uint64_t& aiv_func_addr_split2, uint64_t& aiv_func_addr_split3, uint64_t& aic_func_addr, uint64_t& aic_func_addr_split1, uint64_t& aic_func_addr_split2, uint64_t& aic_func_addr_split3, uint64_t& dy_block_dim) {
+static __aicore__ void switch_func_of_is_inf__kernel0(GM_ADDR __ac_dynamic_tiling_key_0, GM_ADDR __ac_dynamic_block_num_0, GM_ADDR __ac_wait_lock_0, uint64_t& aiv_func_addr, uint64_t& aiv_func_addr_split1, uint64_t& aiv_func_addr_split2, uint64_t& aiv_func_addr_split3, uint64_t& aic_func_addr, uint64_t& aic_func_addr_split1, uint64_t& aic_func_addr_split2, uint64_t& aic_func_addr_split3, uint64_t& dy_block_num) {
     __gm__ uint64_t* tilingKeyAddr = reinterpret_cast<__gm__ uint64_t*>(__ac_dynamic_tiling_key_0);
-    __gm__ uint64_t* blockDimAddr = reinterpret_cast<__gm__ uint64_t*>(__ac_dynamic_block_dim_0);
+    __gm__ uint64_t* blockNumAddr = reinterpret_cast<__gm__ uint64_t*>(__ac_dynamic_block_num_0);
     __gm__ volatile uint64_t* lockAddr = reinterpret_cast<__gm__ uint64_t*>(__ac_wait_lock_0);
     dcci(lockAddr, 0, 2);
     while(*lockAddr != 1) {
@@ -149,16 +149,16 @@ static __aicore__ void switch_func_of_is_inf__kernel0(GM_ADDR __ac_dynamic_tilin
         aic_func_addr_split1 = (uint64_t)(is_inf__kernel0_middle_split1);
         aic_func_addr_split2 = (uint64_t)(is_inf__kernel0_middle_split2);
         aic_func_addr_split3 = (uint64_t)(is_inf__kernel0_middle_split3);
-    dy_block_dim = ((uint64_t)1) << 32 | (*blockDimAddr);
+    dy_block_num = ((uint64_t)1) << 32 | (*blockNumAddr);
 
 }
     return;
 }
 
-__aicore__ inline void call_func_of_is_inf__kernel0(uint64_t args_offset, const uint64_t dy_aiv_func_ptr, const uint64_t dy_aiv_func_ptr_split1, const uint64_t dy_aiv_func_ptr_split2, const uint64_t dy_aiv_func_ptr_split3, const uint64_t dy_aic_func_ptr, const uint64_t dy_aic_func_ptr_split1, const uint64_t dy_aic_func_ptr_split2, const uint64_t dy_aic_func_ptr_split3, const uint64_t dy_block_dim) {
-    uint64_t kernelType = dy_block_dim  >> 32;
-    uint64_t blockDim = 32;
-    g_super_kernel_dynamic_block_num = dy_block_dim & 0xFFFFFFFF;
+__aicore__ inline void call_func_of_is_inf__kernel0(uint64_t args_offset, const uint64_t dy_aiv_func_ptr, const uint64_t dy_aiv_func_ptr_split1, const uint64_t dy_aiv_func_ptr_split2, const uint64_t dy_aiv_func_ptr_split3, const uint64_t dy_aic_func_ptr, const uint64_t dy_aic_func_ptr_split1, const uint64_t dy_aic_func_ptr_split2, const uint64_t dy_aic_func_ptr_split3, const uint64_t dy_block_num) {
+    uint64_t kernelType = dy_block_num  >> 32;
+    uint64_t numBlocks = 32;
+    g_super_kernel_dynamic_block_num = dy_block_num & 0xFFFFFFFF;
     using FuncType = void (*)(uint64_t args_offset);
     
     FuncType aiv_ptr = (FuncType)(dy_aiv_func_ptr);
@@ -174,7 +174,7 @@ __aicore__ inline void call_func_of_is_inf__kernel0(uint64_t args_offset, const 
     FuncType aic_ptr_split3 = (FuncType)(dy_aic_func_ptr_split3);
     
     if (kernelType == 6 || kernelType == 7) {
-        if (get_block_idx() < blockDim) {
+        if (get_block_idx() < numBlocks) {
             uint8_t coreid = get_coreid();
             if ASCEND_IS_AIC {
                 if ((coreid % 4) == 0) {
@@ -205,7 +205,7 @@ __aicore__ inline void call_func_of_is_inf__kernel0(uint64_t args_offset, const 
             }
         }
     } else if(kernelType == 0 || kernelType == 4) {
-        if (AscendC::GetBlockIdx() < blockDim) {
+        if (AscendC::GetBlockIdx() < numBlocks) {
             uint8_t coreid = get_coreid();
             if ASCEND_IS_AIV{
                 if ((coreid % 4) == 0) {
@@ -223,7 +223,7 @@ __aicore__ inline void call_func_of_is_inf__kernel0(uint64_t args_offset, const 
             }
         }
     } else if (kernelType == 1 || kernelType == 5) {
-        if (get_block_idx() < blockDim) {
+        if (get_block_idx() < numBlocks) {
             uint8_t coreid = get_coreid();
             if ASCEND_IS_AIC {
                 if ((coreid % 4) == 0) {
@@ -268,7 +268,7 @@ extern "C"  __global__ __attribute__((aligned(512))) __aicore__ void auto_gen_te
 
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
-    uint64_t dy_blockDim = 0;
+    uint64_t dy_blockNum = 0;
     uint64_t aiv_func_addr_split1 = 0;
     uint64_t aic_func_addr_split1 = 0;
     uint64_t aiv_func_addr_split2 = 0;
@@ -278,7 +278,7 @@ extern "C"  __global__ __attribute__((aligned(512))) __aicore__ void auto_gen_te
     RecordProfiling(0, 0, true);
     //begin func call of sub operator is_inf__kernel0
 
-    switch_func_of_is_inf__kernel0(param_base[4], param_base[5], param_base[6], aiv_func_addr, aiv_func_addr_split1, aiv_func_addr_split2, aiv_func_addr_split3, aic_func_addr, aic_func_addr_split1, aic_func_addr_split2, aic_func_addr_split3, dy_blockDim);
+    switch_func_of_is_inf__kernel0(param_base[4], param_base[5], param_base[6], aiv_func_addr, aiv_func_addr_split1, aiv_func_addr_split2, aiv_func_addr_split3, aic_func_addr, aic_func_addr_split1, aic_func_addr_split2, aic_func_addr_split3, dy_blockNum);
 
     pipe_barrier(PIPE_ALL);
     AscendC::SyncAll<false>(); // reason3: dynamic gen_switch_case_block when no pre op
@@ -300,7 +300,7 @@ extern "C"  __global__ __attribute__((aligned(512))) __aicore__ void auto_gen_te
     }
 
     RecordProfiling(1, 0x8, true);
-    call_func_of_is_inf__kernel0(1, aiv_func_addr, aiv_func_addr_split1, aiv_func_addr_split2, aiv_func_addr_split3, aic_func_addr, aic_func_addr_split1, aic_func_addr_split2, aic_func_addr_split3, dy_blockDim);
+    call_func_of_is_inf__kernel0(1, aiv_func_addr, aiv_func_addr_split1, aiv_func_addr_split2, aiv_func_addr_split3, aic_func_addr, aic_func_addr_split1, aic_func_addr_split2, aic_func_addr_split3, dy_blockNum);
     if ASCEND_IS_AIC {
 
         if (AscendC::GetBlockIdx() == 0) {

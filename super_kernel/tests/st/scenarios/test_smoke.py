@@ -21,6 +21,7 @@ from asc_op_compile_base.common.ccec import current_build_config
 from asc_op_compile_base.common.buildcfg.buildcfg_mapping \
     import kernel_meta_parent_dir, op_debug_config, tbe_debug_level
 from asc_op_compile_base.common.context.op_context import OpContext
+from superkernel.super_kernel_feature_manager import *
 
 
 @pytest.mark.parametrize(
@@ -471,6 +472,8 @@ def test_sk_1_stream_3_ops(
         golden_codegen_path,
         golden_options,
 ):
+    tmp = get_features()
+    assert tmp == {}
     kernel_meta_dir = tmp_dir / golden_codegen_path
     json_meta_dir = json_dir / golden_codegen_path
     global_var_storage.set_variable("ascendc_compile_debug_config", True)

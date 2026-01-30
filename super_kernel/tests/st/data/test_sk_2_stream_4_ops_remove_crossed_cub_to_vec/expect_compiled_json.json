@@ -9,14 +9,14 @@
   "memoryStamping": [],
   "opParaSize": 8,
   "parameters": [],
-  "sha256": "384a663d7fe2634754bf896e955a24573f52a59d1bf6bbb985b430229cddf283",
+  "sha256": "f2747233b3bb330464ee192846ccb5bbc2d31191673ec60c525787aa1dea8cf9",
   "taskRation": "1:1",
   "optionalInputMode": "gen_placeholder",
   "optionalOutputMode": "gen_placeholder",
   "supportSuperKernel": 1,
   "SuperkernelInfo": {
     "kernelList": {
-      "dav-c220-cube": [
+      "aicore": [
         {
           "func_name": "is_inf__kernel0",
           "split_mode": 4,
@@ -38,28 +38,6 @@
           }
         },
         {
-          "func_name": "is_inf__kernel0",
-          "split_mode": 4,
-          "blockDim": 32,
-          "sub_operator_kernel_type": "KERNEL_TYPE_AIC_ONLY",
-          "sub_operator_early_start_set_flag": false,
-          "sub_operator_early_start_wait_flag": false,
-          "sub_operator_call_dcci_before_kernel_start": false,
-          "sub_operator_call_dcci_after_kernel_end": false,
-          "streamid": 0,
-          "send_event_list": [
-            101
-          ],
-          "recv_event_list": [],
-          "arg_list": {
-            "param_offset": 10,
-            "notify_param_offset": 13,
-            "wait_param_offset": null
-          }
-        }
-      ],
-      "dav-c220-vec": [
-        {
           "func_name": "pows__kernel0",
           "split_mode": 4,
           "blockDim": 1,
@@ -77,6 +55,26 @@
             "param_offset": 5,
             "notify_param_offset": null,
             "wait_param_offset": 9
+          }
+        },
+        {
+          "func_name": "is_inf__kernel0",
+          "split_mode": 4,
+          "blockDim": 32,
+          "sub_operator_kernel_type": "KERNEL_TYPE_AIC_ONLY",
+          "sub_operator_early_start_set_flag": false,
+          "sub_operator_early_start_wait_flag": false,
+          "sub_operator_call_dcci_before_kernel_start": false,
+          "sub_operator_call_dcci_after_kernel_end": false,
+          "streamid": 0,
+          "send_event_list": [
+            101
+          ],
+          "recv_event_list": [],
+          "arg_list": {
+            "param_offset": 10,
+            "notify_param_offset": 13,
+            "wait_param_offset": null
           }
         },
         {

@@ -9,52 +9,14 @@
   "memoryStamping": [],
   "opParaSize": 8,
   "parameters": [],
-  "sha256": "4e46556dc17dde52841b678e11dc66ea01a472c934fdfcf6b41858abce66656b",
+  "sha256": "f8decbd7b1e07af4f84fc91220ed002cb0e1e8a5f109e8341c4bff305d467515",
   "taskRation": "1:1",
   "optionalInputMode": "gen_placeholder",
   "optionalOutputMode": "gen_placeholder",
   "supportSuperKernel": 1,
   "SuperkernelInfo": {
     "kernelList": {
-      "dav-c220-vec": [
-        {
-          "func_name": "is_inf__kernel0",
-          "split_mode": 4,
-          "blockDim": 32,
-          "sub_operator_kernel_type": "KERNEL_TYPE_MIX_AIC_1_1",
-          "sub_operator_early_start_set_flag": false,
-          "sub_operator_early_start_wait_flag": false,
-          "sub_operator_call_dcci_before_kernel_start": false,
-          "sub_operator_call_dcci_after_kernel_end": false,
-          "streamid": 0,
-          "send_event_list": [],
-          "recv_event_list": [],
-          "arg_list": {
-            "param_offset": 1,
-            "notify_param_offset": null,
-            "wait_param_offset": null
-          }
-        },
-        {
-          "func_name": "pows__kernel0",
-          "split_mode": 4,
-          "blockDim": 1,
-          "sub_operator_kernel_type": "KERNEL_TYPE_MIX_AIC_1_1",
-          "sub_operator_early_start_set_flag": false,
-          "sub_operator_early_start_wait_flag": false,
-          "sub_operator_call_dcci_before_kernel_start": false,
-          "sub_operator_call_dcci_after_kernel_end": false,
-          "streamid": 1,
-          "send_event_list": [],
-          "recv_event_list": [],
-          "arg_list": {
-            "param_offset": 4,
-            "notify_param_offset": null,
-            "wait_param_offset": null
-          }
-        }
-      ],
-      "dav-c220-cube": [
+      "aicore": [
         {
           "func_name": "is_inf__kernel0",
           "split_mode": 4,

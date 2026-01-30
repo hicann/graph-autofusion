@@ -24,7 +24,8 @@ from utils import SkCompileContext
 from asc_op_compile_base.common.context.op_context import OpContext
 from asc_op_compile_base.common.context import op_info
 from asc_op_compile_base.common.context import get_context
-from asc_op_compile_base.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, op_debug_config, tbe_debug_level
+from asc_op_compile_base.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, \
+    op_debug_config, tbe_debug_level
 from asc_op_compile_base.common.buildcfg.buildcfg import build_config
 from asc_op_compile_base.common.ccec import current_build_config
 from asc_op_compile_base.common.platform.platform_info import set_current_compile_soc_info

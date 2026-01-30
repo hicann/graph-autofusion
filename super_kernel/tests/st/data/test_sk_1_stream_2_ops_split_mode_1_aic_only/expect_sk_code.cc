@@ -1,7 +1,7 @@
 
 #if 1
 #include "kernel_operator.h"
-#if defined(__DAV_C220_CUBE__)
+#if (defined(__DAV_CUBE__) && __NPU_ARCH__ == 2201)
     __gm__ struct OpSystemRunCfg g_opSystemRunCfg = {0};
 #else
     extern __gm__ struct OpSystemRunCfg g_opSystemRunCfg;

@@ -18,15 +18,15 @@ import sys
 from unittest import mock
 import pytest
 from utils import compare_files
+from asc_op_compile_base.asc_op_compiler.super_kernel_utility import CommonUtility
 from superkernel.super_kernel import *
 from superkernel.super_kernel import compile as sk_compile
-from asc_op_compile_base.asc_op_compiler.super_kernel_utility import KernelMetaType, \
-    CommonUtility
-from asc_op_compile_base.asc_op_compiler.super_kernel_constants import SuperKernelPreLoadMode, \
+from superkernel.super_kernel_constants import SuperKernelPreLoadMode, \
     SuperKernelDataCacheMode, SuperKernelEarlyStartMode, SubOperatorType, SuperKernelDebugDcciAllMode, \
-    SuperKernelDebugSyncAllMode, SuperKernelFeedSyncAllMode, SuperKernelProfilingMode
+    SuperKernelDebugSyncAllMode, SuperKernelFeedSyncAllMode, SuperKernelProfilingMode, SuperKernelKernelType
 from superkernel.super_kernel_sub_op_infos import SubOperatorInfos
 from superkernel.super_kernel_op_infos import SuperOperatorInfos
+from superkernel.super_kernel_feature_manager import *
 
 
 THIS_FILE_NAME = __file__
@@ -97,7 +97,12 @@ class TestSuperKernel:
     @staticmethod
     def teardown_method():
         logging.info("--------------TearDown-------------")
-          
+
+    @staticmethod 
+    def test_feature_manager(): 
+        tmp = get_features()
+        assert tmp == {}
+           
     @staticmethod
     def test_super_kernel_sub_op_add_compile(tmp_dir):
         with mock.patch("builtins.open", new_callable=mock.mock_open, read_data="{}"), \
@@ -105,7 +110,7 @@ class TestSuperKernel:
         mock.patch("subprocess.run"), \
         mock.patch.object(CommonUtility, 'is_support_super_kernel', return_value=True), \
         mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir), \
-        mock.patch("superkernel.super_kernel.super_kernel_compile"):
+        mock.patch("superkernel.super_kernel.compile_super_kernel"):
             kernel_info_compile1 = {
                 "op_list": [
                     {
@@ -128,7 +133,7 @@ class TestSuperKernel:
         mock.patch("subprocess.run"), \
         mock.patch.object(CommonUtility, 'is_support_super_kernel', return_value=True), \
         mock.patch.object(CommonUtility, 'get_kernel_meta_dir', return_value=tmp_dir), \
-        mock.patch("superkernel.super_kernel.super_kernel_compile"):
+        mock.patch("superkernel.super_kernel.compile_super_kernel"):
             kernel_info_compile1 = {
                 "op_list": [
                     {
@@ -157,23 +162,23 @@ class TestSuperKernel:
         with mock.patch("json.load", return_value=sub_op_add_json):
             pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
-            pre_sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            pre_sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 5;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 5;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 4;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 4;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 6;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 6;\n"
 
     @staticmethod
@@ -182,23 +187,23 @@ class TestSuperKernel:
         with mock.patch("json.load", return_value=sub_op_add_json):
             pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
-            pre_sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            pre_sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 1;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 1;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 0;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 0;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 2;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 2;\n"
 
     @staticmethod
@@ -206,23 +211,23 @@ class TestSuperKernel:
         with mock.patch("json.load", return_value=sub_op_add_json):
             pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
-            pre_sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            pre_sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 9;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 9;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 8;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 8;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 10;\n"
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
             assert gen_early_start_config(pre_sub_operator, sub_operator) == "g_super_kernel_early_start_config = 10;\n"
 
     @staticmethod
@@ -231,12 +236,12 @@ class TestSuperKernel:
             pre_sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
 
-            pre_sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MAX
+            pre_sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MAX
             with pytest.raises(Exception):
                 gen_early_start_config(pre_sub_operator, sub_operator)
 
-            pre_sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MAX
+            pre_sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MAX
             with pytest.raises(Exception):
                 gen_early_start_config(pre_sub_operator, sub_operator)
 
@@ -289,31 +294,31 @@ __aicore__ inline void WaitFunc(GM_ADDR wait_lock_addr)
 
     @staticmethod
     def test_get_sync_code_by_kernel_type():
-        code_gen = get_sync_code_by_kernel_type(KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1)
+        code_gen = get_sync_code_by_kernel_type(SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1)
         gloden_code = "AscendC::SyncAll<false>();\n\n"
         assert code_gen == gloden_code
 
-        code_gen = get_sync_code_by_kernel_type(KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2)
+        code_gen = get_sync_code_by_kernel_type(SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2)
         assert code_gen == gloden_code
 
-        code_gen = get_sync_code_by_kernel_type(KernelMetaType.KERNEL_TYPE_AIC_ONLY)
+        code_gen = get_sync_code_by_kernel_type(SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY)
         gloden_code = """
 ffts_cross_core_sync(PIPE_FIX, AscendC::GetffstMsg(0x0, AscendC::SYNC_AIC_FLAG));
 wait_flag_dev(AscendC::SYNC_AIC_FLAG);
 """
         assert code_gen == gloden_code
 
-        code_gen = get_sync_code_by_kernel_type(KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0)
+        code_gen = get_sync_code_by_kernel_type(SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0)
         assert code_gen == gloden_code
 
-        code_gen = get_sync_code_by_kernel_type(KernelMetaType.KERNEL_TYPE_AIV_ONLY)
+        code_gen = get_sync_code_by_kernel_type(SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY)
         gloden_code = """
 ffts_cross_core_sync(PIPE_MTE3, AscendC::GetffstMsg(0x0, AscendC::SYNC_AIV_ONLY_ALL));
 wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
 """
         assert code_gen == gloden_code
 
-        code_gen = get_sync_code_by_kernel_type(KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0)
+        code_gen = get_sync_code_by_kernel_type(SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0)
         assert code_gen == gloden_code
 
     @staticmethod
@@ -333,8 +338,8 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
             assert "pre_sub_op_key" in code_gen
 
             super_operator.early_start_mode = SuperKernelEarlyStartMode.EarlyStartEnableV2
-            pre_sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            pre_sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             code_gen = gen_inter_ops_barrier(super_operator, pre_sub_operator, sub_operator)
             assert "pre_sub_op_key" in code_gen
             assert "g_super_kernel_early_start_config = 5" in code_gen
@@ -353,7 +358,7 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
     @staticmethod
     def test_gen_op_end_debug_sync_all():
         super_operator = SuperOperatorInfos(kernel_info, "test_gen_op_end_debug_sync_all")
-        super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+        super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
         super_operator.debug_sync_all_mode = SuperKernelDebugSyncAllMode.DebugSyncAllEnable
         code_gen = gen_op_end_debug_sync_all(super_operator)
         assert "AscendC::SyncAll<false>();" in code_gen
@@ -397,12 +402,12 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
             sub_operator = SubOperatorInfos(0, info_dict, 0, {})
             super_operator = SuperOperatorInfos(kernel_info, "test_tpl_of_gen_switch_case_call")
 
-            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             sub_operator.call_dynamic_switch_func = "call_dynamic_switch_func_mock"
             code_gen = tpl_of_gen_switch_case_call(sub_operator.start_block_idx, sub_operator, super_operator)
             assert "\n    call_dynamic_switch_func_mock\n" == code_gen
 
-            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             code_gen = tpl_of_gen_switch_case_call(sub_operator.start_block_idx, sub_operator, super_operator)
             goden_code = """
     call_dynamic_switch_func_mock
@@ -454,8 +459,8 @@ wait_flag_dev(AscendC::SYNC_AIV_ONLY_ALL);
                                         SubOperatorInfos(0, info_dict, 0, {})]
             for op in super_operator.info_base:
                 op.recv_event_list = info_dict.get('recv_event_list', [100, 101])
-            super_operator.info_base[0].kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
-            super_operator.info_base[1].kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            super_operator.info_base[0].kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
+            super_operator.info_base[1].kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             code_gen = gen_clear_wait_sync_addr_code(super_operator)
             
             goden_code = """\
@@ -659,7 +664,7 @@ wait_flag_dev(AscendC::SYNC_AIC_AIV_FLAG);
 
             arch = 'aic'
             pre_sub_operator.notify_block = {"aic": "notify_code", "aiv": "notify_code"}
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
             code_gen = gen_sync_and_event_code_for_two_stream(super_operator, pre_sub_operator, sub_operator, arch)
             goden_code = """\
     notify_code    wait_code// two stream when has wait event, add sync by current operator kernel type
@@ -667,7 +672,7 @@ wait_flag_dev(AscendC::SYNC_AIC_AIV_FLAG);
 """
             assert goden_code == code_gen
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIC_ONLY
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIC_ONLY
             code_gen = gen_sync_and_event_code_for_two_stream(super_operator, pre_sub_operator, sub_operator, arch)
             goden_code = """\
     notify_code    wait_code// two stream when has wait event, add sync by current operator kernel type
@@ -677,7 +682,7 @@ wait_flag_dev(AscendC::SYNC_AIC_FLAG);\n
 """
             assert goden_code == code_gen
 
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_AIV_ONLY
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY
             code_gen = gen_sync_and_event_code_for_two_stream(super_operator, pre_sub_operator, sub_operator, arch)
             goden_code = """\
     notify_code    wait_code// two stream when has wait event, add sync by current operator kernel type
@@ -717,7 +722,7 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_dynamic_kern
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
-    uint64_t dy_blockDim = 0;
+    uint64_t dy_blockNum = 0;
     uint64_t aiv_func_addr_split1 = 0;
     uint64_t aic_func_addr_split1 = 0;
     uint64_t aiv_func_addr_split2 = 0;
@@ -758,7 +763,7 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_preload_mode
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
-    uint64_t dy_blockDim = 0;
+    uint64_t dy_blockNum = 0;
     uint64_t aiv_func_addr_split1 = 0;
     uint64_t aic_func_addr_split1 = 0;
     uint64_t aiv_func_addr_split2 = 0;
@@ -801,7 +806,7 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_preload_mode
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
-    uint64_t dy_blockDim = 0;
+    uint64_t dy_blockNum = 0;
     uint64_t aiv_func_addr_split1 = 0;
     uint64_t aic_func_addr_split1 = 0;
     uint64_t aiv_func_addr_split2 = 0;
@@ -844,7 +849,7 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_preload_by_a
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
-    uint64_t dy_blockDim = 0;
+    uint64_t dy_blockNum = 0;
     uint64_t aiv_func_addr_split1 = 0;
     uint64_t aic_func_addr_split1 = 0;
     uint64_t aiv_func_addr_split2 = 0;
@@ -890,7 +895,7 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_sub_data_cac
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
-    uint64_t dy_blockDim = 0;
+    uint64_t dy_blockNum = 0;
     uint64_t aiv_func_addr_split1 = 0;
     uint64_t aic_func_addr_split1 = 0;
     uint64_t aiv_func_addr_split2 = 0;
@@ -939,7 +944,7 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_next_sub_dat
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
-    uint64_t dy_blockDim = 0;
+    uint64_t dy_blockNum = 0;
     uint64_t aiv_func_addr_split1 = 0;
     uint64_t aic_func_addr_split1 = 0;
     uint64_t aiv_func_addr_split2 = 0;
@@ -990,7 +995,7 @@ __aicore__ inline void auto_gen_test_gen_2_real_stream_code_by_arch_notify_block
     GM_ADDR *param_base = (GM_ADDR *)get_para_base();
     uint64_t aiv_func_addr = 0;
     uint64_t aic_func_addr = 0;
-    uint64_t dy_blockDim = 0;
+    uint64_t dy_blockNum = 0;
     uint64_t aiv_func_addr_split1 = 0;
     uint64_t aic_func_addr_split1 = 0;
     uint64_t aiv_func_addr_split2 = 0;
@@ -1048,7 +1053,7 @@ __BLOCK_LOCAL__ __inline__ bool g_profiling_off;
             super_operator.vec_op_list = []
             super_operator.timestamp_option = True
             super_operator.feed_sync_all_mode = SuperKernelFeedSyncAllMode.FeedSyncAllEnable
-            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
             super_operator.profiling_mode = SuperKernelProfilingMode.ProfilingEnable
             gen_2_real_stream_super_kernel_file(super_operator)
             assert os.path.exists(super_operator.kernel_file)
@@ -1074,25 +1079,25 @@ __BLOCK_LOCAL__ __inline__ bool g_profiling_off;
             assert judge_need_feed_sync_all(super_operator, sub_op) == False
 
             sub_op.with_sync_all = True
-            super_operator.block_dim = 20
-            sub_op.block_dim = 20
-            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
-            sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+            super_operator.block_num = 20
+            sub_op.block_num = 20
+            super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
+            sub_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
             assert judge_need_feed_sync_all(super_operator, sub_op) == False
 
-            sub_op.block_dim = 10
-            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+            sub_op.block_num = 10
+            super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
             assert judge_need_feed_sync_all(super_operator, sub_op) == True
 
-            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
-            sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+            super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
+            sub_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
             assert judge_need_feed_sync_all(super_operator, sub_op) == True
 
-            sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
+            sub_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0
             assert judge_need_feed_sync_all(super_operator, sub_op) == True
 
-            super_operator.block_dim = 10
-            sub_op.block_dim = 20
+            super_operator.block_num = 10
+            sub_op.block_num = 20
             assert judge_need_feed_sync_all(super_operator, sub_op) == False
 
     @staticmethod
@@ -1114,9 +1119,9 @@ __BLOCK_LOCAL__ __inline__ bool g_profiling_off;
             assert sync_flag == False
 
             sub_op.with_sync_all = True
-            super_operator.block_dim = 36
-            sub_op.block_dim = 18
-            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+            super_operator.block_num = 36
+            sub_op.block_num = 18
+            super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
             code_gen, sync_flag = gen_feed_syncall_var_init_code(super_operator, sub_op)
             goden_code = """\
 \nAscendC::g_superKernelAutoSyncAllSyncIdx = 0;
@@ -1142,7 +1147,7 @@ if ASCEND_IS_AIV {
                 assert code_gen == ""
 
                 super_operator.feed_sync_all_mode = SuperKernelFeedSyncAllMode.FeedSyncAllEnable
-                super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_0
+                super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_0
                 super_operator.workspace_size = 1024
                 code_gen = gen_clear_syncall_worskspace(super_operator)
                 goden_code = """\
@@ -1171,7 +1176,7 @@ if ASCEND_IS_AIV {
                 super_operator = SuperOperatorInfos(kernel_info, "test_gen_clear_syncall_worskspace_aiv_1_0")
                 super_operator.workspace_size = 1024
                 super_operator.feed_sync_all_mode = SuperKernelFeedSyncAllMode.FeedSyncAllEnable
-                super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIV_1_0
+                super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0
                 code_gen = gen_clear_syncall_worskspace(super_operator)
                 goden_code = """\
 \nif ASCEND_IS_AIV {
@@ -1199,7 +1204,7 @@ if ASCEND_IS_AIV {
                 super_operator = SuperOperatorInfos(kernel_info, "test_gen_clear_syncall_worskspace_aic_1_2")
                 super_operator.workspace_size = 1024
                 super_operator.feed_sync_all_mode = SuperKernelFeedSyncAllMode.FeedSyncAllEnable
-                super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_2
+                super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_2
                 code_gen = gen_clear_syncall_worskspace(super_operator)
                 goden_code = """\
 \nif ASCEND_IS_AIV {
@@ -1236,9 +1241,9 @@ if ASCEND_IS_AIC {
             pre_sub_operator.send_event_list = [100]
             pre_sub_operator.notify_block = "pre_sub_operator.notify_block"
             sub_operator.wait_block = "sub_operator.wait_block"
-            super_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
-            pre_sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
-            sub_operator.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+            super_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
+            pre_sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
+            sub_operator.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
 
             code_gen = gen_sync_and_event_code(super_operator, pre_sub_operator, sub_operator)
             goden_code = """\
@@ -1288,7 +1293,7 @@ if ASCEND_IS_AIC {
                                         SubOperatorInfos(0, info_dict, 0, {}), \
                                         SubOperatorInfos(0, info_dict, 0, {})]
             for sub_op in super_operator.info_base:
-                sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+                sub_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
                 sub_op.recv_event_list = [100]
                 sub_op.send_event_list = [100]
                 sub_op.wait_block = "sub_op.wait_block"
@@ -1333,7 +1338,7 @@ if ASCEND_IS_AIC {
                                         SubOperatorInfos(0, info_dict, 0, {}), \
                                         SubOperatorInfos(0, info_dict, 0, {})]
             for sub_op in super_operator.info_base:
-                sub_op.kernel_type = KernelMetaType.KERNEL_TYPE_MIX_AIC_1_1
+                sub_op.kernel_type = SuperKernelKernelType.KERNEL_TYPE_MIX_AIC_1_1
                 sub_op.recv_event_list = [100]
                 sub_op.send_event_list = [100]
                 sub_op.wait_block = "sub_op.wait_block"

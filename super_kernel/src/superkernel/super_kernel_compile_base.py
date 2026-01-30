@@ -12,6 +12,57 @@
 """
 super kernel compile base
 """
+from asc_op_compile_base.asc_op_compiler.super_kernel_utility import CommonUtility
+
+from .super_kernel_constants import ERR_CODE, SuperKernelKernelType
+
+
+def check_func_align(s):
+    try:
+        num = int(s)
+    except Exception as err:
+        CommonUtility().ascendc_raise_python_err(ERR_CODE, \
+            "Invalid func-align option, reason is: ", err)
+    if num < 0:
+        CommonUtility().ascendc_raise_python_err(ERR_CODE, \
+            f'Invalid func-align option, func-align should be a positive integer, but got {num}')
+    elif num > 0 and (num & (num - 1)) != 0:
+        CommonUtility().ascendc_raise_python_err(ERR_CODE, \
+            f'Invalid func-align option, func-align should be a power of two, but got {num}')
+    return
+
+
+def gen_func_align_attribute(align_size):
+    check_func_align(align_size)
+    if int(align_size) == 0:
+        return ""
+    else:
+        return f"__attribute__((aligned({align_size})))"
+
+
+def gen_system_run_cfg(kernel_type):
+    file_header = ''
+    if kernel_type == SuperKernelKernelType.KERNEL_TYPE_AIV_ONLY or \
+        kernel_type == SuperKernelKernelType.KERNEL_TYPE_MIX_AIV_1_0:
+        file_header += "#if (defined(__DAV_VEC__) && __NPU_ARCH__ == 2201)\n"
+    else:
+        file_header += "#if (defined(__DAV_CUBE__) && __NPU_ARCH__ == 2201)\n"
+ 
+    file_header += f"    __gm__ struct OpSystemRunCfg g_opSystemRunCfg = {{{0}}};\n"
+    file_header += f"#else\n"
+    file_header += f"    extern __gm__ struct OpSystemRunCfg g_opSystemRunCfg;\n"
+    file_header += f"#endif\n\n"
+    return file_header
+
+
+def gen_file_header(kernel_type, split_mode):
+    file_header = """
+#if 1
+#include "kernel_operator.h"
+"""
+    if split_mode <= 1:
+        file_header += gen_system_run_cfg(kernel_type)
+    return file_header
 
 
 def gen_super_dump_code(is_mix: bool, dump_size: int, offset: int):
