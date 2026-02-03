@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project version="4">
-  <component name="Black">
-    <option name="sdkName" value="py311_pt27" />
-  </component>
-  <component name="CMakePythonSetting">
-    <option name="pythonIntegrationState" value="YES" />
-  </component>
-</project>
