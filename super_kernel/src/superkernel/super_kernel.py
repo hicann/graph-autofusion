@@ -14,7 +14,7 @@ super kernel
 """
 import os
 import stat
-from asc_op_compile_base.asc_op_compiler.super_kernel_utility import CommonUtility
+from asc_op_compile_base.asc_op_compiler.super_kernel_utility import CommonUtility, AscendCLogLevel
 
 from asc_op_compile_base.asc_op_compiler.super_kernel_op_compile import compile_super_kernel
 from asc_op_compile_base.asc_op_compiler.global_storage import global_var_storage
@@ -1059,6 +1059,9 @@ def compile(kernel_infos, called_kernel_name="ascendc_super_kernel_plus", compil
     if not CommonUtility.is_support_super_kernel():
         CommonUtility().ascendc_raise_python_err(ERR_CODE, \
         f'current soc: {get_soc_spec("SHORT_SOC_VERSION")} series do not support super kernel feature')
+
+    if compile_infos is not None:
+        CommonUtility.print_compile_log("[SuperKernel]", f"compile_infos: {compile_infos}", AscendCLogLevel.LOG_INFO)
 
     kernel_meta_dir = CommonUtility.get_kernel_meta_dir()
     if os.path.exists(os.path.join(kernel_meta_dir, called_kernel_name + ".o")):
