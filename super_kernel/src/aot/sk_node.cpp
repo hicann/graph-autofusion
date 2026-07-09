@@ -1090,10 +1090,6 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
   }
   bool isSimt = (aivType == AIV_TYPE_SIMT_VF_ONLY || aivType == AIV_TYPE_SIMD_SIMT_MIX_VF);
   if (isSimt) {
-    isFusible = false;
-    SetFusionFailReason(FusionFailReason::SIMT_OP_UNSUPPORT);
-    SK_LOGI("%s is SIMT type, aivType=%u, not fusible", Format().c_str(), aivType);
-
     nodeInfos.kernelInfos.isSimtOp = true;
     size_t dynUbufSize = 0;
     aclError aclRet = aclrtFunctionGetAvailDynUbufPerBlock(taskParams.kernelTaskParams.funcHandle, 0, &dynUbufSize);
