@@ -231,14 +231,6 @@ aclError FakeAclrtFunctionGetBinaryNonNull(aclrtFuncHandle funcHandle, aclrtBinH
   return ACL_SUCCESS;
 }
 
-aclError FakeAclrtFunctionGetBinaryForSimt(aclrtFuncHandle funcHandle, aclrtBinHandle *binHandle) {
-  if (binHandle == nullptr) {
-    return ACL_ERROR_INVALID_PARAM;
-  }
-  *binHandle = reinterpret_cast<aclrtBinHandle>(funcHandle);
-  return ACL_SUCCESS;
-}
-
 aclError FakeAclrtFunctionGetBinaryForSkNodeCap(aclrtFuncHandle funcHandle, aclrtBinHandle *binHandle) {
   if (binHandle == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
@@ -259,8 +251,10 @@ aclError FakeAclrtFunctionGetBinaryForBindmapReason(aclrtFuncHandle funcHandle, 
     *binHandle = reinterpret_cast<aclrtBinHandle>(0x5103);
   } else if (funcHandle == reinterpret_cast<aclrtFuncHandle>(0x6104)) {
     *binHandle = reinterpret_cast<aclrtBinHandle>(0x5104);
-  } else {
+  } else if (funcHandle == reinterpret_cast<aclrtFuncHandle>(0x6105)) {
     *binHandle = reinterpret_cast<aclrtBinHandle>(0x5105);
+  } else {
+    *binHandle = reinterpret_cast<aclrtBinHandle>(funcHandle);
   }
   return ACL_SUCCESS;
 }
@@ -421,15 +415,6 @@ aclError FakeAclrtGetFunctionAddrNotInBindMapForSkNode(aclrtFuncHandle funcHdl, 
   *addrAicore = reinterpret_cast<void *>(UT_SK_NODE_BIN_DEV_ADDR + 0x300);
   *addrAiv = reinterpret_cast<void *>(UT_SK_NODE_BIN_DEV_ADDR + 0x400);
   return ACL_SUCCESS;
-}
-
-void MockValidKernelBindMapForSimt() {
-  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForSimt));
-  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
-  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
-  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
-  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
-  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferEmptyForSkNode));
 }
 
 std::string MakeTmpDir(const std::string &suffix) {
@@ -2149,7 +2134,12 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_SimtType3) {
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeAivOnly));
-  MockValidKernelBindMapForSimt();
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferEmptyForSkNode));
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   EXPECT_TRUE(node.InitNode(&opts));
@@ -2183,7 +2173,12 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_SimtType4) {
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeAivOnly));
-  MockValidKernelBindMapForSimt();
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferEmptyForSkNode));
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   EXPECT_TRUE(node.InitNode(&opts));
@@ -2217,7 +2212,12 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_Mix11_SimtType) {
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix11));
-  MockValidKernelBindMapForSimt();
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferEmptyForSkNode));
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   EXPECT_TRUE(node.InitNode(&opts));
@@ -2251,7 +2251,12 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_Mix12_SimtType) {
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix12));
-  MockValidKernelBindMapForSimt();
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferEmptyForSkNode));
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   EXPECT_TRUE(node.InitNode(&opts));

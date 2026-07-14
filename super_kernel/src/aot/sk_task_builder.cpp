@@ -253,10 +253,11 @@ void DumpTaskQueDetail(const TaskQue *que, const char *name, const std::vector<S
     const TaskInfo &ti = que->taskInfos[i];
     const uint64_t nodeId = GetDumpTaskNodeId(ti.index, tasks);
     SK_LOGD(
-        "[%u] type=%s, idx=%u, nodeId=%lu, relatedType=%s, blk=%u, entries=%u, args=0x%llx, "
+        "[%u] type=%s, idx=%u, nodeId=%lu, relatedType=%s, blk=%u, entries=%u, args=0x%llx, argsSize=%u, "
         "debugOptions=0x%llx, extraInfo=0x%llx",
         i, to_string(ti.type), ti.index, nodeId, to_string(ti.relatedType), ti.numBlocks, ti.entryCnt,
-        (unsigned long long)ti.args, (unsigned long long)ti.debugOptions, (unsigned long long)ti.extraInfo);
+        (unsigned long long)ti.args, ti.argsSize, (unsigned long long)ti.debugOptions,
+        (unsigned long long)ti.extraInfo);
     for (uint32_t j = 0; j < ti.entryCnt; ++j) {
       SK_LOGD("   entry[%u]=0x%llx", j, (unsigned long long)ti.entry[j]);
     }
