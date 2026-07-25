@@ -183,8 +183,8 @@ class TilingLib {
   void GenReprScheduleGroupFields(std::stringstream &ss, const ::ascir::ScheduleGroup &sg,
                                   const std::string &field_prefix, const std::string &emit_fn,
                                   const std::string &indent, bool emit_first_arg) const;
-  void GenReprApiTilingFields(std::stringstream &ss, const ::ascir::ScheduleGroup &sg, const std::string &field_prefix,
-                              const std::string &indent, const std::string &first_flag) const;
+  void GenReprApiTilingFields(std::stringstream &ss, const ::ascir::ImplGraph &graph, size_t tiling_case_id,
+                              const std::string &field_prefix, bool top_level) const;
   void GenReprSingleGroup(std::stringstream &ss, const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   void GenReprMultiGroup(std::stringstream &ss, const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   std::string GenPgoTilingFunc(const ::ascir::FusedScheduledResult &fused_schedule_result, const std::string &tiling,

@@ -2383,6 +2383,42 @@ static ascir::ImplGraph GenGraphWithSizeVar(const std::string &graph_name, const
   return graph;
 }
 
+static ascir::ScheduleGroup GenScheduleGroupWithInterleavedApiTilingField() {
+  ascir::ImplGraph graph0("graph0");
+  auto s0 = graph0.CreateSizeVar("s0");
+  (void)graph0.CreateAxis("z0", s0);
+  af::ascir_op::Transpose transpose("Transpose");
+  graph0.AddNode(transpose);
+  graph0.FindNode("Transpose")->outputs[0].attr.que.id = 0;
+
+  ascir::ImplGraph graph1("graph1");
+  auto s1 = graph1.CreateSizeVar("s1");
+  (void)graph1.CreateAxis("z1", s1);
+
+  ascir::ScheduleGroup schedule_group;
+  schedule_group.impl_graphs = {graph0, graph1};
+  return schedule_group;
+}
+
+static ascir::FusedScheduledResult GenSingleGroupFusedScheduleResultWithApiTilingField() {
+  ascir::ScheduledResult scheduled_result;
+  scheduled_result.schedule_groups.push_back(GenScheduleGroupWithInterleavedApiTilingField());
+
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.node_idx_to_scheduled_results.push_back({scheduled_result});
+  return fused_schedule_result;
+}
+
+static ascir::FusedScheduledResult GenMultiGroupFusedScheduleResultWithApiTilingField() {
+  ascir::ScheduledResult scheduled_result;
+  scheduled_result.schedule_groups.push_back(GenScheduleGroupWithInterleavedApiTilingField());
+  scheduled_result.schedule_groups.emplace_back();
+
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.node_idx_to_scheduled_results.push_back({scheduled_result});
+  return fused_schedule_result;
+}
+
 static ascir::FusedScheduledResult GenMultiGroupFusedScheduleResultWithSizeVar(const std::string &var_name) {
   ascir::ScheduleGroup schedule_group1;
   schedule_group1.impl_graphs.push_back(GenGraphWithSizeVar("graph1", var_name));
@@ -2457,6 +2493,42 @@ TEST_F(TestCodegenTiling, GenerateForInductorGetTilingDataReprShouldKeepZeroValu
   EXPECT_EQ(tiling_impl.find("if (tiling_data->get_corenum() != 0)"), std::string::npos);
   EXPECT_EQ(tiling_impl.find("if (tiling_data->get_ub_size() != 0)"), std::string::npos);
   EXPECT_EQ(tiling_impl.find("if (tiling_data->get_hbm_size() != 0)"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GetTilingDataReprShouldKeepSingleGroupApiTilingFieldInDeclarationOrder) {
+  ge::PlatformContext::GetInstance().SetPlatform("2201");
+  const auto fused_schedule_result = GenSingleGroupFusedScheduleResultWithApiTilingField();
+  const auto repr = this->GenGetTilingDataReprFuncForInductor(fused_schedule_result, "AutofuseTilingData");
+
+  const auto s0_pos = repr.find("emit_field(\"s0\"");
+  const auto api_tiling_pos = repr.find(".Transpose_tilingData_0 = {");
+  const auto s1_pos = repr.find("emit_field(\"s1\"");
+  const auto q0_pos = repr.find("emit_field(\"q0_size\"");
+  ASSERT_NE(s0_pos, std::string::npos);
+  ASSERT_NE(api_tiling_pos, std::string::npos);
+  ASSERT_NE(s1_pos, std::string::npos);
+  ASSERT_NE(q0_pos, std::string::npos);
+  EXPECT_LT(s0_pos, api_tiling_pos);
+  EXPECT_LT(api_tiling_pos, s1_pos);
+  EXPECT_LT(s1_pos, q0_pos);
+}
+
+TEST_F(TestCodegenTiling, GetTilingDataReprShouldKeepMultiGroupApiTilingFieldInDeclarationOrder) {
+  ge::PlatformContext::GetInstance().SetPlatform("2201");
+  const auto fused_schedule_result = GenMultiGroupFusedScheduleResultWithApiTilingField();
+  const auto repr = this->GenGetTilingDataReprFuncForInductor(fused_schedule_result, "AutofuseTilingData");
+
+  const auto s0_pos = repr.find("emit_sub(\"s0\"");
+  const auto api_tiling_pos = repr.find(".Transpose_tilingData_0 = {");
+  const auto s1_pos = repr.find("emit_sub(\"s1\"");
+  const auto q0_pos = repr.find("emit_sub(\"q0_size\"");
+  ASSERT_NE(s0_pos, std::string::npos);
+  ASSERT_NE(api_tiling_pos, std::string::npos);
+  ASSERT_NE(s1_pos, std::string::npos);
+  ASSERT_NE(q0_pos, std::string::npos);
+  EXPECT_LT(s0_pos, api_tiling_pos);
+  EXPECT_LT(api_tiling_pos, s1_pos);
+  EXPECT_LT(s1_pos, q0_pos);
 }
 
 TEST_F(TestCodegenTiling, GenerateForInductorShouldContainTopnMainOutputAbi) {
