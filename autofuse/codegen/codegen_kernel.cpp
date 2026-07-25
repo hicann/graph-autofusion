@@ -2382,6 +2382,7 @@ std::string Kernel::GetIncludeApiHeaderFiles(const ascir::FusedScheduledResult &
       "basic_api/kernel_operator_common_intf.h",
       "basic_api/kernel_operator_sys_var_intf.h",
       "basic_api/kernel_struct_binary.h",
+      "basic_api/kernel_operator_limits_intf.h",
   };
   std::stringstream ss;
   for (const auto &header : api_header_list) {

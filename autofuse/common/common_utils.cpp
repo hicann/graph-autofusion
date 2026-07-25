@@ -232,10 +232,14 @@ af::Status ScalarValuePreProcess(const std::string &ori_value, const std::string
       return af::FAILED;
     }
     after_pre_pro_value = ori_value == "inf" ? "AfInfinity<" + dtype + ">()" : "-AfInfinity<" + dtype + ">()";
+  } else if (ori_value == "nan" || ori_value == "NaN" || ori_value == "NAN") {
+    if ((dtype != "float") && (dtype != "half")) {
+      return af::FAILED;
+    }
+    after_pre_pro_value = "AscendC::NumericLimits<" + dtype + ">::QuietNaN()";
   } else {
     after_pre_pro_value = ori_value;
   }
-
   return af::SUCCESS;
 }
 
