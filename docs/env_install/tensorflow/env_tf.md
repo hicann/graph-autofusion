@@ -135,7 +135,7 @@ pip3 install "numpy==1.23.5" pandas decorator sympy scipy attrs psutil protobuf=
 x86_64 架构可使用一键配置脚本自动完成上述步骤（在线安装 TF、NPU Adapter 及依赖）：
 
 ```bash
-bash scripts/env_install/setup_tf_env.sh
+bash scripts/env_install/tensorflow/setup_tf_env.sh
 ```
 
 脚本完成后激活环境：
