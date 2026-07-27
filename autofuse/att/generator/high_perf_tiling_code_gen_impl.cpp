@@ -45,17 +45,19 @@ af::Status HighPerfTilingCodeGenImpl::GenSolverBaseClass() {
     GE_ASSERT_TRUE(args_manager.Process(false), "Args manager process failed.");
     total_models.emplace_back(args_manager);
   }
-  std::string basic_solvers_head;
+  autofuse::GeneratedCode basic_solvers_head;
   std::string basic_solvers_func;
-  basic_solvers_head = SolverPassManager::GenCommonBaseClassesHead(total_models);
+  basic_solvers_head = SolverPassManager::GenCommonBaseClassesHeader(total_models);
   basic_solvers_func = SolverPassManager::GenCommonBaseClassesFunc(total_models);
   std::regex pattern(std::string(kDefaultConfigMaxIterHeader) + std::string(kDefaultConfigMaxIterValue));
   std::string result_head = std::regex_replace(
-      basic_solvers_head, pattern,
+      basic_solvers_head.body, pattern,
       kDefaultConfigMaxIterHeader + std::to_string(AutoFuseConfig::GetAttStrategyConfig().max_iter_num));
   std::string result_func = std::regex_replace(
       basic_solvers_func, pattern,
       kDefaultConfigMaxIterHeader + std::to_string(AutoFuseConfig::GetAttStrategyConfig().max_iter_num));
+  basic_solvers_head.body = result_head + "\n";
+  autofuse::AppendGeneratedCode(atomic_headers_[autofuse::GeneratedHeaderId::kSolver], basic_solvers_head);
   tiling_head_.AddLine(result_head);
   tiling_func_.AddLine(result_func);
   return af::SUCCESS;

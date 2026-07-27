@@ -16,6 +16,7 @@
 #include <memory>
 #include <utility>
 #include "code_printer.h"
+#include "common/tiling_source_dependencies.h"
 #include "base/model_info.h"
 #include "generator_config.h"
 #include "tiling_data_gen/tiling_data_generator.h"
@@ -58,6 +59,13 @@ class TilingCodeGenImpl {
   af::Status GenTiling(std::map<std::string, std::string> &tiling_res,
                        std::unordered_map<std::string, std::string> cache_reuse_info = {}, uint32_t cache_capacity = 0,
                        const EnableGroupParallels &enable_group_parallels = {});
+  af::Status FinishGeneratedHeaders(std::map<std::string, std::string> &tiling_res);
+  static af::Status FinishGeneratedHeaders(
+      const std::map<autofuse::GeneratedHeaderId, autofuse::GeneratedCode> &generated_headers,
+      const std::string &tiling_data_type_name, bool is_autofuse, std::map<std::string, std::string> &tiling_res);
+  const std::map<autofuse::GeneratedHeaderId, autofuse::GeneratedCode> &GetGeneratedHeaders() const {
+    return atomic_headers_;
+  }
 
   // 设置每个ScheduleResult的Group个数
   void SetScheduleResultGroupNums(const std::map<std::pair<size_t, size_t>, size_t> &group_nums) {
@@ -68,11 +76,21 @@ class TilingCodeGenImpl {
   uint32_t GetGroupNumForCurrentScheduleResult(const std::pair<size_t, size_t> &schedule_result_key) const;
 
  protected:
+  void AddAtomicHeaderLine(autofuse::GeneratedHeaderId header_id, const std::string &line);
+  void AppendAtomicHeaderBody(autofuse::GeneratedHeaderId header_id, const std::string &body);
+  void ResetTranslationUnit();
+  void RequireTranslationUnitSystemHeader(const std::string &header);
+  void RequireVarRelationSystemHeaders();
+  void RequireTranslationUnitExternalHeader(const std::string &header);
+  void RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId header_id);
+  void RequireTranslationUnitTilingDataHeader();
+  af::Status FinishTranslationUnit(const std::string &key, std::map<std::string, std::string> &tiling_res);
   // 用于判断求解器是否有效
   af::Status CheckImplPtr(const std::string &indent);
   af::Status GetReuseVarNames(std::map<std::string, std::string> &var_names_to_reuse_var_name);
   // 用于构造一个用于复制的结构体
   af::Status GenStructCopyDef();
+  af::Status CollectStructCopyVars(std::set<std::string> &tiling_data_vars);
   // 用于构造一个用于缓存复用的哈希表
   af::Status GenCacheHashMapDef();
 
@@ -243,6 +261,8 @@ class TilingCodeGenImpl {
   // 生成宏函数与include信息
   virtual af::Status GenMacroInclude();
   void GenPgoHeaderCodesTail();
+  void GenPgoCallbackDefs(ge::CodePrinter &pgo_header);
+  void GenPgoConfigDefs(ge::CodePrinter &pgo_header);
   // 生成工具函数
   virtual af::Status GenToolFuncs();
   // 生成tilingimpl的基类public函数
@@ -318,6 +338,8 @@ class TilingCodeGenImpl {
   ge::CodePrinter tiling_data_;
   ge::CodePrinter tiling_func_;
   ge::CodePrinter tiling_head_;
+  std::map<autofuse::GeneratedHeaderId, autofuse::GeneratedCode> atomic_headers_;
+  autofuse::GeneratedCode translation_unit_;
   std::string op_name_;
   TilingCodeGenConfig config_;
   ExtraInfoConfig extra_info_config_;
@@ -412,6 +434,14 @@ class TilingCodeGenImpl {
   af::Status GenPGOReuseGroupTilingWrapper();
   af::Status GenTilingKeyFunc();
   void GenTilingHeadMultiGroup();
+  void InitTilingHeadCodeGeneration();
+  void GenPgoSearchConfigDef();
+  af::Status InitTilingGeneration(const std::unordered_map<std::string, std::string> &cache_reuse_info,
+                                  uint32_t cache_capacity);
+  void GenGroupNamespaceHead(const ScheduleGroupIdent &cur_ident);
+  void RequireReuseGroupTranslationUnitHeaders();
+  void RequireGroupTranslationUnitHeaders();
+  af::Status FinishGroupTiling(const ScheduleGroupIdent &cur_ident, std::map<std::string, std::string> &tiling_res);
 
   // 辅助函数：从所有model info中收集输入变量名并返回数量
   size_t CollectInputVarsSize() const;

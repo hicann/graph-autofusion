@@ -69,9 +69,21 @@ af::Status IsUpperBoundValid(const Expr &min_expr, const Expr &max_expr) {
   return af::SUCCESS;
 }
 
-void GenLogDefine(ge::CodePrinter &print) {
+void GenLogDefine(ge::CodePrinter &print, bool preserve_includes) {
   const auto &slog_extend = AddSlogExtend();
-  const auto &extend_define = slog_extend.empty() ? "\n" : slog_extend + "\n";
+  std::stringstream log_body;
+  const std::set<std::string> known_includes = {
+      "#include <cinttypes>", "#include <sys/syscall.h>", "#include <unistd.h>",   "#include <cstdint>",
+      "#include <stdio.h>",   "#include <stdlib.h>",      "#include <map>",        "#include <securec.h>",
+      "#include <vector>",    "#include \"dlog_pub.h\"",  "#include \"err_msg.h\""};
+  std::istringstream log_stream(slog_extend);
+  std::string line;
+  while (std::getline(log_stream, line)) {
+    if (known_includes.count(line) == 0U) {
+      log_body << line << '\n';
+    }
+  }
+  const auto extend_define = slog_extend.empty() ? "\n" : (preserve_includes ? slog_extend : log_body.str()) + "\n";
   // 根据 ASCEND_GLOBAL_LOG_LEVEL 决定生成的宏内容：
   // DLOG_NULL 时生成空宏，否则生成完整宏
   // 运行时通过 CheckLogLevel 动态判断是否真正输出
@@ -394,6 +406,147 @@ std::string GenTilingScoreFuncDefineHead(bool is_uniq_group) {
   return part1 + workspace_param + part2;
 }
 }  // namespace
+
+namespace {
+std::string GetAtomicHeaderKey(autofuse::GeneratedHeaderId header_id) {
+  switch (header_id) {
+    case autofuse::GeneratedHeaderId::kState:
+      return kTilingStateHeaderIdentify;
+    case autofuse::GeneratedHeaderId::kLog:
+      return kTilingLogHeaderIdentify;
+    case autofuse::GeneratedHeaderId::kPgo:
+      return kTilingPgoHeaderIdentify;
+    case autofuse::GeneratedHeaderId::kSolver:
+      return kTilingSolverHeaderIdentify;
+    case autofuse::GeneratedHeaderId::kApi:
+      return kTilingApiHeaderIdentify;
+    default:
+      return "";
+  }
+}
+
+std::string GetAtomicHeaderGuard(autofuse::GeneratedHeaderId header_id) {
+  switch (header_id) {
+    case autofuse::GeneratedHeaderId::kState:
+      return "__AUTOFUSE_TILING_FUNC_STATE_H__";
+    case autofuse::GeneratedHeaderId::kLog:
+      return "__AUTOFUSE_TILING_FUNC_LOG_H__";
+    case autofuse::GeneratedHeaderId::kPgo:
+      return "__AUTOFUSE_TILING_FUNC_PGO_H__";
+    case autofuse::GeneratedHeaderId::kSolver:
+      return "__AUTOFUSE_TILING_FUNC_SOLVER_H__";
+    case autofuse::GeneratedHeaderId::kApi:
+      return "__AUTOFUSE_TILING_FUNC_API_H__";
+    default:
+      return "";
+  }
+}
+
+std::string WrapAtomicHeaderBody(autofuse::GeneratedHeaderId header_id, const std::string &body,
+                                 const std::string &tiling_data_type_name, bool is_autofuse) {
+  const bool has_global_tiling_data = is_autofuse && tiling_data_type_name == "AutofuseTilingData";
+  if (header_id == autofuse::GeneratedHeaderId::kLog) {
+    return body;
+  }
+  if (header_id == autofuse::GeneratedHeaderId::kPgo) {
+    if (has_global_tiling_data) {
+      return "struct " + tiling_data_type_name + ";\nstruct AutofuseTilingDataPerf;\nnamespace optiling {\n" + body +
+             "}  // namespace optiling\n";
+    }
+    return "struct AutofuseTilingDataPerf;\nnamespace optiling {\nstruct " + tiling_data_type_name + ";\n" + body +
+           "}  // namespace optiling\n";
+  }
+  if (header_id == autofuse::GeneratedHeaderId::kApi) {
+    if (has_global_tiling_data) {
+      return "struct " + tiling_data_type_name + ";\nstruct AutofuseTilingDataPerf;\nuint32_t GetWorkspaceSize(const " +
+             tiling_data_type_name +
+             " &tiling_data);\nnamespace optiling {\nstruct PgoTensorArgs;\nstruct SearchConfig;\n" + body +
+             "}  // namespace optiling\n";
+    }
+    return "struct AutofuseTilingDataPerf;\nnamespace optiling {\nstruct " + tiling_data_type_name +
+           ";\nstruct PgoTensorArgs;\nstruct SearchConfig;\n" + body + "}  // namespace optiling\n";
+  }
+  std::string prefix;
+  if (header_id == autofuse::GeneratedHeaderId::kSolver) {
+    prefix = "using std::greater;\nusing std::string;\n";
+  }
+  return prefix + "namespace optiling {\n" + body + "}  // namespace optiling\n";
+}
+}  // namespace
+
+void TilingCodeGenImpl::AddAtomicHeaderLine(autofuse::GeneratedHeaderId header_id, const std::string &line) {
+  AppendAtomicHeaderBody(header_id, line + "\n");
+  tiling_head_.AddLine(line);
+}
+
+void TilingCodeGenImpl::AppendAtomicHeaderBody(autofuse::GeneratedHeaderId header_id, const std::string &body) {
+  atomic_headers_[header_id].body += body;
+}
+
+void TilingCodeGenImpl::ResetTranslationUnit() {
+  tiling_func_.Reset();
+  translation_unit_ = {};
+}
+
+void TilingCodeGenImpl::RequireTranslationUnitSystemHeader(const std::string &header) {
+  autofuse::RequireSystemHeader(translation_unit_.dependencies, header);
+}
+
+void TilingCodeGenImpl::RequireVarRelationSystemHeaders() {
+  RequireTranslationUnitSystemHeader("cmath");
+  RequireTranslationUnitSystemHeader("limits");
+}
+
+void TilingCodeGenImpl::RequireTranslationUnitExternalHeader(const std::string &header) {
+  autofuse::RequireExternalHeader(translation_unit_.dependencies, header);
+}
+
+void TilingCodeGenImpl::RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId header_id) {
+  autofuse::RequireGeneratedHeader(translation_unit_.dependencies, header_id);
+}
+
+void TilingCodeGenImpl::RequireTranslationUnitTilingDataHeader() {
+  if (config_.is_autofuse) {
+    RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kTilingData);
+    return;
+  }
+  RequireTranslationUnitExternalHeader(op_name_ + "_tiling_data.h");
+}
+
+af::Status TilingCodeGenImpl::FinishTranslationUnit(const std::string &key,
+                                                    std::map<std::string, std::string> &tiling_res) {
+  translation_unit_.body = tiling_func_.GetOutputStr();
+  std::string output;
+  GE_ASSERT_SUCCESS(autofuse::RenderTranslationUnit(translation_unit_, output));
+  tiling_res[key] += output;
+  return af::SUCCESS;
+}
+
+af::Status TilingCodeGenImpl::FinishGeneratedHeaders(std::map<std::string, std::string> &tiling_res) {
+  return FinishGeneratedHeaders(atomic_headers_, config_.tiling_data_type_name, config_.is_autofuse, tiling_res);
+}
+
+af::Status TilingCodeGenImpl::FinishGeneratedHeaders(
+    const std::map<autofuse::GeneratedHeaderId, autofuse::GeneratedCode> &generated_headers,
+    const std::string &tiling_data_type_name, bool is_autofuse, std::map<std::string, std::string> &tiling_res) {
+  const std::array<autofuse::GeneratedHeaderId, 5U> header_order = {
+      autofuse::GeneratedHeaderId::kState, autofuse::GeneratedHeaderId::kLog, autofuse::GeneratedHeaderId::kPgo,
+      autofuse::GeneratedHeaderId::kSolver, autofuse::GeneratedHeaderId::kApi};
+  for (const auto header_id : header_order) {
+    const auto iter = generated_headers.find(header_id);
+    if (iter == generated_headers.end() ||
+        (header_id == autofuse::GeneratedHeaderId::kPgo && iter->second.body.empty())) {
+      continue;
+    }
+    autofuse::GeneratedCode header = iter->second;
+    header.body = WrapAtomicHeaderBody(header_id, header.body, tiling_data_type_name, is_autofuse);
+    std::string output;
+    GE_ASSERT_SUCCESS(autofuse::RenderGeneratedHeader(header, GetAtomicHeaderGuard(header_id), output));
+    tiling_res[GetAtomicHeaderKey(header_id)] = std::move(output);
+  }
+  return af::SUCCESS;
+}
+
 inline void SetTilingDefinition(const std::set<std::string> &var_names, const std::string &param_name,
                                 std::set<std::string> &tiling_data_vars,
                                 std::map<std::string, std::string> &type_name_to_definition) {
@@ -535,7 +688,7 @@ af::Status TilingCodeGenImpl::GetRelatedHardware(std::map<std::string, std::stri
 af::Status TilingCodeGenImpl::GenDurationCommonCode() {
   const auto duration_head_code = DurationGenHeadCode();
   if (!duration_head_code.empty()) {
-    tiling_head_.AddLine(duration_head_code);
+    AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kLog, duration_head_code);
     tiling_func_.AddLine(DurationGenDefineCode());
   }
   return af::SUCCESS;
@@ -695,12 +848,7 @@ af::Status TilingCodeGenImpl::GetReuseVarNames(std::map<std::string, std::string
   return af::SUCCESS;
 }
 
-af::Status TilingCodeGenImpl::GenStructCopyDef() {
-  std::set<std::string> tiling_data_vars;
-  // 获取所有的var name和复用var的映射关系
-  std::map<std::string, std::string> var_names_to_reuse_var_name;
-  std::set<ReuseScheduleGroupPtr> reuse_schedule_groups;
-  GE_ASSERT_SUCCESS(GetReuseVarNames(var_names_to_reuse_var_name));
+af::Status TilingCodeGenImpl::CollectStructCopyVars(std::set<std::string> &tiling_data_vars) {
   for (const auto &model_info : tiling_model_info_) {
     ArgsManager args_manager(model_info);
     GE_ASSERT_TRUE(args_manager.Process(false), "Args manager process failed.");
@@ -727,25 +875,36 @@ af::Status TilingCodeGenImpl::GenStructCopyDef() {
       }
     }
   }
+  return af::SUCCESS;
+}
+
+af::Status TilingCodeGenImpl::GenStructCopyDef() {
+  std::set<std::string> tiling_data_vars;
+  // 获取所有的var name和复用var的映射关系
+  std::map<std::string, std::string> var_names_to_reuse_var_name;
+  GE_ASSERT_SUCCESS(GetReuseVarNames(var_names_to_reuse_var_name));
+  GE_ASSERT_SUCCESS(CollectStructCopyVars(tiling_data_vars));
   tiling_data_vars.insert("tiling_key");
   tiling_data_vars.insert(BaseTypeUtils::DumpHardware(HardwareDef::CORENUM));
   if (config_.gen_extra_infos) {
     tiling_data_vars.insert("workspaceSize");
   }
-  tiling_head_.AddLine("struct TilingDataCopy {");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kState, "struct TilingDataCopy {");
   for (const auto &var : tiling_data_vars) {
     // 如果没有复用，则定义该变量
     std::string reuse_var = var;
     const auto &iter = var_names_to_reuse_var_name.find(var);
     if (iter == var_names_to_reuse_var_name.end()) {
-      tiling_head_.AddLine("  uint32_t " + var + ";");
+      AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kState, "  uint32_t " + var + ";");
     } else {
       reuse_var = iter->second;
     }
-    tiling_head_.AddLine("  void set_" + var + "(uint32_t val) { " + reuse_var + " = val; }");
-    tiling_head_.AddLine("  inline uint32_t get_" + var + "() { return " + reuse_var + "; }");
+    AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kState,
+                        "  void set_" + var + "(uint32_t val) { " + reuse_var + " = val; }");
+    AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kState,
+                        "  inline uint32_t get_" + var + "() { return " + reuse_var + "; }");
   }
-  tiling_head_.AddLine("};");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kState, "};");
   return af::SUCCESS;
 }
 
@@ -772,70 +931,113 @@ af::Status TilingCodeGenImpl::GenCacheHashMapDef() {
     return af::SUCCESS;
   }
 
-  size_t input_vars_size = CollectInputVarsSize();
+  auto &state_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kState].dependencies;
+  for (const auto &header : {"array", "cstddef", "cstdint", "memory"}) {
+    autofuse::RequireSystemHeader(state_dependencies, header);
+  }
+
+  const size_t input_vars_size = CollectInputVarsSize();
+  ge::CodePrinter state_header;
 
   // 生成常量定义（Operator和Group缓存共享）
-  cache::OperatorLevelCacheGen::GenConstantDefs(tiling_head_, input_vars_size);
+  cache::OperatorLevelCacheGen::GenConstantDefs(state_header, input_vars_size);
 
   // 生成FixedSizeHashMap模板定义（Operator和Group缓存共享）
-  GE_ASSERT_SUCCESS(operator_level_cache_gen_->GenFixedSizeHashMapDef(tiling_head_),
+  GE_ASSERT_SUCCESS(operator_level_cache_gen_->GenFixedSizeHashMapDef(state_header),
                     "Generate FixedSizeHashMap definition failed.");
 
   // 只在Operator缓存开启时生成OperatorCache相关类型和类
   if (config_.cache_enabled_at_compile_time) {
-    GE_ASSERT_SUCCESS(operator_level_cache_gen_->GenOperatorCacheTypes(tiling_head_, config_.tiling_data_type_name),
+    GE_ASSERT_SUCCESS(operator_level_cache_gen_->GenOperatorCacheTypes(state_header),
                       "Generate Operator cache types failed.");
 
-    GE_ASSERT_SUCCESS(operator_level_cache_gen_->GenTilingCacheContext(tiling_head_, config_.tiling_data_type_name),
+    GE_ASSERT_SUCCESS(operator_level_cache_gen_->GenTilingCacheContext(state_header),
                       "Generate TilingCacheContext failed.");
   }
+
+  AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kState, state_header.GetOutputStr());
+  tiling_head_.AddLine(state_header.GetOutputStr());
 
   return af::SUCCESS;
 }
 
+void TilingCodeGenImpl::GenPgoCallbackDefs(ge::CodePrinter &pgo_header) {
+  pgo_header.AddLine("#ifndef AUTOFUSE_PGO_TENSOR_ARGS_DEFINED");
+  pgo_header.AddLine("#define AUTOFUSE_PGO_TENSOR_ARGS_DEFINED");
+  pgo_header.AddLine("struct PgoTensorArgs {");
+  pgo_header.AddLine("  void **inputs = nullptr;");
+  pgo_header.AddLine("  uint32_t input_num = 0;");
+  pgo_header.AddLine("  void **outputs = nullptr;");
+  pgo_header.AddLine("  uint32_t output_num = 0;");
+  pgo_header.AddLine("};");
+  pgo_header.AddLine("#endif");
+  pgo_header.AddLine("typedef long int (*ProfilingCallback)(" + GenPgoTensorArgsDef());
+  pgo_header.AddLine("void* stream, uint32_t workspaceSize, " + config_.tiling_data_type_name +
+                     "* tiling_data, double* cost_time);");
+  pgo_header.AddLine("typedef long int (*ProfilingBatchCallback)(" + GenPgoTensorArgsDef());
+  pgo_header.AddLine("void* stream, uint32_t workspaceSize, std::vector<AutofuseTilingDataPerf> *profiles);");
+}
+
+void TilingCodeGenImpl::GenPgoConfigDefs(ge::CodePrinter &pgo_header) {
+  pgo_header.AddLine("#ifndef AUTOFUSE_PGO_CONFIG_DEFINED");
+  pgo_header.AddLine("#define AUTOFUSE_PGO_CONFIG_DEFINED");
+  pgo_header.AddLine("class PgoConfig {");
+  pgo_header.AddLine("public:");
+  pgo_header.AddLine("  static PgoConfig& Instance() {");
+  pgo_header.AddLine("    static PgoConfig instance;");
+  pgo_header.AddLine("    return instance;");
+  pgo_header.AddLine("  }");
+  pgo_header.AddLine("  void ResetRuntimeOverrides() {");
+  pgo_header.AddLine("    need_change_solver_run = false;");
+  pgo_header.AddLine("    pgo_threshold_index = 0;");
+  pgo_header.AddLine("    pgo_ub_threshold_list = {0.2, 0.1, 0, 0.05, 0.1};");
+  pgo_header.AddLine("    pgo_corenum_threshold_list = {0.4, 0.4, 1, 1, 0.8};");
+  pgo_header.AddLine("  }");
+  pgo_header.AddLine("  ProfilingCallback single_callback;");
+  pgo_header.AddLine("  ProfilingBatchCallback batch_callback;");
+  pgo_header.AddLine("  PgoTensorArgs *tensor_args = nullptr;");
+  pgo_header.AddLine("  int32_t pgo_algorithm = 1; // 0 for pruning, 1 for core num");
+  pgo_header.AddLine("  bool need_change_solver_run = false;");
+  pgo_header.AddLine("  size_t pgo_threshold_index = 0;");
+  pgo_header.AddLine("  constexpr static size_t pgo_threshold_list_size = 5;");
+  pgo_header.AddLine("  std::array<double, pgo_threshold_list_size> pgo_ub_threshold_list{0.2, 0.1, 0, 0.05, 0.1};");
+  pgo_header.AddLine("  std::array<double, pgo_threshold_list_size> pgo_corenum_threshold_list{0.4, 0.4, 1, 1, 0.8};");
+  pgo_header.AddLine("private:");
+  pgo_header.AddLine("  PgoConfig() = default;");
+  pgo_header.AddLine("  ~PgoConfig() = default;");
+  pgo_header.AddLine("  PgoConfig(const PgoConfig &) = delete;");
+  pgo_header.AddLine("  PgoConfig &operator=(const PgoConfig &) = delete;");
+  pgo_header.AddLine("};");
+  pgo_header.AddLine("class PgoConfigRuntimeGuard {");
+  pgo_header.AddLine("public:");
+  pgo_header.AddLine("  PgoConfigRuntimeGuard() { PgoConfig::Instance().ResetRuntimeOverrides(); }");
+  pgo_header.AddLine("  ~PgoConfigRuntimeGuard() { PgoConfig::Instance().ResetRuntimeOverrides(); }");
+  pgo_header.AddLine("};");
+  pgo_header.AddLine("#endif");
+}
+
 void TilingCodeGenImpl::GenPgoHeaderCodesTail() {
-  tiling_data_.AddLine("using AutofuseTilingData =  " + config_.tiling_data_type_name + ";\n");
-  std::string pgo_perf_struct = {
-      "struct AutofuseTilingDataPerf {\n"
-      "  AutofuseTilingData tiling_data;\n"
-      "  double best_perf;\n"
-      "};\n"};
-  tiling_data_.AddLine(pgo_perf_struct);
-  tiling_data_.AddLine("#ifndef AUTOFUSE_PGO_TENSOR_ARGS_DEFINED");
-  tiling_data_.AddLine("#define AUTOFUSE_PGO_TENSOR_ARGS_DEFINED");
-  tiling_data_.AddLine("struct PgoTensorArgs {");
-  tiling_data_.AddLine("  void **inputs = nullptr;");
-  tiling_data_.AddLine("  uint32_t input_num = 0;");
-  tiling_data_.AddLine("  void **outputs = nullptr;");
-  tiling_data_.AddLine("  uint32_t output_num = 0;");
-  tiling_data_.AddLine("};");
-  tiling_data_.AddLine("#endif");
-  tiling_data_.AddLine("typedef long int (*ProfilingCallback)(" + GenPgoTensorArgsDef());
-  tiling_data_.AddLine("void* stream, uint32_t workspaceSize, AutofuseTilingData* tiling_data, double* cost_time);");
-  tiling_data_.AddLine("typedef long int (*ProfilingBatchCallback)(" + GenPgoTensorArgsDef());
-  tiling_data_.AddLine("void* stream, uint32_t workspaceSize, std::vector<AutofuseTilingDataPerf> *profiles);");
-  tiling_data_.AddLine("class PgoConfig {");
-  tiling_data_.AddLine("public:");
-  tiling_data_.AddLine("  static PgoConfig& Instance() {");
-  tiling_data_.AddLine("    static PgoConfig instance;");
-  tiling_data_.AddLine("    return instance;");
-  tiling_data_.AddLine("  }");
-  tiling_data_.AddLine("  ProfilingCallback single_callback;");
-  tiling_data_.AddLine("  ProfilingBatchCallback batch_callback;");
-  tiling_data_.AddLine("  PgoTensorArgs *tensor_args = nullptr;");
-  tiling_data_.AddLine("  int32_t pgo_algorithm = 1; // 0 for pruning, 1 for core num");
-  tiling_data_.AddLine("  bool need_change_solver_run = false;");
-  tiling_data_.AddLine("  size_t pgo_threshold_index = 0;");
-  tiling_data_.AddLine("  constexpr static size_t pgo_threshold_list_size = 5;");
-  tiling_data_.AddLine("  std::array<double, pgo_threshold_list_size> pgo_ub_threshold_list{0.2, 0.1, 0, 0.05, 0.1};");
-  tiling_data_.AddLine(
-      "  std::array<double, pgo_threshold_list_size> pgo_corenum_threshold_list{0.4, 0.4, 1, 1, 0.8};");
-  tiling_data_.AddLine("private:");
-  tiling_data_.AddLine("  PgoConfig() = default;");
-  tiling_data_.AddLine("  ~PgoConfig() = default;");
-  tiling_data_.AddLine("  PgoConfig(const PgoConfig &) = delete;");
-  tiling_data_.AddLine("  PgoConfig &operator=(const PgoConfig &) = delete;");
-  tiling_data_.AddLine("};");
+  if (!config_.is_autofuse) {
+    tiling_data_.AddLine("using AutofuseTilingData =  " + config_.tiling_data_type_name + ";\n");
+    const std::string pgo_perf_struct = {
+        "struct AutofuseTilingDataPerf {\n"
+        "  AutofuseTilingData tiling_data;\n"
+        "  double best_perf;\n"
+        "};\n"};
+    tiling_data_.AddLine(pgo_perf_struct);
+  }
+  ge::CodePrinter pgo_header;
+  GenPgoCallbackDefs(pgo_header);
+  GenPgoConfigDefs(pgo_header);
+  const std::string pgo_header_body = pgo_header.GetOutputStr();
+  if (config_.enable_autofuse_pgo || config_.is_inductor_scene) {
+    AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kPgo, pgo_header_body);
+  }
+  tiling_head_.AddLine(WrapAtomicHeaderBody(autofuse::GeneratedHeaderId::kPgo, pgo_header_body,
+                                            config_.tiling_data_type_name, config_.is_autofuse));
+  if (!config_.is_autofuse) {
+    tiling_data_.AddLine(pgo_header_body);
+  }
 }
 
 af::Status TilingCodeGenImpl::GenHeaderInclude() {
@@ -1139,7 +1341,7 @@ enum class PipeType : uint8_t {
   ALL,
 };
 )";
-  tiling_head_.AddLine(kPipeType);
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kState, kPipeType);
   return af::SUCCESS;
 }
 
@@ -1430,20 +1632,23 @@ af::Status TilingCodeGenImpl::GenExternFuncDef() {
 }
 
 af::Status TilingCodeGenImpl::GenExpressionMacro() {
-  tiling_head_.AddLine("#define Max(a, b) ((double)(a) > (double)(b) ? (a) : (b))");
-  tiling_head_.AddLine("#define Min(a, b) ((double)(a) < (double)(b) ? (a) : (b))");
-  tiling_head_.AddLine("#define Abs(a) ((double)(a) >= 0 ? (a) : -(a))");
-  tiling_head_.AddLine("#define Log(a) (log((double)(a)))");
-  tiling_head_.AddLine("#define Pow(a, b) pow(a, b)");
-  tiling_head_.AddLine("#define Rational(a, b) ((double)(a) / (double)(b))");
-  tiling_head_.AddLine("#define ExpectEq(a, b) ((a) == (b))");
-  tiling_head_.AddLine("#define ExpectNe(a, b) ((a) != (b))");
-  tiling_head_.AddLine("#define ExpectLe(a, b) ((a) <= (b))");
-  tiling_head_.AddLine("#define ExpectLt(a, b) ((a) < (b))");
-  tiling_head_.AddLine("#define LogicAnd(a, b) ((a) && (b))");
-  tiling_head_.AddLine("#define LogicOr(a, b) ((a) || (b))");
-  tiling_head_.AddLine("#define True true");
-  tiling_head_.AddLine("#define False false");
+  const std::array<std::string, 14U> macros = {"#define Max(a, b) ((double)(a) > (double)(b) ? (a) : (b))",
+                                               "#define Min(a, b) ((double)(a) < (double)(b) ? (a) : (b))",
+                                               "#define Abs(a) ((double)(a) >= 0 ? (a) : -(a))",
+                                               "#define Log(a) (log((double)(a)))",
+                                               "#define Pow(a, b) pow(a, b)",
+                                               "#define Rational(a, b) ((double)(a) / (double)(b))",
+                                               "#define ExpectEq(a, b) ((a) == (b))",
+                                               "#define ExpectNe(a, b) ((a) != (b))",
+                                               "#define ExpectLe(a, b) ((a) <= (b))",
+                                               "#define ExpectLt(a, b) ((a) < (b))",
+                                               "#define LogicAnd(a, b) ((a) && (b))",
+                                               "#define LogicOr(a, b) ((a) || (b))",
+                                               "#define True true",
+                                               "#define False false"};
+  for (const auto &macro : macros) {
+    AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kSolver, macro);
+  }
   return af::SUCCESS;
 }
 
@@ -1475,59 +1680,69 @@ af::Status TilingCodeGenImpl::GenMacroInclude() {
   for (const auto &head_file : uniq_head_files) {
     tiling_head_.AddLine(head_file);
   }
-  GenLogDefine(tiling_head_);
+  GenLogDefine(tiling_head_, true);
+  ge::CodePrinter log_header;
+  GenLogDefine(log_header, false);
+  AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kLog, log_header.GetOutputStr());
   if (config_.gen_tiling_data) {
     // 如果是自己生成的tilingdata定义，需要在实现里面include 该头文件
     tiling_head_.AddLine("#include \"" + op_name_ + "_tiling_data.h\"");
   }
   GenExpressionMacro();
-  tiling_head_.AddLine("#define MAX_SOLUTION 50");
-  tiling_head_.AddLine("#define OP_NAME \"" + op_name_ + "\"");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kSolver, "#define MAX_SOLUTION 50");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kLog, "#define OP_NAME \"" + op_name_ + "\"");
   tiling_head_.AddLine("");
   GE_ASSERT_SUCCESS(GenDurationCommonCode(), "Generate duration common code failed.");
   return af::SUCCESS;
 }
 
 af::Status TilingCodeGenImpl::GenToolFuncs() {
-  tiling_head_.AddLine("inline bool IsEqual(double a, double b)");
-  tiling_head_.AddLine("{");
-  tiling_head_.AddLine("    const double epsilon = 1e-8;");
-  tiling_head_.AddLine("    double abs = (a > b) ? (a - b) : (b - a);");
-  tiling_head_.AddLine("    return abs < epsilon;");
-  tiling_head_.AddLine("}");
-  tiling_head_.AddLine("template<typename T1, typename T2>");
-  tiling_head_.AddLine("inline double TernaryOp(bool cond, T1 a, T2 b)");
-  tiling_head_.AddLine("{");
-  tiling_head_.AddLine("    return static_cast<double>(cond ? a : b);");
-  tiling_head_.AddLine("}");
-  tiling_head_.AddLine("template<typename T>");
-  tiling_head_.AddLine("inline T Ceiling(T a)");
-  tiling_head_.AddLine("{");
-  tiling_head_.AddLine("    T value = static_cast<T>(static_cast<int64_t>(a));");
-  tiling_head_.AddLine("    return (IsEqual(value, a)) ? value : (value + 1);");
-  tiling_head_.AddLine("}");
-  tiling_head_.AddLine("template<typename T>");
-  tiling_head_.AddLine("inline T Floor(T a)");
-  tiling_head_.AddLine("{");
-  tiling_head_.AddLine("    return static_cast<T>(static_cast<int64_t>(a));");
-  tiling_head_.AddLine("}");
-  tiling_head_.AddLine("template<typename T1, typename T2>");
-  tiling_head_.AddLine("inline auto Mod(T1 a, T2 b)->decltype(a % b)");
-  tiling_head_.AddLine("{");
-  tiling_head_.AddLine("    return a % b;");
-  tiling_head_.AddLine("}");
-  tiling_head_.AddLine("template<typename T1, typename T2>");
-  tiling_head_.AddLine(
+  auto &solver_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kSolver].dependencies;
+  for (const auto &header : {"cmath", "cstdint", "type_traits"}) {
+    autofuse::RequireSystemHeader(solver_dependencies, header);
+  }
+  ge::CodePrinter solver_header;
+  solver_header.AddLine("inline bool IsEqual(double a, double b)");
+  solver_header.AddLine("{");
+  solver_header.AddLine("    const double epsilon = 1e-8;");
+  solver_header.AddLine("    double abs = (a > b) ? (a - b) : (b - a);");
+  solver_header.AddLine("    return abs < epsilon;");
+  solver_header.AddLine("}");
+  solver_header.AddLine("template<typename T1, typename T2>");
+  solver_header.AddLine("inline double TernaryOp(bool cond, T1 a, T2 b)");
+  solver_header.AddLine("{");
+  solver_header.AddLine("    return static_cast<double>(cond ? a : b);");
+  solver_header.AddLine("}");
+  solver_header.AddLine("template<typename T>");
+  solver_header.AddLine("inline T Ceiling(T a)");
+  solver_header.AddLine("{");
+  solver_header.AddLine("    T value = static_cast<T>(static_cast<int64_t>(a));");
+  solver_header.AddLine("    return (IsEqual(value, a)) ? value : (value + 1);");
+  solver_header.AddLine("}");
+  solver_header.AddLine("template<typename T>");
+  solver_header.AddLine("inline T Floor(T a)");
+  solver_header.AddLine("{");
+  solver_header.AddLine("    return static_cast<T>(static_cast<int64_t>(a));");
+  solver_header.AddLine("}");
+  solver_header.AddLine("template<typename T1, typename T2>");
+  solver_header.AddLine("inline auto Mod(T1 a, T2 b)->decltype(a % b)");
+  solver_header.AddLine("{");
+  solver_header.AddLine("    return a % b;");
+  solver_header.AddLine("}");
+  solver_header.AddLine("template<typename T1, typename T2>");
+  solver_header.AddLine(
       "inline auto Mod(T1 a, T2 b)->typename std::enable_if<std::is_floating_point<T1>::value || "
       "std::is_floating_point<T2>::value, decltype(std::fmod(a, b))>::type");
-  tiling_head_.AddLine("{");
-  tiling_head_.AddLine("    return std::fmod(a, b);");
-  tiling_head_.AddLine("}");
-  tiling_head_.AddLine("template<typename TI, typename TO>");
-  tiling_head_.AddLine("inline TO &RefToRef(TI &ptr) {");
-  tiling_head_.AddLine("  return *(reinterpret_cast<TO *>(reinterpret_cast<void *>(&ptr)));");
-  tiling_head_.AddLine("}");
-  tiling_head_.AddLine("");
+  solver_header.AddLine("{");
+  solver_header.AddLine("    return std::fmod(a, b);");
+  solver_header.AddLine("}");
+  solver_header.AddLine("template<typename TI, typename TO>");
+  solver_header.AddLine("inline TO &RefToRef(TI &ptr) {");
+  solver_header.AddLine("  return *(reinterpret_cast<TO *>(reinterpret_cast<void *>(&ptr)));");
+  solver_header.AddLine("}");
+  solver_header.AddLine("");
+  AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kSolver, solver_header.GetOutputStr());
+  tiling_head_.AddLine(solver_header.GetOutputStr());
   return af::SUCCESS;
 }
 
@@ -2055,15 +2270,22 @@ af::Status TilingCodeGenImpl::GenGetTilingDataFromCopy() {
 }
 
 af::Status TilingCodeGenImpl::GenFindCacheAndSaveCache() {
+  ge::CodePrinter state_header;
+  auto &state_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kState].dependencies;
+  for (const auto &header : {"array", "cstddef", "cstdint"}) {
+    autofuse::RequireSystemHeader(state_dependencies, header);
+  }
   // 当OperatorCache关闭但GroupCache开启时，需要在这里补齐GroupCache依赖的共享定义
   if (!config_.cache_enabled_at_compile_time) {
-    cache::OperatorLevelCacheGen::GenConstantDefs(tiling_head_, CollectInputVarsSize());
-    GE_ASSERT_SUCCESS(operator_level_cache_gen_->GenFixedSizeHashMapDef(tiling_head_),
+    cache::OperatorLevelCacheGen::GenConstantDefs(state_header, CollectInputVarsSize());
+    GE_ASSERT_SUCCESS(operator_level_cache_gen_->GenFixedSizeHashMapDef(state_header),
                       "Generate FixedSizeHashMap definition for Group cache failed.");
   }
 
-  GE_ASSERT_SUCCESS(group_level_cache_gen_->GenGroupCacheTypes(tiling_head_, cache_capacity_),
+  GE_ASSERT_SUCCESS(group_level_cache_gen_->GenGroupCacheTypes(state_header, cache_capacity_),
                     "Generate Group cache types failed.");
+  AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kState, state_header.GetOutputStr());
+  tiling_head_.AddLine(state_header.GetOutputStr());
 
   GE_ASSERT_SUCCESS(group_level_cache_gen_->GenGroupCacheFunctions(tiling_func_, config_.tiling_data_type_name),
                     "Generate Group cache functions failed.");
@@ -2611,11 +2833,14 @@ af::Status TilingCodeGenImpl::GenGetTilingKey() {
 af::Status TilingCodeGenImpl::GenPGOSearchTilingKey() {
   GE_ASSERT_SUCCESS(GenSearchAllTilingbyCaseId(), "Gen SearchAllTilingbyCaseId failed.");
   std::string params = config_.tiling_data_type_name + " &tiling_data" + ", int32_t tiling_case_id";
-  tiling_head_.AddLine(
-      "bool PGOSearchTilingKey(std::vector<AutofuseTilingDataPerf>& tiling_data_list, " + params +
-      ", AutofuseTilingData* output_tiling_data," + GenPgoTensorArgsDef() +
-      "void* stream, uint32_t workspaceSize, double& out_best_perf, std::unordered_map<int64_t, uint64_t> "
-      "&workspace_map, std::vector<uint32_t*> block_dim_vec={}, const SearchConfig *search_cfg=nullptr);");
+  const std::string output_tiling_data_type =
+      config_.is_autofuse ? "AutofuseTilingData" : config_.tiling_data_type_name;
+  AddAtomicHeaderLine(
+      autofuse::GeneratedHeaderId::kApi,
+      "bool PGOSearchTilingKey(std::vector<AutofuseTilingDataPerf>& tiling_data_list, " + params + ", " +
+          output_tiling_data_type + "* output_tiling_data," + GenPgoTensorArgsDef() +
+          "void* stream, uint32_t workspaceSize, double& out_best_perf, std::unordered_map<int64_t, uint64_t> "
+          "&workspace_map, std::vector<uint32_t*> block_dim_vec={}, const SearchConfig *search_cfg=nullptr);");
   tiling_func_.AddLine(
       "bool PGOSearchTilingKey(std::vector<AutofuseTilingDataPerf>& tiling_data_list, " + params +
       ", AutofuseTilingData* output_tiling_data," + GenPgoTensorArgsDef() +
@@ -2779,11 +3004,61 @@ af::Status TilingCodeGenImpl::GenHeaderCodesSummaryBody() {
 void TilingCodeGenImpl::GenTilingHeadMultiGroup() {
   std::string params = config_.tiling_data_type_name + " &tiling_data, int32_t tiling_case_id";
   if (config_.enable_autofuse_pgo || config_.is_inductor_scene) {
-    tiling_head_.AddLine(
-        "bool PGOSearchTilingKey(std::vector<AutofuseTilingDataPerf>& tiling_data_list, " + params +
-        ", AutofuseTilingData* output_tiling_data," + GenPgoTensorArgsDef() +
-        "void* stream, uint32_t workspaceSize, double& best_perf, const SearchConfig *search_cfg=nullptr);");
+    AddAtomicHeaderLine(
+        autofuse::GeneratedHeaderId::kApi,
+        "bool PGOSearchTilingKey(std::vector<AutofuseTilingDataPerf>& tiling_data_list, " + params + ", " +
+            config_.tiling_data_type_name + "* output_tiling_data," + GenPgoTensorArgsDef() +
+            "void* stream, uint32_t workspaceSize, double& best_perf, const SearchConfig *search_cfg=nullptr);");
   }
+}
+
+void TilingCodeGenImpl::InitTilingHeadCodeGeneration() {
+  tiling_head_.Reset();
+  ResetTranslationUnit();
+  tiling_data_.Reset();
+  atomic_headers_.clear();
+  auto &state_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kState].dependencies;
+  autofuse::RequireSystemHeader(state_dependencies, "cstdint");
+  auto &solver_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kSolver].dependencies;
+  for (const auto &header : {"functional", "string"}) {
+    autofuse::RequireSystemHeader(solver_dependencies, header);
+  }
+  auto &api_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kApi].dependencies;
+  autofuse::RequireSystemHeader(api_dependencies, "cstdint");
+  if (!is_uniq_group_ || config_.enable_autofuse_pgo || config_.is_inductor_scene) {
+    autofuse::RequireSystemHeader(api_dependencies, "unordered_map");
+  }
+  if (config_.enable_autofuse_pgo || config_.is_inductor_scene) {
+    autofuse::RequireSystemHeader(api_dependencies, "vector");
+  }
+  auto &log_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kLog].dependencies;
+  if (!AddSlogExtend().empty()) {
+    for (const auto &header : {"cinttypes", "cstdarg", "cstdint", "cstring", "securec.h", "stdlib.h", "sys/syscall.h",
+                               "unistd.h", "vector"}) {
+      autofuse::RequireSystemHeader(log_dependencies, header);
+    }
+    autofuse::RequireExternalHeader(log_dependencies, "dlog_pub.h");
+    autofuse::RequireExternalHeader(log_dependencies, "err_msg.h");
+  }
+  RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kLog);
+  RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kSolver);
+}
+
+void TilingCodeGenImpl::GenPgoSearchConfigDef() {
+  auto &pgo_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kPgo].dependencies;
+  for (const auto &header : {"array", "cstddef", "cstdint", "vector"}) {
+    autofuse::RequireSystemHeader(pgo_dependencies, header);
+  }
+  if (config_.is_autofuse) {
+    GenPgoHeaderCodesTail();
+  }
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kPgo, "struct SearchConfig {");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kPgo, "  bool ub_threshold_enabled = true;");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kPgo, "  double ub_threshold = 0.0;");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kPgo, "  bool corenum_threshold_enabled = true;");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kPgo, "  double corenum_threshold = 1.0;");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kPgo, "  bool enable_multicore_ub_tradeoff = true;");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kPgo, "};");
 }
 
 af::Status TilingCodeGenImpl::GenTilingHead(std::map<std::string, std::string> &tiling_res,
@@ -2793,10 +3068,7 @@ af::Status TilingCodeGenImpl::GenTilingHead(std::map<std::string, std::string> &
   FusedGraphNamespaceMap namespace_map;
   GE_ASSERT_SUCCESS(ObtainInnerParams(hardware_map, namespace_map));
   // 1、生成总TilingData
-  tiling_head_.Reset();
-  tiling_func_.Reset();
-  tiling_data_.Reset();
-  tiling_func_.AddLine("#include \"" + kDefaultTilingHeadFileName + "\"");
+  InitTilingHeadCodeGeneration();
   GE_ASSERT_SUCCESS(tiling_data_manager_.Init());
   if (config_.gen_tiling_data) {
     GE_ASSERT_SUCCESS(GenHeaderCodesHead(), "Generate tiling data head failed.");
@@ -2804,13 +3076,7 @@ af::Status TilingCodeGenImpl::GenTilingHead(std::map<std::string, std::string> &
   // 2、生成公共的TilingFunc代码
   GE_ASSERT_SUCCESS(GenMacroInclude(), "Generate macro include failed.");
   if (config_.enable_autofuse_pgo || config_.is_inductor_scene) {
-    tiling_head_.AddLine("struct SearchConfig {");
-    tiling_head_.AddLine("  bool ub_threshold_enabled = true;");
-    tiling_head_.AddLine("  double ub_threshold = 0.0;");
-    tiling_head_.AddLine("  bool corenum_threshold_enabled = true;");
-    tiling_head_.AddLine("  double corenum_threshold = 1.0;");
-    tiling_head_.AddLine("  bool enable_multicore_ub_tradeoff = true;");
-    tiling_head_.AddLine("};");
+    GenPgoSearchConfigDef();
   }
   tiling_head_.AddLine("namespace optiling{};");
   tiling_head_.AddLine("using namespace optiling;");
@@ -2827,20 +3093,24 @@ af::Status TilingCodeGenImpl::GenTilingHead(std::map<std::string, std::string> &
     GenTilingHeadMultiGroup();
   }
   if (config_.enable_autofuse_pgo) {
-    tiling_head_.AddLine(
-        "bool PGOByCoreNumSearchTilingKey(std::vector<AutofuseTilingData>& tiling_data_list, "
-        "AutofuseTilingData* tiling_data, uint32_t max_block_dim);");
+    AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi, "bool PGOByCoreNumSearchTilingKey(std::vector<" +
+                                                               config_.tiling_data_type_name + ">& tiling_data_list, " +
+                                                               config_.tiling_data_type_name +
+                                                               "* tiling_data, uint32_t max_block_dim);");
   }
   tiling_head_.AddLine("using namespace std;");
   // 生成ArrangeBlockOffsets函数声明
   GenArrangeBlockOffsetsDeclarations(namespace_map);
   GE_ASSERT_SUCCESS(GenCommonFrameWork(), "Generate common framework failed.");
   tiling_func_.AddLine("} // namespace optiling");
+  for (const auto &header : {"algorithm", "cmath", "cstddef", "cstdint", "functional", "utility", "vector"}) {
+    RequireTranslationUnitSystemHeader(header);
+  }
   if (config_.gen_tiling_data) {
     tiling_res[config_.tiling_data_type_name] += tiling_data_.GetOutputStr();
   }
   tiling_res[kTilingHeadIdentify] += tiling_head_.GetOutputStr();
-  tiling_res[kTilingSolverIdentify] += tiling_func_.GetOutputStr();
+  GE_ASSERT_SUCCESS(FinishTranslationUnit(kTilingSolverIdentify, tiling_res));
   return af::SUCCESS;
 }
 
@@ -2851,8 +3121,10 @@ void TilingCodeGenImpl::GenArrangeBlockOffsetsDeclarations(const FusedGraphNames
     for (const auto &result_id_and_groups : asc_graph_namespace_map) {
       const auto &result_id = result_id_and_groups.first;
       if (enable_group_parallels_[asc_graph_id][result_id]) {
-        tiling_head_.AddLine("void ArrangeBlockOffsetsAscGraph" + std::to_string(asc_graph_id) + "Result" +
-                             std::to_string(result_id) + "(AutofuseTilingData &t, uint32_t aiv_num);");
+        AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi,
+                            "void ArrangeBlockOffsetsAscGraph" + std::to_string(asc_graph_id) + "Result" +
+                                std::to_string(result_id) + "(" + config_.tiling_data_type_name +
+                                " &t, uint32_t aiv_num);");
       }
     }
   }
@@ -3381,6 +3653,7 @@ af::Status TilingCodeGenImpl::GenSingleGroupScheduleResult(
     if (hardware_iter != hardware_map.cend()) {
       GenSetHardwareCodes(group_info.second.second, hardware_iter->second);
       if (need_update_second_group_input_vars) {
+        RequireVarRelationSystemHeaders();
         std::string tiling_hyphens = check_cond.empty() ? "" : "&&";
         check_cond += (tiling_hyphens + "(" + input_vars_set_code + ")");
       }
@@ -3549,6 +3822,7 @@ void TilingCodeGenImpl::GenPGOByCoreNumGetScheduleResult(
         tiling_func_.AddLine(set_hardware_code.append(hardware_val));
       }
       if (need_update_second_group_input_vars) {
+        RequireVarRelationSystemHeaders();
         tiling_func_.AddLine(input_vars_set_code);
       }
       GenPGOByCoreNumDoTiling(group_info, group_index, asc_graph_id, impl_graph_id);
@@ -3602,6 +3876,7 @@ void TilingCodeGenImpl::GenFillOtherGroupsGetTiling(
         graph_info, var_relations_[asc_graph_id][impl_graph_id], group_iter.first, "      tiling_data.",
         {"valid_candidates[candidate_index - " + candidate_begin_name + "] = false;", "continue;"});
     if (need_update) {
+      RequireVarRelationSystemHeaders();
       tiling_func_.AddLine(input_vars_set_code);
     }
     tiling_func_.AddLine("      has_solution = " + group_iter.second.first + "::GetTiling(tiling_data." +
@@ -3687,6 +3962,7 @@ af::Status TilingCodeGenImpl::GenPGOScheduleGroupSearchEntry(
   auto [input_vars_set_code, need_update] = ProcessVarRelationsStatement(
       graph_info, var_relations_[asc_graph_id][impl_graph_id], group_info.first, "  tiling_data.", {"return true;"});
   if (need_update) {
+    RequireVarRelationSystemHeaders();
     tiling_func_.AddLine(input_vars_set_code);
   }
   const bool is_reuse =
@@ -3893,8 +4169,9 @@ af::Status TilingCodeGenImpl::GenEnableGroupParallelInvoke(size_t asc_graph_id,
 af::Status TilingCodeGenImpl::GenFusedScheduleResultsGetTilingDefine(const FusedGraphNamespaceMap &namespace_map) {
   tiling_func_.AddLine("bool GetTiling(" + config_.tiling_data_type_name +
                        " &tiling_data, int32_t tiling_case_id, double *perf) {");
-  tiling_head_.AddLine("bool GetTiling(" + config_.tiling_data_type_name +
-                       " &tiling_data, int32_t tiling_case_id, double *perf = nullptr);");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi,
+                      "bool GetTiling(" + config_.tiling_data_type_name +
+                          " &tiling_data, int32_t tiling_case_id, double *perf = nullptr);");
 
   // 添加算子级缓存逻辑
   GE_ASSERT_SUCCESS(cache::OperatorLevelCacheGen::GenInitAndQueryCacheCode(tiling_func_, tiling_model_info_, config_),
@@ -4046,8 +4323,9 @@ af::Status TilingCodeGenImpl::GenGetTilingForAllSchedulesResults(const uint32_t 
                                                                  const AscGraphNamepspaceMap &asc_graph_map) {
   tiling_func_.AddLine("bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data, " +
                        "int32_t tiling_case_id, double *perf) {");
-  tiling_head_.AddLine("bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data, " +
-                       "int32_t tiling_case_id, double *perf);");
+  AddAtomicHeaderLine(
+      autofuse::GeneratedHeaderId::kApi,
+      "bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data, " + "int32_t tiling_case_id, double *perf);");
   tiling_func_.AddLine("  (void)perf;");
   GE_ASSERT_SUCCESS(GenDurationBeginCode(TilingFuncDurationType::TILING_FUNC_DURATION_TOTAL, "  "),
                     "Generate begin code!");
@@ -4214,8 +4492,11 @@ void TilingCodeGenImpl::GenGetTilingFunctionSignature(const std::string &workspa
   }
   tiling_func_.AddLine("bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data" + workspace_define +
                        ", int32_t tiling_case_id" + cache_define_func + ", double *perf) {");
-  tiling_head_.AddLine("bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data" + workspace_define +
-                       ", int32_t tiling_case_id" + cache_define_head + ", double *perf = nullptr);");
+  const auto header_id =
+      cache_define_head.empty() ? autofuse::GeneratedHeaderId::kApi : autofuse::GeneratedHeaderId::kState;
+  AddAtomicHeaderLine(header_id, "bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data" +
+                                     workspace_define + ", int32_t tiling_case_id" + cache_define_head +
+                                     ", double *perf = nullptr);");
 }
 
 af::Status TilingCodeGenImpl::GenGetTilingFunctionBody(bool use_cache, bool is_tail, const std::string &cache_used) {
@@ -4431,10 +4712,23 @@ af::Status TilingCodeGenImpl::GenTilingTail(std::map<std::string, std::string> &
     cache_reuse_info_ = std::move(ext_params.cache_reuse_info);
     with_reuse_info_ = true;
   }
-  tiling_func_.Reset();
+  ResetTranslationUnit();
   tiling_head_.Reset();
   tiling_data_.Reset();
-  tiling_func_.AddLine("#include \"" + kDefaultTilingHeadFileName + "\"");
+  if (!is_uniq_group_) {
+    for (const auto &header :
+         {"algorithm", "array", "cfloat", "cstddef", "cstdint", "functional", "unordered_map", "utility", "vector"}) {
+      RequireTranslationUnitSystemHeader(header);
+    }
+    RequireTranslationUnitTilingDataHeader();
+    RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kState);
+    RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kLog);
+    RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kSolver);
+    RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kApi);
+    if (config_.enable_autofuse_pgo || config_.is_inductor_scene) {
+      RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kPgo);
+    }
+  }
   tiling_func_.AddLine("namespace optiling {");
 
   // 支持二次Tiling：定义全局变量（多Group场景）
@@ -4443,14 +4737,9 @@ af::Status TilingCodeGenImpl::GenTilingTail(std::map<std::string, std::string> &
 
   GE_ASSERT_SUCCESS(GenScheduleGroupTilingTail(), "Generate tiling data tail inner failed.");
 
-  // 生成TilingCacheContext静态成员变量定义（必须在cpp文件中，否则会链接错误）
-  if (config_.cache_enabled_at_compile_time) {
-    GE_ASSERT_SUCCESS(operator_level_cache_gen_->GenTilingCacheContextStaticDefs(tiling_func_),
-                      "Generate TilingCacheContext static defs failed.");
-  }
   tiling_head_.AddLine("} // namespace optiling");
   tiling_func_.AddLine("} // namespace optiling");
-  tiling_res[kTilingScheduleGroupTailIdentify] += tiling_func_.GetOutputStr();
+  GE_ASSERT_SUCCESS(FinishTranslationUnit(kTilingScheduleGroupTailIdentify, tiling_res));
   tiling_res[kTilingHeadIdentify] += tiling_head_.GetOutputStr();
   if (config_.gen_tiling_data) {
     tiling_res[config_.tiling_data_type_name] += tiling_data_.GetOutputStr();
@@ -4460,7 +4749,8 @@ af::Status TilingCodeGenImpl::GenTilingTail(std::map<std::string, std::string> &
 
 af::Status TilingCodeGenImpl::GenGetPerf() {
   tiling_func_.AddLine("double GetPerf(" + config_.tiling_data_type_name + " &tiling_data) {");
-  tiling_head_.AddLine("double GetPerf(" + config_.tiling_data_type_name + " &tiling_data);");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi,
+                      "double GetPerf(" + config_.tiling_data_type_name + " &tiling_data);");
   tiling_func_.AddLine(
       "  TilingCaseImplPtr tilingCaseImplPtr = GetTilingImplPtr(tiling_data.get_tiling_key(), "
       "tiling_data.get_block_dim());");
@@ -4471,7 +4761,8 @@ af::Status TilingCodeGenImpl::GenGetPerf() {
 
 af::Status TilingCodeGenImpl::GenGetSummary() {
   tiling_func_.AddLine("void GetSummary(" + config_.tiling_data_type_name + " &tiling_data) {");
-  tiling_head_.AddLine("void GetSummary(" + config_.tiling_data_type_name + " &tiling_data);");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi,
+                      "void GetSummary(" + config_.tiling_data_type_name + " &tiling_data);");
   tiling_func_.AddLine(
       "  TilingCaseImplPtr tilingCaseImplPtr = GetTilingImplPtr(tiling_data.get_tiling_key(), "
       "tiling_data.get_block_dim());");
@@ -4506,6 +4797,93 @@ af::Status TilingCodeGenImpl::GenTilingKeyFunc() {
   return af::SUCCESS;
 }
 
+af::Status TilingCodeGenImpl::InitTilingGeneration(const std::unordered_map<std::string, std::string> &cache_reuse_info,
+                                                   uint32_t cache_capacity) {
+  cache_capacity_ = cache_capacity;
+  if (!cache_reuse_info.empty()) {
+    cache_reuse_info_ = cache_reuse_info;
+    with_reuse_info_ = true;
+  }
+  tiling_head_.Reset();
+  ResetTranslationUnit();
+  tiling_data_.Reset();
+  GE_ASSERT_TRUE(!tiling_model_info_.empty());
+  GE_ASSERT_SUCCESS(tiling_data_manager_.Init());
+  GE_ASSERT_SUCCESS(GenScheduleGroupTilingHead());
+  return af::SUCCESS;
+}
+
+void TilingCodeGenImpl::GenGroupNamespaceHead(const ScheduleGroupIdent &cur_ident) {
+  tiling_func_.AddLine("namespace optiling{");
+  // 支持二次Tiling：extern声明全局变量（定义在第一个namespace optiling中）
+  tiling_func_.AddLine("// 支持二次Tiling：全局变量，用于传递调整后的核数比例");
+  tiling_func_.AddLine("extern thread_local double g_secondary_tiling_ratio;");
+  if (!is_uniq_group_) {
+    const std::string tiling_data_forward_decl = "struct " + config_.tiling_data_type_name + ";\n";
+    if (config_.is_autofuse) {
+      const std::string global_forward_decl =
+          "}  // namespace optiling\n" + tiling_data_forward_decl + "namespace optiling {\n";
+      AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kState, global_forward_decl);
+      AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kApi, global_forward_decl);
+    } else {
+      AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kState, tiling_data_forward_decl);
+      AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kApi, tiling_data_forward_decl);
+    }
+    autofuse::RequireSystemHeader(atomic_headers_[autofuse::GeneratedHeaderId::kState].dependencies, "unordered_map");
+    AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi, "namespace " + cur_ident.GetGroupPrefix() + " {");
+    AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kState, "namespace " + cur_ident.GetGroupPrefix() + " {\n");
+    tiling_func_.AddLine("namespace " + cur_ident.GetGroupPrefix() + " {");
+  }
+}
+
+void TilingCodeGenImpl::RequireReuseGroupTranslationUnitHeaders() {
+  for (const auto &header : {"cstdint", "unordered_map"}) {
+    RequireTranslationUnitSystemHeader(header);
+  }
+  RequireTranslationUnitTilingDataHeader();
+  RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kState);
+  RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kSolver);
+  RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kApi);
+}
+
+void TilingCodeGenImpl::RequireGroupTranslationUnitHeaders() {
+  for (const auto &header : {"algorithm", "cstdint", "map", "memory", "string", "unordered_map", "vector"}) {
+    RequireTranslationUnitSystemHeader(header);
+  }
+  if (hardware_has_ub_) {
+    RequireTranslationUnitSystemHeader("cmath");
+  }
+  if (with_reuse_info_ || config_.cache_enabled_at_compile_time) {
+    RequireTranslationUnitSystemHeader("array");
+  }
+  if (config_.cache_enabled_at_compile_time) {
+    RequireTranslationUnitSystemHeader("cstring");
+  }
+  RequireTranslationUnitTilingDataHeader();
+  RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kState);
+  RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kLog);
+  RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kSolver);
+  RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kApi);
+  if (config_.enable_autofuse_pgo || config_.is_inductor_scene) {
+    for (const auto &header : {"cfloat", "cstddef", "cstdlib", "new"}) {
+      RequireTranslationUnitSystemHeader(header);
+    }
+    RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kPgo);
+  }
+}
+
+af::Status TilingCodeGenImpl::FinishGroupTiling(const ScheduleGroupIdent &cur_ident,
+                                                std::map<std::string, std::string> &tiling_res) {
+  tiling_func_.AddLine("} // namespace optiling");
+  if (config_.gen_tiling_data) {
+    tiling_res[config_.tiling_data_type_name] += tiling_data_.GetOutputStr();
+  }
+  tiling_res[cur_ident.GetGroupPrefixSnakeCase()].clear();
+  GE_ASSERT_SUCCESS(FinishTranslationUnit(cur_ident.GetGroupPrefixSnakeCase(), tiling_res));
+  tiling_res[kTilingHeadIdentify] += tiling_head_.GetOutputStr();
+  return af::SUCCESS;
+}
+
 af::Status TilingCodeGenImpl::GenTiling(std::map<std::string, std::string> &tiling_res,
                                         std::unordered_map<std::string, std::string> cache_reuse_info,
                                         uint32_t cache_capacity, const EnableGroupParallels &enable_group_parallels) {
@@ -4513,50 +4891,31 @@ af::Status TilingCodeGenImpl::GenTiling(std::map<std::string, std::string> &tili
   if (config_.enable_autofuse_pgo || config_.is_inductor_scene) {
     GE_ASSERT_SUCCESS(GenEnableGroupParallelPgoInvoke("autofuse_tiling_data", true, "      ", arrange_code_));
   }
-  cache_capacity_ = cache_capacity;
-  if (!(cache_reuse_info.empty())) {
-    cache_reuse_info_ = cache_reuse_info;
-    with_reuse_info_ = true;
-  }
-  // make sure input model info is valid
-  tiling_head_.Reset();
-  tiling_func_.Reset();
-  tiling_data_.Reset();
-  GE_ASSERT_TRUE(!tiling_model_info_.empty());
-  GE_ASSERT_SUCCESS(tiling_data_manager_.Init());
-  GE_ASSERT_SUCCESS(GenScheduleGroupTilingHead());
+  GE_ASSERT_SUCCESS(InitTilingGeneration(cache_reuse_info, cache_capacity));
   const auto &cur_ident = tiling_model_info_[0].schedule_group_ident;
-  tiling_func_.AddLine("#include \"" + kDefaultTilingHeadFileName + "\"");
-  tiling_func_.AddLine("namespace optiling{");
-  // 支持二次Tiling：extern声明全局变量（定义在第一个namespace optiling中）
-  tiling_func_.AddLine("// 支持二次Tiling：全局变量，用于传递调整后的核数比例");
-  tiling_func_.AddLine("extern thread_local double g_secondary_tiling_ratio;");
-  if (!is_uniq_group_) {
-    tiling_head_.AddLine("namespace " + cur_ident.GetGroupPrefix() + " {");
-    tiling_func_.AddLine("namespace " + cur_ident.GetGroupPrefix() + " {");
-  }
+  GenGroupNamespaceHead(cur_ident);
   GELOGD("Generate tiling code for %s of %s reuse_ident is %s.", cur_ident.GetGroupPrefix().c_str(), op_name_.c_str(),
          tiling_model_info_[0].reuse_schedule_group->reuse_group_ident.GetGroupPrefix().c_str());
   if (tiling_model_info_[0].reuse_schedule_group->IsReuseGroup(cur_ident)) {
+    RequireReuseGroupTranslationUnitHeaders();
     if (config_.enable_autofuse_pgo) {
+      RequireTranslationUnitSystemHeader("cfloat");
+      RequireTranslationUnitSystemHeader("vector");
+      RequireTranslationUnitGeneratedHeader(autofuse::GeneratedHeaderId::kPgo);
       GE_ASSERT_SUCCESS(GenPGOReuseGroupTilingWrapper(), "Generate func call entrance failed.");
     }
     return GenReuseGroupTilingWrapper(tiling_res);
   }
+  RequireGroupTranslationUnitHeaders();
   GE_ASSERT_SUCCESS(GenTilingKeyFunc());
   GE_ASSERT_SUCCESS(GenGetPerf(), "Generate getperf failed.");
   if (!is_uniq_group_) {
     GE_ASSERT_SUCCESS(GenGetSummary(), "Generate getsummary failed.");
-    tiling_head_.AddLine("} // namespace " + cur_ident.GetGroupPrefix());
+    AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kState, "} // namespace " + cur_ident.GetGroupPrefix() + "\n");
+    AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi, "} // namespace " + cur_ident.GetGroupPrefix());
     tiling_func_.AddLine("} // namespace " + cur_ident.GetGroupPrefix());
   }
-  tiling_func_.AddLine("} // namespace optiling");
-  if (config_.gen_tiling_data) {
-    tiling_res[config_.tiling_data_type_name] += tiling_data_.GetOutputStr();
-  }
-  tiling_res[cur_ident.GetGroupPrefixSnakeCase()] = tiling_func_.GetOutputStr();
-  tiling_res[kTilingHeadIdentify] += tiling_head_.GetOutputStr();
-  return af::SUCCESS;
+  return FinishGroupTiling(cur_ident, tiling_res);
 }
 
 af::Status TilingCodeGenImpl::GenReuseGroupTilingWrapperGetTiling(
@@ -4566,16 +4925,18 @@ af::Status TilingCodeGenImpl::GenReuseGroupTilingWrapperGetTiling(
     tiling_func_.AddLine("bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data, " +
                          (is_uniq_group_ ? "" : "std::unordered_map<int64_t, uint64_t> &workspace_map, ") +
                          "int32_t tiling_case_id, " + reuse_prefix + "::GroupLevelCache* cache) {");
-    tiling_head_.AddLine("bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data, " +
-                         (is_uniq_group_ ? "" : "std::unordered_map<int64_t, uint64_t> &workspace_map, ") +
-                         "int32_t tiling_case_id, " + reuse_prefix + "::GroupLevelCache* cache = nullptr);");
+    AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kState,
+                        "bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data, " +
+                            (is_uniq_group_ ? "" : "std::unordered_map<int64_t, uint64_t> &workspace_map, ") +
+                            "int32_t tiling_case_id, " + reuse_prefix + "::GroupLevelCache* cache = nullptr);");
   } else {
     tiling_func_.AddLine("bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data, " +
                          (is_uniq_group_ ? "" : "std::unordered_map<int64_t, uint64_t> &workspace_map, ") +
                          "int32_t tiling_case_id) {");
-    tiling_head_.AddLine("bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data, " +
-                         (is_uniq_group_ ? "" : "std::unordered_map<int64_t, uint64_t> &workspace_map, ") +
-                         "int32_t tiling_case_id);");
+    AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi,
+                        "bool GetTiling(" + config_.tiling_data_type_name + " &tiling_data, " +
+                            (is_uniq_group_ ? "" : "std::unordered_map<int64_t, uint64_t> &workspace_map, ") +
+                            "int32_t tiling_case_id);");
   }
   auto reuse_tiling_data =
       "  auto reuse_tiling_data = RefToRef<" + cur_prefix + "TilingData, " + reuse_prefix + "TilingData>(tiling_data);";
@@ -4595,7 +4956,8 @@ af::Status TilingCodeGenImpl::GenReuseGroupTilingWrapperGetPerf(
     const std::string &cur_prefix, const std::string &reuse_prefix, const ReuseScheduleGroupInfo &reuse_info,
     std::map<ScheduleGroupIdent, ReuseScheduleGroupInfo>::const_iterator iter) {
   tiling_func_.AddLine("double GetPerf(" + config_.tiling_data_type_name + " &tiling_data) {");
-  tiling_head_.AddLine("double GetPerf(" + config_.tiling_data_type_name + " &tiling_data);");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi,
+                      "double GetPerf(" + config_.tiling_data_type_name + " &tiling_data);");
   auto reuse_tiling_data =
       "  auto reuse_tiling_data = RefToRef<" + cur_prefix + "TilingData, " + reuse_prefix + "TilingData>(tiling_data);";
   tiling_func_.AddLine(reuse_tiling_data);
@@ -4609,7 +4971,8 @@ af::Status TilingCodeGenImpl::GenReuseGroupTilingWrapperGetSummary(
     const std::string &cur_prefix, const std::string &reuse_prefix, const ReuseScheduleGroupInfo &reuse_info,
     std::map<ScheduleGroupIdent, ReuseScheduleGroupInfo>::const_iterator iter) {
   tiling_func_.AddLine("void GetSummary(" + config_.tiling_data_type_name + " &tiling_data) {");
-  tiling_head_.AddLine("void GetSummary(" + config_.tiling_data_type_name + " &tiling_data);");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi,
+                      "void GetSummary(" + config_.tiling_data_type_name + " &tiling_data);");
   auto reuse_tiling_data =
       "  auto reuse_tiling_data = RefToRef<" + cur_prefix + "TilingData, " + reuse_prefix + "TilingData>(tiling_data);";
   tiling_func_.AddLine(reuse_tiling_data);
@@ -4643,13 +5006,15 @@ af::Status TilingCodeGenImpl::GenReuseGroupTilingWrapper(std::map<std::string, s
   GE_ASSERT_SUCCESS(GenReuseGroupTilingWrapperGetPerf(cur_prefix, reuse_prefix, reuse_info, iter));
   // Gen GetSummary
   GE_ASSERT_SUCCESS(GenReuseGroupTilingWrapperGetSummary(cur_prefix, reuse_prefix, reuse_info, iter));
-  tiling_head_.AddLine("} // namespace " + cur_prefix);
+  AppendAtomicHeaderBody(autofuse::GeneratedHeaderId::kState, "} // namespace " + cur_prefix + "\n");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi, "} // namespace " + cur_prefix);
   tiling_func_.AddLine("} // namespace " + cur_prefix);
   tiling_func_.AddLine("} // namespace optiling");
   if (config_.gen_tiling_data) {
     tiling_res[config_.tiling_data_type_name] += tiling_data_.GetOutputStr();
   }
-  tiling_res[cur_ident.GetGroupPrefixSnakeCase()] = tiling_func_.GetOutputStr();
+  tiling_res[cur_ident.GetGroupPrefixSnakeCase()].clear();
+  GE_ASSERT_SUCCESS(FinishTranslationUnit(cur_ident.GetGroupPrefixSnakeCase(), tiling_res));
   tiling_res[kTilingHeadIdentify] += tiling_head_.GetOutputStr();
   GELOGD("Generate reuse group tiling wrapper for %s of %s success.", cur_prefix.c_str(), op_name_.c_str());
   return af::SUCCESS;
@@ -4668,8 +5033,8 @@ af::Status TilingCodeGenImpl::GenPGOReuseGroupTilingWrapper() {
   // Gen PGOProfileReuseGroup: reuse group does not search, only profiles by copying from primary group
   std::string pgo_profile_sig =
       std::string("bool PGOProfileReuseGroup(std::vector<AutofuseTilingDataPerf>& tiling_data_list, ") +
-      "AutofuseTilingData* output_tiling_data, void* stream, uint32_t workspaceSize, double& best_perf)";
-  tiling_head_.AddLine(pgo_profile_sig + ";");
+      config_.tiling_data_type_name + "* output_tiling_data, void* stream, uint32_t workspaceSize, double& best_perf)";
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi, pgo_profile_sig + ";");
   tiling_func_.AddLine(pgo_profile_sig + " {");
   tiling_func_.AddLine("  double cur_perf = DBL_MAX;");
   tiling_func_.AddLine("  AutofuseTilingData autofuse_tiling_data_tmp = *output_tiling_data;");

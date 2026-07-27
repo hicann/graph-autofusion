@@ -12,6 +12,7 @@
 #include "codegen_tiling_data.h"
 
 #include <algorithm>
+#include <initializer_list>
 #include <string>
 #include <cstdlib>
 #include <fstream>
@@ -36,6 +37,7 @@
 #include "backend/backend_spec.h"
 #include "common/ascgraph_info_complete.h"
 #include "codegen_tiling_cube_wrapper.h"
+#include "common/tiling_source_dependencies.h"
 
 namespace codegen {
 using optimize::AscGraphInfoComplete;
@@ -71,11 +73,225 @@ bool CheckTilingHeadersValid(const std::map<std::string, std::string> &tiling_fi
   return true;
 }
 
-void AppendCommonTilingHeaders(std::stringstream &ss) {
-  ss << kTilingHeadInclude << std::endl;
-  ss << kTilingHeadCceKtTestGuard << std::endl;
-  ss << kTilingHeadTilingContext << std::endl;
-  ss << kTilingHeadEndGuard << std::endl;
+void RequireSystemHeaders(autofuse::SourceDependencies &dependencies, std::initializer_list<const char *> headers) {
+  for (const auto *header : headers) {
+    autofuse::RequireSystemHeader(dependencies, header);
+  }
+}
+
+void RequireEntrySystemHeaders(autofuse::SourceDependencies &dependencies, bool is_inductor, bool is_cv,
+                               bool is_multi_group) {
+  if (is_inductor && is_cv) {
+    RequireSystemHeaders(dependencies, {"algorithm", "cfloat", "cstddef", "cstdint", "cstring", "ostream", "sstream",
+                                        "string", "vector"});
+  } else if (is_inductor) {
+    RequireSystemHeaders(dependencies, {"algorithm", "cfloat", "cmath", "cstddef", "cstdint", "map", "ostream",
+                                        "sstream", "string", "unordered_map", "vector"});
+  } else {
+    RequireSystemHeaders(dependencies, {"algorithm", "cfloat", "cmath", "cstddef", "cstdint", "cstdlib", "map",
+                                        "ostream", "sstream", "string", "unordered_map", "vector"});
+  }
+  if (is_multi_group) {
+    autofuse::RequireSystemHeader(dependencies, "utility");
+  }
+}
+
+bool ImplGraphHasWorkspace(const ascir::ImplGraph &graph) {
+  auto nodes = graph.GetAllNodes();
+  for (const auto &node : nodes) {
+    if (IsOps<Workspace>(node)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ScheduleGroupHasWorkspace(const ascir::ScheduleGroup &group) {
+  return std::any_of(group.impl_graphs.begin(), group.impl_graphs.end(), ImplGraphHasWorkspace);
+}
+
+bool ScheduledResultHasWorkspace(const ascir::ScheduledResult &result) {
+  return std::any_of(result.schedule_groups.begin(), result.schedule_groups.end(), ScheduleGroupHasWorkspace);
+}
+
+bool EntryWorkspaceUsesSolver(const ascir::FusedScheduledResult &fused_schedule_result) {
+  for (const auto &scheduled_results : fused_schedule_result.node_idx_to_scheduled_results) {
+    if (std::any_of(scheduled_results.begin(), scheduled_results.end(), ScheduledResultHasWorkspace)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+struct EntryTranslationUnitOptions {
+  bool is_inductor;
+  bool is_cv;
+  bool include_pgo;
+  bool enable_pgo_runtime;
+  bool include_solver;
+  bool is_multi_group;
+  bool include_cube_wrapper = false;
+};
+
+EntryTranslationUnitOptions GetInductorEntryTranslationUnitOptions(
+    const ascir::FusedScheduledResult &fused_schedule_result, bool is_cv, bool enable_pgo_runtime) {
+  return {true,
+          is_cv,
+          true,
+          enable_pgo_runtime,
+          enable_pgo_runtime || EntryWorkspaceUsesSolver(fused_schedule_result),
+          !ascgen_utils::IsSingleGroup(fused_schedule_result),
+          is_cv};
+}
+
+std::string RenderEntryTranslationUnit(const std::string &body, const EntryTranslationUnitOptions &options) {
+  autofuse::GeneratedCode code;
+  code.body = "using namespace optiling;\n\n" + body;
+  RequireEntrySystemHeaders(code.dependencies, options.is_inductor, options.is_cv, options.is_multi_group);
+  autofuse::RequireGeneratedHeader(code.dependencies, autofuse::GeneratedHeaderId::kTilingData);
+  autofuse::RequireGeneratedHeader(code.dependencies, autofuse::GeneratedHeaderId::kLog);
+  if (options.include_pgo) {
+    autofuse::RequireGeneratedHeader(code.dependencies, autofuse::GeneratedHeaderId::kPgo);
+  }
+  if (options.enable_pgo_runtime) {
+    RequireSystemHeaders(code.dependencies, {"fstream", "securec.h", "unordered_set"});
+  }
+  if (options.include_solver) {
+    autofuse::RequireGeneratedHeader(code.dependencies, autofuse::GeneratedHeaderId::kSolver);
+  }
+  autofuse::RequireGeneratedHeader(code.dependencies, autofuse::GeneratedHeaderId::kApi);
+  if (!options.is_inductor) {
+    autofuse::RequireExternalHeaderUnlessCceKtTest(code.dependencies, "exe_graph/runtime/tiling_context.h");
+    autofuse::RequireExternalHeaderUnlessCceKtTest(code.dependencies, "tiling/platform/platform_ascendc.h");
+  }
+  if (options.is_cv && !options.is_inductor) {
+    autofuse::RequireExternalHeader(code.dependencies, "autofuse_cube_tiling_data.h");
+  }
+  if (options.include_cube_wrapper) {
+    autofuse::RequireExternalHeader(code.dependencies, "cube_kernel_tiling_wrapper.h");
+  }
+  std::string output;
+  GE_ASSERT_SUCCESS(autofuse::RenderTranslationUnit(code, output));
+  return output;
+}
+
+void AddFallbackHeader(std::map<std::string, std::string> &headers, const std::string &key, const std::string &guard,
+                       autofuse::GeneratedCode code) {
+  std::string output;
+  if (autofuse::RenderGeneratedHeader(code, guard, output) != af::SUCCESS) {
+    return;
+  }
+  headers.emplace(key, std::move(output));
+}
+
+std::string GetFallbackSolverMacros() {
+  return "#define Max(a, b) ((double)(a) > (double)(b) ? (a) : (b))\n"
+         "#define Min(a, b) ((double)(a) < (double)(b) ? (a) : (b))\n"
+         "#define Abs(a) ((double)(a) >= 0 ? (a) : -(a))\n"
+         "#define Log(a) (log((double)(a)))\n"
+         "#define Pow(a, b) pow(a, b)\n"
+         "#define Rational(a, b) ((double)(a) / (double)(b))\n"
+         "#define ExpectEq(a, b) ((a) == (b))\n"
+         "#define ExpectNe(a, b) ((a) != (b))\n"
+         "#define ExpectLe(a, b) ((a) <= (b))\n"
+         "#define ExpectLt(a, b) ((a) < (b))\n"
+         "#define LogicAnd(a, b) ((a) && (b))\n"
+         "#define LogicOr(a, b) ((a) || (b))\n"
+         "#define True true\n#define False false\n#define MAX_SOLUTION 50\n";
+}
+
+std::string GetFallbackSolverFunctions() {
+  return R"(namespace optiling {
+inline bool IsEqual(double a, double b) {
+  constexpr double kEpsilon = 1e-8;
+  double abs = (a > b) ? (a - b) : (b - a);
+  return abs < kEpsilon;
+}
+template <typename T1, typename T2>
+inline double TernaryOp(bool cond, T1 a, T2 b) {
+  return static_cast<double>(cond ? a : b);
+}
+template <typename T>
+inline T Ceiling(T a) {
+  T value = static_cast<T>(static_cast<int64_t>(a));
+  return IsEqual(value, a) ? value : (value + 1);
+}
+template <typename T>
+inline T Floor(T a) {
+  return static_cast<T>(static_cast<int64_t>(a));
+}
+template <typename T1, typename T2>
+inline auto Mod(T1 a, T2 b) -> decltype(a % b) {
+  return a % b;
+}
+template <typename T1, typename T2>
+inline auto Mod(T1 a, T2 b) -> typename std::enable_if<std::is_floating_point<T1>::value ||
+                                                       std::is_floating_point<T2>::value,
+                                                   decltype(std::fmod(a, b))>::type {
+  return std::fmod(a, b);
+}
+template <typename TI, typename TO>
+inline TO &RefToRef(TI &value) {
+  return *(reinterpret_cast<TO *>(reinterpret_cast<void *>(&value)));
+}
+}  // namespace optiling
+)";
+}
+
+void EnsureFallbackAtomicHeaders(std::map<std::string, std::string> &headers, const std::string &pgo_body,
+                                 const std::string &api_body) {
+  if (headers.find(kTilingStateHeaderIdentify) != headers.end()) {
+    return;
+  }
+  autofuse::GeneratedCode state;
+  state.body = "namespace optiling {}\n";
+  AddFallbackHeader(headers, kTilingStateHeaderIdentify, "__AUTOFUSE_TILING_FUNC_STATE_H__", std::move(state));
+
+  autofuse::GeneratedCode log;
+  log.body =
+      "#define OP_LOGD(name, fmt, ...)\n#define OP_LOGI(name, fmt, ...)\n"
+      "#define OP_LOGW(name, fmt, ...)\n#define OP_LOGE(name, fmt, ...)\n#define OP_NAME \"Autofuse\"\n";
+  AddFallbackHeader(headers, kTilingLogHeaderIdentify, "__AUTOFUSE_TILING_FUNC_LOG_H__", std::move(log));
+
+  autofuse::GeneratedCode solver;
+  for (const auto &header : {"cmath", "cstdint", "type_traits"}) {
+    autofuse::RequireSystemHeader(solver.dependencies, header);
+  }
+  solver.body = GetFallbackSolverMacros() + GetFallbackSolverFunctions();
+  AddFallbackHeader(headers, kTilingSolverHeaderIdentify, "__AUTOFUSE_TILING_FUNC_SOLVER_H__", std::move(solver));
+
+  autofuse::GeneratedCode api;
+  autofuse::RequireSystemHeader(api.dependencies, "cstdint");
+  if (!pgo_body.empty()) {
+    autofuse::RequireSystemHeader(api.dependencies, "unordered_map");
+    autofuse::RequireSystemHeader(api.dependencies, "vector");
+  }
+  api.body =
+      "struct AutofuseTilingData;\nstruct AutofuseTilingDataPerf;\nstruct PgoTensorArgs;\n"
+      "namespace optiling {\nstruct SearchConfig;\n" +
+      api_body + "}  // namespace optiling\n";
+  AddFallbackHeader(headers, kTilingApiHeaderIdentify, "__AUTOFUSE_TILING_FUNC_API_H__", std::move(api));
+  if (!pgo_body.empty()) {
+    autofuse::GeneratedCode pgo;
+    for (const auto &header : {"array", "cstddef", "cstdint", "vector"}) {
+      autofuse::RequireSystemHeader(pgo.dependencies, header);
+    }
+    pgo.body = "struct AutofuseTilingData;\nstruct AutofuseTilingDataPerf;\n" + pgo_body;
+    AddFallbackHeader(headers, kTilingPgoHeaderIdentify, "__AUTOFUSE_TILING_FUNC_PGO_H__", std::move(pgo));
+  }
+}
+
+void AddCvDeclarationsToApiHeader(std::map<std::string, std::string> &headers) {
+  auto iter = headers.find(kTilingApiHeaderIdentify);
+  if (iter == headers.end()) {
+    return;
+  }
+  const auto guard_end = iter->second.rfind("#endif");
+  if (guard_end == std::string::npos) {
+    return;
+  }
+  iter->second.insert(guard_end,
+                      "int32_t get_g_basen_basem_align();\nvoid set_g_basen_basem_align(int32_t value);\n\n");
 }
 
 void AppendCvSafetyAivOnlyModeDef(std::stringstream &ss, bool is_batch) {
@@ -336,14 +552,8 @@ std::map<std::string, std::string> TilingLib::GenerateForInductor(
       GetTilingHeaders(elemwise_schedule_result, true, is_cube_fused_scheduled);
   GE_CHK_BOOL_RET_STATUS_NOLOG(CheckTilingHeadersValid(tiling_file_name_to_content), tiling_file_name_to_content);
   std::stringstream ss;
-  if (is_cube_fused_scheduled) {
-    AppendCVFusionHeaders(ss, false, true);
-  } else {
-    AppendCommonTilingHeaders(ss);
-  }
 
-  ss << "#pragma GCC diagnostic push\n";
-  ss << "#pragma GCC diagnostic ignored \"-Wreturn-type-c-linkage\"\n";
+  ss << "#pragma GCC diagnostic push\n" << "#pragma GCC diagnostic ignored \"-Wreturn-type-c-linkage\"\n";
   ss << "extern \"C\" std::string GetTilingDataRepr(const AutofuseTilingData *tiling_data);\n";
   ss << "#pragma GCC diagnostic pop\n";
   ss << TilingFuncDefForInductor(fused_schedule_result, elemwise_schedule_result) << std::endl;
@@ -370,9 +580,13 @@ std::map<std::string, std::string> TilingLib::GenerateForInductor(
   ss << TilingData("Autofuse").GenerateConst(fused_schedule_result) << std::endl;
   if (is_cube_fused_scheduled) {
     tiling_file_name_to_content[kCubeKernelTilingWrapperHpp] = kCubeKernelTilingWrapperHppValue;
-    tiling_file_name_to_content[kCubeKernelTilingWrapperCpp] = kCubeKernelTilingWrapperCppValue;
+    tiling_file_name_to_content[kCubeKernelTilingWrapperCpp] = kCubeKernelTilingWrapperInclude;
+    tiling_file_name_to_content[kCubeKernelTilingWrapperCpp] += kCubeKernelTilingWrapperCppValue;
   }
-  tiling_file_name_to_content[kTilingDefAndConstIdentify] += ss.str();
+  const std::string entry_body = tiling_file_name_to_content[kTilingDefAndConstIdentify] + ss.str();
+  const auto entry_options =
+      GetInductorEntryTranslationUnitOptions(elemwise_schedule_result, is_cube_fused_scheduled, enable_autofuse_pgo_);
+  tiling_file_name_to_content[kTilingDefAndConstIdentify] = RenderEntryTranslationUnit(entry_body, entry_options);
 
   return tiling_file_name_to_content;
 }
@@ -1896,19 +2110,6 @@ void set_g_basen_basem_align(int32_t value) {
   return result;
 }
 
-void TilingLib::AppendCVFusionHeaders(std::stringstream &ss, bool is_static, bool is_inductor) const {
-  ss << kTilingHeadInclude << std::endl;
-  if (!is_inductor) {
-    ss << kCubeTilingHeadInclude << std::endl;
-    if (!is_static) {
-      ss << kCubeKernelTilingWrapperInclude << std::endl;
-    }
-  }
-  ss << kTilingHeadCceKtTestGuard << std::endl;
-  ss << kTilingHeadTilingContext << std::endl;
-  ss << kTilingHeadEndGuard << std::endl;
-}
-
 std::map<std::string, std::string> TilingLib::GenerateCVFusion(const ascir::FusedScheduledResult &fused_schedule_result,
                                                                const std::map<std::string, std::string> &shape_info,
                                                                const std::string &pgo_dir,
@@ -1928,8 +2129,6 @@ std::map<std::string, std::string> TilingLib::GenerateCVFusion(const ascir::Fuse
   tiling_file_name_to_content = GetTilingHeaders(elemwise_schedule_result, false, true);
   GE_CHK_BOOL_RET_STATUS_NOLOG(CheckTilingHeadersValid(tiling_file_name_to_content), tiling_file_name_to_content);
 
-  std::stringstream ss;
-  AppendCVFusionHeaders(ss, is_static);
   std::map<std::string, std::string> result;
   if (is_static) {
     result = GenerateCVFusionStatic(fused_schedule_result, elemwise_schedule_result, shape_info, pgo_dir, core_num);
@@ -1937,7 +2136,17 @@ std::map<std::string, std::string> TilingLib::GenerateCVFusion(const ascir::Fuse
     result = GenerateCVFusionDynamic(fused_schedule_result, elemwise_schedule_result, shape_info, pgo_dir, core_num);
   }
 
-  tiling_file_name_to_content[kTilingDefAndConstIdentify] += ss.str() + result[kTilingDefAndConstIdentify];
+  const std::string entry_body =
+      tiling_file_name_to_content[kTilingDefAndConstIdentify] + result[kTilingDefAndConstIdentify];
+  const EntryTranslationUnitOptions entry_options = {
+      false,
+      true,
+      enable_autofuse_pgo_,
+      enable_autofuse_pgo_,
+      enable_autofuse_pgo_ || EntryWorkspaceUsesSolver(elemwise_schedule_result),
+      !ascgen_utils::IsSingleGroup(elemwise_schedule_result),
+      !is_static};
+  tiling_file_name_to_content[kTilingDefAndConstIdentify] = RenderEntryTranslationUnit(entry_body, entry_options);
   if (!is_static) {
     tiling_file_name_to_content[kCubeKernelTilingWrapperHpp] = result[kCubeKernelTilingWrapperHpp];
     tiling_file_name_to_content[kCubeKernelTilingWrapperCpp] = result[kCubeKernelTilingWrapperCpp];
@@ -1956,7 +2165,6 @@ std::map<std::string, std::string> TilingLib::Generate(const ascir::FusedSchedul
   std::map<std::string, std::string> tiling_file_name_to_content = GetTilingHeaders(fused_schedule_result, false);
   GE_CHK_BOOL_RET_STATUS_NOLOG(CheckTilingHeadersValid(tiling_file_name_to_content), tiling_file_name_to_content);
   std::stringstream ss;
-  AppendCommonTilingHeaders(ss);
   ss << TilingFuncDef(fused_schedule_result, fused_schedule_result, shape_info, pgo_dir, core_num) << std::endl;
   // 生成GenConstTilingData方法
   ss << TilingData("Autofuse").GenerateConst(fused_schedule_result, false) << std::endl;
@@ -1968,7 +2176,15 @@ std::map<std::string, std::string> TilingLib::Generate(const ascir::FusedSchedul
     ss << GenGetTilingKeyKernelTypeForStatic(fused_schedule_result);
   }
   ss << "#endif" << std::endl;
-  tiling_file_name_to_content[kTilingDefAndConstIdentify] += ss.str();
+  const std::string entry_body = tiling_file_name_to_content[kTilingDefAndConstIdentify] + ss.str();
+  const EntryTranslationUnitOptions entry_options = {
+      false,
+      false,
+      enable_autofuse_pgo_,
+      enable_autofuse_pgo_,
+      enable_autofuse_pgo_ || EntryWorkspaceUsesSolver(fused_schedule_result),
+      !ascgen_utils::IsSingleGroup(fused_schedule_result)};
+  tiling_file_name_to_content[kTilingDefAndConstIdentify] = RenderEntryTranslationUnit(entry_body, entry_options);
 
   return tiling_file_name_to_content;
 }
@@ -2035,6 +2251,36 @@ std::string TilingLib::GetStubTilingHeaders(const ascir::FusedScheduledResult &f
   return ss.str();
 }
 
+std::string TilingLib::GetStubTilingApi(const ascir::FusedScheduledResult &fused_schedule_result,
+                                        bool include_pgo) const {
+  std::stringstream ss;
+  ss << "extern \"C\" inline bool GetTiling(AutofuseTilingData &tiling_data, int32_t tiling_case_id = -1, "
+        "double *perf = nullptr) {\n";
+  ss << "  (void)tiling_data; (void)tiling_case_id; (void)perf; return true;\n}\n";
+  if (!include_pgo) {
+    return ss.str();
+  }
+  const std::string common_params =
+      "std::vector<AutofuseTilingDataPerf> &tiling_data_list, AutofuseTilingData &tiling_data, "
+      "int32_t tiling_case_id, AutofuseTilingData *output_tiling_data, " +
+      PGOSearchFuncInputOutputCallBackDef(fused_schedule_result) +
+      "void *stream, uint32_t workspace_size, double &out_best_perf";
+  ss << "inline bool PGOSearchTilingKey(" << common_params
+     << ", std::unordered_map<int64_t, uint64_t> &workspace_map, "
+        "std::vector<uint32_t *> block_dim_vec = {}, const SearchConfig *search_cfg = nullptr) {\n";
+  ss << "  (void)tiling_data_list; (void)tiling_data; (void)tiling_case_id; (void)output_tiling_data;\n"
+        "  (void)tensor_args; (void)stream; (void)workspace_size; (void)out_best_perf; (void)workspace_map;\n"
+        "  (void)block_dim_vec; (void)search_cfg; return true;\n}\n";
+  ss << "inline bool PGOSearchTilingKey(" << common_params << ", const SearchConfig *search_cfg = nullptr) {\n";
+  ss << "  (void)tiling_data_list; (void)tiling_data; (void)tiling_case_id; (void)output_tiling_data;\n"
+        "  (void)tensor_args; (void)stream; (void)workspace_size; (void)out_best_perf; (void)search_cfg; return true;\n"
+        "}\n";
+  ss << "inline bool PGOByCoreNumSearchTilingKey(std::vector<AutofuseTilingData> &tiling_data_list, "
+        "AutofuseTilingData *tiling_data, uint32_t max_block_dim = 48) {\n";
+  ss << "  (void)tiling_data_list; (void)tiling_data; (void)max_block_dim; return true;\n}\n";
+  return ss.str();
+}
+
 std::string TilingLib::GetTilingIncludeHead(bool is_cv) const {
   std::stringstream ss;
   ss << "#ifndef __AUTOFUSE_TILING_FUNC_COMMON_H__" << std::endl;
@@ -2059,6 +2305,25 @@ std::string TilingLib::GetTilingIncludeHead(bool is_cv) const {
   return ss.str();
 }
 
+void TilingLib::PopulateFallbackAtomicHeaders(std::map<std::string, std::string> &tiling_file_name_to_content,
+                                              const ascir::FusedScheduledResult &fused_schedule_result,
+                                              bool use_att_codegen, bool include_pgo) const {
+  std::string fallback_pgo_body;
+  std::string fallback_api_body;
+  if (!use_att_codegen) {
+    fallback_api_body = GetStubTilingApi(fused_schedule_result, include_pgo);
+    if (include_pgo) {
+      fallback_pgo_body = PGOProfilingCallbackDef(fused_schedule_result, "AutofuseTilingData", false);
+      fallback_pgo_body +=
+          "namespace optiling {\nstruct SearchConfig {\n"
+          "  bool ub_threshold_enabled = true;\n  double ub_threshold = 0.0;\n"
+          "  bool corenum_threshold_enabled = true;\n  double corenum_threshold = 1.0;\n"
+          "  bool enable_multicore_ub_tradeoff = true;\n};\n}  // namespace optiling\n";
+    }
+  }
+  EnsureFallbackAtomicHeaders(tiling_file_name_to_content, fallback_pgo_body, fallback_api_body);
+}
+
 std::map<std::string, std::string> TilingLib::GetTilingHeaders(const ascir::FusedScheduledResult &fused_schedule_result,
                                                                bool is_inductor_scene, bool is_cv) const {
   std::stringstream ss;
@@ -2074,13 +2339,18 @@ std::map<std::string, std::string> TilingLib::GetTilingHeaders(const ascir::Fuse
   if (ascgen_utils::IsJustCubeFixpip(fused_schedule_result)) {
     ss << "#endif // __AUTOFUSE_TILING_FUNC_COMMON_H__" << std::endl;
     tiling_file_name_to_content[kTilingHeadIdentify] += ss.str();
+    EnsureFallbackAtomicHeaders(tiling_file_name_to_content, "", GetStubTilingApi(fused_schedule_result, false));
+    if (is_cv) {
+      AddCvDeclarationsToApiHeader(tiling_file_name_to_content);
+    }
     return tiling_file_name_to_content;
   }
 
-  if (enable_autofuse_pgo_ || is_inductor_scene) {
+  const bool use_att_codegen = this->codegen_func_ != nullptr && !IsEmptyTensorSence(fused_schedule_result);
+  if ((enable_autofuse_pgo_ || is_inductor_scene) && !use_att_codegen) {
     ss << PGOProfilingCallbackDef(fused_schedule_result, tiling_name);
   }
-  if (this->codegen_func_ != nullptr && !IsEmptyTensorSence(fused_schedule_result)) {
+  if (use_att_codegen) {
     std::map<std::string, std::string> options;
     tiling_file_name_to_content[kTilingHeadIdentify] += ss.str();
     options.emplace("tiling_data_type_name", tiling_name);
@@ -2099,7 +2369,11 @@ std::map<std::string, std::string> TilingLib::GetTilingHeaders(const ascir::Fuse
   std::stringstream ss_end;
   ss_end << "#endif // __AUTOFUSE_TILING_FUNC_COMMON_H__" << std::endl;
   tiling_file_name_to_content[kTilingHeadIdentify] += ss_end.str();
-
+  const bool include_pgo = enable_autofuse_pgo_ || is_inductor_scene;
+  PopulateFallbackAtomicHeaders(tiling_file_name_to_content, fused_schedule_result, use_att_codegen, include_pgo);
+  if (is_cv) {
+    AddCvDeclarationsToApiHeader(tiling_file_name_to_content);
+  }
   return tiling_file_name_to_content;
 }
 
@@ -3444,23 +3718,7 @@ std::string TilingLib::PGOTensorArgsDef() const {
   return ss.str();
 }
 
-std::string TilingLib::PGOProfilingCallbackDef(const ascir::FusedScheduledResult &fused_schedule_result,
-                                               const std::string tiling) const {
-  std::stringstream ss;
-
-  ss << "#include <cfloat>" << std::endl;
-  ss << "#include <cstdint>" << std::endl;
-  ss << "#include <vector>" << std::endl;
-  ss << "#include <unordered_set>" << std::endl;
-  ss << "#include <array>" << std::endl;
-  ss << std::endl;
-  ss << PGOTensorArgsDef();
-  ss << "typedef long int (*ProfilingCallback)(";
-  ss << PGOSearchFuncInputOutputCallBackDef(fused_schedule_result);
-  ss << "void *stream, uint32_t workspaceSize, " << tiling << " *tiling_data, double *cost_time);" << std::endl;
-  ss << "typedef long int (*ProfilingBatchCallback)(";
-  ss << PGOSearchFuncInputOutputCallBackDef(fused_schedule_result);
-  ss << "void *stream, uint32_t workspaceSize, std::vector<AutofuseTilingDataPerf> *profiles);" << std::endl;
+void TilingLib::AppendPgoConfigDef(std::stringstream &ss) const {
   ss << "class PgoConfig {" << std::endl;
   ss << "public:" << std::endl;
   ss << "  static PgoConfig& Instance() {" << std::endl;
@@ -3493,6 +3751,28 @@ std::string TilingLib::PGOProfilingCallbackDef(const ascir::FusedScheduledResult
   ss << "  PgoConfigRuntimeGuard() { PgoConfig::Instance().ResetRuntimeOverrides(); }" << std::endl;
   ss << "  ~PgoConfigRuntimeGuard() { PgoConfig::Instance().ResetRuntimeOverrides(); }" << std::endl;
   ss << "};" << std::endl;
+}
+
+std::string TilingLib::PGOProfilingCallbackDef(const ascir::FusedScheduledResult &fused_schedule_result,
+                                               const std::string tiling, bool include_headers) const {
+  std::stringstream ss;
+
+  if (include_headers) {
+    ss << "#include <cfloat>" << std::endl;
+    ss << "#include <cstdint>" << std::endl;
+    ss << "#include <vector>" << std::endl;
+    ss << "#include <unordered_set>" << std::endl;
+    ss << "#include <array>" << std::endl;
+    ss << std::endl;
+  }
+  ss << PGOTensorArgsDef();
+  ss << "typedef long int (*ProfilingCallback)(";
+  ss << PGOSearchFuncInputOutputCallBackDef(fused_schedule_result);
+  ss << "void *stream, uint32_t workspaceSize, " << tiling << " *tiling_data, double *cost_time);" << std::endl;
+  ss << "typedef long int (*ProfilingBatchCallback)(";
+  ss << PGOSearchFuncInputOutputCallBackDef(fused_schedule_result);
+  ss << "void *stream, uint32_t workspaceSize, std::vector<AutofuseTilingDataPerf> *profiles);" << std::endl;
+  AppendPgoConfigDef(ss);
   ss << std::endl;
 
   return ss.str();
@@ -4454,7 +4734,7 @@ void TilingLib::GenDeduplicateCandidateSolutions(std::stringstream &ss) const {
   ss << "      continue;" << std::endl;
   ss << "    }" << std::endl;
   ss << "    auto &kept = deduplicated[iter->second];" << std::endl;
-  ss << "    if (!IsEqual(kept.modeled_perf, solution.modeled_perf)) {" << std::endl;
+  ss << "    if (!(std::fabs(kept.modeled_perf - solution.modeled_perf) < 1e-8)) {" << std::endl;
   ss << "      OP_LOGW(OP_NAME, \"same repr with different modeled_perf, keep first: kept=%.6f, current=%.6f, "
         "repr=%s\", "
      << "kept.modeled_perf, solution.modeled_perf, solution.canonical_repr.c_str());" << std::endl;
@@ -4549,7 +4829,7 @@ std::string TilingLib::GenInductorConfigParserForInductor() const {
   ss << "  if (ub_it != raw.end()) {" << std::endl;
   ss << "    out.ub_threshold_enabled = true;" << std::endl;
   ss << "    try { out.ub_threshold = std::stod(ub_it->second); } catch (...) { return false; }" << std::endl;
-  ss << "    if (IsEqual(out.ub_threshold, 0.0)) { out.ub_threshold = kMinUbThreshold; }" << std::endl;
+  ss << "    if (std::fabs(out.ub_threshold) < 1e-8) { out.ub_threshold = kMinUbThreshold; }" << std::endl;
   ss << "  }" << std::endl;
   ss << "  auto cn_it = raw.find(\"corenum_threshold\");" << std::endl;
   ss << "  if (cn_it != raw.end()) {" << std::endl;

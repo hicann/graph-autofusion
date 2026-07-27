@@ -18,16 +18,25 @@ import types
 
 import pytest
 
+from compile_test_utils import TILING_HEADER_FILES
+
 
 _BASE_DIR = os.path.dirname(
     os.path.dirname(
-        os.path.dirname(
-            os.path.dirname(
-                os.path.dirname(os.path.realpath(__file__)))))
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    )
 )
 _PYTHON_DIR = os.path.join(_BASE_DIR, "autofuse/compiler/python")
 MODULE_NAME = "autofuse.compiler.python.asc_codegen_compile"
 MODULE_PATH = os.path.join(_PYTHON_DIR, "asc_codegen_compile.py")
+
+
+def _build_nchw_conv_args(module, input_shape, input_format):
+    args_list = [
+        {"shape": input_shape, "format": input_format, "dtype": "float16"},
+        {"shape": [1, 64, 224, 224], "format": "NCHW", "dtype": "float16"},
+    ]
+    return module.build_conv_args(args_list, 1, "NCHW")
 
 
 class SimpleNamespace(object):
@@ -78,46 +87,59 @@ def asc_codegen_compile_module():
     stub_module("tbe.common")
     stub_module("tbe.common.buildcfg", get_current_build_config=lambda: {})
     stub_module("tbe.common.utils")
-    stub_module("tbe.common.utils.log", 
-                 info=DummyLogger.info, 
-                 error=DummyLogger.error, 
-                 warning=DummyLogger.warning)
-    
+    stub_module(
+        "tbe.common.utils.log",
+        info=DummyLogger.info,
+        error=DummyLogger.error,
+        warning=DummyLogger.warning,
+    )
+
     # Mock do_op_tiling to return Conv2D tiling result
-    stub_module("tbe.common.utils.op_tiling", 
-                 do_op_tiling=lambda *args, **kwargs: {
-                     "tiling_data": {},
-                     "tiling_key": 12345,
-                     "block_dim": 4
-                 })
-    
-    stub_module("tbe.common.context", 
-                 get_context=lambda: SimpleNamespace(get_compile_info=lambda: {}))
-    
+    stub_module(
+        "tbe.common.utils.op_tiling",
+        do_op_tiling=lambda *args, **kwargs: {
+            "tiling_data": {},
+            "tiling_key": 12345,
+            "block_dim": 4,
+        },
+    )
+
+    stub_module(
+        "tbe.common.context",
+        get_context=lambda: SimpleNamespace(get_compile_info=lambda: {}),
+    )
+
     stub_module("tbe.tikcpp")
-    stub_module("tbe.tikcpp.compile_op",
-                 CommonUtility=SimpleNamespace(print_compile_log=lambda *args, **kwargs: None),
-                 AscendCLogLevel=SimpleNamespace(LOG_ERROR="error", LOG_DEBUG="debug", LOG_WARNING="warning",
-                                                  LOG_INFO="info"))
-    
+    stub_module(
+        "tbe.tikcpp.compile_op",
+        CommonUtility=SimpleNamespace(print_compile_log=lambda *args, **kwargs: None),
+        AscendCLogLevel=SimpleNamespace(
+            LOG_ERROR="error", LOG_DEBUG="debug", LOG_WARNING="warning", LOG_INFO="info"
+        ),
+    )
+
     # Mock TilingInfo as a proper class
     class MockTilingInfo:
         def __init__(self):
             self.tiling_data = None
             self.tiling_key = None
             self.file_content = None
-    
-    stub_module("tbe.tikcpp.get_op_tiling", 
-                 TilingInfo=MockTilingInfo,
-                 _change_param_name_to_name=lambda *args, **kwargs: None,
-                 gen_static_shape_v2=lambda *args, **kwargs: "mock_tiling_content")
+
+    stub_module(
+        "tbe.tikcpp.get_op_tiling",
+        TilingInfo=MockTilingInfo,
+        _change_param_name_to_name=lambda *args, **kwargs: None,
+        gen_static_shape_v2=lambda *args, **kwargs: "mock_tiling_content",
+    )
     sys.modules["tbe.tikcpp"].OpInfo = object
-    
+
     stub_module("asc_op_compile_base")
     stub_module("asc_op_compile_base.common")
     stub_module("asc_op_compile_base.common.platform")
-    stub_module("asc_op_compile_base.common.platform.platform_info", 
-                 get_soc_spec=lambda key: 8 if key == "vector_core_cnt" else None)
+    stub_module(
+        "asc_op_compile_base.common.platform.platform_info",
+        get_soc_spec=lambda key: 8 if key == "vector_core_cnt" else None,
+    )
 
     package = stub_module("autofuse")
     compiler_pkg = stub_module("autofuse.compiler")
@@ -125,18 +147,26 @@ def asc_codegen_compile_module():
     package.compiler = compiler_pkg
     compiler_pkg.python = python_pkg
 
-    package_prefix = MODULE_NAME.rsplit('.', 1)[0]
-    stub_module(package_prefix + ".pyautofuse", 
-                 Schedule=object, 
-                 CodeGen=object, 
-                 ascir=SimpleNamespace())
-    stub_module(package_prefix + ".ascbc_kernel_compile",
-                 ascbc_kernel_compile=lambda *args, **kwargs: ("kernel.o", "kernel.json"),
-                 camel_to_snake=lambda value: ''.join(['_' +
-                                c.lower() if c.isupper() else c for c in value]).lstrip('_'))
-    stub_module(package_prefix + ".compile_adapter", 
-                 get_pgo_env_flag=lambda: False, 
-                 get_pgo_topn=lambda: 5)
+    package_prefix = MODULE_NAME.rsplit(".", 1)[0]
+    stub_module(
+        package_prefix + ".pyautofuse",
+        Schedule=object,
+        CodeGen=object,
+        ascir=SimpleNamespace(),
+    )
+    stub_module(
+        package_prefix + ".ascbc_kernel_compile",
+        ascbc_kernel_compile=lambda *args, **kwargs: ("kernel.o", "kernel.json"),
+        camel_to_snake=lambda value: "".join(
+            ["_" + c.lower() if c.isupper() else c for c in value]
+        ).lstrip("_"),
+    )
+    stub_module(
+        package_prefix + ".compile_adapter",
+        TILING_HEADER_FILES=TILING_HEADER_FILES,
+        get_pgo_env_flag=lambda: False,
+        get_pgo_topn=lambda: 5,
+    )
 
     spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -148,78 +178,82 @@ def asc_codegen_compile_module():
 
 class TestBuildConvArgs:
     """测试 _build_conv_args 函数"""
-    
+
     @staticmethod
     def test_build_conv_args_basic(asc_codegen_compile_module):
         """测试基本的 Conv2D 参数构建 - 验证格式转换功能"""
         # 重要：当列表长度为3时，args_list[1] == args_list[-2]，会导致引用共享
         # 需要至少4个元素才能避免 args_list[1] 和 args_list[-2] 指向同一对象
         args_list = [
-            {"shape": [1, 64, 224, 224], "format": "NCHW", "dtype": "float16"},  # input0 (x)
-            {"shape": [7, 7, 3, 64], "format": "HWCN", "dtype": "float16"},       # input1 (filter)
-            {"shape": [1, 64, 112, 112], "format": "NCHW", "dtype": "float16"},   # dummy (避免引用共享)
-            {"shape": [1, 64, 224, 224], "format": "NCHW", "dtype": "float16"},   # output (args_list[-2] 会指向 dummy)
+            {
+                "shape": [1, 64, 224, 224],
+                "format": "NCHW",
+                "dtype": "float16",
+            },  # input0 (x)
+            {
+                "shape": [7, 7, 3, 64],
+                "format": "HWCN",
+                "dtype": "float16",
+            },  # input1 (filter)
+            {
+                "shape": [1, 64, 112, 112],
+                "format": "NCHW",
+                "dtype": "float16",
+            },  # dummy (避免引用共享)
+            {
+                "shape": [1, 64, 224, 224],
+                "format": "NCHW",
+                "dtype": "float16",
+            },  # output (args_list[-2] 会指向 dummy)
         ]
         input_num = 2  # 只处理前2个作为输入
         data_format = "NCHW"
-        
-        origin_inputs, origin_outputs, inputs = asc_codegen_compile_module.build_conv_args(
-            args_list, input_num, data_format
+
+        origin_inputs, origin_outputs, inputs = (
+            asc_codegen_compile_module.build_conv_args(
+                args_list, input_num, data_format
+            )
         )
-        
+
         # 验证输入输出数量
         assert len(origin_inputs) == 2
         assert len(inputs) == 2
         assert len(origin_outputs) == 1
-        
+
         # 验证第一个输入（已经是 NCHW，不需要转换）
         assert inputs[0]["param_name"] == "input0"
         assert inputs[0]["format"] == "NCHW"
-        
+
         # 验证第二个输入的 HWCN -> NCHW 格式转换
         # 转换索引: [3,2,0,1]
         assert inputs[1]["param_name"] == "input1"
         assert inputs[1]["format"] == "NCHW"
         # shape 会被转换成 tuple，这是正常的
         assert list(inputs[1]["shape"]) == [64, 3, 7, 7]
-        
+
         # 验证输出格式（args_list[-2] 是 dummy 元素）
         assert origin_outputs[0]["format"] == "NCHW"
         assert origin_outputs[0]["param_name"] == "output0"
-    
+
     @staticmethod
     def test_build_conv_args_nhwc_to_nchw(asc_codegen_compile_module):
         """测试 NHWC -> NCHW 格式转换"""
-        args_list = [
-            {"shape": [1, 224, 224, 64], "format": "NHWC", "dtype": "float16"},  # NHWC input
-            {"shape": [1, 64, 224, 224], "format": "NCHW", "dtype": "float16"},  # NCHW output
-        ]
-        input_num = 1
-        data_format = "NCHW"
-        
-        origin_inputs, origin_outputs, inputs = asc_codegen_compile_module.build_conv_args(
-            args_list, input_num, data_format
+        origin_inputs, origin_outputs, inputs = _build_nchw_conv_args(
+            asc_codegen_compile_module, [1, 224, 224, 64], "NHWC"
         )
-        
+
         assert inputs[0]["format"] == "NCHW"
         # shape 会被转换成 tuple，使用 list() 转换后比较
         assert list(inputs[0]["shape"]) == [1, 64, 224, 224]
         assert inputs[0]["ori_format"] == "NCHW"
-    
+
     @staticmethod
     def test_build_conv_args_same_format_no_conversion(asc_codegen_compile_module):
         """测试格式相同时不转换"""
-        args_list = [
-            {"shape": [1, 64, 224, 224], "format": "NCHW", "dtype": "float16"},
-            {"shape": [1, 64, 224, 224], "format": "NCHW", "dtype": "float16"},  # output
-        ]
-        input_num = 1
-        data_format = "NCHW"
-        
-        origin_inputs, origin_outputs, inputs = asc_codegen_compile_module.build_conv_args(
-            args_list, input_num, data_format
+        origin_inputs, origin_outputs, inputs = _build_nchw_conv_args(
+            asc_codegen_compile_module, [1, 64, 224, 224], "NCHW"
         )
-        
+
         # 格式相同，shape 不变
         assert inputs[0]["format"] == "NCHW"
         assert inputs[0]["shape"] == [1, 64, 224, 224]
@@ -227,135 +261,149 @@ class TestBuildConvArgs:
 
 class TestGetGraphBasicInfo:
     """测试 get_graph_basic_info 函数新增的 is_conv 返回值"""
-    
+
     @staticmethod
-    def test_get_graph_basic_info_returns_is_conv_for_conv2d(asc_codegen_compile_module):
+    def test_get_graph_basic_info_returns_is_conv_for_conv2d(
+        asc_codegen_compile_module,
+    ):
         """测试 Conv2D 场景返回 is_conv=True"""
-        params = {'vector_core_num': 8}
-        
+        params = {"vector_core_num": 8}
+
         class MockScheduleResults:
             def get_name(self):
                 return "Conv2DFusionGraph"
-            
+
             def get_input_num(self):
                 return 3
-            
+
             def get_output_num(self):
                 return 1
-            
+
             def is_cube_type(self):
                 return True
-            
+
             def get_cube_attributes(self):
                 return {"cube_attributes": {"input_num": 3}}
-            
+
             def is_conv_type(self):
                 return True
-        
+
         args = [
             {"shape": [1, 64, 224, 224]},
             {"shape": [64, 3, 7, 7]},
             {"shape": [1, 64, 224, 224]},
-            "conv2d_kernel"  # kernel_name 是最后一个参数
+            "conv2d_kernel",  # kernel_name 是最后一个参数
         ]
-        
-        params['schedule_results'] = MockScheduleResults()
-        
-        graph_name, input_num, output_num, is_cube, is_conv, cube_attrs = \
+
+        params["schedule_results"] = MockScheduleResults()
+
+        graph_name, input_num, output_num, is_cube, is_conv, cube_attrs = (
             asc_codegen_compile_module.get_graph_basic_info(params, args)
-        
+        )
+
         # camel_to_snake 会把 Conv2D 转成 conv2_d，这是正常的
         assert "conv2" in graph_name.lower()  # 包含 conv2 即可
         assert input_num == 3
         assert output_num == 1
-        assert is_cube == True
-        assert is_conv == True  # Conv2D 返回 True
+        assert is_cube
+        assert is_conv  # Conv2D 返回 True
         assert cube_attrs is not None
-    
+
     @staticmethod
-    def test_get_graph_basic_info_returns_is_conv_false_for_matmul(asc_codegen_compile_module):
+    def test_get_graph_basic_info_returns_is_conv_false_for_matmul(
+        asc_codegen_compile_module,
+    ):
         """测试 MatMul 场景返回 is_conv=False"""
-        params = {'vector_core_num': 8}
-        
+        params = {"vector_core_num": 8}
+
         class MockScheduleResults:
             def get_name(self):
                 return "MatMulFusionGraph"
-            
+
             def get_input_num(self):
                 return 2
-            
+
             def get_output_num(self):
                 return 1
-            
+
             def is_cube_type(self):
                 return True
-            
+
             def get_cube_attributes(self):
                 return {"cube_attributes": {"is_batch": False}}
-            
+
             def is_conv_type(self):
                 return False
-        
+
         args = [
             {"shape": [1024, 1024]},
             {"shape": [1024, 1024]},
             {"shape": [1024, 1024]},
-            "matmul_kernel"
+            "matmul_kernel",
         ]
-        
-        params['schedule_results'] = MockScheduleResults()
-        
-        graph_name, input_num, output_num, is_cube, is_conv, cube_attrs = \
+
+        params["schedule_results"] = MockScheduleResults()
+
+        graph_name, input_num, output_num, is_cube, is_conv, cube_attrs = (
             asc_codegen_compile_module.get_graph_basic_info(params, args)
-        
+        )
+
         # camel_to_snake 会把 MatMul 转成 mat_mul，这是正常的
-        assert "matmul" in graph_name.lower() or "mat" in graph_name.lower()  # 包含 mat 即可
-        assert is_cube == True
-        assert is_conv == False  # MatMul 返回 False
+        assert (
+            "matmul" in graph_name.lower() or "mat" in graph_name.lower()
+        )  # 包含 mat 即可
+        assert is_cube
+        assert not is_conv  # MatMul 返回 False
 
 
 class TestGenerateCmakeLists:
     """测试 generate_cmake_lists 函数包含 Conv2D 编译路径"""
-    
+
     @staticmethod
-    def test_generate_cmake_lists_includes_conv2d_paths(asc_codegen_compile_module, tmpdir):
+    def test_generate_cmake_lists_includes_conv2d_paths(
+        asc_codegen_compile_module, tmpdir
+    ):
         """测试生成的 CMakeLists.txt 包含 Conv2D 头文件路径"""
         host_build_dir = str(tmpdir)
-        
+
         asc_codegen_compile_module.generate_cmake_lists(
             asc_codegen_compile_module.HostCompileContext(
-                "conv2d_graph", "conv2d_kernel", host_build_dir, True, False, True)
+                "conv2d_graph", "conv2d_kernel", host_build_dir, True, False, True
+            )
         )
-        
+
         cmake_file = os.path.join(host_build_dir, "CMakeLists.txt")
         assert os.path.exists(cmake_file)
-        
-        with open(cmake_file, 'r') as f:
+
+        with open(cmake_file, "r") as f:
             content = f.read()
-            
+
             # 验证 Conv2D 相关路径
             assert "conv2d_v2" in content
             assert "ops_nn/ascendc/conv2d_v2" in content
-            
+
             # 验证 cube_kernel_tiling_wrapper.cpp (动态 shape)
             assert "cube_kernel_tiling_wrapper.cpp" in content
-    
+
     @staticmethod
-    def test_generate_cmake_lists_includes_matmul_paths(asc_codegen_compile_module, tmpdir):
+    def test_generate_cmake_lists_includes_matmul_paths(
+        asc_codegen_compile_module, tmpdir
+    ):
         """测试生成的 CMakeLists.txt 包含 MatMul 头文件路径"""
         host_build_dir = str(tmpdir)
-        
+
         asc_codegen_compile_module.generate_cmake_lists(
             asc_codegen_compile_module.HostCompileContext(
-                "matmul_graph", "matmul_kernel", host_build_dir, True, True, True)
+                "matmul_graph", "matmul_kernel", host_build_dir, True, True, True
+            )
         )
-        
+
         cmake_file = os.path.join(host_build_dir, "CMakeLists.txt")
         assert os.path.exists(cmake_file)
-        
-        with open(cmake_file, 'r') as f:
+
+        with open(cmake_file, "r") as f:
             content = f.read()
-            
+
             # 验证 MatMul 相关路径
             assert "mat_mul_v3" in content
             assert "ops_nn/ascendc/mat_mul_v3" in content
@@ -365,7 +413,9 @@ class TestStaticShapeCompileHasattrCheck:
     """测试 static_shape_compile 函数的 hasattr 检查"""
 
     @staticmethod
-    def test_static_shape_compile_related_api_keeps_argument_count(asc_codegen_compile_module):
+    def test_static_shape_compile_related_api_keeps_argument_count(
+        asc_codegen_compile_module,
+    ):
         """新增上下文参数后，相关 API 入参不超过代码检查阈值"""
         function_names = [
             "template_decider",
@@ -374,91 +424,135 @@ class TestStaticShapeCompileHasattrCheck:
         ]
 
         for name in function_names:
-            params = inspect.signature(getattr(asc_codegen_compile_module, name)).parameters
+            params = inspect.signature(
+                getattr(asc_codegen_compile_module, name)
+            ).parameters
             assert len(params) <= 5
 
     @staticmethod
-    def test_static_shape_compile_keeps_soc_vector_core_num_by_default(asc_codegen_compile_module, tmpdir,
-                                                                       monkeypatch):
+    def test_static_shape_compile_keeps_soc_vector_core_num_by_default(
+        asc_codegen_compile_module, tmpdir, monkeypatch
+    ):
         """未传 vector_core_num 时保持原有 get_soc_spec 行为"""
         temp_dir = str(tmpdir)
         fake_lib = SimpleNamespace(GenConstTilingData=FakeCFunc(b"new tiling"))
         TestStaticShapeCompileHasattrCheck._prepare_tiling_file(temp_dir)
-        TestStaticShapeCompileHasattrCheck._mock_static_compile_dependencies(asc_codegen_compile_module, monkeypatch,
-                                                                            fake_lib)
+        TestStaticShapeCompileHasattrCheck._mock_static_compile_dependencies(
+            asc_codegen_compile_module, monkeypatch, fake_lib
+        )
 
-        asc_codegen_compile_module.static_shape_compile(kernel_name="kernel", temp_dir=temp_dir, graph_name="graph")
+        asc_codegen_compile_module.static_shape_compile(
+            kernel_name="kernel", temp_dir=temp_dir, graph_name="graph"
+        )
 
         assert fake_lib.GenConstTilingData.calls[0][1].value == 8
 
     @staticmethod
-    def test_static_shape_compile_uses_vector_core_num_when_provided(asc_codegen_compile_module, tmpdir, monkeypatch):
+    def test_static_shape_compile_uses_vector_core_num_when_provided(
+        asc_codegen_compile_module, tmpdir, monkeypatch
+    ):
         """传入 vector_core_num 时静态化 tiling 使用同源核数"""
         temp_dir = str(tmpdir)
         fake_lib = SimpleNamespace(GenConstTilingData=FakeCFunc(b"new tiling"))
         TestStaticShapeCompileHasattrCheck._prepare_tiling_file(temp_dir)
-        TestStaticShapeCompileHasattrCheck._mock_static_compile_dependencies(asc_codegen_compile_module, monkeypatch,
-                                                                            fake_lib)
+        TestStaticShapeCompileHasattrCheck._mock_static_compile_dependencies(
+            asc_codegen_compile_module, monkeypatch, fake_lib
+        )
 
-        asc_codegen_compile_module.static_shape_compile(kernel_name="kernel", temp_dir=temp_dir, graph_name="graph",
-                                                        vector_core_num=4)
+        asc_codegen_compile_module.static_shape_compile(
+            kernel_name="kernel",
+            temp_dir=temp_dir,
+            graph_name="graph",
+            vector_core_num=4,
+        )
 
         assert fake_lib.GenConstTilingData.calls[0][1].value == 4
 
     @staticmethod
-    def test_static_shape_cv_compile_uses_vector_core_num_when_provided(asc_codegen_compile_module, tmpdir,
-                                                                        monkeypatch):
+    def test_static_shape_cv_compile_uses_vector_core_num_when_provided(
+        asc_codegen_compile_module, tmpdir, monkeypatch
+    ):
         """CV 模板选择使用传入的 vector_core_num"""
         fake_lib = SimpleNamespace(GenCVFusionTilingKey=FakeCFunc(0))
-        TestStaticShapeCompileHasattrCheck._mock_static_compile_dependencies(asc_codegen_compile_module, monkeypatch,
-                                                                            fake_lib)
+        TestStaticShapeCompileHasattrCheck._mock_static_compile_dependencies(
+            asc_codegen_compile_module, monkeypatch, fake_lib
+        )
 
-        asc_codegen_compile_module.static_shape_cv_compile(kernel_name="kernel", temp_dir=str(tmpdir),
-                                                           graph_name="graph", vector_core_num=4)
+        asc_codegen_compile_module.static_shape_cv_compile(
+            kernel_name="kernel",
+            temp_dir=str(tmpdir),
+            graph_name="graph",
+            vector_core_num=4,
+        )
 
         assert fake_lib.GenCVFusionTilingKey.calls[0][1].value == 4
 
     @staticmethod
-    def test_static_shape_cv_common_compile_uses_vector_core_num_when_provided(asc_codegen_compile_module, tmpdir,
-                                                                               monkeypatch):
+    def test_static_shape_cv_common_compile_uses_vector_core_num_when_provided(
+        asc_codegen_compile_module, tmpdir, monkeypatch
+    ):
         """CV common block dim/wss 计算使用传入的 vector_core_num"""
+
         def fill_outputs(config_path, aiv_num, ub_size, workspace_size, block_dim):
-            ctypes.cast(workspace_size, ctypes.POINTER(ctypes.c_uint32)).contents.value = 16
-            ctypes.cast(block_dim, ctypes.POINTER(ctypes.c_uint32)).contents.value = aiv_num.value
+            ctypes.cast(
+                workspace_size, ctypes.POINTER(ctypes.c_uint32)
+            ).contents.value = 16
+            ctypes.cast(
+                block_dim, ctypes.POINTER(ctypes.c_uint32)
+            ).contents.value = aiv_num.value
             return 0
 
-        fake_lib = SimpleNamespace(GenTilingDataValueBlockDimAndWss=FakeCFunc(on_call=fill_outputs))
-        TestStaticShapeCompileHasattrCheck._mock_static_compile_dependencies(asc_codegen_compile_module, monkeypatch,
-                                                                            fake_lib)
+        fake_lib = SimpleNamespace(
+            GenTilingDataValueBlockDimAndWss=FakeCFunc(on_call=fill_outputs)
+        )
+        TestStaticShapeCompileHasattrCheck._mock_static_compile_dependencies(
+            asc_codegen_compile_module, monkeypatch, fake_lib
+        )
 
-        vec_block_dim, _ = asc_codegen_compile_module.static_shape_cv_common_compile(kernel_name="kernel",
-                                                                                     temp_dir=str(tmpdir),
-                                                                                     graph_name="graph",
-                                                                                     vector_core_num=4)
+        vec_block_dim, _ = asc_codegen_compile_module.static_shape_cv_common_compile(
+            kernel_name="kernel",
+            temp_dir=str(tmpdir),
+            graph_name="graph",
+            vector_core_num=4,
+        )
 
         assert fake_lib.GenTilingDataValueBlockDimAndWss.calls[0][1].value == 4
         assert vec_block_dim == 4
 
     @staticmethod
-    def test_template_decider_passes_vector_core_num_to_cv_static_compile(asc_codegen_compile_module, tmpdir,
-                                                                          monkeypatch):
+    def test_template_decider_passes_vector_core_num_to_cv_static_compile(
+        asc_codegen_compile_module, tmpdir, monkeypatch
+    ):
         """CV 模板决策继续向底层静态编译透传 vector_core_num"""
         calls = []
-        monkeypatch.setattr(asc_codegen_compile_module, "static_shape_cv_compile",
-                            lambda **kwargs: calls.append(("cv_compile", kwargs["vector_core_num"])) or -1)
-        monkeypatch.setattr(asc_codegen_compile_module, "static_shape_cv_common_compile",
-                            lambda **kwargs: calls.append(("cv_common", kwargs["vector_core_num"])) or (4, 16))
+        monkeypatch.setattr(
+            asc_codegen_compile_module,
+            "static_shape_cv_compile",
+            lambda **kwargs: calls.append(("cv_compile", kwargs["vector_core_num"]))
+            or -1,
+        )
+        monkeypatch.setattr(
+            asc_codegen_compile_module,
+            "static_shape_cv_common_compile",
+            lambda **kwargs: calls.append(("cv_common", kwargs["vector_core_num"]))
+            or (4, 16),
+        )
 
         tiling_info = SimpleNamespace(tiling_key=2, file_content="")
         cube_info = [4, False, 4, [False], False]
-        compile_context = asc_codegen_compile_module.StaticCompileContext("kernel",
-                                                                           str(tmpdir), "graph", 4, False, "", "")
-        asc_codegen_compile_module.template_decider(compile_context, tiling_info, cube_info)
+        compile_context = asc_codegen_compile_module.StaticCompileContext(
+            "kernel", str(tmpdir), "graph", 4, False, "", ""
+        )
+        asc_codegen_compile_module.template_decider(
+            compile_context, tiling_info, cube_info
+        )
 
         assert calls == [("cv_compile", 4), ("cv_common", 4)]
 
     @staticmethod
-    def test_asc_codegen_compile_logs_core_limits(asc_codegen_compile_module, tmpdir, monkeypatch):
+    def test_asc_codegen_compile_logs_core_limits(
+        asc_codegen_compile_module, tmpdir, monkeypatch
+    ):
         """入口保留控核日志，并将 vector_core_num 继续透传"""
         log_messages = []
         set_platform_calls = []
@@ -467,22 +561,37 @@ class TestStaticShapeCompileHasattrCheck:
         class MockContext(object):
             @staticmethod
             def get_op_info():
-                extra_params = {"compute_graph": "graph", "symbol_source_info": "symbol"}
+                extra_params = {
+                    "compute_graph": "graph",
+                    "symbol_source_info": "symbol",
+                }
                 return [SimpleNamespace(extra_params=extra_params)]
 
             @staticmethod
             def get_addition(key):
-                return {"_op_vectorcore_num": "4", "_op_aicore_num": "2", "device_id": "0"}.get(key)
+                return {
+                    "_op_vectorcore_num": "4",
+                    "_op_aicore_num": "2",
+                    "device_id": "0",
+                }.get(key)
 
         context_module = sys.modules["tbe.common.context"]
         monkeypatch.setattr(context_module, "__path__", [], raising=False)
         stub_module("tbe.common.context.op_context", get_context=lambda: MockContext())
         stub_module("autofuse.compile_adapter", get_debug_flag=lambda: False)
-        monkeypatch.setattr(asc_codegen_compile_module, "get_current_build_config", lambda key: str(tmpdir))
+        monkeypatch.setattr(
+            asc_codegen_compile_module,
+            "get_current_build_config",
+            lambda key: str(tmpdir),
+        )
         monkeypatch.setattr(
             asc_codegen_compile_module,
             "get_soc_spec",
-            lambda key: {"NpuArch": "Ascend910", "vector_core_cnt": 8, "ub_size": 1024}.get(key),
+            lambda key: {
+                "NpuArch": "Ascend910",
+                "vector_core_cnt": 8,
+                "ub_size": 1024,
+            }.get(key),
         )
         monkeypatch.setattr(
             asc_codegen_compile_module.CommonUtility,
@@ -502,38 +611,51 @@ class TestStaticShapeCompileHasattrCheck:
 
         assert ("Ascend910", 4, 1024) in set_platform_calls
         assert compile_calls[0]["vector_core_num"] == "4"
-        assert any("vector_core_num=4, vector_core_num_limited=4" in message for message, _ in log_messages)
+        assert any(
+            "vector_core_num=4, vector_core_num_limited=4" in message
+            for message, _ in log_messages
+        )
         assert any("ai_core_num_limited=2" in message for message, _ in log_messages)
-    
+
     @staticmethod
-    def test_static_shape_compile_uses_hasattr_for_gen_const_tiling_data(asc_codegen_compile_module, tmpdir):
+    def test_static_shape_compile_uses_hasattr_for_gen_const_tiling_data(
+        asc_codegen_compile_module, tmpdir
+    ):
         """验证 static_shape_compile 使用 hasattr 检查 GenConstTilingData"""
         temp_dir = str(tmpdir)
-        
+
         # 创建必要的目录结构
         host_dir = os.path.join(temp_dir, "host")
         device_dir = os.path.join(temp_dir, "device")
         os.makedirs(host_dir, exist_ok=True)
         os.makedirs(device_dir, exist_ok=True)
-        
+
         # Mock 相关函数以避免实际编译调用
-        original_ascendc_clean = getattr(asc_codegen_compile_module, 'ascendc_clean', None)
-        original_ascbc_host_compile = getattr(asc_codegen_compile_module, 'ascbc_host_compile', None)
-        original_static_shape_kernel_proc = getattr(asc_codegen_compile_module, 'static_shape_kernel_proc', None)
-        
+        original_ascendc_clean = getattr(
+            asc_codegen_compile_module, "ascendc_clean", None
+        )
+        original_ascbc_host_compile = getattr(
+            asc_codegen_compile_module, "ascbc_host_compile", None
+        )
+        original_static_shape_kernel_proc = getattr(
+            asc_codegen_compile_module, "static_shape_kernel_proc", None
+        )
+
         def mock_ascendc_clean(*args, **kwargs):
             pass
-        
+
         def mock_ascbc_host_compile(*args, **kwargs):
             pass
-        
+
         def mock_static_shape_kernel_proc(*args, **kwargs):
             pass
-        
+
         asc_codegen_compile_module.ascendc_clean = mock_ascendc_clean
         asc_codegen_compile_module.ascbc_host_compile = mock_ascbc_host_compile
-        asc_codegen_compile_module.static_shape_kernel_proc = mock_static_shape_kernel_proc
-        
+        asc_codegen_compile_module.static_shape_kernel_proc = (
+            mock_static_shape_kernel_proc
+        )
+
         try:
             # 由于需要 ctypes.CDLL 加载 .so 文件，实际测试会失败
             # 但 hasattr 检查逻辑在源代码中已正确实现
@@ -544,23 +666,45 @@ class TestStaticShapeCompileHasattrCheck:
             if original_ascendc_clean:
                 asc_codegen_compile_module.ascendc_clean = original_ascendc_clean
             if original_ascbc_host_compile:
-                asc_codegen_compile_module.ascbc_host_compile = original_ascbc_host_compile
+                asc_codegen_compile_module.ascbc_host_compile = (
+                    original_ascbc_host_compile
+                )
             if original_static_shape_kernel_proc:
-                asc_codegen_compile_module.static_shape_kernel_proc = original_static_shape_kernel_proc
+                asc_codegen_compile_module.static_shape_kernel_proc = (
+                    original_static_shape_kernel_proc
+                )
 
     @staticmethod
-    def _mock_static_compile_dependencies(asc_codegen_compile_module, monkeypatch, fake_lib):
-        monkeypatch.setattr(asc_codegen_compile_module, "ascendc_clean", lambda *args, **kwargs: None)
-        monkeypatch.setattr(asc_codegen_compile_module, "ascbc_host_compile", lambda *args, **kwargs: None)
-        monkeypatch.setattr(asc_codegen_compile_module, "static_shape_kernel_proc", lambda *args, **kwargs: None)
-        monkeypatch.setattr(asc_codegen_compile_module, "get_soc_spec",
-                            lambda key: 8 if key == "vector_core_cnt" else 1024)
+    def _mock_static_compile_dependencies(
+        asc_codegen_compile_module, monkeypatch, fake_lib
+    ):
+        monkeypatch.setattr(
+            asc_codegen_compile_module, "ascendc_clean", lambda *args, **kwargs: None
+        )
+        monkeypatch.setattr(
+            asc_codegen_compile_module,
+            "ascbc_host_compile",
+            lambda *args, **kwargs: None,
+        )
+        monkeypatch.setattr(
+            asc_codegen_compile_module,
+            "static_shape_kernel_proc",
+            lambda *args, **kwargs: None,
+        )
+        monkeypatch.setattr(
+            asc_codegen_compile_module,
+            "get_soc_spec",
+            lambda key: 8 if key == "vector_core_cnt" else 1024,
+        )
         monkeypatch.setattr(ctypes, "CDLL", lambda path: fake_lib)
 
     @staticmethod
     def _prepare_tiling_file(temp_dir, use_cv_common=False):
-        device_dir = os.path.join(temp_dir, "device", "cv_common") if use_cv_common else os.path.join(temp_dir,
-                                                                                                      "device")
+        device_dir = (
+            os.path.join(temp_dir, "device", "cv_common")
+            if use_cv_common
+            else os.path.join(temp_dir, "device")
+        )
         os.makedirs(device_dir, exist_ok=True)
         with open(os.path.join(device_dir, "autofuse_tiling_data.h"), "w") as file:
             file.write("old tiling")
@@ -568,62 +712,68 @@ class TestStaticShapeCompileHasattrCheck:
 
 class TestDynamicShapeCompile:
     """测试新增的 dynamic_shape_compile 函数"""
-    
+
     @staticmethod
     def test_dynamic_shape_compile_exists(asc_codegen_compile_module):
         """验证 dynamic_shape_compile 函数存在"""
-        assert hasattr(asc_codegen_compile_module, 'dynamic_shape_compile')
-    
+        assert hasattr(asc_codegen_compile_module, "dynamic_shape_compile")
+
     @staticmethod
     def test_dynamic_shape_compile_signature(asc_codegen_compile_module):
         """验证 dynamic_shape_compile 函数签名"""
         sig = inspect.signature(asc_codegen_compile_module.dynamic_shape_compile)
         params = list(sig.parameters.keys())
-        
+
         # 检查参数名称
-        assert 'compile_ctx' in params
-        assert 'use_cv_common' in params
-        assert 'is_cube' in params
-        assert 'cross_info' in params
+        assert "compile_ctx" in params
+        assert "use_cv_common" in params
+        assert "is_cube" in params
+        assert "cross_info" in params
 
 
 class TestAscbcConvKernelTilingPro:
     """测试新增的 ascbc_conv_kernel_tiling_pro 函数"""
-    
+
     @staticmethod
     def test_ascbc_conv_kernel_tiling_pro_exists(asc_codegen_compile_module):
         """验证 ascbc_conv_kernel_tiling_pro 函数存在"""
-        assert hasattr(asc_codegen_compile_module, 'ascbc_conv_kernel_tiling_pro')
-    
+        assert hasattr(asc_codegen_compile_module, "ascbc_conv_kernel_tiling_pro")
+
     @staticmethod
     def test_ascbc_conv_kernel_tiling_pro_signature(asc_codegen_compile_module):
         """验证函数签名"""
         sig = inspect.signature(asc_codegen_compile_module.ascbc_conv_kernel_tiling_pro)
         params = list(sig.parameters.keys())
-        
+
         # 检查关键参数
-        assert 'temp_dir' in params
-        assert 'graph_name' in params
-        assert 'kernel_name' in params
-        assert 'cube_attrs' in params
-        assert 'tiling_key_list' in params
+        assert "temp_dir" in params
+        assert "graph_name" in params
+        assert "kernel_name" in params
+        assert "cube_attrs" in params
+        assert "tiling_key_list" in params
 
 
 class TestAscbcMatmulKernelDynamicTilingPro:
     """测试新增的 ascbc_matmul_kernel_dynamic_tiling_pro 函数"""
-    
+
     @staticmethod
     def test_ascbc_matmul_kernel_dynamic_tiling_pro_exists(asc_codegen_compile_module):
         """验证函数存在"""
-        assert hasattr(asc_codegen_compile_module, 'ascbc_matmul_kernel_dynamic_tiling_pro')
-    
+        assert hasattr(
+            asc_codegen_compile_module, "ascbc_matmul_kernel_dynamic_tiling_pro"
+        )
+
     @staticmethod
-    def test_ascbc_matmul_kernel_dynamic_tiling_pro_signature(asc_codegen_compile_module):
+    def test_ascbc_matmul_kernel_dynamic_tiling_pro_signature(
+        asc_codegen_compile_module,
+    ):
         """验证函数签名"""
-        sig = inspect.signature(asc_codegen_compile_module.ascbc_matmul_kernel_dynamic_tiling_pro)
+        sig = inspect.signature(
+            asc_codegen_compile_module.ascbc_matmul_kernel_dynamic_tiling_pro
+        )
         params = list(sig.parameters.keys())
-        
-        assert 'temp_dir' in params
-        assert 'graph_name' in params
-        assert 'kernel_name' in params
-        assert 'cube_attrs' in params
+
+        assert "temp_dir" in params
+        assert "graph_name" in params
+        assert "kernel_name" in params
+        assert "cube_attrs" in params
