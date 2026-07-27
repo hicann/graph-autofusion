@@ -790,6 +790,12 @@ build_backend() {
                       load_gather_split_b_t_abs_store_test_e2e_v2 \
                       load_gather_tail_split_b_t_abs_store_test_e2e_v2 \
                       load_gather_one_axis_split_b_t_abs_store_test_e2e_v2 \
+                      indirect_load_rank2_axis1_simt_e2e_v2 \
+                      indirect_load_rank2_axis1_simd_e2e_v2 \
+                      indirect_load_rank3_axis1_simt_e2e_v2 \
+                      indirect_load_rank3_axis1_simd_e2e_v2 \
+                      indirect_load_rank4_axis2_simt_e2e_v2 \
+                      indirect_load_rank4_axis2_simd_e2e_v2 \
                       load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \
                       gather_reduce_store_test_e2e_v2 \
                       load_where_store_test_e2e_v2 \

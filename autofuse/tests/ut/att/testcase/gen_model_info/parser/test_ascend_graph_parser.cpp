@@ -9,6 +9,7 @@
  */
 #include <iostream>
 #include "gtest/gtest.h"
+#include "ascgraph_info_complete.h"
 #include "gen_model_info.h"
 #include "test_fa_ascir_graph.h"
 #include "base/att_const_values.h"
@@ -247,6 +248,7 @@ TEST_F(TestAscendGraphParser, case1) {
 TEST_F(TestAscendGraphParser, test_gather_graph_parse) {
   af::AscGraph graph1("gather_graph");
   ASSERT_EQ(af::ascir::cg::BuildGatherAscendGraphND(graph1), af::SUCCESS);
+  ASSERT_EQ(optimize::AscGraphInfoComplete::CompleteApiInfo(graph1), af::SUCCESS);
   att::TuningSpacePtr tuning_space = std::make_shared<att::TuningSpace>();
   EXPECT_NE(tuning_space, nullptr);
   att::AscendGraphParser ascend_graph_parser(tuning_space);

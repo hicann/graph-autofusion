@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "ascir.h"
+#include "indirect_load_utils.h"
 #include "optimize.h"
 #include "tiling_group.h"
 #include "graph_properties_cache.h"
@@ -66,6 +67,7 @@ class Scheduler {
  private:
   // ub 切分
   Status TileSplit();
+  static std::vector<ascir::AxisId> GetSortedNodeVectorizedAxes(Scheduler &scheduler);
   // block 切分
   Status BlockSplit(std::vector<ascir::AxisId> &tile_out_axes);
   void FuseTileOutAxes(const std::vector<ascir::AxisId> &non_reduce_outer_axes,
@@ -74,10 +76,12 @@ class Scheduler {
                             const std::vector<ascir::AxisId> &non_reduce_outer_axes,
                             const std::vector<ascir::AxisId> &reduce_outer_axes);
   void RemoveDuplicatedAxisFromGroup();
+  Status InitIndirectLoadScheduleCase();
+  Status ApplyIndirectLoadNodeAxes(const af::AscNodePtr &node, bool &skip_main_tiling) const;
   Status ModifyStoreAfterReduce(ascir::NodeView &node, ascir::AxisId reduce_block_id);
   Status ApplyBlockSplitToNode(ascir::NodeView &node, bool is_store_after_reduce);
   void TileTiling(ascir::AxisId tile_id, std::pair<af::AxisPtr, af::AxisPtr> &tiled_axes) const {
-    if (tile_id != kDefaultAxisId) {
+    if (tile_id != kDefaultAxisId && tiled_axes.first == nullptr) {
       tiled_axes = graph_.TileSplit(tile_id);
     }
   }
@@ -96,12 +100,18 @@ class Scheduler {
   bool HasRGroup() const {
     return tiling_case_.ub_tiling_id_r != kDefaultAxisId;
   }
+
+  void AdjustVectorizedAxesOrderOffsets(std::vector<size_t> &vectorized_axes_order, size_t split_point, size_t end,
+                                        size_t offset) const;
   ascir::ImplGraph &graph_;
   AxisGroup axes_group_;
   TilingCase &tiling_case_;
   bool is_last_axis_reduce_;
   optimize::ReduceTemplateType reduce_template_;
   ascir::CubeTemplateType cube_template_;
+  bool is_indirect_load_schedule_case_ = false;
+  bool has_indirect_load_synthetic_outer_axis_ = false;
+  ascgen_utils::indirect_load::TemplateAxes indirect_load_axes_;
   GraphPropertiesCache graph_cache_;  // 图属性缓存，避免重复遍历
 };
 }  // namespace optimize::autoschedule

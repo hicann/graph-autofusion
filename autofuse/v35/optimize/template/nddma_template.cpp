@@ -15,6 +15,7 @@
 #include "un_alignment_strategy.h"
 #include "tensor_layout_utils.h"
 #include "autoschedule/alignment_handler.h"
+#include "indirect_load_utils.h"
 #include "platform/common/base_alignment_strategy.h"
 
 namespace optimize {
@@ -204,6 +205,11 @@ af::Status NddmaTemplate::ProcessSliceToNddma(const af::AscNodePtr &node_load, b
   }
   GE_CHECK_NOTNULL(node_load);
   GE_CHECK_NOTNULL(node_load->GetOpDesc());
+
+  const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node_load);
+  if (indirect_load_behavior.uses_direct_gm_pipeline || indirect_load_behavior.skips_api_emit) {
+    return af::SUCCESS;
+  }
 
   const std::vector<int64_t> &node_axis = node_load->attr.sched.axis;
   const std::vector<int64_t> &tensor_axis = node_load->outputs[0].attr.axis;

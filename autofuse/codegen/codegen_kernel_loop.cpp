@@ -18,6 +18,8 @@
 #include "optimize/platform/platform_factory.h"
 #include "api_call/utils/api_call_factory.h"
 #include "graph/ascendc_ir/utils/asc_tensor_utils.h"
+#include "indirect_load_utils.h"
+#include "v35/codegen/simt_scalar_call/simt_scalar_emitter.h"
 
 using namespace std;
 using namespace af::ops;
@@ -32,6 +34,59 @@ const std::string kEnCacheOriginBroadcastAxis = "enable_cache_origin_brc_axis";
 const std::string kEnCacheFusedBroadcastAxis = "enable_cache_fused_brc_axis";
 const std::string kEnCacheA = "dis_enable_cache_a";
 const std::string kEnCacheR = "dis_enable_cache_r";
+
+ApiCall *FindIndirectLoadOpCall(Loop *loop, bool require_direct_gm) {
+  if (loop == nullptr) {
+    return nullptr;
+  }
+  for (const auto &body : loop->bodys) {
+    if (body.type == LoopType::CALL) {
+      if (body.call == nullptr || !af::ops::IsOps<af::ascir_op::IndirectLoad>(body.call->node)) {
+        continue;
+      }
+      const auto behavior =
+          ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(body.call->node));
+      if (!require_direct_gm || (behavior.uses_direct_gm_pipeline && behavior.skips_ub_lifecycle)) {
+        return body.call;
+      }
+    } else if (ApiCall *call = FindIndirectLoadOpCall(body.loop, require_direct_gm); call != nullptr) {
+      return call;
+    }
+  }
+  return nullptr;
+}
+
+Status AddSkippedApiEmitProcessCall(const ascir::NodeView &node, Loop *current_loop,
+                                    const std::vector<ascir::AxisId> &current_axis,
+                                    std::map<ascir::TensorId, ApiCall *> &tensor_calls) {
+  auto call = CreateApiCallObject(node);
+  GE_ASSERT_NOTNULL(call, "Create api call object failed, ascir type:%s", node->GetTypePtr());
+  current_loop->AddCall(call);
+  GE_CHK_STATUS_RET(call->Init(node), "ApiCall Init failed, ascir type:%s", node->GetTypePtr());
+  call->skip_api_emit = true;
+  call->exec_condition = node->attr.sched.exec_condition;
+  call->axis = current_loop->axis_id;
+  call->depth = current_axis.size();
+  if (IsOps<Store>(node)) {
+    for (auto out : node->outputs()) {
+      tensor_calls.insert({out->attr.mem.tensor_id, call});
+    }
+    return af::SUCCESS;
+  }
+  GE_ASSERT_TRUE(node->inputs.Size() == 1UL,
+                 "Skipped api emit process node only supports single-input tensor mapping, node[%s].",
+                 node->GetNamePtr());
+  auto input = node->inputs()[0];
+  GE_ASSERT_NOTNULL(input, "Skipped api emit process node[%s] input is null", node->GetNamePtr());
+  auto in_call = tensor_calls.find(input->attr.mem.tensor_id);
+  GE_CHK_BOOL_RET_STATUS(in_call != tensor_calls.end(), af::FAILED,
+                         "Codegen node[%s] no API call found for process input tensor id[%ld]", node->GetNamePtr(),
+                         input->attr.mem.tensor_id);
+  for (auto out : node->outputs()) {
+    tensor_calls.insert({out->attr.mem.tensor_id, in_call->second});
+  }
+  return af::SUCCESS;
+}
 }  // namespace
 
 Loop::Loop(const ascir::AxisId axis) : axis_id(axis), parent(nullptr) {}
@@ -250,6 +305,11 @@ Status Loop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const Tiler &
   TraverseGraphForReduceNodes(nodes, current_loop->is_graph_has_reduce_node, current_loop->is_ar);
   auto lifecycle_edge = GetLifecycleEdge(nodes, tpipe);
   for (auto node : nodes) {
+    if (IsSkippedApiEmitProcessNode(node)) {
+      GE_CHK_STATUS_RET(AddSkippedApiEmitProcessCall(node, current_loop, current_axis, tensor_calls));
+      continue;
+    }
+
     // Loop enter or create
     GELOGI("node:%s, ComputeUnit:%u\r\n", node->GetNamePtr(), static_cast<uint32_t>(node->attr.api.unit));
     if (node->attr.api.unit != af::ComputeUnit::kUnitNone) {
@@ -454,21 +514,30 @@ Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<as
     }
     if (body.type == LoopType::LOOP) {
       for (auto call : target_calls) {
-        GE_CHK_STATUS_RET(call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
+        if (!ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(call->node))
+                 .skips_ub_lifecycle) {
+          GE_CHK_STATUS_RET(call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
+        }
         used_calls.insert(call);
       }
       body.loop->compute_stage = this->compute_stage;
       GE_CHK_STATUS_RET(body.loop->GenerateLoop(tiler, tpipe, current_axis, ss), "Generate loop for body failed");
       for (auto call : target_calls) {
-        GE_CHK_BOOL_RET_STATUS(call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
+        if (!ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(call->node))
+                 .skips_ub_lifecycle) {
+          GE_CHK_BOOL_RET_STATUS(call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
+        }
       }
       used_calls.clear();
     } else {
-      if (body.call->unit == af::ComputeUnit::kUnitNone) {
+      if (body.call->unit == af::ComputeUnit::kUnitNone || body.call->skip_api_emit) {
         continue;
       }
+      const bool skips_ub_lifecycle =
+          ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(body.call->node))
+              .skips_ub_lifecycle;
       GE_CHK_BOOL_RET_STATUS(body.call->WaitInputs(tpipe, ss), af::FAILED, "Func WaitInputs return false");
-      if (!IsFindInUsedCalls(body.call)) {
+      if (!IsFindInUsedCalls(body.call) && !skips_ub_lifecycle) {
         GE_CHK_STATUS_RET(body.call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
       }
       std::string call;
@@ -501,12 +570,14 @@ Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<as
         }
       }
 
-      if (!IsFindInUsedCalls(body.call)) {
-        GE_CHK_BOOL_RET_STATUS(body.call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
+      if (!skips_ub_lifecycle) {
+        if (!IsFindInUsedCalls(body.call)) {
+          GE_CHK_BOOL_RET_STATUS(body.call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
+        }
+        GE_CHK_BOOL_RET_STATUS(body.call->FreeInputs(tpipe, ss), af::FAILED, "Func FreeInputs return false");
+        GE_CHK_BOOL_RET_STATUS(body.call->FreeUnusedOutputs(tpipe, ss), af::FAILED,
+                               "Func FreeUnusedOutputs return false");
       }
-      GE_CHK_BOOL_RET_STATUS(body.call->FreeInputs(tpipe, ss), af::FAILED, "Func FreeInputs return false");
-      GE_CHK_BOOL_RET_STATUS(body.call->FreeUnusedOutputs(tpipe, ss), af::FAILED,
-                             "Func FreeUnusedOutputs return false");
       ss << std::endl;
     }
   }
@@ -627,13 +698,27 @@ Status Loop::GenerateLoop(const Tiler &tiler, const TPipe &tpipe, std::vector<as
     if (axis.type == Axis::Type::kAxisTypeBlockInner) {
       auto peer = tiler.GetAxis(axis.split_pair_other_id);
       ss << "int32_t block_dim_offset = " << peer.Str() << " * " << tiler.Size(axis.size) << ";" << std::endl;
+      ApiCall *call = FindIndirectLoadOpCall(this, true);
+      if (call != nullptr) {
+        std::string call_code;
+        GE_CHK_STATUS_RET(call->Generate(tpipe, current_axis, call_code), "Codegen generate hoisted call failed");
+        ss << call_code << std::endl;
+        call->skip_api_emit = true;
+        current_axis.pop_back();
+        return af::SUCCESS;
+      }
+    }
+    if (axis.type == Axis::Type::kAxisTypeTileInner && FindIndirectLoadOpCall(this, false) != nullptr) {
+      ss << tiler.GenInnerLoopSizeAndActualSize(axis.id, axis.split_pair_other_id);
     }
     if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse && axis.type == Axis::Type::kAxisTypeTileOuter) {
       ss << axis.loop_size.AsArg() << " = 1;" << std::endl;
     }
     ss << "for (" << axis.AsArg() << " = 0; " << axis << " < " << axis.loop_size.Str() << "; " << axis << "++) "
        << "{" << std::endl;
-    if (tpipe.cv_fusion_type != ascir::CubeTemplateType::kUBFuse) {
+    const bool skip_calc_from_axis_for_indirect_load_simt =
+        axis.type == Axis::Type::kAxisTypeTileInner && FindIndirectLoadOpCall(this, true) != nullptr;
+    if (tpipe.cv_fusion_type != ascir::CubeTemplateType::kUBFuse && !skip_calc_from_axis_for_indirect_load_simt) {
       ss << tiler.CalcFromAxis(axis.id);
     }
     GenerateEnCacheCondition(tiler, tpipe, axis, ss);
@@ -1187,7 +1272,8 @@ bool ApiCall::WaitInputVector(const TPipe &tpipe, const ApiTensor *in, const Ten
 bool ApiCall::WaitInputMte(const TPipe &tpipe, const ApiTensor *in, const Tensor &t, std::stringstream &ss) const {
   // 1. load->store 2. load->store store 3. load->vec store store
   if (this->type == Store::Type &&
-      ((in->write->compute_type == ascir::ComputeType::kComputeLoad) && (in->write->type != Gather::Type)) &&
+      ((in->write->compute_type == ascir::ComputeType::kComputeLoad) && (in->write->type != Gather::Type) &&
+       (in->write->type != IndirectLoad::Type)) &&
       IsUnitFirstRead(*this, *in)) {
     ss << tpipe.SyncMte2ToMte3(t) << std::endl;
   }

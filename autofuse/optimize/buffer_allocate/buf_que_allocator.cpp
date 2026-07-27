@@ -16,6 +16,7 @@
 #include "schedule_utils.h"
 #include "graph_utils.h"
 #include "common_utils.h"
+#include "indirect_load_utils.h"
 #include "attribute_group/attr_group_symbolic_desc.h"
 #include "platform/platform_factory.h"
 #include "mem_reuse_manager.h"
@@ -382,6 +383,10 @@ Status BufQueAllocator::SetOutputTensorAttr(const af::AscGraph &impl_graph) cons
 }
 
 Status BufQueAllocator::GetAndSetNodeTempBuffer(const af::AscNodePtr &node) {
+  if (ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_api_emit) {
+    node->attr.tmp_buffers.clear();
+    return af::SUCCESS;
+  }
   auto impl = ascgen_utils::GetAscIrCodegenImpl(node->GetType());
   GE_ASSERT_NOTNULL(impl, "GetAscIrCodegenImpl of node %s[%s] is null", node->GetTypePtr(), node->GetNamePtr());
   std::vector<std::unique_ptr<af::TmpBufDesc>> buffers =
@@ -401,7 +406,7 @@ Status BufQueAllocator::GetAndSetNodeTempBuffer(const af::AscNodePtr &node) {
 }
 
 bool BufQueAllocator::IsTensorUsedByOtherUnit(const af::AscNodePtr &node, const af::AscTensor *output) {
-  if (ScheduleUtils::IsLoad(node) || IsOps<Gather>(node)) {
+  if (ScheduleUtils::IsLoad(node) || ScheduleUtils::IsGatherLikeLoad(node)) {
     return true;
   }
   for (const auto &input : output->anchor.GetPeerInDataAnchorsPtr()) {

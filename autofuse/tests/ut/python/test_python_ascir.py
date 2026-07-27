@@ -10,10 +10,12 @@
 # -----------------------------------------------------------------------------------------------------------
 
 import pytest
+import importlib.util
 import json
 import time
 import os
 import shutil
+import sys
 from autofuse.pyautofuse import ascir, Autofuser, AutofuserOptions, Schedule, CodeGen
 
 try:
@@ -160,6 +162,53 @@ class TestAscir:
                 e.args[0]
                 == "Check dtype failed for cast_0 Cast; input_dtypes: [DT_INT8], output_dytpes: [DT_INT4]"
             )
+
+    @staticmethod
+    def test_graph_create_node_with_indirect_load_api():
+        import pyautofuse
+
+        origin_pyautofuse = sys.modules.get("autofuse.pyautofuse")
+        sys.modules["autofuse.pyautofuse"] = pyautofuse
+        ascir_mod = pyautofuse.ascir
+        ascir_mod.utils.set_platform("3510", 1, 245760)
+        try:
+            source_path = os.path.abspath(
+                os.path.join(PYF_PATH, "../../..", "compiler", "python", "ascir_api.py")
+            )
+            spec = importlib.util.spec_from_file_location(
+                "source_ascir_api", source_path
+            )
+            source_ascir_api = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(source_ascir_api)
+            finally:
+                if origin_pyautofuse is None:
+                    sys.modules.pop("autofuse.pyautofuse", None)
+                else:
+                    sys.modules["autofuse.pyautofuse"] = origin_pyautofuse
+
+            graph = ascir_mod.HintGraph("test_indirect_load_api")
+            s0 = graph.create_size("s0")
+            s1 = graph.create_size("s1")
+            s2 = graph.create_size("s2")
+            z0 = graph.create_axis("z0", s0)
+            z1 = graph.create_axis("z1", s1)
+            z2 = graph.create_axis("z2", s2)
+
+            x = source_ascir_api.Data(graph, dtype=ascir_mod.dtypes.float32)
+            x.axis = [z0, z1, z2]
+            index = source_ascir_api.Data(graph, dtype=ascir_mod.dtypes.int32)
+            index.axis = [z0, z1, z2]
+            y = source_ascir_api.IndirectLoad(
+                graph, x, index, axis=1, sched_axis=[z0, z1, z2]
+            )
+
+            assert y.dtype == ascir_mod.dtypes.float32
+            debug_str = ascir_mod.utils.debug_str(graph)
+            assert "IndirectLoad" in debug_str
+            assert "axis" in debug_str
+        finally:
+            ascir_mod.utils.set_platform("2201", 1, 245760)
 
     @staticmethod
     def test_graph_create_const_node_with_value_str_attr():

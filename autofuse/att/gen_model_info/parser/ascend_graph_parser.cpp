@@ -24,6 +24,8 @@
 #include "ascir_node_param/ascir_node_param.h"
 #include "base_types_printer.h"
 #include "common_utils.h"
+#include "indirect_load_utils.h"
+#include "schedule_result.h"
 #include "specific_params_builder.h"
 #include "vector_function_graph_parser.h"
 
@@ -853,11 +855,11 @@ void AscendGraphParser::ParserOptionalInfos(const af::AscGraph &graph) const {
 }
 
 af::Status AscendGraphParser::CalculateReservedUbSize(const af::AscGraph &graph) {
-  constexpr int32_t kSimtDcacheSize = 32 * 1024;
   tuning_space_->reserve_ub["ascendc"] = ascgen_utils::CalcReservedTmpBufSizeForAscGraph(graph);
   for (const auto &node : graph.GetAllNodes()) {
-    if (node->GetType() == kGather) {
-      tuning_space_->reserve_ub["simt_dcache"] = kSimtDcacheSize;
+    const int64_t simt_dcache_size = ::ascir::GetDcacheSize(*node);
+    if (simt_dcache_size > 0) {
+      tuning_space_->reserve_ub["simt_dcache"] = static_cast<uint32_t>(simt_dcache_size);
       break;
     }
   }
@@ -873,6 +875,13 @@ af::Status AscendGraphParser::ConvertToTuningSpace(const af::AscGraph &graph) {
     auto &node = node_order.second;
     auto node_iter = graph_sched_info_.find(node);
     if (node_iter == graph_sched_info_.end()) {
+      continue;
+    }
+    const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
+    if (indirect_load_behavior.uses_direct_gm_pipeline || indirect_load_behavior.skips_api_emit) {
+      GELOGD("[IndirectLoad] Skip tuning-space node info for node[%s], direct_gm[%d], skips_emit[%d].",
+             node->GetNamePtr(), static_cast<int32_t>(indirect_load_behavior.uses_direct_gm_pipeline),
+             static_cast<int32_t>(indirect_load_behavior.skips_api_emit));
       continue;
     }
     const auto &sched_attrs = node_iter->second;

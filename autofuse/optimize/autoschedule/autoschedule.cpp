@@ -10,6 +10,7 @@
 
 #include "autoschedule.h"
 #include <algorithm>
+#include <numeric>
 #include <sstream>
 #include <string>
 #include <queue>
@@ -18,6 +19,7 @@
 #include "ascir_utils.h"
 #include "schedule_utils.h"
 #include "common_utils.h"
+#include "indirect_load_utils.h"
 #include "node_utils.h"
 #include "ascendc_ir/core/ascendc_ir_impl.h"
 #include "graph/symbolizer/symbolic_utils.h"
@@ -179,6 +181,33 @@ void AppendIdIfNotDefault(std::stringstream &ss, const std::string &prefix, int6
     ss << prefix << id;
   }
 }
+
+// Returns true if an IndirectLoad prebuilt tiling case was generated, and the caller should return early.
+bool TryGenIndirectLoadTilingCase(ascir::ImplGraph &graph,
+                                  std::vector<optimize::autoschedule::TilingCase> &tiling_cases) {
+  bool has_indirect_load_case = false;
+  af::AxisId indirect_load_tile_id = kDefaultAxisId;
+  std::pair<af::AxisPtr, af::AxisPtr> indirect_load_tiling;
+  if (ascgen_utils::indirect_load::GetPrebuiltYTilingCase(graph, has_indirect_load_case, indirect_load_tile_id,
+                                                          indirect_load_tiling) != af::SUCCESS) {
+    GELOGE(af::FAILED, "[IndirectLoad] Failed to generate prebuilt tiling case for graph[%s].",
+           graph.GetName().c_str());
+    return true;
+  }
+  if (!has_indirect_load_case) {
+    return false;
+  }
+  optimize::autoschedule::TilingCase tiling_case;
+  if (indirect_load_tile_id != kDefaultAxisId) {
+    tiling_case.ub_tiling_id_y = indirect_load_tile_id;
+  }
+  tiling_case.ub_tiling_y = indirect_load_tiling;
+  tiling_case.block_tiling_id = 0;
+  tiling_cases.push_back(tiling_case);
+  GELOGD("[IndirectLoad] Graph[%s] generate prebuilt outer tiling case for axis[%ld].", graph.GetName().c_str(),
+         indirect_load_tile_id);
+  return true;
+}
 }  // namespace
 
 namespace optimize::autoschedule {
@@ -187,7 +216,8 @@ Status AutoSchedule::SelectLoopAxis(ascir::ImplGraph &impl_graph, bool is_reduce
   for (auto node : impl_graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node);
     node->attr.sched.loop_axis = af::kIdNone;
-    if (node->attr.api.type != af::ApiType::kAPITypeCompute) {
+    const auto behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
+    if (node->attr.api.type != af::ApiType::kAPITypeCompute || behavior.skips_main_schedule_tiling) {
       continue;
     }
     if (ScheduleUtils::IsReduce(node) && !is_reduce_fullload) {
@@ -219,6 +249,10 @@ void AutoSchedule::GenTilingCase(std::vector<TilingCase> &tiling_cases) {
       field = tid;
     }
   };
+
+  if (TryGenIndirectLoadTilingCase(graph_, tiling_cases)) {
+    return;
+  }
 
   if (cube_template_ != ascir::CubeTemplateType::kDefault) {
     for (const auto &y_id : axes_group_.y_group) {
@@ -305,6 +339,27 @@ static std::string GetTilingCaseStr(const std::string &graph_name, const TilingC
   return ss.str();
 }
 
+Status BuildIndirectLoadAxisGroup(const ascir::ImplGraph &graph, const AxisGroup &base_group, AxisGroup &axis_group) {
+  const af::AscNodePtr indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(graph);
+  if (indirect_load == nullptr) {
+    axis_group = base_group;
+    return af::SUCCESS;
+  }
+
+  ascgen_utils::indirect_load::TemplateAxes axes;
+  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, axes));
+  axis_group = {};
+  axis_group.y_group.push_back(axes.outer_axis);
+  if (axes.inner_axis != af::kIdNone) {
+    axis_group.y_group.push_back(axes.inner_axis);
+  }
+  axis_group.axes_order.resize(axis_group.y_group.size());
+  std::iota(axis_group.axes_order.begin(), axis_group.axes_order.end(), 0UL);
+  GELOGD("[IndirectLoad] Graph[%s] use template axis group[%s].", graph.GetName().c_str(),
+         axis_group.ToString().c_str());
+  return af::SUCCESS;
+}
+
 Status AutoSchedule::DoAutoSchedule() {
   graph_.SetGraphType(af::AscGraphType::kImplGraph);
   ReorderBroadcastAxesInner(graph_);
@@ -356,7 +411,11 @@ Status AutoSchedule::ProcessOneTilingCase(TilingCase &tiling_case, size_t index,
   GE_ASSERT_TRUE(output.scheduled_graph.CopyFrom(graph_), "Failed to copy graph for tiling case %zu in graph: [%s]",
                  index, graph_.GetName().c_str());
 
-  Scheduler scheduler(output.scheduled_graph, axes_group_, tiling_case, is_last_axis_reduce, reduce_template_,
+  AxisGroup axis_group;
+  GE_CHK_STATUS_RET(BuildIndirectLoadAxisGroup(output.scheduled_graph, axes_group_, axis_group),
+                    "Failed to build scheduler axis group for tiling case %zu in graph: [%s]", index,
+                    graph_name.c_str());
+  Scheduler scheduler(output.scheduled_graph, axis_group, tiling_case, is_last_axis_reduce, reduce_template_,
                       cube_template_);
 
   auto ret = scheduler.DoScheduler();

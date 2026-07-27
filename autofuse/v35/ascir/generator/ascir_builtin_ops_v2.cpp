@@ -929,6 +929,21 @@ REG_ASC_IR(Gather).Impl(v2_soc_versions,
                          {{"T1", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_FLOAT16, DT_BF16, DT_FLOAT}},
                           {"T2", TensorType{DT_INT32, DT_INT64}}}});
 
+REG_ASC_IR(IndirectLoad)
+    .Input("x1", "T1")
+    .Input("x2", "T2")
+    .Output("y", "T1")
+    .Attr<int64_t>("axis")
+    .Attr<bool>("negative_index_support")
+    .Attr<bool>("need_check_bound")
+    .Attr<int64_t>("max")
+    .ComputeType(ComputeType::kComputeLoad)
+    .Impl(v2_soc_versions,
+          {af::ascir::AscIrImplCreator<af::ascir::IndirectLoadAscIrAttImplV2>(),
+           af::ascir::AscIrImplCreator<af::ascir::IndirectLoadAscIrCodegenImplV2>(),
+           {{"T1", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_FLOAT16, DT_BF16, DT_FLOAT}},
+            {"T2", TensorType{DT_INT32, DT_INT64}}}});
+
 REG_ASC_IR(Transpose).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::TransposeAscIrAttImplV2>(),
                                              af::ascir::AscIrImplCreator<af::ascir::TransposeAscIrCodegenImplV2>(),
                                              {{"T", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_FLOAT16,

@@ -15,6 +15,7 @@
 #include "graph/utils/graph_utils.h"
 #include "common/checker.h"
 #include "common_utils.h"
+#include "indirect_load_utils.h"
 #include "schedule_utils.h"
 #include "common/util/mem_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
@@ -360,7 +361,8 @@ bool NeedRemovePad(const af::AscNodePtr &node) {
   if (ascgen_utils::IsNodeContainsBrcInline(node)) {
     return true;
   }
-  if (optimize::ScheduleUtils::IsLoad(node) && node->GetInDataNodesSize() == 1UL && node->GetOutDataNodesSize() > 0UL) {
+  if (optimize::ScheduleUtils::IsLoad(node) && !af::ops::IsOps<af::ascir_op::IndirectLoad>(node) &&
+      node->GetInDataNodesSize() == 1UL && node->GetOutDataNodesSize() > 0UL) {
     // 判断Load是否是非连续的
     const auto &repeats = node->outputs[0].attr.repeats;
     const auto &strides = node->outputs[0].attr.strides;
@@ -548,6 +550,12 @@ void VectorFuncPartitioner::RefineEnableVFFlag(const af::AscNodePtr &node, bool 
       GELOGD("Node [%s] has direct Scalar input, disable VF support.", node->GetNamePtr());
       break;
     }
+  }
+
+  // 6. IndirectLoad template nodes with custom emit paths should not participate in regular VF fusion.
+  if (ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(node)) {
+    enable_vf = false;
+    GELOGD("Node [%s] is IndirectLoad custom emit node, disable VF support.", node->GetNamePtr());
   }
 }
 
@@ -1083,7 +1091,7 @@ af::Status VectorFuncPartitioner::SetSubGraphAttrs(af::AscGraph &vf_graph) {
     node->attr.sched.axis = node->outputs[0].attr.vectorized_axis;
 
     af::Position pos = af::Position::kPositionVecCalc;
-    if (ScheduleUtils::IsLoad(node)) {
+    if (ScheduleUtils::IsLoad(node) && !af::ops::IsOps<af::ascir_op::IndirectLoad>(node)) {
       pos = af::Position::kPositionVecIn;
     } else if (ScheduleUtils::IsStore(node)) {
       pos = af::Position::kPositionVecOut;
@@ -1160,9 +1168,10 @@ af::Status VectorFuncPartitioner::ModifySubgraphAttrs(af::AscGraph &vf_graph) {
 
 af::Status VectorFuncPartitioner::BuildSubgraphs() {
   for (const auto &cluster : cluster_dict_.GetAllClusters()) {
-    // 不包含隐士广播的单节点不融合
-    if (!cluster->meta_data_.enable_vf ||
-        (cluster->Nodes().size() < kMinVfNodesNum && !ascgen_utils::IsNodeContainsBrcInline(cluster->Nodes().back()))) {
+    // 不包含隐式广播的单节点不融合
+    const bool force_vf = ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(cluster->Nodes().front());
+    if (!cluster->meta_data_.enable_vf || (cluster->Nodes().size() < kMinVfNodesNum && !force_vf &&
+                                           !ascgen_utils::IsNodeContainsBrcInline(cluster->Nodes().back()))) {
       continue;
     }
     // 1. create vf op && subgraph
@@ -1175,6 +1184,7 @@ af::Status VectorFuncPartitioner::BuildSubgraphs() {
     // 2. build subgraph
     GE_ASSERT_SUCCESS(impl_graph_.AddSubGraph(vf_graph));
     GE_ASSERT_SUCCESS(BuildSubgraph(cluster, vf_graph, vf_op));
+    (void)ascgen_utils::indirect_load::InheritTemplateRoleIfIL(impl_graph_, vf_node_name, cluster->Nodes().front());
     // step 3. set graph attr
     GE_ASSERT_SUCCESS(ModifySubgraphAttrs(vf_graph));
     sub_graphs_.push_back(vf_graph);

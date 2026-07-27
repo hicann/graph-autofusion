@@ -17,11 +17,12 @@
 #include "common/checker.h"
 #include "common_utils.h"
 #include "graph/types_af.h"
+#include "indirect_load_utils.h"
+#include "schedule_result.h"
 
 namespace ascir {
 namespace {
 constexpr int64_t kMinTmpBufferSize = 8 * 1024;
-constexpr int64_t kSimtDcacheSize = 32 * 1024;
 constexpr int64_t kBlockAlignBytes = 32;
 
 std::string MakeQueueName(int64_t id) {
@@ -220,8 +221,9 @@ UbExpr CalcReservedUbSize(const af::AscGraph &graph) {
   UbExpr reserved_ub_size = af::Symbol(ascgen_utils::CalcReservedTmpBufSizeForAscGraph(graph));
   for (const auto &node : graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node);
-    if (node->GetType() == af::ascir_op::Gather::Type) {
-      reserved_ub_size = reserved_ub_size + af::Symbol(kSimtDcacheSize);
+    const int64_t simt_dcache_size = ::ascir::GetDcacheSize(*node);
+    if (simt_dcache_size > 0) {
+      reserved_ub_size = reserved_ub_size + af::Symbol(simt_dcache_size);
       break;
     }
   }
@@ -305,6 +307,9 @@ af::Status AscGraphUbExprBuilder::Build(const af::AscGraph &graph, UbExprContext
   std::map<int64_t, ContainerState> buffer_bytes;
   for (const auto &node : graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node);
+    if (ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_ub_expr) {
+      continue;
+    }
     for (const auto &output : node->outputs()) {
       AddTensor(graph, output->attr, queue_bytes, buffer_bytes);
     }

@@ -2200,6 +2200,38 @@ TEST_F(TestOptimizer, MergeAxesGatherOnlyOneDim) {
   EXPECT_EQ(new_axis[3]->size, s1 * s2);
 }
 
+TEST_F(TestOptimizer, CompleteGatherApiInfoSetsDcacheSize) {
+  constexpr int64_t kSimtDcacheSize = 32 * 1024;
+  af::AscGraph graph("GatherDcacheGraph");
+
+  af::ascir_op::Data data0("data0", graph);
+  data0.y.dtype = ge::DT_FLOAT16;
+  data0.ir_attr.SetIndex(0);
+
+  af::ascir_op::Data data1("data1", graph);
+  data1.y.dtype = ge::DT_INT32;
+  data1.ir_attr.SetIndex(1);
+
+  af::ascir_op::Gather gather("gather");
+  gather.x1 = data0.y;
+  gather.x2 = data1.y;
+  gather.ir_attr.SetAxis(0);
+  gather.y.dtype = ge::DT_FLOAT16;
+
+  af::ascir_op::Output output("output");
+  output.x = gather.y;
+  output.y.dtype = ge::DT_FLOAT16;
+  output.ir_attr.SetIndex(0);
+
+  auto gather_node = graph.FindNode("gather");
+  ASSERT_NE(gather_node, nullptr);
+  gather_node->attr.api.compute_type = af::ComputeType::kComputeGather;
+  EXPECT_EQ(::ascir::GetDcacheSize(*gather_node), 0);
+
+  ASSERT_EQ(optimize::AscGraphInfoComplete::CompleteApiInfo(graph), af::SUCCESS);
+  EXPECT_EQ(::ascir::GetDcacheSize(*gather_node), kSimtDcacheSize);
+}
+
 TEST_F(TestOptimizer, MergeAxesReduce) {
   af::AscGraph graph("LoadAbsStore");
   auto s0 = graph.CreateSizeVar("s0");

@@ -112,6 +112,8 @@ struct ShareGraph {
   static af::ComputeGraphPtr LoadGatherAbsStore(int64_t gather_axis, af::DataType data_type);
   static af::ComputeGraphPtr LoadGatherTailAbsStore(int64_t gather_axis, af::DataType data_type);
   static af::ComputeGraphPtr LoadGatherOneAxisAbsStore(int64_t gather_axis, af::DataType data_type);
+  static af::ComputeGraphPtr IndirectLoadStoreFusedGraph(size_t rank, int64_t axis, af::DataType data_type,
+                                                         bool has_input_pre, bool use_exp2);
   static af::ComputeGraphPtr MatMulFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr GatherReduceStore(int64_t gather_axis, af::DataType data_type);
   static af::ComputeGraphPtr LoadWhereReduceStoreFusedGraph(size_t dims_size, bool x2_scalar, bool x3_scalar);

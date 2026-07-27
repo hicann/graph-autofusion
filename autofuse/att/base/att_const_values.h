@@ -224,6 +224,7 @@ inline const std::string kXor = "Xor";
 inline const std::string kVshrs = "Vshrs";
 // 下面均为ASCIR定义（已有性能评估）
 inline const std::string kGather = "Gather";
+inline const std::string kIndirectLoad = "IndirectLoad";
 inline const std::string kAbs = "Abs";
 inline const std::string kAdd = "Add";
 inline const std::string kBroadcast = "Broadcast";

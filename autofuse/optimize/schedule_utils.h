@@ -19,6 +19,7 @@
 #include "ascir.h"
 #include "ascir_ops.h"
 #include "common/platform_context.h"
+#include "schedule_result.h"
 
 namespace optimize {
 class ScheduleUtils {
@@ -64,6 +65,11 @@ class ScheduleUtils {
 
   static bool IsGather(const af::AscNodePtr &node) {
     return node->attr.api.compute_type == af::ComputeType::kComputeGather;
+  }
+
+  static bool IsGatherLikeLoad(const af::AscNodePtr &node) {
+    return af::ops::IsOps<af::ascir_op::Gather>(node) ||
+           ::ascir::GetTemplateIdOrDefault(*node) == ascir::TemplateId::kIndirectLoadSimd;
   }
 
   static bool IsBuffer(const af::AscNodePtr &node) {

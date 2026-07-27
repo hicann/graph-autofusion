@@ -11,6 +11,7 @@
 #include "base_alignment_strategy.h"
 #include "common_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
+#include "indirect_load_utils.h"
 #include "platform/platform_factory.h"
 
 namespace optimize {
@@ -301,7 +302,8 @@ af::Status BaseAlignmentStrategy::AddPadForAlignmentConflictNode(ascir::ImplGrap
   bool inserted = false;
   for (const auto &node : impl_graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node);
-    if (ScheduleUtils::IsBuffer(node)) {
+    const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
+    if (ScheduleUtils::IsBuffer(node) || indirect_load_behavior.uses_direct_gm_pipeline) {
       continue;
     }
 
@@ -383,7 +385,9 @@ af::Status BaseAlignmentStrategy::AlignVectorizedStrides(ascir::ImplGraph &impl_
 
   for (const auto &node : impl_graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node);
-    if (ScheduleUtils::IsBuffer(node)) {
+    const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
+    if (ScheduleUtils::IsBuffer(node) || indirect_load_behavior.uses_direct_gm_pipeline ||
+        indirect_load_behavior.skips_api_emit) {
       continue;
     }
     GE_ASSERT_SUCCESS(SetVectorizedStridesForOneNode(node));

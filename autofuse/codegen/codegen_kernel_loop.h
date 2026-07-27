@@ -136,6 +136,7 @@ class ApiCall {
   std::vector<const ApiTensor *> inputs;
   bool enable_cache{false};
   bool is_input_tbuf_contiguous = false;
+  bool skip_api_emit{false};
   std::string enable_cache_with_condition;
   // 用于标记Call节点执行状态
   // broadcast cache场景：在Call节点外生成控制条件

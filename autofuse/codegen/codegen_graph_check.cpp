@@ -13,6 +13,7 @@
 #include "ascir_ops.h"
 #include "common/platform_context.h"
 #include "common_utils.h"
+#include "indirect_load_utils.h"
 
 namespace codegen {
 
@@ -214,6 +215,9 @@ Status IsRepeatStrideValid(const ascir::ImplGraph &graph) {
 
 Status IsGraphNodeValid(const ascir::ImplGraph &graph) {
   for (const auto &node : graph.GetAllNodes()) {
+    if (ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_api_emit) {
+      continue;
+    }
     auto impl = ascgen_utils::GetAscIrCodegenImpl(node->GetType());
     GE_ASSERT_NOTNULL(impl, "GetAscIrCodegenImpl of node %s[%s] is null", node->GetTypePtr(), node->GetNamePtr());
     GE_ASSERT_TRUE(impl->IsNodeValid(*node), "Node %s[%s] is invalid", node->GetTypePtr(), node->GetNamePtr());

@@ -116,6 +116,7 @@ PyMODINIT_FUNC PyInit_pyautofuse(void);
   OP(BatchMatMulBias)             \
   OP(Where)                       \
   OP(Gather)                      \
+  OP(IndirectLoad)                \
   OP(Transpose)                   \
   OP(BitwiseAnd)                  \
   OP(Ln)                          \

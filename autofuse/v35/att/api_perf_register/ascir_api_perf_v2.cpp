@@ -504,6 +504,9 @@ ApiPerfRegister<ApiPerf> add_api_perf_v2(ApiPerfRegisterV2(kAdd, GetPerfFunc(kAd
                                                            &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> gather_api_perf_v2(ApiPerfRegisterV2(kGather, GetPerfFunc(kGather), nullptr,
                                                               &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> indirect_load_api_perf_v2(ApiPerfRegisterV2(kIndirectLoad, GetPerfFunc(kUnitVector), nullptr,
+                                                                     &perf_param_table_v2,
+                                                                     &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> abs_api_perf_v2(ApiPerfRegisterV2(kAbs, GetPerfFunc(kAbs + "V2"), nullptr,
                                                            &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> broadcast_api_perf_v2(ApiPerfRegisterV2(kBroadcast, GetPerfFunc(kBroadcast), nullptr,

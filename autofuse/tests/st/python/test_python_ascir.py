@@ -162,6 +162,31 @@ class TestAscir:
             )
 
     @staticmethod
+    def test_graph_create_node_with_indirect_load_api():
+        ascir.utils.set_platform("3510", 1, 245760)
+        try:
+            graph = ascir.HintGraph("test_indirect_load_api")
+            s0 = graph.create_size("s0")
+            s1 = graph.create_size("s1")
+            s2 = graph.create_size("s2")
+            z0 = graph.create_axis("z0", s0)
+            z1 = graph.create_axis("z1", s1)
+            z2 = graph.create_axis("z2", s2)
+
+            x = ascir_api.Data(graph, dtype=ascir.dtypes.float32)
+            x.axis = [z0, z1, z2]
+            index = ascir_api.Data(graph, dtype=ascir.dtypes.int32)
+            index.axis = [z0, z1, z2]
+            y = ascir_api.IndirectLoad(graph, x, index, axis=1, sched_axis=[z0, z1, z2])
+
+            assert y.dtype == ascir.dtypes.float32
+            debug_str = ascir.utils.debug_str(graph)
+            assert "IndirectLoad" in debug_str
+            assert "axis" in debug_str
+        finally:
+            ascir.utils.set_platform("2201", 1, 245760)
+
+    @staticmethod
     def test_graph_create_const_node_with_value_str_attr():
         graph = ascir.HintGraph("test")
 

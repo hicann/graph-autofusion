@@ -16,6 +16,7 @@
 #include "ascendc_ir/utils/asc_graph_utils.h"
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
+#include "fusion/autofuse_attrs.h"
 
 using namespace af;
 
@@ -8284,6 +8285,176 @@ af::ComputeGraphPtr ShareGraph::LoadGatherTailAbsStore(int64_t gather_axis, af::
   std::string sub_graph_str;
   af::AscGraphUtils::SerializeToReadable(sub_graph, sub_graph_str);
   af::AttrUtils::SetStr(ascbc_node->GetOpDescBarePtr(), "ascgraph", sub_graph_str);
+  return compute_graph;
+}
+
+template <typename Op>
+void SetIndirectLoadNodeView(Op &op, const std::vector<int64_t> &axes, const std::vector<af::Expression> &repeats,
+                             const std::vector<af::Expression> &strides, af::DataType data_type) {
+  op.attr.sched.axis = axes;
+  op.y.dtype = data_type;
+  *op.y.axis = axes;
+  *op.y.repeats = repeats;
+  *op.y.strides = strides;
+}
+
+static void CreateIndirectLoadAxes(af::AscGraph &graph, size_t rank, size_t offset, std::vector<int64_t> &axes,
+                                   std::vector<af::Expression> &repeats, std::vector<af::Expression> &strides) {
+  for (size_t i = 0UL; i < rank; ++i) {
+    const size_t dim = offset + i;
+    repeats.emplace_back(graph.CreateSizeVar("s" + std::to_string(dim)));
+    axes.emplace_back(graph.CreateAxis("z" + std::to_string(dim), repeats.back()).id);
+  }
+  strides.assign(rank, af::ops::One);
+  for (size_t i = rank - 1UL; i > 0UL; --i) {
+    strides[i - 1UL] = repeats[i] * strides[i];
+  }
+}
+
+static void AddIndirectLoadDataChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                     const std::vector<af::Expression> &repeats,
+                                     const std::vector<af::Expression> &strides, af::DataType data_type,
+                                     bool has_input_pre, af::ascir_op::IndirectLoad &indirect_load) {
+  af::ascir_op::Data x("x");
+  graph.AddNode(x);
+  x.y.dtype = data_type;
+  x.ir_attr.SetIndex(0);
+  af::ascir_op::Load input_load("input_load");
+  graph.AddNode(input_load);
+  input_load.x = x.y;
+  SetIndirectLoadNodeView(input_load, axes, repeats, strides, data_type);
+  if (!has_input_pre) {
+    indirect_load.x1 = input_load.y;
+    return;
+  }
+  af::ascir_op::Relu input_relu("input_relu");
+  graph.AddNode(input_relu);
+  input_relu.x = input_load.y;
+  SetIndirectLoadNodeView(input_relu, axes, repeats, strides, data_type);
+  indirect_load.x1 = input_relu.y;
+}
+
+static void AddIndirectLoadIndexChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                      const std::vector<af::Expression> &repeats,
+                                      const std::vector<af::Expression> &strides,
+                                      af::ascir_op::IndirectLoad &indirect_load) {
+  af::ascir_op::Data index("index");
+  graph.AddNode(index);
+  index.y.dtype = af::DT_INT32;
+  index.ir_attr.SetIndex(1);
+  af::ascir_op::Load index_load("index_load");
+  graph.AddNode(index_load);
+  index_load.x = index.y;
+  SetIndirectLoadNodeView(index_load, axes, repeats, strides, af::DT_INT32);
+  af::ascir_op::Abs index_abs("index_abs");
+  graph.AddNode(index_abs);
+  index_abs.x = index_load.y;
+  SetIndirectLoadNodeView(index_abs, axes, repeats, strides, af::DT_INT32);
+  indirect_load.x2 = index_abs.y;
+}
+
+static void AddIndirectLoadOutputChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                       const std::vector<af::Expression> &repeats,
+                                       const std::vector<af::Expression> &strides, af::DataType data_type,
+                                       bool use_exp2, af::ascir_op::IndirectLoad &indirect_load) {
+  af::ascir_op::Neg output_neg("output_neg");
+  graph.AddNode(output_neg);
+  if (use_exp2) {
+    af::ascir_op::Exp2 exp2("output_exp");
+    graph.AddNode(exp2);
+    exp2.x = indirect_load.y;
+    SetIndirectLoadNodeView(exp2, axes, repeats, strides, data_type);
+    output_neg.x = exp2.y;
+  } else {
+    af::ascir_op::Exp exp("output_exp");
+    graph.AddNode(exp);
+    exp.x = indirect_load.y;
+    SetIndirectLoadNodeView(exp, axes, repeats, strides, data_type);
+    output_neg.x = exp.y;
+  }
+  SetIndirectLoadNodeView(output_neg, axes, repeats, strides, data_type);
+
+  af::ascir_op::Store store("store");
+  graph.AddNode(store);
+  store.x = output_neg.y;
+  SetIndirectLoadNodeView(store, axes, repeats, strides, data_type);
+
+  af::ascir_op::Output y("y");
+  graph.AddNode(y);
+  y.x = store.y;
+  SetIndirectLoadNodeView(y, axes, repeats, strides, data_type);
+  y.ir_attr.SetIndex(0);
+}
+
+static void IndirectLoadStore_BeforeAutofuse(af::AscGraph &graph, size_t rank, int64_t axis, af::DataType data_type,
+                                             bool has_input_pre, bool use_exp2) {
+  std::vector<int64_t> input_axes;
+  std::vector<af::Expression> input_repeats;
+  std::vector<af::Expression> input_strides;
+  CreateIndirectLoadAxes(graph, rank, 0UL, input_axes, input_repeats, input_strides);
+  std::vector<int64_t> output_axes;
+  std::vector<af::Expression> output_repeats;
+  std::vector<af::Expression> output_strides;
+  CreateIndirectLoadAxes(graph, rank, rank, output_axes, output_repeats, output_strides);
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  graph.AddNode(indirect_load);
+  AddIndirectLoadDataChain(graph, input_axes, input_repeats, input_strides, data_type, has_input_pre, indirect_load);
+  AddIndirectLoadIndexChain(graph, output_axes, output_repeats, output_strides, indirect_load);
+  indirect_load.ir_attr.SetAxis(axis);
+  SetIndirectLoadNodeView(indirect_load, output_axes, output_repeats, output_strides, data_type);
+  AddIndirectLoadOutputChain(graph, output_axes, output_repeats, output_strides, data_type, use_exp2, indirect_load);
+}
+
+af::ComputeGraphPtr ShareGraph::IndirectLoadStoreFusedGraph(size_t rank, int64_t axis, af::DataType data_type,
+                                                            bool has_input_pre, bool use_exp2) {
+  if (rank < 2UL || rank > 4UL || axis < -static_cast<int64_t>(rank) || axis >= static_cast<int64_t>(rank)) {
+    return nullptr;
+  }
+  af::AscGraph fused_graph("indirect_load_store_test");
+  af::ascir_op::Data data0("data0", fused_graph);
+  data0.ir_attr.SetIndex(0);
+  af::ascir_op::Data data1("data1", fused_graph);
+  data1.ir_attr.SetIndex(1);
+  ComputeGraphPtr compute_graph = af::AscGraphUtils::GetComputeGraph(fused_graph);
+  if (compute_graph == nullptr) {
+    return nullptr;
+  }
+
+  auto data_desc = std::make_shared<GeTensorDesc>();
+  data_desc->SetDataType(data_type);
+  auto index_desc = std::make_shared<GeTensorDesc>();
+  index_desc->SetDataType(af::DT_INT32);
+  auto backend_desc = std::make_shared<OpDesc>("asc_backend", "AscBackend");
+  backend_desc->AddInputDesc(data_desc->Clone());
+  backend_desc->AddInputDesc(index_desc->Clone());
+  backend_desc->AddOutputDesc(data_desc->Clone());
+  auto backend = compute_graph->AddNode(backend_desc);
+  if (backend == nullptr) {
+    return nullptr;
+  }
+
+  auto sub_graph = std::make_shared<af::AscGraph>("indirect_load_store_test");
+  IndirectLoadStore_BeforeAutofuse(*sub_graph, rank, axis, data_type, has_input_pre, use_exp2);
+  auto fuse_attrs = backend->GetOpDesc()->GetOrCreateAttrsGroup<af::AutoFuseAttrs>();
+  if (fuse_attrs == nullptr) {
+    return nullptr;
+  }
+  fuse_attrs->SetAscGraph(sub_graph);
+
+  af::ascir_op::Output output("output");
+  output.ir_attr.SetIndex(0);
+  auto output_node = compute_graph->AddNode(af::OpDescUtils::GetOpDescFromOperator(output));
+  auto data0_node = fused_graph.FindNode("data0");
+  auto data1_node = fused_graph.FindNode("data1");
+  if (data0_node == nullptr || data1_node == nullptr || output_node == nullptr) {
+    return nullptr;
+  }
+  if (af::GraphUtils::AddEdge(data0_node->GetOutDataAnchor(0), backend->GetInDataAnchor(0)) != ge::GRAPH_SUCCESS ||
+      af::GraphUtils::AddEdge(data1_node->GetOutDataAnchor(0), backend->GetInDataAnchor(1)) != ge::GRAPH_SUCCESS ||
+      af::GraphUtils::AddEdge(backend->GetOutDataAnchor(0), output_node->GetInDataAnchor(0)) != ge::GRAPH_SUCCESS ||
+      compute_graph->TopologicalSorting() != ge::GRAPH_SUCCESS) {
+    return nullptr;
+  }
   return compute_graph;
 }
 

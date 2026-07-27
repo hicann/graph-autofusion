@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include "ascir_ops.h"
+#include "ascgraph_info_complete.h"
 #include "common/ub_expr/asc_graph_ub_expr_builder.h"
 #include "common/ub_expr/ub_expr_utils.h"
 #include "graph/utils/graph_utils.h"
@@ -331,6 +332,7 @@ TEST(AscGraphUbExprBuilderTest, BuildIncludesReservedUbForGather) {
   af::Operator op("Gather", "Gather");
   auto node = graph.AddNode(op);
   ASSERT_NE(node, nullptr);
+  ASSERT_EQ(optimize::AscGraphInfoComplete::CompleteApiInfo(graph), af::SUCCESS);
 
   ascir::UbExprContext context;
   EXPECT_EQ(ascir::AscGraphUbExprBuilder().Build(graph, context), af::SUCCESS);
