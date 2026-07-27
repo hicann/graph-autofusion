@@ -655,7 +655,12 @@ TEST(GeneratorUT, CreateAxesReorderTilingCodeGenImplSuccess) {
 }
 
 TEST(GeneratorUT, AxesReorderSolverHeaderRegistersOnlyDirectStandardHeaders) {
-  TilingModelInfo model_infos{CreateModelInfo()};
+  ModelInfo model_info = CreateModelInfo();
+  size_t order = 1U;
+  for (const auto &arg : model_info.arg_list) {
+    arg->order = (arg->name == "tilem" || arg->name == "tilen") ? 0U : order++;
+  }
+  TilingModelInfo model_infos{model_info};
   ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 0UL}, model_infos), af::SUCCESS);
   TilingCodeGenConfig config;
   config.type = TilingImplType::AXES_REORDER;
@@ -669,6 +674,10 @@ TEST(GeneratorUT, AxesReorderSolverHeaderRegistersOnlyDirectStandardHeaders) {
       solver_header,
       {"cmath", "cstddef", "cstdint", "functional", "sstream", "string", "type_traits", "utility", "vector"},
       {"algorithm", "array", "map", "memory", "set", "unordered_map"});
+  const auto &solver_source = tiling_res.at(kTilingSolverIdentify);
+  EXPECT_NE(solver_source.find("#include <map>"), std::string::npos);
+  EXPECT_NE(solver_source.find("lcm(info.var_a->align, info.var_b->align)"), std::string::npos);
+  EXPECT_EQ(solver_source.find("::lcm(info.var_a->align, info.var_b->align)"), std::string::npos);
 }
 
 TEST(GeneratorUT, TilingCodeGenImplConstruct) {
