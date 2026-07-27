@@ -3915,29 +3915,24 @@ void TilingLib::GenReprScheduleGroupFields(std::stringstream &ss, const ascir::S
                                            const std::string &field_prefix, const std::string &emit_fn,
                                            const std::string &indent, bool emit_first_arg) const {
   std::unordered_set<std::string> seen_vars;
-  std::vector<std::string> shape_var_names;
+  std::set<int64_t> q_ids;
+  std::set<int64_t> b_ids;
+  std::string first_arg = emit_first_arg ? ", first); first = false;" : ");";
   for (size_t gi = 0; gi < sg.impl_graphs.size(); ++gi) {
-    for (auto size : sg.impl_graphs[gi].GetAllSizeVar()) {
+    const auto &graph = sg.impl_graphs[gi];
+    for (auto size : graph.GetAllSizeVar()) {
       if (!size->expr.IsConstExpr()) {
         std::string var_name = std::string(size->expr.Str().get());
         if (seen_vars.find(var_name) == seen_vars.end()) {
-          shape_var_names.push_back(var_name);
+          ss << indent << emit_fn << "(\"" << var_name << "\", " << field_prefix << "get_" << var_name << "()"
+             << first_arg << std::endl;
           seen_vars.insert(var_name);
         }
       }
     }
-  }
-  std::string first_arg = emit_first_arg ? ", first); first = false;" : ");";
-  for (const auto &var_name : shape_var_names) {
-    ss << indent << emit_fn << "(\"" << var_name << "\", " << field_prefix << "get_" << var_name << "()" << first_arg
-       << std::endl;
-  }
-
-  std::set<int64_t> q_ids;
-  std::set<int64_t> b_ids;
-  for (size_t gi = 0; gi < sg.impl_graphs.size(); ++gi) {
-    codegen::TilingData::GetTqueAndTbufId(sg.impl_graphs[gi], q_ids, b_ids);
-    codegen::TilingData::GetTmpBufName(sg.impl_graphs[gi], b_ids);
+    codegen::TilingData::GetTqueAndTbufId(graph, q_ids, b_ids);
+    codegen::TilingData::GetTmpBufName(graph, b_ids);
+    GenReprApiTilingFields(ss, graph, gi, field_prefix, emit_first_arg);
   }
   for (auto q_id : q_ids) {
     if (q_id >= 0) {
@@ -3953,32 +3948,31 @@ void TilingLib::GenReprScheduleGroupFields(std::stringstream &ss, const ascir::S
   }
 }
 
-void TilingLib::GenReprApiTilingFields(std::stringstream &ss, const ascir::ScheduleGroup &sg,
-                                       const std::string &field_prefix, const std::string &indent,
-                                       const std::string &first_flag) const {
-  for (size_t gi = 0; gi < sg.impl_graphs.size(); ++gi) {
-    for (const auto &node : sg.impl_graphs[gi].GetAllNodes()) {
-      std::string device_type_name;
-      std::string api_field_name;
-      if (af::SUCCESS == GetApiTilingTypeName(node, device_type_name) &&
-          af::SUCCESS == GetApiTilingFieldName(node, api_field_name)) {
-        api_field_name = api_field_name + "_" + std::to_string(gi);
-        ss << indent << "{" << std::endl;
-        ss << indent << "  if (!" << first_flag << ") { repr << \",\"; }" << std::endl;
-        ss << indent << "  repr << std::endl << \"" << indent << "." << api_field_name << " = {\";" << std::endl;
-        std::vector<std::string> api_fields;
-        codegen::TilingData::GetApiTilingDataName(node, api_fields);
-        bool api_first = true;
-        for (const auto &af : api_fields) {
-          ss << indent << "  if (!" << (api_first ? "true" : "false") << ") { repr << \",\"; }" << std::endl;
-          ss << indent << "  repr << std::endl << \"" << indent << "  ." << af << " = \" << " << field_prefix
-             << api_field_name << "." << af << ";" << std::endl;
-          api_first = false;
-        }
-        ss << indent << "  repr << std::endl << \"" << indent << "}\";" << std::endl;
-        ss << indent << "  " << first_flag << " = false;" << std::endl;
-        ss << indent << "}" << std::endl;
+void TilingLib::GenReprApiTilingFields(std::stringstream &ss, const ascir::ImplGraph &graph, size_t tiling_case_id,
+                                       const std::string &field_prefix, bool top_level) const {
+  const std::string indent = top_level ? "  " : "    ";
+  const std::string first_flag = top_level ? "first" : "sub_first";
+  for (const auto &node : graph.GetAllNodes()) {
+    std::string device_type_name;
+    std::string api_field_name;
+    if (af::SUCCESS == GetApiTilingTypeName(node, device_type_name) &&
+        af::SUCCESS == GetApiTilingFieldName(node, api_field_name)) {
+      api_field_name = api_field_name + "_" + std::to_string(tiling_case_id);
+      ss << indent << "{" << std::endl;
+      ss << indent << "  if (!" << first_flag << ") { repr << \",\"; }" << std::endl;
+      ss << indent << "  repr << std::endl << \"" << indent << "." << api_field_name << " = {\";" << std::endl;
+      std::vector<std::string> api_fields;
+      codegen::TilingData::GetApiTilingDataName(node, api_fields);
+      bool api_first = true;
+      for (const auto &af : api_fields) {
+        ss << indent << "  if (!" << (api_first ? "true" : "false") << ") { repr << \",\"; }" << std::endl;
+        ss << indent << "  repr << std::endl << \"" << indent << "  ." << af << " = \" << " << field_prefix
+           << api_field_name << "." << af << ";" << std::endl;
+        api_first = false;
       }
+      ss << indent << "  repr << std::endl << \"" << indent << "}\";" << std::endl;
+      ss << indent << "  " << first_flag << " = false;" << std::endl;
+      ss << indent << "}" << std::endl;
     }
   }
 }
@@ -4032,7 +4026,6 @@ void TilingLib::GenReprSingleGroup(std::stringstream &ss,
   ss << "  emit_field(\"tiling_key\", tiling_data->get_tiling_key(), first); first = false;" << std::endl;
   auto &sg = fused_schedule_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
   GenReprScheduleGroupFields(ss, sg, "tiling_data->", "emit_field", "  ", true);
-  GenReprApiTilingFields(ss, sg, "tiling_data->", "  ", "first");
 }
 
 void TilingLib::GenReprMultiGroup(std::stringstream &ss,
@@ -4064,7 +4057,6 @@ void TilingLib::GenReprMultiGroup(std::stringstream &ss,
         ss << "    emit_sub(\"tiling_key\", tiling_data->" << sub_name << ".get_tiling_key());" << std::endl;
         std::string field_prefix = "tiling_data->" + sub_name + ".";
         GenReprScheduleGroupFields(ss, schedule_groups[k], field_prefix, "emit_sub", "    ", false);
-        GenReprApiTilingFields(ss, schedule_groups[k], field_prefix, "    ", "sub_first");
         ss << "    repr << std::endl << \"  }\";" << std::endl;
         ss << "    first = false;" << std::endl;
         ss << "  }" << std::endl;

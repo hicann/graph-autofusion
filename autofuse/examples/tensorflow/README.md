@@ -22,7 +22,7 @@
 3. 也可使用一键配置脚本自动搭建环境（**仅 x86_64 架构可用**）：
 
    ```bash
-   bash scripts/env_install/setup_tf_env.sh
+   bash scripts/env_install/tensorflow/setup_tf_env.sh
    ```
 
    脚本完成后激活环境：
