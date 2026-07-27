@@ -697,11 +697,12 @@ inline __aicore__ void GetSignBitTensor(const AscendC::LocalTensor<uint16_t> &ds
   uint32_t rpt_times = cal_cnt / one_rpt_cnt;
   uint32_t tail_rpt_cnt = cal_cnt - rpt_times * one_rpt_cnt;
   uint64_t mask[2] = {uint64_t(0x5555555555555555), 0};
+  AscendC::Duplicate(inner_dup, uint32_t(0xFFFFFFFF), 2 * cal_cnt);
   AscendC::Duplicate(inner_dup, 1U, mask, rpt_times, 1, 8);
   if (tail_rpt_cnt != 0) {
     uint64_t mask_tail = 0b01;
     for (uint32_t i = 1; i < tail_rpt_cnt; i++) {
-      mask_tail += (0b01 << (2 * i));
+      mask_tail += (uint64_t(1) << (2 * i));
     }
     mask[0] = mask_tail;
     AscendC::Duplicate(inner_dup[2 * (cal_cnt - tail_rpt_cnt)], 1U, mask, 1, 1, 8);
@@ -757,8 +758,8 @@ inline __aicore__ void CalcWeightedTensor(const AscendC::LocalTensor<half> &dst,
   if (tail_rpt_cnt != 0) {
     if (tail_rpt_cnt * sizeof(half) < ONE_REPEAT_BYTE_SIZE / 2) {
       uint64_t mask_tail = 0b01;
-      for (uint32_t i = 1; i < tail_rpt_cnt; i++) {
-        mask_tail += (0b01 << (2 * i));
+      for (uint32_t i = 1; i < tail_rpt_cnt / 2; i++) {
+        mask_tail += (uint64_t(1) << (2 * i));
       }
       mask[0] = mask_tail;
       mask[1] = 0;
@@ -766,8 +767,8 @@ inline __aicore__ void CalcWeightedTensor(const AscendC::LocalTensor<half> &dst,
       mask[0] = uint64_t(0x5555555555555555);
       uint32_t tail_cnt = tail_rpt_cnt - 128 / sizeof(half);
       uint64_t mask_tail = 0b01;
-      for (uint32_t i = 1; i < tail_cnt; i++) {
-        mask_tail += (0b01 << (2 * i));
+      for (uint32_t i = 1; i < tail_cnt / 2; i++) {
+        mask_tail += (uint64_t(1) << (2 * i));
       }
       mask[1] = mask_tail;
     }
