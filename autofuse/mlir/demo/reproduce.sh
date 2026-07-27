@@ -269,4 +269,4 @@ case "${1:-all}" in
   all)      do_build; do_pipeline; do_sim ;;
   *) echo "usage: $0 {build|pipeline|sim|camodel|realnpu|all}"; exit 1 ;;
 esac
-echo "== done: $1 =="
+echo "== done: ${1:-all} =="
