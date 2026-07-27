@@ -13,6 +13,7 @@
 
 #include <functional>
 #include <utility>
+#include "ascir_node_param/ascir_node_param.h"
 #include "base/perf_breakdown.h"
 #include "perf_param.h"
 
@@ -27,6 +28,7 @@ struct NodeDetail {
   std::vector<Expr> output_dims{};  // 合轴后
   Expr gm_stride{CreateExpr(0)};
   Expr ub_stride{CreateExpr(0)};
+  ascir_param::CastNodeParams cast_node_params;
   int32_t block_count_idx{0};                      // 用于 LoadStoreStrideV2Func，表示发生非连续的轴索引
   std::map<Expr, TernaryOp, ExprCmp> ternary_ops;  // 动态shape表达式
 

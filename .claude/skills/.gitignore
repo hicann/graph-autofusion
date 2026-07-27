@@ -11,6 +11,8 @@
 !af-test-developer/**
 !af-code-reviewer/
 !af-code-reviewer/**
+!af-perf-modeler/
+!af-perf-modeler/**
 !sk-model-analysis/
 !sk-model-analysis/**
 !sk-operator-asset-adapter/

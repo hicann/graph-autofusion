@@ -40,6 +40,12 @@ class PerfParamTable {
     static std::vector<VfInstructPerf> empty{};
     return empty;
   }
+  // 获取同时依赖输入输出dtype的MicroApi性能信息
+  [[nodiscard]] virtual const std::vector<VfInstructDtypeMappingPerf> &GetVfInstructDtypeMappingPerfTable(
+      [[maybe_unused]] const std::string &micro_api_type) const {
+    static std::vector<VfInstructDtypeMappingPerf> empty{};
+    return empty;
+  }
   // 获取Vector Function的头开销
   [[nodiscard]] virtual Expr GetVectorFunctionHeadCost() const {
     return CreateExpr(0);

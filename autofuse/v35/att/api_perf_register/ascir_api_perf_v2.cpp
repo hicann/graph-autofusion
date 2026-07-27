@@ -315,6 +315,7 @@ af::Status CastApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_sh
                    [[maybe_unused]] const NodeInfo &node, PerfOutputInfo &perf_res) {
   NodeDetail node_info;
   GE_ASSERT_SUCCESS(SetNodeDetail(input_shapes, output_shapes, node_info));
+  node_info.cast_node_params = node.cast_node_params;
   GE_ASSERT_SUCCESS(ascendcperf_v2::CastPerf(node_info, perf_res));
   return af::SUCCESS;
 }

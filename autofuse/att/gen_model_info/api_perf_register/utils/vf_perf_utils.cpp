@@ -33,6 +33,27 @@ const PerfParamTable *GetParamPerfTable() {
   return api_perf->GetPerfParam();
 }
 
+bool ContainsDtype(const std::vector<std::string> &dtypes, const std::string &dtype) {
+  return std::count(dtypes.begin(), dtypes.end(), dtype) > 0;
+}
+
+bool MatchDtypeMappingPerf(const VfInstructDtypeMappingPerf &api_perf, const std::string &input_dtype,
+                           const std::string &output_dtype) {
+  return ContainsDtype(api_perf.input_dtypes, input_dtype) && ContainsDtype(api_perf.output_dtypes, output_dtype);
+}
+
+bool FindDtypeMappingPerf(const std::vector<VfInstructDtypeMappingPerf> &api_perf_table, const std::string &input_dtype,
+                          const std::string &output_dtype, Expr &latency, Expr &throughput) {
+  for (const auto &api_perf : api_perf_table) {
+    if (MatchDtypeMappingPerf(api_perf, input_dtype, output_dtype)) {
+      latency = CreateExpr(api_perf.latency);
+      throughput = CreateExpr(api_perf.throughput);
+      return true;
+    }
+  }
+  return false;
+}
+
 Expr GetVFApiCount(const NodePerfInfo &node_info, const uint32_t micro_api_len, bool strides_equal,
                    const ascir_param::VectorFuncNodeParams &vector_func_params) {
   const Expr data_type_size = GetDataTypeSize(node_info.input_dtype);
@@ -124,6 +145,39 @@ af::Status VfPerfUtils::AddVfInstructPerf(const std::string &vf_instruct_type, c
       break;
     }
   }
+  return af::SUCCESS;
+}
+
+af::Status VfPerfUtils::GetVfInstructDtypeMappingPerf(const std::string &vf_instruct_type,
+                                                      const std::string &input_dtype, const std::string &output_dtype,
+                                                      Expr &latency, Expr &throughput) {
+  latency = CreateExpr(0);
+  throughput = CreateExpr(0);
+  const auto param_table = GetParamPerfTable();
+  GE_ASSERT_NOTNULL(param_table);
+  const auto &api_perf_table = param_table->GetVfInstructDtypeMappingPerfTable(vf_instruct_type);
+  if (FindDtypeMappingPerf(api_perf_table, input_dtype, output_dtype, latency, throughput) ||
+      FindDtypeMappingPerf(api_perf_table, input_dtype, kDefault, latency, throughput) ||
+      FindDtypeMappingPerf(api_perf_table, kDefault, output_dtype, latency, throughput) ||
+      FindDtypeMappingPerf(api_perf_table, kDefault, kDefault, latency, throughput)) {
+    GELOGD(
+        "Found dtype mapping perf of vf instruct [%s]: input_dtype is [%s], output_dtype is [%s], latency is [%s], "
+        "throughput is [%s].",
+        vf_instruct_type.c_str(), input_dtype.c_str(), output_dtype.c_str(), latency.Serialize().get(),
+        throughput.Serialize().get());
+  }
+  return af::SUCCESS;
+}
+
+af::Status VfPerfUtils::AddVfInstructDtypeMappingPerf(const std::string &vf_instruct_type,
+                                                      const std::string &input_dtype, const std::string &output_dtype,
+                                                      Expr &latency, Expr &throughput, Expr repeat_time) {
+  Expr api_latency = CreateExpr(0);
+  Expr api_throughput = CreateExpr(0);
+  GE_ASSERT_SUCCESS(
+      GetVfInstructDtypeMappingPerf(vf_instruct_type, input_dtype, output_dtype, api_latency, api_throughput));
+  latency = af::sym::Max(api_latency, latency);
+  throughput = throughput + api_throughput * repeat_time;
   return af::SUCCESS;
 }
 

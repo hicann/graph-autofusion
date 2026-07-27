@@ -171,6 +171,12 @@ const std::map<std::string, std::vector<VfInstructPerf>> &PerfParamTableV2::GetV
           },
       },
       {
+          kNot,
+          {
+              {VfInstructPerf{{kUInt8, kInt8, kUInt16, kInt16, kFloat16, kBfloat16, kUInt32, kInt32, kFloat32}, 3, 1}},
+          },
+      },
+      {
           kExp,
           {
               {VfInstructPerf{{kFloat16}, 18, 8}},
@@ -338,10 +344,46 @@ const std::map<std::string, std::vector<VfInstructPerf>> &PerfParamTableV2::GetV
               {VfInstructPerf{{kUInt8, kInt8, kUInt16, kInt16, kUInt32, kInt32, kFloat16, kFloat32, kBfloat16}, 3, 1}},
           },
       },
+      // VPACK
+      {
+          kPack,
+          {
+              {VfInstructPerf{{kUInt16, kInt16, kFloat16, kBfloat16, kUInt32, kInt32, kFloat32}, 8, 1}},
+          },
+      },
+      // VUNPACK
+      {
+          kUnPack,
+          {
+              {VfInstructPerf{{kUInt8, kInt8, kUInt16, kInt16, kFloat16, kBfloat16}, 8, 1}},
+          },
+      },
+      // VINTLV
+      {
+          kInterleave,
+          {
+              {VfInstructPerf{{kUInt8, kInt8, kUInt16, kInt16, kFloat16, kBfloat16, kUInt32, kInt32, kFloat32}, 8, 1}},
+          },
+      },
+      // VDINTLV
+      {
+          kDeInterleave,
+          {
+              {VfInstructPerf{{kUInt8, kInt8, kUInt16, kInt16, kFloat16, kBfloat16, kUInt32, kInt32, kFloat32}, 8, 1}},
+          },
+      },
+      // PPACK
       {
           kMaskPack,
           {
-              {VfInstructPerf{{kUInt8, kInt8, kUInt16, kInt16, kUInt32, kInt32, kFloat16, kFloat32, kBfloat16}, 8, 1}},
+              {VfInstructPerf{{kUInt8, kInt8}, 8, 1}},
+          },
+      },
+      // PUNPACK
+      {
+          kMaskUnPack,
+          {
+              {VfInstructPerf{{kUInt8, kInt8}, 8, 1}},
           },
       },
       {
@@ -395,6 +437,28 @@ const std::map<std::string, std::vector<VfInstructPerf>> &PerfParamTableV2::GetV
   };
   return kVfInstructPerfTable;
 }
+
+const std::map<std::string, std::vector<VfInstructDtypeMappingPerf>> &
+PerfParamTableV2::GetVfInstructDtypeMappingPerfTable() const {
+  static const std::map<std::string, std::vector<VfInstructDtypeMappingPerf>> kVfInstructDtypeMappingPerfTable = {
+      {
+          kCast,
+          {
+              {VfInstructDtypeMappingPerf{{kFloat16, kBfloat16, kFloat32}, {kFloat16, kBfloat16, kFloat32}, 4, 1}},
+              {VfInstructDtypeMappingPerf{{kDefault}, {kDefault}, 5, 2}},
+          },
+      },
+      {
+          kStore,
+          {
+              {VfInstructDtypeMappingPerf{{kUInt8}, {kInt64}, 0, 5}},
+              {VfInstructDtypeMappingPerf{{kDefault}, {kDefault}, 0, 1}},
+          },
+      },
+  };
+  return kVfInstructDtypeMappingPerfTable;
+}
+
 PerfParamTableV2::PerfParamTableV2() {
   pipes_head_perf_.emplace(PipeType::AIV_MTE2, &PerfParamTableV2::GetMTE2PipeHead);
   pipes_head_perf_.emplace(
@@ -405,12 +469,22 @@ PerfParamTableV2::PerfParamTableV2() {
         return kMte3PipeHeadCost;
       });
   vf_instruct_type_2_api_perf_ = GetVfInstructPerfTable();
+  vf_instruct_type_2_dtype_mapping_api_perf_ = GetVfInstructDtypeMappingPerfTable();
 }
 
 const std::vector<VfInstructPerf> &PerfParamTableV2::GetVfInstructPerfTable(const std::string &vf_instruct_type) const {
   const auto &iter = vf_instruct_type_2_api_perf_.find(vf_instruct_type);
   if (iter == vf_instruct_type_2_api_perf_.end()) {
     return PerfParamTable::GetVfInstructPerfTable(vf_instruct_type);
+  }
+  return iter->second;
+}
+
+const std::vector<VfInstructDtypeMappingPerf> &PerfParamTableV2::GetVfInstructDtypeMappingPerfTable(
+    const std::string &vf_instruct_type) const {
+  const auto &iter = vf_instruct_type_2_dtype_mapping_api_perf_.find(vf_instruct_type);
+  if (iter == vf_instruct_type_2_dtype_mapping_api_perf_.end()) {
+    return PerfParamTable::GetVfInstructDtypeMappingPerfTable(vf_instruct_type);
   }
   return iter->second;
 }

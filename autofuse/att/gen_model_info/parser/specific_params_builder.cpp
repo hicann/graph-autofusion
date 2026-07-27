@@ -30,6 +30,14 @@ af::Status FillVectorFuncParams(const ascir_param::AscirNodeParams &params, Node
   node_info.vector_func_params = *vector_func_params;
   return af::SUCCESS;
 }
+
+af::Status FillCastParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
+  const auto *cast_params = ascir_param::GetSpecificParams<ascir_param::CastNodeParams>(params);
+  GE_ASSERT_NOTNULL(cast_params, "Cast specific params is null, node[%s].", node_info.name.c_str());
+  node_info.cast_node_params = *cast_params;
+  return af::SUCCESS;
+}
+
 }  // namespace
 
 af::Status FillSpecificParams(const af::AscNodePtr &ge_node, NodeInfo &node_info) {
@@ -47,6 +55,9 @@ af::Status FillSpecificParams(const af::AscNodePtr &ge_node, NodeInfo &node_info
   }
   if (node_info.node_type == kVectorFunc) {
     return FillVectorFuncParams(*params, node_info);
+  }
+  if (node_info.node_type == kCast) {
+    return FillCastParams(*params, node_info);
   }
   return af::SUCCESS;
 }

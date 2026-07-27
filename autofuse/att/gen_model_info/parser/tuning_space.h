@@ -183,6 +183,7 @@ struct NodeInfo {
   std::vector<NodeInfo> sub_nodes_infos;
   ascir_param::VectorFuncNodeParams vector_func_params;
   ascir_param::ReduceNodeParams reduce_specific_params;
+  ascir_param::CastNodeParams cast_node_params;
   af::ExecuteCondition exec_condition{af::ExecuteCondition::kNoCache};
   std::string DebugString() const {
     std::stringstream ss;

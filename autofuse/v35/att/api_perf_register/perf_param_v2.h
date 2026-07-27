@@ -23,6 +23,9 @@ class PerfParamTableV2 : public PerfParamTable {
   const std::map<std::string, std::vector<VfInstructPerf>> &GetVfInstructPerfTable() const;
   [[nodiscard]] const std::vector<VfInstructPerf> &GetVfInstructPerfTable(
       [[maybe_unused]] const std::string &vf_instruct_type) const override;
+  const std::map<std::string, std::vector<VfInstructDtypeMappingPerf>> &GetVfInstructDtypeMappingPerfTable() const;
+  [[nodiscard]] const std::vector<VfInstructDtypeMappingPerf> &GetVfInstructDtypeMappingPerfTable(
+      [[maybe_unused]] const std::string &vf_instruct_type) const override;
   [[nodiscard]] Expr GetVectorFunctionHeadCost() const override;
   [[nodiscard]] std::string GetApiRegisterVerName() const override;
   [[nodiscard]] Expr GetOpHeadCost() const override;
@@ -36,6 +39,7 @@ class PerfParamTableV2 : public PerfParamTable {
 
  private:
   std::map<std::string, std::vector<VfInstructPerf>> vf_instruct_type_2_api_perf_;
+  std::map<std::string, std::vector<VfInstructDtypeMappingPerf>> vf_instruct_type_2_dtype_mapping_api_perf_;
   std::map<PipeType, PipeHeadPerfFunc> pipes_head_perf_;
 };
 

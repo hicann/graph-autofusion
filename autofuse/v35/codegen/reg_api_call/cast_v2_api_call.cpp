@@ -9,6 +9,7 @@
  */
 #include "cast_v2_api_call.h"
 
+#include <memory>
 #include <sstream>
 #include "attr_utils.h"
 #include "ascir_ops.h"
@@ -18,6 +19,7 @@
 #include "common/checker.h"
 #include "api_call/utils/api_call_factory.h"
 #include "api_call/utils/api_call_utils.h"
+#include "ascir_node_param/ascir_node_param.h"
 #include "codegen/expression_convert_struct.h"
 
 namespace codegen {
@@ -25,6 +27,39 @@ using namespace std;
 using namespace af::ops;
 using namespace af::ascir_op;
 using namespace ascgen_utils;
+
+namespace {
+constexpr const char *kAscirNodeParams = "AscirNodeParams";
+
+af::Status FillCastNodeParams(const af::AscNodePtr &node, const std::vector<ge::Expression> &output_dims,
+                              const std::vector<ge::Expression> &output_strides,
+                              const std::vector<ge::Expression> &input_strides) {
+  GE_ASSERT_NOTNULL(node);
+  auto params = ascir_param::GetAscirNodeParams(node);
+  if (params == nullptr) {
+    auto op_desc = node->GetOpDesc();
+    GE_ASSERT_NOTNULL(op_desc);
+    params = std::make_shared<ascir_param::AscirNodeParams>();
+    GE_ASSERT_TRUE(op_desc->SetExtAttr(kAscirNodeParams, params), "Node:%s SetExtAttr failed", node->GetNamePtr());
+  }
+
+  auto *cast_params = std::get_if<ascir_param::CastNodeParams>(&params->specific_params);
+  if (cast_params == nullptr) {
+    params->specific_params = ascir_param::CastNodeParams{};
+    cast_params = std::get_if<ascir_param::CastNodeParams>(&params->specific_params);
+  }
+  GE_ASSERT_NOTNULL(cast_params, "Cast specific params is null, node[%s].", node->GetNamePtr());
+  params->api_name = node->GetType();
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+
+  *cast_params = ascir_param::CastNodeParams{};
+  cast_params->valid = true;
+  cast_params->output_dims = output_dims;
+  cast_params->output_strides = output_strides;
+  cast_params->input_strides = input_strides;
+  return af::SUCCESS;
+}
+}  // namespace
 
 Status CastV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis,
                                const std::vector<std::reference_wrapper<const Tensor>> &inputs,
@@ -54,6 +89,29 @@ Status CastV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::Axis
   bool status = GenerateVectorizedAxisMergeStatus(ub_inputs, ub_outputs, merge_info, tpipe);
   GE_ASSERT_TRUE(status, "GenerateVectorizedAxisMergeStatus failed");
   SaveApiLoopAxisParams(merge_info, param);
+  std::vector<ge::Expression> output_dims;
+  std::vector<ge::Expression> output_strides;
+  std::vector<ge::Expression> input_strides;
+  if (param.outer_repeats.empty()) {
+    if (!merge_info.merge_repeats.empty()) {
+      output_dims.emplace_back(merge_info.merge_repeats.back());
+    }
+    output_strides.emplace_back(af::ops::One);
+    input_strides.emplace_back(af::ops::One);
+  } else {
+    const size_t merge_repeats_size = merge_info.merge_repeats.size();
+    ge::Expression outer_call_count = merge_info.merge_repeats[0];
+    for (size_t i = 1; i + 1 < merge_repeats_size; ++i) {
+      outer_call_count = outer_call_count * merge_info.merge_repeats[i];
+    }
+    output_dims.emplace_back(outer_call_count);
+    output_dims.emplace_back(param.cal_count);
+    output_strides.emplace_back(param.output_second_to_last_stride);
+    output_strides.emplace_back(af::ops::One);
+    input_strides.emplace_back(param.input_second_to_last_stride);
+    input_strides.emplace_back(af::ops::One);
+  }
+  GE_ASSERT_SUCCESS(FillCastNodeParams(this->node, output_dims, output_strides, input_strides));
   stringstream ss;
   size_t outer_repeats_size = param.outer_repeats.size();
   std::string scalar_local_blk_tensor_name = "local_blk_tensor_of_" + x.name;

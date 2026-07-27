@@ -21,6 +21,7 @@
 #include "common_utils.h"
 #include "utils/api_call_factory.h"
 #include "cast_v2_api_call.h"
+#include "ascir_node_param/ascir_node_param.h"
 
 using namespace ge;
 using namespace af::ops;
@@ -108,6 +109,17 @@ TEST(CastV2ApiCallTest, CastV2ApiCall_Zero_Stride) {
   call.Generate(tpipe, current_axis, result);
   EXPECT_EQ(result, std::string{"CastExtend(local_1[0], local_0[0], {ConvertToUint32(local_0_actual_size)}, "
                                 "{ConvertToUint32(1)}, {ConvertToUint32(1)});\n"});
+
+  const auto params = ascir_param::GetAscirNodeParams(cast);
+  ASSERT_NE(params, nullptr);
+  const auto *cast_params = std::get_if<ascir_param::CastNodeParams>(&params->specific_params);
+  ASSERT_NE(cast_params, nullptr);
+  ASSERT_EQ(cast_params->output_dims.size(), 1U);
+  ASSERT_EQ(cast_params->output_strides.size(), 1U);
+  ASSERT_EQ(cast_params->input_strides.size(), 1U);
+  EXPECT_STREQ(cast_params->output_dims[0].Serialize().get(), "s2");
+  EXPECT_STREQ(cast_params->output_strides[0].Serialize().get(), "1");
+  EXPECT_STREQ(cast_params->input_strides[0].Serialize().get(), "1");
 }
 
 TEST(CastV2ApiCallTest, CastV2ApiCallTwoDimension) {
@@ -191,6 +203,20 @@ TEST(CastV2ApiCallTest, CastV2ApiCallTwoDimension) {
             std::string{"CastExtend(local_1[0], local_0[0], {ConvertToUint32(t->s0), ConvertToUint32(t->s1)}, "
                         "{ConvertToUint32(((8 * Ceiling((Rational(1 , 8) * t->s1))))/(1)), ConvertToUint32(1)}, "
                         "{ConvertToUint32(((16 * Ceiling((Rational(1 , 16) * t->s1))))/(1)), ConvertToUint32(1)});\n"});
+
+  const auto params = ascir_param::GetAscirNodeParams(cast);
+  ASSERT_NE(params, nullptr);
+  const auto *cast_params = std::get_if<ascir_param::CastNodeParams>(&params->specific_params);
+  ASSERT_NE(cast_params, nullptr);
+  ASSERT_EQ(cast_params->output_dims.size(), 2U);
+  ASSERT_EQ(cast_params->output_strides.size(), 2U);
+  ASSERT_EQ(cast_params->input_strides.size(), 2U);
+  EXPECT_STREQ(cast_params->output_dims[0].Serialize().get(), "s0");
+  EXPECT_STREQ(cast_params->output_dims[1].Serialize().get(), "s1");
+  EXPECT_STREQ(cast_params->output_strides[0].Serialize().get(), "(8 * Ceiling((Rational(1 , 8) * s1)))");
+  EXPECT_STREQ(cast_params->output_strides[1].Serialize().get(), "1");
+  EXPECT_STREQ(cast_params->input_strides[0].Serialize().get(), "(16 * Ceiling((Rational(1 , 16) * s1)))");
+  EXPECT_STREQ(cast_params->input_strides[1].Serialize().get(), "1");
 }
 
 TEST(CastV2ApiCallTest, CastV2ApiCallThreeDimension) {
@@ -281,6 +307,14 @@ TEST(CastV2ApiCallTest, CastV2ApiCallThreeDimension) {
                 ", 16) * t->s2)) * t->s1))/(1)], {ConvertToUint32(t->s1), ConvertToUint32(t->s2)}, "
                 "{ConvertToUint32(((8 * Ceiling((Rational(1 , 8) * t->s2))))/(1)), ConvertToUint32(1)}, "
                 "{ConvertToUint32(((16 * Ceiling((Rational(1 , 16) * t->s2))))/(1)), ConvertToUint32(1)});\n\n}\n"});
+
+  const auto params = ascir_param::GetAscirNodeParams(cast);
+  ASSERT_NE(params, nullptr);
+  const auto *cast_params = std::get_if<ascir_param::CastNodeParams>(&params->specific_params);
+  ASSERT_NE(cast_params, nullptr);
+  ASSERT_EQ(cast_params->output_dims.size(), 2U);
+  EXPECT_STREQ(cast_params->output_dims[0].Serialize().get(), "(s0 * s1)");
+  EXPECT_STREQ(cast_params->output_dims[1].Serialize().get(), "s2");
 }
 
 TEST(CastV2ApiCallTest, CastV2ApiCall_Offset) {

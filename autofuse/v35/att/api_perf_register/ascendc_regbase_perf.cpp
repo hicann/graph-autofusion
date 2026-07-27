@@ -41,6 +41,139 @@ af::Status RegVfPerf(const std::string &vf_instruct_type, const NodeDetail &node
   perf.pipe_res[PipeType::AIV_VEC] = res;
   return af::SUCCESS;
 }
+
+Expr ProductExprs(const std::vector<ge::Expression> &exprs, size_t end) {
+  Expr res = CreateExpr(1);
+  for (size_t i = 0U; i < end; ++i) {
+    res = res * exprs[i];
+  }
+  return res;
+}
+
+Expr GetCastOneRepeatSize(const NodeDetail &node_info) {
+  if (node_info.input_dtype[0] == kUInt8 && node_info.output_dtype[0] == kInt4) {
+    return kRptEleMap.at(kFloat16);
+  }
+  Expr one_rep_size = kRptSizeFloat;
+  auto it = kRptEleMap.find(node_info.input_dtype[0]);
+  if (it != kRptEleMap.end()) {
+    one_rep_size = it->second;
+  }
+  it = kRptEleMap.find(node_info.output_dtype[0]);
+  if (it != kRptEleMap.end()) {
+    one_rep_size = af::sym::Min(one_rep_size, it->second);
+  }
+  return one_rep_size;
+}
+
+Expr GetCastCallCount(const NodeDetail &node_info) {
+  const auto &cast_params = node_info.cast_node_params;
+  if (!cast_params.valid) {
+    return CreateExpr(1);
+  }
+  if (cast_params.output_dims.size() > 1U) {
+    return cast_params.output_dims.front();
+  }
+  return CreateExpr(1);
+}
+
+Expr GetNonSameBitCastCallCount(const NodeDetail &node_info, PerfOutputInfo &perf) {
+  const auto &cast_params = node_info.cast_node_params;
+  if (!cast_params.valid || cast_params.output_dims.size() <= 1U || cast_params.output_strides.empty() ||
+      cast_params.input_strides.empty()) {
+    return CreateExpr(1);
+  }
+
+  const Expr count = cast_params.output_dims.back();
+  auto contiguous_case = std::make_shared<IfCase>(CreateExpr(1));
+  auto inner_strided_case = std::make_shared<IfCase>(GetCastCallCount(node_info));
+  auto inner_stride_case = std::make_shared<IfCase>(CondType::K_EQ, cast_params.output_strides.front(), count,
+                                                    std::move(contiguous_case), std::move(inner_strided_case));
+  auto outer_strided_case = std::make_shared<IfCase>(GetCastCallCount(node_info));
+  Expr call_count = CreateExpr("cast_call_count");
+  TernaryOp ternary_op(CondType::K_EQ, cast_params.output_strides.front(), cast_params.input_strides.front(),
+                       std::move(inner_stride_case), std::move(outer_strided_case));
+  ternary_op.SetVariable(call_count);
+  perf.ternary_ops[call_count] = std::move(ternary_op);
+  return call_count;
+}
+
+Expr GetCastRepeatTime(const NodeDetail &node_info, const Expr &one_rep_size, PerfOutputInfo &perf) {
+  const auto &cast_params = node_info.cast_node_params;
+  GE_ASSERT_TRUE(one_rep_size != af::sym::kSymbolZero, "one_rep_size is [%s].",
+                 af::SymbolicUtils::ToString(one_rep_size).c_str());
+  if (!cast_params.valid || cast_params.output_dims.empty() || cast_params.output_strides.empty() ||
+      cast_params.input_strides.empty()) {
+    Expr input_count = ProductExprs(node_info.input_dims, node_info.input_dims.size());
+    return af::sym::Ceiling(af::sym::Div(input_count, one_rep_size));
+  }
+
+  const Expr count = cast_params.output_dims.back();
+  if (cast_params.output_dims.size() == 1U) {
+    return af::sym::Ceiling(af::sym::Div(count, one_rep_size));
+  }
+
+  const Expr api_outer = cast_params.output_dims.front();
+  GE_ASSERT_TRUE(api_outer != af::sym::kSymbolZero, "api_outer is [%s].",
+                 af::SymbolicUtils::ToString(api_outer).c_str());
+  const Expr contiguous_repeat = af::sym::Ceiling(af::sym::Div(api_outer * count, one_rep_size));
+  const Expr strided_repeat = af::sym::Ceiling(af::sym::Div(count, one_rep_size));
+
+  auto contiguous_case = std::make_shared<IfCase>(contiguous_repeat);
+  auto inner_strided_case = std::make_shared<IfCase>(strided_repeat);
+  auto inner_stride_case = std::make_shared<IfCase>(CondType::K_EQ, cast_params.output_strides.front(), count,
+                                                    std::move(contiguous_case), std::move(inner_strided_case));
+  auto outer_strided_case = std::make_shared<IfCase>(strided_repeat);
+  Expr repeat_time = CreateExpr("cast_repeat_time");
+  TernaryOp ternary_op(CondType::K_EQ, cast_params.output_strides.front(), cast_params.input_strides.front(),
+                       std::move(inner_stride_case), std::move(outer_strided_case));
+  ternary_op.SetVariable(repeat_time);
+  perf.ternary_ops[repeat_time] = std::move(ternary_op);
+  return repeat_time;
+}
+
+Expr GetSameBitCastRepeatTime(const NodeDetail &node_info, const Expr &one_rep_size) {
+  const auto &cast_params = node_info.cast_node_params;
+  GE_ASSERT_TRUE(one_rep_size != af::sym::kSymbolZero, "one_rep_size is [%s].",
+                 af::SymbolicUtils::ToString(one_rep_size).c_str());
+  if (!cast_params.valid || cast_params.output_dims.empty()) {
+    Expr input_count = ProductExprs(node_info.input_dims, node_info.input_dims.size());
+    return af::sym::Ceiling(af::sym::Div(input_count, one_rep_size));
+  }
+
+  return af::sym::Ceiling(af::sym::Div(cast_params.output_dims.back(), one_rep_size));
+}
+
+bool IsCastPair(const NodeDetail &node_info, const std::string &input_dtype, const std::string &output_dtype) {
+  return node_info.input_dtype[0] == input_dtype && node_info.output_dtype[0] == output_dtype;
+}
+
+bool IsSameBitIntegerCast(const NodeDetail &node_info) {
+  return IsCastPair(node_info, kInt8, kUInt8) || IsCastPair(node_info, kUInt8, kInt8) ||
+         IsCastPair(node_info, kInt16, kUInt16) || IsCastPair(node_info, kUInt16, kInt16) ||
+         IsCastPair(node_info, kInt32, kUInt32) || IsCastPair(node_info, kUInt32, kInt32) ||
+         IsCastPair(node_info, kInt64, kUInt64) || IsCastPair(node_info, kUInt64, kInt64);
+}
+
+bool IsB8Cast(const NodeDetail &node_info) {
+  return node_info.input_dtype[0] == kUInt8 &&
+         (node_info.output_dtype[0] == kFloat32 || node_info.output_dtype[0] == kInt32 ||
+          node_info.output_dtype[0] == kInt16 || node_info.output_dtype[0] == kInt4);
+}
+
+bool IsB4Cast(const NodeDetail &node_info) {
+  return IsCastPair(node_info, kFloat16, kInt4) || IsCastPair(node_info, kInt4, kFloat16);
+}
+
+bool IsB64Cast(const NodeDetail &node_info) {
+  return IsCastPair(node_info, kInt64, kFloat32) || IsCastPair(node_info, kFloat32, kInt64) ||
+         IsCastPair(node_info, kInt64, kInt32) || IsCastPair(node_info, kInt32, kInt64);
+}
+
+bool IsB64TransferCast(const NodeDetail &node_info) {
+  return IsCastPair(node_info, kInt64, kFloat16) || IsCastPair(node_info, kFloat16, kInt64);
+}
+
 }  // namespace
 
 /*
@@ -640,34 +773,207 @@ af::Status LeakyReluPerf(const NodeDetail &node_info, PerfOutputInfo &perf) {
       调用 vf_ins_vcvt(dst_type, src_type)
 ===========================================================================
 */
+namespace {
+af::Status AddSameBitIntegerCastPerf(const NodeDetail &node_info, const Expr &repeat_time, Expr &max_latency,
+                                     Expr &all_vf_instruct_cost) {
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kUpdateMask, node_info.input_dtype[0], max_latency,
+                                                   all_vf_instruct_cost, kSymTwo));
+  // MicroAPI::DataCopy (normal load).
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kLoad, node_info.input_dtype[0], max_latency, all_vf_instruct_cost, repeat_time));
+  // MicroAPI::DataCopy (normal store).
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(
+      kStore, node_info.input_dtype[0], node_info.output_dtype[0], max_latency, all_vf_instruct_cost, repeat_time));
+  return af::SUCCESS;
+}
+
+af::Status AddCastDataCopyPerf(const NodeDetail &node_info, const Expr &repeat_time, Expr &max_latency,
+                               Expr &all_vf_instruct_cost) {
+  // MicroAPI::DataCopy (load).
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kLoad, node_info.input_dtype[0], max_latency, all_vf_instruct_cost, repeat_time));
+  // MicroAPI::DataCopy (store).
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(
+      kStore, node_info.input_dtype[0], node_info.output_dtype[0], max_latency, all_vf_instruct_cost, repeat_time));
+  return af::SUCCESS;
+}
+
+af::Status AddFloat32BoolCastPerf(const Expr &repeat_time, Expr &max_latency, Expr &all_vf_instruct_cost) {
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kDuplicate, kUInt32, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kAnd, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kAdds, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kOr, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  // MicroAPI::Not.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kNot, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  // MicroAPI::ShiftRights.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kVshrs, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  return af::SUCCESS;
+}
+
+af::Status AddB4CastPerf(const NodeDetail &node_info, const Expr &repeat_time, Expr &max_latency,
+                         Expr &all_vf_instruct_cost) {
+  const Expr input_size = kDataTypeSizeMap.at(node_info.input_dtype[0]);
+  const Expr output_size = kDataTypeSizeMap.at(node_info.output_dtype[0]);
+  if (input_size.Compare(output_size) > 0) {
+    // CastExtendB4 packs the store mask twice for half -> int4x2_t.
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kMaskPack, kFloat16, max_latency, all_vf_instruct_cost, repeat_time * kSymTwo));
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(
+        kCast, node_info.input_dtype[0], node_info.output_dtype[0], max_latency, all_vf_instruct_cost, repeat_time));
+  } else if (input_size.Compare(output_size) < 0) {
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kMaskPack, kFloat16, max_latency, all_vf_instruct_cost, repeat_time));
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(
+        kCast, node_info.input_dtype[0], node_info.output_dtype[0], max_latency, all_vf_instruct_cost, repeat_time));
+  }
+  return af::SUCCESS;
+}
+
+af::Status AddB64TransferCastPerf(const NodeDetail &node_info, const Expr &repeat_time, Expr &max_latency,
+                                  Expr &all_vf_instruct_cost) {
+  const Expr input_size = kDataTypeSizeMap.at(node_info.input_dtype[0]);
+  const Expr float_size = kDataTypeSizeMap.at(kFloat32);
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kDuplicate, kUInt32, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  if (input_size.Compare(float_size) < 0) {
+    // MicroAPI::Interleave.
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kInterleave, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  } else {
+    // MicroAPI::DeInterleave.
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kDeInterleave, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  }
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(kCast, node_info.input_dtype[0], kFloat32, max_latency,
+                                                               all_vf_instruct_cost, repeat_time));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(kCast, kFloat32, node_info.output_dtype[0], max_latency,
+                                                               all_vf_instruct_cost, repeat_time));
+  return af::SUCCESS;
+}
+
+bool IsB8SpecificCast(const NodeDetail &node_info) {
+  return IsB8Cast(node_info) || IsCastPair(node_info, kInt8, kFloat32) || IsCastPair(node_info, kFloat32, kInt8) ||
+         IsCastPair(node_info, kInt16, kInt8) || IsCastPair(node_info, kInt16, kUInt8);
+}
+
+af::Status AddB8SpecificCastPerf(const NodeDetail &node_info, const Expr &repeat_time, Expr &max_latency,
+                                 Expr &all_vf_instruct_cost) {
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(kCast, node_info.input_dtype[0], kFloat16, max_latency,
+                                                               all_vf_instruct_cost, repeat_time));
+  if (IsB8Cast(node_info) &&
+      kDataTypeSizeMap.at(kFloat16).Compare(kDataTypeSizeMap.at(node_info.output_dtype[0])) < 0) {
+    // MicroAPI::UnPack<uint32_t, uint16_t>.
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kUnPack, kUInt16, max_latency, all_vf_instruct_cost, repeat_time));
+  }
+  if (IsCastPair(node_info, kUInt8, kInt4)) {
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(kCast, node_info.input_dtype[0], kInt4, max_latency,
+                                                                 all_vf_instruct_cost, repeat_time));
+    // MicroAPI::Pack<uint16_t, uint32_t>.
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kPack, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+    // MicroAPI::Pack<uint8_t, uint16_t>.
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kPack, kUInt16, max_latency, all_vf_instruct_cost, repeat_time));
+  }
+  if (!IsCastPair(node_info, kInt16, kUInt8)) {
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(kCast, kFloat16, node_info.output_dtype[0],
+                                                                 max_latency, all_vf_instruct_cost, repeat_time));
+  }
+  return af::SUCCESS;
+}
+
+af::Status AddB64CastPerf(const NodeDetail &node_info, const Expr &repeat_time, Expr &max_latency,
+                          Expr &all_vf_instruct_cost) {
+  const Expr input_size = kDataTypeSizeMap.at(node_info.input_dtype[0]);
+  const Expr output_size = kDataTypeSizeMap.at(node_info.output_dtype[0]);
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(
+      kCast, node_info.input_dtype[0], node_info.output_dtype[0], max_latency, all_vf_instruct_cost, repeat_time));
+  if (input_size.Compare(output_size) > 0) {
+    // MicroAPI::Pack<uint32_t, int64_t>. Pack在输入8B，RegTraitNumOne时，用Duplicate + DeInterleave
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kDuplicate, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+    // DeInterleave
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kDeInterleave, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  }
+  return af::SUCCESS;
+}
+
+af::Status AddInt64ToUInt8CastPerf(const Expr &repeat_time, Expr &max_latency, Expr &all_vf_instruct_cost) {
+  // MicroAPI::Pack<uint32_t, int64_t>. Pack在输入8B，RegTraitNumOne时，用Duplicate + DeInterleave
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kDuplicate, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  // DeInterleave
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kDeInterleave, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  // MicroAPI::Pack<uint16_t, uint32_t>.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kPack, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  // MicroAPI::Pack<uint8_t, uint16_t>.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kPack, kUInt16, max_latency, all_vf_instruct_cost, repeat_time));
+  return af::SUCCESS;
+}
+
+af::Status AddUInt8ToInt64CastPerf(const Expr &repeat_time, Expr &max_latency, Expr &all_vf_instruct_cost) {
+  // MicroAPI::UnPack<uint64_t, uint32_t>. UnPack在输出8B，RegTraitNumOne时用Duplicate + Interleave
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kDuplicate, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  // Interleave
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kInterleave, kUInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  return af::SUCCESS;
+}
+
+af::Status AddSpecificCastComputePerf(const NodeDetail &node_info, const Expr &repeat_time, Expr &max_latency,
+                                      Expr &all_vf_instruct_cost) {
+  if (IsCastPair(node_info, kFloat32, kBool)) {
+    GE_ASSERT_SUCCESS(AddFloat32BoolCastPerf(repeat_time, max_latency, all_vf_instruct_cost));
+  } else if (IsB4Cast(node_info)) {
+    GE_ASSERT_SUCCESS(AddB4CastPerf(node_info, repeat_time, max_latency, all_vf_instruct_cost));
+  } else if (IsB64TransferCast(node_info)) {
+    GE_ASSERT_SUCCESS(AddB64TransferCastPerf(node_info, repeat_time, max_latency, all_vf_instruct_cost));
+  } else if (IsB8SpecificCast(node_info)) {
+    GE_ASSERT_SUCCESS(AddB8SpecificCastPerf(node_info, repeat_time, max_latency, all_vf_instruct_cost));
+  } else if (IsB64Cast(node_info)) {
+    GE_ASSERT_SUCCESS(AddB64CastPerf(node_info, repeat_time, max_latency, all_vf_instruct_cost));
+  } else if (IsCastPair(node_info, kInt64, kUInt8)) {
+    GE_ASSERT_SUCCESS(AddInt64ToUInt8CastPerf(repeat_time, max_latency, all_vf_instruct_cost));
+  } else if (IsCastPair(node_info, kUInt8, kInt64)) {
+    GE_ASSERT_SUCCESS(AddUInt8ToInt64CastPerf(repeat_time, max_latency, all_vf_instruct_cost));
+  } else if (node_info.input_dtype[0] == kInt32 && node_info.output_dtype[0] == kFloat16) {
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(kCast, node_info.input_dtype[0], kFloat32, max_latency,
+                                                                 all_vf_instruct_cost, repeat_time));
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(kCast, kFloat32, node_info.output_dtype[0],
+                                                                 max_latency, all_vf_instruct_cost, repeat_time));
+  } else {
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(
+        kCast, node_info.input_dtype[0], node_info.output_dtype[0], max_latency, all_vf_instruct_cost, repeat_time));
+  }
+  return af::SUCCESS;
+}
+}  // namespace
+
 af::Status CastPerf(const NodeDetail &node_info, PerfOutputInfo &perf) {
-  GELOGD("Cast node info is %s.", node_info.ToString().c_str());
-  Expr cal_count = node_info.input_dims[kNumZero];
-  Expr oneRepSize = kRptSizeFloat;
-  auto it = kRptEleMap.find(node_info.input_dtype[0]);
-  if (it != kRptEleMap.end()) {
-    oneRepSize = it->second;
-  }
-  it = kRptEleMap.find(node_info.output_dtype[0]);
-  if (it != kRptEleMap.end()) {
-    oneRepSize = af::sym::Min(oneRepSize, it->second);
-  }
-  GE_ASSERT_TRUE(oneRepSize != af::sym::kSymbolZero, "oneRepSize is [%s].",
-                 af::SymbolicUtils::ToString(oneRepSize).c_str());
-  Expr repeat_time = af::sym::Ceiling(cal_count / oneRepSize);
+  GELOGD("Cast node info is %s, input dtype is [%s], output dtype is [%s].", node_info.ToString().c_str(),
+         node_info.input_dtype[0].c_str(), node_info.output_dtype[0].c_str());
+  Expr one_rep_size = GetCastOneRepeatSize(node_info);
+  GE_ASSERT_TRUE(one_rep_size != af::sym::kSymbolZero, "one_rep_size is [%s].",
+                 af::SymbolicUtils::ToString(one_rep_size).c_str());
+  const bool is_same_bit_integer_cast = IsSameBitIntegerCast(node_info);
+  Expr repeat_time = is_same_bit_integer_cast ? GetSameBitCastRepeatTime(node_info, one_rep_size)
+                                              : GetCastRepeatTime(node_info, one_rep_size, perf);
+  Expr call_count =
+      is_same_bit_integer_cast ? GetCastCallCount(node_info) : GetNonSameBitCastCallCount(node_info, perf);
   Expr max_latency = CreateExpr(0);
   Expr all_vf_instruct_cost = CreateExpr(0);
-  GELOGD("cal_count is [%s], oneRepSize is [%s], repeat_time is [%s].", af::SymbolicUtils::ToString(cal_count).c_str(),
-         af::SymbolicUtils::ToString(oneRepSize).c_str(), af::SymbolicUtils::ToString(repeat_time).c_str());
-  if (node_info.input_dtype[0] == kInt32 && node_info.output_dtype[0] == kFloat16) {
-    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kCast, node_info.input_dtype[0], max_latency, all_vf_instruct_cost,
-                                                     repeat_time));
-    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kCast, kFloat32, max_latency, all_vf_instruct_cost, repeat_time));
+  GELOGD("one_rep_size is [%s], repeat_time is [%s], cast_param_valid[%d].",
+         af::SymbolicUtils::ToString(one_rep_size).c_str(), af::SymbolicUtils::ToString(repeat_time).c_str(),
+         static_cast<int32_t>(node_info.cast_node_params.valid));
+
+  if (is_same_bit_integer_cast) {
+    GE_ASSERT_SUCCESS(AddSameBitIntegerCastPerf(node_info, repeat_time, max_latency, all_vf_instruct_cost));
   } else {
-    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kCast, node_info.input_dtype[0], max_latency, all_vf_instruct_cost,
-                                                     repeat_time));
+    GE_ASSERT_SUCCESS(AddCastDataCopyPerf(node_info, repeat_time, max_latency, all_vf_instruct_cost));
+    GE_ASSERT_SUCCESS(AddSpecificCastComputePerf(node_info, repeat_time, max_latency, all_vf_instruct_cost));
   }
-  Expr res = VfPerfUtils::GetVFHeadCost() + max_latency + all_vf_instruct_cost;
+  Expr res = (VfPerfUtils::GetVFHeadCost() + max_latency + all_vf_instruct_cost) * call_count;
   res.Simplify();
   perf.pipe_res[PipeType::AIV_VEC] = res;
   return af::SUCCESS;
