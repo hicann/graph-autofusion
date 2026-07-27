@@ -195,8 +195,6 @@ build_ascgen-dev() {
               -D ENABLE_GE_ST=${ENABLE_GE_ST_FLAG}"
 
   echo "CMAKE_ARGS is: $CMAKE_ARGS"
-  ORIGINAL_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
-  unset LD_LIBRARY_PATH
   export BUILD_METADEF=${BUILD_METADEF}
 
   rm -f CMakeCache.txt
@@ -579,9 +577,6 @@ codegen_e2e_st() {
             -D RUN_TEST=1 \
             -D ENABLE_GE_ST=on \
             -D ENABLE_LLT_PKG=ON"
-
-  ORIGINAL_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
-  unset LD_LIBRARY_PATH
   env
 
   cmake $CMAKE_ARGS ../
@@ -707,9 +702,6 @@ build_backend() {
             -D ENABLE_TEST=True \
             -D ENABLE_GE_ST=on \
             -D ENABLE_LLT_PKG=ON"
-
-  ORIGINAL_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
-  unset LD_LIBRARY_PATH
   env
 
   cmake $CMAKE_ARGS ../
