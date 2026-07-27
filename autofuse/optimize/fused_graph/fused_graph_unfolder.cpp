@@ -24,7 +24,6 @@
 #include "graph/utils/node_utils.h"
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
-#include "graph_dump_utils.h"
 #include "schedule_utils.h"
 #include "ascir_utils.h"
 #include "ascgraph_info_complete.h"

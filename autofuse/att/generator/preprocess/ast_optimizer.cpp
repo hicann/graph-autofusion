@@ -11,6 +11,38 @@
 #include "ast_optimizer.h"
 
 namespace att {
+bool AstCanonicalizer::NodeKey::operator<(const NodeKey &other) const {
+  if (type != other.type) {
+    return type < other.type;
+  }
+  if (value != other.value) {
+    return value < other.value;
+  }
+  return child_ids < other.child_ids;
+}
+
+std::string AstCanonicalizer::AssignNode(ASTNode *node) {
+  if (node == nullptr) {
+    return "";
+  }
+  NodeKey key{
+      node->type, node->type == NodeType::VARIABLE || node->type == NodeType::NUMBER ? node->expr : node->op, {}};
+  key.child_ids.reserve(node->children.size());
+  for (const auto &child : node->children) {
+    key.child_ids.emplace_back(AssignNode(child.get()));
+  }
+  auto iter = node_ids_.find(key);
+  if (iter == node_ids_.end()) {
+    iter = node_ids_.emplace(std::move(key), std::to_string(next_id_++)).first;
+  }
+  node->hash = iter->second;
+  return node->hash;
+}
+
+void AstCanonicalizer::Assign(ASTNode *root) {
+  (void)AssignNode(root);
+}
+
 // 表达式涉及的函数
 const std::vector<std::string> functions_set = {"Ceiling", "Min", "Max", "Rational", "Floor",
                                                 "Log",     "Pow", "Mod", "Abs"};
@@ -62,7 +94,7 @@ std::vector<std::string> Parser::Tokenize(const std::string &s) const {
       HandleNegativeNumber(s, i, tokens);
     }
     // 处理非负数字
-    else if (IsNumberChar(s[i])) {
+    else if (IsNumberChar(s[i]) && s[i] != '/') {
       HandleNumber(s, i, tokens);
     }
     // 处理变量
@@ -76,14 +108,27 @@ std::vector<std::string> Parser::Tokenize(const std::string &s) const {
 }
 
 ASTPtr Parser::ParseFunction(const std::string &func) {
+  if (Peek(1) != "(") {
+    return nullptr;
+  }
   // consume两次，第一次是函数名，第二次是(
   Consume();
   Consume();
   std::vector<ASTPtr> args;
   while (Peek() != ")") {
-    args.push_back(ParseExpr());
+    if (Peek().empty()) {
+      return nullptr;
+    }
+    const size_t previous_pos = pos_;
+    ASTPtr arg = ParseExpr();
+    if (arg == nullptr || pos_ == previous_pos) {
+      return nullptr;
+    }
+    args.push_back(std::move(arg));
     if (Peek() == ",") {
       Consume();
+    } else if (Peek() != ")") {
+      return nullptr;
     }
   }
   Consume();
@@ -92,6 +137,9 @@ ASTPtr Parser::ParseFunction(const std::string &func) {
 
 ASTPtr Parser::ParsePrimary() {
   std::string token = Peek();
+  if (token.empty()) {
+    return nullptr;
+  }
   if (token == "(") {
     Consume();
     auto node = ParseExpr();
@@ -116,7 +164,7 @@ ASTPtr Parser::ParsePrimary() {
     Consume();
     return std::make_shared<ASTNode>(token, NodeType::NUMBER);
   }
-  if (isalpha(token[0])) {
+  if (isalpha(token[0]) || token[0] == '_') {
     Consume();
     return std::make_shared<ASTNode>(token, NodeType::VARIABLE);
   }
@@ -278,6 +326,7 @@ void Optimizer::Optimize(ASTPtr &root) {
   if (!root) {
     return;
   }
+  canonicalizer_.Assign(root.get());
   Traverse(root.get());
 }
 }  // namespace att

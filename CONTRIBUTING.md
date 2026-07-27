@@ -21,7 +21,8 @@
    - 接口命名规范
    - 配置参数命名规范
    - 代码流程规范
-4. 提交pr时，如果存在多个无效commit，建议您在提交pr前先进行rebase操作，合并多个commit为一个，以保持代码的简洁性和可读性，具体参考[git rebase](https://git-scm.com/docs/git-rebase)，同时，commit message也需要符合项目的代码规范，能够清晰地描述本次变更的意图和内容，格式为：<类型>: <简短描述>。 例如:
+4. 流水线会执行 code check，未经过 pre-commit 中 clang-format 格式化的代码将被拦截。建议安装 pre-commit，并在仓库根目录执行 `pre-commit install`，以便本地 commit 时自动检查并格式化代码。
+5. 提交pr时，如果存在多个无效commit，建议您在提交pr前先进行rebase操作，合并多个commit为一个，以保持代码的简洁性和可读性，具体参考[git rebase](https://git-scm.com/docs/git-rebase)，同时，commit message也需要符合项目的代码规范，能够清晰地描述本次变更的意图和内容，格式为：<类型>: <简短描述>。 例如:
 
 |类型|说明|示例|
 |--|--|--|
@@ -57,7 +58,7 @@
   如果您在本项目中发现某些文档描述错误，欢迎您新建Issue进行反馈和修复。
 
   您可以按照[提交Issue/处理Issue任务](https://gitcode.com/cann/community#提交Issue处理Issue任务)指引新建 `Documentation|文档反馈` 类Issue指出对应文档的问题，然后在评论框中输入“/assign”或“/assign @yourself”，将该Issue分配给您纠正对应文档描述。
-  
+
 - 帮助解决他人Issue
 
   如果社区中他人遇到的问题您有合适的解决方法，欢迎您在Issue中发表评论交流，帮助他人解决问题和痛点，共同优化易用性。

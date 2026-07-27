@@ -59,3 +59,7 @@ target_link_libraries(optimize_ut ${ASCGEN_COMMON_LINK_OPTION}
         GTest::gtest
         pthread
 )
+
+add_test(NAME optimize_ut_aggregate
+    COMMAND $<TARGET_FILE:optimize_ut>
+)

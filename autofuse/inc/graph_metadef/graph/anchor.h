@@ -23,16 +23,13 @@ namespace af {
 class Anchor;
 enum AnchorStatus {
   ANCHOR_SUSPEND = 0,  // dat null
-  ANCHOR_CONST = 1,
-  ANCHOR_DATA = 2,  // Effective
+  ANCHOR_DATA = 2,     // Effective
   ANCHOR_RESERVED = 3
 };
 using ConstAnchor = const Anchor;
 class AnchorImpl;
 using AnchorImplPtr = std::shared_ptr<AnchorImpl>;
 class GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY Anchor : public std::enable_shared_from_this<Anchor> {
-  friend class AnchorUtils;
-
  public:
   using TYPE = const char *;
   template <class T>
@@ -78,9 +75,6 @@ class GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY Anchor : public std::enable
   // insert node
   // this--old_peer ---> this--first_peer   second_peer--old_peer
   graphStatus Insert(const AnchorPtr &old_peer, const AnchorPtr &first_peer, const AnchorPtr &second_peer);
-
-  // Replace peer with new peer
-  graphStatus ReplacePeer(const AnchorPtr &old_peer, const AnchorPtr &new_peer);
 
   // Judge if the anchor is linked with the given anchor
   bool IsLinkedWith(const AnchorPtr &peer) const;
@@ -148,7 +142,6 @@ class GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY DataAnchor : public Anchor 
   Anchor::TYPE GetSelfType() const override;
 
  private:
-  Format format_{FORMAT_ND};
   AnchorStatus status_{ANCHOR_SUSPEND};
 };
 
@@ -177,8 +170,6 @@ class GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY InDataAnchor : public DataA
 
 class GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY OutDataAnchor : public DataAnchor {
   friend class InDataAnchor;
-
-  friend class AnchorUtils;
 
  public:
   template <class T>

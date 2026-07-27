@@ -1681,4 +1681,54 @@ TEST_F(VfPartition, tail_axis_stride_not_one_disable_vf) {
   EXPECT_EQ(graph.GetAllSubGraphs(sub_graphs), af::SUCCESS);
   EXPECT_EQ(sub_graphs.size(), 0UL);
 }
+
+TEST_F(VfPartition, topological_sort_for_vf_graph_keeps_load_before_consumer) {
+  af::AscGraph graph("vf_sort_keep_dependency");
+  auto z0 = graph.CreateAxis("z0", af::Symbol(2));
+
+  af::ascir_op::Data data0("data0", graph);
+  data0.ir_attr.SetIndex(0);
+  af::ascir_op::Load load0("load0");
+  load0.x = data0.y;
+  load0.y.dtype = ge::DT_FLOAT;
+
+  af::ascir_op::Data data1("data1", graph);
+  data1.ir_attr.SetIndex(1);
+  af::ascir_op::TrueDiv truediv("truediv");
+  truediv.x1 = load0.y;
+  truediv.y.dtype = ge::DT_FLOAT;
+
+  af::ascir_op::Store store("store");
+  store.x = truediv.y;
+  store.y.dtype = ge::DT_FLOAT;
+
+  af::ascir_op::Load load1("load1");
+  load1.x = data1.y;
+  load1.y.dtype = ge::DT_FLOAT;
+  truediv.x2 = load1.y;
+
+  af::ascir_op::Output out("out");
+  out.x = store.y;
+  out.ir_attr.SetIndex(0);
+
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  for (const auto &node : graph.GetAllNodes()) {
+    node->attr.sched.axis = {z0.id};
+    node->attr.sched.loop_axis = z0.id;
+  }
+  graph.FindNode("truediv")->attr.sched.loop_axis = -1;
+
+  VectorFuncPartitioner partitioner(graph);
+  ASSERT_EQ(partitioner.TopologicalSortingForVfGraph(graph), af::SUCCESS);
+
+  std::vector<std::string> node_names;
+  for (const auto &node : graph.GetAllNodes()) {
+    node_names.push_back(node->GetName());
+  }
+  auto load1_iter = std::find(node_names.begin(), node_names.end(), "load1");
+  auto truediv_iter = std::find(node_names.begin(), node_names.end(), "truediv");
+  ASSERT_NE(load1_iter, node_names.end());
+  ASSERT_NE(truediv_iter, node_names.end());
+  EXPECT_LT(std::distance(node_names.begin(), load1_iter), std::distance(node_names.begin(), truediv_iter));
+}
 }  // namespace optimize

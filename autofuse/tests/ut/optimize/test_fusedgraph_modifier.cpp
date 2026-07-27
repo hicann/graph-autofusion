@@ -20,7 +20,6 @@
 #include "graph/utils/op_desc_utils.h"
 #include "ascir_ops.h"
 #include "attribute_group/attr_group_symbolic_desc.h"
-#include "graph_dump_utils.h"
 #include "fused_graph/fused_graph_modifier.h"
 #include "graph/ascendc_ir/utils/asc_graph_utils.h"
 #include "graph_utils.h"

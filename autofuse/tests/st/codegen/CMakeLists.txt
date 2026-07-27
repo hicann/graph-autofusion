@@ -28,3 +28,10 @@ target_link_libraries(codegen_st PRIVATE
 
 add_test(NAME codegen_st COMMAND codegen_st --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/codegen_st.xml)
 set_tests_properties(codegen_st PROPERTIES LABELS "st;codegen_st")
+
+add_test(NAME kernel_tool_st_aggregate
+    COMMAND ${CMAKE_CURRENT_BINARY_DIR}/kernel_tool/test_kernel
+)
+set_tests_properties(kernel_tool_st_aggregate PROPERTIES
+    LABELS "st;kernel_tool_st"
+)

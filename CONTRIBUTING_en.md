@@ -21,7 +21,8 @@ In addition, developers need to pay attention to the following points when prepa
    - Interface naming specifications
    - Configuration parameter naming specifications
    - Code flow specifications
-4. When submitting a PR, if there are multiple invalid commits, it is recommended that you perform a rebase operation before submitting the PR to merge multiple commits into one to maintain code simplicity and readability. For details, see [git rebase](https://git-scm.com/docs/git-rebase). At the same time, the commit message must also conform to the project code specifications and clearly describe the intent and content of this change. The format is: <type>: <brief description>. For example:
+4. The pipeline runs a code check and rejects code that has not been formatted by clang-format through pre-commit. We recommend installing pre-commit and running `pre-commit install` in the repository root so that each local commit is automatically checked and formatted.
+5. When submitting a PR, if there are multiple invalid commits, it is recommended that you perform a rebase operation before submitting the PR to merge multiple commits into one to maintain code simplicity and readability. For details, see [git rebase](https://git-scm.com/docs/git-rebase). At the same time, the commit message must also conform to the project code specifications and clearly describe the intent and content of this change. The format is: <type>: <brief description>. For example:
 
 |Type|Description|Example|
 |--|--|--|
@@ -56,7 +57,7 @@ Developer contribution scenarios mainly include:
   If you discover certain document description errors in this project, you are welcome to create an Issue for feedback and correction.
 
   You can follow the [Submit Issue/Handle Issue Task](https://gitcode.com/cann/community#提交Issue处理Issue任务) guide to create a `Documentation|Document Feedback` type Issue to point out the corresponding document problem, then enter "/assign" or "/assign @yourself" in the comment box to assign the Issue to yourself to correct the corresponding document description.
-  
+
 - Help Solve Others' Issues
 
   If you have appropriate solutions for problems encountered by others in the community, you are welcome to post comments in the Issue to exchange ideas, help others solve problems and pain points, and jointly optimize usability.

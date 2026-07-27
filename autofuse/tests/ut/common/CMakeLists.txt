@@ -46,3 +46,7 @@ target_link_libraries(test_common PRIVATE
     error_manager
     metadef
 )
+
+add_test(NAME common_ut_aggregate
+    COMMAND $<TARGET_FILE:test_common>
+)

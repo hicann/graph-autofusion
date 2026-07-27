@@ -18,7 +18,7 @@
 
 namespace af {
 namespace ascir {
-namespace {
+extern std::vector<std::unique_ptr<af::TmpBufDesc>> CalcPolygammaTmpSizeV2(const af::AscNode &node);
 
 std::shared_ptr<AscNode> BuildPolygammaFloatNode(AscGraph &graph) {
   auto s0 = graph.CreateSizeVar("s0");
@@ -64,6 +64,5 @@ TEST(CalcPolyGammaTmpSizeV2Test, ShouldReturnApiLevelTmpBuffer) {
   EXPECT_EQ(result[0]->life_time_axis_id, -1);
 }
 
-}  // namespace
 }  // namespace ascir
 }  // namespace af

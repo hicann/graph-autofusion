@@ -11,6 +11,7 @@
 #ifndef ATT_CODE_GEN_PREPROCESS_AST_OPTIMIZER_H_
 #define ATT_CODE_GEN_PREPROCESS_AST_OPTIMIZER_H_
 #include <iostream>
+#include <map>
 #include <vector>
 #include <unordered_map>
 #include <memory>
@@ -36,49 +37,29 @@ struct ASTNode {
   std::string temp_var;
 
   ASTNode(std::string e, NodeType t, std::string o = "", std::vector<std::shared_ptr<ASTNode>> &&c = {})
-      : expr(e), type(t), op(o), children(std::move(c)) {
-    GenerateHash();
-  }
-
- private:
-  // 生成变量或数字节点的hash
-  void GenerateLeafHash() {
-    if (type == NodeType::VARIABLE) {
-      hash = "VAR" + expr;
-    } else {
-      hash = "NUMBER" + expr;
-    }
-  }
-
-  // 生成操作符或函数节点的hash
-  void GenerateOperatorHash() {
-    std::stringstream ss;
-    size_t children_size = children.size();
-    ss << op << "(";
-    for (size_t i = 0u; i < children_size; ++i) {
-      ss << children[i]->hash;
-      if (static_cast<size_t>(i + 1) != children_size) {
-        ss << ",";
-      }
-    }
-    ss << ")";
-    hash = ss.str();
-  }
-
-  void GenerateHash() {
-    if (type == NodeType::VARIABLE || type == NodeType::NUMBER) {
-      GenerateLeafHash();
-    } else {
-      if (children.empty()) {
-        hash = op + "()";  // 处理无子节点的情况
-      } else {
-        GenerateOperatorHash();
-      }
-    }
-  }
+      : expr(std::move(e)), type(t), op(std::move(o)), children(std::move(c)) {}
 };
 
 using ASTPtr = std::shared_ptr<ASTNode>;
+
+class AstCanonicalizer {
+ public:
+  void Assign(ASTNode *root);
+
+ private:
+  struct NodeKey {
+    NodeType type;
+    std::string value;
+    std::vector<std::string> child_ids;
+
+    bool operator<(const NodeKey &other) const;
+  };
+
+  std::string AssignNode(ASTNode *node);
+
+  std::map<NodeKey, std::string> node_ids_;
+  size_t next_id_ = 0U;
+};
 
 // AST解析模块，功能包含词法分析和语法分析，最终生成AST
 class Parser {
@@ -124,6 +105,7 @@ class Optimizer {
   std::vector<ASTNode> temp_order_;
   std::set<std::string> visited_;
   int32_t temp_count_ = 0;
+  AstCanonicalizer canonicalizer_;
 };
 
 // AST可视化模块

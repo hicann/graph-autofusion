@@ -1082,4 +1082,18 @@ TEST_F(SplitScheduleCaseGeneratorTest, SplitScoreFunc_split_dim_dynamic) {
   // 验证生成实际的函数
   EXPECT_TRUE(score_func.find("graph0_result0_g0_tiling_data") != std::string::npos);
 }
+
+TEST_F(SplitScheduleCaseGeneratorTest, SplitScoreFunc_split_dim_mixed_const_and_dynamic) {
+  af::AscGraph graph("split_last_dim_graph");
+
+  // output[0] 为常量 32，output[1..3] 为动态 SizeVar，构造混合 const/symbolic 场景
+  CreateSplitAscGraph(graph, {"s0"}, {"32", "s1", "s2", "s3"}, {"2", "1"});
+  auto split_node = graph.FindNode("split");
+  ASSERT_TRUE(split_node != nullptr);
+  optimize::SplitScoreFunctionGenerator generator(graph, split_node, 1);
+  std::string score_func;
+  EXPECT_EQ(generator.Generate(score_func), af::SUCCESS);
+  // output[0] 为 const 但后续 output 非 const，应优雅降级为运行时打分函数
+  EXPECT_TRUE(score_func.find("graph0_result0_g0_tiling_data") != std::string::npos);
+}
 }  // namespace schedule

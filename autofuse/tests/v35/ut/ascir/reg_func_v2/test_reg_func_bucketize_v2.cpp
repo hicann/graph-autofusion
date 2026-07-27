@@ -25,6 +25,8 @@ namespace ascir {
 using namespace testing;
 using namespace af::ascir_op;
 
+extern std::vector<std::unique_ptr<af::TmpBufDesc>> CalcBucketizeTmpSizeV2(const af::AscNode &node);
+
 class CalcBucketizeTmpSizeV2Test : public ::testing::Test {
  protected:
   void SetUp() override {}
@@ -63,7 +65,7 @@ class CalcBucketizeTmpSizeV2Test : public ::testing::Test {
     af::ascir_op::Data x2("x2", graph);
     af::ascir_op::Load load1("load1");
     af::ascir_op::Load load2("load2");
-    af::ascir_op::Bucketize bucketize("bucketize");
+    af::ascir_op::Add bucketize("bucketize");
     af::ascir_op::Store store("store");
     af::ascir_op::Output y("y");
 
@@ -124,7 +126,7 @@ class CalcBucketizeTmpSizeV2Test : public ::testing::Test {
 
     af::ascir_op::Data x1("x1", graph);
     af::ascir_op::Load load1("load1");
-    af::ascir_op::Bucketize bucketize("bucketize");
+    af::ascir_op::Add bucketize("bucketize");
     af::ascir_op::Store store("store");
     af::ascir_op::Output y("y");
 

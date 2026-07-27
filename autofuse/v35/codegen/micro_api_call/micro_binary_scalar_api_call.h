@@ -21,7 +21,8 @@ class MicroBinaryScalarApiCall final : public MicroApiCall {
   Status Generate(const TensorManager &tensor_mng, const TPipe &tpipe, CallParam &param, std::string &result) override;
 
  private:
-  bool second_input_scalar_ = false;
+  bool has_scalar_input_ = false;
+  bool need_exchange_inputs_ = false;
 };
 }  // namespace codegen
 

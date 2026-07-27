@@ -21,6 +21,25 @@
 using namespace att;
 
 namespace {
+std::string BuildLongSum(size_t term_count) {
+  std::string expr = "term_0";
+  for (size_t i = 1U; i < term_count; ++i) {
+    expr += "+term_" + std::to_string(i);
+  }
+  return expr;
+}
+
+void CountNodesAndHashBytes(const ASTPtr &node, size_t &node_count, size_t &hash_bytes) {
+  if (node == nullptr) {
+    return;
+  }
+  ++node_count;
+  hash_bytes += node->hash.size();
+  for (const auto &child : node->children) {
+    CountNodesAndHashBytes(child, node_count, hash_bytes);
+  }
+}
+
 const std::string kExpr3Str =
     "((32 * Ceiling((((104 * z0t_size) + -1) * Rational(1 , 4)))) + (32 * Ceiling((((104 * z0t_size) + -3) * "
     "Rational(1 , 4)))) + (32 * Ceiling((((104 * z0t_size) + -7) * Rational(1 , 4)))) + (32 * Ceiling((((112 * "
@@ -180,4 +199,37 @@ TEST_F(TestAstOptimizer, test_expr4) {
   optimizer.Optimize(ast);
   std::string optimized_expr = optimizer.GenerateCode();
   EXPECT_EQ(optimized_expr, "");
+}
+
+TEST_F(TestAstOptimizer, ParseFunctionAcceptsUnderscorePrefixedVariable) {
+  Parser parser("Ceiling(_dynamic_shape)", false);
+
+  ASTPtr ast = parser.Parse();
+
+  ASSERT_NE(ast, nullptr);
+  EXPECT_TRUE(parser.IsFullyParsed());
+  ASSERT_EQ(ast->children.size(), 1U);
+  EXPECT_EQ(ast->children[0]->expr, "_dynamic_shape");
+}
+
+TEST_F(TestAstOptimizer, ParseFunctionReturnsNullForInvalidArgument) {
+  Parser parser("Max(a < b, c)", false);
+
+  ASTPtr ast = parser.Parse();
+
+  EXPECT_EQ(ast, nullptr);
+}
+
+TEST_F(TestAstOptimizer, AstHashStorageScalesLinearlyForLongExpression) {
+  Parser parser(BuildLongSum(512U), false);
+  ASTPtr ast = parser.Parse();
+  ASSERT_NE(ast, nullptr);
+  Optimizer optimizer;
+  optimizer.Optimize(ast);
+
+  size_t node_count = 0U;
+  size_t hash_bytes = 0U;
+  CountNodesAndHashBytes(ast, node_count, hash_bytes);
+
+  EXPECT_LT(hash_bytes, node_count * 16U);
 }

@@ -1,4 +1,4 @@
-add_executable(test_ascir_st 
+add_executable(test_ascir_st
     test_main_st.cpp
     reg_func/test_reg_func_broadcast.cpp
     reg_func/test_reg_func_clipbyvalue.cpp
@@ -42,3 +42,10 @@ target_link_libraries(test_ascir_st
     metadef
     #ge_compiler
     GTest::gtest)
+
+add_test(NAME ascir_st_aggregate
+    COMMAND $<TARGET_FILE:test_ascir_st>
+)
+set_tests_properties(ascir_st_aggregate PROPERTIES
+    LABELS "st;ascir_st"
+)

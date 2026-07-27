@@ -1,0 +1,4 @@
+interface:
+  display_name: "精简 Graph Metadef"
+  short_description: "稳健删除 Autofuse graph_metadef 冗余数据结构"
+  default_prompt: "使用 $af-prune-graph-metadef 清理指定 graph_metadef 头文件中的仓内无用内容。"

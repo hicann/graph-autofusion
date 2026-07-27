@@ -58,6 +58,7 @@ struct NamedExprContext {
   std::set<std::string> declared_vars;
   std::set<std::string> used_names;
   std::map<std::string, size_t> prefix_indices;
+  AstCanonicalizer ast_canonicalizer;
 };
 
 struct SemanticContainerInput {
@@ -310,7 +311,7 @@ void InitUsedNames(const Expr &expr, NamedExprContext &ctx, const std::set<std::
   AddFreeSymbolsToUsedNames(expr, ctx, ignored_names);
 }
 
-void CountAstHashRefs(const ASTPtr &node, NamedExprContext &ctx) {
+void CountAstHashRefsImpl(const ASTPtr &node, NamedExprContext &ctx) {
   if (node == nullptr) {
     return;
   }
@@ -318,8 +319,13 @@ void CountAstHashRefs(const ASTPtr &node, NamedExprContext &ctx) {
     ++ctx.ast_hash_ref_count[node->hash];
   }
   for (const auto &child : node->children) {
-    CountAstHashRefs(child, ctx);
+    CountAstHashRefsImpl(child, ctx);
   }
+}
+
+void CountAstHashRefs(const ASTPtr &node, NamedExprContext &ctx) {
+  ctx.ast_canonicalizer.Assign(node.get());
+  CountAstHashRefsImpl(node, ctx);
 }
 
 size_t GetAstRefCount(const ASTPtr &node, const NamedExprContext &ctx) {

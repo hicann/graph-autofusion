@@ -11,6 +11,8 @@
 #ifndef ASCGEN_DEV_OPTIMIZE_TASK_GENERATOR_CUBE_SCHEDULE_CASE_GENERATOR_H_
 #define ASCGEN_DEV_OPTIMIZE_TASK_GENERATOR_CUBE_SCHEDULE_CASE_GENERATOR_H_
 
+#include <utility>
+
 #include "ascir_ops.h"
 #include "ascir/meta/ascir.h"
 #include "common/ascgen_log.h"
@@ -32,6 +34,7 @@ class CubeFusionCaseGenerator : public FusionCaseGenerator {
   static Status SwapCastBrcAndGenNddma(const af::AscNodePtr &node_cast, const af::AscNodePtr &node_load,
                                        af::AscGraph &new_case);
   std::vector<af::AscNodePtr> node_order_{};
+  std::vector<std::pair<std::string, std::string>> split_data_names_{};
   bool partition_ = false;
 };
 }  // namespace optimize

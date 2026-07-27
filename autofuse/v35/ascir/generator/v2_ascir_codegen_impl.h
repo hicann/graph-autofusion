@@ -444,29 +444,6 @@ class FloorAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class PolygammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
- public:
-  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
-    return CalcPolygammaTmpSizeV2(node);
-  }
-  [[nodiscard]] std::string GetApiCallName() const override {
-    return "PolygammaApiCall";
-  }
-  [[nodiscard]] std::string GetApiName() const override {
-    return "PolyGammaExtend";
-  }
-  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"api_regbase/polygamma.h"};
-  }
-  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
-                   node.GetNamePtr());
-    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
-                      node.GetTypePtr(), node.GetNamePtr());
-    return true;
-  }
-};
-
 class ModifiedBesselI0AscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
@@ -649,29 +626,6 @@ class BesselY1AscIrCodegenImplV2 : public AscIrCodegenV2 {
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
-    return true;
-  }
-};
-
-class BucketizeAscIrCodegenImplV2 : public AscIrCodegenV2 {
- public:
-  [[nodiscard]] std::string GetApiCallName() const override {
-    return "BucketizeApiCall";
-  }
-  [[nodiscard]] std::string GetApiName() const override {
-    return "BucketizeExtend";
-  }
-  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"api_regbase/bucketize.h"};
-  }
-  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
-    return CalcBucketizeTmpSizeV2(node);
-  }
-  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
-                   node.GetNamePtr());
-    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node, {false, {1}}),
-                      "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
     return true;
   }
 };

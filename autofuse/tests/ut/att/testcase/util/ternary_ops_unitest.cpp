@@ -161,4 +161,25 @@ TEST_F(TernaryOpsUtilsUnitTest, TestDecomposeNamedVarsPreservesNestedFunctionSyn
   EXPECT_NE(generated_code.find("very_long_dynamic_shape_expression_used_by_abs_function"), std::string::npos)
       << generated_code;
 }
+
+TEST_F(TernaryOpsUtilsUnitTest, TestDecomposeNamedVarsHandlesLongLeftDeepExpression) {
+  Expr long_sum = CreateExpr("long_term_0");
+  for (size_t i = 1U; i < 256U; ++i) {
+    long_sum = long_sum + CreateExpr(("long_term_" + std::to_string(i)).c_str());
+  }
+  const Expr dim_r = CreateExpr("dim_r");
+  const Expr repeated_expr = af::sym::Ceiling(long_sum * af::sym::Rational(1, 8));
+  const Expr small_case = repeated_expr * dim_r + repeated_expr;
+  const Expr large_case = repeated_expr * (dim_r + CreateExpr(1)) + repeated_expr;
+  const TernaryOp ternary_op(CondType::K_LT, dim_r, CreateExpr(2), small_case, large_case);
+
+  std::string preamble;
+  std::string ternary_expr;
+  ternary_op.DecomposeNamedVars("long_cost", preamble, ternary_expr);
+
+  const std::string generated_code = preamble + ternary_expr;
+  EXPECT_NE(generated_code.find("double long_cost_common"), std::string::npos) << generated_code;
+  EXPECT_NE(generated_code.find("long_term_255"), std::string::npos) << generated_code;
+  EXPECT_NE(ternary_expr.find("TernaryOp"), std::string::npos) << generated_code;
+}
 }  // namespace att

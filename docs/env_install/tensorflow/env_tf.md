@@ -84,9 +84,7 @@ export CUDA_VISIBLE_DEVICES=-1
 
 ### aarch64 架构
 
-aarch64 架构下 TF 无官方预编译 wheel，需要源码编译。aarch64 编译流程较长，请参考 [aarch64 架构 TF 1.15 源码编译](build_tf15_aarch64.md)。
-
-TF 2.6.5 的 aarch64 编译流程与 1.15 类似，区别在于使用 Python 3.9、对应的 TF 2.6.5 源码以及 h5py==3.1.0（TF 1.15 为 h5py==2.8.0）。
+aarch64 架构下 TF 无官方预编译 wheel，需要源码编译。TF 1.15.0 和 TF 2.6.5 的完整编译流程（含 nsync 修改、bazel 编译、TF Adapter 编译）请参考 [aarch64 架构 TF 源码编译](build_tf_aarch64.md)，文档内对两个版本的差异（Python、numpy、h5py、bazel、TF Adapter 路径等）有分别说明。
 
 ---
 
@@ -106,7 +104,7 @@ pip3 install npu_device-2.6.5-py3-none-manylinux2014_x86_64.whl --force-reinstal
 
 ### aarch64 架构
 
-TF 1.15（npu_bridge）：需修改 tfa 源码（`tf_adapter/`）三处后编译，请参考 [aarch64 架构 TF 1.15 源码编译](build_tf15_aarch64.md) 中的「编译安装 TF Adapter」章节。
+TF 1.15（npu_bridge）：需修改 tfa 源码（`tf_adapter/`）三处后编译，请参考 [aarch64 架构 TF 源码编译](build_tf_aarch64.md) 中的「编译安装 TF Adapter」章节。
 
 TF 2.6.5（npu_device）：使用 tfa 源码中独立的 `tf_adapter_2.x/` 构建系统，无需修改源码。
 
@@ -122,24 +120,30 @@ pip3 install build/dist/python/dist/npu_device-2.6.5-py3-none-manylinux2014_aarc
 ## 四、安装其他依赖
 
 ```bash
-# TF 1.15: numpy==1.18.5, TF 2.6.5: numpy==1.23.5
-pip3 install numpy==<NUMPY_VERSION> pandas decorator sympy scipy attrs psutil protobuf==3.19.0
+# TF 1.15
+pip3 install "numpy==1.18.5" pandas decorator sympy scipy attrs psutil protobuf==3.19.0
+# TF 2.6.5
+pip3 install "numpy==1.23.5" pandas decorator sympy scipy attrs psutil protobuf==3.19.0
 ```
+
+> numpy 必须与其它包同条命令安装以锁定版本，否则 pandas/scipy 会将 numpy 升级到 2.x，破坏 h5py 的 ABI 兼容性。
 
 ---
 
-## 五、一键配置脚本
+## 五、一键配置脚本（仅 x86_64）
 
-也可使用一键配置脚本自动完成上述步骤（支持 x86_64 和 aarch64）：
+x86_64 架构可使用一键配置脚本自动完成上述步骤（在线安装 TF、NPU Adapter 及依赖）：
 
 ```bash
-bash scripts/package/graph_autofusion/setup_tf_env.sh
+bash scripts/env_install/setup_tf_env.sh
 ```
 
 脚本完成后激活环境：
 
 ```bash
-source env/activate_tf15.sh   # TF 1.15
+source scripts/env_install/env/activate_tf1.sh    # TF 1.15
 # 或
-source env/activate_tf2.sh    # TF 2.6.5
+source scripts/env_install/env/activate_tf2.sh    # TF 2.6.5
 ```
+
+> **aarch64 架构不适用此脚本**：aarch64 请按 [aarch64 架构 TF 源码编译](build_tf_aarch64.md) 手动编译。

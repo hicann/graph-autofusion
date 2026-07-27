@@ -35,6 +35,32 @@ class CalcIsnanTmpSizeTest : public ::testing::Test {
   void TearDown() override {}
 };
 
+TEST(IsnanInferDtypeTest, DefaultsBoolCompatibleOutputToBool) {
+  for (const auto *npu_arch : {"3510", "5102"}) {
+    std::vector<af::DataType> output_dtypes;
+
+    EXPECT_EQ(af::ascir_op::Isnan::InferDataType({af::DT_FLOAT16}, output_dtypes, npu_arch), af::SUCCESS);
+    ASSERT_EQ(output_dtypes.size(), 1U);
+    EXPECT_EQ(output_dtypes[0], af::DT_BOOL);
+  }
+}
+
+TEST(IsnanInferDtypeTest, AcceptsExplicitUint8Output) {
+  std::vector<af::DataType> output_dtypes{af::DT_UINT8};
+
+  EXPECT_EQ(af::ascir_op::Isnan::InferDataType({af::DT_FLOAT16}, output_dtypes, "5102"), af::SUCCESS);
+  ASSERT_EQ(output_dtypes.size(), 1U);
+  EXPECT_EQ(output_dtypes[0], af::DT_UINT8);
+}
+
+TEST(IsnanInferDtypeTest, DefaultsBoolCompatibleOutputToBoolWithoutCheck) {
+  std::vector<af::DataType> output_dtypes;
+
+  EXPECT_EQ(af::ascir_op::Isnan::InferDataTypeWithNoCheck({af::DT_FLOAT16}, output_dtypes, "5102"), af::SUCCESS);
+  ASSERT_EQ(output_dtypes.size(), 1U);
+  EXPECT_EQ(output_dtypes[0], af::DT_BOOL);
+}
+
 /**
  * @tc.name:CalcIsnanTmpSize_ShouldReturnCorrectSize_WhenNodelsValid
  * @tc.number: CalcIsnanTmpSize_Test_001

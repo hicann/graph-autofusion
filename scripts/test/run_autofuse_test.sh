@@ -21,6 +21,7 @@ METADEF_LIB_PATH=${OUTPUT_PATH}/metadef/lib/
 PYTHON_LIB_PATH=${AUTOFUSE_BUILD_PATH}/tests/
 PYTHON_MODULE_PATH=${AUTOFUSE_PATH}/compiler/python/
 TESTS_ST_PATH="${AUTOFUSE_PATH}/tests/st/"
+LOCAL_RUNTIME_LIB_PATH="${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir/generator:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/expression:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph:${AUTOFUSE_BUILD_PATH}/tests:${AUTOFUSE_BUILD_PATH}/tests/depends/trace:${AUTOFUSE_BUILD_PATH}/tests/depends/runtime"
 RUN_V35_TESTS="off"
 
 source ${BASEPATH}/scripts/support_multiple_versions_of_lcov.sh
@@ -316,11 +317,9 @@ build_test() {
 
   echo "$(date '+%F %T') run test_main success!"
 
-  LOCAL_RUNTIME_LIB_PATH="${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir/generator:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/expression:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph:${AUTOFUSE_BUILD_PATH}/tests:${AUTOFUSE_BUILD_PATH}/tests/depends/trace:${AUTOFUSE_BUILD_PATH}/tests/depends/runtime"
-
-  cd ${AUTOFUSE_BUILD_PATH}/tests/ut/
   export LD_LIBRARY_PATH=${LOCAL_RUNTIME_LIB_PATH}:${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
-  RUN_TEST_CASE=${AUTOFUSE_BUILD_PATH}/tests/ut/test_main && ${RUN_TEST_CASE}
+  ctest --output-on-failure -j${THREAD_NUM} -R '^test_main_ut_aggregate$' \
+        --test-dir ${AUTOFUSE_BUILD_PATH}/tests/ut --no-tests=error
   if [ $? -ne 0 ]
   then
     unset LD_LIBRARY_PATH
@@ -328,7 +327,6 @@ build_test() {
     return 1
   fi
   unset LD_LIBRARY_PATH
-  cd -
   echo "$(date '+%F %T') ascgen-dev test success!"
 }
 
@@ -364,9 +362,9 @@ build_test_ascir_st() {
   echo "build test_ascir_st success!"
 
   cp ${AUTOFUSE_BUILD_PATH}/tests/st/ascir/test_ascir_st  ${OUTPUT_PATH}
-  LOCAL_RUNTIME_LIB_PATH="${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir/generator:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/expression:${BUILD_PATH}/graph:${AUTOFUSE_BUILD_PATH}/tests:${AUTOFUSE_BUILD_PATH}/tests/depends/trace:${AUTOFUSE_BUILD_PATH}/tests/depends/runtime"
   export LD_LIBRARY_PATH=${LOCAL_RUNTIME_LIB_PATH}:${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
-  RUN_TEST_CASE=${OUTPUT_PATH}/test_ascir_st && ${RUN_TEST_CASE}
+  ctest --output-on-failure -j${THREAD_NUM} -L st -L ascir_st \
+        --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error
 
   if [ $? -ne 0 ]
   then
@@ -392,7 +390,8 @@ build_ut_optimize() {
 
   cp ${AUTOFUSE_BUILD_PATH}/tests/ut/optimize/optimize_ut  ${OUTPUT_PATH}
   export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
-  RUN_TEST_CASE=${OUTPUT_PATH}/optimize_ut && ${RUN_TEST_CASE}
+  ctest --output-on-failure -j${THREAD_NUM} \
+        --test-dir ${AUTOFUSE_BUILD_PATH}/tests/ut/optimize --no-tests=error
 
   if [ $? -ne 0 ]
   then
@@ -417,7 +416,8 @@ build_ut_common () {
 
   cp ${AUTOFUSE_BUILD_PATH}/tests/ut/common/test_common  ${OUTPUT_PATH}
   export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
-  RUN_TEST_CASE=${OUTPUT_PATH}/test_common && ${RUN_TEST_CASE}
+  ctest --output-on-failure -j${THREAD_NUM} \
+        --test-dir ${AUTOFUSE_BUILD_PATH}/tests/ut/common --no-tests=error
   if [ $? -ne 0 ]; then
     unset LD_LIBRARY_PATH
     echo "execute command: run test_common failed."
@@ -536,7 +536,6 @@ build_st_common() {
     return 1
   fi
 
-  LOCAL_RUNTIME_LIB_PATH="${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir/generator:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/expression:${BUILD_PATH}/graph:${AUTOFUSE_BUILD_PATH}/tests:${AUTOFUSE_BUILD_PATH}/tests/depends/trace:${AUTOFUSE_BUILD_PATH}/tests/depends/runtime"
   export LD_LIBRARY_PATH=${LOCAL_RUNTIME_LIB_PATH}:${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
   ctest --output-on-failure -j${THREAD_NUM} -L st -L test_common_st --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error \
         -O ${BUILD_PATH}/test_common_st.log
@@ -587,32 +586,6 @@ get_coverage() {
         ${lcov_parallel_params} \
         -o cov/coverage.info
     genhtml cov/coverage.info --output-directory cov/coverage_report ${genhtml_ignore_errors}
-}
-
-run_codegen_one_e2e_st() {
-  test_name="$1"
-  v2="v2"
-  if [[ $test_name == *"$v2"* ]]; then
-    dir_name="${test_name%_e2e_v2}"
-    cp ${AUTOFUSE_BUILD_PATH}/tests/v35/st/codegen/e2e_v2/${dir_name}/${test_name}  ${OUTPUT_PATH}
-  else
-    dir_name="${test_name%_e2e}"
-    cp ${AUTOFUSE_BUILD_PATH}/tests/st/codegen/e2e/${dir_name}/${test_name}  ${OUTPUT_PATH}
-  fi
-  RUN_TEST_CASE=${OUTPUT_PATH}/${test_name} && ${RUN_TEST_CASE}
-}
-
-run_backend_one_e2e_st() {
-  test_name="$1"
-  v2="v2"
-  if [[ $test_name == *"$v2"* ]]; then
-    dir_name="${test_name%_e2e_v2}"
-    cp ${AUTOFUSE_BUILD_PATH}/tests/v35/st/backend_e2e_v2/${dir_name}/${test_name}  ${OUTPUT_PATH}
-  else
-    dir_name="${test_name%_e2e}"
-    cp ${AUTOFUSE_BUILD_PATH}/tests/st/backend_e2e/${dir_name}/${test_name}  ${OUTPUT_PATH}
-  fi
-  RUN_TEST_CASE=${OUTPUT_PATH}/${test_name} && ${RUN_TEST_CASE}
 }
 
 codegen_e2e_st() {
@@ -994,7 +967,8 @@ build_kernel_tool() {
 
   export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}:${LD_LIBRARY_PATH}
   cp ${AUTOFUSE_BUILD_PATH}/tests/st/codegen/kernel_tool/test_kernel  ${OUTPUT_PATH}
-  RUN_TEST_CASE=${OUTPUT_PATH}/test_kernel && ${RUN_TEST_CASE}
+  ctest --output-on-failure -j${THREAD_NUM} -L st -L kernel_tool_st \
+        --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error
   if [ $? -ne 0 ]
   then
     echo "execute command: run kernel tool failed."
@@ -1006,22 +980,23 @@ build_kernel_tool() {
 
 run_py_module_test() {
     local test_dir="$1"
-    local local_runtime_lib_path="${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir/generator:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/expression:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph:${AUTOFUSE_BUILD_PATH}/tests:${AUTOFUSE_BUILD_PATH}/tests/depends/trace:${AUTOFUSE_BUILD_PATH}/tests/depends/runtime"
     local ascend_devlib_path="${ASCEND_INSTALL_PATH}/$(uname -m)-linux/devlib"
     local ascend_device_path="${ASCEND_INSTALL_PATH}/$(uname -m)-linux/devlib/device"
+    local test_ld_library_path="${LOCAL_RUNTIME_LIB_PATH}:${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}:${ascend_devlib_path}:${ascend_device_path}"
+
+    if [ -n "${INITIAL_LD_LIBRARY_PATH}" ]; then
+        test_ld_library_path="${test_ld_library_path}:${INITIAL_LD_LIBRARY_PATH}"
+    fi
 
     mk_dir ${PYTHON_LIB_PATH}/autofuse || true
     cp -f "${AUTOFUSE_BUILD_PATH}/tests/pyautofuse.so" "${PYTHON_LIB_PATH}/autofuse/pyautofuse.so"
     cp "${PYTHON_MODULE_PATH}"/*.py "${PYTHON_LIB_PATH}/autofuse" || true
     export PYTHONPATH="${PYTHON_LIB_PATH}:${PYTHONPATH}"
-    export LD_LIBRARY_PATH=${local_runtime_lib_path}:${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}:${ascend_devlib_path}:${ascend_device_path}
     rm -rf "${test_dir}/__pycache__/" || true
-    if ! pytest -s -vv "$test_dir"; then
-        unset LD_LIBRARY_PATH
+    if ! LD_LIBRARY_PATH="${test_ld_library_path}" python3 -m pytest -s -vv "$test_dir"; then
         echo "py module test failed."
         return 1
     fi
-    unset LD_LIBRARY_PATH
     echo "py module test success!"
 }
 
@@ -1067,7 +1042,8 @@ build_ut_att() {
   cp ${AUTOFUSE_BUILD_PATH}/tests/ut/att/att_ut  ${OUTPUT_PATH}
   ldd -r ${OUTPUT_PATH}/att_ut
   export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
-  RUN_TEST_CASE=${OUTPUT_PATH}/att_ut && ${RUN_TEST_CASE}
+  ctest --output-on-failure -j${THREAD_NUM} \
+        --test-dir ${AUTOFUSE_BUILD_PATH}/tests/ut/att --no-tests=error
   if [ $? -ne 0 ]; then
     unset LD_LIBRARY_PATH
     echo "att_ut test failed."
@@ -1225,6 +1201,7 @@ build_st() {
 main() {
   cd "${BASEPATH}"
   checkopts "$@"
+  INITIAL_LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}"
   if [[ "X${ENABLE_COV}" = "Xon" ]]; then
     require_coverage_tools || exit 1
   fi

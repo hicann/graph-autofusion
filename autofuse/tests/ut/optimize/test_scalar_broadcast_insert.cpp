@@ -212,6 +212,106 @@ TEST_F(TestScalarBroadcastInsert, ScalarMultipleDownstreams_InsertsOneSharedBroa
   }
 }
 
+TEST_F(TestScalarBroadcastInsert, ScalarMultipleDownstreamsWithDifferentView_InsertsSeparateBroadcasts) {
+  auto graph = AscGraphBuilder("test_scalar_multi_downstream_different_view")
+                   .Loops({Sym("s0"), Sym("s1")})
+                   .Data("data0", 0)
+                   .Data("data1", 1)
+                   .Load("load0", "data0")
+                   .Load("load1", "data1")
+                   .Scalar("scalar0", "1.0")
+                   .Add("add0", "load0", "scalar0")
+                   .Mul("mul0", "load1", "scalar0")
+                   .Store("store0", "add0")
+                   .Store("store1", "mul0")
+                   .Output("output0", "store0")
+                   .Output("output1", "store1", 1)
+                   .Build();
+
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  auto mul_node = graph.FindNode("mul0");
+  ASSERT_NE(mul_node, nullptr);
+  ASSERT_GE(mul_node->outputs[0].attr.repeats.size(), 1U);
+  mul_node->outputs[0].attr.repeats[0] = af::sym::kSymbolOne;
+
+  auto ret = InsertBroadcastAfterScalarForAscGraph(graph);
+  ASSERT_EQ(ret, af::SUCCESS);
+
+  EXPECT_EQ(CountNodesByType(graph, ascir_op::Broadcast::Type), 2U);
+  EXPECT_FALSE(IsConnected(graph, "scalar0", "add0"));
+  EXPECT_FALSE(IsConnected(graph, "scalar0", "mul0"));
+  EXPECT_EQ(CountOutDataEdges(graph, "scalar0"), 2U);
+}
+
+TEST_F(TestScalarBroadcastInsert, ScalarMultipleDownstreamsWithDifferentShapes_GroupsCompatibleViews) {
+  auto graph = AscGraphBuilder("test_scalar_multi_downstream_different_shapes")
+                   .Loops({Sym("s0"), Sym("s1")})
+                   .Data("data0", 0)
+                   .Load("load0", "data0")
+                   .Scalar("scalar0", "2.0")
+                   .Add("add0", "load0", "scalar0")
+                   .Mul("mul0", "load0", "scalar0")
+                   .Add("add1", "load0", "scalar0")
+                   .Sub("sub0", "load0", "scalar0")
+                   .Build();
+
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  auto mul_node = std::dynamic_pointer_cast<AscNode>(graph.FindNode("mul0"));
+  auto add1_node = std::dynamic_pointer_cast<AscNode>(graph.FindNode("add1"));
+  ASSERT_NE(mul_node, nullptr);
+  ASSERT_NE(add1_node, nullptr);
+  ASSERT_FALSE(mul_node->outputs[0].attr.repeats.empty());
+  ASSERT_FALSE(add1_node->outputs[0].attr.repeats.empty());
+  mul_node->outputs[0].attr.repeats[0] = Sym(14);
+  mul_node->outputs[0].attr.strides = {Sym(322)};
+  add1_node->outputs[0].attr.repeats[0] = Sym(32);
+  add1_node->outputs[0].attr.strides = {Sym(736)};
+
+  ASSERT_EQ(InsertBroadcastAfterScalarForAscGraph(graph), af::SUCCESS);
+  EXPECT_EQ(CountNodesByType(graph, ascir_op::Broadcast::Type), 3U);
+
+  const auto add_brc = graph.FindNode("add0")->GetInDataAnchor(1)->GetPeerOutAnchor()->GetOwnerNode();
+  const auto mul_brc = graph.FindNode("mul0")->GetInDataAnchor(1)->GetPeerOutAnchor()->GetOwnerNode();
+  const auto add1_brc = graph.FindNode("add1")->GetInDataAnchor(1)->GetPeerOutAnchor()->GetOwnerNode();
+  const auto sub_brc = graph.FindNode("sub0")->GetInDataAnchor(1)->GetPeerOutAnchor()->GetOwnerNode();
+  ASSERT_NE(add_brc, nullptr);
+  ASSERT_NE(mul_brc, nullptr);
+  ASSERT_NE(add1_brc, nullptr);
+  ASSERT_NE(sub_brc, nullptr);
+  EXPECT_EQ(add_brc, sub_brc);
+  EXPECT_NE(add_brc, mul_brc);
+  EXPECT_NE(add_brc, add1_brc);
+  EXPECT_NE(mul_brc, add1_brc);
+  EXPECT_EQ(CountOutDataEdges(graph, add_brc->GetName()), 2U);
+}
+
+TEST_F(TestScalarBroadcastInsert, ScalarDownstreamWithoutTensorAttr_DoesNotSynthesizeBroadcastAttr) {
+  auto graph = AscGraphBuilder("test_scalar_downstream_without_tensor_attr")
+                   .Loops({Sym("s0")})
+                   .Data("data0", 0)
+                   .Load("load0", "data0")
+                   .Scalar("scalar0", "1.0")
+                   .Add("add0", "load0", "scalar0")
+                   .Build();
+
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  auto add_node = std::dynamic_pointer_cast<AscNode>(graph.FindNode("add0"));
+  ASSERT_NE(add_node, nullptr);
+  ASSERT_FALSE(add_node->attr.sched.axis.empty());
+  add_node->outputs[0].attr.axis.clear();
+  add_node->outputs[0].attr.repeats.clear();
+  add_node->outputs[0].attr.strides.clear();
+
+  ASSERT_EQ(InsertBroadcastAfterScalarForAscGraph(graph), af::SUCCESS);
+
+  auto brc_node = std::dynamic_pointer_cast<AscNode>(
+      graph.FindNode("add0")->GetInDataAnchor(1)->GetPeerOutAnchor()->GetOwnerNode());
+  ASSERT_NE(brc_node, nullptr);
+  EXPECT_TRUE(brc_node->outputs[0].attr.axis.empty());
+  EXPECT_TRUE(brc_node->outputs[0].attr.repeats.empty());
+  EXPECT_TRUE(brc_node->outputs[0].attr.strides.empty());
+}
+
 // ==================== Scalar 直连 Output → 不插入 ====================
 
 TEST_F(TestScalarBroadcastInsert, ScalarDirectToOutput_NoInsert) {

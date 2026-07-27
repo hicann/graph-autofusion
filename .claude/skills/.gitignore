@@ -25,4 +25,7 @@
 !sk-operator-sample-gen/**
 !sk-operator-validate/
 !sk-operator-validate/**
+!af-code-reviewer/*
+!af-prune-graph-metadef/
+!af-prune-graph-metadef/**
 !.gitignore

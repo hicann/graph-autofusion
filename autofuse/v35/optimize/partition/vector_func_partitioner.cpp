@@ -29,6 +29,59 @@ constexpr int32_t kMaxBitWidthGap = 2;
 constexpr int64_t kOutLoopAxisId = -1L;
 constexpr size_t kMinVfNodesNum = 2UL;
 
+std::unordered_map<af::Node *, size_t> BuildDependencyAwareRanks(
+    const af::AscGraph &graph, const std::unordered_set<af::Node *> &outer_loop_sequences) {
+  std::vector<af::NodePtr> nodes;
+  std::unordered_map<af::Node *, size_t> indegrees;
+  std::unordered_map<af::Node *, std::vector<af::NodePtr>> out_nodes;
+  for (const auto &node : graph.GetAllNodes()) {
+    nodes.push_back(node);
+    indegrees[node.get()] = 0UL;
+  }
+
+  for (const auto &node : nodes) {
+    for (const auto &out_node : node->GetOutDataNodes()) {
+      if (indegrees.find(out_node.get()) == indegrees.end()) {
+        continue;
+      }
+      out_nodes[node.get()].push_back(out_node);
+      ++indegrees[out_node.get()];
+    }
+  }
+
+  const auto has_higher_priority = [&outer_loop_sequences](const af::NodePtr &node1, const af::NodePtr &node2) -> bool {
+    bool is_node1_in_outer_seq = outer_loop_sequences.find(node1.get()) != outer_loop_sequences.end();
+    bool is_node2_in_outer_seq = outer_loop_sequences.find(node2.get()) != outer_loop_sequences.end();
+    if (is_node1_in_outer_seq != is_node2_in_outer_seq) {
+      return is_node1_in_outer_seq;
+    }
+    return node1->GetOpDescBarePtr()->GetId() < node2->GetOpDescBarePtr()->GetId();
+  };
+
+  std::vector<af::NodePtr> ready_nodes;
+  for (const auto &node : nodes) {
+    if (indegrees[node.get()] == 0UL) {
+      ready_nodes.push_back(node);
+    }
+  }
+
+  std::unordered_map<af::Node *, size_t> ranks;
+  while (!ready_nodes.empty()) {
+    auto iter = std::min_element(ready_nodes.begin(), ready_nodes.end(), has_higher_priority);
+    auto node = *iter;
+    ready_nodes.erase(iter);
+    ranks[node.get()] = ranks.size();
+    for (const auto &out_node : out_nodes[node.get()]) {
+      auto &indegree = indegrees[out_node.get()];
+      --indegree;
+      if (indegree == 0UL) {
+        ready_nodes.push_back(out_node);
+      }
+    }
+  }
+  return ranks;
+}
+
 namespace cast_helpers {
 bool HasHighToLowCastNode(const std::unordered_set<af::AscNodePtr> &nodes) {
   for (const auto &node : nodes) {
@@ -1181,14 +1234,14 @@ af::Status VectorFuncPartitioner::TopologicalSortingForVfGraph(af::AscGraph &gra
       outer_loop_sequences.emplace(node.get());
     }
   }
-  const auto func = [&outer_loop_sequences](const af::NodePtr &node1, const af::NodePtr &node2) -> bool {
-    bool is_node1_in_outer_seq = outer_loop_sequences.find(node1.get()) != outer_loop_sequences.end();
-    bool is_node2_in_outer_seq = outer_loop_sequences.find(node2.get()) != outer_loop_sequences.end();
-    if (is_node1_in_outer_seq && !is_node2_in_outer_seq) {
-      return true;
-    } else {
-      return node1->GetOpDescBarePtr()->GetId() < node2->GetOpDescBarePtr()->GetId();
+  const auto ranks = BuildDependencyAwareRanks(graph, outer_loop_sequences);
+  const auto func = [&ranks](const af::NodePtr &node1, const af::NodePtr &node2) -> bool {
+    const auto rank1 = ranks.find(node1.get());
+    const auto rank2 = ranks.find(node2.get());
+    if (rank1 != ranks.end() && rank2 != ranks.end()) {
+      return rank1->second < rank2->second;
     }
+    return node1->GetOpDescBarePtr()->GetId() < node2->GetOpDescBarePtr()->GetId();
   };
 
   auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);

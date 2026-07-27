@@ -89,43 +89,49 @@ inline __aicore__ void Pow(const AscendC::LocalTensor<T> &dst, const T &src1, co
   Duplicate(src1_buf, src1, block_cnt);
   // 调用Power基础API：tensor(block size) + scalar
   if (static_cast<float>(src2) == 0.0f) {
-    Duplicate(dst_buf, static_cast<T>(1.0), calCount);
+    Duplicate(dst, static_cast<T>(1.0), calCount);
     return;
   } else if (static_cast<float>(src2) == 1.0f) {
-    DataCopy(dst_buf, src1_buf, KernelUtils::BlkAlign<T>(calCount));
+    Duplicate(dst, src1, calCount);
     return;
   } else if (static_cast<float>(src2) == -1.0f) {
     if constexpr (std::is_same_v<T, float> || std::is_same_v<T, half>) {
-      Reciprocal(dst_buf, src1_buf, calCount);
+      Reciprocal(dst_buf, src1_buf, block_cnt);
+      Duplicate(dst, dst_buf.GetValue(0), calCount);
       return;
     }
   } else if (static_cast<float>(src2) == 2.0f) {
     if constexpr (!std::is_same_v<T, int8_t> && !std::is_same_v<T, uint8_t>) {
-      Mul(dst_buf, src1_buf, src1_buf, calCount);
+      Mul(dst_buf, src1_buf, src1_buf, block_cnt);
+      Duplicate(dst, dst_buf.GetValue(0), calCount);
       return;
     }
   } else if (static_cast<float>(src2) == 0.5f) {
     if constexpr (std::is_same_v<T, float> || std::is_same_v<T, half>) {
-      Sqrt(dst_buf, src1_buf, calCount);
+      Sqrt(dst_buf, src1_buf, block_cnt);
+      Duplicate(dst, dst_buf.GetValue(0), calCount);
       return;
     }
   } else if (static_cast<float>(src2) == -0.5f) {
     if constexpr (std::is_same_v<T, float> || std::is_same_v<T, half>) {
-      Rsqrt(dst_buf, src1_buf, calCount);
+      Rsqrt(dst_buf, src1_buf, block_cnt);
+      Duplicate(dst, dst_buf.GetValue(0), calCount);
       return;
     }
   } else if (static_cast<float>(src2) == 3.0f) {
     if constexpr (!std::is_same_v<T, int8_t> && !std::is_same_v<T, uint8_t>) {
-      Mul(dst_buf, src1_buf, src1_buf, calCount);
-      Mul(dst_buf, dst_buf, src1_buf, calCount);
+      Mul(dst_buf, src1_buf, src1_buf, block_cnt);
+      Mul(dst_buf, dst_buf, src1_buf, block_cnt);
+      Duplicate(dst, dst_buf.GetValue(0), calCount);
       return;
     }
   } else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, bfloat16_t>) {
-    Power<T, false, pow_config>(dst_buf, src1_buf, src2, tmp_buf, calCount);
+    Power<T, false, pow_config>(dst_buf, src1_buf, src2, tmp_buf, block_cnt);
+    Duplicate(dst, dst_buf.GetValue(0), calCount);
     return;
   }
-  Power(dst_buf, src1_buf, src2, tmp_buf, calCount);
+  Power(dst_buf, src1_buf, src2, tmp_buf, block_cnt);
   // 取block tensor中的一个scalar元素，扩充为dst size长度的tensor
-  Duplicate(dst, dst_buf.GetValue(0), dst.GetSize());
+  Duplicate(dst, dst_buf.GetValue(0), calCount);
 }
 #endif  // __ASCENDC_API_POW_H__

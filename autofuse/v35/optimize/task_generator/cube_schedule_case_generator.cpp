@@ -10,6 +10,7 @@
 
 #include "task_generator/cube_schedule_case_generator.h"
 #include <queue>
+#include <unordered_set>
 #include "graph/ascendc_ir/utils/asc_graph_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
 #include "graph/utils/graph_utils.h"
@@ -175,6 +176,122 @@ bool IsCubeFixpip(const af::AscNodePtr &cube_node) {
     }
   }
   return true;
+}
+
+bool IsReachableToCube(const af::AscNodePtr &start_node) {
+  GE_ASSERT_NOTNULL(start_node);
+  std::queue<af::AscNodePtr> node_queue;
+  std::unordered_set<const af::Node *> visited;
+  node_queue.push(start_node);
+  visited.insert(start_node.get());
+  while (!node_queue.empty()) {
+    auto current_node = node_queue.front();
+    node_queue.pop();
+    GE_ASSERT_NOTNULL(current_node);
+    if (ScheduleUtils::IsCube(current_node)) {
+      return true;
+    }
+    for (const auto &out_node : current_node->GetOutDataNodes()) {
+      auto out_asc_node = std::dynamic_pointer_cast<af::AscNode>(out_node);
+      if (out_asc_node == nullptr || visited.find(out_asc_node.get()) != visited.end()) {
+        continue;
+      }
+      visited.insert(out_asc_node.get());
+      node_queue.push(out_asc_node);
+    }
+  }
+  return false;
+}
+
+std::string GetUniqueSplitDataName(af::AscGraph &graph, const std::string &base_name) {
+  std::string split_name = base_name + "_shared_split_data";
+  size_t suffix = 0UL;
+  while (graph.FindNode(split_name.c_str()) != nullptr) {
+    split_name = base_name + "_shared_split_data_" + std::to_string(++suffix);
+  }
+  return split_name;
+}
+
+Status CopyDataNodeForSharedSplit(af::AscGraph &graph, const af::AscNodePtr &src_data_node,
+                                  const std::string &split_name, af::AscNodePtr &split_data_node) {
+  GE_ASSERT_NOTNULL(src_data_node);
+  af::ascir_op::Data data(split_name.c_str());
+  data.attr = src_data_node->attr;
+  data.y.dtype = src_data_node->outputs[0].attr.dtype;
+  *data.y.axis = src_data_node->outputs[0].attr.axis;
+  *data.y.repeats = src_data_node->outputs[0].attr.repeats;
+  *data.y.strides = src_data_node->outputs[0].attr.strides;
+  split_data_node = graph.AddNode(data);
+  GE_ASSERT_NOTNULL(split_data_node);
+  split_data_node->attr = src_data_node->attr;
+  split_data_node->outputs[0].attr = src_data_node->outputs[0].attr;
+  return af::SUCCESS;
+}
+
+Status SplitSharedDataForCubeAndVector(ascir::ImplGraph &graph,
+                                       std::vector<std::pair<std::string, std::string>> &renamed_data_nodes) {
+  auto all_nodes = graph.GetAllNodes();
+  for (const auto &node : all_nodes) {
+    GE_ASSERT_NOTNULL(node);
+    if (!af::ops::IsOps<af::ascir_op::Data>(node)) {
+      continue;
+    }
+    auto data_node = std::dynamic_pointer_cast<af::AscNode>(node);
+    GE_ASSERT_NOTNULL(data_node);
+    std::vector<af::AscNodePtr> cube_load_nodes;
+    std::vector<af::AscNodePtr> vector_load_nodes;
+    for (const auto &out_node : data_node->GetOutDataNodes()) {
+      auto load_node = std::dynamic_pointer_cast<af::AscNode>(out_node);
+      if (load_node == nullptr || !ScheduleUtils::IsLoad(load_node)) {
+        continue;
+      }
+      if (IsReachableToCube(load_node)) {
+        cube_load_nodes.emplace_back(load_node);
+      } else {
+        vector_load_nodes.emplace_back(load_node);
+      }
+    }
+    if (cube_load_nodes.empty() || vector_load_nodes.empty()) {
+      continue;
+    }
+
+    const auto original_name = data_node->GetName();
+    const auto split_name = GetUniqueSplitDataName(graph, original_name);
+    af::AscNodePtr split_data_node;
+    GE_CHK_STATUS_RET(CopyDataNodeForSharedSplit(graph, data_node, split_name, split_data_node));
+    for (const auto &load_node : vector_load_nodes) {
+      GE_ASSERT_NOTNULL(load_node);
+      auto in_anchor = load_node->GetInDataAnchor(0);
+      GE_CHECK_NOTNULL(in_anchor);
+      auto src_anchor = data_node->GetOutDataAnchor(0);
+      GE_CHECK_NOTNULL(src_anchor);
+      auto new_src_anchor = split_data_node->GetOutDataAnchor(0);
+      GE_CHECK_NOTNULL(new_src_anchor);
+      GE_CHK_STATUS_RET(af::GraphUtils::ReplaceEdgeSrc(src_anchor, in_anchor, new_src_anchor));
+    }
+    renamed_data_nodes.emplace_back(split_name, original_name);
+  }
+  return af::SUCCESS;
+}
+
+Status RestoreSplitDataNames(std::vector<ascir::ImplGraph> &grouped_graphs,
+                             const std::vector<std::pair<std::string, std::string>> &renamed_data_nodes) {
+  for (auto &grouped_graph : grouped_graphs) {
+    for (const auto &name_pair : renamed_data_nodes) {
+      const auto &split_name = name_pair.first;
+      const auto &original_name = name_pair.second;
+      auto split_node = grouped_graph.FindNode(split_name.c_str());
+      if (split_node == nullptr) {
+        continue;
+      }
+      auto original_node = grouped_graph.FindNode(original_name.c_str());
+      GE_ASSERT_TRUE(original_node == nullptr, "Graph %s already has Data node %s, cannot restore split Data name.",
+                     grouped_graph.GetName().c_str(), original_name.c_str());
+      GE_CHECK_NOTNULL(split_node->GetOpDesc());
+      split_node->GetOpDesc()->SetName(original_name.c_str());
+    }
+  }
+  return af::SUCCESS;
 }
 
 Status GetPrioritySequence(const af::AscGraph &graph, std::unordered_set<af::Node *> &priority_sequences,
@@ -369,6 +486,8 @@ Status CubeFusionCaseGenerator::GenerateGeneralCase(ascir::HintGraph &graph, std
   }
   ascir::utils::DumpGraph(graph, "before_partition");
   ascir::utils::DumpGraph(optimize_graph, "after_partition");
+  split_data_names_.clear();
+  GE_ASSERT_SUCCESS(SplitSharedDataForCubeAndVector(optimize_graph, split_data_names_));
   GE_ASSERT_SUCCESS(FillInputDataAttrForCvGraph(optimize_graph));
   graphs.emplace_back(optimize_graph);
   return af::GRAPH_SUCCESS;
@@ -522,6 +641,7 @@ Status CubeFusionCaseGenerator::GeneratorTask(ascir::HintGraph &optimize_graph, 
     ScheduleTask task{graph, {}, score_funcs[i], {}, ReduceTemplateType::kDefault, ascir::CubeTemplateType::kFixpip};
     GE_CHK_STATUS_RET(ScheduleGroupGraphPartitioner::PartitionByConnectivity(graph, task.grouped_graphs, node_order_),
                       "Failed to partition graph");
+    GE_CHK_STATUS_RET(RestoreSplitDataNames(task.grouped_graphs, split_data_names_), "Restore split Data names failed");
     if (task.grouped_graphs.size() > 1U) {
       task.cube_type = ascir::CubeTemplateType::kCommon;
       MoveCubeGraphsToEnd(task.grouped_graphs);

@@ -156,7 +156,7 @@ View more compilation parameters through `bash build.sh -h`. After successful ex
 - ${arch} indicates CPU architecture, for example, aarch64 or x86_64.
 
 During compilation, CMake automatically downloads third-party source packages (abseil-cpp, boost, json, protobuf, symengine, googletest, mockcpp, and so on) required by autofuse and superkernel AOT UT from external networks (for example, `https://gitcode.com/cann-src-third-party/` and Huawei Cloud OBS) through `ExternalProject_Add`. If your compilation environment cannot directly access external networks (for example, enterprise intranet or Docker container default bridge network), select the appropriate solution:
- 
+
 **Solution 1: Configure Network Proxy (Recommended)**
 If the environment has an HTTP proxy that can access external networks, set the `http_proxy` / `https_proxy` environment variables before compilation. `build.sh` automatically passes these proxy variables to CMake subprocesses:
 
@@ -275,12 +275,11 @@ After local verification completes, execute the following command to install the
 > - The installation path (default or specified) must match the path where you installed the cann-toolkit package.
 > - --full indicates full installation mode.
 > - --install-path specifies the installation path. If not specified, the default installation path is `/usr/local/Ascend` (root user) or `${HOME}/Ascend` (non-root user).
-> - --quiet indicates silent installation. It skips human-computer interaction.  
-> - --pylocal determines whether to install .whl files inside the package along the run package installation path.  
+> - --quiet indicates silent installation. It skips human-computer interaction.
+> - --pylocal determines whether to install .whl files inside the package along the run package installation path.
 >   - If you select this parameter, .whl installs in the `${ascend_install_path}/cann/python/site-packages` path.
 >   - If you do not select this parameter, .whl installs in the local python path, for example, `/usr/local/python3.7.5/lib/python3.7/site-packages`.
-> - --autofuse indicates whether to install autofuse component-related compilation artifacts. Current package installation does not install autofuse by default. Add this option to install autofuse.
-> - For more installation options, use the --help option to view.  
+> - For more installation options, use the --help option to view.
 
 #### Uninstallation
 
@@ -289,7 +288,7 @@ If you want to uninstall the installed package, execute the following command:
 ```shell
 # Add --install-path=${install_path} if installed to a specified path
 ./build_out/cann-graph-autofusion_${cann_version}_linux-${arch}.run --uninstall
-```  
+```
 
 ### 4.5 Test Verification
 

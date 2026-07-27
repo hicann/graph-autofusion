@@ -142,7 +142,16 @@ af::Status UnAlignmentStrategy::SetAlignInfoForTailBrcNodes(AlignmentType aligne
     for (const auto &peer_in : output->anchor.GetPeerInDataAnchorsPtr()) {
       GE_ASSERT_NOTNULL(peer_in);
       auto asc_node = std::dynamic_pointer_cast<af::AscNode>(peer_in->GetOwnerNode());
-      if (!ScheduleUtils::IsBuffer(asc_node) && visited_nodes.insert(asc_node.get()).second) {
+      if (ScheduleUtils::IsBuffer(asc_node)) {
+        continue;
+      }
+      if (ScheduleUtils::IsReduce(asc_node)) {
+        // Reduce changes the tensor layout, so input alignment must not propagate to its output.
+        GELOGI("Stop alignment propagation from node [%s] to Reduce node [%s].", node->GetNamePtr(),
+               asc_node->GetNamePtr());
+        continue;
+      }
+      if (visited_nodes.insert(asc_node.get()).second) {
         node_queue.push(asc_node.get());
       }
     }

@@ -20,7 +20,7 @@ cat /usr/local/Ascend/cann/<arch>-linux/ascend_ops_install.info
 根据实际场景，选择合适的命令：
 
   ```bash
-  # 默认路径安装，以root用户为例（非root用户，将/usr/local替换为${HOME}） 
+  # 默认路径安装，以root用户为例（非root用户，将/usr/local替换为${HOME}）
   source /usr/local/Ascend/cann/set_env.sh
   # 指定路径安装
   source ${install_path}/cann/set_env.sh
@@ -156,7 +156,7 @@ bash build.sh --pkg
 - ${arch} 表示 CPU 架构，如 aarch64、x86_64。
 
 编译过程中，CMake 会通过 `ExternalProject_Add` 从外网（如 `https://gitcode.com/cann-src-third-party/`、华为云 OBS 等）自动下载 autofuse 和 superkernel AOT UT 所需的第三方源码包（abseil-cpp、boost、json、protobuf、symengine、googletest、mockcpp 等）。如果您的编译环境无法直接访问外网（如企业内网、Docker 容器默认 bridge 网络），请根据实际情况选择以下解决方案：
- 
+
 **方案一：配置网络代理（推荐）**
 如果环境中有 HTTP 代理可访问外网，设置 `http_proxy` / `https_proxy` 环境变量后执行编译。`build.sh` 会自动将这些代理变量传递给 CMake 子进程：
 
@@ -275,12 +275,11 @@ bash build.sh --pkg
 > - 此处的安装路径（无论默认还是指定）需与前面安装 cann-toolkit 包时的路径保持一致。
 > - --full          全量模式安装。
 > - --install-path  指定安装路径，不指定则默认安装在`/usr/local/Ascend`（root 用户）或`${HOME}/Ascend`（非 root 用户）目录。
-> - --quiet         静默安装，跳过人机交互环节。  
-> - --pylocal       安装 run 包时，是否将包内的 .whl 跟随 run 包安装路径来安装。  
+> - --quiet         静默安装，跳过人机交互环节。
+> - --pylocal       安装 run 包时，是否将包内的 .whl 跟随 run 包安装路径来安装。
 >   - 若选择该参数，则 .whl 安装在`${ascend_install_path}/cann/python/site-packages`路径下。
 >   - 若不选择该参数，则 .whl 安装在本地 python 路径下，例如`/usr/local/python3.7.5/lib/python3.7/site-packages`。
-> - --autofuse      是否安装 autofuse 组件相关编译产物。当前 run 包安装默认不安装 autofuse，添加此选项可安装 autofuse。
-> - 更多安装选项请使用 --help 选项查看。  
+> - 更多安装选项请使用 --help 选项查看。
 
 #### 卸载
 
@@ -289,7 +288,7 @@ bash build.sh --pkg
 ```shell
 # 如果是安装到指定路径情况，则加上 --install-path=${install_path}
 ./build_out/cann-graph-autofusion_${cann_version}_linux-${arch}.run --uninstall
-```  
+```
 
 ### 4.5 测试验证
 

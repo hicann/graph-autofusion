@@ -192,20 +192,6 @@ REG_ASC_IR(BesselY0)
                             af::ascir::AscIrImplCreator<af::ascir::BesselY0AscIrCodegenImplV2>(),
                             {{"T", TensorType{DT_FLOAT}}}});
 
-constexpr std::pair<ge::DataType, ge::DataType> kBucketizeTypePairs[] = {
-    {DT_INT8, DT_INT32},  {DT_UINT8, DT_INT32},   {DT_INT16, DT_INT32}, {DT_UINT16, DT_INT32},
-    {DT_INT32, DT_INT32}, {DT_UINT32, DT_INT32},  {DT_INT64, DT_INT32}, {DT_UINT64, DT_INT32},
-    {DT_FLOAT, DT_INT32}, {DT_FLOAT16, DT_INT32}, {DT_BF16, DT_INT32},
-};
-REG_ASC_IR(Bucketize)
-    .Input("x1", "T1")
-    .Input("x2", "T1")
-    .Output("y", "T2")
-    .ComputeType(ComputeType::kComputeElewise)
-    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::BucketizeAscIrAttImplV2>(),
-                            af::ascir::AscIrImplCreator<af::ascir::BucketizeAscIrCodegenImplV2>(),
-                            {{"T1", MakeT1List(kBucketizeTypePairs)}, {"T2", MakeT2List(kBucketizeTypePairs)}}});
-
 REG_ASC_IR(BesselY1)
     .Input("x", "T")
     .Output("y", "T")
@@ -355,15 +341,6 @@ REG_ASC_IR(LegendrePolynomialP)
            af::ascir::AscIrImplCreator<af::ascir::LegendrePolynomialPAscIrCodegenImplV2>(),
            {{"T", TensorType{DT_FLOAT}},
             {"U", TensorType{DT_INT8, DT_UINT8, DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_INT64, DT_UINT64}}}});
-
-REG_ASC_IR(Polygamma)
-    .Input("x", "T")
-    .Attr<int64_t>("n")
-    .Output("y", "T")
-    .ComputeType(ComputeType::kComputeElewise)
-    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::PolygammaAscIrAttImplV2>(),
-                            af::ascir::AscIrImplCreator<af::ascir::PolygammaAscIrCodegenImplV2>(),
-                            {{"T", TensorType{DT_FLOAT}}}});
 
 REG_ASC_IR(AiryAi)
     .Input("x", "T")

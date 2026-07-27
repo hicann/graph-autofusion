@@ -11,6 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <cctype>
@@ -22,6 +23,10 @@
 namespace af {
 namespace ascir {
 namespace {
+bool IsBoolCompatibleOutput(const std::set<DataType> &support_types) {
+  return support_types.size() == 2U && support_types.count(DT_BOOL) > 0U && support_types.count(DT_UINT8) > 0U;
+}
+
 const char *GetPureFileName(const char *path) {
   const char *name = std::strrchr(path, '/');
   if (name == nullptr) {
@@ -293,7 +298,7 @@ class OutputHandler {
       }
       (void)syms_only_of_output_.insert(out_sym);
       auto support_types = out_sym->GetTensorType().tensor_type_impl_->GetMutableDateTypeSet();
-      if (support_types.size() > 1U) {
+      if (support_types.size() > 1U && !IsBoolCompatibleOutput(support_types)) {
         could_infer = false;
         warning_code << std::string(space_count, ' ') << "GELOGW(\"Output ir_index [" << out_index
                      << "] has multi result " << TensorTypeToCode(out_sym->GetTensorType()) << ", cannot infer.\");\n";
@@ -350,8 +355,9 @@ class OutputHandler {
       } else {
         ss << std::string(space_count, ' ') << "} else if (npu_arch == \"" << soc_store.first << "\") {\n";
       }
+      const auto default_dtype = IsBoolCompatibleOutput(support_types) ? DT_BOOL : *support_types.begin();
       ss << std::string(space_count + 2U, ' ') << "expect_output_dtypes.push_back("
-         << DataTypeToSerialString(*support_types.begin()) << ");\n";
+         << DataTypeToSerialString(default_dtype) << ");\n";
     }
     if (!is_first) {
       ss << std::string(space_count, ' ') << "}\n";

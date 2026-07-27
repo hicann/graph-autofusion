@@ -287,47 +287,6 @@ graphStatus Anchor::Insert(const AnchorPtr &old_peer, const AnchorPtr &first_pee
   return GRAPH_SUCCESS;
 }
 
-graphStatus Anchor::ReplacePeer(const AnchorPtr &old_peer, const AnchorPtr &new_peer) {
-  GE_CHECK_NOTNULL(old_peer);
-  GE_CHECK_NOTNULL(new_peer);
-  GE_CHECK_NOTNULL(impl_);
-  if (!IsSameType(old_peer->GetSelfType(), new_peer->GetSelfType())) {
-    REPORT_INNER_ERR_MSG("E18888", "the type of old_peer[%s] and new_peer[%s] is not the same.",
-                         old_peer->GetSelfType(), new_peer->GetSelfType());
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] the type of old_peer[%s] and new_peer[%s] is not the same.",
-           old_peer->GetSelfType(), new_peer->GetSelfType());
-    return ge::GRAPH_FAILED;
-  }
-
-  if (!CanAddPeer(new_peer)) {
-    REPORT_INNER_ERR_MSG("E18888", "new_peer[%s] check failed.", new_peer->GetSelfType());
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] new_peer[%s] check failed.", new_peer->GetSelfType());
-    return ge::GRAPH_FAILED;
-  }
-
-  const auto this_it = std::find_if(this->impl_->peer_anchors_.begin(), this->impl_->peer_anchors_.end(),
-                                    [old_peer](const std::weak_ptr<Anchor> &an) {
-                                      const auto anchor = an.lock();
-                                      return old_peer->Equal(anchor);
-                                    });
-  if (this_it == this->impl_->peer_anchors_.end()) {
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] this anchor(%s, %d) is not connected to old_peer(%s, %d)",
-           this->GetOwnerNode()->GetName().c_str(), this->GetIdx(), old_peer->GetOwnerNode()->GetName().c_str(),
-           old_peer->GetIdx());
-    return ge::GRAPH_FAILED;
-  }
-
-  const auto old_it = std::find_if(old_peer->impl_->peer_anchors_.begin(), old_peer->impl_->peer_anchors_.end(),
-                                   [this](const std::weak_ptr<Anchor> &an) {
-                                     const auto anchor = an.lock();
-                                     return this->Equal(anchor);
-                                   });
-  *this_it = new_peer;
-  (void)old_peer->impl_->peer_anchors_.erase(old_it);
-  new_peer->impl_->peer_anchors_.push_back(shared_from_this());
-  return GRAPH_SUCCESS;
-}
-
 bool Anchor::IsLinkedWith(const AnchorPtr &peer) const {
   if (impl_ == nullptr) {
     GELOGE(ge::GRAPH_FAILED, "[Check][Param] impl_ of anchor is nullptr.");

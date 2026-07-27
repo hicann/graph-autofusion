@@ -78,7 +78,11 @@ Status SplitScoreFunctionGenerator::TryGetScoreByConstExpr(int32_t &score) {
       static_cast<int64_t>(std::ceil(static_cast<double>(split_dim_size) * (1.0 - kMaxUnalignedRate)));
   for (size_t i = 0U; i < num_outputs_; ++i) {
     const auto &output = split_node_->outputs[i];
-    GE_WARN_ASSERT(output.attr.repeats[split_dim_].IsConstExpr(), "split dim of output[%zu] is non-const", i);
+    if (!output.attr.repeats[split_dim_].IsConstExpr()) {
+      GELOGI("output[%zu] split dim is non-const, cannot resolve score at compile time", i);
+      score = 0;
+      return ASCCOMMON_SUC;
+    }
     int64_t dim = -1;
     GE_ASSERT_TRUE(output.attr.repeats[split_dim_].GetConstValue(dim), "Failed to get int value, expr = %s",
                    output.attr.repeats[split_dim_].Str().get());

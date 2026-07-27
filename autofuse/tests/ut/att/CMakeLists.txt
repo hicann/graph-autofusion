@@ -134,3 +134,7 @@ target_link_libraries(att_ut PRIVATE
         ascend_protobuf
         )
 add_dependencies(att_ut ascir_builtin_ops)
+
+add_test(NAME att_ut_aggregate
+    COMMAND $<TARGET_FILE:att_ut>
+)

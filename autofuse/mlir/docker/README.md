@@ -53,17 +53,41 @@ CLion:      Docker Toolchain
 如果本机已经有可用镜像，例如我们当前实测过的本地镜像：
 
 ```bash
-export AF_MLIR_DEV_IMAGE=autofuse-mlir-dev:arm64
+case "$(uname -m)" in
+  aarch64 | arm64)
+    export AF_MLIR_DEV_IMAGE=autofuse-mlir-dev:arm64
+    ;;
+  x86_64 | amd64)
+    export AF_MLIR_DEV_IMAGE=autofuse-mlir-dev:x86_64
+    ;;
+  *)
+    echo "Unsupported architecture: $(uname -m)" >&2
+    return 1 2>/dev/null || exit 1
+    ;;
+esac
 ```
 
 这时不要执行 `pull_dev_image.sh`。`pull_dev_image.sh` 只用于拉取镜像仓中的远端镜像。
 
-由团队提供镜像地址后：
+团队镜像根据宿主机架构选择。远端仓库使用 `arm64` 作为 AArch64 镜像 tag，使用
+`x86_64` 作为 x86-64 镜像 tag：
 
 ```bash
-export AF_MLIR_REMOTE_IMAGE=swr.cn-east-2.myhuaweicloud.com/<namespace>/autofuse-mlir-dev:llvm21-aarch64
+case "$(uname -m)" in
+  aarch64 | arm64)
+    export AF_MLIR_REMOTE_IMAGE=swr.cn-east-2.myhuaweicloud.com/ascendmlir/autofuse-mlir-dev:arm64
+    export AF_MLIR_DEV_IMAGE=autofuse-mlir-dev:arm64
+    ;;
+  x86_64 | amd64)
+    export AF_MLIR_REMOTE_IMAGE=swr.cn-east-2.myhuaweicloud.com/ascendmlir/autofuse-mlir-dev:x86_64
+    export AF_MLIR_DEV_IMAGE=autofuse-mlir-dev:x86_64
+    ;;
+  *)
+    echo "Unsupported architecture: $(uname -m)" >&2
+    return 1 2>/dev/null || exit 1
+    ;;
+esac
 bash mlir/docker/pull_dev_image.sh
-export AF_MLIR_DEV_IMAGE="${AF_MLIR_REMOTE_IMAGE}"
 ```
 
 如果镜像仓需要登录：
@@ -281,7 +305,7 @@ Docker Toolchain 配置：
 Settings:  Build, Execution, Deployment > Toolchains
 Name:      Docker
 Server:    <Docker: Auto detected server>
-Image:     autofuse-mlir-dev:arm64
+Image:     autofuse-mlir-dev:arm64（AArch64）或 autofuse-mlir-dev:x86_64（x86-64）
 ```
 
 Docker Toolchain 的 `Container settings`：

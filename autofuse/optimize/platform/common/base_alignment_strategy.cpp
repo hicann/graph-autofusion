@@ -460,7 +460,16 @@ bool BaseAlignmentStrategy::SetAlignInfoForNodeOutputs(AlignmentType aligned_typ
       }
       auto asc_node = std::dynamic_pointer_cast<af::AscNode>(peer_in->GetOwnerNode());
       GE_ASSERT_NOTNULL(asc_node);
-      if (!ScheduleUtils::IsBuffer(asc_node) && visited_nodes.insert(asc_node.get()).second) {
+      if (ScheduleUtils::IsBuffer(asc_node)) {
+        continue;
+      }
+      if (ScheduleUtils::IsReduce(asc_node)) {
+        // Reduce changes the tensor layout, so input alignment must not propagate to its output.
+        GELOGI("Stop alignment propagation from node [%s] to Reduce node [%s].", node->GetNamePtr(),
+               asc_node->GetNamePtr());
+        continue;
+      }
+      if (visited_nodes.insert(asc_node.get()).second) {
         node_queue.push(asc_node.get());
       }
     }

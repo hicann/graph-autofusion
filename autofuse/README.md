@@ -48,13 +48,6 @@ pip3 install setuptools
 pip3 install torch_npu==2.8  # 通过pip 安装 torch_npu 时，会自动安装依赖的torch 版本
 ```
 
-#### 安装 inductor-npu-ext (Autofuse 在 Inductor 的使能框架)
-```bash
-git clone https://gitcode.com/Ascend/torchair.git
-cd torchair/experimental/_inductor_npu_ext/
-pip3 install -e ./python/
-```
-
 #### 其他环境依赖
 ```bash
 CMake >= 3.16.0

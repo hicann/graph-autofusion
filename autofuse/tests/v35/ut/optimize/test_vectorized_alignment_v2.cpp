@@ -31,6 +31,29 @@ using namespace optimize::autoschedule;
 
 namespace optimize {
 using namespace ge;
+
+template <typename Op, typename Dtype>
+void SetTwoDimNodeAttrV2(Op &op, Dtype dtype, af::ComputeType compute_type, const std::vector<af::AxisId> &axes,
+                         const std::vector<af::Expression> &repeats, const std::vector<af::Expression> &strides) {
+  op.y.dtype = dtype;
+  op.attr.sched.axis = axes;
+  op.attr.api.compute_type = compute_type;
+  *op.y.axis = axes;
+  *op.y.repeats = repeats;
+  *op.y.strides = strides;
+  *op.y.vectorized_axis = axes;
+}
+
+void ExpectCompactReduceBranchV2(const af::AscGraph &graph, const char *aligned_input) {
+  std::vector<af::Expression> aligned_input_strides = {af::Symbol(24), One};
+  std::vector<af::Expression> compact_output_strides = {One, Zero};
+  EXPECT_EQ(graph.FindNode(aligned_input)->outputs[0].attr.vectorized_strides, aligned_input_strides);
+  EXPECT_EQ(graph.FindNode("max")->outputs[0].attr.vectorized_strides, compact_output_strides);
+  EXPECT_EQ(graph.FindNode("sum")->outputs[0].attr.vectorized_strides, compact_output_strides);
+  EXPECT_EQ(graph.FindNode("scalar_broadcast")->outputs[0].attr.vectorized_strides, compact_output_strides);
+  EXPECT_EQ(graph.FindNode("div")->outputs[0].attr.vectorized_strides, compact_output_strides);
+}
+
 class VectorizedAlignmentUTV2 : public testing::Test {
  protected:
   void SetUp() override {
@@ -587,5 +610,124 @@ TEST_F(VectorizedAlignmentUTV2, scalar_brc_tail_reduce_alignment) {
 
   auto store_node = graph.FindNode("store");
   EXPECT_EQ(store_node->outputs[0].attr.vectorized_strides, max_golden_stride);
+}
+
+TEST_F(VectorizedAlignmentUTV2, sibling_reduce_keeps_compact_output_alignment) {
+  af::AscGraph graph("sibling_reduce_alignment");
+  auto rows = af::Symbol(10);
+  auto cols = af::Symbol(22);
+  auto row_axis = graph.CreateAxis("row", rows);
+  auto col_axis = graph.CreateAxis("col", cols);
+  std::vector<af::AxisId> axes = {row_axis.id, col_axis.id};
+
+  af::ascir_op::Data data("data", graph);
+  data.y.dtype = af::DT_FLOAT;
+  data.attr.api.type = af::ApiType::kAPITypeBuffer;
+
+  af::ascir_op::Load load("load");
+  load.x = data.y;
+  SetTwoDimNodeAttrV2(load, af::DT_FLOAT, af::ComputeType::kComputeLoad, axes, {rows, cols}, {cols, One});
+
+  af::ascir_op::Relu relu("relu");
+  relu.x = load.y;
+  SetTwoDimNodeAttrV2(relu, af::DT_FLOAT, af::ComputeType::kComputeElewise, axes, {rows, cols}, {cols, One});
+
+  af::ascir_op::Scalar scalar("scalar", graph);
+  scalar.ir_attr.SetValue("22.0");
+  scalar.y.dtype = af::DT_FLOAT;
+  scalar.attr.api.type = af::ApiType::kAPITypeBuffer;
+
+  af::ascir_op::Broadcast scalar_broadcast("scalar_broadcast");
+  scalar_broadcast.x = scalar.y;
+  SetTwoDimNodeAttrV2(scalar_broadcast, af::DT_FLOAT, af::ComputeType::kComputeBroadcast, axes, {rows, One},
+                      {One, Zero});
+
+  af::ascir_op::Max max("max");
+  max.x = relu.y;
+  SetTwoDimNodeAttrV2(max, af::DT_FLOAT, af::ComputeType::kComputeReduce, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::Store max_store("max_store");
+  max_store.x = max.y;
+  SetTwoDimNodeAttrV2(max_store, af::DT_FLOAT, af::ComputeType::kComputeStore, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::Sum sum("sum");
+  sum.x = relu.y;
+  SetTwoDimNodeAttrV2(sum, af::DT_FLOAT, af::ComputeType::kComputeReduce, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::Store sum_store("sum_store");
+  sum_store.x = sum.y;
+  SetTwoDimNodeAttrV2(sum_store, af::DT_FLOAT, af::ComputeType::kComputeStore, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::TrueDiv div("div");
+  div.x1 = sum.y;
+  div.x2 = scalar_broadcast.y;
+  SetTwoDimNodeAttrV2(div, af::DT_FLOAT, af::ComputeType::kComputeElewise, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::Store div_store("div_store");
+  div_store.x = div.y;
+  SetTwoDimNodeAttrV2(div_store, af::DT_FLOAT, af::ComputeType::kComputeStore, axes, {rows, One}, {One, Zero});
+
+  ASSERT_EQ(AlignmentHandler::AlignVectorizedStrides(graph), af::SUCCESS);
+  ExpectCompactReduceBranchV2(graph, "relu");
+}
+
+TEST_F(VectorizedAlignmentUTV2, tail_broadcast_does_not_propagate_alignment_through_reduce) {
+  af::AscGraph graph("tail_broadcast_reduce_alignment");
+  auto rows = af::Symbol(10);
+  auto cols = af::Symbol(22);
+  auto row_axis = graph.CreateAxis("row", rows);
+  auto col_axis = graph.CreateAxis("col", cols);
+  std::vector<af::AxisId> axes = {row_axis.id, col_axis.id};
+
+  af::ascir_op::Data data("data", graph);
+  data.y.dtype = af::DT_FLOAT;
+  data.attr.api.type = af::ApiType::kAPITypeBuffer;
+
+  af::ascir_op::Load load("load");
+  load.x = data.y;
+  SetTwoDimNodeAttrV2(load, af::DT_FLOAT, af::ComputeType::kComputeLoad, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::Broadcast broadcast("broadcast");
+  broadcast.x = load.y;
+  SetTwoDimNodeAttrV2(broadcast, af::DT_FLOAT, af::ComputeType::kComputeBroadcast, axes, {rows, cols}, {cols, One});
+
+  af::ascir_op::Scalar scalar("scalar", graph);
+  scalar.ir_attr.SetValue("22.0");
+  scalar.y.dtype = af::DT_FLOAT;
+  scalar.attr.api.type = af::ApiType::kAPITypeBuffer;
+
+  af::ascir_op::Broadcast scalar_broadcast("scalar_broadcast");
+  scalar_broadcast.x = scalar.y;
+  SetTwoDimNodeAttrV2(scalar_broadcast, af::DT_FLOAT, af::ComputeType::kComputeBroadcast, axes, {rows, One},
+                      {One, Zero});
+
+  af::ascir_op::Max max("max");
+  max.x = broadcast.y;
+  SetTwoDimNodeAttrV2(max, af::DT_FLOAT, af::ComputeType::kComputeReduce, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::Store max_store("max_store");
+  max_store.x = max.y;
+  SetTwoDimNodeAttrV2(max_store, af::DT_FLOAT, af::ComputeType::kComputeStore, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::Sum sum("sum");
+  sum.x = broadcast.y;
+  SetTwoDimNodeAttrV2(sum, af::DT_FLOAT, af::ComputeType::kComputeReduce, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::Store sum_store("sum_store");
+  sum_store.x = sum.y;
+  SetTwoDimNodeAttrV2(sum_store, af::DT_FLOAT, af::ComputeType::kComputeStore, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::TrueDiv div("div");
+  div.x1 = sum.y;
+  div.x2 = scalar_broadcast.y;
+  SetTwoDimNodeAttrV2(div, af::DT_FLOAT, af::ComputeType::kComputeElewise, axes, {rows, One}, {One, Zero});
+
+  af::ascir_op::Store div_store("div_store");
+  div_store.x = div.y;
+  SetTwoDimNodeAttrV2(div_store, af::DT_FLOAT, af::ComputeType::kComputeStore, axes, {rows, One}, {One, Zero});
+
+  ASSERT_EQ(AlignmentHandler::AlignVectorizedStrides(graph), af::SUCCESS);
+  ExpectCompactReduceBranchV2(graph, "broadcast");
+  EXPECT_EQ(graph.FindNode("sum_0_pad"), nullptr);
 }
 }  // namespace optimize

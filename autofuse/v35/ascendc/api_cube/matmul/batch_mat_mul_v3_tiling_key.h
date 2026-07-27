@@ -17,33 +17,10 @@
 #define OP_KERNEL_BATCH_MAT_MUL_V3_TILING_KEY_H
 #endif
 
+#include "arch35/mat_mul_v3_tiling_key_public.h"
 #include "arch35/mat_mul_tiling_data.h"
 #include "mat_mul_v3_common.h"
 #include "template_argument.h"
-
-#define MAT_MUL_BASIC_LEVEL 1  // 数据类型定义
-#define MAT_MUL_HIGH_LEVEL 0
-
-#define MAT_MUL_NO_TRANS 0  //  数据格式定义
-#define MAT_MUL_TRANS 1
-
-#define MAT_MUL_FOR_BATCH 0
-#define MAT_MUL_ITER_BATCH_SINGLE_BIAS 1
-#define MAT_MUL_BATCH_MATMUL_TO_MUL 2
-#define MAT_MUL_MERGE_BATCH 3
-
-#define MAT_MUL_BASIC 0
-#define MAT_MUL_STREAM_K 1
-#define MAT_MUL_K_EQUAL_ZERO 2
-
-#define MAT_MUL_NO_FULL_LOAD 0
-#define MAT_MUL_A_FULL_LOAD 1
-#define MAT_MUL_B_FULL_LOAD 2
-#define MAT_MUL_AB_FULL_LOAD 3
-
-#define MAT_MUL_ON_THE_FLY 0
-#define MAT_MUL_1V1_ND_ALIG_FIXPIPE 1
-#define MAT_MUL_1V2_ND_ALIG_FIXPIPE 2
 
 // 模板参数
 ASCENDC_TPL_ARGS_DECL(

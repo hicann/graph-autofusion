@@ -304,6 +304,7 @@ struct DecomposeContext {
   std::map<std::string, size_t> ast_ref_count;
   std::map<std::string, std::string> ast_hash_to_var;
   std::map<std::string, ASTPtr> expr_asts;
+  AstCanonicalizer ast_canonicalizer;
 };
 
 struct BuiltAstExpr {
@@ -324,6 +325,8 @@ ASTPtr ParseCompleteAst(const std::string &expr_str, DecomposeContext &context) 
   ASTPtr ast = parser.Parse();
   if (!parser.IsFullyParsed()) {
     ast = nullptr;
+  } else {
+    context.ast_canonicalizer.Assign(ast.get());
   }
   context.expr_asts[expr_str] = ast;
   return ast;
@@ -360,43 +363,62 @@ void CountIfCaseAstRefs(const IfCase &node, DecomposeContext &context) {
   CountIfCaseAstRefs(*node.GetChoiceB(), context);
 }
 
-std::string RebuildAstNode(const ASTPtr &node, const std::vector<std::string> &children) {
+bool AppendAstExpr(const ASTPtr &node, DecomposeContext &context, std::string &output);
+
+bool AppendAstNode(const ASTPtr &node, DecomposeContext &context, std::string &output) {
+  bool replaced = false;
   if (node->type == NodeType::FUNCTION) {
-    std::string expr = node->op + "(";
-    for (size_t i = 0U; i < children.size(); ++i) {
-      expr += (i == 0U ? "" : ", ") + children[i];
+    output += node->op + "(";
+    for (size_t i = 0U; i < node->children.size(); ++i) {
+      output += i == 0U ? "" : ", ";
+      replaced = AppendAstExpr(node->children[i], context, output) || replaced;
     }
-    return expr + ")";
+    output += ")";
+    return replaced;
   }
-  if (node->type == NodeType::OPERATOR && children.size() == 2U) {
-    return "(" + children[0] + " " + node->op + " " + children[1] + ")";
+  if (node->type == NodeType::OPERATOR && node->children.size() == 2U) {
+    output += "(";
+    replaced = AppendAstExpr(node->children[0], context, output) || replaced;
+    output += " " + node->op + " ";
+    replaced = AppendAstExpr(node->children[1], context, output) || replaced;
+    output += ")";
+    return replaced;
   }
-  return node->expr;
+  output += node->expr;
+  return false;
 }
 
-BuiltAstExpr BuildAstExpr(const ASTPtr &node, DecomposeContext &context) {
-  if (node == nullptr || IsAstLeaf(*node)) {
-    return {node == nullptr ? "" : node->expr, false};
+bool AppendAstExpr(const ASTPtr &node, DecomposeContext &context, std::string &output) {
+  if (node == nullptr) {
+    return false;
   }
-  std::vector<std::string> children;
-  bool child_replaced = false;
-  for (const auto &child : node->children) {
-    BuiltAstExpr child_expr = BuildAstExpr(child, context);
-    children.emplace_back(std::move(child_expr.expr));
-    child_replaced = child_replaced || child_expr.replaced;
-  }
-  const std::string expr = RebuildAstNode(node, children);
-  if (context.ast_ref_count[node->hash] <= 1U || expr.length() < kCommonExprMinLen) {
-    return {expr, child_replaced};
+  if (IsAstLeaf(*node)) {
+    output += node->expr;
+    return false;
   }
   auto var_iter = context.ast_hash_to_var.find(node->hash);
   if (var_iter != context.ast_hash_to_var.end()) {
-    return {var_iter->second, true};
+    output += var_iter->second;
+    return true;
   }
+  const size_t expr_start = output.size();
+  const bool child_replaced = AppendAstNode(node, context, output);
+  if (context.ast_ref_count[node->hash] <= 1U || output.size() - expr_start < kCommonExprMinLen) {
+    return child_replaced;
+  }
+  const std::string expr = output.substr(expr_start);
   const std::string var_name = context.prefix + "_common" + std::to_string(context.common_counter++);
   context.preamble += "  double " + var_name + " = " + expr + ";\n";
   context.ast_hash_to_var[node->hash] = var_name;
-  return {var_name, true};
+  output.resize(expr_start);
+  output += var_name;
+  return true;
+}
+
+BuiltAstExpr BuildAstExpr(const ASTPtr &node, DecomposeContext &context) {
+  BuiltAstExpr result;
+  result.replaced = AppendAstExpr(node, context, result.expr);
+  return result;
 }
 
 std::string BuildExpr(const Expr &expr, DecomposeContext &context) {

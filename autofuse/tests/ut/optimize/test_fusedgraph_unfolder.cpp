@@ -19,7 +19,6 @@
 #include "graph/utils/op_desc_utils.h"
 #include "ascir_ops.h"
 #include "attribute_group/attr_group_symbolic_desc.h"
-#include "graph_dump_utils.h"
 #define private public
 #include "fused_graph/fused_graph_unfolder.h"
 #undef private

@@ -19,6 +19,7 @@
 #include "ascir/meta/ascir_utils.h"
 #include "ascir/meta/ascir_ops_utils.h"
 #include "optimize/schedule_utils.h"
+#include "optimize/graph_pass/pass_utils.h"
 #include "optimize/task_generator/concat_group_partitioner.h"
 #include "optimize/task_generator/concat_score_function_generator.h"
 #include "optimize/task_generator/concat_inputs_unification_pass.h"
@@ -272,6 +273,7 @@ Status ConcatFusionCaseGenerator::ConvertConcatToStores(ascir::HintGraph &owner_
   }
 
   GE_CHK_STATUS_RET(RemoveUnusedNodes(concat_node, post_concat_nodes_), "RemoveUnusedNodes failed");
+  GE_CHK_STATUS_RET(PassUtils::PruneGraph(owner_graph), "Prune graph failed");
   GE_ASSERT_GRAPH_SUCCESS(ScheduleUtils::TopologicalSorting(owner_graph));
   ascir::utils::DumpGraph(owner_graph, "AfterConvertConcatToStore");
   return af::SUCCESS;
@@ -304,6 +306,7 @@ Status ConcatFusionCaseGenerator::SplitConcats(ascir::HintGraph &owner_graph, co
     }
   }
   GE_CHK_STATUS_RET(RemoveUnusedNodes(concat_node, post_concat_nodes_), "RemoveUnusedNodes failed");
+  GE_CHK_STATUS_RET(PassUtils::PruneGraph(owner_graph), "Prune graph failed");
   GE_ASSERT_GRAPH_SUCCESS(ScheduleUtils::TopologicalSorting(owner_graph));
   ascir::utils::DumpGraph(owner_graph, "AfterSplitConcat");
   split = true;
