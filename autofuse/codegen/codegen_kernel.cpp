@@ -25,7 +25,10 @@
 #include "backend/backend_spec.h"
 #include "graph/symbolizer/symbolic_utils.h"
 #include "ascendc_api_registry.h"
+#include "indirect_load_utils.h"
 #include "optimize/platform/platform_factory.h"
+#include "optimize/schedule_utils.h"
+#include "v35/codegen/simt_scalar_call/simt_scalar_emitter.h"
 #include "common/platform_context.h"
 #include "codegen_graph_check.h"
 
@@ -39,6 +42,43 @@ namespace {
 constexpr uint32_t kFuncIdBegin = 20000000U;
 constexpr const char kInputTensorDescName[] = "input_tensor_desc";
 constexpr const char kOutputTensorDescName[] = "output_tensor_desc";
+
+struct QueCollection {
+  std::unordered_map<ascir::QueId, af::Position> que_id_to_src_position;
+  std::set<ascir::QueId> need_bind_que_id;
+  std::map<ascir::QueId, bool> direct_gm_ques;
+};
+
+Status AllocateQues(TPipe &tpipe, const QueCollection &collection) {
+  for (const auto &iter : collection.que_id_to_src_position) {
+    if (tpipe.ques.count(iter.first) > 0UL) {
+      continue;
+    }
+    std::string position;
+    GE_CHK_STATUS_RET(PositionValue(iter.second, position), "Codegen get position value failed");
+    const bool need_que_bind = collection.need_bind_que_id.count(iter.first) > 0UL;
+    if (need_que_bind) {
+      std::string dst_position;
+      GE_CHK_STATUS_RET(PositionValue(af::Position::kPositionVecOut, dst_position),
+                        "Codegen get position value failed");
+      const auto new_que = tpipe.ques.emplace(iter.first, TQue{iter.first, iter.second, position, dst_position});
+      GE_CHK_BOOL_RET_STATUS(new_que.second, af::FAILED, "Codegen emplace que [%ld] failed", iter.first);
+    } else {
+      const auto new_que = tpipe.ques.emplace(iter.first, TQue{iter.first, iter.second, position});
+      GE_CHK_BOOL_RET_STATUS(new_que.second, af::FAILED, "Codegen emplace que [%ld] failed", iter.first);
+    }
+    const auto skip_iter = collection.direct_gm_ques.find(iter.first);
+    if (skip_iter != collection.direct_gm_ques.end()) {
+      tpipe.ques.at(iter.first).skip_init_for_simt_direct_gm = skip_iter->second;
+    }
+  }
+  for (auto &[id, que] : tpipe.ques) {
+    if (id != tpipe.cube_output_que_id) {
+      que.is_cv_ub_fusion = (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse);
+    }
+  }
+  return af::SUCCESS;
+}
 
 std::string GetTensorName(const ascir::TensorAttr &tensor) {
   const auto node = tensor.anchor.GetOwnerNodeBarePtr();
@@ -1288,7 +1328,8 @@ Status Kernel::ParseUbScalarOptimizationInfo(const ascir::NodeView &node, Tensor
 Status Kernel::JudgeIsLoadLinkStoreAndVec(const ascir::NodeView &node, Tensor &t, ascir::TensorId id) const {
   // todo: 解决load多引用场景，被store, vec 同时引用的缺少mte3到mte2的同步的问题,
   // 临时方案，从这里解析下是否该场景
-  if ((node->attr.api.compute_type == ascir::ComputeType::kComputeLoad) && (!IsOps<Gather>(node))) {
+  if ((node->attr.api.compute_type == ascir::ComputeType::kComputeLoad) &&
+      (!optimize::ScheduleUtils::IsGatherLikeLoad(std::dynamic_pointer_cast<af::AscNode>(node)))) {
     bool link_to_store = false;
     bool link_to_vec = false;
     for (auto &out : node->outputs()) {
@@ -1416,6 +1457,10 @@ Status TPipe::TensorAlloc(const Tensor &tensor, std::string &result) const {
 }
 
 Status TPipe::InitTQueBuffers(const TQue &que, std::string &result) const {
+  if (que.skip_init_for_simt_direct_gm) {
+    result.clear();
+    return af::SUCCESS;
+  }
   stringstream ss;
   std::string blk_align;
   GE_CHK_STATUS_RET(KernelUtils::BlkAlign(ge::DT_UINT8, blk_align), "Codegen blk align failed");
@@ -1465,6 +1510,10 @@ std::string TPipe::TensorSizeCalc() const {
   for (const auto &pair : this->tensors) {
     const auto &t = pair.second;
     if (t.alloc_type == af::AllocType::kAllocTypeQueue) {
+      const TQue *que = GetQue(t.que_id);
+      if (que != nullptr && que->skip_init_for_simt_direct_gm) {
+        continue;
+      }
       ss << t.size.DefineConst(this->tiler.TensorVectorizedSize(t)) << std::endl;
       ss << t.que_buf_num.DefineConst(to_string(t.que_buf_num_value)) << std::endl;
     } else if (t.alloc_type == af::AllocType::kAllocTypeBuffer) {
@@ -1547,7 +1596,7 @@ Status TPipe::LocalTQueAlloc(std::string &result) const {
   stringstream ss;
 
   for (auto &[id, que] : this->ques) {
-    if (id == this->cube_output_que_id) {
+    if (id == this->cube_output_que_id || que.skip_init_for_simt_direct_gm) {
       continue;
     }
     stringstream tensor_size_max;
@@ -1560,10 +1609,7 @@ Status TPipe::LocalTQueAlloc(std::string &result) const {
 
     for (auto mid : que.merge_scopes) {
       auto merge_scope = this->merge_scopes.find(mid);
-      if (merge_scope == this->merge_scopes.end()) {
-        GELOGE(af::FAILED, "Codegen merge scope not found:%ld", mid);
-        return af::FAILED;
-      }
+      GE_ASSERT_TRUE(merge_scope != this->merge_scopes.end(), "Codegen merge scope not found:%ld", mid);
 
       if (is_first) {
         is_first = false;
@@ -1579,10 +1625,7 @@ Status TPipe::LocalTQueAlloc(std::string &result) const {
     uint32_t tensor_buf_num_max_val = 0;
     for (auto tid : que.not_merge_tensors) {
       auto tensor = this->tensors.find(tid);
-      if (tensor == this->tensors.end()) {
-        GELOGE(af::FAILED, "Codegen tensor not found:%ld", tid);
-        return af::FAILED;
-      }
+      GE_ASSERT_TRUE(tensor != this->tensors.end(), "Codegen tensor not found:%ld", tid);
 
       if (is_first) {
         is_first = false;
@@ -1815,8 +1858,7 @@ std::string TPipe::SyncMte2ToMte3(const Tensor in_tensor) const {
 }
 
 Status TPipe::CollectQues(const ascir::ImplGraph &graph) {
-  std::unordered_map<ascir::QueId, af::Position> que_id_to_src_position;
-  std::set<ascir::QueId> need_bind_que_id;
+  QueCollection collection;
   for (auto node : graph.GetAllNodes()) {
     if (node->attr.api.type == ge::ApiType::kAPITypeBuffer) {
       continue;
@@ -1826,8 +1868,13 @@ Status TPipe::CollectQues(const ascir::ImplGraph &graph) {
         continue;
       }
       const int64_t tensor_que_id = out_tensor->attr.que.id;
+      const bool uses_direct_gm = ascgen_utils::indirect_load::GetTemplateBehavior(node).uses_direct_gm_pipeline;
+      auto [direct_gm_iter, inserted] = collection.direct_gm_ques.emplace(tensor_que_id, uses_direct_gm);
+      if (!inserted) {
+        direct_gm_iter->second = direct_gm_iter->second && uses_direct_gm;
+      }
       if (out_tensor->attr.mem.position == af::Position::kPositionVecIn) {
-        que_id_to_src_position.emplace(tensor_que_id, out_tensor->attr.mem.position);
+        collection.que_id_to_src_position.emplace(tensor_que_id, out_tensor->attr.mem.position);
 
         std::set<std::string> peer_node_types;
         for (const auto &peer_in_anchor : out_tensor->anchor.GetPeerInDataAnchorsPtr()) {
@@ -1836,40 +1883,14 @@ Status TPipe::CollectQues(const ascir::ImplGraph &graph) {
           }
         }
         if ((peer_node_types.size() == 1U) && *peer_node_types.begin() == Store::Type) {
-          need_bind_que_id.emplace(tensor_que_id);
+          collection.need_bind_que_id.emplace(tensor_que_id);
         }
       } else if (out_tensor->attr.mem.position == af::Position::kPositionVecOut) {
-        que_id_to_src_position.emplace(tensor_que_id, out_tensor->attr.mem.position);
+        collection.que_id_to_src_position.emplace(tensor_que_id, out_tensor->attr.mem.position);
       }
     }
   }
-
-  // Allocate
-  for (const auto &iter : que_id_to_src_position) {
-    if (this->ques.count(iter.first) > 0UL) {
-      continue;
-    }
-    std::string position;
-    GE_CHK_STATUS_RET(PositionValue(iter.second, position), "Codegen get position value failed");
-    // 如果qid被非load->store的load复用，则不能使用TQueBind
-    bool need_que_bind = need_bind_que_id.count(iter.first) > 0UL;
-    if (need_que_bind) {
-      std::string dst_position;
-      GE_CHK_STATUS_RET(PositionValue(af::Position::kPositionVecOut, dst_position),
-                        "Codegen get position value failed");
-      auto new_que = this->ques.emplace(iter.first, TQue{iter.first, iter.second, position, dst_position});
-      GE_CHK_BOOL_RET_STATUS(new_que.second, af::FAILED, "Codegen emplace que [%ld] failed", iter.first);
-    } else {
-      auto new_que = this->ques.emplace(iter.first, TQue{iter.first, iter.second, position});
-      GE_CHK_BOOL_RET_STATUS(new_que.second, af::FAILED, "Codegen emplace que [%ld] failed", iter.first);
-    }
-  }
-  for (auto &[id, que] : this->ques) {
-    if (id != this->cube_output_que_id) {
-      que.is_cv_ub_fusion = (this->cv_fusion_type == ascir::CubeTemplateType::kUBFuse);
-    }
-  }
-  return af::SUCCESS;
+  return AllocateQues(*this, collection);
 }
 
 void TPipe::SetUsingAttCalcQBTSizeConfig(bool using_att_calc_qbt_size) {
@@ -2155,7 +2176,8 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
       }
       continue;
     }
-    has_gather = (has_gather || IsOps<Gather>(node));
+    has_gather =
+        (has_gather || optimize::ScheduleUtils::IsGatherLikeLoad(std::dynamic_pointer_cast<af::AscNode>(node)));
   }
   for (const auto &pair : kernel_outputs) {
     kernel.outputs.emplace_back(GM_ADDR(GenValidName(pair.second.first)));
@@ -2190,6 +2212,11 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
   // Parse for tpipe
   for (auto node : graph.GetAllNodes()) {
     if (IsOps<Output>(node) || IsOps<Data>(node) || IsOps<ScalarData>(node)) {
+      continue;
+    }
+    const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
+    if (indirect_load_behavior.skips_api_emit && indirect_load_behavior.uses_direct_gm_pipeline &&
+        !IsOps<Store>(node)) {
       continue;
     }
 

@@ -52,6 +52,8 @@ inline constexpr char kScalarDataOpType[] = "ScalarData";
 inline constexpr char kAscGraphAttr[] = "ascgraph";
 inline constexpr char kNegativeSlopeAttr[] = "negative_slope";
 inline constexpr char kNegativeIndexSupportAttr[] = "negative_index_support";
+inline constexpr char kNeedCheckBoundAttr[] = "need_check_bound";
+inline constexpr char kMaxAttr[] = "max";
 inline constexpr char kAlphaAttr[] = "alpha";
 inline constexpr char kNAttr[] = "n";
 inline constexpr char kErrorMsgAttr[] = "error_msg";
@@ -1150,6 +1152,14 @@ DEFINE_IR_ATTR_ACCESSORS(IndexExpr, AscIndexExprIrAttrDef, kExprAttr, int64_t, P
                          PyLong_AsLong, SetExpr, GetExpr)
 DEFINE_IR_ATTR_ACCESSORS(Gather, AscGatherIrAttrDef, kAxisAttr, int64_t, PyLong_Check, PyLong_FromLong, PyLong_AsLong,
                          SetAxis, GetAxis)
+DEFINE_IR_ATTR_ACCESSORS(IndirectLoad, AscIndirectLoadIrAttrDef, kAxisAttr, int64_t, PyLong_Check, PyLong_FromLong,
+                         PyLong_AsLong, SetAxis, GetAxis)
+DEFINE_IR_ATTR_ACCESSORS(IndirectLoad, AscIndirectLoadIrAttrDef, kNegativeIndexSupportAttr, bool, PyBool_Check,
+                         PyBool_FromLong, PyObject_IsTrue, SetNegative_index_support, GetNegative_index_support)
+DEFINE_IR_ATTR_ACCESSORS(IndirectLoad, AscIndirectLoadIrAttrDef, kNeedCheckBoundAttr, bool, PyBool_Check,
+                         PyBool_FromLong, PyObject_IsTrue, SetNeed_check_bound, GetNeed_check_bound)
+DEFINE_IR_ATTR_ACCESSORS(IndirectLoad, AscIndirectLoadIrAttrDef, kMaxAttr, int64_t, PyLong_Check, PyLong_FromLong,
+                         PyLong_AsLong, SetMax, GetMax)
 DEFINE_IR_ATTR_ACCESSORS(MatMul, AscMatMulIrAttrDef, kHasRelu, int64_t, PyLong_Check, PyLong_FromLong, PyLong_AsLong,
                          SetHas_relu, GetHas_relu)
 DEFINE_IR_ATTR_ACCESSORS(MatMul, AscMatMulIrAttrDef, kTransposeX1, int64_t, PyLong_Check, PyLong_FromLong,
@@ -1287,6 +1297,8 @@ const std::map<std::string, typename IrAttr<OpType>::handler> IrAttr<OpType>::at
     {"Load", AutoRegAttrHandle<af::ascir_op::Load, kOffsetAttr>::RegHandle},
     {"Store", AutoRegAttrHandle<af::ascir_op::Store, kOffsetAttr>::RegHandle},
     {"Gather", AutoRegAttrHandle<af::ascir_op::Gather, kAxisAttr>::RegHandle},
+    {"IndirectLoad", AutoRegAttrHandle<af::ascir_op::IndirectLoad, kAxisAttr, kNegativeIndexSupportAttr,
+                                       kNeedCheckBoundAttr, kMaxAttr>::RegHandle},
     {"MatMul",
      AutoRegAttrHandle<af::ascir_op::MatMul, kHasRelu, kOffsetX, kTransposeX1, kTransposeX2, kEnableHf32>::RegHandle},
     {"MatMulBias", AutoRegAttrHandle<af::ascir_op::MatMulBias, kHasRelu, kOffsetX, kTransposeX1, kTransposeX2,

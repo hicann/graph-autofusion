@@ -13,8 +13,6 @@
 import torch
 import torch_npu
 import torch.nn as nn
-# === 核心：导入 inductor_npu_ext 后，才能走到 Autofuse 后端
-import inductor_npu_ext
 
 # ===== 1. 昇腾 NPU 配置 =====
 DEVICE = "npu:0"  # 假设使用0卡
@@ -26,17 +24,23 @@ class MyModel(nn.Module):
     def __init__(self):
         super().__init__()
     
-    def forward(self, x, y):
-        result = torch.sum(torch.mul(x, y))
+    def forward(self, x, y, z):
+        result = torch.ge(torch.add(x, y), z)
         return result
 
-# ===== 3. 使能 NPU + Inductor =====
+# ===== 3. inductor + 昇腾NPU自动融合后端 =====
 model = MyModel().to(DEVICE)
-model = torch.compile(model, dynamic=False, fullgraph=True)
+model = torch.compile(
+    model,
+    dynamic=False,
+    fullgraph=True,
+    options={"npu_backend": "ascendc"},
+)
 
 # ===== 4. 创建输入 =====
-x = torch.randn(256, 100, device=DEVICE)
-y = torch.randn(256, 100, device=DEVICE)
+x = torch.randn(128, 50, device=DEVICE)
+y = torch.randn(128, 50, device=DEVICE)
+z = torch.randn(128, 50, device=DEVICE)
 
 # ===== 5. 执行 =====
 model.eval()
@@ -65,4 +69,4 @@ with torch_npu.profiler.profile(
     experimental_config=experimental_config) as prof:
     # 跑 100 step
     for _ in range(100):
-        result = model(x, y)
+        result = model(x, y, z)

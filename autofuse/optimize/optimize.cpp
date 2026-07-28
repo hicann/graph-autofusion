@@ -24,6 +24,7 @@
 #include "fusion/autofuse_attrs.h"
 #include "buffer_allocate/buf_que_allocator.h"
 #include "ascgraph_info_complete.h"
+#include "indirect_load_utils.h"
 #include "schedule_utils.h"
 #include "common_utils.h"
 #include "node_utils.h"
@@ -802,7 +803,7 @@ Status Optimizer::RemoveAllZeroStrideLoopAxis(ascir::ImplGraph &owner_graph) {
 
 Status Optimizer::MergeContinuousAxis(ascir::ImplGraph &impl_graph, ascir::CubeTemplateType cube_type) {
   auto all_axis = impl_graph.GetAllAxis();
-  if (all_axis.size() <= 1UL) {
+  if (all_axis.size() <= 1UL || ascgen_utils::indirect_load::FindIndirectLoadNode(impl_graph) != nullptr) {
     return af::SUCCESS;
   }
   // concat等场景,会有多套轴, 只能先用循环轴的index来生成潜在连续组, 后续根据连续组会找到多个连续轴

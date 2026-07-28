@@ -34,17 +34,20 @@ def compile_adapter_module():
     ascendc_compile_module.CompileError = CompileError
     ascendc_compile_module.main = _noop_main
     with load_compile_module(
-            MODULE_NAME,
-            MODULE_PATH,
-            extra_autofuse_attrs={"ascendc_compile": ascendc_compile_module},
-            extra_modules={"autofuse.ascendc_compile": ascendc_compile_module}) as loaded_module:
+        MODULE_NAME,
+        MODULE_PATH,
+        extra_autofuse_attrs={"ascendc_compile": ascendc_compile_module},
+        extra_modules={"autofuse.ascendc_compile": ascendc_compile_module},
+    ) as loaded_module:
         yield loaded_module
 
 
 def test_host_compile_defaults_to_abi_1(compile_adapter_module):
     argv = ["--output_file=host.so", "--compile_options=-Werror"]
 
-    args, temp_dir_ctx, auto_cleanup = compile_adapter_module.prepare_compile_context(argv, "host", None)
+    args, temp_dir_ctx, auto_cleanup = compile_adapter_module.prepare_compile_context(
+        argv, "host", None
+    )
 
     assert auto_cleanup is True
     assert temp_dir_ctx is not None
@@ -58,7 +61,9 @@ def test_host_compile_keeps_explicit_abi(compile_adapter_module, abi):
     option = f"-D_GLIBCXX_USE_CXX11_ABI={abi}"
     argv = ["--output_file=host.so", f"--compile_options=-Werror {option}"]
 
-    args, temp_dir_ctx, _ = compile_adapter_module.prepare_compile_context(argv, "host", None)
+    args, temp_dir_ctx, _ = compile_adapter_module.prepare_compile_context(
+        argv, "host", None
+    )
 
     assert args.compile_options == f"-Werror {option}"
     temp_dir_ctx.cleanup()
@@ -67,7 +72,9 @@ def test_host_compile_keeps_explicit_abi(compile_adapter_module, abi):
 def test_device_compile_does_not_add_host_default_abi(compile_adapter_module):
     argv = ["--output_file=device.so", "--compile_options=-Werror"]
 
-    args, temp_dir_ctx, _ = compile_adapter_module.prepare_compile_context(argv, "device", None)
+    args, temp_dir_ctx, _ = compile_adapter_module.prepare_compile_context(
+        argv, "device", None
+    )
 
     assert args.compile_options == "-Werror"
     temp_dir_ctx.cleanup()
@@ -80,22 +87,39 @@ def test_jit_compile_records_atrace_and_reports(compile_adapter_module, tmpdir, 
     compile_adapter_module.jit_compile("tiling", "host", "kernel", argv)
 
     labels = [item[0] for item in compile_adapter_module.duration_records]
-    assert ["InductorCompile", "jit_compile", "GenerateHostSource", "autofuse"] in labels
-    assert ["InductorCompile", "jit_compile", "GenerateDeviceSource", "autofuse"] in labels
+    assert [
+        "InductorCompile",
+        "jit_compile",
+        "GenerateHostSource",
+        "autofuse",
+    ] in labels
+    assert [
+        "InductorCompile",
+        "jit_compile",
+        "GenerateDeviceSource",
+        "autofuse",
+    ] in labels
     assert ["InductorCompile", "jit_compile", "AscendCCompile", "autofuse"] in labels
     assert ["InductorCompile", "jit_compile", "Total", "autofuse"] in labels
     assert compile_adapter_module.duration_reports == [True]
     assert capsys.readouterr().out == ""
 
 
-def test_host_compile_records_duration_without_stdout(compile_adapter_module, tmpdir, capsys):
+def test_host_compile_records_duration_without_stdout(
+    compile_adapter_module, tmpdir, capsys
+):
     output_file = tmpdir.join("host.so")
     argv = [f"--output_file={output_file}", f"--output_path={tmpdir}"]
 
     compile_adapter_module.host_compile("tiling", "host", argv)
 
     labels = [item[0] for item in compile_adapter_module.duration_records]
-    assert ["InductorCompile", "host_compile", "GenerateHostSource", "autofuse"] in labels
+    assert [
+        "InductorCompile",
+        "host_compile",
+        "GenerateHostSource",
+        "autofuse",
+    ] in labels
     assert ["InductorCompile", "host_compile", "AscendCCompile", "autofuse"] in labels
     assert ["InductorCompile", "host_compile", "Total", "autofuse"] in labels
     assert capsys.readouterr().out == ""
@@ -105,33 +129,49 @@ def test_kernel_compile_records_device_stage(compile_adapter_module, tmpdir):
     output_file = tmpdir.join("kernel.so")
     argv = [f"--output_file={output_file}", f"--output_path={tmpdir}"]
 
-    compile_adapter_module.kernel_compile("tiling", "kernel", argv, tiling_repr="AutofuseTilingData{}")
+    compile_adapter_module.kernel_compile(
+        "tiling", "kernel", argv, tiling_repr="AutofuseTilingData{}"
+    )
 
     labels = [item[0] for item in compile_adapter_module.duration_records]
-    assert ["InductorCompile", "kernel_compile", "GenerateDeviceSource", "autofuse"] in labels
+    assert [
+        "InductorCompile",
+        "kernel_compile",
+        "GenerateDeviceSource",
+        "autofuse",
+    ] in labels
     assert ["InductorCompile", "kernel_compile", "AscendCCompile", "autofuse"] in labels
     assert ["InductorCompile", "kernel_compile", "Total", "autofuse"] in labels
 
 
-def test_execute_compile_keeps_single_host_file_without_marker(compile_adapter_module, tmpdir):
+def test_execute_compile_keeps_single_host_file_without_marker(
+    compile_adapter_module, tmpdir
+):
     captured = {}
 
     def fake_main(args):
         captured["args"] = args
 
     compile_adapter_module.ascendc_compile.main = fake_main
-    args = type("Args", (), {
-        "stage": "host",
-        "temp_dir": str(tmpdir),
-        "graph_name": "graph",
-        "trace_stage": "host_compile",
-    })()
+    args = type(
+        "Args",
+        (),
+        {
+            "stage": "host",
+            "temp_dir": str(tmpdir),
+            "graph_name": "graph",
+            "trace_stage": "host_compile",
+        },
+    )()
 
-    compile_adapter_module.execute_compile({
-        "tiling_struct_code": "struct AutofuseTilingData {};",
-        "host_impl_code": "extern \"C\" int TilingFunc() { return 0; }",
-        "kernel_impl_code": None,
-    }, args)
+    compile_adapter_module.execute_compile(
+        {
+            "tiling_struct_code": "struct AutofuseTilingData {};",
+            "host_impl_code": 'extern "C" int TilingFunc() { return 0; }',
+            "kernel_impl_code": None,
+        },
+        args,
+    )
 
     host_file = os.path.join(str(tmpdir), "host", "graph_tiling_func.cpp")
     assert captured["args"].host_files == host_file
@@ -145,30 +185,39 @@ def test_execute_compile_splits_host_files_with_marker(compile_adapter_module, t
         captured["args"] = args
 
     compile_adapter_module.ascendc_compile.main = fake_main
-    host_impl = "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
-        "struct CommonType {};",
-        "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
-        "extern \"C\" int Solver() { return 0; }",
-        "// AUTOFUSE_SPLIT_FILE_END: solver_func",
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: asc_graph0_schedule_result0_g0",
-        "#include \"autofuse_tiling_func_common.h\"",
-        "extern \"C\" int TilingFunc() { return 0; }",
-        "// AUTOFUSE_SPLIT_FILE_END: asc_graph0_schedule_result0_g0",
-    ])
-    args = type("Args", (), {
-        "stage": "host",
-        "temp_dir": str(tmpdir),
-        "graph_name": "graph",
-        "trace_stage": "host_compile",
-    })()
+    host_impl = "\n".join(
+        [
+            "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+            "struct CommonType {};",
+            "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+            "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
+            'extern "C" int Solver() { return 0; }',
+            "// AUTOFUSE_SPLIT_FILE_END: solver_func",
+            "// AUTOFUSE_SPLIT_FILE_BEGIN: asc_graph0_schedule_result0_g0",
+            '#include "autofuse_tiling_func_common.h"',
+            'extern "C" int TilingFunc() { return 0; }',
+            "// AUTOFUSE_SPLIT_FILE_END: asc_graph0_schedule_result0_g0",
+        ]
+    )
+    args = type(
+        "Args",
+        (),
+        {
+            "stage": "host",
+            "temp_dir": str(tmpdir),
+            "graph_name": "graph",
+            "trace_stage": "host_compile",
+        },
+    )()
 
-    compile_adapter_module.execute_compile({
-        "tiling_struct_code": "struct AutofuseTilingData {};",
-        "host_impl_code": host_impl,
-        "kernel_impl_code": None,
-    }, args)
+    compile_adapter_module.execute_compile(
+        {
+            "tiling_struct_code": "struct AutofuseTilingData {};",
+            "host_impl_code": host_impl,
+            "kernel_impl_code": None,
+        },
+        args,
+    )
 
     host_dir = os.path.join(str(tmpdir), "host")
     assert os.path.exists(os.path.join(host_dir, "autofuse_tiling_func_common.h"))
@@ -179,106 +228,146 @@ def test_execute_compile_splits_host_files_with_marker(compile_adapter_module, t
     for cpp_file in captured["args"].host_files:
         with open(cpp_file) as f:
             assert f.read().count('#include "autofuse_tiling_func_common.h"') == 1
-    assert not os.path.exists(os.path.join(host_dir, "graph_tiling_func_TilingHead.cpp"))
+    assert not os.path.exists(
+        os.path.join(host_dir, "graph_tiling_func_TilingHead.cpp")
+    )
 
 
-@pytest.mark.parametrize("host_impl", [
-    "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
-        "struct CommonType {};",
-        "// AUTOFUSE_SPLIT_FILE_END: solver_func",
-    ]),
-    "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
-        "// AUTOFUSE_SPLIT_FILE_END: solver_func",
-        "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
-    ]),
-    "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
-        "struct CommonType {};",
-    ]),
-    "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
-        "struct CommonType {};",
-        "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
-        "int Solver() { return 0; }",
-        "// AUTOFUSE_SPLIT_FILE_END: solver_func",
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
-        "int Solver2() { return 0; }",
-        "// AUTOFUSE_SPLIT_FILE_END: solver_func",
-    ]),
-    "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
-        "struct CommonType {};",
-        "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: ../solver",
-        "int Solver() { return 0; }",
-        "// AUTOFUSE_SPLIT_FILE_END: ../solver",
-    ]),
-    "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
-        "struct CommonType {};",
-        "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: a/b",
-        "int Solver() { return 0; }",
-        "// AUTOFUSE_SPLIT_FILE_END: a/b",
-    ]),
-    "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
-        "struct CommonType {};",
-        "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: a\\b",
-        "int Solver() { return 0; }",
-        "// AUTOFUSE_SPLIT_FILE_END: a\\b",
-    ]),
-    "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
-        "struct CommonType {};",
-        "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: ",
-        "int Solver() { return 0; }",
-        "// AUTOFUSE_SPLIT_FILE_END: ",
-    ]),
-    "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
-        "int Solver() { return 0; }",
-        "// AUTOFUSE_SPLIT_FILE_END: solver_func",
-    ]),
-    "\n".join([
-        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
-        "struct CommonType {};",
-        "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
-    ]),
-])
-def test_execute_compile_rejects_invalid_split_marker(compile_adapter_module, tmpdir, host_impl):
+@pytest.mark.parametrize(
+    "host_impl",
+    [
+        "\n".join(
+            [
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+                "struct CommonType {};",
+                "// AUTOFUSE_SPLIT_FILE_END: solver_func",
+            ]
+        ),
+        "\n".join(
+            [
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
+                "// AUTOFUSE_SPLIT_FILE_END: solver_func",
+                "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+            ]
+        ),
+        "\n".join(
+            [
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+                "struct CommonType {};",
+            ]
+        ),
+        "\n".join(
+            [
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+                "struct CommonType {};",
+                "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
+                "int Solver() { return 0; }",
+                "// AUTOFUSE_SPLIT_FILE_END: solver_func",
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
+                "int Solver2() { return 0; }",
+                "// AUTOFUSE_SPLIT_FILE_END: solver_func",
+            ]
+        ),
+        "\n".join(
+            [
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+                "struct CommonType {};",
+                "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: ../solver",
+                "int Solver() { return 0; }",
+                "// AUTOFUSE_SPLIT_FILE_END: ../solver",
+            ]
+        ),
+        "\n".join(
+            [
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+                "struct CommonType {};",
+                "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: a/b",
+                "int Solver() { return 0; }",
+                "// AUTOFUSE_SPLIT_FILE_END: a/b",
+            ]
+        ),
+        "\n".join(
+            [
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+                "struct CommonType {};",
+                "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: a\\b",
+                "int Solver() { return 0; }",
+                "// AUTOFUSE_SPLIT_FILE_END: a\\b",
+            ]
+        ),
+        "\n".join(
+            [
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+                "struct CommonType {};",
+                "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: ",
+                "int Solver() { return 0; }",
+                "// AUTOFUSE_SPLIT_FILE_END: ",
+            ]
+        ),
+        "\n".join(
+            [
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
+                "int Solver() { return 0; }",
+                "// AUTOFUSE_SPLIT_FILE_END: solver_func",
+            ]
+        ),
+        "\n".join(
+            [
+                "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+                "struct CommonType {};",
+                "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+            ]
+        ),
+    ],
+)
+def test_execute_compile_rejects_invalid_split_marker(
+    compile_adapter_module, tmpdir, host_impl
+):
     def fake_main(args):
         return None
 
     compile_adapter_module.ascendc_compile.main = fake_main
-    args = type("Args", (), {
-        "stage": "host",
-        "temp_dir": str(tmpdir),
-        "graph_name": "graph",
-        "trace_stage": "host_compile",
-    })()
+    args = type(
+        "Args",
+        (),
+        {
+            "stage": "host",
+            "temp_dir": str(tmpdir),
+            "graph_name": "graph",
+            "trace_stage": "host_compile",
+        },
+    )()
 
     with pytest.raises(compile_adapter_module.ascendc_compile.CompileError) as exc_info:
-        compile_adapter_module.execute_compile({
-            "tiling_struct_code": "struct AutofuseTilingData {};",
-            "host_impl_code": host_impl,
-            "kernel_impl_code": None,
-        }, args)
+        compile_adapter_module.execute_compile(
+            {
+                "tiling_struct_code": "struct AutofuseTilingData {};",
+                "host_impl_code": host_impl,
+                "kernel_impl_code": None,
+            },
+            args,
+        )
 
-    assert ("split host source" in str(exc_info.value) or
-            "invalid split host source key" in str(exc_info.value))
+    assert "split host source" in str(
+        exc_info.value
+    ) or "invalid split host source key" in str(exc_info.value)
 
 
 def test_host_compile_and_jit_compile_signatures_keep_stable(compile_adapter_module):
     assert list(inspect.signature(compile_adapter_module.jit_compile).parameters) == [
-        "tiling_def", "host_tiling", "op_kernel", "argv"
+        "tiling_def",
+        "host_tiling",
+        "op_kernel",
+        "argv",
     ]
     assert list(inspect.signature(compile_adapter_module.host_compile).parameters) == [
-        "tiling_def_code", "tiling_impl_code", "argv"
+        "tiling_def_code",
+        "tiling_impl_code",
+        "argv",
     ]

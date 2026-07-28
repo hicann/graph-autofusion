@@ -33,7 +33,9 @@ class LoadedCompileModule:
 
 
 @contextmanager
-def load_compile_module(module_name, module_path, extra_autofuse_attrs=None, extra_modules=None):
+def load_compile_module(
+    module_name, module_path, extra_autofuse_attrs=None, extra_modules=None
+):
     duration_records = []
     duration_reports = []
     original_modules = {}

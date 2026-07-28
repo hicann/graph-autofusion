@@ -1619,7 +1619,7 @@ TEST_F(STestAscirPerfV2, TestCastV2) {
   cast_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "31");
+  EXPECT_EQ(Str(res), "30");
 }
 
 TEST_F(STestAscirPerfV2, TestSumV2) {
@@ -1938,7 +1938,7 @@ TEST_F(STestAscirPerfV2, TestLogicalNotV2) {
   pow_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "54");
+  EXPECT_EQ(Str(res), "42");
 }
 
 TEST_F(STestAscirPerfV2, TestLogicalOrV2) {
@@ -1967,7 +1967,7 @@ TEST_F(STestAscirPerfV2, TestLogicalOrV2) {
   pow_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "63");
+  EXPECT_EQ(Str(res), "51");
 }
 
 TEST_F(STestAscirPerfV2, TestLogicalAndV2) {
@@ -1996,7 +1996,7 @@ TEST_F(STestAscirPerfV2, TestLogicalAndV2) {
   pow_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "63");
+  EXPECT_EQ(Str(res), "51");
 }
 
 TEST_F(STestAscirPerfV2, TestClipByValueV2) {

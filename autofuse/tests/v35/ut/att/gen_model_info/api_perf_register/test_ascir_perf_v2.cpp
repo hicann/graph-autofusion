@@ -18,6 +18,7 @@
 #include "att/api_perf_register/perf_param_v2.h"
 #include "ascir/generator/v2_ascir_att_impl.h"
 #include "api_perf_register/api_perf_factory.h"
+#include "v35/att/api_perf_register/ascendc_regbase_perf.h"
 #include "../../../../../ut/att/testcase/gen_model_info/api_perf_register/runtime_stub.h"
 #include "common/platform_context.h"
 #include "api_perf_register/utils/api_perf_utils.h"
@@ -60,6 +61,79 @@ void SetSingleReduceSpecificParams(NodeInfo &node) {
   params.canonical_params.reuse = {true, false};
   params.exprs.merge_size = {true, {{CreateExpr(8), ascir_param::ParamExprRole::kSemantic}}};
   params.exprs.merge_times = {true, {{CreateExpr(1), ascir_param::ParamExprRole::kSemantic}}};
+}
+
+att::TensorShapeInfo MakeCastShape(const std::string &data_type, const Expr &dim) {
+  att::TensorShapeInfo shape;
+  shape.loc = att::HardwareDef::UB;
+  shape.data_type = data_type;
+  shape.dims = {dim};
+  shape.repeats = shape.dims;
+  shape.strides = {CreateExpr(1)};
+  shape.gm_strides = shape.strides;
+  return shape;
+}
+
+std::string GetCastPerfExpr(const std::string &input_dtype, const std::string &output_dtype,
+                            const ascir_param::CastNodeParams &cast_params = {}) {
+  auto cast_v2 = ApiPerfFactory::Instance().Create("CastV2");
+  EXPECT_NE(cast_v2, nullptr);
+  auto cast_v2_perf = cast_v2->GetPerfFunc();
+  const Expr dim = CreateExpr(129);
+  std::vector<att::TensorShapeInfo> input_shapes = {MakeCastShape(input_dtype, dim)};
+  std::vector<att::TensorShapeInfo> output_shapes = {MakeCastShape(output_dtype, dim)};
+  NodeInfo node;
+  node.cast_node_params = cast_params;
+  PerfOutputInfo perf_res;
+  EXPECT_EQ(cast_v2_perf(input_shapes, output_shapes, node, perf_res), af::SUCCESS);
+  return Str(perf_res.pipe_res[PipeType::AIV_VEC]);
+}
+
+ascir_param::CastNodeParams MakeCastParams(const std::vector<Expr> &output_dims,
+                                           const std::vector<Expr> &output_strides,
+                                           const std::vector<Expr> &input_strides) {
+  ascir_param::CastNodeParams params;
+  params.valid = true;
+  params.output_dims = output_dims;
+  params.output_strides = output_strides;
+  params.input_strides = input_strides;
+  return params;
+}
+
+NodeDetail MakeCastNodeDetail(const std::string &input_dtype, const std::string &output_dtype) {
+  NodeDetail node_detail;
+  node_detail.name = "CastNode";
+  node_detail.optype = kCast;
+  node_detail.input_dtype = {input_dtype};
+  node_detail.output_dtype = {output_dtype};
+  node_detail.input_dims = {CreateExpr("cast_outer"), CreateExpr("cast_inner")};
+  node_detail.output_dims = node_detail.input_dims;
+  node_detail.cast_node_params.valid = true;
+  node_detail.cast_node_params.output_dims = node_detail.output_dims;
+  node_detail.cast_node_params.output_strides = {CreateExpr("cast_output_stride"), CreateExpr(1)};
+  node_detail.cast_node_params.input_strides = {CreateExpr("cast_input_stride"), CreateExpr(1)};
+  return node_detail;
+}
+
+TEST_F(UTestAscirPerfV2, CastDynamicCallCountForNonSameBit2D) {
+  NodeDetail node_detail = MakeCastNodeDetail(kFloat16, kFloat32);
+  PerfOutputInfo perf;
+
+  EXPECT_EQ(att::ascendcperf_v2::CastPerf(node_detail, perf), af::SUCCESS);
+
+  EXPECT_EQ(perf.ternary_ops.size(), 2U);
+  EXPECT_NE(Str(perf.pipe_res[PipeType::AIV_VEC]).find("cast_call_count"), std::string::npos);
+}
+
+TEST_F(UTestAscirPerfV2, CastSameBitCallCountUsesOuterDim) {
+  NodeDetail node_detail = MakeCastNodeDetail(kInt32, kUInt32);
+  PerfOutputInfo perf;
+
+  EXPECT_EQ(att::ascendcperf_v2::CastPerf(node_detail, perf), af::SUCCESS);
+
+  EXPECT_TRUE(perf.ternary_ops.empty());
+  EXPECT_EQ(Str(perf.pipe_res[PipeType::AIV_VEC]).find("cast_call_count"), std::string::npos);
+  EXPECT_NE(Str(perf.pipe_res[PipeType::AIV_VEC]).find("cast_outer"), std::string::npos);
 }
 
 TEST_F(UTestAscirPerfV2, FillSpecificParamsStoresSharedReduceParamsOnAscNode) {
@@ -1931,8 +2005,47 @@ TEST_F(UTestAscirPerfV2, TestCastV2) {
   PerfOutputInfo perf_res;
   cast_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
-  std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "31");
+  EXPECT_EQ(Str(res), "30");
+}
+
+TEST_F(UTestAscirPerfV2, TestCastV2SameBitIntegerUsesDataCopyCostOnly) {
+  auto cast_params =
+      MakeCastParams({CreateExpr(2), CreateExpr(64)}, {CreateExpr(64), CreateExpr(1)}, {CreateExpr(64), CreateExpr(1)});
+  EXPECT_EQ(GetCastPerfExpr("int8", "uint8", cast_params), "52");
+}
+
+TEST_F(UTestAscirPerfV2, TestCastV2UInt8ToInt64UsesInterleaveCost) {
+  auto cast_params = MakeCastParams({CreateExpr(64)}, {CreateExpr(1)}, {CreateExpr(1)});
+  EXPECT_EQ(GetCastPerfExpr("uint8", "int64", cast_params), "42");
+}
+
+TEST_F(UTestAscirPerfV2, TestCastV2Int64ToUInt8UsesPackCost) {
+  auto cast_params = MakeCastParams({CreateExpr(64)}, {CreateExpr(1)}, {CreateExpr(1)});
+  EXPECT_EQ(GetCastPerfExpr("int64", "uint8", cast_params), "38");
+}
+
+TEST_F(UTestAscirPerfV2, TestCastV2DynamicStrideCreatesRepeatTernary) {
+  auto cast_v2 = ApiPerfFactory::Instance().Create("CastV2");
+  ASSERT_NE(cast_v2, nullptr);
+  auto cast_v2_perf = cast_v2->GetPerfFunc();
+  const Expr dim = CreateExpr(129);
+  std::vector<att::TensorShapeInfo> input_shapes = {MakeCastShape("float32", dim)};
+  std::vector<att::TensorShapeInfo> output_shapes = {MakeCastShape("float16", dim)};
+  NodeInfo node;
+  node.cast_node_params =
+      MakeCastParams({CreateExpr("outer"), CreateExpr("inner")}, {CreateExpr("out_stride"), CreateExpr(1)},
+                     {CreateExpr("in_stride"), CreateExpr(1)});
+  PerfOutputInfo perf_res;
+  EXPECT_EQ(cast_v2_perf(input_shapes, output_shapes, node, perf_res), af::SUCCESS);
+  EXPECT_EQ(perf_res.ternary_ops.size(), 2U);
+  EXPECT_NE(Str(perf_res.pipe_res[PipeType::AIV_VEC]).find("cast_repeat_time"), std::string::npos);
+  EXPECT_NE(Str(perf_res.pipe_res[PipeType::AIV_VEC]).find("cast_call_count"), std::string::npos);
+}
+
+TEST_F(UTestAscirPerfV2, TestCastV2DynamicCallCountMultipliesFinalCost) {
+  auto cast_params =
+      MakeCastParams({CreateExpr(2), CreateExpr(64)}, {CreateExpr(64), CreateExpr(1)}, {CreateExpr(64), CreateExpr(1)});
+  EXPECT_EQ(GetCastPerfExpr("float32", "float16", cast_params), "(((2 * cast_repeat_time) + 24) * cast_call_count)");
 }
 
 TEST_F(UTestAscirPerfV2, TestSumV2) {
@@ -2251,7 +2364,7 @@ TEST_F(UTestAscirPerfV2, TestLogicalNotV2) {
   pow_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "54");
+  EXPECT_EQ(Str(res), "42");
 }
 
 TEST_F(UTestAscirPerfV2, TestLogicalOrV2) {
@@ -2280,7 +2393,7 @@ TEST_F(UTestAscirPerfV2, TestLogicalOrV2) {
   pow_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "63");
+  EXPECT_EQ(Str(res), "51");
 }
 
 TEST_F(UTestAscirPerfV2, TestLogicalAndV2) {
@@ -2309,7 +2422,7 @@ TEST_F(UTestAscirPerfV2, TestLogicalAndV2) {
   pow_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "63");
+  EXPECT_EQ(Str(res), "51");
 }
 
 TEST_F(UTestAscirPerfV2, TestClipByValueV2) {

@@ -16,11 +16,14 @@
 #include "graph/symbolizer/symbolic.h"
 #include "graph/attribute_group/attr_group_shape_env.h"
 #include "ascir_ops_utils.h"
+#include "schedule_result.h"
 
 using namespace af::ascir_op;
 
 namespace optimize {
 namespace {
+constexpr int64_t kGatherSimtDcacheSize = 32 * 1024;
+
 static Status GetNodeIrAttrOffset(const af::NodePtr &node, af::Expression &offset) {
   auto asc_node = std::dynamic_pointer_cast<af::AscNode>(node);
   GE_ASSERT_NOTNULL(asc_node);
@@ -76,6 +79,7 @@ void CompleteSplitApiInfo(af::AscNodePtr &node) {
 void CompleteGatherApiInfo(af::AscNodePtr &node) {
   node->attr.api.type = af::ApiType::kAPITypeCompute;
   node->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  (void)::ascir::SetDcacheSize(node, kGatherSimtDcacheSize);
 }
 
 void CompleteCubeApiInfo(af::AscNodePtr &node) {
@@ -154,6 +158,7 @@ static const std::map<std::string, af::ComputeType> kOpTypeToComputeType = {
     {Sigmoid::Type, af::ComputeType::kComputeElewise},
     {Concat::Type, af::ComputeType::kComputeConcat},
     {Gather::Type, af::ComputeType::kComputeGather},
+    {IndirectLoad::Type, af::ComputeType::kComputeLoad},
 
     {Where::Type, af::ComputeType::kComputeElewise},
     {Select::Type, af::ComputeType::kComputeElewise},

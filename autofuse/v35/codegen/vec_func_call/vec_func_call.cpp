@@ -320,6 +320,22 @@ Status VfCall::ParseSubGraph(const ascir::NodeView &vf_node, const ascir::ImplGr
 }
 
 Status VfCall::ParseInputOutputInfo(const TPipe &tpipe) const {
+  if (inputs.empty() && skip_api_emit) {
+    for (const auto *input : node->inputs()) {
+      GE_ASSERT_NOTNULL(input, "Skipped VfCall node %s has null input.", node->GetNamePtr());
+      auto tensor_ptr = tpipe.GetTensor(input->attr.mem.tensor_id);
+      GE_CHK_BOOL_RET_STATUS(tensor_ptr != nullptr, af::FAILED, "Check[Param] tensor_ptr is nullptr");
+      ub_inputs_.emplace_back(*tensor_ptr);
+    }
+  }
+  if (outputs.empty() && skip_api_emit) {
+    for (const auto *output : node->outputs()) {
+      GE_ASSERT_NOTNULL(output, "Skipped VfCall node %s has null output.", node->GetNamePtr());
+      auto tensor_ptr = tpipe.GetTensor(output->attr.mem.tensor_id);
+      GE_CHK_BOOL_RET_STATUS(tensor_ptr != nullptr, af::FAILED, "Check[Param] tensor_ptr is nullptr");
+      ub_outputs_.emplace_back(*tensor_ptr);
+    }
+  }
   for (const auto &in : inputs) {
     auto tensor_ptr = tpipe.GetTensor(in->id);
     GE_CHK_BOOL_RET_STATUS(tensor_ptr != nullptr, af::FAILED, "Check[Param] tensor_ptr is nullptr");

@@ -195,8 +195,6 @@ build_ascgen-dev() {
               -D ENABLE_GE_ST=${ENABLE_GE_ST_FLAG}"
 
   echo "CMAKE_ARGS is: $CMAKE_ARGS"
-  ORIGINAL_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
-  unset LD_LIBRARY_PATH
   export BUILD_METADEF=${BUILD_METADEF}
 
   rm -f CMakeCache.txt
@@ -579,9 +577,6 @@ codegen_e2e_st() {
             -D RUN_TEST=1 \
             -D ENABLE_GE_ST=on \
             -D ENABLE_LLT_PKG=ON"
-
-  ORIGINAL_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
-  unset LD_LIBRARY_PATH
   env
 
   cmake $CMAKE_ARGS ../
@@ -707,9 +702,6 @@ build_backend() {
             -D ENABLE_TEST=True \
             -D ENABLE_GE_ST=on \
             -D ENABLE_LLT_PKG=ON"
-
-  ORIGINAL_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
-  unset LD_LIBRARY_PATH
   env
 
   cmake $CMAKE_ARGS ../
@@ -798,6 +790,12 @@ build_backend() {
                       load_gather_split_b_t_abs_store_test_e2e_v2 \
                       load_gather_tail_split_b_t_abs_store_test_e2e_v2 \
                       load_gather_one_axis_split_b_t_abs_store_test_e2e_v2 \
+                      indirect_load_rank2_axis1_simt_e2e_v2 \
+                      indirect_load_rank2_axis1_simd_e2e_v2 \
+                      indirect_load_rank3_axis1_simt_e2e_v2 \
+                      indirect_load_rank3_axis1_simd_e2e_v2 \
+                      indirect_load_rank4_axis2_simt_e2e_v2 \
+                      indirect_load_rank4_axis2_simd_e2e_v2 \
                       load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \
                       gather_reduce_store_test_e2e_v2 \
                       load_where_store_test_e2e_v2 \

@@ -60,6 +60,7 @@ const double kCompareNormalAdjustmentFactor = 1.245;
 // 数据类型字符串定义
 inline const std::string kInt8 = "int8";
 inline const std::string kUInt8 = "uint8";
+inline const std::string kInt4 = "int4";
 inline const std::string kFloat16 = "float16";
 inline const std::string kBfloat16 = "bfloat16";
 inline const std::string kUInt16 = "uint16";
@@ -70,6 +71,7 @@ inline const std::string kInt32 = "int32";
 inline const std::string kUInt64 = "uint64";
 inline const std::string kInt64 = "int64";
 inline const std::string kBool = "bool";
+inline const std::string kDefault = "default";
 inline const std::map<std::string, Expr> kBlkEleMap = {
     {kInt8, CreateExpr(32)},   {kUInt8, CreateExpr(32)}, {kFloat16, CreateExpr(16)}, {kBfloat16, CreateExpr(16)},
     {kUInt16, CreateExpr(16)}, {kInt16, CreateExpr(16)}, {kFloat32, CreateExpr(8)},  {kUInt32, CreateExpr(8)},
@@ -77,9 +79,10 @@ inline const std::map<std::string, Expr> kBlkEleMap = {
 };
 
 inline const std::map<std::string, Expr> kDataTypeSizeMap = {
-    {kInt8, CreateExpr(1)},   {kUInt8, CreateExpr(1)},  {kFloat16, CreateExpr(2)}, {kBfloat16, CreateExpr(2)},
-    {kUInt16, CreateExpr(2)}, {kInt16, CreateExpr(2)},  {kFloat32, CreateExpr(4)}, {kUInt32, CreateExpr(4)},
-    {kInt32, CreateExpr(4)},  {kUInt64, CreateExpr(8)}, {kInt64, CreateExpr(8)},   {kBool, CreateExpr(1)},
+    {kInt4, CreateExpr(1)},     {kInt8, CreateExpr(1)},   {kUInt8, CreateExpr(1)},  {kFloat16, CreateExpr(2)},
+    {kBfloat16, CreateExpr(2)}, {kUInt16, CreateExpr(2)}, {kInt16, CreateExpr(2)},  {kFloat32, CreateExpr(4)},
+    {kUInt32, CreateExpr(4)},   {kInt32, CreateExpr(4)},  {kUInt64, CreateExpr(8)}, {kInt64, CreateExpr(8)},
+    {kBool, CreateExpr(1)},
 };
 
 inline const std::map<std::string, Expr> kRptEleMap = {
@@ -183,6 +186,7 @@ inline const std::string kArgMaxMultiRPhase1 = "ArgMaxMultiRPhase1";
 inline const std::string kArgMaxMultiRPhase2 = "ArgMaxMultiRPhase2";
 inline const std::string kMins = "Mins";
 inline const std::string kMuls = "Muls";
+inline const std::string kNot = "Not";
 inline const std::string kOr = "Or";
 inline const std::string kPairReduceSum = "PairReduceSum";
 inline const std::string kSetVectorMask = "SetVectorMask";
@@ -194,7 +198,12 @@ inline const std::string kDefaultApi = "Load";  // 用于获取默认的AscIrAtt
 inline const std::string kTruncate = "Truncate";
 inline const std::string kMulAddDst = "MulAddDst";
 inline const std::string kUpdateMask = "UpdateMask";
+inline const std::string kPack = "Pack";
+inline const std::string kUnPack = "UnPack";
+inline const std::string kInterleave = "Interleave";
+inline const std::string kDeInterleave = "DeInterleave";
 inline const std::string kMaskPack = "MaskPack";
+inline const std::string kMaskUnPack = "MaskUnPack";
 inline const std::string kMaskOr = "kMaskOr";
 inline const std::string kMaskAnd = "kMaskAnd";
 inline const std::string kMaskSel = "MaskSel";
@@ -205,6 +214,7 @@ inline const std::string kXor = "Xor";
 inline const std::string kVshrs = "Vshrs";
 // 下面均为ASCIR定义（已有性能评估）
 inline const std::string kGather = "Gather";
+inline const std::string kIndirectLoad = "IndirectLoad";
 inline const std::string kAbs = "Abs";
 inline const std::string kAdd = "Add";
 inline const std::string kBroadcast = "Broadcast";

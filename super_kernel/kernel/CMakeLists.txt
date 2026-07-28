@@ -28,6 +28,8 @@ foreach(SK_KERNEL_ARCH IN LISTS SK_KERNEL_ARCHS)
 
    target_link_libraries(${SK_ENTRY_TARGET} PRIVATE
       $<BUILD_INTERFACE:runtime_headers>
+      $<BUILD_INTERFACE:asc_kernel_headers>
+      $<BUILD_INTERFACE:kernel_tiling_headers>
    )
    set_property(TARGET ${SK_ENTRY_TARGET} PROPERTY POSITION_INDEPENDENT_CODE ON)
    set(SK_ENTRY_OBJECT ${CMAKE_CURRENT_BINARY_DIR}/${SK_ENTRY_TARGET}.o)
@@ -71,6 +73,10 @@ foreach(SK_KERNEL_ARCH IN LISTS SK_KERNEL_ARCHS)
 
    target_include_directories(${SK_SCOPE_TARGET} PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/../src/aot/
+   )
+   target_link_libraries(${SK_SCOPE_TARGET} PRIVATE
+      $<BUILD_INTERFACE:asc_kernel_headers>
+      $<BUILD_INTERFACE:kernel_tiling_headers>
    )
    set_property(TARGET ${SK_SCOPE_TARGET} PROPERTY POSITION_INDEPENDENT_CODE ON)
 endforeach()

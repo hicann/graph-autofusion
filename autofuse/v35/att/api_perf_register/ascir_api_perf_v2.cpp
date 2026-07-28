@@ -315,6 +315,7 @@ af::Status CastApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_sh
                    [[maybe_unused]] const NodeInfo &node, PerfOutputInfo &perf_res) {
   NodeDetail node_info;
   GE_ASSERT_SUCCESS(SetNodeDetail(input_shapes, output_shapes, node_info));
+  node_info.cast_node_params = node.cast_node_params;
   GE_ASSERT_SUCCESS(ascendcperf_v2::CastPerf(node_info, perf_res));
   return af::SUCCESS;
 }
@@ -503,6 +504,9 @@ ApiPerfRegister<ApiPerf> add_api_perf_v2(ApiPerfRegisterV2(kAdd, GetPerfFunc(kAd
                                                            &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> gather_api_perf_v2(ApiPerfRegisterV2(kGather, GetPerfFunc(kGather), nullptr,
                                                               &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> indirect_load_api_perf_v2(ApiPerfRegisterV2(kIndirectLoad, GetPerfFunc(kUnitVector), nullptr,
+                                                                     &perf_param_table_v2,
+                                                                     &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> abs_api_perf_v2(ApiPerfRegisterV2(kAbs, GetPerfFunc(kAbs + "V2"), nullptr,
                                                            &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> broadcast_api_perf_v2(ApiPerfRegisterV2(kBroadcast, GetPerfFunc(kBroadcast), nullptr,

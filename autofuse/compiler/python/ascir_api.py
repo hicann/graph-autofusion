@@ -1837,6 +1837,30 @@ def Gather(
     return op.y
 
 
+def IndirectLoad(
+    owner_graph: ascir.HintGraph,
+    x1: ascir.OpsOperatorOutput,
+    x2: ascir.OpsOperatorOutput,
+    *,
+    axis: int,
+    sched_axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    name = _generate_op_name(owner_graph, "indirectload")
+    op = ascir.ops.IndirectLoad(name)
+    meta = _get_metadata(owner_graph)
+    meta.ops.append(op)
+
+    op.attr.ir_attr.axis = axis
+    op.attr.sched.axis = sched_axis
+    op.x1 = x1
+    op.x2 = x2
+    _infer_or_set_view(op.y, sched_axis, size, stride)
+    op.infer_dtype()
+    return op.y
+
+
 def BitwiseAnd(
     owner_graph: ascir.HintGraph,
     x1: ascir.OpsOperatorOutput,

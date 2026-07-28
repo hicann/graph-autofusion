@@ -2384,6 +2384,11 @@ af::Status TilingCodeGenImpl::GenSelectBetterTilingBasedOnObjAndUbRatio() {
     tiling_func_.AddLine("        tilingCaseImplPtr->GetTilingData(tmp_tiling, tiling_data);");
     tiling_func_.AddLine("      }");
     tiling_func_.AddLine("    }");
+  } else {
+    tiling_func_.AddLine(GenCallUpdateBetterTiling(is_uniq_group_));
+    tiling_func_.AddLine("    sub_case_flag = is_sub_case;");
+    tiling_func_.AddLine("    obj = cur_obj;");
+    tiling_func_.AddLine("    return true;");
   }
   return af::SUCCESS;
 }

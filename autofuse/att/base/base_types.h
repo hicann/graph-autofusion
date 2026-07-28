@@ -113,6 +113,13 @@ struct VfInstructPerf {
   int32_t throughput{0};
 };
 
+struct VfInstructDtypeMappingPerf {
+  std::vector<std::string> input_dtypes;
+  std::vector<std::string> output_dtypes;
+  int32_t latency{0};
+  int32_t throughput{0};
+};
+
 struct TensorShapeInfo {
   inline std::string GetDimExpr() const {
     std::stringstream ss;

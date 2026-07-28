@@ -12,6 +12,7 @@
 #include "ascir_ops_utils.h"
 #include "ascgraph_info_complete.h"
 #include "ascir_utils.h"
+#include "indirect_load_utils.h"
 #include "schedule_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
 
@@ -483,7 +484,8 @@ Status TilingGroup::GenTilingGroup(const ascir::ImplGraph &impl_graph, AxisGroup
   std::vector<std::pair<std::string, AxisGroup>> node_name_to_tiling_group;
   std::set<af::AxisId> n_groupset;
   for (const auto &node : impl_graph.GetAllNodes()) {
-    if (ScheduleUtils::IsBuffer(node)) {
+    if (ScheduleUtils::IsBuffer(node) ||
+        ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_main_schedule_tiling) {
       continue;
     }
     AxisGroup single_node_axes_group;

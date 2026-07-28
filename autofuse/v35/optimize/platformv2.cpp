@@ -22,6 +22,7 @@
 #include "task_generator/reduce_schedule_case_generator.h"
 #include "task_generator/recompute_case_generator.h"
 #include "task_generator/split_schedule_case_generator.h"
+#include "task_generator/indirect_load_schedule_case_generator.h"
 
 namespace optimize {
 constexpr size_t kMaxVecQueNum = 14UL;
@@ -85,6 +86,8 @@ std::unique_ptr<BackendSpec> PlatformV2::GetBackendSpec() const {
 
 Status PlatformV2::GenerateTasks(ascir::ImplGraph &optimize_graph, const OptimizerOptions &options,
                                  std::vector<ScheduleTask> &tasks) const {
+  GE_ASSERT_SUCCESS(IndirectLoadScheduleCaseGenerator().GeneratorTask(optimize_graph, tasks, options),
+                    "Failed to generate tasks for IndirectLoad");
   GE_ASSERT_SUCCESS(SplitFusionCaseGenerator().GeneratorTask(optimize_graph, tasks, options),
                     "Failed to generate tasks for split");
   GE_ASSERT_SUCCESS(CubeFusionCaseGenerator().GeneratorTask(optimize_graph, tasks, options),

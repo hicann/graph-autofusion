@@ -24,6 +24,7 @@ namespace ascir_param {
 namespace {
 constexpr const char *kAscirNodeParams = "AscirNodeParams";
 constexpr const char *kVectorFunc = "VectorFunc";
+constexpr const char *kCast = "Cast";
 
 struct AscirParamSourceContext {
   af::AscNodePtr node;
@@ -105,6 +106,15 @@ af::Status RegisterVectorFuncAscirNodeParams(const af::AscNodePtr &node) {
   params->api_name = node->GetType();
   params->status = ParamBuildStatus::kBuilt;
   params->specific_params = VectorFuncNodeParams{};
+  return RegisterAscirNodeParams(node, params);
+}
+
+af::Status RegisterCastAscirNodeParams(const af::AscNodePtr &node) {
+  GE_ASSERT_NOTNULL(node);
+  auto params = std::make_shared<AscirNodeParams>();
+  params->api_name = node->GetType();
+  params->status = ParamBuildStatus::kBuilt;
+  params->specific_params = CastNodeParams{};
   return RegisterAscirNodeParams(node, params);
 }
 
@@ -503,6 +513,9 @@ af::Status EnrichAscirNodeParams(const AscirParamSourceContext &source) {
   GE_ASSERT_NOTNULL(source.node);
   if (source.node->GetType() == kVectorFunc) {
     return RegisterVectorFuncAscirNodeParams(source.node);
+  }
+  if (source.node->GetType() == kCast) {
+    return RegisterCastAscirNodeParams(source.node);
   }
   if (!IsReduceParamSupported(source.node->GetType())) {
     return RegisterSkippedAscirNodeParams(source.node);

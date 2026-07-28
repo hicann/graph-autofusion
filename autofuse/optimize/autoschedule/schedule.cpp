@@ -11,6 +11,7 @@
 #include "schedule.h"
 #include <numeric>
 #include "alignment_handler.h"
+#include "indirect_load_utils.h"
 #include "schedule_utils.h"
 #include "node_cache_marker.h"
 
@@ -177,12 +178,6 @@ void AppendAxisOrder(const std::vector<size_t> &axes_order, size_t group_axis_si
   const auto inner_axis_end_idx = inner_axis_begin_idx + axis_count;
   vectorized_axes_order.insert(vectorized_axes_order.end(), axes_order.begin() + inner_axis_begin_idx,
                                axes_order.begin() + inner_axis_end_idx);
-}
-
-void AdjustAxisOrderOffsets(std::vector<size_t> &axes_order, size_t start_idx, size_t end_idx, size_t offset) {
-  for (size_t i = start_idx; i < end_idx; ++i) {
-    axes_order[i] += offset;
-  }
 }
 
 void GetOuterAxes(const std::vector<ascir::AxisId> &axes_group, const ascir::AxisId &ub_tiling_id,
@@ -405,8 +400,25 @@ Status Scheduler::ApplyBlockSplitToNode(ascir::NodeView &node, bool is_store_aft
   return af::SUCCESS;
 }
 
+void Scheduler::AdjustVectorizedAxesOrderOffsets(std::vector<size_t> &vectorized_axes_order, size_t split_point,
+                                                 size_t end, size_t offset) const {
+  const size_t start_idx = is_last_axis_reduce_ ? split_point : 0;
+  const size_t end_idx = is_last_axis_reduce_ ? end : split_point;
+  for (size_t i = start_idx; i < end_idx; ++i) {
+    vectorized_axes_order[i] += offset;
+  }
+}
+
 void Scheduler::FindVectorizedAxes(std::vector<ascir::AxisId> &vectorized_axes,
                                    std::vector<size_t> &vectorized_axes_order) {
+  if (is_indirect_load_schedule_case_) {
+    if (indirect_load_axes_.inner_axis != af::kIdNone) {
+      vectorized_axes.push_back(indirect_load_axes_.inner_axis);
+      vectorized_axes_order.push_back(0UL);
+    }
+    return;
+  }
+
   size_t last_ub_size = 0UL;
   size_t group_axis_size = 0UL;
   const auto &axes_order = axes_group_.axes_order;
@@ -436,11 +448,7 @@ void Scheduler::FindVectorizedAxes(std::vector<ascir::AxisId> &vectorized_axes,
 
     // 带reduce 需要在ub内确保向量化轴是RA或者AR排布
     const size_t offset = axes_order.size() + axes_group_.n_group.size();
-    if (is_last_axis_reduce_) {
-      AdjustAxisOrderOffsets(vectorized_axes_order, prev_ub_size, current_ub_size, offset);
-    } else {
-      AdjustAxisOrderOffsets(vectorized_axes_order, 0, prev_ub_size, offset);
-    }
+    AdjustVectorizedAxesOrderOffsets(vectorized_axes_order, prev_ub_size, current_ub_size, offset);
     last_ub_size = current_ub_size;
   }
 
@@ -453,11 +461,7 @@ void Scheduler::FindVectorizedAxes(std::vector<ascir::AxisId> &vectorized_axes,
     }
 
     const size_t offset = axes_order.size() + vectorized_axes.size();
-    if (is_last_axis_reduce_) {
-      AdjustAxisOrderOffsets(vectorized_axes_order, non_reduce_axis_size, vectorized_axes.size(), offset);
-    } else {
-      AdjustAxisOrderOffsets(vectorized_axes_order, 0, non_reduce_axis_size, offset);
-    }
+    AdjustVectorizedAxesOrderOffsets(vectorized_axes_order, non_reduce_axis_size, vectorized_axes.size(), offset);
   }
 }
 
@@ -496,15 +500,123 @@ Status Scheduler::RemoveRedundantBroadcastNode(const ascir::ImplGraph &impl_grap
   return af::SUCCESS;
 }
 
-Status Scheduler::TileSplit() {
-  // split ub
-  TileTiling(tiling_case_.ub_tiling_id_x, tiling_case_.ub_tiling_x);
-  TileTiling(tiling_case_.ub_tiling_id_y, tiling_case_.ub_tiling_y);
-  TileTiling(tiling_case_.ub_tiling_id_r, tiling_case_.ub_tiling_r);
+namespace {
+Status AddIndirectLoadSyntheticOuterAxis(const af::AscNodePtr &node, ascir::AxisId outer_axis_id,
+                                         bool has_synthetic_outer_axis) {
+  if (!has_synthetic_outer_axis) {
+    return af::SUCCESS;
+  }
 
+  node->attr.sched.axis.insert(node->attr.sched.axis.begin(), outer_axis_id);
+  for (const auto &output : node->outputs()) {
+    ascir::SizeExpr stride = af::sym::kSymbolOne;
+    if (!output->attr.axis.empty()) {
+      stride = af::sym::Mul(output->attr.repeats.front(), output->attr.strides.front());
+    }
+    output->attr.axis.insert(output->attr.axis.begin(), outer_axis_id);
+    output->attr.repeats.insert(output->attr.repeats.begin(), af::sym::kSymbolOne);
+    output->attr.strides.insert(output->attr.strides.begin(), stride);
+  }
+  return af::SUCCESS;
+}
+
+Status ApplyIndirectLoadTemplateMerge(ascir::ImplGraph &graph, const af::AscNodePtr &node, ascir::AxisId axis_id) {
+  if (axis_id == af::kIdNone) {
+    return af::SUCCESS;
+  }
+  const auto axis = graph.FindAxis(axis_id);
+  GE_ASSERT_NOTNULL(axis, "IndirectLoad template axis[%ld] is not found.", axis_id);
+  if (axis->type == ascir::Axis::Type::kAxisTypeMerged) {
+    GELOGD("[IndirectLoad] Graph[%s] apply template merge axis[%ld] for node[%s].", graph.GetName().c_str(), axis_id,
+           node->GetNamePtr());
+    GE_ASSERT_TRUE(graph.ApplySchedAxisMerge(node, axis_id), "Failed to merge schedule axis[%ld] for node[%s].",
+                   axis_id, node->GetNamePtr());
+    GE_ASSERT_TRUE(graph.ApplyTensorAxisMerge(node, axis_id), "Failed to merge tensor axis[%ld] for node[%s].", axis_id,
+                   node->GetNamePtr());
+  } else {
+    GELOGD("[IndirectLoad] Graph[%s] apply single-axis template merge axis[%ld] for node[%s].", graph.GetName().c_str(),
+           axis_id, node->GetNamePtr());
+    GE_ASSERT_TRUE(graph.ApplySchedAxisMerge(node, axis_id, {axis_id}),
+                   "Failed to merge schedule axis[%ld] for node[%s].", axis_id, node->GetNamePtr());
+    GE_ASSERT_TRUE(graph.ApplyTensorAxisMerge(node, axis_id, {axis_id}),
+                   "Failed to merge tensor axis[%ld] for node[%s].", axis_id, node->GetNamePtr());
+  }
+  return af::SUCCESS;
+}
+
+Status ApplyInputInnerVectorizedAxis(ascir::ImplGraph &graph, const af::AscNodePtr &node,
+                                     ascir::AxisId input_inner_axis_id) {
+  if (input_inner_axis_id == af::kIdNone) {
+    return af::SUCCESS;
+  }
+  GE_ASSERT_TRUE(!node->outputs().empty(), "IndirectLoad input-pre node[%s] has no output.", node->GetNamePtr());
+  for (const auto &output : node->outputs()) {
+    output->attr.vectorized_axis = {input_inner_axis_id};
+    output->attr.vectorized_strides = {af::sym::kSymbolOne};
+  }
+
+  const auto input_inner_axis = graph.FindAxis(input_inner_axis_id);
+  GE_ASSERT_NOTNULL(input_inner_axis, "IndirectLoad input inner axis[%ld] is not found.", input_inner_axis_id);
+  if (input_inner_axis->type != ascir::Axis::Type::kAxisTypeMerged) {
+    return af::SUCCESS;
+  }
+  GELOGD("[IndirectLoad] Graph[%s] apply input inner vectorized axis[%ld] for node[%s].", graph.GetName().c_str(),
+         input_inner_axis_id, node->GetNamePtr());
+  GE_ASSERT_TRUE(graph.ApplySchedAxisMerge(node, input_inner_axis_id),
+                 "Failed to merge input inner schedule axis[%ld] for node[%s].", input_inner_axis_id,
+                 node->GetNamePtr());
+  GE_ASSERT_TRUE(graph.ApplyTensorAxisMerge(node, input_inner_axis_id),
+                 "Failed to merge input inner tensor axis[%ld] for node[%s].", input_inner_axis_id, node->GetNamePtr());
+  return af::SUCCESS;
+}
+}  // namespace
+
+Status Scheduler::InitIndirectLoadScheduleCase() {
+  is_indirect_load_schedule_case_ = false;
+  has_indirect_load_synthetic_outer_axis_ = false;
+  if (tiling_case_.ub_tiling_y.first == nullptr) {
+    return af::SUCCESS;
+  }
+  const af::AscNodePtr indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(graph_);
+  if (indirect_load == nullptr) {
+    return af::SUCCESS;
+  }
+  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, indirect_load_axes_));
+  const auto outer_axis = graph_.FindAxis(indirect_load_axes_.outer_axis);
+  GE_ASSERT_NOTNULL(outer_axis, "IndirectLoad outer axis[%ld] is not found.", indirect_load_axes_.outer_axis);
+  has_indirect_load_synthetic_outer_axis_ =
+      outer_axis->from.empty() &&
+      std::find(indirect_load->attr.sched.axis.begin(), indirect_load->attr.sched.axis.end(),
+                indirect_load_axes_.outer_axis) == indirect_load->attr.sched.axis.end();
+  is_indirect_load_schedule_case_ = true;
+  return af::SUCCESS;
+}
+
+Status Scheduler::ApplyIndirectLoadNodeAxes(const af::AscNodePtr &node, bool &skip_main_tiling) const {
+  skip_main_tiling = false;
+  if (!is_indirect_load_schedule_case_) {
+    return af::SUCCESS;
+  }
+  if (ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(node)) {
+    skip_main_tiling = true;
+    GE_ASSERT_SUCCESS(ApplyInputInnerVectorizedAxis(graph_, node, indirect_load_axes_.input_inner_axis));
+    return af::SUCCESS;
+  }
+  if (ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(node)) {
+    skip_main_tiling = true;
+    return af::SUCCESS;
+  }
+  GE_ASSERT_SUCCESS(
+      AddIndirectLoadSyntheticOuterAxis(node, indirect_load_axes_.outer_axis, has_indirect_load_synthetic_outer_axis_));
+  GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_axes_.outer_axis));
+  GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_axes_.inner_axis));
+  return af::SUCCESS;
+}
+
+std::vector<ascir::AxisId> Scheduler::GetSortedNodeVectorizedAxes(Scheduler &scheduler) {
   std::vector<ascir::AxisId> vectorized_axes;
   std::vector<size_t> vectorized_axes_order;
-  FindVectorizedAxes(vectorized_axes, vectorized_axes_order);
+  scheduler.FindVectorizedAxes(vectorized_axes, vectorized_axes_order);
 
   // reorder vectorized axis by original node axis order
   std::vector<size_t> base_order(vectorized_axes.size());
@@ -513,15 +625,30 @@ Status Scheduler::TileSplit() {
     return vectorized_axes_order[a] < vectorized_axes_order[b];
   });
 
-  std::vector<ascir::AxisId> sorted_node_vectorized_axes;
-  sorted_node_vectorized_axes.reserve(base_order.size());
+  std::vector<ascir::AxisId> sorted;
+  sorted.reserve(base_order.size());
   for (const size_t index : base_order) {
-    sorted_node_vectorized_axes.push_back(vectorized_axes[index]);
+    sorted.push_back(vectorized_axes[index]);
   }
+  return sorted;
+}
+
+Status Scheduler::TileSplit() {
+  // split ub
+  TileTiling(tiling_case_.ub_tiling_id_x, tiling_case_.ub_tiling_x);
+  TileTiling(tiling_case_.ub_tiling_id_y, tiling_case_.ub_tiling_y);
+  TileTiling(tiling_case_.ub_tiling_id_r, tiling_case_.ub_tiling_r);
+
+  auto sorted_node_vectorized_axes = GetSortedNodeVectorizedAxes(*this);
 
   bool has_reduce = graph_cache_.HasComputeType(af::ComputeType::kComputeReduce);
   for (auto node : graph_.GetAllNodes()) {
     if (ScheduleUtils::IsBuffer(node)) {
+      continue;
+    }
+    bool skip_main_tiling = false;
+    GE_CHK_STATUS_RET(ApplyIndirectLoadNodeAxes(node, skip_main_tiling));
+    if (skip_main_tiling) {
       continue;
     }
     ApplyTiling(node, tiling_case_.ub_tiling_id_x, tiling_case_.ub_tiling_x);
@@ -543,6 +670,9 @@ Status Scheduler::TileSplit() {
     // 非reduce场景应该将向量化轴调整为tensor中的相对顺序, 带reduce场景由于tiling策略已经做了特别的reorder,需要跳过
     // tiling策略暂时无法支持具有reduce和transpose融合的场景
     for (auto &output : node->outputs()) {
+      if (is_indirect_load_schedule_case_ && ascgen_utils::indirect_load::ShouldPreserveVectorizedAxis(node)) {
+        continue;
+      }
       output->attr.vectorized_axis = node_vectorized_axes;
       if (!has_reduce) {
         auto tensor_axis = output->attr.axis;
@@ -561,6 +691,8 @@ Status Scheduler::DoScheduler() {
     ascir::utils::DumpGraph(graph_, "AfterDoTiling");
     return af::SUCCESS;
   }
+  GE_CHK_STATUS_RET(InitIndirectLoadScheduleCase(), "Failed to init IndirectLoad schedule case for graph[%s].",
+                    graph_.GetName().c_str());
   RemoveDuplicatedAxisFromGroup();
   // Tile Split
   TileSplit();
@@ -586,7 +718,8 @@ Status Scheduler::DoScheduler() {
 Status Scheduler::ApplyBlockSplit(const std::vector<ascir::AxisId> &new_sched_axes) {
   bool is_reduce_after = false;
   for (auto node : graph_.GetAllNodes()) {
-    if (ScheduleUtils::IsBuffer(node)) {
+    if (ScheduleUtils::IsBuffer(node) ||
+        (is_indirect_load_schedule_case_ && ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(node))) {
       continue;
     }
     if ((!is_reduce_after) && ScheduleUtils::IsReduce(node)) {
@@ -596,9 +729,14 @@ Status Scheduler::ApplyBlockSplit(const std::vector<ascir::AxisId> &new_sched_ax
     std::vector<ascir::AxisId> node_new_sched_axes = new_sched_axes;
     GE_ASSERT_TRUE(!node->outputs.operator()().empty());
     auto &vectorized_axis = node->outputs[0].attr.vectorized_axis;
-    node_new_sched_axes.insert(node_new_sched_axes.end(), vectorized_axis.begin(), vectorized_axis.end());
+    if (!is_indirect_load_schedule_case_) {
+      node_new_sched_axes.insert(node_new_sched_axes.end(), vectorized_axis.begin(), vectorized_axis.end());
+    }
     bool is_store_after_reduce = is_reduce_after && ScheduleUtils::IsStore(node);
     GE_ASSERT_SUCCESS(ApplyBlockSplitToNode(node, is_store_after_reduce));
+    if (is_indirect_load_schedule_case_) {
+      continue;
+    }
     graph_.ApplySchedAxisReorder(node, node_new_sched_axes);
   }
   return af::SUCCESS;

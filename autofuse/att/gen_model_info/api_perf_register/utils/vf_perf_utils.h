@@ -25,6 +25,11 @@ class VfPerfUtils {
                                       Expr &throughput);
   static af::Status AddVfInstructPerf(const std::string &vf_instruct_type, const std::string &data_type, Expr &latency,
                                       Expr &throughput, Expr repeat_time);
+  static af::Status GetVfInstructDtypeMappingPerf(const std::string &vf_instruct_type, const std::string &input_dtype,
+                                                  const std::string &output_dtype, Expr &latency, Expr &throughput);
+  static af::Status AddVfInstructDtypeMappingPerf(const std::string &vf_instruct_type, const std::string &input_dtype,
+                                                  const std::string &output_dtype, Expr &latency, Expr &throughput,
+                                                  Expr repeat_time);
   // 获取vf头开销
   static Expr GetVFHeadCost();
   // 根据vf function子图解析的结果获取vf function的性能
