@@ -29,6 +29,15 @@ source ${BASEPATH}/scripts/support_multiple_versions_of_lcov.sh
 # TODO(For autofuse): Remove 'export DISABLE_COMPILATION_WERROR=ON' and fix the related compilation errors.
 export DISABLE_COMPILATION_WERROR=ON
 
+set_test_ld_library_path() {
+  local autofuse_lib_path="${LOCAL_RUNTIME_LIB_PATH}:${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}"
+  if [ -n "${INITIAL_LD_LIBRARY_PATH}" ]; then
+    export LD_LIBRARY_PATH="${autofuse_lib_path}:${INITIAL_LD_LIBRARY_PATH}"
+  else
+    export LD_LIBRARY_PATH="${autofuse_lib_path}"
+  fi
+}
+
 # print usage message
 usage() {
   echo "Usage:"
@@ -243,7 +252,6 @@ build_test_ascendc_api_test() {
     return 1
   fi
   echo "[UT AUTOFUSE ASCENDC API] make success!"
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
   ctest --output-on-failure -j${THREAD_NUM} --test-dir ${AUTOFUSE_BUILD_PATH}/tests/ut/ascendc --no-tests=error \
         -O ${BUILD_PATH}/ctest_test_ascendc_api.log
   if [ $? -ne 0 ]; then
@@ -286,16 +294,13 @@ build_test() {
 
   echo "$(date '+%F %T') run test_main success!"
 
-  export LD_LIBRARY_PATH=${LOCAL_RUNTIME_LIB_PATH}:${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
   ctest --output-on-failure -j${THREAD_NUM} -R '^test_main_ut_aggregate$' \
         --test-dir ${AUTOFUSE_BUILD_PATH}/tests/ut --no-tests=error
   if [ $? -ne 0 ]
   then
-    unset LD_LIBRARY_PATH
     echo "execute command: test_main  failed."
     return 1
   fi
-  unset LD_LIBRARY_PATH
   echo "$(date '+%F %T') ascgen-dev test success!"
 }
 
@@ -330,19 +335,16 @@ build_test_ascir_st() {
   echo "build test_ascir_st success!"
 
   cp ${AUTOFUSE_BUILD_PATH}/tests/st/ascir/test_ascir_st  ${OUTPUT_PATH}
-  export LD_LIBRARY_PATH=${LOCAL_RUNTIME_LIB_PATH}:${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
   ctest --output-on-failure -j${THREAD_NUM} -L st -L ascir_st \
         --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error
 
   if [ $? -ne 0 ]
   then
     env
-    unset LD_LIBRARY_PATH
     echo "execute command: make -j test_ascir_st failed."
     return 1
   fi
 
-  unset LD_LIBRARY_PATH
   echo "$(date '+%F %T') run test_ascir_st success!"
 }
 
@@ -357,17 +359,14 @@ build_ut_optimize() {
   fi
 
   cp ${AUTOFUSE_BUILD_PATH}/tests/ut/optimize/optimize_ut  ${OUTPUT_PATH}
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
   ctest --output-on-failure -j${THREAD_NUM} \
         --test-dir ${AUTOFUSE_BUILD_PATH}/tests/ut/optimize --no-tests=error
 
   if [ $? -ne 0 ]
   then
     echo "execute command: run optimize_ut failed."
-    unset LD_LIBRARY_PATH
     return 1
   fi
-  unset LD_LIBRARY_PATH
 
   echo "$(date '+%F %T') optimize_st test successfully!"
 }
@@ -383,15 +382,12 @@ build_ut_common () {
   fi
 
   cp ${AUTOFUSE_BUILD_PATH}/tests/ut/common/test_common  ${OUTPUT_PATH}
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
   ctest --output-on-failure -j${THREAD_NUM} \
         --test-dir ${AUTOFUSE_BUILD_PATH}/tests/ut/common --no-tests=error
   if [ $? -ne 0 ]; then
-    unset LD_LIBRARY_PATH
     echo "execute command: run test_common failed."
     return 1
   fi
-  unset LD_LIBRARY_PATH
   echo "$(date '+%F %T') test_common test successfully!"
 }
 
@@ -405,19 +401,15 @@ build_ut_autofuse_utils() {
   fi
 
   cp ${AUTOFUSE_BUILD_PATH}/tests/ut/autofuse/autofuse_utils_ut ${OUTPUT_PATH}
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
   RUN_TEST_CASE=${OUTPUT_PATH}/autofuse_utils_ut && ${RUN_TEST_CASE}
   if [ $? -ne 0 ]; then
     echo "execute command: run autofuse_utils_ut failed."
-    unset LD_LIBRARY_PATH
     return 1
   fi
-  unset LD_LIBRARY_PATH
   echo "$(date '+%F %T') autofuse_utils_ut test successfully!"
 }
 
 build_st_optimize() {
-  local ascend_host_lib_path="${ASCEND_INSTALL_PATH}/lib64"
   echo "$(date '+%F %T') create build directory and build optimiz st";
   cd "${BUILD_PATH}"
   make -j${THREAD_NUM} optimize_st
@@ -427,16 +419,13 @@ build_st_optimize() {
     return 1
   fi
 
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}:${ascend_host_lib_path}:${LD_LIBRARY_PATH}
   ctest --output-on-failure -j${THREAD_NUM} -L st -L optimize_st --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error \
         -O ${BUILD_PATH}/optimize_st.log
   if [ $? -ne 0 ]
   then
-    unset LD_LIBRARY_PATH
     echo "execute command: run optimize_st failed."
     return 1
   fi
-  unset LD_LIBRARY_PATH
 
   echo "$(date '+%F %T') optimize_st test successfully!"
 }
@@ -482,7 +471,6 @@ build_st_codegen() {
     return 1
   fi
 
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
   ctest --output-on-failure -j${THREAD_NUM} -L st -L codegen_st --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error \
         -O ${BUILD_PATH}/codegen_st.log
   if [ $? -ne 0 ]
@@ -490,7 +478,6 @@ build_st_codegen() {
     echo "execute command: run codegen_st failed."
     return 1
   fi
-  unset LD_LIBRARY_PATH
   echo "codegen_st test successfully!"
 }
 
@@ -504,16 +491,13 @@ build_st_common() {
     return 1
   fi
 
-  export LD_LIBRARY_PATH=${LOCAL_RUNTIME_LIB_PATH}:${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
   ctest --output-on-failure -j${THREAD_NUM} -L st -L test_common_st --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error \
         -O ${BUILD_PATH}/test_common_st.log
   if [ $? -ne 0 ]
   then
-    unset LD_LIBRARY_PATH
     echo "execute command: run common_st failed."
     return 1
   fi
-  unset LD_LIBRARY_PATH
   echo "$(date '+%F %T') common_st test successfully!"
 }
 
@@ -643,7 +627,6 @@ codegen_e2e_st() {
   fi
   echo "$(date '+%F %T') make codegen_e2e_st_test1 end"
 
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}:${LD_LIBRARY_PATH}
   ctest --output-on-failure -j${THREAD_NUM} -L st -L codegen_e2e_st_test1 --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error \
         -O ${BUILD_PATH}/ctest_codegen_e2e_st_test1.log
   if [ $? -ne 0 ]; then
@@ -659,14 +642,12 @@ codegen_e2e_st() {
   fi
   echo "$(date '+%F %T') make codegen_e2e_st_test2 end"
 
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}:${LD_LIBRARY_PATH}
   ctest --output-on-failure -j${THREAD_NUM} -L st -L codegen_e2e_st_test2 --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error \
         -O ${BUILD_PATH}/ctest_codegen_e2e_st_test2.log
   if [ $? -ne 0 ]; then
     echo "execute command: run codegen_e2e_st_test2 failed."
     return 1
   fi
-  unset LD_LIBRARY_PATH
   echo "$(date '+%F %T') codegen_e2e_st execute success!"
 }
 
@@ -889,9 +870,6 @@ build_backend() {
   fi
   echo "$(date '+%F %T') make build_backend_test1 end"
 
-  ASCEND_DEVLIB_PATH=${ASCEND_INSTALL_PATH}/toolkit/devlib
-  ASCEND_RUNTIME_STUB_PATH=${ASCEND_INSTALL_PATH}/runtime/lib64/stub
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}:${ASCEND_DEVLIB_PATH}:${ASCEND_RUNTIME_STUB_PATH}:${LD_LIBRARY_PATH}
   (cd "${AUTOFUSE_BUILD_PATH}/tests" && \
     ctest --output-on-failure -j${THREAD_NUM} -L st -L build_backend_test1 -R "${CTEST_BACKEND_TEST1_REGEX}" \
           --no-tests=error -O ${BUILD_PATH}/ctest_build_backend_test1.log)
@@ -908,7 +886,6 @@ build_backend() {
   fi
   echo "$(date '+%F %T') make build_backend_test2 end"
 
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}:${ASCEND_DEVLIB_PATH}:${ASCEND_RUNTIME_STUB_PATH}:${LD_LIBRARY_PATH}
   (cd "${AUTOFUSE_BUILD_PATH}/tests" && \
     ctest --output-on-failure -j${THREAD_NUM} -L st -L build_backend_test2 -R "${CTEST_BACKEND_TEST2_REGEX}" \
           --no-tests=error -O ${BUILD_PATH}/ctest_build_backend_test2.log)
@@ -916,7 +893,6 @@ build_backend() {
     echo "execute command: run build_backend_test2 failed."
     return 1
   fi
-  unset LD_LIBRARY_PATH
   echo "$(date '+%F %T') build_backend execute success!"
 }
 
@@ -931,7 +907,6 @@ build_kernel_tool() {
     return 1
   fi
 
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}:${LD_LIBRARY_PATH}
   cp ${AUTOFUSE_BUILD_PATH}/tests/st/codegen/kernel_tool/test_kernel  ${OUTPUT_PATH}
   ctest --output-on-failure -j${THREAD_NUM} -L st -L kernel_tool_st \
         --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error
@@ -940,7 +915,6 @@ build_kernel_tool() {
     echo "execute command: run kernel tool failed."
     return 1
   fi
-  unset LD_LIBRARY_PATH
   echo "kernel tool test successfully!"
 }
 
@@ -1006,20 +980,16 @@ build_ut_att() {
 
   cp ${AUTOFUSE_BUILD_PATH}/tests/ut/att/att_ut  ${OUTPUT_PATH}
   ldd -r ${OUTPUT_PATH}/att_ut
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}
   ctest --output-on-failure -j${THREAD_NUM} \
         --test-dir ${AUTOFUSE_BUILD_PATH}/tests/ut/att --no-tests=error
   if [ $? -ne 0 ]; then
-    unset LD_LIBRARY_PATH
     echo "att_ut test failed."
     return 1
   fi
-  unset LD_LIBRARY_PATH
   echo "att_ut test successfully!"
 }
 
 build_st_att() {
-  local ascend_host_lib_path="${ASCEND_INSTALL_PATH}/lib64"
   echo "$(date '+%F %T') create build directory and build att st"
   cd "${BUILD_PATH}"
 
@@ -1047,17 +1017,14 @@ build_st_att() {
     return 1
   fi
 
-  export LD_LIBRARY_PATH=${METADEF_LIB_PATH}:${ASCEND_INSTALL_LIB_PATH}:${ascend_host_lib_path}:${LD_LIBRARY_PATH}
   ctest --output-on-failure -j${THREAD_NUM} -L st -L att_st --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error \
         -O ${BUILD_PATH}/att_st.log
 
   if [ $? -ne 0 ]
   then
-    unset LD_LIBRARY_PATH
     echo "att_st test failed."
     return 1
   fi
-  unset LD_LIBRARY_PATH
   echo "$(date '+%F %T') att_st test successfully!"
 }
 
@@ -1169,6 +1136,7 @@ main() {
 
   export ASCEND_CUSTOM_PATH=${ASCEND_INSTALL_PATH}
   ASCEND_INSTALL_LIB_PATH=${ASCEND_INSTALL_PATH}/$(uname -m)-linux/lib64/
+  set_test_ld_library_path
 
   build_ascgen-dev || { echo "ascgen-dev build failed."; exit 1; }
 
