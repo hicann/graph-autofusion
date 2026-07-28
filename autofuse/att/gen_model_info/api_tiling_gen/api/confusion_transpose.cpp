@@ -463,6 +463,8 @@ af::Status GetConfusionTransposeTilingHeadFiles([[maybe_unused]] const std::stri
 #include <array>
 #include "graph/tensor.h"
 
+#ifndef AUTOFUSE_CONFUSION_TRANSPOSE_TILING_DEFS
+#define AUTOFUSE_CONFUSION_TRANSPOSE_TILING_DEFS
 using graphStatus = uint32_t;
 const graphStatus GRAPH_FAILED = 0xFFFFFFFF;
 const graphStatus GRAPH_SUCCESS = 0;
@@ -479,6 +481,7 @@ enum class AutoFuseTransposeType: uint8_t {
   TRANSPOSE_ND2ND_0321 = 6,
   TRANSPOSE_INVALID = 7
 };
+#endif
 )";
 
   code_string = kHeaderContent;

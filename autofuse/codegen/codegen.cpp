@@ -106,6 +106,14 @@ Status EnrichScheduledResultAscirParams(const ascir::FusedScheduledResult &fused
   return af::SUCCESS;
 }
 
+bool IsSplitTilingHeaderKey(const std::string &key) {
+  return key == kTilingStateHeaderIdentify || key == kTilingLogHeaderIdentify || key == kTilingPgoHeaderIdentify ||
+         key == kTilingSolverHeaderIdentify || key == kTilingApiHeaderIdentify || key == kTilingBaseHeaderIdentify ||
+         key == kTilingEntryHeaderIdentify || key == kTilingTailHeaderIdentify;
+}
+
+std::string RemoveSplitCppIncludes(const std::string &content);
+
 Status CombineTilings(const std::map<std::string, std::string> &tiling_file_name_to_content, std::string &result) {
   GE_CHK_BOOL_RET_STATUS(tiling_file_name_to_content.find(kTilingHeadIdentify) != tiling_file_name_to_content.end(),
                          af::FAILED, "tiling_file_name_to_content has no tiling head");
@@ -114,23 +122,12 @@ Status CombineTilings(const std::map<std::string, std::string> &tiling_file_name
 
   // 遍历所有非 TilingHead 和 TilingData 的条目，去掉第一行后拼接
   for (const auto &[key, value] : tiling_file_name_to_content) {
-    if (key == kTilingHeadIdentify || key.find(kTilingDataIdentify) != std::string::npos) {
+    if (key == kTilingHeadIdentify || IsSplitTilingHeaderKey(key) ||
+        key.find(kTilingDataIdentify) != std::string::npos) {
       continue;
     }
 
-    // 查找并跳过第一行头文件行
-    size_t include_pos = value.find(kTilingHeadInclude);
-    if (include_pos != std::string::npos) {
-      // 找到 include 行，跳过它，并去掉后面的换行符
-      size_t content_start = include_pos + kTilingHeadInclude.length();
-      while (content_start < value.size() && (value[content_start] == '\n' || value[content_start] == '\r')) {
-        content_start++;
-      }
-      result += value.substr(content_start);
-    } else {
-      // 如果没有 include 行，直接拼接整个内容
-      result += value;
-    }
+    result += RemoveSplitCppIncludes(value);
 
     if (!result.empty() && result.back() != '\n') {
       result += '\n';
@@ -155,24 +152,24 @@ void AppendSplitEnd(const std::string &key, std::string &result) {
   result += "\n";
 }
 
-std::string RemoveSplitCppInclude(const std::string &content, const std::string &include) {
-  size_t include_pos = content.find(include);
-  if (include_pos == std::string::npos) {
-    return content;
-  }
-  if (include_pos != 0U) {
-    GELOGW("Split cpp include [%s] is not at file begin, keep original content.", include.c_str());
-    return content;
-  }
-  size_t content_start = include_pos + include.length();
-  while (content_start < content.size() && (content[content_start] == '\n' || content[content_start] == '\r')) {
-    content_start++;
-  }
-  return content.substr(content_start);
-}
-
 std::string RemoveSplitCppIncludes(const std::string &content) {
-  return RemoveSplitCppInclude(RemoveSplitCppInclude(content, kTilingHeadInclude), kCubeKernelTilingWrapperInclude);
+  const std::set<std::string> split_includes = {
+      kTilingHeadInclude,       kTilingStateHeaderInclude,      kTilingLogHeaderInclude, kTilingPgoHeaderInclude,
+      kTilingBaseHeaderInclude, kTilingSolverHeaderInclude,     kTilingApiHeaderInclude, kTilingEntryHeaderInclude,
+      kTilingTailHeaderInclude, kCubeKernelTilingWrapperInclude};
+  std::istringstream input(content);
+  std::stringstream output;
+  std::string line;
+  bool in_include_prefix = true;
+  while (std::getline(input, line)) {
+    if (in_include_prefix && !line.empty() && line.rfind("#include ", 0U) != 0U) {
+      in_include_prefix = false;
+    }
+    if (!in_include_prefix || split_includes.count(line) == 0U) {
+      output << line << '\n';
+    }
+  }
+  return output.str();
 }
 
 void AppendSplitSource(const std::string &key, const std::string &content, std::string &result) {
@@ -181,38 +178,53 @@ void AppendSplitSource(const std::string &key, const std::string &content, std::
   AppendSplitEnd(key, result);
 }
 
-void AppendLineBreakIfNeeded(std::string &content) {
-  if (!content.empty() && content.back() != '\n') {
-    content += '\n';
-  }
-}
-
 std::string BuildSplitHeaderContent(const std::map<std::string, std::string> &tiling_file_name_to_content) {
-  std::string content = RemoveAutoFuseTilingHeadGuards(tiling_file_name_to_content.at(kTilingHeadIdentify));
-  auto wrapper_header = tiling_file_name_to_content.find(kCubeKernelTilingWrapperHpp);
-  if (wrapper_header != tiling_file_name_to_content.end()) {
-    AppendLineBreakIfNeeded(content);
-    content += wrapper_header->second;
-    AppendLineBreakIfNeeded(content);
-  }
-  return content;
+  return RemoveAutoFuseTilingHeadGuards(tiling_file_name_to_content.at(kTilingHeadIdentify));
 }
 
 bool ShouldSkipSplitCppSource(const std::string &key) {
-  return key == kTilingHeadIdentify || key == kCubeKernelTilingWrapperHpp ||
+  return key == kTilingHeadIdentify || IsSplitTilingHeaderKey(key) || key == kCubeKernelTilingWrapperHpp ||
          key.find(kTilingDataIdentify) != std::string::npos;
+}
+
+bool HasNewSplitTilingHeaders(const std::map<std::string, std::string> &tiling_file_name_to_content) {
+  return tiling_file_name_to_content.find(kTilingStateHeaderIdentify) != tiling_file_name_to_content.end();
+}
+
+void AppendSplitHeaderSources(const std::map<std::string, std::string> &tiling_file_name_to_content, bool is_new_format,
+                              std::string &result) {
+  std::string tiling_head = BuildSplitHeaderContent(tiling_file_name_to_content);
+  if (!is_new_format) {
+    auto wrapper_header = tiling_file_name_to_content.find(kCubeKernelTilingWrapperHpp);
+    if (wrapper_header != tiling_file_name_to_content.end()) {
+      if (!tiling_head.empty() && tiling_head.back() != '\n') {
+        tiling_head += '\n';
+      }
+      tiling_head += wrapper_header->second;
+    }
+    AppendSplitSource(kTilingHeadIdentify, tiling_head, result);
+    return;
+  }
+  for (const auto &key : {kTilingStateHeaderIdentify, kTilingLogHeaderIdentify, kTilingPgoHeaderIdentify,
+                          kTilingSolverHeaderIdentify, kTilingApiHeaderIdentify, kCubeKernelTilingWrapperHpp}) {
+    auto iter = tiling_file_name_to_content.find(key);
+    if (iter != tiling_file_name_to_content.end()) {
+      AppendSplitSource(key, iter->second, result);
+    }
+  }
 }
 
 Status CombineTilingsWithSplitMarkers(const std::map<std::string, std::string> &tiling_file_name_to_content,
                                       std::string &result) {
   GE_CHK_BOOL_RET_STATUS(tiling_file_name_to_content.find(kTilingHeadIdentify) != tiling_file_name_to_content.end(),
                          af::FAILED, "tiling_file_name_to_content has no tiling head");
-  AppendSplitSource(kTilingHeadIdentify, BuildSplitHeaderContent(tiling_file_name_to_content), result);
+  const bool is_new_format = HasNewSplitTilingHeaders(tiling_file_name_to_content);
+  AppendSplitHeaderSources(tiling_file_name_to_content, is_new_format, result);
   for (const auto &[key, value] : tiling_file_name_to_content) {
     if (ShouldSkipSplitCppSource(key)) {
       continue;
     }
-    AppendSplitSource(key, RemoveSplitCppIncludes(value), result);
+    AppendSplitSource(key, is_new_format ? value : RemoveSplitCppIncludes(value), result);
   }
   return af::SUCCESS;
 }

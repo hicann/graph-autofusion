@@ -32,6 +32,34 @@ class TestBackendPgoAddAbsE2e : public testing::Test {
   }
 };
 
+namespace {
+std::string GetSiblingPath(const std::string &path, const std::string &file_name) {
+  const auto parent_path = std::filesystem::path(path).parent_path();
+  if (parent_path.empty()) {
+    return file_name;
+  }
+  auto sibling_path = parent_path;
+  sibling_path.append(file_name);
+  return sibling_path.string();
+}
+
+void WriteFile(const std::string &file_name, const std::string &content) {
+  std::fstream file(file_name, std::ios::out);
+  file << content;
+}
+
+void WriteSplitTilingHeaders(const std::map<std::string, std::string> &tiling_files,
+                             const std::string &tiling_head_file_name) {
+  WriteFile(GetSiblingPath(tiling_head_file_name, "autofuse_tiling_func_state.h"),
+            tiling_files.at("TilingStateHeader"));
+  WriteFile(GetSiblingPath(tiling_head_file_name, "autofuse_tiling_func_log.h"), tiling_files.at("TilingLogHeader"));
+  WriteFile(GetSiblingPath(tiling_head_file_name, "autofuse_tiling_func_pgo.h"), tiling_files.at("TilingPgoHeader"));
+  WriteFile(GetSiblingPath(tiling_head_file_name, "autofuse_tiling_func_solver.h"),
+            tiling_files.at("TilingSolverHeader"));
+  WriteFile(GetSiblingPath(tiling_head_file_name, "autofuse_tiling_func_api.h"), tiling_files.at("TilingApiHeader"));
+}
+}  // namespace
+
 // pgo有跨文件共享变量的需求，故不使用CombineTilings接口拼接文件
 TEST_F(TestBackendPgoAddAbsE2e, PgoAddAbsE2eCodegen) {
   bool gen_success = true;
@@ -79,6 +107,13 @@ TEST_F(TestBackendPgoAddAbsE2e, PgoAddAbsE2eCodegen) {
 
     std::map<std::string, std::string> tiling_file_name_to_content;
     tiling_file_name_to_content = codegen.GenerateTiling(fused_schedule_result, shape_info, ".", "10");
+    EXPECT_EQ(tiling_file_name_to_content.find("TilingBaseHeader"), tiling_file_name_to_content.end());
+    EXPECT_EQ(tiling_file_name_to_content.find("TilingEntryHeader"), tiling_file_name_to_content.end());
+    EXPECT_EQ(tiling_file_name_to_content.find("TilingTailHeader"), tiling_file_name_to_content.end());
+    EXPECT_NE(tiling_data.find("struct AutofuseTilingDataPerf"), std::string::npos);
+    EXPECT_EQ(tiling_file_name_to_content.at("TilingPgoHeader").find("struct AutofuseTilingDataPerf {"),
+              std::string::npos);
+    WriteSplitTilingHeaders(tiling_file_name_to_content, tiling_head_file_name);
     kernel_file << tilig_stub << RemoveSubDirInclude(kernel);
     tiling_data_file << tiling_data;
     tiling_head_file << tiling_file_name_to_content["TilingHead"];
@@ -86,6 +121,9 @@ TEST_F(TestBackendPgoAddAbsE2e, PgoAddAbsE2eCodegen) {
     schedule_group_tail_file << tiling_file_name_to_content["schedule_group_tail"];
     solver_func_file << tiling_file_name_to_content["solver_func"];
     tiling_def_and_tiling_const_file << tiling_file_name_to_content["tiling_def_and_tiling_const"];
+  } catch (const std::exception &e) {
+    std::cerr << "PgoAddAbsE2eCodegen failed: " << e.what() << std::endl;
+    gen_success = false;
   } catch (...) {
     gen_success = false;
   }

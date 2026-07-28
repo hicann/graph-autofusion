@@ -23,8 +23,27 @@ INDUCTOR_COMPILE_TRACE_LABEL = "InductorCompile"
 SPLIT_BEGIN_PREFIX = "// AUTOFUSE_SPLIT_FILE_BEGIN:"
 SPLIT_END_PREFIX = "// AUTOFUSE_SPLIT_FILE_END:"
 SPLIT_HEADER_KEY = "TilingHead"
-SPLIT_HEADER_FILE = "autofuse_tiling_func_common.h"
 SPLIT_HEADER_INCLUDE = '#include "autofuse_tiling_func_common.h"'
+SPLIT_HEADER_FILES = {
+    "TilingHead": "autofuse_tiling_func_common.h",
+    "TilingStateHeader": "autofuse_tiling_func_state.h",
+    "TilingLogHeader": "autofuse_tiling_func_log.h",
+    "TilingPgoHeader": "autofuse_tiling_func_pgo.h",
+    "TilingBaseHeader": "autofuse_tiling_func_base.h",
+    "TilingSolverHeader": "autofuse_tiling_func_solver.h",
+    "TilingApiHeader": "autofuse_tiling_func_api.h",
+    "TilingEntryHeader": "autofuse_tiling_func_entry.h",
+    "TilingTailHeader": "autofuse_tiling_func_tail.h",
+    "ACubeKernelTilingWrapperHpp": "cube_kernel_tiling_wrapper.h",
+}
+TILING_HEADER_FILES = dict(SPLIT_HEADER_FILES)
+TILING_HEADER_FILES["CubeKernelTilingWrapperHpp"] = "cube_kernel_tiling_wrapper.h"
+FINAL_SPLIT_DISCRIMINATOR_KEYS = {"TilingStateHeader"}
+HISTORICAL_SPLIT_DISCRIMINATOR_KEYS = {
+    "TilingBaseHeader",
+    "TilingEntryHeader",
+    "TilingTailHeader",
+}
 
 
 def str2bool(v):
@@ -129,25 +148,37 @@ def parse_split_marker(line, prefix):
     return key
 
 
-def finish_split_source(key, lines, header, cpp_sources, seen_keys):
+def finish_split_source(key, lines, headers, cpp_sources, seen_keys):
     if key in seen_keys:
         raise ascendc_compile.CompileError(
             f"split host source key is duplicated: {key}"
         )
     seen_keys.add(key)
     content = "".join(lines)
-    if key == SPLIT_HEADER_KEY:
-        if header is not None:
-            raise ascendc_compile.CompileError("split host source header is duplicated")
-        return content, cpp_sources
+    if key in SPLIT_HEADER_FILES:
+        headers[key] = content
+        return headers, cpp_sources
+    if key.endswith("Header") or key.endswith("Hpp"):
+        raise ascendc_compile.CompileError(f"unknown split host header key: {key}")
     cpp_sources.append((key, content))
-    return header, cpp_sources
+    return headers, cpp_sources
+
+
+def validate_split_sources(headers, cpp_sources):
+    discriminator_keys = (
+        FINAL_SPLIT_DISCRIMINATOR_KEYS | HISTORICAL_SPLIT_DISCRIMINATOR_KEYS
+    )
+    is_split_format = bool(discriminator_keys & set(headers))
+    if not is_split_format and SPLIT_HEADER_KEY not in headers:
+        raise ascendc_compile.CompileError("split host source has no TilingHead")
+    if not cpp_sources:
+        raise ascendc_compile.CompileError("split host source has no cpp source")
 
 
 def parse_split_host_sources(host_impl_code):
     current_key = None
     current_lines = []
-    header = None
+    headers = {}
     cpp_sources = []
     seen_keys = set()
     for line in host_impl_code.splitlines(keepends=True):
@@ -172,8 +203,8 @@ def parse_split_host_sources(host_impl_code):
                 raise ascendc_compile.CompileError(
                     f"split host source marker mismatch: begin={current_key}, end={end_key}"
                 )
-            header, cpp_sources = finish_split_source(
-                current_key, current_lines, header, cpp_sources, seen_keys
+            headers, cpp_sources = finish_split_source(
+                current_key, current_lines, headers, cpp_sources, seen_keys
             )
             current_key = None
             current_lines = []
@@ -189,11 +220,8 @@ def parse_split_host_sources(host_impl_code):
         raise ascendc_compile.CompileError(
             f"split host source marker is not closed: {current_key}"
         )
-    if header is None:
-        raise ascendc_compile.CompileError("split host source has no TilingHead")
-    if not cpp_sources:
-        raise ascendc_compile.CompileError("split host source has no cpp source")
-    return header, cpp_sources
+    validate_split_sources(headers, cpp_sources)
+    return headers, cpp_sources
 
 
 def add_split_header_include(cpp_content):
@@ -203,12 +231,20 @@ def add_split_header_include(cpp_content):
 
 
 def write_split_host_sources(host_file_path, graph_name, host_impl_code):
-    header, cpp_sources = parse_split_host_sources(host_impl_code)
-    generate_file(host_file_path, SPLIT_HEADER_FILE, header)
+    headers, cpp_sources = parse_split_host_sources(host_impl_code)
+    is_split_format = bool(
+        (FINAL_SPLIT_DISCRIMINATOR_KEYS | HISTORICAL_SPLIT_DISCRIMINATOR_KEYS)
+        & set(headers)
+    )
+    for key, content in headers.items():
+        generate_file(host_file_path, SPLIT_HEADER_FILES[key], content)
     host_files = []
     for key, cpp_content in cpp_sources:
         file_name = f"{graph_name}_tiling_func_{key}.cpp"
-        generate_file(host_file_path, file_name, add_split_header_include(cpp_content))
+        content = (
+            cpp_content if is_split_format else add_split_header_include(cpp_content)
+        )
+        generate_file(host_file_path, file_name, content)
         host_files.append(os.path.join(host_file_path, file_name))
     return host_files
 

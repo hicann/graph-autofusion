@@ -28,7 +28,7 @@ import tbe.common.utils.log as logger
 # Python3 lib pyautofuse.so
 from .pyautofuse import Schedule, CodeGen, ascir
 from .ascbc_kernel_compile import ascbc_kernel_compile, camel_to_snake
-from .compile_adapter import get_pgo_env_flag, get_pgo_topn
+from .compile_adapter import TILING_HEADER_FILES, get_pgo_env_flag, get_pgo_topn
 from tbe.tikcpp.get_op_tiling import (
     TilingInfo,
     _change_param_name_to_name,
@@ -42,6 +42,10 @@ ASCEND_PATH = os.path.join(PYF_PATH, "..", "..", "..")
 timestamp_list = []
 HOST_TILING_COMPILE_JOBS = 32
 _HOST_SOURCE_EXTENSIONS = (".cpp", ".h", ".hpp")
+TILING_FIXED_CPP_FILES = {
+    "BCubeKernelTilingWrapperCpp": "cube_kernel_tiling_wrapper.cpp",
+    "CubeKernelTilingWrapperCpp": "cube_kernel_tiling_wrapper.cpp",
+}
 _SUPPORTED_CROSS_COMPILE_PREFIXES = {
     ("linux", "aarch64"): "aarch64-linux-gnu-",
     ("linux", "x86_64"): "x86_64-linux-gnu-",
@@ -906,13 +910,14 @@ def _process_tiling_funcs_and_infershape(
             template_dir = host_build_dir
             ret_tiling_func_srcs = template_dict
 
+        has_atomic_headers = "TilingStateHeader" in template_dict
         for key, value in template_dict.items():
-            if key == "TilingHead":
-                generate_file(template_dir, "autofuse_tiling_func_common.h", value)
-            elif key == "CubeKernelTilingWrapperHpp":
-                generate_file(template_dir, "cube_kernel_tiling_wrapper.h", value)
-            elif key == "CubeKernelTilingWrapperCpp":
-                generate_file(template_dir, "cube_kernel_tiling_wrapper.cpp", value)
+            if key == "TilingHead" and has_atomic_headers:
+                continue
+            if key in TILING_HEADER_FILES:
+                generate_file(template_dir, TILING_HEADER_FILES[key], value)
+            elif key in TILING_FIXED_CPP_FILES:
+                generate_file(template_dir, TILING_FIXED_CPP_FILES[key], value)
             elif "TilingData" not in key:
                 generate_file(
                     template_dir, graph_name + "_tiling_func_" + key + ".cpp", value
@@ -1162,7 +1167,16 @@ def replace_host_files(replace_root, host_build_dir, graph_name):
     for header_name in [
         "autofuse_tiling_data.h",
         "autofuse_tiling_func_common.h",
+        "autofuse_tiling_func_state.h",
+        "autofuse_tiling_func_log.h",
+        "autofuse_tiling_func_pgo.h",
+        "autofuse_tiling_func_base.h",
+        "autofuse_tiling_func_solver.h",
+        "autofuse_tiling_func_api.h",
+        "autofuse_tiling_func_entry.h",
+        "autofuse_tiling_func_tail.h",
         "autofuse_cube_tiling_data.h",
+        "cube_kernel_tiling_wrapper.h",
     ]:
         header_path = source_dir / header_name
         if header_path.exists():
