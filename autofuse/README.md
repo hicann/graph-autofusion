@@ -64,7 +64,7 @@ sudo apt-get install cmake gcc
 
 
 ### sample 用例
-autofuse 提供了丰富的 sample 用例，可以参考[Autofuse样例](./examples/README.md)。
+autofuse 提供了丰富的 sample 用例，可以参考[Autofuse样例](./examples/pytorch/README.md)。
 
 ### 设置环境变量
 

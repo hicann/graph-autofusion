@@ -78,7 +78,7 @@ sudo apt-get install cmake gcc
 
 ### Sample Use Cases
 
-AutoFuse provides abundant sample use cases. Refer to [AutoFuse Samples](./examples/README.md).
+AutoFuse provides abundant sample use cases. Refer to [AutoFuse Samples](./examples/pytorch/README_en.md).
 
 ### Set Environment Variables
 

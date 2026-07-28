@@ -120,7 +120,7 @@ After entering the container, execute the following command to initialize the en
 
 ### Method 3: Manual Package Installation
 
-1. **Install Driver and Firmware (Optional, Only Required for Running [Samples](../../autofuse/examples/README_en.md))**
+1. **Install Driver and Firmware (Optional, Only Required for Running [Samples](../../autofuse/examples/pytorch/README_en.md))**
 
     For driver and firmware download and installation operations, refer to the "Prepare Software Packages" and "Install NPU Driver and Firmware" chapters in the "[CANN Software Installation Guide](https://www.hiascend.com/document/redirect/CannCommunityInstWizard)". Driver and firmware are dependencies for running samples. If you only compile the environment, you do not need to install them.
 
