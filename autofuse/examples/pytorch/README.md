@@ -4,12 +4,15 @@
 
 使用 `torch.compile` 完成 PyTorch 网络下的算子融合。
 
-当前包含以下两个用例：
+当前包含以下三个用例：
 
 - `add + ge`：将加法和比较算子融合为一个算子；
-- `mul + reducesum`：将乘法和求和归约算子融合为一个算子。
+- `mul + reducesum`：将乘法和求和归约算子融合为一个算子；
+- `gather + add`：构造索引取数和逐元素加法图模式
 
-两个用例均开启 NPU Profiling，可通过生成的性能分析文件查看融合后的 Kernel。
+注：当前暂不支持gather融合能力，等待[ issue175 ](https://gitcode.com/cann/graph-autofusion/issues/175)这个issue完成后gather可以和add进行融合。
+
+三个用例均开启 NPU Profiling，可通过生成的性能分析文件查看融合后的 Kernel。
 
 ## 目录结构
 
@@ -21,10 +24,14 @@ pytorch
 │   ├── README.md
 │   ├── README_en.md
 │   └── af_add_ge.py              # 融合 add + ge
-└── af_reduce
+├── af_reduce
+│   ├── README.md
+│   ├── README_en.md
+│   └── af_mul_reducesum.py       # 融合 mul + reducesum
+└── af_gather
     ├── README.md
     ├── README_en.md
-    └── af_mul_reducesum.py       # 融合 mul + reducesum
+    └── af_gather_add.py          # gather + add 图模式
 ```
 
 ## 前置说明
@@ -67,6 +74,13 @@ cd af_reduce
 python af_mul_reducesum.py
 ```
 
+### gather + add 图模式
+
+```bash
+cd af_gather
+python af_gather_add.py
+```
+
 ## 预期执行结果
 
 程序执行完成后，当前目录下会生成 `profiling` 目录。
@@ -89,3 +103,4 @@ op_summary_时间戳.csv
 
 - [Autofuse 简介与快速上手](../../README.md)
 - [Profiling 性能分析工具指南](https://hiascend.com/document/redirect/CannCommunityToolProfiling)
+- [精度调试工具指南](https://hiascend.com/document/redirect/CannCommunityToolAccucacy)
