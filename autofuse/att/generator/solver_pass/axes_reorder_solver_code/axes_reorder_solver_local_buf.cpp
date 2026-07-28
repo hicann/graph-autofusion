@@ -41,25 +41,26 @@ std::string GenMcRelatedNaiveTiling() {
       int64_t upper_bound_satisfied_ub_threshold = var->value;
       int64_t lower_bound_satisfied_ub_threshold = var->align;
       // 若未找到满足UB利用率的解，则不需要进一步处理
-      if (BinaryFindLowerBoundSatisfiedUBThresholdCond(var, i, var->align, lower_bound_satisfied_ub_threshold)) {
+      if (BinaryFindLowerBoundSatisfiedUBThresholdCond(var, canonical_idx, var->align,
+                                                       lower_bound_satisfied_ub_threshold)) {
         OP_LOGD(OP_NAME, "Found lower_bound_satisfied_ub_threshold:%ld, upper:%ld, lower:%ld, i:%u, input: %s",
-                lower_bound_satisfied_ub_threshold, upper_bound_satisfied_ub_threshold, var->align, i,
+                lower_bound_satisfied_ub_threshold, upper_bound_satisfied_ub_threshold, var->align, canonical_idx,
                 input_.DebugString().c_str());
         var->SetValue(upper_bound_satisfied_ub_threshold);
         // 3.1) 在[var->align,upper_bound_satisfied_ub_threshold]范围内，二分查找满足UB利用率的边界
-        auto satisfied_core_threshold = BinaryFindLowerBoundSatisfiedCoreNum(var, i,
+        auto satisfied_core_threshold = BinaryFindLowerBoundSatisfiedCoreNum(var, canonical_idx,
             lower_bound_satisfied_ub_threshold);
         auto satisfied_core_threshold_left = satisfied_core_threshold.first;
         auto satisfied_core_threshold_right = satisfied_core_threshold.second;
         OP_LOGD(OP_NAME, "Found lower bound satisfied core num:%ld, %ld, var upper:%ld, lower:%ld, i:%u, input: %s",
                 satisfied_core_threshold_left, satisfied_core_threshold_right, upper_bound_satisfied_ub_threshold,
-                var->align, i, input_.DebugString().c_str());
+                var->align, canonical_idx, input_.DebugString().c_str());
         // 3.2)先尝试Tile块更大的值，若有解，则更新var
         int64_t available_core_num_right = 0L;
         var->SetValue(satisfied_core_threshold_right);
         if (InitMulticoreVars() && MulticoreTilingCore(false) && CalRealUsedCoreNum(available_core_num_right)) {
           OP_LOGD(OP_NAME, "Found larger tile size:%ld, available_core_num:%ld, i:%u",
-                  satisfied_core_threshold_right, available_core_num_right, i);
+                  satisfied_core_threshold_right, available_core_num_right, canonical_idx);
         }
         int64_t available_core_num_left = 0L;
         if ((satisfied_core_threshold_left != satisfied_core_threshold_right) && (satisfied_core_threshold_left > 0L)) {
@@ -67,7 +68,7 @@ std::string GenMcRelatedNaiveTiling() {
           if (InitMulticoreVars() && MulticoreTilingCore(false) && CalRealUsedCoreNum(available_core_num_left) &&
               (available_core_num_left > available_core_num_right)) {
             OP_LOGD(OP_NAME, "Found smaller tile size:%ld, available_core_num:%ld, i:%u",
-                    satisfied_core_threshold_left, available_core_num_left, i);
+                    satisfied_core_threshold_left, available_core_num_left, canonical_idx);
           } else {
             var->SetValue(satisfied_core_threshold_right);
           }
@@ -79,24 +80,25 @@ std::string GenMcRelatedNaiveTiling() {
 
 std::string GenNaiveLocalBufTilingImpl() {
   std::string kNaiveLocalBufTilingImpl = R"(
-  for (uint32_t i = 0u; i < num_vars; ++i) {
-    auto &var = vars[i];
+  for (uint32_t ordered_idx = 0U; ordered_idx < num_vars; ++ordered_idx) {
+    auto &var = vars[ordered_idx];
+    const uint32_t canonical_idx = input_.ordered_to_canonical[ordered_idx];
     auto upper_bound = var->upper_bound(var->upper_bound_vars);
     int64_t boundary = (upper_bound / var->align) * var->align;
     if (boundary < var->align) {
       OP_LOGW(OP_NAME, "Invalid aligned upper bound:%ld, raw upper:%ld, align:%ld, i:%u, input: %s.",
-              boundary, upper_bound, var->align, i, input_.DebugString().c_str());
+              boundary, upper_bound, var->align, canonical_idx, input_.DebugString().c_str());
       return false;
     }
     var->SetValue(boundary);
     int64_t upper_bound_satisfied_ub = -1L;
     if (!BinaryFindUpperBoundSatisfiedUBLimit(var, var->align, upper_bound_satisfied_ub)) {
       OP_LOGW(OP_NAME, "BinaryFindUpperBoundSatisfiedUBLimit failed, upper:%ld, lower:%ld, i:%u, input: %s.",
-              upper_bound, var->align, i, input_.DebugString().c_str());
+              upper_bound, var->align, canonical_idx, input_.DebugString().c_str());
       return false;
     }
     OP_LOGD(OP_NAME, "Found upper_bound_satisfied_ub:%ld, upper_bound:%ld, lower_bound:%ld, i:%u, input: %s",
-            upper_bound_satisfied_ub, boundary, var->align, i, input_.DebugString().c_str());
+            upper_bound_satisfied_ub, boundary, var->align, canonical_idx, input_.DebugString().c_str());
     var->SetValue(upper_bound_satisfied_ub);
 )";
   std::string kNaiveLocalBufTilingImplPostProcess = R"(
@@ -154,11 +156,13 @@ std::string GenNaiveLocalBufTilingWithEqualOrderImpl() {
   }
   // 处理剩余的轴
   int64_t max_core_num = static_cast<int64_t>(input_.corenum_threshold * input_.core_num);
-  for (uint32_t i = 0; i < input_.local_buffer_vars_size; ++i) {
-    if (solved_axes[i]) {
+  for (uint32_t ordered_idx = 0U; ordered_idx < input_.local_buffer_vars_size; ++ordered_idx) {
+    const uint32_t canonical_idx = input_.ordered_to_canonical[ordered_idx];
+    if (solved_axes[canonical_idx]) {
       continue;
     }
-    if (!ProcessSingleAxisNaive(input_.local_buffer_vars[i], i, max_core_num)) {
+    auto *var = input_.ordered_local_buffer_vars[ordered_idx];
+    if (!ProcessSingleAxisNaive(var, canonical_idx, max_core_num)) {
       return false;
     }
   }
@@ -181,7 +185,7 @@ std::string GenNaiveLocalBufTiling(bool enable_equal_order_tiling) {
     codes.append(GenInitLocalMCVars());
     codes.append(R"(
   uint32_t num_vars = input_.local_buffer_vars_size;
-  auto *vars = input_.local_buffer_vars;
+  auto *vars = input_.ordered_local_buffer_vars;
 )");
     codes.append(GenNaiveLocalBufTilingImpl());
   }
@@ -191,11 +195,12 @@ std::string GenNaiveLocalBufTiling(bool enable_equal_order_tiling) {
 std::string GenBinaryLocalBufTilingCore() {
   return R"(
 bool AxesReorderSolver::BinaryLocalBufTilingCore(const std::vector<bool> &solved_axes) {
-  for (uint32_t i = 0u; i < input_.local_buffer_vars_size; ++i) {
-    if (solved_axes[i]) {
+  for (uint32_t ordered_idx = 0U; ordered_idx < input_.local_buffer_vars_size; ++ordered_idx) {
+    const uint32_t canonical_idx = input_.ordered_to_canonical[ordered_idx];
+    if (solved_axes[canonical_idx]) {
       continue;
     }
-    auto &var = input_.local_buffer_vars[i];
+    auto &var = input_.ordered_local_buffer_vars[ordered_idx];
     auto upper_bound = var->upper_bound(var->upper_bound_vars);
     int64_t boundary = (upper_bound / var->align) * var->align;
     int64_t init_val = var->value;

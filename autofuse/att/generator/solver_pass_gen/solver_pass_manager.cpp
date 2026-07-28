@@ -477,6 +477,8 @@ void SolverPassManager::InitSolverGen(AxesReorderSolverGen &solver_gen) {
   solver_gen.SetExeTimeMap(args_manager_.GetTernaryOpRelatedVars());
   solver_gen.SetInputAlign(GetOriginalInputAlign());
   solver_gen.SetVarPriority(args_manager_.GetAxesPriority());
+  solver_gen.SetAxesOrder(args_manager_.GetAxesOrder());
+  solver_gen.SetVarsRelations(args_manager_.GetVarsRelations());
   solver_gen.SetObjFunc(args_manager_.GetHeadCost(), args_manager_.GetObjectFunc());
   solver_gen.SetUBThreshold(ub_threshold_);
   solver_gen.SetReservedUbSize(reserved_ub_size_);

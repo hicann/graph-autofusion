@@ -52,7 +52,7 @@ std::string GenPgoSolverGenerateAllTilingDataBody() {
     tilingDataVar = input_.pure_mc_vars[index - input_.local_buffer_vars_size];
     from_local_buffer_vars = false;
   } else {
-    tilingDataVar = input_.local_buffer_vars[index];
+    tilingDataVar = input_.ordered_local_buffer_vars[index];
     from_local_buffer_vars = true;
   }
   auto min_ = tilingDataVar->align;
@@ -91,7 +91,7 @@ std::string GenPgoSolverGenerateAllTilingDataTail() {
         auto tilingDataVarTmp = input_.pure_mc_vars[tmp - input_.local_buffer_vars_size];
         tilingDataVarTmp->value = tilingDataVarTmp->align;
       } else {
-        auto tilingDataVarTmp = input_.local_buffer_vars[tmp];
+        auto tilingDataVarTmp = input_.ordered_local_buffer_vars[tmp];
         tilingDataVarTmp->value = tilingDataVarTmp->align;
       }
       tmp += 1;
@@ -106,7 +106,11 @@ std::string GenPgoSolverGenerateAllTilingDataTail() {
         continue;
       }
     }
-    ans_item[index] = tilingDataVar->value;
+    if (from_local_buffer_vars) {
+      ans_item[input_.ordered_to_canonical[index]] = tilingDataVar->value;
+    } else {
+      ans_item[index] = tilingDataVar->value;
+    }
     PgoSolverGenerateAllTilingDataInner(index + 1, ans_item, ans, step_max);
   }
 }

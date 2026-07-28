@@ -193,6 +193,7 @@ class ArgsManager {
    * @brief 获取轴优先级信息
    */
   ExprUintMap GetAxesPriority() const;
+  ExprUintMap GetAxesOrder() const;
   /**
    * @brief 获取Model Info
    */

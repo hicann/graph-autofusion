@@ -231,12 +231,11 @@ struct CacheLineConfig {
 };
 
 struct RuntimeReorderRule {
-  Expr preferred_axis;
-  Expr fallback_axis;
   Expr condition_axis;
   Expr compare_axis;
   uint32_t condition_threshold{0U};
   uint32_t compare_threshold{0U};
+  std::vector<Expr> preferred_order;
 };
 
 class TilingScheduleConfigTable {
@@ -309,8 +308,8 @@ struct ModelInfo {
   std::vector<Expr> sizes{};                  // 图原始Sizes信息
   vector<CacheLineConfig> cache_line_config;  // ub->gm/gm->ub节点的cache配置信息
   const TilingScheduleConfigTable *tiling_schedule_config_table{nullptr};
-  TilingScheduleConfig tiling_schedule_config;  // Model 级别的 Tiling 调度配置
-  bool is_enable_equal_order_tiling{false};     // 使能等order tiling算法
+  TilingScheduleConfig tiling_schedule_config;            // Model 级别的 Tiling 调度配置
+  bool is_enable_equal_order_tiling{false};               // 使能等order tiling算法
   std::vector<RuntimeReorderRule> runtime_reorder_rules;  // 运行时按shape调整单模板内轴优先级
 };
 

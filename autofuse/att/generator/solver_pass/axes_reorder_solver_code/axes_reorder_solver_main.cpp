@@ -30,7 +30,7 @@ inline bool AxesReorderSolver::WorkloadBalance() {
   constexpr double EPS = 1e-6;
   bool related = false;
   uint32_t num_vars = input_.local_buffer_vars_size;
-  auto *vars = input_.local_buffer_vars;
+  auto *vars = input_.ordered_local_buffer_vars;
   uint32_t index = num_vars - 1;
   for (uint32_t i = 0; i < num_vars; i++) {
     if (vars[i]->mc_related) {

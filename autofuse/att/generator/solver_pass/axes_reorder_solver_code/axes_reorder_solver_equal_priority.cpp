@@ -114,6 +114,9 @@ bool AxesReorderSolver::IdentifyEqualPriorityAxes(const uint32_t axes_num, uint3
   uint32_t index = 0;
   constexpr uint32_t kSupportMaxEqualPriorityAxes = 2;
   for (const auto &pair : order_to_axis_indices) {
+    if (pair.second.size() < kSupportMaxEqualPriorityAxes) {
+      continue;
+    }
     for (const auto &id : pair.second) {
       if (index >= axes_num) {
         OP_LOGI(OP_NAME, "Axes num %u is not enough to identify equal priority axes, index=%u", axes_num, index);

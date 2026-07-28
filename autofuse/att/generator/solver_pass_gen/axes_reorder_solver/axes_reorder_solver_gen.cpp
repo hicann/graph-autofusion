@@ -908,6 +908,10 @@ std::string AxesReorderSolverGen::InitiateArgs() {
   }
   for (const auto &local_arg : local_buffer_tiling_vars_) {
     strs += "    TilingVariable " + Str(local_arg) + ";\n";
+    const auto order_iter = axes_order_.find(local_arg);
+    if (order_iter != axes_order_.end()) {
+      strs += "    " + Str(local_arg) + ".order = " + std::to_string(order_iter->second) + "UL;\n";
+    }
   }
   return strs;
 }
@@ -1117,6 +1121,20 @@ std::string AxesReorderSolverGen::SetTilingVars(VarsType var_type) {
     strs += "};\n";
     strs += "    input." + var_name + "_size = " + std::to_string(vars.size()) + "u;\n";
     strs += "    input." + var_name + " = " + var_name + ";\n";
+    if (var_type == VarsType::LOCALBUFFER) {
+      strs += "    TilingVariable* ordered_local_buffer_vars[" + std::to_string(vars.size()) + "] = {";
+      for (uint32_t i = 0U; i < vars.size(); ++i) {
+        strs += "&" + Str(vars[i]) + ", ";
+      }
+      strs += "};\n";
+      strs += "    uint32_t ordered_to_canonical[" + std::to_string(vars.size()) + "] = {";
+      for (uint32_t i = 0U; i < vars.size(); ++i) {
+        strs += std::to_string(i) + "u, ";
+      }
+      strs += "};\n";
+      strs += "    input.ordered_local_buffer_vars = ordered_local_buffer_vars;\n";
+      strs += "    input.ordered_to_canonical = ordered_to_canonical;\n";
+    }
   }
   return strs;
 }
@@ -1128,6 +1146,43 @@ int32_t AxesReorderSolverGen::GetLocalBufferVarIndex(const Expr &expr) const {
     }
   }
   return -1;
+}
+
+int32_t AxesReorderSolverGen::ResolveLocalBufferVarIndex(const Expr &expr) const {
+  int32_t resolved_idx = -1;
+  for (size_t i = 0U; i < local_buffer_tiling_vars_.size(); ++i) {
+    const Expr &search_var = local_buffer_tiling_vars_[i];
+    bool matched = search_var == expr;
+    const auto relation_iter = vars_relations_.find(search_var);
+    matched = matched || ((relation_iter != vars_relations_.end()) && (relation_iter->second == expr));
+    if (!matched) {
+      continue;
+    }
+    if (resolved_idx >= 0) {
+      return -1;
+    }
+    resolved_idx = static_cast<int32_t>(i);
+  }
+  return resolved_idx;
+}
+
+std::vector<int32_t> AxesReorderSolverGen::GetRuntimePreferredIndices(const RuntimeReorderRule &rule) const {
+  std::vector<int32_t> indices;
+  std::set<int32_t> unique_indices;
+  for (const Expr &expr : rule.preferred_order) {
+    const int32_t index = ResolveLocalBufferVarIndex(expr);
+    if (index < 0) {
+      continue;
+    }
+    if (!unique_indices.emplace(index).second) {
+      return {};
+    }
+    indices.emplace_back(index);
+  }
+  if (indices.size() != local_buffer_tiling_vars_.size()) {
+    return {};
+  }
+  return indices;
 }
 
 std::string AxesReorderSolverGen::GenRuntimeExprValue(const Expr &expr) const {
@@ -1167,31 +1222,19 @@ std::string AxesReorderSolverGen::GenRuntimeCompoundExprValue(const Expr &expr) 
 }
 
 std::string AxesReorderSolverGen::GenRuntimeReorderRule(const RuntimeReorderRule &rule) {
-  const int32_t preferred_idx = GetLocalBufferVarIndex(rule.preferred_axis);
-  const int32_t fallback_idx = GetLocalBufferVarIndex(rule.fallback_axis);
-  if ((preferred_idx < 0) || (fallback_idx < 0) || (preferred_idx == fallback_idx)) {
+  const std::vector<int32_t> preferred_indices = GetRuntimePreferredIndices(rule);
+  if (preferred_indices.empty()) {
     return "";
   }
   std::string code;
   code += "    if ((" + GenRuntimeExprValue(rule.condition_axis) + " < " + std::to_string(rule.condition_threshold) +
           ") && (" + GenRuntimeExprValue(rule.compare_axis) + " > " + std::to_string(rule.compare_threshold) + ")) {\n";
-  code += "      OP_LOGI(OP_NAME, \"[ATT][ReduceTileReorder] Runtime reduce tile reorder chooses preferred axis ";
-  code += Str(rule.preferred_axis);
-  code += " before fallback axis ";
-  code += Str(rule.fallback_axis);
-  code += ", prefer splitting reduce axis.\");\n";
-  if (preferred_idx > fallback_idx) {
-    code += "      auto *runtime_preferred_var = input.local_buffer_vars[" + std::to_string(preferred_idx) + "];\n";
-    code += "      input.local_buffer_vars[" + std::to_string(preferred_idx) + "] = input.local_buffer_vars[" +
-            std::to_string(fallback_idx) + "];\n";
-    code += "      input.local_buffer_vars[" + std::to_string(fallback_idx) + "] = runtime_preferred_var;\n";
+  for (size_t i = 0U; i < preferred_indices.size(); ++i) {
+    code += "      input.ordered_local_buffer_vars[" + std::to_string(i) + "] = input.local_buffer_vars[" +
+            std::to_string(preferred_indices[i]) + "];\n";
+    code += "      input.ordered_to_canonical[" + std::to_string(i) + "] = " + std::to_string(preferred_indices[i]) +
+            "u;\n";
   }
-  code += "    } else {\n";
-  code += "      OP_LOGI(OP_NAME, \"[ATT][ReduceTileReorder] Runtime reduce tile reorder keeps fallback axis ";
-  code += Str(rule.fallback_axis);
-  code += " before preferred axis ";
-  code += Str(rule.preferred_axis);
-  code += ", prefer splitting tail axis.\");\n";
   code += "    }\n";
   return code;
 }
@@ -1613,6 +1656,7 @@ std::string AxesReorderSolverGen::GenPGOSolverFuncImpl() {
   codes += InitiateArgs();
   codes += GenInputInfo(all_cons, local_buffer_cons, mc_mixed_cons);
   codes += GenInput(TradeOffConfig(), all_cons);
+  codes += GenRuntimeReorderRules();
   // topn search_cfg override: directly apply ub_threshold/corenum_threshold to solver input
   codes += "    if (search_cfg != nullptr) {\n";
   codes += "      if (search_cfg->ub_threshold_enabled) {\n";
