@@ -109,7 +109,7 @@ class GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY TensorDesc {
   void SetName(const std::string &name);
   void SetName(const char_t *name);
 
-  // Attr acess
+  // Attr access
   void SetSize(int64_t size);
   int64_t GetSize() const;
 

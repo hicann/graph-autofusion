@@ -1696,7 +1696,7 @@ graphStatus ComputeGraphImpl::AddInOutForNetOutputOp(const OpDescPtr &net_output
     const auto it = targets_.find(src_node);
     if (it != targets_.end()) {
       iter = output_nodes_info.erase(iter);
-      GELOGD("node [%s] is in processed targets, do not add inout for netoutput!", src_node->GetName().c_str());
+      GELOGD("node [%s] is in processed targets, do not add input for netoutput!", src_node->GetName().c_str());
       continue;
     }
     GE_ASSERT_TRUE((src_node != nullptr) && (src_node->GetOpDesc() != nullptr) && (net_output_desc != nullptr),
@@ -3034,7 +3034,7 @@ GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY uint32_t ComputeGraph::GetInputSi
   return impl_->GetInputSize();
 }
 
-// false: known shape  true: unknow shape
+// false: known shape  true: unknown shape
 GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY bool ComputeGraph::GetGraphUnknownFlag() const {
   bool is_unknown = false;
   (void)AttrUtils::GetBool(this, ATTR_NAME_GRAPH_UNKNOWN_FLAG, is_unknown);

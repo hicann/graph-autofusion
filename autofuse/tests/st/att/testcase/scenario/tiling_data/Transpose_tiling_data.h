@@ -87,7 +87,7 @@ TILING_DATA_FIELD_DEF(uint32_t, b2_size)
 // definitions of TilingKeyParms
 TILING_DATA_FIELD_DEF(uint32_t, tiling_key)
 
-// Tranpose API Tiling结构体
+// Transpose API Tiling结构体
 TILING_DATA_FIELD_DEF_STRUCT(ConfusionTransposeTiling, transpose_tilingData_0)
 
 END_TILING_DATA_DEF

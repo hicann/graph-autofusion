@@ -666,7 +666,7 @@ std::string NddmaTemplate::GetScoreFunc(const af::AscGraph &origin_graph, const 
 
   for (const auto &node : nddma_graph.GetAllNodes()) {
     if (nddma_node_cnt > 1) {
-      GELOGD("Graph [%s]: Has more than 1 Nddma ndoe, assigning default score.", nddma_graph.GetName().c_str());
+      GELOGD("Graph [%s]: Has more than 1 Nddma node, assigning default score.", nddma_graph.GetName().c_str());
       return "";
     }
     if (IsNddma(node)) {

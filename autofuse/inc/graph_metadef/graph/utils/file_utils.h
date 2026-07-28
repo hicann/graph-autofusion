@@ -74,7 +74,7 @@ graphStatus WriteBinToFile(std::string &path, char_t *data, uint32_t &data_len);
  * @ingroup domi_common
  * @brief  Get binary file from file
  * @param [in] name origin name.
- * @return string. name which repace special code as _.
+ * @return string. name which replace special code as _.
  */
 std::string GetRegulatedName(const std::string name);
 /**
@@ -97,7 +97,7 @@ graphStatus GetBinFromFile(const std::string &path, char_t *buffer, size_t &data
 /**
  * @ingroup domi_common
  * @brief  Write binary to file
- * @param [in] fd  file desciption.
+ * @param [in] fd  file description.
  * @param [in] data char[] used to write to file
  * @param [in] data_len store write size
  * @return graphStatus GRAPH_SUCCESS: success, OTHERS: fail.

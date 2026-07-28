@@ -100,7 +100,7 @@ af::Status AscendGraphParser::ParserOriginAxis(const af::AscGraph &graph) {
                                               orig_axes_info_[cur_axis_id].begin(), orig_axes_info_[cur_axis_id].end());
         continue;
       }
-      GE_ASSERT_SUCCESS(CheckAxisIdValid(cur_axis_id), "Invaild axis id [%ld]", cur_axis_id);
+      GE_ASSERT_SUCCESS(CheckAxisIdValid(cur_axis_id), "Invalid axis id [%ld]", cur_axis_id);
       if (axes_info_[cur_axis_id]->type == af::Axis::kAxisTypeOriginal) {
         orig_axes_info_[axis_info->id].emplace_back(cur_axis_id);
       } else {
@@ -167,7 +167,7 @@ af::Status AscendGraphParser::ParserSchedInfo(const af::AscGraph &graph) {
     std::vector<int64_t> block_dim;  // block outer的轴id
     bool loop_inside_flag = false;
     for (auto &axis_id : node->attr.sched.axis) {
-      GE_ASSERT_SUCCESS(CheckAxisIdValid(axis_id), "Invaild axis id [%ld]", axis_id);
+      GE_ASSERT_SUCCESS(CheckAxisIdValid(axis_id), "Invalid axis id [%ld]", axis_id);
       if (axes_info_[axis_id]->type == af::Axis::kAxisTypeBlockOuter) {
         block_dim.emplace_back(axis_id);
         loop_inside_flag = (axis_id == node->attr.sched.loop_axis) || loop_inside_flag;
@@ -597,8 +597,8 @@ af::Status AscendGraphParser::ParserNodeOutputInfos(const af::AscNodePtr &ge_nod
   for (size_t out_id = 0U; out_id < ge_node->outputs().size(); out_id++) {
     // 取vectorized axis作为tensor dim, 认为vectorized axis的size才会占用local buffer
     auto &output_tensor = ge_node->outputs[out_id].attr;
-    GE_ASSERT_SUCCESS(CheckAxisIdValid(output_tensor.vectorized_axis), "Invaild axis id.");
-    GE_ASSERT_SUCCESS(CheckAxisIdValid(output_tensor.axis), "Invaild axis id.");
+    GE_ASSERT_SUCCESS(CheckAxisIdValid(output_tensor.vectorized_axis), "Invalid axis id.");
+    GE_ASSERT_SUCCESS(CheckAxisIdValid(output_tensor.axis), "Invalid axis id.");
     // 向量轴为空不需要创建tensor
     if (output_tensor.vectorized_axis.empty()) {
       GELOGD("Node [%s] output [%zu] output vectorized size empty.", node_info.name.c_str(), out_id);
@@ -672,8 +672,8 @@ af::Status AscendGraphParser::ParserNodeInputInfos(const af::AscNodePtr &ge_node
 
   for (size_t in_id = 0U; in_id < ge_node->inputs.Size(); in_id++) {
     auto &input_tensor = ge_node->inputs[in_id].attr;
-    GE_ASSERT_SUCCESS(CheckAxisIdValid(input_tensor.vectorized_axis), "Invaild axis id.");
-    GE_ASSERT_SUCCESS(CheckAxisIdValid(input_tensor.axis), "Invaild axis id.");
+    GE_ASSERT_SUCCESS(CheckAxisIdValid(input_tensor.vectorized_axis), "Invalid axis id.");
+    GE_ASSERT_SUCCESS(CheckAxisIdValid(input_tensor.axis), "Invalid axis id.");
     TensorPtr tensor = af::MakeShared<Tensor>();
     GE_ASSERT_NOTNULL(tensor, "Create tensor failed.");
     tensor->name = ge_node->GetName() + kInputNamePrefix + std::to_string(in_id);

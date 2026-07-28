@@ -336,7 +336,7 @@ GraphUtils::RemoveSubgraphRecursively(const ComputeGraphPtr &compute_graph, cons
   GE_CHECK_NOTNULL(remove_node);
   GE_CHECK_NOTNULL(remove_node->GetOpDesc());
   if (remove_node->GetOwnerComputeGraph() == nullptr) {
-    GELOGW("Node %s has not been setted owner graph.", remove_node->GetName().c_str());
+    GELOGW("Node %s has not been set owner graph.", remove_node->GetName().c_str());
     return af::GRAPH_SUCCESS;
   }
   if ((remove_node->GetOwnerComputeGraph() != compute_graph) &&
@@ -4438,7 +4438,7 @@ void CompleteGraphBuilder::AddDataNodes(graphStatus &error_code, std::string &er
     const std::vector<uint32_t> anchor_indes = input.second.second;
     if (input_names.size() != anchor_indes.size()) {
       error_code = af::GRAPH_FAILED;
-      error_msg = "AddDataNodes failed: num of input_names and indexs not equal.";
+      error_msg = "AddDataNodes failed: num of input_names and indexes not equal.";
       return;
     }
     if (input_names.empty()) {

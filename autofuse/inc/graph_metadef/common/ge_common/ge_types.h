@@ -455,7 +455,7 @@ struct OpDescInfoId {
     context_id = context;
     thread_id = thread;
   }
-  // for exception dump(one process may has multi thread for mutli device ids)
+  // for exception dump(one process may has multi thread for multi device ids)
   OpDescInfoId(const uint32_t task, const uint32_t stream, const int32_t dev_id)
       : task_id(task), stream_id(stream), context_id(UINT32_MAX), thread_id(UINT32_MAX), device_id(dev_id) {}
   OpDescInfoId(const uint32_t task, const uint32_t stream, const uint32_t context, const uint32_t thread,
@@ -586,7 +586,7 @@ const char_t *const OPTION_EXEC_HCOM_RANK_MAPPING = "ge.exec.hcomRankMapping";
 
 const char_t *const OPTION_NUMA_CONFIG = "ge.numaConfig";
 
-// 7: config format mode(expirimental option)
+// 7: config format mode(experimental option)
 const char_t *const OPTION_EXEC_FORMAT_MODEL = "ge.exec.formatMode";
 
 // 8: config build graph mode(online or offline)

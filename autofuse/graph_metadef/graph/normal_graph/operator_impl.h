@@ -90,7 +90,7 @@ class OperatorImpl : public std::enable_shared_from_this<OperatorImpl> {
   std::vector<std::weak_ptr<OperatorImpl>> control_input_link_{};
   std::vector<std::weak_ptr<OperatorImpl>> control_output_link_{};
   std::map<std::string, SubgraphBuilder> subgraph_names_to_builders_;
-  RuntimeInferenceContext *runtime_context_{nullptr};  // depracated, will delete when air support
+  RuntimeInferenceContext *runtime_context_{nullptr};  // deprecated, will delete when air support
   GetConstInputOnRuntimeFun get_const_input_runtime_ = nullptr;
 
  private:

@@ -224,7 +224,7 @@ __simd_vf__ inline void ErfinvCoreImpl(__ubuf__ T *dstUb, __ubuf__ T *srcUb, uin
     Reg::Compare<float, CMPMODE::LT>(thresholdMask, log2Reg, constTempReg, mask);
     ErfinvComputeNearOne(tempResultReg, castReg, negLog2Reg, thresholdMask);
     Reg::Select(dstReg, tempResultReg, dstReg, thresholdMask);
-    // solve speical cases
+    // solve special cases
     ErfinvHandleNanCases(dstReg, castReg, mask);
     ErfinvHandleOneCases(dstReg, castReg, mask);
 

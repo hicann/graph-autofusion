@@ -117,9 +117,9 @@ __simd_vf__ inline void IgammaCImplAsymptoticMask(__ubuf__ T *src0Ub, __ubuf__ T
 
   // store mask
   Reg::Or(mask1, mask1, mask2, mask);
-  Reg::StoreAlign(workUb + 264, mask1);  // aymptotic 中使用的mask
+  Reg::StoreAlign(workUb + 264, mask1);  // asymptotic 中使用的mask
   Reg::Not(mask1, mask1, mask);
-  Reg::StoreAlign(workUb + 256, mask1);  // aymptotic 之后使用的起始mask
+  Reg::StoreAlign(workUb + 256, mask1);  // asymptotic 之后使用的起始mask
 }
 
 template <typename T, bool isIgam>

@@ -413,20 +413,20 @@ graphStatus ShapeEnvAttr::AppendReplacement(const Expression &target, const Expr
   // 仅支持 符号->常量，符号->表达式，符号->符号 映射
   if (expr1.IsConstExpr()) {
     if (!expr2.IsVariableExpr()) {
-      GELOGW("Unsupport append replacement %s to %s", SymbolicUtils::ToString(expr1).c_str(),
+      GELOGW("Unsupported append replacement %s to %s", SymbolicUtils::ToString(expr1).c_str(),
              SymbolicUtils::ToString(expr2).c_str());
       return GRAPH_SUCCESS;
     }
   } else if (!expr1.IsVariableExpr()) {
     if (!expr2.IsVariableExpr()) {
-      GELOGW("Unsupport append replacement %s to %s", SymbolicUtils::ToString(expr1).c_str(),
+      GELOGW("Unsupported append replacement %s to %s", SymbolicUtils::ToString(expr1).c_str(),
              SymbolicUtils::ToString(expr2).c_str());
       return GRAPH_SUCCESS;
     }
   }
   // 判断replacement是否成环
   if (CheckReplacementCycle(expr1, expr2)) {
-    GELOGW("Unsupport append replacement %s to %s, replacement contains the other.",
+    GELOGW("Unsupported append replacement %s to %s, replacement contains the other.",
            SymbolicUtils::ToString(expr1).c_str(), SymbolicUtils::ToString(expr2).c_str());
     return GRAPH_SUCCESS;
   }

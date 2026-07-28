@@ -50,8 +50,8 @@ graphStatus FastNode::Reset() {
   } else {
     extend_info_ = ComGraphMakeUnique<ExtendInfo>();
     GE_CHK_BOOL_EXEC(extend_info_ != nullptr,
-                     REPORT_INNER_ERR_MSG("E18888", "Failed to allocate memory for extend informations");
-                     return GRAPH_FAILED, "[Check][Param] Failed to allocate memory for extend informations");
+                     REPORT_INNER_ERR_MSG("E18888", "Failed to allocate memory for extend information");
+                     return GRAPH_FAILED, "[Check][Param] Failed to allocate memory for extend information");
   }
 
   extend_info_->UpdateInputSymbols(data_in_num_);

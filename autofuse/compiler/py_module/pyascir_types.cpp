@@ -188,7 +188,7 @@ bool DoDynamicOutputInference(const af::AscNodePtr &node, InferDtypeFunc infer_f
   }
 
   PY_ASSERT_SUCCESS(infer_func(input_dtypes, output_dtyps, npu_arch),
-                    "Infer dtype failed for %s %s; input_dtypes: %s is not supportted now", node->GetNamePtr(),
+                    "Infer dtype failed for %s %s; input_dtypes: %s is not supported now", node->GetNamePtr(),
                     node->GetTypePtr(), DataTypesToString(input_dtypes).c_str(),
                     DataTypesToString(output_dtyps).c_str());
 
@@ -238,7 +238,7 @@ bool DoInference(const af::AscNodePtr &node, InferDtypeFunc infer_func, const st
     return true;
   }
   PY_ASSERT_SUCCESS(infer_func(input_dtypes, output_dtyps, npu_arch),
-                    "Infer dtype failed for %s %s; input_dtypes: %s is not supportted now", node->GetNamePtr(),
+                    "Infer dtype failed for %s %s; input_dtypes: %s is not supported now", node->GetNamePtr(),
                     node->GetTypePtr(), DataTypesToString(input_dtypes).c_str(),
                     DataTypesToString(output_dtyps).c_str());
 

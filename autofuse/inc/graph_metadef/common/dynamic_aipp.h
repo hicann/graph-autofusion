@@ -22,7 +22,7 @@ struct tagAippDynamicBatchPara {
   int8_t scfSwitch;      // resize switch
   int8_t paddingSwitch;  // 0: unable padding
                          // 1: padding config value,sfr_filling_hblank_ch0 ~  sfr_filling_hblank_ch2
-                         // 2: padding source picture data, single row/collumn copy
+                         // 2: padding source picture data, single row/column copy
                          // 3: padding source picture data, block copy
                          // 4: padding source picture data, mirror copy
   int8_t rotateSwitch;   // rotate switch，0: non-ratate，

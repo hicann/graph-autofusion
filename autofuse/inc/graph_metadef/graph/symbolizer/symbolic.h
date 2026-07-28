@@ -33,12 +33,12 @@ enum class ExprType : uint32_t {
   kExprConstantRealDouble = 1,
   kExprConstantRation = 2,
   kExprConstantBoolean = 3,
-  // add const defination here
+  // add const definition here
   kExprVariable = 100,
-  // add variable defination here
+  // add variable definition here
   kExprOperation = 200,
   kExprOperationBoolean,
-  // add operation defination here
+  // add operation definition here
   kExprNone = std::numeric_limits<uint32_t>::max()
 };
 

@@ -942,7 +942,7 @@ inline __aicore__ void CompareExtendInt64GtGeLe(const AscendC::LocalTensor<uint8
   constexpr uint32_t elem_in_one_repeat = ONE_REPEAT_BYTE_SIZE / sizeof(int64_t);
 
   // Divide int64_t into 2 int32_t digits,
-  // calculate the sign bits and value bits seperately, and calculate as a whole in the end
+  // calculate the sign bits and value bits separately, and calculate as a whole in the end
   uint32_t quadruple_cal_cnt = 4 * repeat_times * (last_axis < elem_in_one_repeat ? elem_in_one_repeat : last_axis);
   uint32_t double_cal_cnt = 2 * repeat_times * (last_axis < elem_in_one_repeat ? elem_in_one_repeat : last_axis);
   // make sure every tensor address is aligned to 32B

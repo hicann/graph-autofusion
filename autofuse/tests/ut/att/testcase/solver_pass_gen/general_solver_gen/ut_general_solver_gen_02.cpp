@@ -381,7 +381,7 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_run_solver) {
   expect_codes += "        OP_LOGD(OP_NAME, \"Start initializing the input.\");\n";
   expect_codes += "        if (solver -> Init(input)) {\n";
   expect_codes += "            // 运行通用求解器并获取算法的解\n";
-  expect_codes += "            OP_LOGD(OP_NAME, \"Intialization finished, start running the solver.\");\n";
+  expect_codes += "            OP_LOGD(OP_NAME, \"Initialization finished, start running the solver.\");\n";
   expect_codes += "            if (solver -> Run(solution_num, solution)) {\n";
   expect_codes += "                solver -> GetResult(solution_num, solution, tiling_data);\n";
   expect_codes += "                free(memory_pool);\n";

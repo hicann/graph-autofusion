@@ -502,7 +502,7 @@ std::string MemoryTilingDataGen::GenFuncImpl(const std::pair<std::string, Expr> 
   }
   for (const auto &origin_var : used_vars) {
     if (!IsValid(used_expr)) {
-      GELOGW("Container[%s] expr does't exist.", var_name.c_str());
+      GELOGW("Container[%s] expr doesn't exist.", var_name.c_str());
       continue;
     }
     if ((origin_var.IsConstExpr()) || (define_vars.find(Str(origin_var)) != define_vars.cend())) {

@@ -171,13 +171,13 @@ class FastNode {
 
   /**
    * record the edge info to node.
-   * The funcion is not recommended, please used the AddEdge funcion istead.
+   * The function is not recommended, please used the AddEdge function instead.
    */
   graphStatus RecordEdge(Edge<FastNode> *const edge, DirectionType type);
 
   /**
    * clear the edge info to node.
-   * The funcion is not recommended, please used the RemoveEdge funcion istead.
+   * The function is not recommended, please used the RemoveEdge function instead.
    */
   graphStatus EraseEdge(const Edge<FastNode> *const edge, DirectionType type);
 
@@ -208,7 +208,7 @@ class FastNode {
   void UpdateDataInNum(size_t new_num);
 
   /**
-   * update the number of data ouput in the node.
+   * update the number of data output in the node.
    */
   void UpdateDataOutNum(size_t new_num);
 

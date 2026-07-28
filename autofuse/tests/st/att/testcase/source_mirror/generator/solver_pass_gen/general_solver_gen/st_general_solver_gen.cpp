@@ -397,7 +397,7 @@ void AppendSolverImplPart6(std::string &codes) {
   codes += "        OP_LOGD(OP_NAME, \"Start initializing the input.\");\n";
   codes += "        if (solver -> Init(input)) {\n";
   codes += "            // 运行通用求解器并获取算法的解\n";
-  codes += "            OP_LOGD(OP_NAME, \"Intialization finished, start running the solver.\");\n";
+  codes += "            OP_LOGD(OP_NAME, \"Initialization finished, start running the solver.\");\n";
   codes += "            if (solver -> Run(solution_num, solution)) {\n";
   codes += "                solver -> GetResult(solution_num, solution, tiling_data);\n";
   codes += "                delete solver;\n";
@@ -513,7 +513,7 @@ void AppendSolverInvokePart1(std::string &codes) {
   codes += "        OP_LOGD(OP_NAME, \"Start initializing the input.\");\n";
   codes += "        if (solver -> Init(input)) {\n";
   codes += "            // 运行通用求解器并获取算法的解\n";
-  codes += "            OP_LOGD(OP_NAME, \"Intialization finished, start running the solver.\");\n";
+  codes += "            OP_LOGD(OP_NAME, \"Initialization finished, start running the solver.\");\n";
   codes += "            if (solver -> Run(solution_num, solution)) {\n";
   codes += "                solver -> GetResult(solution_num, solution, tiling_data);\n";
   codes += "                delete solver;\n";

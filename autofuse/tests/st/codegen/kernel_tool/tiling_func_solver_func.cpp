@@ -177,7 +177,7 @@ bool AxesReorderSolver::MulticoreTiling(bool enable_workload_balance) {
     double max_balance = std::fmod(cur_corenum_fp, 1.0);
     OP_LOGD(OP_NAME, "max_balance initialized: %f, current corenum is %d", max_balance, cur_corenum);
     if (fabs(max_balance) < 0.00000001f) {
-      OP_LOGI(OP_NAME, "max_balance already satisified");
+      OP_LOGI(OP_NAME, "max_balance already satisfied");
       return true;
     }
     double balance = max_balance;
@@ -229,13 +229,13 @@ void AxesReorderSolver::ApplyPromptAlign(TilingVariable *var) {
     const auto tile_data_size = var->value * var->data_type_size;
     // if tile data size is less than 512B, no need to update prompt align
     if ((loop_size == 1) && (tail_size == 0) && (tile_data_size <= 512)) {
-      OP_LOGI(OP_NAME, "No need to update promt align, as loop size is 1 and tail size is 0, tile data size is %u",
+      OP_LOGI(OP_NAME, "No need to update prompt align, as loop size is 1 and tail size is 0, tile data size is %u",
               tile_data_size);
       return;
     }
     // 当block_len > 64B 对性能影响较大
     if ((var->value * var->data_type_size) <= 64) {
-      OP_LOGI(OP_NAME, "No need to update promt align, as block len is less than 64B");
+      OP_LOGI(OP_NAME, "No need to update prompt align, as block len is less than 64B");
       return;
     }
     OP_LOGI(OP_NAME, "Update prompt align from %u to %u", var->value, aligned_val);

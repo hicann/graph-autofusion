@@ -338,13 +338,13 @@ const std::string GE_FE_FLAG = "ge.feFlag";
 // this option is to obtain stream max parallel num
 const std::string STREAM_MAX_PARALLEL_NUM = "ge.streamMaxParallelNum";
 
-// congigure outputDatatype to setting net output type
+// configure outputDatatype to setting net output type
 const std::string OUTPUT_DATATYPE = "ge.outputDatatype";
 
-// congigure opSelectImplmode to setting op select implmode
+// configure opSelectImplmode to setting op select implmode
 const std::string OP_SELECT_IMPL_MODE = "ge.opSelectImplmode";
 
-// congigure optypelist_for_implmode to setting which op use implmode
+// configure optypelist_for_implmode to setting which op use implmode
 const std::string OPTYPELIST_FOR_IMPLMODE = "ge.optypelistForImplmode";
 
 // configure whether to enable hcom parallel by session constructor options param,
@@ -440,7 +440,7 @@ const char_t *const ENABLE_PRINT_OP_PASS = "ge.enablePrintOpPass";
 const char_t *const DEBUG_DIR = "ge.debugDir";
 
 // Configure switch for op status check such as overflow
-// Its value should be true of flase
+// Its value should be true of false
 const char_t *const STATUS_CHECK = "ge.status_check";
 
 // Configure operator compiler cache path

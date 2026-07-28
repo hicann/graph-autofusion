@@ -2863,7 +2863,7 @@ std::string TilingLib::GenPGOGetTilingKey(const std::string tiling) const {
   ss << "    }" << std::endl;
   ss << "    OP_LOGD(OP_NAME, \"[Start to use tiling result]: %s.\", config_file_path);" << std::endl;
   ss << "    std::string line;" << std::endl;
-  ss << "    // first line: 0:read everytime; 1:read first time" << std::endl;
+  ss << "    // first line: 0:read every time; 1:read first time" << std::endl;
   ss << "    std::getline(config_file, line);" << std::endl;
   ss << "    std::istringstream iss0(line);" << std::endl;
   ss << "    int flag = -1;" << std::endl;

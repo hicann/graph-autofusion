@@ -1347,7 +1347,7 @@ bool PGOGetTilingKey(const char *config_file_path, AutofuseTilingData &tiling_da
     }
     OP_LOGD(OP_NAME, "[Start to use tiling result]: %s.", config_file_path);
     std::string line;
-    // first line: 0:read everytime; 1:read first time
+    // first line: 0:read every time; 1:read first time
     std::getline(config_file, line);
     std::istringstream iss0(line);
     int flag = -1;

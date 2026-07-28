@@ -517,7 +517,7 @@ af::Status CodeGen::HandleDeviceCodeGenForCVFusion(CodeGen::Object *self,
     af::Status ret = self->codegen->GenerateKernel(ub_schedule_result, ub_kernel, false);
     GE_CHK_STATUS_RET(ret, "codegen generate ub kernel fail");
   } else {
-    GELOGI("Has no cube ub fused shcedule result, no need to generate ub tiling data and kernel");
+    GELOGI("Has no cube ub fused schedule result, no need to generate ub tiling data and kernel");
   }
 
   // 生成兜底模板的代码，必须有兜底模板
@@ -582,7 +582,7 @@ af::Status CodeGen::HandleHostCodeGenForCVFusion(CodeGen::Object *self,
                                                     ub_tiling_file_name_to_content),
                       "generate ub tiling failed");
   } else {
-    GELOGI("Has no cube ub fused shcedule result, no need to generate ub tiling");
+    GELOGI("Has no cube ub fused schedule result, no need to generate ub tiling");
   }
 
   // 生成兜底模板的代码，必须有兜底模板

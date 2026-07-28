@@ -24,7 +24,7 @@ class CycleDetector {
   ~CycleDetector() = default;
   /* Detect whether there are cycles in graph
    * after fusing all nodes in param fusion_nodes.
-   * Before call this func, you should call GenerateConnectionMatrix frist
+   * Before call this func, you should call GenerateConnectionMatrix first
    * to generate connection_matrix based on current graph.
    *
    * Compared with Cycle Detection
@@ -53,7 +53,7 @@ class CycleDetector {
    * Update connection matrix based on graph.
    * Connection matrix is served for cycle detection.
    *
-   * The first param graph, it should be the same one graph when contribue cycle_detector
+   * The first param graph, it should be the same one graph when contribute cycle_detector
    */
   void Update(const ComputeGraphPtr &graph, const std::vector<NodePtr> &fusion_nodes);
 

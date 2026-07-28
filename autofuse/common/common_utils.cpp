@@ -361,11 +361,11 @@ bool IsGeneralizeBrcInlineScene(const af::AscNodePtr &node, const af::AscTensor 
 
   GE_CHK_BOOL_RET_STATUS_NOLOG(i0_vectorized_axis_pos.size() == i1_vectorized_axis_pos.size(), false);
 
-  GELOGD("node_name:%s, input0 axis_id:%s, repeates:%s, vectorized_axis:%s, vectorized_axis_pos:%s", node->GetNamePtr(),
+  GELOGD("node_name:%s, input0 axis_id:%s, repeats:%s, vectorized_axis:%s, vectorized_axis_pos:%s", node->GetNamePtr(),
          VectorToStr(input0.attr.axis).c_str(), VectorToStr(input0.attr.repeats).c_str(),
          VectorToStr(input0.attr.vectorized_axis).c_str(), VectorToStr(i0_vectorized_axis_pos).c_str());
 
-  GELOGD("node_name:%s, input0 axis_id:%s, repeates:%s, vectorized_axis:%s, vectorized_axis_pos:%s", node->GetNamePtr(),
+  GELOGD("node_name:%s, input0 axis_id:%s, repeats:%s, vectorized_axis:%s, vectorized_axis_pos:%s", node->GetNamePtr(),
          VectorToStr(input1.attr.axis).c_str(), VectorToStr(input1.attr.repeats).c_str(),
          VectorToStr(input0.attr.vectorized_axis).c_str(), VectorToStr(i1_vectorized_axis_pos).c_str());
 

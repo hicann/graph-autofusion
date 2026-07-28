@@ -4647,7 +4647,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Multi_ScheduleGroup) {
   codegen::Kernel::GenKernelFuncByTilingKey(fused_schedule_result, ss1);
   kernel_txt = ss1.str();
   std::string expect_found =
-      "const uint32_t block_offset = t->ub_size;  // resue as block_offset\n"
+      "const uint32_t block_offset = t->ub_size;  // reuse as block_offset\n"
       "block_dim = block_dim >= block_offset ? "
       "block_dim - block_offset : block_dim + GetBlockNum() - block_offset;\n";
   EXPECT_TRUE(kernel_txt.find(expect_found) != std::string::npos);

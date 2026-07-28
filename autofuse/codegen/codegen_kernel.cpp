@@ -462,7 +462,7 @@ Status Tensor::Init() {
     this->vectorized_axis_pos.push_back(pos - this->axis.begin());
   }
 
-  // repeates 大于0的时候, 先初始化is_ub_scalar为true, 如有有其一repeate不是One, 则赋值为false, 认为不是ub_scalar场景
+  // repeats 大于0的时候, 先初始化is_ub_scalar为true, 如有有其一repeate不是One, 则赋值为false, 认为不是ub_scalar场景
   is_ub_scalar = (this->axis_size.size() > 0U);
   for (auto &repeate : this->axis_size) {
     if (repeate != One) {
@@ -1061,7 +1061,7 @@ std::string codegen::Tiler::BlockOutterAxisDefine() {
   stringstream code;
   code << this->block_dim.Define("GetBlockIdx()") << std::endl;
   if (enable_group_parallel_) {
-    code << "const uint32_t block_offset = " << tiling_data.name << "->ub_size;  // resue as block_offset" << std::endl;
+    code << "const uint32_t block_offset = " << tiling_data.name << "->ub_size;  // reuse as block_offset" << std::endl;
     code << this->block_dim.name << " = " << this->block_dim.name << " >= block_offset ? " << this->block_dim.name
          << " - block_offset : " << this->block_dim.name << " + GetBlockNum() - block_offset;" << std::endl;
     // block_dim范围在调用前校验了，此处不需要重复校验

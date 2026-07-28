@@ -59,7 +59,7 @@ typedef intptr_t TraEventHandle;
 #define TRACE_STRUCT_SHOW_MODE_HEX 2   // hexadecimal
 #define TRACE_STRUCT_SHOW_MODE_CHAR 3  // string
 
-// evnet process type
+// event process type
 #define TRACE_EVENT_PROCESS_SYNC 0U                 // process event synchronously
 #define TRACE_EVENT_PROCESS_ASYNC 1U                // process event asynchronously
 #define TRACE_EVENT_PROCESS_ASYNC_DEDUPLICATION 2U  // process event asynchronously and deduplication

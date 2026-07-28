@@ -370,7 +370,7 @@ Codegen::Codegen(const CodegenOptions &options)
       using_att_calc_qbt_size_(options.using_att_calc_qbt_size) {}
 
 Status Codegen::Generate(const ascir::FusedScheduledResult &fused_schedule_result, CodegenResult &result) const {
-  // fot UT/ST shape info stub
+  // for UT/ST shape info stub
   std::map<std::string, std::string> shape_info;
   return this->Generate(shape_info, fused_schedule_result, result);
 }

@@ -701,7 +701,7 @@ Status Scheduler::DoScheduler() {
     std::vector<ascir::AxisId> new_sched_axes;
     GE_CHK_STATUS_RET(BlockSplit(new_sched_axes), "Failed to gen tile outer axis, graph:[%s].",
                       graph_.GetName().c_str());
-    // Appy block split for node
+    // Apply block split for node
     GE_CHK_STATUS_RET(ApplyBlockSplit(new_sched_axes));
   }
   GE_CHK_STATUS_RET(RemoveRedundantBroadcastNode(graph_));
