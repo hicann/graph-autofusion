@@ -9,27 +9,124 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
+import importlib.util
+import os
+import sys
+import types
+
 import pytest
 
-from compile_test_utils import load_asc_codegen_compile_module
 
-SPLIT_HEADER_NAMES = (
-    "autofuse_tiling_func_state.h",
-    "autofuse_tiling_func_log.h",
-    "autofuse_tiling_func_pgo.h",
-    "autofuse_tiling_func_base.h",
-    "autofuse_tiling_func_solver.h",
-    "autofuse_tiling_func_api.h",
-    "autofuse_tiling_func_entry.h",
-    "autofuse_tiling_func_tail.h",
-    "cube_kernel_tiling_wrapper.h",
+BASE_DIR = os.path.dirname(
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    )
 )
+PYTHON_DIR = os.path.join(BASE_DIR, "autofuse/compiler/python")
+MODULE_NAME = "autofuse.compiler.python.asc_codegen_compile"
+MODULE_PATH = os.path.join(PYTHON_DIR, "asc_codegen_compile.py")
+
+
+class _SimpleNamespace(object):
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+class _DummyLogger(object):
+    @staticmethod
+    def info(*args, **kwargs):
+        return None
+
+    @staticmethod
+    def error(*args, **kwargs):
+        return None
+
+    @staticmethod
+    def warning(*args, **kwargs):
+        return None
+
+
+def _stub_module(name, **attrs):
+    module = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    sys.modules[name] = module
+    return module
 
 
 @pytest.fixture(scope="module")
 def asc_codegen_compile_module():
-    with load_asc_codegen_compile_module() as module:
-        yield module
+    _stub_module("tbe")
+    _stub_module("tbe.common")
+    _stub_module("tbe.common.buildcfg", get_current_build_config=lambda: {})
+    _stub_module("tbe.common.utils")
+    _stub_module(
+        "tbe.common.utils.log",
+        info=_DummyLogger.info,
+        error=_DummyLogger.error,
+        warning=_DummyLogger.warning,
+    )
+    _stub_module(
+        "tbe.common.utils.op_tiling", do_op_tiling=lambda *args, **kwargs: None
+    )
+    _stub_module(
+        "tbe.common.context",
+        get_context=lambda: _SimpleNamespace(get_compile_info=lambda: {}),
+    )
+    _stub_module("tbe.tikcpp")
+    _stub_module(
+        "tbe.tikcpp.compile_op",
+        CommonUtility=_SimpleNamespace(print_compile_log=lambda *args, **kwargs: None),
+        AscendCLogLevel=_SimpleNamespace(
+            LOG_ERROR="error", LOG_DEBUG="debug", LOG_WARNING="warning"
+        ),
+    )
+    _stub_module(
+        "tbe.tikcpp.get_op_tiling",
+        TilingInfo=object,
+        _change_param_name_to_name=lambda *args, **kwargs: None,
+        gen_static_shape_v2=lambda *args, **kwargs: None,
+    )
+    sys.modules["tbe.tikcpp"].OpInfo = object
+    _stub_module("asc_op_compile_base")
+    _stub_module("asc_op_compile_base.common")
+    _stub_module("asc_op_compile_base.common.platform")
+    _stub_module(
+        "asc_op_compile_base.common.platform.platform_info",
+        get_soc_spec=lambda *args, **kwargs: None,
+    )
+
+    package = _stub_module("autofuse")
+    compiler_pkg = _stub_module("autofuse.compiler")
+    python_pkg = _stub_module("autofuse.compiler.python")
+    package.compiler = compiler_pkg
+    compiler_pkg.python = python_pkg
+
+    package_prefix = MODULE_NAME.rsplit(".", 1)[0]
+    _stub_module(
+        package_prefix + ".pyautofuse",
+        Schedule=object,
+        CodeGen=object,
+        ascir=_SimpleNamespace(),
+    )
+    _stub_module(
+        package_prefix + ".ascbc_kernel_compile",
+        ascbc_kernel_compile=lambda *args, **kwargs: ("kernel.o", "kernel.json"),
+        camel_to_snake=lambda value: value,
+    )
+    _stub_module(
+        package_prefix + ".compile_adapter",
+        get_pgo_env_flag=lambda: False,
+        get_pgo_topn=lambda: 5,
+    )
+
+    spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(module)
+    sys.modules[MODULE_NAME] = module
+    return module
 
 
 def test_get_replace_kernel_root_returns_none_when_env_is_missing(
@@ -149,25 +246,6 @@ def test_replace_host_files_copies_autofuse_cube_tiling_data_when_present(
     assert host_build_dir.join("autofuse_cube_tiling_data.h").read() == "cube"
 
 
-def test_replace_host_files_copies_split_headers_when_present(
-    tmpdir, asc_codegen_compile_module
-):
-    replace_root = tmpdir.mkdir("replace_root")
-    source_dir = replace_root.mkdir("nested")
-    host_build_dir = tmpdir.ensure("build", "host", dir=True)
-
-    source_dir.join("demo_graph_tiling_func_solver_func.cpp").write("new solver")
-    for header_name in SPLIT_HEADER_NAMES:
-        source_dir.join(header_name).write(header_name)
-
-    asc_codegen_compile_module.replace_host_files(
-        str(replace_root), str(host_build_dir), "demo_graph"
-    )
-
-    for header_name in SPLIT_HEADER_NAMES:
-        assert host_build_dir.join(header_name).read() == header_name
-
-
 def test_host_miss_device_hit_keeps_device_replacement_independent(
     tmpdir, asc_codegen_compile_module
 ):
@@ -215,64 +293,75 @@ def test_device_miss_host_hit_keeps_host_replacement_independent(
     assert host_build_dir.join("demo_graph_tiling_func_0.cpp").read() == "new0"
 
 
-def _set_module_mocks(module, monkeypatch, mocks):
-    for name, mock in mocks.items():
-        monkeypatch.setattr(module, name, mock)
-
-
-def _mock_compile_preparation(asc_codegen_compile_module, monkeypatch, tmpdir):
-    mocks = {
-        "get_graph_basic_info": lambda params, args: (
-            "demo_graph",
-            1,
-            1,
-            True,
-            False,
-            {},
-        ),
-        "create_compile_dirs": lambda temp_dir: (
-            str(tmpdir.ensure("device", dir=True)),
-            str(tmpdir.ensure("host", dir=True)),
-        ),
-        "generate_device_and_host_code": lambda **kwargs: ("kernel", {"k": "v"}),
-        "is_static_compile": lambda params, tiling_func_srcs: True,
-    }
-    _set_module_mocks(asc_codegen_compile_module, monkeypatch, mocks)
-
-
-def _mock_compile_execution(asc_codegen_compile_module, monkeypatch, tmpdir, calls):
+def _mock_host_replacement_compile_flow(
+    asc_codegen_compile_module, monkeypatch, tmpdir, calls
+):
     def fake_static_shape_compile(**kwargs):
         if "use_cv_common" in kwargs:
             kwargs["use_cv_common"][0] = True
         calls.append(("static_shape_compile", kwargs["graph_name"], kwargs))
 
-    mocks = {
-        "ascbc_matmul_kernel_tiling_pro": lambda *args, **kwargs: kwargs[
-            "use_cv_common"
-        ].__setitem__(0, True),
-        "static_shape_compile": fake_static_shape_compile,
-        "get_replace_kernel_root": lambda: tmpdir.ensure("replace_root", dir=True),
-        "replace_host_files": lambda root, host_dir, graph_name: calls.append(
+    monkeypatch.setattr(
+        asc_codegen_compile_module,
+        "get_graph_basic_info",
+        lambda params, args: ("demo_graph", 1, 1, True, False, {}),
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module,
+        "create_compile_dirs",
+        lambda temp_dir: (
+            str(tmpdir.ensure("device", dir=True)),
+            str(tmpdir.ensure("host", dir=True)),
+        ),
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module,
+        "generate_device_and_host_code",
+        lambda **kwargs: ("kernel", {"k": "v"}),
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module,
+        "is_static_compile",
+        lambda params, tiling_func_srcs: True,
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module,
+        "ascbc_matmul_kernel_tiling_pro",
+        lambda *args, **kwargs: kwargs["use_cv_common"].__setitem__(0, True),
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module, "static_shape_compile", fake_static_shape_compile
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module,
+        "get_replace_kernel_root",
+        lambda: tmpdir.ensure("replace_root", dir=True),
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module,
+        "replace_host_files",
+        lambda root, host_dir, graph_name: calls.append(
             ("replace_host", host_dir, graph_name)
         ),
-        "replace_kernel": lambda *args, **kwargs: calls.append(("replace_device",)),
-        "ascbc_kernel_compile": lambda *args, **kwargs: (
-            "kernel.o",
-            "kernel.json",
-        ),
-        "asc_graph_compile_post": lambda *args, **kwargs: calls.append(
-            ("post", args[0])
-        ),
-        "timestamp_set": lambda *args, **kwargs: None,
-    }
-    _set_module_mocks(asc_codegen_compile_module, monkeypatch, mocks)
-
-
-def _mock_host_replacement_compile_flow(
-    asc_codegen_compile_module, monkeypatch, tmpdir, calls
-):
-    _mock_compile_preparation(asc_codegen_compile_module, monkeypatch, tmpdir)
-    _mock_compile_execution(asc_codegen_compile_module, monkeypatch, tmpdir, calls)
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module,
+        "replace_kernel",
+        lambda *args, **kwargs: calls.append(("replace_device",)),
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module,
+        "ascbc_kernel_compile",
+        lambda *args, **kwargs: ("kernel.o", "kernel.json"),
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module,
+        "asc_graph_compile_post",
+        lambda *args, **kwargs: calls.append(("post", args[0])),
+    )
+    monkeypatch.setattr(
+        asc_codegen_compile_module, "timestamp_set", lambda *args, **kwargs: None
+    )
 
 
 def test_host_replacement_happens_once_before_static_shape_compile_and_uses_final_host_dir(

@@ -24,10 +24,8 @@ inline const std::string kCubeKernelTilingWrapperHppValue = R"(
 #include <stdexcept>
 #include <cstddef>
 #include <cstring>
-#include <cmath>
 #include <iomanip>
 #include <algorithm>
-#include <limits>
 #include "acl/acl.h"
 #include "platform/platform_info.h"
 

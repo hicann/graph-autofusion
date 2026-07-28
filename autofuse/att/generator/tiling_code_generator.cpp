@@ -31,25 +31,6 @@ bool IsUniqueGroups(const TilingModelInfo &all_model_infos) {
   }
   return (asc_graphs.size() == 1UL) && (groups_ids.size() == 1UL) && (impl_graphs_ids.size() == 1UL);
 }
-
-std::string GetSplitHeaderFileName(const std::string &key) {
-  if (key == kTilingStateHeaderIdentify) {
-    return kTilingStateHeaderFileName;
-  }
-  if (key == kTilingLogHeaderIdentify) {
-    return kTilingLogHeaderFileName;
-  }
-  if (key == kTilingPgoHeaderIdentify) {
-    return kTilingPgoHeaderFileName;
-  }
-  if (key == kTilingApiHeaderIdentify) {
-    return kTilingApiHeaderFileName;
-  }
-  if (key == kTilingSolverHeaderIdentify) {
-    return kTilingSolverHeaderFileName;
-  }
-  return "";
-}
 }  // namespace
 
 af::Status TilingCodeGenerator::GenTilingCode(const std::string &op_type, const TilingModelInfo &model_infos,
@@ -71,9 +52,6 @@ af::Status TilingCodeGenerator::GenTilingCode(const std::string &op_type, const 
       if (key == kTilingHeadIdentify) {
         tiling_dumper.AddLine(value);
         tiling_dumper.SaveToFile(kDefaultTilingHeadFileName);
-      } else if (!GetSplitHeaderFileName(key).empty()) {
-        tiling_dumper.AddLine(value);
-        tiling_dumper.SaveToFile(EnsureTrailingSlash(config.path) + GetSplitHeaderFileName(key));
       } else if ((key == config.tiling_data_type_name) || (key.find(kDefaultTilingDataTypeName) != std::string::npos)) {
         // doning nothing,在上面做过处理了
       } else {
@@ -99,7 +77,6 @@ af::Status TilingCodeGenerator::GenTilingCode(const std::string &op_type, const 
   GE_ASSERT_SUCCESS(impl->GenTilingTail(tiling_res), "Gen tiling tail impl failed, type[%d].",
                     static_cast<int32_t>(config.type));
   GE_ASSERT_TRUE(tiling_res.find(kTilingHeadIdentify) != tiling_res.cend(), "Generate tiling func failed.");
-  GE_ASSERT_SUCCESS(impl->FinishGeneratedHeaders(tiling_res), "Finish generated tiling headers failed.");
   return af::SUCCESS;
 }
 
@@ -200,7 +177,6 @@ af::Status TilingCodeGenerator::GenTilingCode(const std::string &op_type,
     return GenTilingCode(op_type, all_model_infos, config, tiling_res);
   }
 
-  generated_headers_.clear();
   GenTilingHead(op_type, all_model_infos, config, tiling_res, enable_group_parallels);
   GELOGD("Got model infos size %zu of op type = %s.", all_model_infos.size(), op_type.c_str());
 
@@ -214,9 +190,6 @@ af::Status TilingCodeGenerator::GenTilingCode(const std::string &op_type,
   GenTilingTailExtParams ext_params = {schedule_result_score_func, var_relations, enable_group_parallels,
                                        workspace_tensor_id_set};
   GenTilingTail(params, tiling_res, ext_params);
-  GE_ASSERT_SUCCESS(TilingCodeGenImpl::FinishGeneratedHeaders(generated_headers_, config.tiling_data_type_name,
-                                                              config.is_autofuse, tiling_res),
-                    "Finish generated tiling headers failed.");
   return af::SUCCESS;
 }
 
@@ -230,7 +203,6 @@ af::Status TilingCodeGenerator::GenTilingHead(const std::string &op_type, const 
   GE_ASSERT_NOTNULL(impl, "Create tiling code gen impl failed, type[%d].", static_cast<int32_t>(config.type));
   GE_ASSERT_SUCCESS(impl->GenTilingHead(tiling_res, enable_group_parallels), "Gen tiling head impl failed, type[%d].",
                     static_cast<int32_t>(config.type));
-  MergeGeneratedHeaders(*impl);
   return af::SUCCESS;
 }
 
@@ -245,7 +217,6 @@ af::Status TilingCodeGenerator::GenTilingBody(const GenTilingParams &params,
 
   GE_ASSERT_SUCCESS(impl->GenTiling(tiling_res, params.cache_reuse_info, cache_capacity, enable_group_parallels),
                     "Gen tiling body impl failed, type[%d].", static_cast<int32_t>(params.config.type));
-  MergeGeneratedHeaders(*impl);
   return af::SUCCESS;
 }
 
@@ -261,14 +232,7 @@ af::Status TilingCodeGenerator::GenTilingTail(const GenTilingParams &params,
                                              std::move(ext_params.workspace_tensor_id_set)};
   GE_ASSERT_SUCCESS(impl->GenTilingTail(tiling_res, impl_ext_params), "Gen tiling tail impl failed, type[%d].",
                     static_cast<int32_t>(params.config.type));
-  MergeGeneratedHeaders(*impl);
   return af::SUCCESS;
-}
-
-void TilingCodeGenerator::MergeGeneratedHeaders(const TilingCodeGenImpl &impl) {
-  for (const auto &[header_id, generated_code] : impl.GetGeneratedHeaders()) {
-    autofuse::AppendGeneratedCode(generated_headers_[header_id], generated_code);
-  }
 }
 
 af::Status TilingCodeGenerator::CollectModelInfosAndMetadata(
@@ -327,7 +291,6 @@ af::Status TilingCodeGenerator::GenScheduleGroupTilingBodies(
         impl->SetScheduleResultGroupNums(schedule_result_group_nums);
         GE_ASSERT_SUCCESS(impl->GenTiling(tiling_res, params.cache_reuse_info, cache_capacity, enable_group_parallels),
                           "Gen tiling body impl failed, type[%d].", params.config.type);
-        MergeGeneratedHeaders(*impl);
         tiling_res[config.tiling_data_type_name] += tiling_res[cur_config.tiling_data_type_name];
       }
     }

@@ -593,7 +593,7 @@ inline AxesReorderSolver::DualAxesInfo AxesReorderSolver::InitializeDualAxesInfo
   info.upper_bound_a = info.var_a->upper_bound(info.var_a->upper_bound_vars);
   info.upper_bound_b = info.var_b->upper_bound(info.var_b->upper_bound_vars);
   info.upper_bound_both = std::min(info.upper_bound_a, info.upper_bound_b);
-  info.low_bound_both = lcm(info.var_a->align, info.var_b->align);
+  info.low_bound_both = ::lcm(info.var_a->align, info.var_b->align);
   OP_LOGD(OP_NAME, "[DFX] Axes: a(ub=%ld, align=%ld), b(ub=%ld, align=%ld), low_bound_both=%ld",
           info.upper_bound_a, info.var_a->align, info.upper_bound_b, info.var_b->align, info.low_bound_both);
   return info;

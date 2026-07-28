@@ -11,7 +11,6 @@
 #include "common_gen_utils.h"
 #include <iostream>
 #include <regex>
-#include <vector>
 #include "gtest/gtest.h"
 #include "base/att_const_values.h"
 #include "tiling_code_generator.h"
@@ -448,8 +447,51 @@ Status BuildMatMulDemoAscendGraph(ge::AscGraph &graph) {
   mat_mul->attr.api.unit = ComputeUnit::kUnitVector;
   return af::SUCCESS;
 }
+std::string RemoveAutoFuseTilingHeadGuards(const std::string &input) {
+  std::istringstream iss(input);
+  std::ostringstream oss;
+  std::string line;
+  const std::string guard_token = "__AUTOFUSE_TILING_FUNC_COMMON_H__";
+
+  while (std::getline(iss, line)) {
+    // 如果当前行不包含 guard_token，则保留
+    if (line.find(guard_token) == std::string::npos) {
+      oss << line << "\n";
+    }
+  }
+  return oss.str();
+}
+
 void CombineTilings(const std::map<std::string, std::string> &tilings, std::string &result) {
-  att::test::CombineTilings(tilings, result);
+  const std::string tiling_head = "TilingHead";                       // TilingHead作为开头拼接其他文件
+  const std::string tiling_data = "TilingData";                       // 要排除的 TilingData 子串
+  result += RemoveAutoFuseTilingHeadGuards(tilings.at(tiling_head));  // 删除头文件的宏保护，cpp文件不需要
+  const std::string include_str = "#include \"autofuse_tiling_func_common.h\"";
+
+  // 遍历所有非 TilingHead 和 TilingData 的条目，去掉第一行后拼接
+  for (const auto &[key, value] : tilings) {
+    if (key == tiling_head || key.find(tiling_data) != std::string::npos) {
+      continue;
+    }
+
+    // 查找并跳过第一行头文件行
+    size_t include_pos = value.find(include_str);
+    if (include_pos != std::string::npos) {
+      // 找到 include 行，跳过它，并去掉后面的换行符
+      size_t content_start = include_pos + include_str.length();
+      while (content_start < value.size() && (value[content_start] == '\n' || value[content_start] == '\r')) {
+        content_start++;
+      }
+      result += value.substr(content_start);
+    } else {
+      // 如果没有 include 行，直接拼接整个内容
+      result += value;
+    }
+
+    if (!result.empty() && result.back() != '\n') {
+      result += '\n';
+    }
+  }
 }
 }  // namespace cg
 }  // namespace ascir
@@ -1119,7 +1161,7 @@ TEST_F(TestApiTilingGen, gen_mat_mul_tiling_success) {
  * - `constexpr size_t kInputShapeSize`
  * - `constexpr size_t kOperatorCacheCapacity`
  * - `bool FindOperatorCache`
- * - `OperatorCacheSaveResult SaveOperatorCache`
+ * - `bool SaveOperatorCache`
  * - `bool IsCacheEnabled`
  *
  * 备注：验证编译时缓存开关功能正常
@@ -1162,7 +1204,7 @@ TEST_F(TestApiTilingGen, gen_op_level_cache_basic) {
 
   // 验证缓存函数生成
   EXPECT_NE(tiling_func.find("FindOperatorCache(const"), std::string::npos);
-  EXPECT_NE(tiling_func.find("OperatorCacheSaveResult SaveOperatorCache"), std::string::npos);
+  EXPECT_NE(tiling_func.find("bool SaveOperatorCache"), std::string::npos);
 
   // 注意：缓存查询代码(input_shapes数组构建)只在有缓存复用信息时生成
   // 这是当前设计的限制，算子级缓存类型和函数已正确生成
@@ -1297,7 +1339,7 @@ TEST_F(TestApiTilingGen, two_level_cache_full_test) {
 
   // 验证两级缓存函数生成
   EXPECT_NE(tiling_func.find("FindOperatorCache(const"), std::string::npos);
-  EXPECT_NE(tiling_func.find("OperatorCacheSaveResult SaveOperatorCache"), std::string::npos);
+  EXPECT_NE(tiling_func.find("bool SaveOperatorCache"), std::string::npos);
 
   // 验证TilingCacheContext类生成
   EXPECT_NE(tiling_func.find("class TilingCacheContext"), std::string::npos);

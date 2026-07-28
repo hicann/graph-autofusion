@@ -8,7 +8,6 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include <iostream>
-#include <vector>
 #include "gtest/gtest.h"
 #include "base/att_const_values.h"
 #include "gen_model_info.h"
@@ -20,7 +19,6 @@
 #include "graph_construct_utils.h"
 #include "result_checker_utils.h"
 #include "common/st_scenario_utils.h"
-#include "common_gen_utils.h"
 #include "test_common_utils.h"
 
 using namespace ge::ascir_op;
@@ -41,9 +39,9 @@ void Add_Layer_Norm_Slice_AfterQueBufAlloc(ascir::HintGraph &graph);
 void Add_Layer_Norm_Welford_BeforeAutofuse(ascir::HintGraph &graph);
 void Add_Layer_Norm_Welford_AfterScheduler(ascir::HintGraph &graph);
 void Add_Layer_Norm_Welford_AfterQueBufAlloc(ascir::HintGraph &graph);
+void CombineTilings(const std::map<std::string, std::string> &tilings, std::string &result);
 
 using namespace att;
-using att::test::CombineTilings;
 
 namespace {
 void SetStatsEnv() {
@@ -92,26 +90,6 @@ void WriteTilingFiles(const std::map<std::string, std::string> &tiling_funcs, co
   for (const auto &[key, value] : tiling_funcs) {
     if (key == "TilingHead") {
       WriteFile(head_file, head_include + value);
-      continue;
-    }
-    if (key == "TilingStateHeader") {
-      WriteFile("autofuse_tiling_func_state.h", value);
-      continue;
-    }
-    if (key == "TilingLogHeader") {
-      WriteFile("autofuse_tiling_func_log.h", value);
-      continue;
-    }
-    if (key == "TilingPgoHeader") {
-      WriteFile("autofuse_tiling_func_pgo.h", value);
-      continue;
-    }
-    if (key == "TilingSolverHeader") {
-      WriteFile("autofuse_tiling_func_solver.h", value);
-      continue;
-    }
-    if (key == "TilingApiHeader") {
-      WriteFile("autofuse_tiling_func_api.h", value);
       continue;
     }
     WriteFile(source_prefix + key + "_3.cpp", value);
@@ -239,6 +217,54 @@ TEST_F(TestGenAddLayerNormalModelInfoV2, test_autofuse_v2_axes_reorder) {
       "tiling_func_main_add_layer_norm_autofuse -I ./",
       "./tiling_func_main_add_layer_norm_autofuse");
 }
+std::string RemoveAutoFuseTilingHeadGuards(const std::string &input) {
+  std::istringstream iss(input);
+  std::ostringstream oss;
+  std::string line;
+  const std::string guard_token = "__AUTOFUSE_TILING_FUNC_COMMON_H__";
+
+  while (std::getline(iss, line)) {
+    // 如果当前行不包含 guard_token，则保留
+    if (line.find(guard_token) == std::string::npos) {
+      oss << line << "\n";
+    }
+  }
+
+  return oss.str();
+}
+
+void CombineTilings(const std::map<std::string, std::string> &tilings, std::string &result) {
+  const std::string tiling_head = "TilingHead";                       // TilingHead作为开头拼接其他文件
+  const std::string tiling_data = "TilingData";                       // 要排除的 TilingData 子串
+  result += RemoveAutoFuseTilingHeadGuards(tilings.at(tiling_head));  // 删除头文件的宏保护，cpp文件不需要
+  const std::string include_str = "#include \"autofuse_tiling_func_common.h\"";
+
+  // 遍历所有非 TilingHead 和 TilingData 的条目，去掉第一行后拼接
+  for (const auto &[key, value] : tilings) {
+    if (key == tiling_head || key.find(tiling_data) != std::string::npos) {
+      continue;
+    }
+
+    // 查找并跳过第一行头文件行
+    size_t include_pos = value.find(include_str);
+    if (include_pos != std::string::npos) {
+      // 找到 include 行，跳过它，并去掉后面的换行符
+      size_t content_start = include_pos + include_str.length();
+      while (content_start < value.size() && (value[content_start] == '\n' || value[content_start] == '\r')) {
+        content_start++;
+      }
+      result += value.substr(content_start);
+    } else {
+      // 如果没有 include 行，直接拼接整个内容
+      result += value;
+    }
+
+    if (!result.empty() && result.back() != '\n') {
+      result += '\n';
+    }
+  }
+}
+
 const std::string kGroupParallelTilingMain = R"(
  #include <iostream>
  #include "AddLayerNorm_tiling_data.h"

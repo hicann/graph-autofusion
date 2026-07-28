@@ -12,7 +12,6 @@
 #include <string>
 #include <utility>
 #include <algorithm>
-#include "common/tiling_source_dependencies.h"
 #include "base/base_types.h"
 #include "generator/preprocess/args_manager.h"
 #include "generator/solver_pass/solver.h"
@@ -41,7 +40,6 @@ class SolverPassManager : public InputOutputSettersMixin<SolverPassManager>,
         sub_case_tag_(case_id_info.sub_case_tag),
         tiling_data_type_(type_name) {}
   static std::string GenCommonBaseClassesHead(std::vector<ArgsManager> args_managers);
-  static autofuse::GeneratedCode GenCommonBaseClassesHeader(std::vector<ArgsManager> args_managers);
   static std::string GenCommonBaseClassesFunc(std::vector<ArgsManager> args_managers);
   std::string GenClassPass();
   std::pair<std::string, std::string> GenFuncPass();

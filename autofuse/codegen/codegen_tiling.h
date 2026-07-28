@@ -17,26 +17,12 @@
 
 namespace codegen {
 const std::string kTilingHeadIdentify = "TilingHead";
-const std::string kTilingStateHeaderIdentify = "TilingStateHeader";
-const std::string kTilingLogHeaderIdentify = "TilingLogHeader";
-const std::string kTilingPgoHeaderIdentify = "TilingPgoHeader";
-const std::string kTilingBaseHeaderIdentify = "TilingBaseHeader";
-const std::string kTilingSolverHeaderIdentify = "TilingSolverHeader";
-const std::string kTilingApiHeaderIdentify = "TilingApiHeader";
-const std::string kTilingEntryHeaderIdentify = "TilingEntryHeader";
-const std::string kTilingTailHeaderIdentify = "TilingTailHeader";
 const std::string kTilingDataIdentify = "TilingData";
 const std::string kTilingHeadGuard = "__AUTOFUSE_TILING_FUNC_COMMON_H__";
 const std::string kTilingHeadInclude = "#include \"autofuse_tiling_func_common.h\"";
-const std::string kTilingStateHeaderInclude = "#include \"autofuse_tiling_func_state.h\"";
-const std::string kTilingLogHeaderInclude = "#include \"autofuse_tiling_func_log.h\"";
-const std::string kTilingPgoHeaderInclude = "#include \"autofuse_tiling_func_pgo.h\"";
-const std::string kTilingBaseHeaderInclude = "#include \"autofuse_tiling_func_base.h\"";
-const std::string kTilingSolverHeaderInclude = "#include \"autofuse_tiling_func_solver.h\"";
-const std::string kTilingApiHeaderInclude = "#include \"autofuse_tiling_func_api.h\"";
-const std::string kTilingEntryHeaderInclude = "#include \"autofuse_tiling_func_entry.h\"";
-const std::string kTilingTailHeaderInclude = "#include \"autofuse_tiling_func_tail.h\"";
 const std::string kTilingHeadCceKtTestGuard = "#ifndef __CCE_KT_TEST__";
+const std::string kTilingHeadEndGuard = "#endif";
+const std::string kTilingHeadTilingContext = "#include \"exe_graph/runtime/tiling_context.h\"";
 const std::string kTilingDefAndConstIdentify = "tiling_def_and_tiling_const";
 const std::string kCubeTilingHeadInclude = "#include \"autofuse_cube_tiling_data.h\"";
 const std::string kCubeKernelTilingWrapperHpp = "ACubeKernelTilingWrapperHpp";
@@ -129,8 +115,7 @@ class TilingLib {
                                     const std::string tiling) const;
   std::string PGOTensorArgsDef() const;
   std::string PGOProfilingCallbackDef(const ::ascir::FusedScheduledResult &fused_schedule_result,
-                                      const std::string tiling, bool include_headers = true) const;
-  void AppendPgoConfigDef(std::stringstream &ss) const;
+                                      const std::string tiling) const;
   std::string PGOSearchFuncInputOutputCallBackDef(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   std::string PGOSearchFuncInputOutputDef(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   std::string PGOSearchFuncInputOutputCall(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
@@ -146,10 +131,6 @@ class TilingLib {
   std::string PGOSearchTensorFreeDef(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   std::string StubHeadersWithoutCodegenFunc() const;
   std::string GetStubTilingHeaders(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
-  std::string GetStubTilingApi(const ::ascir::FusedScheduledResult &fused_schedule_result, bool include_pgo) const;
-  void PopulateFallbackAtomicHeaders(std::map<std::string, std::string> &tiling_file_name_to_content,
-                                     const ::ascir::FusedScheduledResult &fused_schedule_result, bool use_att_codegen,
-                                     bool include_pgo) const;
   std::string GenGetAutoFuseTilingInput(bool is_inductor_scene) const;
   std::string GenGetResLimitStru(void) const;
   bool IsMixKernelTaskType(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
@@ -291,6 +272,7 @@ class TilingLib {
   std::string GenGetTilingKeyKernelTypeForStatic(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   std::string GenCVTilingFunc() const;
   std::string GenTilingDataBlockDimAndWss() const;
+  void AppendCVFusionHeaders(std::stringstream &ss, bool is_static, bool is_inductor = false) const;
   std::map<std::string, std::string> GenerateCVFusionStatic(
       const ::ascir::FusedScheduledResult &fused_schedule_result,
       const ::ascir::FusedScheduledResult &elemwise_schedule_result,

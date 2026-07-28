@@ -18,8 +18,6 @@ import types
 
 import pytest
 
-from compile_test_utils import TILING_HEADER_FILES
-
 
 _BASE_DIR = os.path.dirname(
     os.path.dirname(
@@ -29,14 +27,6 @@ _BASE_DIR = os.path.dirname(
 _PYTHON_DIR = os.path.join(_BASE_DIR, "autofuse/compiler/python")
 MODULE_NAME = "autofuse.compiler.python.asc_codegen_compile"
 MODULE_PATH = os.path.join(_PYTHON_DIR, "asc_codegen_compile.py")
-
-
-def _build_nchw_conv_args(module, input_shape, input_format):
-    args_list = [
-        {"shape": input_shape, "format": input_format, "dtype": "float16"},
-        {"shape": [1, 64, 224, 224], "format": "NCHW", "dtype": "float16"},
-    ]
-    return module.build_conv_args(args_list, 1, "NCHW")
 
 
 class SimpleNamespace(object):
@@ -163,7 +153,6 @@ def asc_codegen_compile_module():
     )
     stub_module(
         package_prefix + ".compile_adapter",
-        TILING_HEADER_FILES=TILING_HEADER_FILES,
         get_pgo_env_flag=lambda: False,
         get_pgo_topn=lambda: 5,
     )
@@ -238,8 +227,25 @@ class TestBuildConvArgs:
     @staticmethod
     def test_build_conv_args_nhwc_to_nchw(asc_codegen_compile_module):
         """测试 NHWC -> NCHW 格式转换"""
-        origin_inputs, origin_outputs, inputs = _build_nchw_conv_args(
-            asc_codegen_compile_module, [1, 224, 224, 64], "NHWC"
+        args_list = [
+            {
+                "shape": [1, 224, 224, 64],
+                "format": "NHWC",
+                "dtype": "float16",
+            },  # NHWC input
+            {
+                "shape": [1, 64, 224, 224],
+                "format": "NCHW",
+                "dtype": "float16",
+            },  # NCHW output
+        ]
+        input_num = 1
+        data_format = "NCHW"
+
+        origin_inputs, origin_outputs, inputs = (
+            asc_codegen_compile_module.build_conv_args(
+                args_list, input_num, data_format
+            )
         )
 
         assert inputs[0]["format"] == "NCHW"
@@ -250,8 +256,21 @@ class TestBuildConvArgs:
     @staticmethod
     def test_build_conv_args_same_format_no_conversion(asc_codegen_compile_module):
         """测试格式相同时不转换"""
-        origin_inputs, origin_outputs, inputs = _build_nchw_conv_args(
-            asc_codegen_compile_module, [1, 64, 224, 224], "NCHW"
+        args_list = [
+            {"shape": [1, 64, 224, 224], "format": "NCHW", "dtype": "float16"},
+            {
+                "shape": [1, 64, 224, 224],
+                "format": "NCHW",
+                "dtype": "float16",
+            },  # output
+        ]
+        input_num = 1
+        data_format = "NCHW"
+
+        origin_inputs, origin_outputs, inputs = (
+            asc_codegen_compile_module.build_conv_args(
+                args_list, input_num, data_format
+            )
         )
 
         # 格式相同，shape 不变

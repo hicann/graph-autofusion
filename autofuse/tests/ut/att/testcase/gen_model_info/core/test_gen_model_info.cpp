@@ -1242,7 +1242,7 @@ TEST_F(TestGenModelInfo, gen_schedule_group_with_var_relation) {
  * - `using OperatorLevelCache`
  * - `FixedSizeHashMap<kInputShapeSize, kOperatorCacheCapacity`
  * - `bool FindOperatorCache`
- * - `OperatorCacheSaveResult SaveOperatorCache`
+ * - `bool SaveOperatorCache`
  *
  * 备注：验证缓存类型定义和函数声明正确生成
  */
@@ -1285,8 +1285,7 @@ TEST_F(TestGenModelInfo, op_level_cache_basic) {
   // 验证缓存函数定义（在TilingCacheContext类中）
   // 使用通用的类型匹配，不依赖具体的TilingData类型名称
   EXPECT_NE(tiling_func.find("* FindOperatorCache(const std::array<uint32_t, kInputShapeSize>&"), std::string::npos);
-  EXPECT_NE(tiling_func.find("OperatorCacheSaveResult SaveOperatorCache(const std::array<uint32_t, kInputShapeSize>&"),
-            std::string::npos);
+  EXPECT_NE(tiling_func.find("bool SaveOperatorCache(const std::array<uint32_t, kInputShapeSize>&"), std::string::npos);
 
   // 注意：缓存查询代码(input_shapes数组构建)只在有缓存复用信息时生成
   // 这是当前设计的限制，算子级缓存类型和函数已正确生成
@@ -1344,13 +1343,11 @@ TEST_F(TestGenModelInfo, two_level_cache_generation) {
   // 验证两级缓存函数（在TilingCacheContext类中）
   // 使用通用的类型匹配，不依赖具体的TilingData类型名称
   EXPECT_NE(tiling_func.find("* FindOperatorCache(const std::array<uint32_t, kInputShapeSize>&"), std::string::npos);
-  EXPECT_NE(tiling_func.find("OperatorCacheSaveResult SaveOperatorCache(const std::array<uint32_t, kInputShapeSize>&"),
-            std::string::npos);
+  EXPECT_NE(tiling_func.find("bool SaveOperatorCache(const std::array<uint32_t, kInputShapeSize>&"), std::string::npos);
 
   // 验证TilingCacheContext类生成（使用unique_ptr避免栈溢出）
   EXPECT_NE(tiling_func.find("class TilingCacheContext"), std::string::npos);
-  EXPECT_NE(tiling_func.find("thread_local std::unique_ptr<OperatorLevelCache<TilingData>> operator_cache_"),
-            std::string::npos);
+  EXPECT_NE(tiling_func.find("thread_local std::unique_ptr<OperatorLevelCache> operator_cache_"), std::string::npos);
 
   // 清理环境变量
   unsetenv("AUTOFUSE_DFX_FLAGS");

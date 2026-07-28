@@ -51,16 +51,25 @@ class OperatorLevelCacheGen : public TilingCacheCodeGen {
   /**
    * @brief 生成TilingCacheContext类定义
    * @param code_printer 代码打印器
+   * @param tiling_data_type_name TilingData类型名称
    * @return af::Status
    */
-  static af::Status GenTilingCacheContext(ge::CodePrinter &code_printer);
+  static af::Status GenTilingCacheContext(ge::CodePrinter &code_printer, const std::string &tiling_data_type_name);
+
+  /**
+   * @brief 生成TilingCacheContext静态成员定义（必须在cpp文件中）
+   * @param code_printer 代码打印器
+   * @return af::Status
+   */
+  static af::Status GenTilingCacheContextStaticDefs(ge::CodePrinter &code_printer);
 
   /**
    * @brief 生成算子级缓存类型定义
    * @param code_printer 代码打印器
+   * @param tiling_data_type_name TilingData类型名称
    * @return af::Status
    */
-  static af::Status GenOperatorCacheTypes(ge::CodePrinter &code_printer);
+  static af::Status GenOperatorCacheTypes(ge::CodePrinter &code_printer, const std::string &tiling_data_type_name);
   /**
    *
    * @param code_printer 代码打印器（函数体）
@@ -83,9 +92,10 @@ class OperatorLevelCacheGen : public TilingCacheCodeGen {
 
   /**
    * @brief 生成Context类代码
+   * @param tiling_data_type_name TilingData类型名称
    * @return af::Status
    */
-  static std::string GenContextClass();
+  static std::string GenContextClass(const std::string &tiling_data_type_name);
 
   /**
    * @brief 生成Context类结构体
@@ -101,21 +111,24 @@ class OperatorLevelCacheGen : public TilingCacheCodeGen {
 
   /**
    * @brief 生成Context类缓存操作方法
+   * @param tiling_data_type_name TilingData类型名称
    * @return af::Status
    */
-  static std::string GenContextCacheOperations();
+  static std::string GenContextCacheOperations(const std::string &tiling_data_type_name);
 
   /**
    * @brief 生成FindOperatorCache实现代码
+   * @param tiling_data_type_name TilingData类型名称
    * @return 生成的代码字符串
    */
-  static std::string GenFindOperatorCacheImpl();
+  static std::string GenFindOperatorCacheImpl(const std::string &tiling_data_type_name);
 
   /**
    * @brief 生成SaveOperatorCache实现代码
+   * @param tiling_data_type_name TilingData类型名称
    * @return 生成的代码字符串
    */
-  static std::string GenSaveOperatorCacheImpl();
+  static std::string GenSaveOperatorCacheImpl(const std::string &tiling_data_type_name);
 };
 }  // namespace cache
 

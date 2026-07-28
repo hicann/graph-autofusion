@@ -70,9 +70,6 @@ class TilingCodeGenerator {
                                           const std::unordered_map<std::string, std::string> &cache_reuse_info,
                                           uint32_t cache_capacity, const EnableGroupParallels &enable_group_parallels,
                                           std::map<std::string, std::string> &tiling_res);
-  void MergeGeneratedHeaders(const TilingCodeGenImpl &impl);
-
-  std::map<autofuse::GeneratedHeaderId, autofuse::GeneratedCode> generated_headers_;
 };
 }  // namespace att
 #endif

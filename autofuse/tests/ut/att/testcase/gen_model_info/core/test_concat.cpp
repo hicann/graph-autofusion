@@ -85,6 +85,21 @@ class TestGenConcat : public ::testing::Test {
     unsetenv("ASCEND_GLOBAL_LOG_LEVEL");
   }
 };
+std::string RemoveAutoFuseTilingHeadGuards(const std::string &input) {
+  std::istringstream iss(input);
+  std::ostringstream oss;
+  std::string line;
+  const std::string guard_token = "__AUTOFUSE_TILING_FUNC_COMMON_H__";
+
+  while (std::getline(iss, line)) {
+    // 如果当前行不包含 guard_token，则保留
+    if (line.find(guard_token) == std::string::npos) {
+      oss << line << "\n";
+    }
+  }
+
+  return oss.str();
+}
 void InitConcatAxes(Concat &node, const std::vector<int64_t> &axis, af::DataType dtype,
                     const std::vector<af::Expression> &repeats, const std::vector<af::Expression> &strides) {
   node.attr.sched.axis = axis;

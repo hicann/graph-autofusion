@@ -415,18 +415,11 @@ ExprExprMap SolverPassManager::GetOriginalInputAlign() const {
 }
 
 std::string SolverPassManager::GenCommonBaseClassesHead(std::vector<ArgsManager> args_managers) {
-  return GenCommonBaseClassesHeader(std::move(args_managers)).body;
-}
-
-autofuse::GeneratedCode SolverPassManager::GenCommonBaseClassesHeader(std::vector<ArgsManager> args_managers) {
-  autofuse::GeneratedCode base_classes;
+  std::string base_classes;
   for (uint32_t i = 0U; i < static_cast<std::uint32_t>(SolverType::ERROR); i++) {
     SolverType type = static_cast<SolverType>(i);
     if (IsNeedSolver(args_managers, type)) {
-      base_classes.body += GetSolverHead(type);
-      if (type == SolverType::SEARCH_TILE) {
-        autofuse::RequireSystemHeader(base_classes.dependencies, "cstddef");
-      }
+      base_classes += GetSolverHead(type);
     }
   }
   return base_classes;
