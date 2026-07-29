@@ -12,12 +12,12 @@
 
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
+#include "v35/ascir/ascir_codegen_v2.h"
 #include "common_utils.h"
 #include "graph_utils.h"
 #include "graph/symbolizer/symbolic.h"
 #include "indirect_load_utils.h"
 #include "schedule_result.h"
-#include "schedule_utils.h"
 
 #include <algorithm>
 #include <sstream>
@@ -76,15 +76,25 @@ bool HasExp2(const af::AscGraph &graph) {
   return false;
 }
 
-bool IsTemplateCandidateLegal(ascir::TemplateId template_id, const IndirectLoadGraphPaths &paths) {
+af::Status ValidateTemplateCandidate(ascir::TemplateId template_id, const IndirectLoadGraphPaths &paths,
+                                     bool &is_candidate_legal) {
+  is_candidate_legal = true;
   if (template_id != ascir::TemplateId::kIndirectLoadSimt) {
-    return true;
+    return af::SUCCESS;
   }
+  is_candidate_legal = false;
   if (paths.data_input.empty()) {
-    return false;
+    return af::SUCCESS;
   }
   const auto &input_node = paths.data_input.front();
-  return af::ops::IsOps<af::ascir_op::Data>(input_node) || af::ops::IsOps<af::ascir_op::Load>(input_node);
+  if (af::ops::IsOps<af::ascir_op::Data>(input_node)) {
+    is_candidate_legal = true;
+  } else if (af::ops::IsOps<af::ascir_op::Load>(input_node)) {
+    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
+        input_node, ascgen_utils::indirect_load::TemplateRole::kSimtInputBoundary));
+    is_candidate_legal = true;
+  }
+  return af::SUCCESS;
 }
 
 af::Status GetIndirectLoadAxis(const af::AscNodePtr &node, int64_t &axis) {
@@ -142,12 +152,12 @@ af::Status MergeAxesForTemplate(af::AscGraph &graph, const std::vector<af::AxisI
   return af::SUCCESS;
 }
 
-af::Status CreateFixedTileSplit(af::AscGraph &graph, af::AxisId axis_id, af::AxisId &outer_id, af::AxisId &inner_id) {
+af::Status CreateFixedTileSplit(af::AscGraph &graph, af::AxisId axis_id) {
   const auto *axis = graph.FindAxis(axis_id);
   GE_ASSERT_NOTNULL(axis, "IndirectLoad fixed tile axis %ld is not found.", axis_id);
-  outer_id =
+  const af::AxisId outer_id =
       graph.CreateAxis(axis->name + "T", ascir::Axis::Type::kAxisTypeTileOuter, axis->size, {axis_id}, af::kIdNone).id;
-  inner_id =
+  const af::AxisId inner_id =
       graph
           .CreateAxis(axis->name + "t", ascir::Axis::Type::kAxisTypeTileInner, af::sym::kSymbolOne, {axis_id}, outer_id)
           .id;
@@ -168,12 +178,11 @@ af::Status BuildSimdInputInnerAxis(af::AscGraph &graph, const af::AscNodePtr &in
   return af::SUCCESS;
 }
 af::Status BuildAxisViewByBoundary(af::AscGraph &graph, const std::vector<af::AxisId> &axes, size_t boundary,
-                                   af::AxisId &outer_axis, af::AxisId &inner_axis, std::vector<af::AxisId> &outer_axes,
-                                   std::vector<af::AxisId> &inner_axes) {
+                                   af::AxisId &outer_axis, af::AxisId &inner_axis) {
   GE_ASSERT_TRUE(!axes.empty(), "IndirectLoad output axis is empty.");
   const size_t split = std::min(boundary, axes.size());
-  outer_axes.assign(axes.begin(), axes.begin() + static_cast<int64_t>(split));
-  inner_axes.assign(axes.begin() + static_cast<int64_t>(split), axes.end());
+  const std::vector<af::AxisId> outer_axes(axes.begin(), axes.begin() + static_cast<int64_t>(split));
+  const std::vector<af::AxisId> inner_axes(axes.begin() + static_cast<int64_t>(split), axes.end());
   if (outer_axes.empty()) {
     outer_axis = graph.CreateAxis("indirect_load_single_outer", af::sym::kSymbolOne).id;
   } else {
@@ -192,13 +201,8 @@ af::Status NormalizeAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &i
   const size_t boundary = static_cast<size_t>(axis < 0L ? axis + rank : axis);
   ascir::AxisId outer_axis = af::kIdNone;
   ascir::AxisId inner_axis = af::kIdNone;
-  std::vector<ascir::AxisId> outer_axes;
-  std::vector<ascir::AxisId> inner_axes;
-  GE_ASSERT_SUCCESS(
-      BuildAxisViewByBoundary(graph, output_axes, boundary, outer_axis, inner_axis, outer_axes, inner_axes));
-  ascir::AxisId fixed_tile_outer_axis = af::kIdNone;
-  ascir::AxisId fixed_tile_inner_axis = af::kIdNone;
-  GE_ASSERT_SUCCESS(CreateFixedTileSplit(graph, outer_axis, fixed_tile_outer_axis, fixed_tile_inner_axis));
+  GE_ASSERT_SUCCESS(BuildAxisViewByBoundary(graph, output_axes, boundary, outer_axis, inner_axis));
+  GE_ASSERT_SUCCESS(CreateFixedTileSplit(graph, outer_axis));
   GE_ASSERT_SUCCESS(
       ascgen_utils::indirect_load::SetTemplateAxes(indirect_load, {outer_axis, inner_axis, input_inner_axis}));
   return af::SUCCESS;
@@ -217,6 +221,22 @@ af::Status NormalizeSimdAxesForTemplate(af::AscGraph &graph, const af::AscNodePt
   if (input_producer != nullptr && !af::ops::IsOps<af::ascir_op::Data>(input_producer)) {
     GE_ASSERT_SUCCESS(BuildSimdInputInnerAxis(graph, input_producer, axis_index, input_inner_axis));
   }
+  for (const auto &node : paths.data_input) {
+    if (af::ops::IsOps<af::ascir_op::Data>(node)) {
+      for (const auto &output : node->outputs()) {
+        std::copy_n(output_axes.begin(), axis_index, output->attr.axis.begin());
+      }
+      break;
+    }
+    if (ascgen_utils::indirect_load::GetTemplateRole(node) !=
+        ascgen_utils::indirect_load::TemplateRole::kSimdInputPre) {
+      break;
+    }
+    std::copy_n(output_axes.begin(), axis_index, node->attr.sched.axis.begin());
+    for (const auto &output : node->outputs()) {
+      std::copy_n(output_axes.begin(), axis_index, output->attr.axis.begin());
+    }
+  }
   return NormalizeAxesForTemplate(graph, indirect_load, axis, rank, input_inner_axis);
 }
 
@@ -232,7 +252,8 @@ bool CanEmitSimtScalar(const af::AscNodePtr &node) {
     return false;
   }
   const auto impl = ascgen_utils::GetAscIrCodegenImpl(node->GetType());
-  return impl != nullptr && impl->IsSimtScalarSupported(*node);
+  const auto *v2_impl = impl == nullptr ? nullptr : dynamic_cast<af::ascir::AscIrCodegenV2 *>(impl.get());
+  return v2_impl != nullptr && v2_impl->IsSimtScalarSupported(*node);
 }
 
 bool CollectMovableSimtInputPreNodes(const af::AscNodePtr &indirect_load, const NodePath &data_input, NodePath &nodes) {
@@ -252,7 +273,34 @@ bool CollectMovableSimtInputPreNodes(const af::AscNodePtr &indirect_load, const 
   return false;
 }
 
-af::Status MoveSimtInputPreNode(const af::AscNodePtr &node, const af::AscNodePtr &indirect_load) {
+bool IsSimdInputShapeEnlarged(const af::AscNodePtr &indirect_load) {
+  af::Expression input_numel = af::sym::kSymbolOne;
+  for (const af::Expression &repeat : indirect_load->inputs()[0]->attr.repeats) {
+    input_numel = input_numel * repeat;
+  }
+  af::Expression output_numel = af::sym::kSymbolOne;
+  for (const af::Expression &repeat : indirect_load->outputs()[0]->attr.repeats) {
+    output_numel = output_numel * repeat;
+  }
+  return af::SymbolicUtils::StaticCheckGt(output_numel, input_numel) == af::TriBool::kTrue;
+}
+
+void CollectMovableSimdInputPreNodes(const af::AscNodePtr &indirect_load, const NodePath &data_input, NodePath &nodes) {
+  af::AscNodePtr consumer = indirect_load;
+  for (const auto &current : data_input) {
+    if (af::ops::IsOps<af::ascir_op::Data>(current) || af::ops::IsOps<af::ascir_op::Load>(current) ||
+        current->inputs.Size() != 1UL || current->outputs().size() != 1UL ||
+        current->attr.api.compute_type != af::ComputeType::kComputeElewise || current->GetInControlNodesSize() != 0UL ||
+        current->GetOutControlNodesSize() != 0UL ||
+        ascgen_utils::indirect_load::GetOnlyOutputConsumer(current) != consumer) {
+      return;
+    }
+    nodes.emplace_back(current);
+    consumer = current;
+  }
+}
+
+af::Status MoveInputPreNode(const af::AscNodePtr &node, const af::AscNodePtr &indirect_load) {
   const auto producer = ascgen_utils::indirect_load::GetInputProducer(node, 0UL);
   GE_ASSERT_NOTNULL(producer);
   const auto producer_out = producer->GetOutDataAnchor(0UL);
@@ -281,7 +329,7 @@ af::Status MoveSimtInputPreNode(const af::AscNodePtr &node, const af::AscNodePtr
   node_output->attr.repeats = indirect_output->attr.repeats;
   node_output->attr.strides = indirect_output->attr.strides;
   indirect_output->attr.dtype = producer->outputs()[0]->attr.dtype;
-  GELOGD("[IndirectLoad] Move SIMT input pre node[%s] after IndirectLoad[%s].", node->GetNamePtr(),
+  GELOGD("[IndirectLoad] Move input pre node[%s] after IndirectLoad[%s].", node->GetNamePtr(),
          indirect_load->GetNamePtr());
   return af::SUCCESS;
 }
@@ -295,7 +343,23 @@ af::Status MoveSimtInputPreNodes(const af::AscNodePtr &indirect_load, IndirectLo
     return af::SUCCESS;
   }
   for (const auto &node : nodes) {
-    GE_ASSERT_SUCCESS(MoveSimtInputPreNode(node, indirect_load));
+    GE_ASSERT_SUCCESS(MoveInputPreNode(node, indirect_load));
+  }
+  paths.data_input.erase(paths.data_input.begin(), paths.data_input.begin() + static_cast<int64_t>(nodes.size()));
+  paths.output.insert(paths.output.begin(), nodes.rbegin(), nodes.rend());
+  return af::SUCCESS;
+}
+
+af::Status MoveSimdInputPreNodes(const af::AscNodePtr &indirect_load, IndirectLoadGraphPaths &paths) {
+  if (IsSimdInputShapeEnlarged(indirect_load) || indirect_load->GetInControlNodesSize() != 0UL ||
+      indirect_load->GetOutControlNodesSize() != 0UL ||
+      ascgen_utils::indirect_load::GetOnlyOutputConsumer(indirect_load) == nullptr) {
+    return af::SUCCESS;
+  }
+  NodePath nodes;
+  CollectMovableSimdInputPreNodes(indirect_load, paths.data_input, nodes);
+  for (const auto &node : nodes) {
+    GE_ASSERT_SUCCESS(MoveInputPreNode(node, indirect_load));
   }
   paths.data_input.erase(paths.data_input.begin(), paths.data_input.begin() + static_cast<int64_t>(nodes.size()));
   paths.output.insert(paths.output.begin(), nodes.rbegin(), nodes.rend());
@@ -346,24 +410,22 @@ af::Status RecordTemplateLogicalView(const af::AscNodePtr &indirect_load) {
 af::Status PrepareCandidateGraph(const af::AscNodePtr &indirect_load, ascir::TemplateId template_id,
                                  IndirectLoadGraphPaths &paths, bool &is_candidate_legal) {
   paths = CollectGraphPaths(indirect_load);
-  if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
+  if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
+    GE_ASSERT_SUCCESS(MoveSimdInputPreNodes(indirect_load, paths));
+  } else if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
     GE_ASSERT_SUCCESS(MoveSimtInputPreNodes(indirect_load, paths));
   }
-  is_candidate_legal = IsTemplateCandidateLegal(template_id, paths);
+  GE_ASSERT_SUCCESS(ValidateTemplateCandidate(template_id, paths, is_candidate_legal));
   if (!is_candidate_legal) {
     return af::SUCCESS;
   }
   GE_ASSERT_SUCCESS(PropagateInputTensorAttrs(paths));
   GE_ASSERT_SUCCESS(RecordTemplateLogicalView(indirect_load));
-  GE_ASSERT_SUCCESS(::ascir::SetTemplateId(indirect_load, template_id));
   return af::SUCCESS;
 }
 
 af::Status AnnotateSimdTemplateRoles(const af::AscNodePtr &indirect_load, const IndirectLoadGraphPaths &paths) {
   GE_ASSERT_NOTNULL(indirect_load);
-  GE_ASSERT_SUCCESS(
-      ascgen_utils::indirect_load::SetTemplateRole(indirect_load, ascgen_utils::indirect_load::TemplateRole::kSimdOp));
-
   for (const auto &node : paths.data_input) {
     if (af::ops::IsOps<af::ascir_op::Data>(node)) {
       break;
@@ -375,29 +437,11 @@ af::Status AnnotateSimdTemplateRoles(const af::AscNodePtr &indirect_load, const 
       }
       break;
     }
-    if (!ascgen_utils::IsNodeSupportsVectorFunction(node) && !af::ops::IsOps<af::ascir_op::Load>(node)) {
+    if (node->inputs.Size() != 1UL || node->outputs().size() != 1UL) {
       break;
     }
     GE_ASSERT_SUCCESS(
         ascgen_utils::indirect_load::SetTemplateRole(node, ascgen_utils::indirect_load::TemplateRole::kSimdInputPre));
-  }
-  return af::SUCCESS;
-}
-
-af::Status AnnotateSimtInputRoles(const NodePath &path, bool &is_candidate_legal) {
-  is_candidate_legal = false;
-  for (const auto &node : path) {
-    if (af::ops::IsOps<af::ascir_op::Data>(node)) {
-      is_candidate_legal = true;
-      return af::SUCCESS;
-    }
-    if (af::ops::IsOps<af::ascir_op::Load>(node)) {
-      GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
-          node, ascgen_utils::indirect_load::TemplateRole::kSimtInputBoundary));
-      is_candidate_legal = true;
-      return af::SUCCESS;
-    }
-    return af::SUCCESS;
   }
   return af::SUCCESS;
 }
@@ -431,10 +475,6 @@ af::Status AnnotateSimtTemplateRoles(const af::AscNodePtr &indirect_load, const 
   is_candidate_legal = false;
   GE_ASSERT_SUCCESS(
       ascgen_utils::indirect_load::SetTemplateRole(indirect_load, ascgen_utils::indirect_load::TemplateRole::kSimtOp));
-  GE_ASSERT_SUCCESS(AnnotateSimtInputRoles(paths.data_input, is_candidate_legal));
-  if (!is_candidate_legal) {
-    return af::SUCCESS;
-  }
   GE_ASSERT_SUCCESS(AnnotateSimtTransformRoles(paths.index_input, af::ascir_op::Data::Type, af::ascir_op::Load::Type,
                                                is_candidate_legal));
   if (!is_candidate_legal) {
@@ -452,8 +492,9 @@ af::Status ApplySimdGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirec
   if (!is_candidate_legal) {
     return af::SUCCESS;
   }
-  GE_ASSERT_SUCCESS(NormalizeSimdAxesForTemplate(graph, indirect_load, paths));
   GE_ASSERT_SUCCESS(AnnotateSimdTemplateRoles(indirect_load, paths));
+  GE_ASSERT_SUCCESS(NormalizeSimdAxesForTemplate(graph, indirect_load, paths));
+  GE_ASSERT_SUCCESS(::ascir::SetTemplateId(indirect_load, ascir::TemplateId::kIndirectLoadSimd));
   return af::SUCCESS;
 }
 
@@ -472,6 +513,7 @@ af::Status ApplySimtGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirec
   }
   GE_ASSERT_SUCCESS(::ascir::SetDcacheSize(indirect_load, kIndirectLoadSimtDcacheSize));
   GE_ASSERT_SUCCESS(NormalizeSimtAxesForTemplate(graph, indirect_load));
+  GE_ASSERT_SUCCESS(::ascir::SetTemplateId(indirect_load, ascir::TemplateId::kIndirectLoadSimt));
   return af::SUCCESS;
 }
 

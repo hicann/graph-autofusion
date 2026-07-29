@@ -16,9 +16,7 @@
 #include "ascir.h"
 
 namespace codegen {
-bool CanEmitSimtScalar(const ascir::NodeView &node);
 af::Status EmitSimtScalarExpr(const ascir::NodeView &node, const std::vector<std::string> &inputs, std::string &expr);
-bool IsSkippedApiEmitProcessNode(const ascir::NodeView &node);
 }  // namespace codegen
 
 #endif  // __AUTOFUSE_SIMT_SCALAR_EMITTER_H__

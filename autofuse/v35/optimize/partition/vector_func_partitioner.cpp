@@ -1169,9 +1169,8 @@ af::Status VectorFuncPartitioner::ModifySubgraphAttrs(af::AscGraph &vf_graph) {
 af::Status VectorFuncPartitioner::BuildSubgraphs() {
   for (const auto &cluster : cluster_dict_.GetAllClusters()) {
     // 不包含隐式广播的单节点不融合
-    const bool force_vf = ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(cluster->Nodes().front());
-    if (!cluster->meta_data_.enable_vf || (cluster->Nodes().size() < kMinVfNodesNum && !force_vf &&
-                                           !ascgen_utils::IsNodeContainsBrcInline(cluster->Nodes().back()))) {
+    if (!cluster->meta_data_.enable_vf ||
+        (cluster->Nodes().size() < kMinVfNodesNum && !ascgen_utils::IsNodeContainsBrcInline(cluster->Nodes().back()))) {
       continue;
     }
     // 1. create vf op && subgraph

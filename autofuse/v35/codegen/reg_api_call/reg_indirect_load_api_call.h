@@ -15,12 +15,10 @@
 
 #include "codegen_kernel.h"
 #include "indirect_load_utils.h"
-#include "schedule_result.h"
 
 namespace codegen {
 class IndirectLoadRegApiCall final : public ApiCall {
  public:
-  using ApiCall::Generate;
   explicit IndirectLoadRegApiCall(const std::string &api_name) : ApiCall(api_name) {}
   ~IndirectLoadRegApiCall() final = default;
   Status GenerateFuncDefinition(const TPipe &tpipe, const Tiler &tiler, std::stringstream &ss) const override;
@@ -42,9 +40,8 @@ class IndirectLoadRegApiCall final : public ApiCall {
 
   int64_t axis_ = 0;
   ascir::AxisId outer_axis_ = af::kIdNone;
-  ascir::TemplateId template_id_{ascir::TemplateId::kIndirectLoadSimt};
+  ascir::TemplateId template_id_{ascir::TemplateId::kDefault};
   ascgen_utils::indirect_load::TemplateLogicalView logical_view_;
-  af::AscNodePtr input_pre_vf_;
   std::vector<af::AscNodePtr> index_pre_nodes_;
   std::vector<af::AscNodePtr> output_post_nodes_;
   std::string output_gm_tensor_;

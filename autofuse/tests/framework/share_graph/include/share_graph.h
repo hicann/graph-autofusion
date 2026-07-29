@@ -10,10 +10,28 @@
 
 #ifndef INC_SHARE_GRAPH_H
 #define INC_SHARE_GRAPH_H
+#include <cstdint>
+
 #include "graph/compute_graph.h"
 #include "ascendc_ir.h"
 
 namespace ascir {
+enum class IndirectLoadInputPreType : uint32_t {
+  kNone = 0U,
+  kRelu,
+  kExp2,
+  kReluExp2,
+  kReluRelu,
+  kPrecisionCast,
+};
+
+enum class IndirectLoadOutputPostType : uint32_t {
+  kDefault = 0U,
+  kModifiedBesselK0,
+  kDirectStore,
+  kCastExp2CastBack,
+};
+
 struct ShareGraph {
   static af::ComputeGraphPtr LoadLog2StoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr ModFusedGraph(size_t dims_size);
@@ -113,7 +131,12 @@ struct ShareGraph {
   static af::ComputeGraphPtr LoadGatherTailAbsStore(int64_t gather_axis, af::DataType data_type);
   static af::ComputeGraphPtr LoadGatherOneAxisAbsStore(int64_t gather_axis, af::DataType data_type);
   static af::ComputeGraphPtr IndirectLoadStoreFusedGraph(size_t rank, int64_t axis, af::DataType data_type,
-                                                         bool has_input_pre, bool use_exp2);
+                                                         af::DataType index_type,
+                                                         IndirectLoadInputPreType input_pre_type, bool use_exp2,
+                                                         IndirectLoadOutputPostType output_post_type,
+                                                         const std::vector<int64_t> &input_shape = {},
+                                                         const std::vector<int64_t> &output_shape = {},
+                                                         bool mixed_index_pre = false);
   static af::ComputeGraphPtr MatMulFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr GatherReduceStore(int64_t gather_axis, af::DataType data_type);
   static af::ComputeGraphPtr LoadWhereReduceStoreFusedGraph(size_t dims_size, bool x2_scalar, bool x3_scalar);

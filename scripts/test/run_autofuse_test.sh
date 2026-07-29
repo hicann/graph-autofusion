@@ -771,13 +771,28 @@ build_backend() {
                       load_gather_split_b_t_abs_store_test_e2e_v2 \
                       load_gather_tail_split_b_t_abs_store_test_e2e_v2 \
                       load_gather_one_axis_split_b_t_abs_store_test_e2e_v2 \
-                      indirect_load_rank2_axis1_simt_e2e_v2 \
-                      indirect_load_rank2_axis1_simd_e2e_v2 \
-                      indirect_load_rank3_axis1_simt_e2e_v2 \
-                      indirect_load_rank3_axis1_simd_e2e_v2 \
-                      indirect_load_rank4_axis2_simt_e2e_v2 \
-                      indirect_load_rank4_axis2_simd_e2e_v2 \
-                      load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \
+                       indirect_load_rank2_axis1_simt_e2e_v2 \
+                       indirect_load_rank2_axis1_simd_e2e_v2 \
+                       indirect_load_rank2_axisneg2_simt_e2e_v2 \
+                       indirect_load_rank2_axisneg2_simd_e2e_v2 \
+                       indirect_load_rank3_axis1_simt_e2e_v2 \
+                       indirect_load_rank3_axis1_simd_e2e_v2 \
+                       indirect_load_rank4_axis2_simt_e2e_v2 \
+                       indirect_load_rank4_axis2_simd_e2e_v2 \
+                       indirect_load_rank2_axis1_relu_exp2_pre_simd_e2e_v2 \
+                       indirect_load_rank2_axis0_relu_pre_expanded_simd_e2e_v2 \
+                       indirect_load_rank2_axis0_relu_relu_pre_expanded_simd_e2e_v2 \
+                       indirect_load_rank3_axis2_exp2_pre_expanded_simd_e2e_v2 \
+                        indirect_load_rank4_axis1_relu_exp2_pre_expanded_simd_e2e_v2 \
+                        indirect_load_rank3_axis2_mixed_vf_pre_expanded_simd_e2e_v2 \
+                        indirect_load_rank2_axis1_large_simt_e2e_v2 \
+                       indirect_load_rank2_axis1_float_int64_simd_e2e_v2 \
+                       indirect_load_rank2_axis1_modified_bessel_k0_simd_only_e2e_v2 \
+                       indirect_load_rank2_axis1_precision_cast_simt_e2e_v2 \
+                       indirect_load_rank2_axis1_precision_cast_simd_e2e_v2 \
+                       indirect_load_rank2_axis1_bf16_int64_simt_e2e_v2 \
+                       indirect_load_rank2_axis1_uint32_int32_simd_e2e_v2 \
+                       load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \
                       gather_reduce_store_test_e2e_v2 \
                       load_where_store_test_e2e_v2 \
                       load_where_x2_is_ubscalar_store_test_e2e_v2 \

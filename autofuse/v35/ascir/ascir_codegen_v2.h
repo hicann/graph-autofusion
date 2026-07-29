@@ -30,6 +30,19 @@ class AscIrCodegenV2 : public AscIrCodegen {
   virtual uint32_t GetMicroInstNum() const {
     return 1U;
   }
+
+  virtual bool IsSimtScalarSupported(const AscNode &node) const {
+    (void)node;
+    return false;
+  }
+
+  virtual ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
+                                                 std::string &expr) const {
+    (void)node;
+    (void)inputs;
+    (void)expr;
+    return af::FAILED;
+  }
 };
 }  // namespace ascir
 }  // namespace af

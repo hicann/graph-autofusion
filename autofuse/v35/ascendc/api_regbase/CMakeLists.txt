@@ -78,6 +78,8 @@ set(ascendc_api_regbase_extend_src
         igammac_helper/asymptotic_series.h
         igammac_helper/series_complement.h
         hypot.h
+        indirect_load_simd.h
+        indirect_load_simt.h
 )
 
 set(generated_regbase_files)

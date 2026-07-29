@@ -28,7 +28,6 @@
 #include "indirect_load_utils.h"
 #include "optimize/platform/platform_factory.h"
 #include "optimize/schedule_utils.h"
-#include "v35/codegen/simt_scalar_call/simt_scalar_emitter.h"
 #include "common/platform_context.h"
 #include "codegen_graph_check.h"
 
@@ -67,10 +66,7 @@ Status AllocateQues(TPipe &tpipe, const QueCollection &collection) {
       const auto new_que = tpipe.ques.emplace(iter.first, TQue{iter.first, iter.second, position});
       GE_CHK_BOOL_RET_STATUS(new_que.second, af::FAILED, "Codegen emplace que [%ld] failed", iter.first);
     }
-    const auto skip_iter = collection.direct_gm_ques.find(iter.first);
-    if (skip_iter != collection.direct_gm_ques.end()) {
-      tpipe.ques.at(iter.first).skip_init_for_simt_direct_gm = skip_iter->second;
-    }
+    tpipe.ques.at(iter.first).skip_init_for_simt_direct_gm = collection.direct_gm_ques.at(iter.first);
   }
   for (auto &[id, que] : tpipe.ques) {
     if (id != tpipe.cube_output_que_id) {
@@ -2215,8 +2211,7 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
       continue;
     }
     const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
-    if (indirect_load_behavior.skips_api_emit && indirect_load_behavior.uses_direct_gm_pipeline &&
-        !IsOps<Store>(node)) {
+    if (indirect_load_behavior.skips_api_emit && !IsOps<Store>(node)) {
       continue;
     }
 

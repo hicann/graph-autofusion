@@ -8299,10 +8299,12 @@ void SetIndirectLoadNodeView(Op &op, const std::vector<int64_t> &axes, const std
 }
 
 static void CreateIndirectLoadAxes(af::AscGraph &graph, size_t rank, size_t offset, std::vector<int64_t> &axes,
-                                   std::vector<af::Expression> &repeats, std::vector<af::Expression> &strides) {
+                                   std::vector<af::Expression> &repeats, std::vector<af::Expression> &strides,
+                                   const std::vector<int64_t> &shape) {
   for (size_t i = 0UL; i < rank; ++i) {
     const size_t dim = offset + i;
-    repeats.emplace_back(graph.CreateSizeVar("s" + std::to_string(dim)));
+    repeats.emplace_back(shape.empty() ? graph.CreateSizeVar("s" + std::to_string(dim))
+                                       : graph.CreateSizeVar(shape[i]));
     axes.emplace_back(graph.CreateAxis("z" + std::to_string(dim), repeats.back()).id);
   }
   strides.assign(rank, af::ops::One);
@@ -8311,10 +8313,30 @@ static void CreateIndirectLoadAxes(af::AscGraph &graph, size_t rank, size_t offs
   }
 }
 
+static void AddIndirectLoadPrecisionCastDataChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                                  const std::vector<af::Expression> &repeats,
+                                                  const std::vector<af::Expression> &strides,
+                                                  af::ascir_op::IndirectLoad &indirect_load) {
+  af::ascir_op::Data x("x");
+  graph.AddNode(x);
+  x.y.dtype = af::DT_FLOAT16;
+  x.ir_attr.SetIndex(0);
+  af::ascir_op::Load input_load("input_load");
+  graph.AddNode(input_load);
+  input_load.x = x.y;
+  SetIndirectLoadNodeView(input_load, axes, repeats, strides, af::DT_FLOAT16);
+  af::ascir_op::Cast input_cast("input_cast");
+  graph.AddNode(input_cast);
+  input_cast.x = input_load.y;
+  SetIndirectLoadNodeView(input_cast, axes, repeats, strides, af::DT_FLOAT);
+  indirect_load.x1 = input_cast.y;
+}
+
 static void AddIndirectLoadDataChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
                                      const std::vector<af::Expression> &repeats,
                                      const std::vector<af::Expression> &strides, af::DataType data_type,
-                                     bool has_input_pre, af::ascir_op::IndirectLoad &indirect_load) {
+                                     IndirectLoadInputPreType input_pre_type,
+                                     af::ascir_op::IndirectLoad &indirect_load) {
   af::ascir_op::Data x("x");
   graph.AddNode(x);
   x.y.dtype = data_type;
@@ -8323,43 +8345,185 @@ static void AddIndirectLoadDataChain(af::AscGraph &graph, const std::vector<int6
   graph.AddNode(input_load);
   input_load.x = x.y;
   SetIndirectLoadNodeView(input_load, axes, repeats, strides, data_type);
-  if (!has_input_pre) {
+  if (input_pre_type == IndirectLoadInputPreType::kNone) {
     indirect_load.x1 = input_load.y;
+    return;
+  }
+  if (input_pre_type == IndirectLoadInputPreType::kExp2) {
+    af::ascir_op::Exp2 input_exp2("input_exp2");
+    graph.AddNode(input_exp2);
+    input_exp2.x = input_load.y;
+    SetIndirectLoadNodeView(input_exp2, axes, repeats, strides, data_type);
+    indirect_load.x1 = input_exp2.y;
     return;
   }
   af::ascir_op::Relu input_relu("input_relu");
   graph.AddNode(input_relu);
   input_relu.x = input_load.y;
   SetIndirectLoadNodeView(input_relu, axes, repeats, strides, data_type);
-  indirect_load.x1 = input_relu.y;
+  if (input_pre_type == IndirectLoadInputPreType::kRelu) {
+    indirect_load.x1 = input_relu.y;
+    return;
+  }
+  if (input_pre_type == IndirectLoadInputPreType::kReluRelu) {
+    af::ascir_op::Relu input_relu2("input_relu2");
+    graph.AddNode(input_relu2);
+    input_relu2.x = input_relu.y;
+    SetIndirectLoadNodeView(input_relu2, axes, repeats, strides, data_type);
+    indirect_load.x1 = input_relu2.y;
+    return;
+  }
+  af::ascir_op::Exp2 input_exp2("input_exp2");
+  graph.AddNode(input_exp2);
+  input_exp2.x = input_relu.y;
+  SetIndirectLoadNodeView(input_exp2, axes, repeats, strides, data_type);
+  indirect_load.x1 = input_exp2.y;
 }
 
 static void AddIndirectLoadIndexChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
                                       const std::vector<af::Expression> &repeats,
-                                      const std::vector<af::Expression> &strides,
-                                      af::ascir_op::IndirectLoad &indirect_load) {
+                                      const std::vector<af::Expression> &strides, af::DataType index_type,
+                                      bool mixed_index_pre, af::ascir_op::IndirectLoad &indirect_load) {
   af::ascir_op::Data index("index");
   graph.AddNode(index);
-  index.y.dtype = af::DT_INT32;
+  index.y.dtype = index_type;
   index.ir_attr.SetIndex(1);
   af::ascir_op::Load index_load("index_load");
   graph.AddNode(index_load);
   index_load.x = index.y;
-  SetIndirectLoadNodeView(index_load, axes, repeats, strides, af::DT_INT32);
+  SetIndirectLoadNodeView(index_load, axes, repeats, strides, index_type);
   af::ascir_op::Abs index_abs("index_abs");
   graph.AddNode(index_abs);
   index_abs.x = index_load.y;
-  SetIndirectLoadNodeView(index_abs, axes, repeats, strides, af::DT_INT32);
-  indirect_load.x2 = index_abs.y;
+  SetIndirectLoadNodeView(index_abs, axes, repeats, strides, index_type);
+  if (!mixed_index_pre) {
+    indirect_load.x2 = index_abs.y;
+    return;
+  }
+  af::ascir_op::Abs index_abs2("index_abs2");
+  graph.AddNode(index_abs2);
+  index_abs2.x = index_abs.y;
+  SetIndirectLoadNodeView(index_abs2, axes, repeats, strides, index_type);
+  af::ascir_op::Cast index_cast("index_cast_float");
+  graph.AddNode(index_cast);
+  index_cast.x = index_abs2.y;
+  SetIndirectLoadNodeView(index_cast, axes, repeats, strides, af::DT_FLOAT);
+  af::ascir_op::Exp2 index_exp2("index_exp2");
+  graph.AddNode(index_exp2);
+  index_exp2.x = index_cast.y;
+  SetIndirectLoadNodeView(index_exp2, axes, repeats, strides, af::DT_FLOAT);
+  af::ascir_op::Log2 index_log2("index_log2");
+  graph.AddNode(index_log2);
+  index_log2.x = index_exp2.y;
+  SetIndirectLoadNodeView(index_log2, axes, repeats, strides, af::DT_FLOAT);
+  af::ascir_op::FloorToInt index_floor_to_int("index_floor_to_int");
+  graph.AddNode(index_floor_to_int);
+  index_floor_to_int.x = index_log2.y;
+  SetIndirectLoadNodeView(index_floor_to_int, axes, repeats, strides, index_type);
+  indirect_load.x2 = index_floor_to_int.y;
+}
+
+template <typename Op>
+static void AddIndirectLoadCustomOutputChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                             const std::vector<af::Expression> &repeats,
+                                             const std::vector<af::Expression> &strides, af::DataType data_type,
+                                             IndirectLoadOutputPostType output_post_type, Op &op) {
+  af::AscOpOutput *output = &op.y;
+  if (output_post_type == IndirectLoadOutputPostType::kModifiedBesselK0) {
+    af::ascir_op::ModifiedBesselK0 modified_bessel_k0("output_modified_bessel_k0");
+    graph.AddNode(modified_bessel_k0);
+    modified_bessel_k0.x = *output;
+    SetIndirectLoadNodeView(modified_bessel_k0, axes, repeats, strides, data_type);
+    output = &modified_bessel_k0.y;
+  }
+  af::ascir_op::Store store("store");
+  graph.AddNode(store);
+  store.x = *output;
+  SetIndirectLoadNodeView(store, axes, repeats, strides, data_type);
+  af::ascir_op::Output y("y");
+  graph.AddNode(y);
+  y.x = store.y;
+  SetIndirectLoadNodeView(y, axes, repeats, strides, data_type);
+  y.ir_attr.SetIndex(0);
+}
+
+static void AddIndirectLoadPrecisionOutputChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                                const std::vector<af::Expression> &repeats,
+                                                const std::vector<af::Expression> &strides, bool use_exp2,
+                                                af::ascir_op::IndirectLoad &indirect_load) {
+  af::ascir_op::Exp exp("output_exp");
+  af::ascir_op::Exp2 exp2("output_exp");
+  af::AscOpOutput *math_output = nullptr;
+  if (use_exp2) {
+    graph.AddNode(exp2);
+    exp2.x = indirect_load.y;
+    SetIndirectLoadNodeView(exp2, axes, repeats, strides, af::DT_FLOAT);
+    math_output = &exp2.y;
+  } else {
+    graph.AddNode(exp);
+    exp.x = indirect_load.y;
+    SetIndirectLoadNodeView(exp, axes, repeats, strides, af::DT_FLOAT);
+    math_output = &exp.y;
+  }
+  af::ascir_op::Cast output_cast("output_cast");
+  graph.AddNode(output_cast);
+  output_cast.x = *math_output;
+  SetIndirectLoadNodeView(output_cast, axes, repeats, strides, af::DT_FLOAT16);
+  AddIndirectLoadCustomOutputChain(graph, axes, repeats, strides, af::DT_FLOAT16,
+                                   IndirectLoadOutputPostType::kDirectStore, output_cast);
+}
+
+static void AddIndirectLoadUint32OutputChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                             const std::vector<af::Expression> &repeats,
+                                             const std::vector<af::Expression> &strides,
+                                             af::ascir_op::IndirectLoad &indirect_load) {
+  af::ascir_op::Cast cast_int32("output_cast_int32");
+  graph.AddNode(cast_int32);
+  cast_int32.x = indirect_load.y;
+  SetIndirectLoadNodeView(cast_int32, axes, repeats, strides, af::DT_INT32);
+  af::ascir_op::Cast cast_float("output_cast_float");
+  graph.AddNode(cast_float);
+  cast_float.x = cast_int32.y;
+  SetIndirectLoadNodeView(cast_float, axes, repeats, strides, af::DT_FLOAT);
+  af::ascir_op::Exp2 exp2("output_exp");
+  graph.AddNode(exp2);
+  exp2.x = cast_float.y;
+  SetIndirectLoadNodeView(exp2, axes, repeats, strides, af::DT_FLOAT);
+  af::ascir_op::Cast cast_back_int32("output_cast_back_int32");
+  graph.AddNode(cast_back_int32);
+  cast_back_int32.x = exp2.y;
+  SetIndirectLoadNodeView(cast_back_int32, axes, repeats, strides, af::DT_INT32);
+  af::ascir_op::Cast output_cast("output_cast");
+  graph.AddNode(output_cast);
+  output_cast.x = cast_back_int32.y;
+  SetIndirectLoadNodeView(output_cast, axes, repeats, strides, af::DT_UINT32);
+  AddIndirectLoadCustomOutputChain(graph, axes, repeats, strides, af::DT_UINT32,
+                                   IndirectLoadOutputPostType::kDirectStore, output_cast);
 }
 
 static void AddIndirectLoadOutputChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
                                        const std::vector<af::Expression> &repeats,
                                        const std::vector<af::Expression> &strides, af::DataType data_type,
-                                       bool use_exp2, af::ascir_op::IndirectLoad &indirect_load) {
+                                       IndirectLoadInputPreType input_pre_type, bool use_exp2,
+                                       IndirectLoadOutputPostType output_post_type,
+                                       af::ascir_op::IndirectLoad &indirect_load) {
+  if (input_pre_type == IndirectLoadInputPreType::kPrecisionCast) {
+    AddIndirectLoadPrecisionOutputChain(graph, axes, repeats, strides, use_exp2, indirect_load);
+    return;
+  }
+  if (output_post_type == IndirectLoadOutputPostType::kCastExp2CastBack) {
+    AddIndirectLoadUint32OutputChain(graph, axes, repeats, strides, indirect_load);
+    return;
+  }
+  if (output_post_type != IndirectLoadOutputPostType::kDefault) {
+    AddIndirectLoadCustomOutputChain(graph, axes, repeats, strides, data_type, output_post_type, indirect_load);
+    return;
+  }
   af::ascir_op::Neg output_neg("output_neg");
   graph.AddNode(output_neg);
-  if (use_exp2) {
+  if (input_pre_type == IndirectLoadInputPreType::kExp2 || input_pre_type == IndirectLoadInputPreType::kReluExp2) {
+    output_neg.x = indirect_load.y;
+  } else if (use_exp2) {
     af::ascir_op::Exp2 exp2("output_exp");
     graph.AddNode(exp2);
     exp2.x = indirect_load.y;
@@ -8387,27 +8551,41 @@ static void AddIndirectLoadOutputChain(af::AscGraph &graph, const std::vector<in
 }
 
 static void IndirectLoadStore_BeforeAutofuse(af::AscGraph &graph, size_t rank, int64_t axis, af::DataType data_type,
-                                             bool has_input_pre, bool use_exp2) {
+                                             af::DataType index_type, IndirectLoadInputPreType input_pre_type,
+                                             bool use_exp2, IndirectLoadOutputPostType output_post_type,
+                                             const std::vector<int64_t> &input_shape,
+                                             const std::vector<int64_t> &output_shape, bool mixed_index_pre) {
   std::vector<int64_t> input_axes;
   std::vector<af::Expression> input_repeats;
   std::vector<af::Expression> input_strides;
-  CreateIndirectLoadAxes(graph, rank, 0UL, input_axes, input_repeats, input_strides);
+  CreateIndirectLoadAxes(graph, rank, 0UL, input_axes, input_repeats, input_strides, input_shape);
   std::vector<int64_t> output_axes;
   std::vector<af::Expression> output_repeats;
   std::vector<af::Expression> output_strides;
-  CreateIndirectLoadAxes(graph, rank, rank, output_axes, output_repeats, output_strides);
+  CreateIndirectLoadAxes(graph, rank, rank, output_axes, output_repeats, output_strides, output_shape);
   af::ascir_op::IndirectLoad indirect_load("indirect_load");
   graph.AddNode(indirect_load);
-  AddIndirectLoadDataChain(graph, input_axes, input_repeats, input_strides, data_type, has_input_pre, indirect_load);
-  AddIndirectLoadIndexChain(graph, output_axes, output_repeats, output_strides, indirect_load);
+  if (input_pre_type == IndirectLoadInputPreType::kPrecisionCast) {
+    AddIndirectLoadPrecisionCastDataChain(graph, input_axes, input_repeats, input_strides, indirect_load);
+  } else {
+    AddIndirectLoadDataChain(graph, input_axes, input_repeats, input_strides, data_type, input_pre_type, indirect_load);
+  }
+  AddIndirectLoadIndexChain(graph, output_axes, output_repeats, output_strides, index_type, mixed_index_pre,
+                            indirect_load);
   indirect_load.ir_attr.SetAxis(axis);
-  SetIndirectLoadNodeView(indirect_load, output_axes, output_repeats, output_strides, data_type);
-  AddIndirectLoadOutputChain(graph, output_axes, output_repeats, output_strides, data_type, use_exp2, indirect_load);
+  const af::DataType indirect_load_type =
+      input_pre_type == IndirectLoadInputPreType::kPrecisionCast ? af::DT_FLOAT : data_type;
+  SetIndirectLoadNodeView(indirect_load, output_axes, output_repeats, output_strides, indirect_load_type);
+  AddIndirectLoadOutputChain(graph, output_axes, output_repeats, output_strides, data_type, input_pre_type, use_exp2,
+                             output_post_type, indirect_load);
 }
 
-af::ComputeGraphPtr ShareGraph::IndirectLoadStoreFusedGraph(size_t rank, int64_t axis, af::DataType data_type,
-                                                            bool has_input_pre, bool use_exp2) {
-  if (rank < 2UL || rank > 4UL || axis < -static_cast<int64_t>(rank) || axis >= static_cast<int64_t>(rank)) {
+af::ComputeGraphPtr ShareGraph::IndirectLoadStoreFusedGraph(
+    size_t rank, int64_t axis, af::DataType data_type, af::DataType index_type, IndirectLoadInputPreType input_pre_type,
+    bool use_exp2, IndirectLoadOutputPostType output_post_type, const std::vector<int64_t> &input_shape,
+    const std::vector<int64_t> &output_shape, bool mixed_index_pre) {
+  if (rank < 2UL || rank > 4UL || axis < -static_cast<int64_t>(rank) || axis >= static_cast<int64_t>(rank) ||
+      (!input_shape.empty() && input_shape.size() != rank) || (!output_shape.empty() && output_shape.size() != rank)) {
     return nullptr;
   }
   af::AscGraph fused_graph("indirect_load_store_test");
@@ -8423,7 +8601,7 @@ af::ComputeGraphPtr ShareGraph::IndirectLoadStoreFusedGraph(size_t rank, int64_t
   auto data_desc = std::make_shared<GeTensorDesc>();
   data_desc->SetDataType(data_type);
   auto index_desc = std::make_shared<GeTensorDesc>();
-  index_desc->SetDataType(af::DT_INT32);
+  index_desc->SetDataType(index_type);
   auto backend_desc = std::make_shared<OpDesc>("asc_backend", "AscBackend");
   backend_desc->AddInputDesc(data_desc->Clone());
   backend_desc->AddInputDesc(index_desc->Clone());
@@ -8434,7 +8612,8 @@ af::ComputeGraphPtr ShareGraph::IndirectLoadStoreFusedGraph(size_t rank, int64_t
   }
 
   auto sub_graph = std::make_shared<af::AscGraph>("indirect_load_store_test");
-  IndirectLoadStore_BeforeAutofuse(*sub_graph, rank, axis, data_type, has_input_pre, use_exp2);
+  IndirectLoadStore_BeforeAutofuse(*sub_graph, rank, axis, data_type, index_type, input_pre_type, use_exp2,
+                                   output_post_type, input_shape, output_shape, mixed_index_pre);
   auto fuse_attrs = backend->GetOpDesc()->GetOrCreateAttrsGroup<af::AutoFuseAttrs>();
   if (fuse_attrs == nullptr) {
     return nullptr;

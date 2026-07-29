@@ -878,7 +878,7 @@ af::Status AscendGraphParser::ConvertToTuningSpace(const af::AscGraph &graph) {
       continue;
     }
     const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
-    if (indirect_load_behavior.uses_direct_gm_pipeline || indirect_load_behavior.skips_api_emit) {
+    if (indirect_load_behavior.uses_direct_gm_pipeline) {
       GELOGD("[IndirectLoad] Skip tuning-space node info for node[%s], direct_gm[%d], skips_emit[%d].",
              node->GetNamePtr(), static_cast<int32_t>(indirect_load_behavior.uses_direct_gm_pipeline),
              static_cast<int32_t>(indirect_load_behavior.skips_api_emit));

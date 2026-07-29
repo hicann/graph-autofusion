@@ -386,8 +386,7 @@ af::Status BaseAlignmentStrategy::AlignVectorizedStrides(ascir::ImplGraph &impl_
   for (const auto &node : impl_graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node);
     const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
-    if (ScheduleUtils::IsBuffer(node) || indirect_load_behavior.uses_direct_gm_pipeline ||
-        indirect_load_behavior.skips_api_emit) {
+    if (ScheduleUtils::IsBuffer(node) || indirect_load_behavior.uses_direct_gm_pipeline) {
       continue;
     }
     GE_ASSERT_SUCCESS(SetVectorizedStridesForOneNode(node));
