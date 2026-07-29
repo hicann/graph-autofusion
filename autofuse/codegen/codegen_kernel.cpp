@@ -2923,7 +2923,7 @@ Status Kernel::GenCubeCommonFuncOfCVFusion(const ascir::FusedScheduledResult &fu
       }
     }
   }
-  AppendFuncCall(ss1, per_group_func_calls.cbegin(), per_group_func_calls.cend(), false);
+  AppendFuncCall(ss1, per_group_func_calls.cbegin(), per_group_func_calls.cend());
   return af::SUCCESS;
 }
 
@@ -3451,11 +3451,8 @@ bool Kernel::GetEnableParallelCompile() const {
 }
 
 void Kernel::AppendFuncCall(std::stringstream &ss, std::vector<std::vector<std::string>>::const_iterator begin,
-                            std::vector<std::vector<std::string>>::const_iterator end, bool need_sync_all) {
+                            std::vector<std::vector<std::string>>::const_iterator end) {
   for (auto it = begin; it != end; ++it) {
-    if (it != begin && need_sync_all) {
-      ss << "    AscendC::PipeBarrier<PIPE_ALL>();" << std::endl;
-    }
     for (const auto &call_statement : *it) {
       ss << call_statement;
     }
