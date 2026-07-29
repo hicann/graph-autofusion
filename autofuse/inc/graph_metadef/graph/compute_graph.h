@@ -232,7 +232,7 @@ class ComputeGraph : public std::enable_shared_from_this<ComputeGraph>, public A
   void SetInputSize(const uint32_t size);
   uint32_t GetInputSize() const;
 
-  // false: known shape  true: unknow shape
+  // false: known shape  true: unknown shape
   bool GetGraphUnknownFlag() const;
   void SetGraphUnknownFlag(const bool flag);
 

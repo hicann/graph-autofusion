@@ -130,9 +130,9 @@ bool ScheduleUtils::IsVectorizedAxisContinuousInGM(const af::AscTensorAttr &outp
   auto &axis = output_tensor.axis;
   auto &repeats = output_tensor.repeats;
   auto &strides = output_tensor.strides;
-  GE_ASSERT_TRUE(axis.size() == repeats.size(), "axis size:[%zu] mis match with repeat size:[%zu].", axis.size(),
+  GE_ASSERT_TRUE(axis.size() == repeats.size(), "axis size:[%zu] mismatch with repeat size:[%zu].", axis.size(),
                  repeats.size());
-  GE_ASSERT_TRUE(axis.size() == strides.size(), "axis size:[%zu] mis match with repeat size:[%zu].", axis.size(),
+  GE_ASSERT_TRUE(axis.size() == strides.size(), "axis size:[%zu] mismatch with repeat size:[%zu].", axis.size(),
                  strides.size());
   std::map<int64_t, af::Expression> id_2_repeat_map;
   std::map<int64_t, af::Expression> id_2_stride_map;

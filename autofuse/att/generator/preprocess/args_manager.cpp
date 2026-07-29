@@ -721,6 +721,46 @@ ExprUintMap ArgsManager::GetAxesPriority() const {
   return axes_pirority;
 }
 
+ExprUintMap ArgsManager::GetAxesOrder() const {
+  ExprUintMap original_orders;
+  std::set<Expr, ExprCmp> ambiguous_originals;
+  uint32_t next_order = 1U;
+  for (const auto &arg_axis : model_info_.arg_list) {
+    GE_ASSERT_NOTNULL(arg_axis);
+    GE_ASSERT_NOTNULL(arg_axis->size);
+    const uint32_t order = static_cast<uint32_t>(arg_axis->order);
+    next_order = std::max(next_order, order + 1U);
+    const auto result = original_orders.emplace(arg_axis->size->symbol_expr, order);
+    if (!result.second) {
+      ambiguous_originals.emplace(arg_axis->size->symbol_expr);
+    }
+  }
+  const ExprExprMap var_relations = GetVarsRelations();
+  const std::vector<Expr> searchable_vars = GetSearchableVars();
+  std::map<Expr, size_t, ExprCmp> original_counts;
+  for (const auto &var : searchable_vars) {
+    const auto relation_iter = var_relations.find(var);
+    const Expr &original_var = relation_iter == var_relations.end() ? var : relation_iter->second;
+    ++original_counts[original_var];
+  }
+  ExprUintMap axes_order;
+  for (const auto &var : searchable_vars) {
+    Expr original_var = var;
+    const auto relation_iter = var_relations.find(var);
+    if (relation_iter != var_relations.end()) {
+      original_var = relation_iter->second;
+    }
+    const auto order_iter = original_orders.find(original_var);
+    if ((order_iter != original_orders.end()) && (ambiguous_originals.count(original_var) == 0U) &&
+        (original_counts.at(original_var) == 1U)) {
+      axes_order[var] = order_iter->second;
+    } else {
+      axes_order[var] = next_order++;
+    }
+  }
+  return axes_order;
+}
+
 void ArgsManager::Reset() {
   vars_infos_.clear();
   hardware_cons_.clear();

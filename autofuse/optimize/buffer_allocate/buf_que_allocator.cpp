@@ -137,7 +137,7 @@ Status BufQueAllocator::AllocBufQueForSingleImplGraph(af::AscGraph &impl_graph, 
   AllocateWithinGroup(impl_graph, total_vecin_nums, total_vecout_nums, is_reduce_mem_reuse);
 
   if (total_vecin_nums > max_que_num) {
-    GELOGD("Graph [%s] occupies [%zu] vecin ques, exceeding limit [%zu]. Attempting to shorten lifetime.",
+    GELOGD("Graph [%s] occupies [%zu] vecin queues, exceeding limit [%zu]. Attempting to shorten lifetime.",
            impl_graph.GetName().c_str(), total_vecin_nums, max_que_num);
     GE_CHK_STATUS_RET(ShortenVecinLifetime(impl_graph, max_que_num), "Failed to shorten vecin lifetime for graph [%s].",
                       impl_graph.GetName().c_str());
@@ -145,7 +145,7 @@ Status BufQueAllocator::AllocBufQueForSingleImplGraph(af::AscGraph &impl_graph, 
   }
 
   if (total_vecout_nums > max_que_num) {
-    GELOGD("Graph [%s] occupies [%zu] vecout ques, exceeding limit [%zu]. Attempting to shorten lifetime.",
+    GELOGD("Graph [%s] occupies [%zu] vecout queues, exceeding limit [%zu]. Attempting to shorten lifetime.",
            impl_graph.GetName().c_str(), total_vecout_nums, max_que_num);
     GE_CHK_STATUS_RET(ShortenVecoutLifetime(impl_graph, max_que_num),
                       "Failed to shorten vecout lifetime for graph [%s].", impl_graph.GetName().c_str());
@@ -699,7 +699,7 @@ Status BufQueAllocator::AllocateWithinGroup(af::AscGraph &graph, size_t &total_v
   MemReuseManager manager = MemReuseManager(tensor_attr_to_tensor_info, tmp_buff_attr_to_tensor_info);
   manager.AllocMemBlocks();
   manager.GetCopyInCopyOutQueNums(total_vecin_nums, total_vecout_nums);
-  GELOGD("[MemReuse] graph[%s] has [%zu] copy in ques and [%zu] copy out ques after mem reuse.",
+  GELOGD("[MemReuse] graph[%s] has [%zu] copy in queues and [%zu] copy out queues after mem reuse.",
          graph.GetName().c_str(), total_vecin_nums, total_vecout_nums);
   return af::SUCCESS;
 }

@@ -80,14 +80,22 @@ void AxesReorderTilingCodeGenImpl::ConfigureSolverPassManagerCommon(SolverPassMa
 }
 
 af::Status AxesReorderTilingCodeGenImpl::GenSolverBaseClass() {
+  auto &solver_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kSolver].dependencies;
+  for (const auto &header : {"cstddef", "sstream", "utility", "vector"}) {
+    autofuse::RequireSystemHeader(solver_dependencies, header);
+  }
   const bool is_enable_equal_order_tiling = IsAnyModelEnableEqualOrderTiling(tiling_model_info_);
+  if (is_enable_equal_order_tiling) {
+    RequireTranslationUnitSystemHeader("limits");
+    RequireTranslationUnitSystemHeader("map");
+  }
   std::string basic_solvers_head = SolverPassManager::GenAxesReorderBaseClassesHead(is_enable_equal_order_tiling);
-  tiling_head_.AddLine(basic_solvers_head);
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kSolver, basic_solvers_head);
   std::string basic_solvers_func = SolverPassManager::GenAxesReorderBaseClassesFunc(is_enable_equal_order_tiling);
   tiling_func_.AddLine(basic_solvers_func);
   if (config_.enable_autofuse_pgo || config_.is_inductor_scene) {
     std::string pgo_solver_head = SolverPassManager::GenAxesReorderPgoClassesHead(config_.pgo_step_max);
-    tiling_head_.AddLine(pgo_solver_head);
+    AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kSolver, pgo_solver_head);
     std::string pgo_solver_func = SolverPassManager::GenAxesReorderPgoClassesFunc();
     tiling_func_.AddLine(pgo_solver_func);
   }

@@ -21,6 +21,19 @@ MODULE_NAME = "autofuse.compile_adapter"
 MODULE_PATH = os.path.join(PYTHON_DIR, "compile_adapter.py")
 
 
+def _host_compile_args(tmpdir):
+    return type(
+        "Args",
+        (),
+        {
+            "stage": "host",
+            "temp_dir": str(tmpdir),
+            "graph_name": "graph",
+            "trace_stage": "host_compile",
+        },
+    )()
+
+
 @pytest.fixture()
 def compile_adapter_module():
     ascendc_compile_module = types.ModuleType("autofuse.ascendc_compile")
@@ -153,16 +166,7 @@ def test_execute_compile_keeps_single_host_file_without_marker(
         captured["args"] = args
 
     compile_adapter_module.ascendc_compile.main = fake_main
-    args = type(
-        "Args",
-        (),
-        {
-            "stage": "host",
-            "temp_dir": str(tmpdir),
-            "graph_name": "graph",
-            "trace_stage": "host_compile",
-        },
-    )()
+    args = _host_compile_args(tmpdir)
 
     compile_adapter_module.execute_compile(
         {
@@ -199,16 +203,7 @@ def test_execute_compile_splits_host_files_with_marker(compile_adapter_module, t
             "// AUTOFUSE_SPLIT_FILE_END: asc_graph0_schedule_result0_g0",
         ]
     )
-    args = type(
-        "Args",
-        (),
-        {
-            "stage": "host",
-            "temp_dir": str(tmpdir),
-            "graph_name": "graph",
-            "trace_stage": "host_compile",
-        },
-    )()
+    args = _host_compile_args(tmpdir)
 
     compile_adapter_module.execute_compile(
         {
@@ -231,6 +226,97 @@ def test_execute_compile_splits_host_files_with_marker(compile_adapter_module, t
     assert not os.path.exists(
         os.path.join(host_dir, "graph_tiling_func_TilingHead.cpp")
     )
+
+
+def test_write_split_host_sources_writes_split_headers_without_injecting_common(
+    tmpdir, compile_adapter_module
+):
+    host_code = """// AUTOFUSE_SPLIT_FILE_BEGIN: TilingStateHeader
+state header
+// AUTOFUSE_SPLIT_FILE_END: TilingStateHeader
+// AUTOFUSE_SPLIT_FILE_BEGIN: TilingSolverHeader
+solver header
+// AUTOFUSE_SPLIT_FILE_END: TilingSolverHeader
+// AUTOFUSE_SPLIT_FILE_BEGIN: TilingApiHeader
+api header
+// AUTOFUSE_SPLIT_FILE_END: TilingApiHeader
+// AUTOFUSE_SPLIT_FILE_BEGIN: ACubeKernelTilingWrapperHpp
+wrapper header
+// AUTOFUSE_SPLIT_FILE_END: ACubeKernelTilingWrapperHpp
+// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func
+#include "autofuse_tiling_func_state.h"
+#include "autofuse_tiling_func_solver.h"
+int Solver() { return 0; }
+// AUTOFUSE_SPLIT_FILE_END: solver_func
+"""
+    host_files = compile_adapter_module.write_split_host_sources(
+        str(tmpdir), "demo_graph", host_code
+    )
+
+    assert not tmpdir.join("autofuse_tiling_func_common.h").check()
+    assert tmpdir.join("autofuse_tiling_func_state.h").read() == "state header\n"
+    assert tmpdir.join("autofuse_tiling_func_solver.h").read() == "solver header\n"
+    assert tmpdir.join("autofuse_tiling_func_api.h").read() == "api header\n"
+    assert tmpdir.join("cube_kernel_tiling_wrapper.h").read() == "wrapper header\n"
+    cpp = tmpdir.join("demo_graph_tiling_func_solver_func.cpp").read()
+    assert cpp.count('#include "autofuse_tiling_func_common.h"') == 0
+    assert '#include "autofuse_tiling_func_state.h"' in cpp
+    assert len(host_files) == 1
+
+
+def test_write_split_host_sources_legacy_marker_injects_common(
+    tmpdir, compile_adapter_module
+):
+    host_code = """// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead
+common header
+// AUTOFUSE_SPLIT_FILE_END: TilingHead
+// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func
+int Solver() { return 0; }
+// AUTOFUSE_SPLIT_FILE_END: solver_func
+"""
+    compile_adapter_module.write_split_host_sources(
+        str(tmpdir), "demo_graph", host_code
+    )
+
+    cpp = tmpdir.join("demo_graph_tiling_func_solver_func.cpp").read()
+    assert cpp.startswith('#include "autofuse_tiling_func_common.h"')
+
+
+def test_write_split_host_sources_historical_split_keeps_cpp(
+    tmpdir, compile_adapter_module
+):
+    host_code = """// AUTOFUSE_SPLIT_FILE_BEGIN: TilingBaseHeader
+base
+// AUTOFUSE_SPLIT_FILE_END: TilingBaseHeader
+// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func
+int Solver() { return 0; }
+// AUTOFUSE_SPLIT_FILE_END: solver_func
+"""
+    compile_adapter_module.write_split_host_sources(
+        str(tmpdir), "demo_graph", host_code
+    )
+
+    cpp = tmpdir.join("demo_graph_tiling_func_solver_func.cpp").read()
+    assert not cpp.startswith('#include "autofuse_tiling_func_common.h"')
+
+
+@pytest.mark.parametrize(
+    "header_key", ["TilingSolverHeader", "UnknownHeader", "UnknownHpp"]
+)
+def test_write_split_host_sources_rejects_undetermined_header_format(
+    tmpdir, compile_adapter_module, header_key
+):
+    host_code = f"""// AUTOFUSE_SPLIT_FILE_BEGIN: {header_key}
+header
+// AUTOFUSE_SPLIT_FILE_END: {header_key}
+// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func
+int Solver() {{ return 0; }}
+// AUTOFUSE_SPLIT_FILE_END: solver_func
+"""
+    with pytest.raises(Exception):
+        compile_adapter_module.write_split_host_sources(
+            str(tmpdir), "demo_graph", host_code
+        )
 
 
 @pytest.mark.parametrize(
@@ -333,16 +419,7 @@ def test_execute_compile_rejects_invalid_split_marker(
         return None
 
     compile_adapter_module.ascendc_compile.main = fake_main
-    args = type(
-        "Args",
-        (),
-        {
-            "stage": "host",
-            "temp_dir": str(tmpdir),
-            "graph_name": "graph",
-            "trace_stage": "host_compile",
-        },
-    )()
+    args = _host_compile_args(tmpdir)
 
     with pytest.raises(compile_adapter_module.ascendc_compile.CompileError) as exc_info:
         compile_adapter_module.execute_compile(

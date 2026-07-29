@@ -378,6 +378,44 @@ TEST_F(ArgsManagerUtest, test_get_searchable_vars2) {
   EXPECT_EQ(exprs.size(), 0);
 }
 
+TEST_F(ArgsManagerUtest, test_get_axes_order_uses_unique_fallback_for_missing_or_ambiguous_axes) {
+  const Expr valid = CreateExpr("valid");
+  const Expr ambiguous = CreateExpr("ambiguous");
+  const Expr missing = CreateExpr("missing");
+  const Expr shared = CreateExpr("shared");
+  const Expr shared_search0 = CreateExpr("shared_search0");
+  const Expr shared_search1 = CreateExpr("shared_search1");
+  ModelInfo model_info;
+  auto valid_axis = MakeAxis("valid", AxisPosition::INNER, false, false, false, MakeSymVar(valid));
+  auto ambiguous_axis0 = MakeAxis("ambiguous0", AxisPosition::INNER, false, false, false, MakeSymVar(ambiguous));
+  auto ambiguous_axis1 = MakeAxis("ambiguous1", AxisPosition::INNER, false, false, false, MakeSymVar(ambiguous));
+  auto shared_axis = MakeAxis("shared", AxisPosition::INNER, false, false, false, MakeSymVar(shared));
+  valid_axis->order = 3U;
+  ambiguous_axis0->order = 1U;
+  ambiguous_axis1->order = 1U;
+  shared_axis->order = 4U;
+  model_info.arg_list = {valid_axis, ambiguous_axis0, ambiguous_axis1, shared_axis};
+
+  ArgsManager args_manager(model_info);
+  VarInfo searchable_info;
+  searchable_info.do_search = true;
+  VarInfo shared_info = searchable_info;
+  shared_info.replacement.orig_expr = shared;
+  args_manager.vars_infos_ = {{valid, searchable_info},
+                              {ambiguous, searchable_info},
+                              {missing, searchable_info},
+                              {shared_search0, shared_info},
+                              {shared_search1, shared_info}};
+
+  const ExprUintMap axes_order = args_manager.GetAxesOrder();
+  ASSERT_EQ(axes_order.size(), 5U);
+  EXPECT_EQ(axes_order.at(valid), 3U);
+  const std::set<uint32_t> fallback_orders = {axes_order.at(ambiguous), axes_order.at(missing),
+                                              axes_order.at(shared_search0), axes_order.at(shared_search1)};
+  EXPECT_EQ(fallback_orders.size(), 4U);
+  EXPECT_GE(*fallback_orders.begin(), 5U);
+}
+
 TEST_F(ArgsManagerUtest, test_get_replaced_vars) {
   ModelInfo info;
   ArgsManager args_manager(info);

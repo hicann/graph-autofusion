@@ -37,7 +37,7 @@ target_link_libraries(test_main PRIVATE
     GTest::gtest
 )
 add_dependencies(test_main ascir_ops_headers)
-gtest_discover_tests(test_main)
+gtest_discover_tests(test_main DISCOVERY_TIMEOUT 30)
 
 add_test(NAME test_main_ut_aggregate
     COMMAND $<TARGET_FILE:test_main>

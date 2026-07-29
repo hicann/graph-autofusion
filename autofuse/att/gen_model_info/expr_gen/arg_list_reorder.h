@@ -233,6 +233,11 @@ class ArgListReorder {
   af::Status ApplyPriorityRules(bool tiling_R, const AxisCategories &categories);
   std::vector<AttAxisPtr> GetNewArgList(const std::vector<size_t> &topo_order,
                                         const std::vector<AttAxisPtr> &arg_list) const;
+  std::vector<Expr> GetTileSplitOrder(const std::vector<size_t> &topo_order,
+                                      const std::vector<AttAxisPtr> &arg_list) const;
+  bool SetRuntimePreferredOrder(const std::vector<AttAxisPtr> &canonical_arg_list,
+                                const std::vector<AttAxisPtr> &source_arg_list,
+                                const std::vector<size_t> &preferred_topo_order, RuntimeReorderRule &rule) const;
   void MakeSureLoadStoreInnerestSameOrder(const std::vector<AttAxisPtr> &arg_list) const;
   bool HandleProperty(const SubAxis *dim, att::ArgListReorder::AxisProperty property, bool is_reduce,
                       bool is_broadcast);

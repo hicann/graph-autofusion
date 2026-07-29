@@ -121,7 +121,7 @@ class OpsKernelInfoStore {
     return SUCCESS;
   }
 
-  // Query information such as foramt/dtype/impl supported by operators (extensible)
+  // Query information such as format/dtype/impl supported by operators (extensible)
   virtual bool GetNodeSupportInfo(const OperatorPtr &op, std::string &support_info) {
     (void)op;
     (void)support_info;

@@ -11,6 +11,7 @@
 #include "gtest/gtest.h"
 
 #include "autofuse_config/auto_fuse_config.h"
+#include "gen_tiling_impl.h"
 #define private public
 #include "codegen.h"
 #include "codegen_tiling.h"
@@ -70,6 +71,16 @@ bool CompileCode(const std::string &code) {
   // 清理临时目录
   std::filesystem::remove_all(temp_dir);
   return compile_exit_code == 0;
+}
+
+void ExpectSystemHeaders(const std::string &source, const std::vector<std::string> &required,
+                         const std::vector<std::string> &forbidden) {
+  for (const auto &header : required) {
+    EXPECT_NE(source.find("#include <" + header + ">"), std::string::npos) << header;
+  }
+  for (const auto &header : forbidden) {
+    EXPECT_EQ(source.find("#include <" + header + ">"), std::string::npos) << header;
+  }
 }
 }  // namespace
 
@@ -2384,11 +2395,41 @@ static ascir::ImplGraph GenGraphWithSizeVar(const std::string &graph_name, const
 }
 
 static ascir::ScheduleGroup GenScheduleGroupWithInterleavedApiTilingField() {
+  constexpr int64_t kSecondDimSize = 32;
+  constexpr int64_t kThirdDimSize = 128;
   ascir::ImplGraph graph0("graph0");
   auto s0 = graph0.CreateSizeVar("s0");
-  (void)graph0.CreateAxis("z0", s0);
+  auto fixed_s1 = graph0.CreateSizeVar(kSecondDimSize);
+  auto fixed_s2 = graph0.CreateSizeVar(kThirdDimSize);
+  auto z0 = graph0.CreateAxis("z0", s0);
+  auto z1 = graph0.CreateAxis("z1", fixed_s1);
+  auto z2 = graph0.CreateAxis("z2", fixed_s2);
+
+  af::ascir_op::Data data("data", graph0);
+  data.y.dtype = ge::DT_FLOAT;
+  *data.y.axis = {z0.id, z1.id, z2.id};
+  *data.y.repeats = {s0, fixed_s1, fixed_s2};
+  *data.y.strides = {fixed_s1 * fixed_s2, fixed_s2, af::ops::One};
+
+  af::ascir_op::Load load("load");
+  graph0.AddNode(load);
+  load.x = data.y;
+  load.y.dtype = ge::DT_FLOAT;
+  *load.y.axis = {z0.id, z1.id, z2.id};
+  *load.y.repeats = {s0, fixed_s1, fixed_s2};
+  *load.y.strides = {fixed_s1 * fixed_s2, fixed_s2, af::ops::One};
+  *load.y.vectorized_axis = {z0.id, z1.id, z2.id};
+  *load.y.vectorized_strides = {fixed_s1 * fixed_s2, fixed_s2, af::ops::One};
+
   af::ascir_op::Transpose transpose("Transpose");
   graph0.AddNode(transpose);
+  transpose.x = load.y;
+  transpose.y.dtype = ge::DT_FLOAT;
+  *transpose.y.axis = {z0.id, z2.id, z1.id};
+  *transpose.y.repeats = {s0, fixed_s2, fixed_s1};
+  *transpose.y.strides = {fixed_s1 * fixed_s2, fixed_s1, af::ops::One};
+  *transpose.y.vectorized_axis = {z0.id, z2.id, z1.id};
+  *transpose.y.vectorized_strides = {fixed_s1 * fixed_s2, fixed_s1, af::ops::One};
   graph0.FindNode("Transpose")->outputs[0].attr.que.id = 0;
 
   ascir::ImplGraph graph1("graph1");
@@ -2548,6 +2589,162 @@ TEST_F(TestCodegenTiling, GenerateForInductorShouldUseGetTilingDataReprAsTilingD
   EXPECT_NE(tiling_impl.find("GetTilingDataRepr("), std::string::npos);
 }
 
+TEST_F(TestCodegenTiling, SplitHeaderGenerateForInductorShouldEmitHeaderKeysAndCppIncludes) {
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  auto tiling_files = this->GenerateForInductor(fused_schedule_result);
+
+  EXPECT_NE(tiling_files.find("TilingHead"), tiling_files.end());
+  EXPECT_NE(tiling_files.find("TilingStateHeader"), tiling_files.end());
+  EXPECT_NE(tiling_files.find("TilingLogHeader"), tiling_files.end());
+  EXPECT_NE(tiling_files.find("TilingPgoHeader"), tiling_files.end());
+  EXPECT_NE(tiling_files.find("TilingSolverHeader"), tiling_files.end());
+  EXPECT_NE(tiling_files.find("TilingApiHeader"), tiling_files.end());
+  EXPECT_EQ(tiling_files.find("TilingBaseHeader"), tiling_files.end());
+  EXPECT_EQ(tiling_files.find("TilingEntryHeader"), tiling_files.end());
+  EXPECT_EQ(tiling_files.find("TilingTailHeader"), tiling_files.end());
+
+  const auto &state_header = tiling_files.at("TilingStateHeader");
+  const auto &solver_header = tiling_files.at("TilingSolverHeader");
+  const auto &api_header = tiling_files.at("TilingApiHeader");
+  EXPECT_EQ(state_header.find("#include \"autofuse_tiling_func_"), std::string::npos);
+  EXPECT_EQ(solver_header.find("#include \"autofuse_tiling_func_"), std::string::npos);
+  EXPECT_EQ(api_header.find("get_g_basen_basem_align"), std::string::npos);
+  EXPECT_EQ(api_header.find("set_g_basen_basem_align"), std::string::npos);
+
+  ASSERT_NE(tiling_files.find(codegen::kTilingDefAndConstIdentify), tiling_files.end());
+  const auto &entry = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  EXPECT_NE(entry.find("#include \"autofuse_tiling_data.h\""), std::string::npos);
+  EXPECT_NE(entry.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
+  EXPECT_NE(entry.find("#include \"autofuse_tiling_func_pgo.h\""), std::string::npos);
+  EXPECT_NE(entry.find("#include \"autofuse_tiling_func_api.h\""), std::string::npos);
+  EXPECT_EQ(entry.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
+  EXPECT_EQ(entry.find("#include \"autofuse_tiling_func_common.h\""), std::string::npos);
+  EXPECT_EQ(entry.find("#include \"exe_graph/runtime/tiling_context.h\""), std::string::npos);
+  EXPECT_EQ(entry.find("exe_graph/runtime/infer_shape_context.h"), std::string::npos);
+  EXPECT_EQ(entry.find("acl/acl.h"), std::string::npos);
+  EXPECT_NE(entry.find("#include \"autofuse_tiling_func_api.h\"\n\nusing namespace optiling;"), std::string::npos);
+  EXPECT_EQ(entry.find("IsEqual(kept.modeled_perf"), std::string::npos);
+  ExpectSystemHeaders(entry,
+                      {"algorithm", "cfloat", "cmath", "cstddef", "cstdint", "map", "ostream", "sstream", "string",
+                       "unordered_map", "utility", "vector"},
+                      {"array", "cstdlib", "fstream", "functional", "memory", "securec.h", "unordered_set"});
+
+  const auto solver_iter = tiling_files.find("solver_func");
+  if (solver_iter != tiling_files.end()) {
+    const auto &solver = solver_iter->second;
+    EXPECT_NE(solver.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
+    EXPECT_NE(solver.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
+    EXPECT_EQ(solver.find("#include \"autofuse_tiling_func_common.h\""), std::string::npos);
+  }
+}
+
+TEST_F(TestCodegenTiling, SplitHeaderApiTilingSourceShouldIncludeApiHeaders) {
+  ge::PlatformContext::GetInstance().SetPlatform("2201");
+  codegen_func_ = att::GenTilingImplAutoFuseV3;
+  auto fused_schedule_result = GenSingleGroupFusedScheduleResultWithApiTilingField();
+  auto tiling_files = this->GenerateForInductor(fused_schedule_result);
+
+  bool found_api_source = false;
+  for (const auto &[key, source] : tiling_files) {
+    if (key == "TilingHead" || source.find("GetConfusionTranspose") == std::string::npos) {
+      continue;
+    }
+    found_api_source = true;
+    EXPECT_NE(source.find("#include \"graph/tensor.h\""), std::string::npos);
+    EXPECT_NE(source.find("#ifndef AUTOFUSE_CONFUSION_TRANSPOSE_TILING_DEFS"), std::string::npos);
+    EXPECT_NE(source.find("const uint32_t ONE_BLK_SIZE = 32;"), std::string::npos);
+    EXPECT_NE(source.find("const uint32_t BLOCK_CUBE = 16;"), std::string::npos);
+  }
+  EXPECT_TRUE(found_api_source);
+}
+
+TEST_F(TestCodegenTiling, SplitHeaderGenerateForTfShouldGuardRuntimeHeadersForCceKtTest) {
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  const std::map<std::string, std::string> shape_info;
+  auto tiling_files = this->Generate(fused_schedule_result, shape_info, ".", "10");
+
+  ASSERT_NE(tiling_files.find(codegen::kTilingDefAndConstIdentify), tiling_files.end());
+  const auto &entry = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  const std::string guarded_headers =
+      "#ifndef __CCE_KT_TEST__\n"
+      "#include \"exe_graph/runtime/tiling_context.h\"\n"
+      "#include \"tiling/platform/platform_ascendc.h\"\n"
+      "#endif\n";
+  EXPECT_NE(entry.find(guarded_headers), std::string::npos);
+  EXPECT_EQ(entry.find("#include \"platform_ascendc.h\""), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, SplitHeaderGenerateForPgoShouldIncludeDirectEntryDependencies) {
+  enable_autofuse_pgo_ = true;
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  const std::map<std::string, std::string> shape_info;
+  auto tiling_files = this->Generate(fused_schedule_result, shape_info, ".", "10");
+
+  ASSERT_NE(tiling_files.find(codegen::kTilingDefAndConstIdentify), tiling_files.end());
+  const auto &entry = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  EXPECT_NE(entry.find("#include <fstream>"), std::string::npos);
+  EXPECT_NE(entry.find("#include <securec.h>"), std::string::npos);
+  EXPECT_NE(entry.find("#include <unordered_set>"), std::string::npos);
+  EXPECT_NE(entry.find("#include \"exe_graph/runtime/tiling_context.h\""), std::string::npos);
+  EXPECT_NE(entry.find("#include \"autofuse_tiling_func_pgo.h\""), std::string::npos);
+  EXPECT_NE(entry.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, SplitHeaderGenerateForInductorPgoShouldIncludeDirectEntryDependencies) {
+  enable_autofuse_pgo_ = true;
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  auto tiling_files = this->GenerateForInductor(fused_schedule_result);
+
+  ASSERT_NE(tiling_files.find(codegen::kTilingDefAndConstIdentify), tiling_files.end());
+  const auto &entry = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  EXPECT_NE(entry.find("optiling::IsEqual"), std::string::npos);
+  EXPECT_NE(entry.find("#include <fstream>"), std::string::npos);
+  EXPECT_NE(entry.find("#include <unordered_set>"), std::string::npos);
+  EXPECT_NE(entry.find("#include <securec.h>"), std::string::npos);
+  EXPECT_NE(entry.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, SplitHeaderFallbackShouldEmitUsableApiAndPgoHeaders) {
+  codegen_func_ = nullptr;
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  auto tiling_files = this->GenerateForInductor(fused_schedule_result);
+
+  ASSERT_NE(tiling_files.find(codegen::kTilingApiHeaderIdentify), tiling_files.end());
+  ASSERT_NE(tiling_files.find(codegen::kTilingPgoHeaderIdentify), tiling_files.end());
+  const auto &api_header = tiling_files.at(codegen::kTilingApiHeaderIdentify);
+  const auto &pgo_header = tiling_files.at(codegen::kTilingPgoHeaderIdentify);
+  EXPECT_NE(api_header.find("inline bool GetTiling("), std::string::npos);
+  EXPECT_NE(api_header.find("inline bool PGOSearchTilingKey("), std::string::npos);
+  EXPECT_NE(api_header.find("inline bool PGOByCoreNumSearchTilingKey("), std::string::npos);
+  EXPECT_NE(pgo_header.find("class PgoConfig"), std::string::npos);
+  EXPECT_NE(pgo_header.find("struct SearchConfig"), std::string::npos);
+  EXPECT_EQ(api_header.find("#include \"autofuse_tiling_func_"), std::string::npos);
+  EXPECT_EQ(pgo_header.find("#include \"autofuse_tiling_func_"), std::string::npos);
+  EXPECT_TRUE(CompileCode(api_header));
+  EXPECT_TRUE(CompileCode(pgo_header));
+}
+
+TEST_F(TestCodegenTiling, SplitHeaderFallbackSolverShouldCompileWorkspaceHelpers) {
+  codegen_func_ = nullptr;
+  auto graph = ascir::ShareGraph::TailBrcTailReduceFusedGraph(3);
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), af::SUCCESS);
+  auto tiling_files = this->GenerateForInductor(fused_schedule_result);
+  ASSERT_NE(tiling_files.find(codegen::kTilingDefAndConstIdentify), tiling_files.end());
+  ASSERT_NE(tiling_files.find(codegen::kTilingSolverHeaderIdentify), tiling_files.end());
+  const auto &entry = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  const auto &solver_header = tiling_files.at(codegen::kTilingSolverHeaderIdentify);
+  EXPECT_NE(entry.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
+  EXPECT_TRUE(CompileCode(solver_header + R"(
+using namespace optiling;
+double WorkspaceSize(double z0z1t_size, double z2t_size, double z2Tt_size) {
+  return Max(0, 4 * Max(Max(32, z0z1t_size), 32 * Ceiling(Ceiling(7 / z2t_size) / z2Tt_size)));
+}
+)"));
+}
+
 TEST_F(TestCodegenTiling, GenerateForInductorTopnAbiShouldNotEmitOutputConfigsMetadataLogic) {
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
   auto tiling_files = this->GenerateForInductor(fused_schedule_result);
@@ -2587,10 +2784,14 @@ TEST_F(TestCodegenTiling, GenerateForInductorCvFusionShouldEmitCvTilingAndCubeWr
 
   auto tiling_files = this->GenerateForInductor(fused_schedule_result);
   ASSERT_TRUE(tiling_files.find(codegen::kTilingDefAndConstIdentify) != tiling_files.end());
+  ASSERT_TRUE(tiling_files.find(codegen::kTilingApiHeaderIdentify) != tiling_files.end());
   ASSERT_TRUE(tiling_files.find(codegen::kCubeKernelTilingWrapperHpp) != tiling_files.end());
   ASSERT_TRUE(tiling_files.find(codegen::kCubeKernelTilingWrapperCpp) != tiling_files.end());
 
   const auto &tiling_impl = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  const auto &api_header = tiling_files.at(codegen::kTilingApiHeaderIdentify);
+  EXPECT_NE(api_header.find("int32_t get_g_basen_basem_align();"), std::string::npos);
+  EXPECT_NE(api_header.find("void set_g_basen_basem_align(int32_t value);"), std::string::npos);
   EXPECT_NE(tiling_impl.find("CVAutofuseTilingData"), std::string::npos);
   EXPECT_NE(tiling_impl.find("CVTilingData"), std::string::npos);
   EXPECT_NE(tiling_impl.find("CallCubeTiling"), std::string::npos);
@@ -2600,12 +2801,20 @@ TEST_F(TestCodegenTiling, GenerateForInductorCvFusionShouldEmitCvTilingAndCubeWr
   EXPECT_EQ(tiling_impl.find("GetModeledPerfForTesting"), std::string::npos);
   EXPECT_EQ(tiling_impl.find("AscirCompileAndLaunch"), std::string::npos);
   EXPECT_EQ(tiling_impl.find("GenAscirTilingAndLaunchFunc"), std::string::npos);
+  EXPECT_EQ(tiling_impl.find("#include \"exe_graph/runtime/tiling_context.h\""), std::string::npos);
+  EXPECT_EQ(tiling_impl.find("#include \"autofuse_cube_tiling_data.h\""), std::string::npos);
+  EXPECT_NE(tiling_impl.find("#include \"cube_kernel_tiling_wrapper.h\""), std::string::npos);
+  ExpectSystemHeaders(
+      tiling_impl, {"algorithm", "cfloat", "cstddef", "cstdint", "cstring", "ostream", "sstream", "string", "vector"},
+      {"array", "cmath", "cstdlib", "functional", "map", "memory", "unordered_map", "utility"});
 }
 
 TEST_F(TestCodegenTiling, CubeWrapperShouldPreserveTilingDataBytes) {
   const auto &wrapper_hpp = kCubeKernelTilingWrapperHppValue;
   const auto &wrapper_cpp = kCubeKernelTilingWrapperCppValue;
   EXPECT_NE(wrapper_hpp.find("std::vector<uint8_t> tiling_data;"), std::string::npos);
+  EXPECT_NE(wrapper_hpp.find("#include <cmath>"), std::string::npos);
+  EXPECT_NE(wrapper_hpp.find("#include <limits>"), std::string::npos);
   EXPECT_NE(wrapper_cpp.find("result.tiling_data.push_back"), std::string::npos);
   EXPECT_NE(wrapper_cpp.find("result.tiling_data = AlignTilingDataTo8Bytes"), std::string::npos);
 }
@@ -3486,7 +3695,7 @@ TEST_F(TestCodegenTiling, ParseSearchConfigShouldNormalizeZeroUbThreshold) {
   ASSERT_TRUE(tiling_files.find(codegen::kTilingDefAndConstIdentify) != tiling_files.end());
   const auto &tiling_impl = tiling_files.at(codegen::kTilingDefAndConstIdentify);
   EXPECT_NE(tiling_impl.find("constexpr double kMinUbThreshold = 0.001;"), std::string::npos);
-  EXPECT_NE(tiling_impl.find("if (IsEqual(out.ub_threshold, 0.0)) { out.ub_threshold = kMinUbThreshold; }"),
+  EXPECT_NE(tiling_impl.find("if (std::fabs(out.ub_threshold) < 1e-8) { out.ub_threshold = kMinUbThreshold; }"),
             std::string::npos);
 }
 
@@ -3550,12 +3759,52 @@ TEST_F(TestCodegenTiling, CodegenGenerateForInductorShouldEmitSplitMarkers) {
 
   ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
 
-  EXPECT_NE(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead"), std::string::npos);
-  EXPECT_NE(result.tiling.find("// AUTOFUSE_SPLIT_FILE_END: TilingHead"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("// AUTOFUSE_SPLIT_FILE_END: TilingHead"), std::string::npos);
+  EXPECT_NE(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingStateHeader"), std::string::npos);
+  EXPECT_NE(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingLogHeader"), std::string::npos);
+  EXPECT_NE(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingPgoHeader"), std::string::npos);
+  EXPECT_NE(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingSolverHeader"), std::string::npos);
+  EXPECT_NE(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingApiHeader"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingBaseHeader"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingEntryHeader"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingTailHeader"), std::string::npos);
+  EXPECT_NE(result.tiling.find("#include \"autofuse_tiling_func_api.h\""), std::string::npos);
+  const auto get_marker_content = [&result](const std::string &key) {
+    const std::string begin = "// AUTOFUSE_SPLIT_FILE_BEGIN: " + key;
+    const std::string end = "// AUTOFUSE_SPLIT_FILE_END: " + key;
+    const size_t begin_pos = result.tiling.find(begin);
+    EXPECT_NE(begin_pos, std::string::npos);
+    const size_t content_pos = result.tiling.find('\n', begin_pos);
+    EXPECT_NE(content_pos, std::string::npos);
+    const size_t end_pos = result.tiling.find(end, content_pos);
+    EXPECT_NE(end_pos, std::string::npos);
+    return result.tiling.substr(content_pos + 1U, end_pos - content_pos - 1U);
+  };
+  const std::string state_header = get_marker_content("TilingStateHeader");
+  const std::string solver_header = get_marker_content("TilingSolverHeader");
+  const std::string api_header = get_marker_content("TilingApiHeader");
+  EXPECT_EQ(state_header.find("#include \"autofuse_tiling_func_"), std::string::npos);
+  EXPECT_EQ(solver_header.find("#include \"autofuse_tiling_func_"), std::string::npos);
+  EXPECT_EQ(api_header.find("#include \"autofuse_tiling_func_"), std::string::npos);
   EXPECT_NE(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: tiling_def_and_tiling_const"), std::string::npos);
   EXPECT_NE(result.tiling.find("extern \"C\" int64_t AutofuseTiling"), std::string::npos);
   EXPECT_NE(result.tiling.find("extern \"C\" int64_t GenerateTopnSolutions"), std::string::npos);
   EXPECT_NE(result.tiling.find("GetTilingDataRepr("), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, InductorEntryUsingSolverHelpersShouldIncludeSolverHeader) {
+  auto graph = ascir::ShareGraph::TailBrcTailReduceFusedGraph(3);
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), af::SUCCESS);
+  auto tiling_files = this->GenerateForInductor(fused_schedule_result);
+  ASSERT_NE(tiling_files.find(codegen::kTilingDefAndConstIdentify), tiling_files.end());
+  const auto &entry = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  ASSERT_NE(entry.find("Max("), std::string::npos);
+  ASSERT_NE(entry.find("Ceiling("), std::string::npos);
+  EXPECT_NE(entry.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, SingleGroupEvaluateModeledPerfShouldUsePublicGetPerf) {
@@ -3586,15 +3835,15 @@ TEST_F(TestCodegenTiling, CodegenGenerateForInductorCvFusionShouldKeepCubeWrappe
 
   ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
 
+  EXPECT_NE(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: ACubeKernelTilingWrapperHpp"), std::string::npos);
   EXPECT_NE(result.tiling.find("class CubeKernelTilingWrapper"), std::string::npos);
   EXPECT_NE(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: BCubeKernelTilingWrapperCpp"), std::string::npos);
-  EXPECT_EQ(result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: ACubeKernelTilingWrapperHpp"), std::string::npos);
   const size_t wrapper_cpp_pos = result.tiling.find("// AUTOFUSE_SPLIT_FILE_BEGIN: BCubeKernelTilingWrapperCpp");
   ASSERT_NE(wrapper_cpp_pos, std::string::npos);
   const size_t wrapper_cpp_end_pos = result.tiling.find("// AUTOFUSE_SPLIT_FILE_END: BCubeKernelTilingWrapperCpp");
   ASSERT_NE(wrapper_cpp_end_pos, std::string::npos);
   const std::string wrapper_cpp = result.tiling.substr(wrapper_cpp_pos, wrapper_cpp_end_pos - wrapper_cpp_pos);
-  EXPECT_EQ(wrapper_cpp.find("#include \"cube_kernel_tiling_wrapper.h\""), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("#include \"cube_kernel_tiling_wrapper.h\""), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, CodegenGenerateShouldNotEmitSplitMarkers) {
@@ -3606,6 +3855,8 @@ TEST_F(TestCodegenTiling, CodegenGenerateShouldNotEmitSplitMarkers) {
 
   EXPECT_EQ(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN"), std::string::npos);
   EXPECT_EQ(result.tiling.find("AUTOFUSE_SPLIT_FILE_END"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("#include \"autofuse_tiling_func_base.h\""), std::string::npos);
+  EXPECT_EQ(result.tiling.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, TilingLibGenerateForInductorShouldNotEmitSplitMarkers) {

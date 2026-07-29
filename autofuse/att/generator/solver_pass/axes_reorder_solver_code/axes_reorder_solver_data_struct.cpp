@@ -157,6 +157,8 @@ std::string GenAxesReorderSolverInput() {
   codes += "  TilingVariable **tiling_vars = nullptr;\n";
   codes += "  TilingVariable **pure_mc_vars = nullptr;\n";
   codes += "  TilingVariable **local_buffer_vars = nullptr;\n";
+  codes += "  TilingVariable **ordered_local_buffer_vars = nullptr;\n";
+  codes += "  uint32_t *ordered_to_canonical = nullptr;\n";
   codes += "  Constraint **all_cons = nullptr;\n";
   codes += GenReorderSolverInputDebugString();
   codes += "};\n";

@@ -92,7 +92,7 @@ bool ArgsReplacer::IsAllFactorReplaced(const ExprExprMap &replaced_vars, std::ve
 bool ArgsReplacer::InitWithEqCons(const std::map<std::string, std::vector<std::pair<Expr, Expr>>> &eq_exprs) {
   for (const auto &eq_cons : eq_exprs) {
     // 如果等式约束中包含非整除约束，返回失败
-    GE_ASSERT_TRUE(eq_cons.first == kFatherToChildNoTail, "CreateExpr[%s] Repalce doesn't support non notail eq exprs.",
+    GE_ASSERT_TRUE(eq_cons.first == kFatherToChildNoTail, "CreateExpr[%s] Replace doesn't support non notail eq exprs.",
                    eq_cons.first.c_str());
     for (const auto &expr : eq_cons.second) {
       expr_factors_map_[expr.first].emplace_back(expr.second);
@@ -121,11 +121,11 @@ bool ArgsReplacer::GetLeafExprs() {
           int32_t factor_align_const_value;
           factor_align.GetConstValue(factor_align_const_value);
           GE_ASSERT_TRUE(IsPowerOfTwo(factor_align_const_value),
-                         "CreateExpr Repalce doesn't support align is not power of 2.");
+                         "CreateExpr Replace doesn't support align is not power of 2.");
         }
         // 每个叶子节点只能有一个父节点，反过来一个父节点可以有多个子节点
         GE_ASSERT_TRUE(ori_expr_new_expr_map_.find(factor) == ori_expr_new_expr_map_.end(),
-                       "CreateExpr Repalce doesn't support multi-parent case.");
+                       "CreateExpr Replace doesn't support multi-parent case.");
         // 对于存在变量整除关系的子节点，变量替换规则为align * 2^new_var
         Expr new_variable = CreateExpr((Str(factor) + kPowBase).c_str());
         Expr new_factor_expr = af::sym::Mul(factor_align, af::sym::Pow(CreateExpr(kBaseTwo), new_variable));

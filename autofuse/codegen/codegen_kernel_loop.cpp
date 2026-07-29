@@ -1098,7 +1098,7 @@ Status ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::AxisId> &c
                     "Codegen generate API call failed, api_name: %s", api_name_.c_str());
   ss << local_result;
 
-  // apicall post precess
+  // apicall post process
   std::string post_result;
   GE_CHK_STATUS_RET(PostProcess(tpipe, current_axis, output_tensors, post_result),
                     "Codegen generate API call post_p failed");

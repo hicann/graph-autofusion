@@ -110,7 +110,7 @@ class BlockingQueue {
     is_stoped_ = false;
   }
 
-  // if the queue is stoped ,need call this function to release the unprocessed items
+  // if the queue is stopped ,need call this function to release the unprocessed items
   std::list<T> GetRemainItems() {
     const std::unique_lock<std::mutex> lock(mutex_);
 

@@ -155,7 +155,7 @@ graphStatus OpDescUtilsEx::CallInferFunc(const OpDescPtr &op_desc, Operator &op)
     // 如，映射到已有的IR上等行为，或无痛地跳过infershape（如netoutput/framework
     // 这里暂时为了v1动态shape执行时保留该错误码，后续整改
     GELOGW(
-        "Node %s(%s) skipped shape inferrence, because has_io is %d, has_ir is %d, has_infer_func is %d, The process "
+        "Node %s(%s) skipped shape inference, because has_io is %d, has_ir is %d, has_infer_func is %d, The process "
         "proceeds only if has_io is true and either has_ir or has_infer_func is true",
         op_desc->GetNamePtr(), op_desc->GetTypePtr(), has_io, is_exist_op, has_infer_func);
     ret = GRAPH_PARAM_INVALID;

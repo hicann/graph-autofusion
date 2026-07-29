@@ -13,6 +13,7 @@
 #include "common/ub_expr/ub_expr_types.h"
 #define private public
 #include "generator/solver_pass_gen/axes_reorder_solver/axes_reorder_solver_gen.h"
+#include "generator/solver_pass/axes_reorder_solver_code.h"
 #include "generator/solver_pass_gen/axes_reorder_solver/ub_named_expr_builder.h"
 #include "gen_model_info/api_perf_register/v1/perf_param_v1.h"
 using namespace att;
@@ -194,8 +195,7 @@ TEST_F(TestAxesReorderSolverGen, GenRuntimeReorderRuleForDynamicReduceTile) {
   Expr reduce = CreateExpr("reduce");
   Expr tail = CreateExpr("tail");
   RuntimeReorderRule rule;
-  rule.preferred_axis = tail;
-  rule.fallback_axis = reduce;
+  rule.preferred_order = {tail, reduce};
   rule.condition_axis = tail;
   rule.compare_axis = reduce;
   rule.condition_threshold = 64U;
@@ -210,13 +210,11 @@ TEST_F(TestAxesReorderSolverGen, GenRuntimeReorderRuleForDynamicReduceTile) {
   std::string code = solver_gen.GenRuntimeReorderRules();
   EXPECT_TRUE(code.find("(tail.upper_bound(tail.upper_bound_vars) < 64)") != std::string::npos);
   EXPECT_TRUE(code.find("(reduce.upper_bound(reduce.upper_bound_vars) > 128)") != std::string::npos);
-  EXPECT_TRUE(code.find("Runtime reduce tile reorder chooses preferred axis tail before fallback axis reduce") !=
-              std::string::npos);
-  EXPECT_TRUE(code.find("Runtime reduce tile reorder keeps fallback axis reduce before preferred axis tail") !=
-              std::string::npos);
-  EXPECT_TRUE(code.find("auto *runtime_preferred_var = input.local_buffer_vars[1]") != std::string::npos);
-  EXPECT_TRUE(code.find("input.local_buffer_vars[1] = input.local_buffer_vars[0]") != std::string::npos);
-  EXPECT_TRUE(code.find("input.local_buffer_vars[0] = runtime_preferred_var") != std::string::npos);
+  EXPECT_TRUE(code.find("input.ordered_local_buffer_vars[0] = input.local_buffer_vars[1]") != std::string::npos);
+  EXPECT_TRUE(code.find("input.ordered_to_canonical[0] = 1u") != std::string::npos);
+  EXPECT_TRUE(code.find("input.ordered_local_buffer_vars[1] = input.local_buffer_vars[0]") != std::string::npos);
+  EXPECT_TRUE(code.find("input.ordered_to_canonical[1] = 0u") != std::string::npos);
+  EXPECT_TRUE(code.find("input.local_buffer_vars[0] =") == std::string::npos);
 }
 
 TEST_F(TestAxesReorderSolverGen, GenRuntimeReorderRuleUsesOriginalAxesForDynamicReduceTile) {
@@ -225,8 +223,7 @@ TEST_F(TestAxesReorderSolverGen, GenRuntimeReorderRuleUsesOriginalAxesForDynamic
   Expr origin_reduce = CreateExpr("origin_reduce");
   Expr origin_tail = CreateExpr("origin_tail");
   RuntimeReorderRule rule;
-  rule.preferred_axis = tail;
-  rule.fallback_axis = reduce;
+  rule.preferred_order = {tail, reduce};
   rule.condition_axis = origin_tail;
   rule.compare_axis = origin_reduce;
   rule.condition_threshold = 64U;
@@ -242,9 +239,8 @@ TEST_F(TestAxesReorderSolverGen, GenRuntimeReorderRuleUsesOriginalAxesForDynamic
   std::string code = solver_gen.GenRuntimeReorderRules();
   EXPECT_TRUE(code.find("(origin_tail.value < 64)") != std::string::npos);
   EXPECT_TRUE(code.find("(origin_reduce.value > 128)") != std::string::npos);
-  EXPECT_TRUE(code.find("auto *runtime_preferred_var = input.local_buffer_vars[1]") != std::string::npos);
-  EXPECT_TRUE(code.find("input.local_buffer_vars[1] = input.local_buffer_vars[0]") != std::string::npos);
-  EXPECT_TRUE(code.find("input.local_buffer_vars[0] = runtime_preferred_var") != std::string::npos);
+  EXPECT_TRUE(code.find("input.ordered_local_buffer_vars[0] = input.local_buffer_vars[1]") != std::string::npos);
+  EXPECT_TRUE(code.find("input.ordered_local_buffer_vars[1] = input.local_buffer_vars[0]") != std::string::npos);
 }
 
 TEST_F(TestAxesReorderSolverGen, GenRuntimeReorderRuleUsesOriginalAxisProductForDynamicReduceTile) {
@@ -255,8 +251,7 @@ TEST_F(TestAxesReorderSolverGen, GenRuntimeReorderRuleUsesOriginalAxisProductFor
   Expr origin_tail0 = CreateExpr("origin_tail0");
   Expr origin_tail1 = CreateExpr("origin_tail1");
   RuntimeReorderRule rule;
-  rule.preferred_axis = tail;
-  rule.fallback_axis = reduce;
+  rule.preferred_order = {tail, reduce};
   rule.condition_axis = origin_tail0 * origin_tail1;
   rule.compare_axis = origin_reduce0 * origin_reduce1;
   rule.condition_threshold = 64U;
@@ -280,8 +275,7 @@ TEST_F(TestAxesReorderSolverGen, GenSolverFuncImplAppliesRuntimeReorderOnceBefor
   Expr reduce = CreateExpr("reduce");
   Expr tail = CreateExpr("tail");
   RuntimeReorderRule rule;
-  rule.preferred_axis = tail;
-  rule.fallback_axis = reduce;
+  rule.preferred_order = {tail, reduce};
   rule.condition_axis = tail;
   rule.compare_axis = reduce;
   rule.condition_threshold = 64U;
@@ -293,13 +287,135 @@ TEST_F(TestAxesReorderSolverGen, GenSolverFuncImplAppliesRuntimeReorderOnceBefor
   solver_gen.SetRuntimeReorderRules({rule});
 
   const std::string code = solver_gen.GenSolverFuncImpl();
-  const std::string swap_code = "auto *runtime_preferred_var = input.local_buffer_vars[1]";
-  const size_t swap_pos = code.find(swap_code);
+  const std::string reorder_code = "input.ordered_local_buffer_vars[0] = input.local_buffer_vars[1]";
+  const size_t reorder_pos = code.find(reorder_code);
   const size_t solver_pos = code.find("AxesReorderSolvercase_test solver(input);");
-  EXPECT_EQ(CountSubstr(code, swap_code), 1U);
-  EXPECT_NE(swap_pos, std::string::npos);
+  EXPECT_EQ(CountSubstr(code, reorder_code), 1U);
+  EXPECT_NE(reorder_pos, std::string::npos);
   EXPECT_NE(solver_pos, std::string::npos);
-  EXPECT_LT(swap_pos, solver_pos);
+  EXPECT_LT(reorder_pos, solver_pos);
+  EXPECT_NE(code.find("TilingVariable* ordered_local_buffer_vars[2] = {&reduce, &tail"), std::string::npos);
+  EXPECT_NE(code.find("uint32_t ordered_to_canonical[2] = {0u, 1u"), std::string::npos);
+  EXPECT_NE(code.find("tiling_data.set_reduce(input.local_buffer_vars[0]->value)"), std::string::npos);
+  EXPECT_NE(code.find("tiling_data.set_tail(input.local_buffer_vars[1]->value)"), std::string::npos);
+}
+
+TEST_F(TestAxesReorderSolverGen, GenRuntimeReorderUsesCompletePermutationAndRejectsInvalidOrder) {
+  Expr axis0 = CreateExpr("axis0");
+  Expr axis1 = CreateExpr("axis1");
+  Expr axis2 = CreateExpr("axis2");
+  RuntimeReorderRule rule;
+  rule.preferred_order = {axis2, axis0, axis1};
+  rule.condition_axis = axis0;
+  rule.compare_axis = axis1;
+  rule.condition_threshold = 64U;
+  rule.compare_threshold = 128U;
+
+  AxesReorderSolverGen solver_gen("case_test", "TilingData");
+  solver_gen.local_buffer_tiling_vars_ = {axis0, axis1, axis2};
+  EXPECT_NE(
+      solver_gen.GenRuntimeReorderRule(rule).find("input.ordered_local_buffer_vars[2] = input.local_buffer_vars[1]"),
+      std::string::npos);
+
+  Expr ignored_axis = CreateExpr("ignored_axis");
+  rule.preferred_order = {axis2, ignored_axis, axis0, axis1};
+  EXPECT_NE(
+      solver_gen.GenRuntimeReorderRule(rule).find("input.ordered_local_buffer_vars[2] = input.local_buffer_vars[1]"),
+      std::string::npos);
+
+  rule.preferred_order = {axis2, axis2, axis1};
+  EXPECT_TRUE(solver_gen.GenRuntimeReorderRule(rule).empty());
+}
+
+TEST_F(TestAxesReorderSolverGen, GenRuntimeReorderResolvesReplacedVarsOneToOne) {
+  Expr origin_reduce = CreateExpr("origin_reduce");
+  Expr origin_tail = CreateExpr("origin_tail");
+  Expr search_reduce = CreateExpr("search_reduce");
+  Expr search_tail = CreateExpr("search_tail");
+  RuntimeReorderRule rule;
+  rule.preferred_order = {origin_tail, origin_reduce};
+  rule.condition_axis = origin_tail;
+  rule.compare_axis = origin_reduce;
+  rule.condition_threshold = 64U;
+  rule.compare_threshold = 128U;
+
+  AxesReorderSolverGen solver_gen("case_test", "TilingData");
+  solver_gen.local_buffer_tiling_vars_ = {search_reduce, search_tail};
+  solver_gen.vars_relations_ = {{search_reduce, origin_reduce}, {search_tail, origin_tail}};
+  const std::string code = solver_gen.GenRuntimeReorderRule(rule);
+  EXPECT_NE(code.find("input.ordered_local_buffer_vars[0] = input.local_buffer_vars[1]"), std::string::npos);
+
+  Expr duplicate_search = CreateExpr("duplicate_search");
+  solver_gen.local_buffer_tiling_vars_ = {search_reduce, duplicate_search, search_tail};
+  solver_gen.vars_relations_[duplicate_search] = origin_reduce;
+  rule.preferred_order = {origin_reduce, origin_tail, duplicate_search};
+  EXPECT_TRUE(solver_gen.GenRuntimeReorderRule(rule).empty());
+}
+
+TEST_F(TestAxesReorderSolverGen, GenPGOSolverAppliesRuntimeOrderBeforeSolverConstruction) {
+  Expr reduce = CreateExpr("reduce");
+  Expr tail = CreateExpr("tail");
+  RuntimeReorderRule rule;
+  rule.preferred_order = {tail, reduce};
+  rule.condition_axis = tail;
+  rule.compare_axis = reduce;
+  rule.condition_threshold = 64U;
+  rule.compare_threshold = 128U;
+
+  AxesReorderSolverGen solver_gen("case_test", "TilingData");
+  solver_gen.local_buffer_tiling_vars_ = {reduce, tail};
+  solver_gen.hardware_use_map_[HardwareDef::UB] = reduce + tail;
+  solver_gen.SetRuntimeReorderRules({rule});
+
+  const std::string code = solver_gen.GenPGOSolverFuncImpl();
+  const size_t reorder_pos = code.find("input.ordered_local_buffer_vars[0] = input.local_buffer_vars[1]");
+  const size_t solver_pos = code.find("PGOSolvercase_test solver(input);");
+  ASSERT_NE(reorder_pos, std::string::npos);
+  ASSERT_NE(solver_pos, std::string::npos);
+  EXPECT_LT(reorder_pos, solver_pos);
+}
+
+TEST_F(TestAxesReorderSolverGen, GenLocalBufferSolversUseOrderedAxesWithCanonicalIndices) {
+  const std::string naive_code = GenNaiveLocalBufTiling(true);
+  EXPECT_NE(naive_code.find("input_.ordered_local_buffer_vars[ordered_idx]"), std::string::npos);
+  EXPECT_NE(naive_code.find("input_.ordered_to_canonical[ordered_idx]"), std::string::npos);
+  EXPECT_NE(naive_code.find("solved_axes[canonical_idx]"), std::string::npos);
+  EXPECT_NE(naive_code.find("ProcessSingleAxisNaive(var, canonical_idx"), std::string::npos);
+
+  const std::string binary_code = GenBinaryLocalBufTilingCore();
+  EXPECT_NE(binary_code.find("input_.ordered_local_buffer_vars[ordered_idx]"), std::string::npos);
+  EXPECT_NE(binary_code.find("input_.ordered_to_canonical[ordered_idx]"), std::string::npos);
+  EXPECT_NE(binary_code.find("solved_axes[canonical_idx]"), std::string::npos);
+}
+
+TEST_F(TestAxesReorderSolverGen, GenWorkloadBalanceUsesOrderedAxes) {
+  const std::string code = GenWorkloadBalancePrepare();
+  EXPECT_NE(code.find("auto *vars = input_.ordered_local_buffer_vars"), std::string::npos);
+}
+
+TEST_F(TestAxesReorderSolverGen, GenEqualOrderAndAxisOrderRemainCanonical) {
+  const std::string equal_order_code = GenNaiveLocalBufTiling(true);
+  EXPECT_NE(equal_order_code.find("IdentifyEqualPriorityAxes"), std::string::npos);
+  EXPECT_NE(equal_order_code.find("solved_axes[canonical_idx]"), std::string::npos);
+  const std::string identify_code = GenIdentifyEqualPriorityAxes();
+  EXPECT_NE(identify_code.find("if (pair.second.size() < kSupportMaxEqualPriorityAxes)"), std::string::npos);
+
+  Expr axis0 = CreateExpr("axis0");
+  Expr axis1 = CreateExpr("axis1");
+  AxesReorderSolverGen solver_gen("case_test", "TilingData");
+  solver_gen.local_buffer_tiling_vars_ = {axis0, axis1};
+  solver_gen.axes_order_ = {{axis0, 3U}, {axis1, 3U}};
+  const std::string init_code = solver_gen.InitiateArgs();
+  EXPECT_NE(init_code.find("axis0.order = 3UL"), std::string::npos);
+  EXPECT_NE(init_code.find("axis1.order = 3UL"), std::string::npos);
+}
+
+TEST_F(TestAxesReorderSolverGen, GenPGOEnumeratesOrderedAxesAndStoresCanonicalCandidates) {
+  const std::string code = GenPgoSolverGenerateAllTilingData();
+  EXPECT_NE(code.find("tilingDataVar = input_.ordered_local_buffer_vars[index]"), std::string::npos);
+  EXPECT_NE(code.find("input_.ordered_local_buffer_vars[tmp]"), std::string::npos);
+  EXPECT_NE(code.find("ans_item[input_.ordered_to_canonical[index]] = tilingDataVar->value"), std::string::npos);
+  EXPECT_NE(code.find("ans_item[index] = tilingDataVar->value"), std::string::npos);
 }
 
 TEST_F(TestAxesReorderSolverGen, TEST_GEN_SOLVER_case2) {

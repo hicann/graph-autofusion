@@ -158,7 +158,7 @@ std::string GenWorkLoadBalance() {
   codes += "  double max_balance = std::fmod(cur_corenum_fp, 1.0);\n";
   codes += "  OP_LOGD(OP_NAME, \"max_balance initialized: %f, current corenum is %ld\", max_balance, cur_corenum);\n";
   codes += "  if (fabs(max_balance) < 0.00000001f) {\n";
-  codes += "    OP_LOGI(OP_NAME, \"max_balance already satisified\");\n";
+  codes += "    OP_LOGI(OP_NAME, \"max_balance already satisfied\");\n";
   codes += "    return true;\n";
   codes += "  }\n";
   codes += "  double balance = max_balance;\n";
@@ -215,13 +215,13 @@ std::string GenApplyPromptAlign() {
       const auto tile_data_size = original_val * var->data_type_size;
       // if tile data size is less than 512B, no need to update prompt align
       if ((loop_size == 1) && (tail_size == 0) && (tile_data_size <= 512)) {
-        OP_LOGI(OP_NAME, "No need to update promt align, as loop size is 1 and tail size is 0, tile data size is %ld",
+        OP_LOGI(OP_NAME, "No need to update prompt align, as loop size is 1 and tail size is 0, tile data size is %ld",
                 tile_data_size);
         return;
       }
       // 当block_len > 64B 对性能影响较大
       if ((original_val * var->data_type_size) <= 64) {
-        OP_LOGI(OP_NAME, "No need to update promt align, as block len is less than 64B");
+        OP_LOGI(OP_NAME, "No need to update prompt align, as block len is less than 64B");
         return;
       }
       OP_LOGI(OP_NAME, "Update prompt align from %ld to %ld", original_val, aligned_val);

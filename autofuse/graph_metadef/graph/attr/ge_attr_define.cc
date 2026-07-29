@@ -1404,7 +1404,7 @@ const std::string ATTR_NAME_INPUTS_ALIGN_ATTR = "_inputs_align_attr";
 const std::string ATTR_NAME_INPUTS_ALIGN_INTERVAL = "_inputs_align_interval";
 const std::string ATTR_NAME_INPUTS_ALIGN_OFFSET = "_inputs_align_offset";
 
-// for binnary om feature
+// for binary om feature
 const std::string ATTR_NAME_OUT_SHAPE_LOCKED = "_out_shape_locked";
 const std::string ATTR_NAME_FORMAT_LOCKED = "_format_locked";
 const std::string ATTR_NAME_SKIP_GEN_TASK = "_skip_gen_task";

@@ -128,7 +128,7 @@ class ApiCall {
   // Public Member Variables
   std::string api_name_;
   ascir::AxisId axis;
-  std::string type;  // ascir tpye
+  std::string type;  // ascir type
   int64_t depth;
   ascir::ComputeUnit unit;
   ascir::ComputeType compute_type;

@@ -216,7 +216,7 @@ class ExecuteGraph : public std::enable_shared_from_this<ExecuteGraph>, public A
 
   /**
    * The edge belong to graph.
-   * somtime, we need to change the owner of edge to correct graph.
+   * sometime, we need to change the owner of edge to correct graph.
    */
   graphStatus MoveEdgeToGraph(const FastEdge *const edge);
 

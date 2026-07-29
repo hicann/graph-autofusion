@@ -263,8 +263,6 @@ bool ArgListReorder::TryBuildReduceTileRuntimeReorderRule(const NodeInfo &node,
     if (!GetReduceAxisDataTypeSize(node, axis.get(), reduce_axis_ori_axes_set, data_type_size)) {
       continue;
     }
-    rule.preferred_axis = axis->repeat;
-    rule.fallback_axis = axis->repeat;
     rule.compare_axis = GetOriginalAxisRepeat(axis.get());
     rule.compare_threshold = GetVectorLenSize() / data_type_size;
     return true;
@@ -292,7 +290,6 @@ bool ArgListReorder::HasSmallTailLargeReduceTile(const NodeInfo &node,
       if (tensor->data_type_size == 0U) {
         continue;
       }
-      rule.preferred_axis = tensor->repeat[i];
       rule.condition_axis = GetOriginalAxisRepeat(dim);
       rule.condition_threshold = CeilDiv(GetCacheLineSize(), tensor->data_type_size);
       uint64_t tail_bytes = 0UL;
@@ -561,6 +558,62 @@ std::vector<AttAxisPtr> ArgListReorder::GetNewArgList(const std::vector<size_t> 
   return new_arg_list;
 }
 
+std::vector<Expr> ArgListReorder::GetTileSplitOrder(const std::vector<size_t> &topo_order,
+                                                    const std::vector<AttAxisPtr> &arg_list) const {
+  std::vector<Expr> order;
+  for (const size_t order_id : topo_order) {
+    if ((order_id < kOrderIdStart) || (order_id > arg_list.size() + kOrderIdStart - 1U)) {
+      continue;
+    }
+    const auto &axis = arg_list[order_id - kOrderIdStart];
+    if (AttUtils::IsTileSplitAxis(axis)) {
+      order.emplace_back(axis->size->symbol_expr);
+    }
+  }
+  return order;
+}
+
+bool ArgListReorder::SetRuntimePreferredOrder(const std::vector<AttAxisPtr> &canonical_arg_list,
+                                              const std::vector<AttAxisPtr> &source_arg_list,
+                                              const std::vector<size_t> &preferred_topo_order,
+                                              RuntimeReorderRule &rule) const {
+  std::vector<Expr> canonical_order;
+  std::map<size_t, std::vector<Expr>> equal_order_groups;
+  for (const auto &axis : canonical_arg_list) {
+    if (!AttUtils::IsTileSplitAxis(axis)) {
+      continue;
+    }
+    canonical_order.emplace_back(axis->size->symbol_expr);
+    equal_order_groups[axis->order].emplace_back(axis->size->symbol_expr);
+  }
+  auto preferred_order = GetTileSplitOrder(preferred_topo_order, source_arg_list);
+  for (const auto &group : equal_order_groups) {
+    if (group.second.size() < 2U) {
+      continue;
+    }
+    std::vector<size_t> positions;
+    for (size_t i = 0U; i < preferred_order.size(); ++i) {
+      if (std::find(group.second.begin(), group.second.end(), preferred_order[i]) != group.second.end()) {
+        positions.emplace_back(i);
+      }
+    }
+    if (positions.size() != group.second.size()) {
+      return false;
+    }
+    for (size_t i = 0U; i < positions.size(); ++i) {
+      preferred_order[positions[i]] = group.second[i];
+    }
+  }
+  std::set<Expr, ExprCmp> canonical_set(canonical_order.begin(), canonical_order.end());
+  std::set<Expr, ExprCmp> preferred_set(preferred_order.begin(), preferred_order.end());
+  if ((canonical_order.size() != preferred_order.size()) || (canonical_set.size() != canonical_order.size()) ||
+      (canonical_set != preferred_set)) {
+    return false;
+  }
+  rule.preferred_order = std::move(preferred_order);
+  return true;
+}
+
 // 排序的入口函数
 af::Status ArgListReorder::SortArgList(vector<AttAxisPtr> &arg_list, vector<AttAxisPtr> &tiling_R_arg_list,
                                        std::vector<RuntimeReorderRule> *runtime_reorder_rules) {
@@ -579,7 +632,15 @@ af::Status ArgListReorder::SortArgList(vector<AttAxisPtr> &arg_list, vector<AttA
   GE_ASSERT_SUCCESS(BuildArgListPriorityGraph(arg_list, prefer_reduce_tile_), "build arg list graph failed");
   std::vector<AttAxisPtr> new_arg_list = GetNewArgList(graph_->TopologicalSort(), arg_list);
   if ((runtime_reorder_rules != nullptr) && has_dynamic_reduce_tile_reorder_) {
-    runtime_reorder_rules->emplace_back(dynamic_reduce_tile_reorder_rule_);
+    graph_ = af::MakeShared<ArgPriorityGraph>(arg_list.size());
+    GE_ASSERT_NOTNULL(graph_, "Create preferred graph failed");
+    RuntimeReorderRule runtime_rule = dynamic_reduce_tile_reorder_rule_;
+    if ((BuildArgListPriorityGraph(arg_list, true) == af::SUCCESS) &&
+        SetRuntimePreferredOrder(new_arg_list, arg_list, graph_->TopologicalSort(), runtime_rule)) {
+      runtime_reorder_rules->emplace_back(std::move(runtime_rule));
+    } else {
+      GELOGW("[ATT][ReduceTileReorder] Invalid preferred order, keep canonical order.");
+    }
   }
 
   if (tiling_R_) {

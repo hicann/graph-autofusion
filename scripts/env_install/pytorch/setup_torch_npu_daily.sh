@@ -21,6 +21,12 @@ set -e
 # 没有指定时，默认使用 3.11.4。
 PYTHON_VERSION="${1:-3.11.4}"
 
+# 检查 Python 版本格式，避免通过非法参数构造越界路径。
+if [[ ! "$PYTHON_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Python 版本格式错误，应为 x.y.z，例如 3.11.4。"
+    exit 1
+fi
+
 # 第二个参数：torch_npu 版本。
 # 没有指定时，默认使用 2.10.0。
 TORCH_NPU_VERSION="${2:-2.10.0}"
@@ -181,4 +187,9 @@ WHEEL="$(
 )"
 
 # 安装 Daily torch_npu Wheel。
-python -m pip install --force-reinstall "$WHEEL"
+python -m pip install \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    --force-reinstall "$WHEEL"
+
+# 所有步骤执行成功后输出提示。
+echo "SUCCESS: PyTorch 和 torch_npu 环境安装成功。"

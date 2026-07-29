@@ -1064,7 +1064,7 @@ bool GeneralSolverGen::RunSolver(bool is_dt) {
   invoke_codes_ += "        OP_LOGD(OP_NAME, \"Start initializing the input.\");\n";
   invoke_codes_ += "        if (solver -> Init(input)) {\n";
   invoke_codes_ += AddAnotationLine("运行通用求解器并获取算法的解\n", "            ");
-  invoke_codes_ += "            OP_LOGD(OP_NAME, \"Intialization finished, start running the solver.\");\n";
+  invoke_codes_ += "            OP_LOGD(OP_NAME, \"Initialization finished, start running the solver.\");\n";
   invoke_codes_ += "            if (solver -> Run(solution_num, solution)) {\n";
   invoke_codes_ += "                solver -> GetResult(solution_num, solution, tiling_data);\n";
   if (is_dt) {

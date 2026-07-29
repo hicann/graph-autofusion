@@ -791,7 +791,7 @@ inline __aicore__ void CompareSingleLoopGT(const AscendC::LocalTensor<T> &dst,  
                                            const uint32_t cal_cnt,  // total numbers
                                            AscendC::LocalTensor<uint8_t> &tmp_buf) {
   // Divide int64_t into 2 int32_t digits,
-  // calculate the sign bits and value bits seperately, and calculate as a whole in the end
+  // calculate the sign bits and value bits separately, and calculate as a whole in the end
   uint32_t quadruple_cal_cnt = 4 * cal_cnt;
   uint32_t double_cal_cnt = 2 * cal_cnt;
   // make sure every tensor address is aligned to 32B

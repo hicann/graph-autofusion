@@ -12,11 +12,11 @@
 #define __ASCENDC_API_REGBASE_COMPARE_H__
 
 using namespace AscendC;
-template <typename InT, CMPMODE mode, const MicroAPI::RegTrait &regTraitNum = MicroAPI::RegTraitNumOne>
+template <typename InT, CMPMODE mode, bool isScalar, const MicroAPI::RegTrait &regTraitNum = MicroAPI::RegTraitNumOne>
 __simd_vf__ inline void CompareNormal2DVecImpl(__ubuf__ uint8_t *dst, __ubuf__ InT *src0, __ubuf__ InT *src1,
                                                const uint16_t dstStride, const uint16_t srcStride,
                                                const uint16_t repeatTime, const uint16_t counterFirst,
-                                               uint32_t counterTail, InT scalar, bool isScalar, uint16_t vlSize) {
+                                               uint32_t counterTail, InT scalar, uint16_t vlSize) {
   uint32_t mainBlockCount = GetVecLen() / sizeof(InT);
   if constexpr (sizeof(InT) == 8) {
     mainBlockCount = 2 * GetVecLen() / sizeof(InT);
@@ -27,7 +27,7 @@ __simd_vf__ inline void CompareNormal2DVecImpl(__ubuf__ uint8_t *dst, __ubuf__ I
   fullMask = MicroAPI::CreateMask<uint8_t>();
   MicroAPI::Duplicate(oneAllReg, 1);
   MicroAPI::Duplicate(zeroAllReg, 0);
-  if (isScalar) {
+  if constexpr (isScalar) {
     MicroAPI::Duplicate(src1Reg, scalar);
   }
   MicroAPI::MaskReg mainBlockMask = MicroAPI::UpdateMask<uint8_t>(mainBlockCount);
@@ -36,7 +36,7 @@ __simd_vf__ inline void CompareNormal2DVecImpl(__ubuf__ uint8_t *dst, __ubuf__ I
     // mainBlock
     for (uint16_t i = 0U; i < repeatTime; ++i) {
       MicroAPI::DataCopy(src0Reg, src0 + j * srcStride + i * vlSize);
-      if (!isScalar) {
+      if constexpr (!isScalar) {
         MicroAPI::DataCopy(src1Reg, src1 + j * srcStride + i * vlSize);
       }
       MicroAPI::Compare<InT, mode>(dstMask, src0Reg, src1Reg, fullMask);
@@ -51,7 +51,7 @@ __simd_vf__ inline void CompareNormal2DVecImpl(__ubuf__ uint8_t *dst, __ubuf__ I
     }
     // tailBlock
     MicroAPI::DataCopy(src0Reg, src0 + j * srcStride + repeatTime * vlSize);
-    if (!isScalar) {
+    if constexpr (!isScalar) {
       MicroAPI::DataCopy(src1Reg, src1 + j * srcStride + repeatTime * vlSize);
     }
     MicroAPI::Compare<InT, mode>(dstMask, src0Reg, src1Reg, fullMask);
@@ -106,23 +106,19 @@ __aicore__ inline void CompareExtend(const LocalTensor<OutT> &dst, const LocalTe
   }
   if (src1IsScalar) {
     if constexpr (sizeof(InT) == 8) {
-      CompareNormal2DVecImpl<InT, mode, MicroAPI::RegTraitNumTwo>(dstLocal, src0Local, src1Local, dstStride, srcStride,
-                                                                  repeat, counterFirst, counterTail, scalar,
-                                                                  src1IsScalar, vlSize);
+      CompareNormal2DVecImpl<InT, mode, true, MicroAPI::RegTraitNumTwo>(
+          dstLocal, src0Local, src1Local, dstStride, srcStride, repeat, counterFirst, counterTail, scalar, vlSize);
     } else {
-      CompareNormal2DVecImpl<InT, mode, MicroAPI::RegTraitNumOne>(dstLocal, src0Local, src1Local, dstStride, srcStride,
-                                                                  repeat, counterFirst, counterTail, scalar,
-                                                                  src1IsScalar, vlSize);
+      CompareNormal2DVecImpl<InT, mode, true>(dstLocal, src0Local, src1Local, dstStride, srcStride, repeat,
+                                              counterFirst, counterTail, scalar, vlSize);
     }
   } else {
     if constexpr (sizeof(InT) == 8) {
-      CompareNormal2DVecImpl<InT, mode, MicroAPI::RegTraitNumTwo>(dstLocal, src0Local, src1Local, dstStride, srcStride,
-                                                                  repeat, counterFirst, counterTail, scalar,
-                                                                  src1IsScalar, vlSize);
+      CompareNormal2DVecImpl<InT, mode, false, MicroAPI::RegTraitNumTwo>(
+          dstLocal, src0Local, src1Local, dstStride, srcStride, repeat, counterFirst, counterTail, scalar, vlSize);
     } else {
-      CompareNormal2DVecImpl<InT, mode, MicroAPI::RegTraitNumOne>(dstLocal, src0Local, src1Local, dstStride, srcStride,
-                                                                  repeat, counterFirst, counterTail, scalar,
-                                                                  src1IsScalar, vlSize);
+      CompareNormal2DVecImpl<InT, mode, false>(dstLocal, src0Local, src1Local, dstStride, srcStride, repeat,
+                                               counterFirst, counterTail, scalar, vlSize);
     }
   }
 }
@@ -150,13 +146,11 @@ __aicore__ inline void CompareScalarExtend(const LocalTensor<OutT> &dst, const L
     counterTail += vlSize;
   }
   if constexpr (sizeof(InT) == 8) {
-    CompareNormal2DVecImpl<InT, mode, MicroAPI::RegTraitNumTwo>(dstLocal, src0Local, src1Local, dstStride, srcStride,
-                                                                repeat, counterFirst, counterTail, srcScalar, true,
-                                                                vlSize);
+    CompareNormal2DVecImpl<InT, mode, true, MicroAPI::RegTraitNumTwo>(
+        dstLocal, src0Local, src1Local, dstStride, srcStride, repeat, counterFirst, counterTail, srcScalar, vlSize);
   } else {
-    CompareNormal2DVecImpl<InT, mode, MicroAPI::RegTraitNumOne>(dstLocal, src0Local, src1Local, dstStride, srcStride,
-                                                                repeat, counterFirst, counterTail, srcScalar, true,
-                                                                vlSize);
+    CompareNormal2DVecImpl<InT, mode, true>(dstLocal, src0Local, src1Local, dstStride, srcStride, repeat, counterFirst,
+                                            counterTail, srcScalar, vlSize);
   }
 }
 #endif  //__ASCENDC_API_REGBASE__COMPARE_H__

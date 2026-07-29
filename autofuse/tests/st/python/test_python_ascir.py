@@ -235,7 +235,7 @@ class TestAscir:
         except Exception as e:
             assert (
                 e.args[0]
-                == "Infer dtype failed for load Load; input_dtypes: [DT_INT64] is not supportted now"
+                == "Infer dtype failed for load Load; input_dtypes: [DT_INT64] is not supported now"
             )
         graph.infer_dtypes()
         debug_str = ascir.utils.debug_str(graph)

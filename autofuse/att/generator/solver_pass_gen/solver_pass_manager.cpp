@@ -415,11 +415,18 @@ ExprExprMap SolverPassManager::GetOriginalInputAlign() const {
 }
 
 std::string SolverPassManager::GenCommonBaseClassesHead(std::vector<ArgsManager> args_managers) {
-  std::string base_classes;
+  return GenCommonBaseClassesHeader(std::move(args_managers)).body;
+}
+
+autofuse::GeneratedCode SolverPassManager::GenCommonBaseClassesHeader(std::vector<ArgsManager> args_managers) {
+  autofuse::GeneratedCode base_classes;
   for (uint32_t i = 0U; i < static_cast<std::uint32_t>(SolverType::ERROR); i++) {
     SolverType type = static_cast<SolverType>(i);
     if (IsNeedSolver(args_managers, type)) {
-      base_classes += GetSolverHead(type);
+      base_classes.body += GetSolverHead(type);
+      if (type == SolverType::SEARCH_TILE) {
+        autofuse::RequireSystemHeader(base_classes.dependencies, "cstddef");
+      }
     }
   }
   return base_classes;
@@ -470,6 +477,8 @@ void SolverPassManager::InitSolverGen(AxesReorderSolverGen &solver_gen) {
   solver_gen.SetExeTimeMap(args_manager_.GetTernaryOpRelatedVars());
   solver_gen.SetInputAlign(GetOriginalInputAlign());
   solver_gen.SetVarPriority(args_manager_.GetAxesPriority());
+  solver_gen.SetAxesOrder(args_manager_.GetAxesOrder());
+  solver_gen.SetVarsRelations(args_manager_.GetVarsRelations());
   solver_gen.SetObjFunc(args_manager_.GetHeadCost(), args_manager_.GetObjectFunc());
   solver_gen.SetUBThreshold(ub_threshold_);
   solver_gen.SetReservedUbSize(reserved_ub_size_);

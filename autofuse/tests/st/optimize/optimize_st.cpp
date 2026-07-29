@@ -4299,7 +4299,7 @@ TEST_F(OptimizerSt, vecoutCanBeReuse) {
   EXPECT_EQ(abs1_node->outputs[0].attr.que.id, que_id);
   EXPECT_NE(abs1_node->outputs[0].attr.mem.reuse_id, af::kIdNone);
 
-  // sigmoid0 reuse abs0, abs2 inplace resue sigmoid0
+  // sigmoid0 reuse abs0, abs2 inplace reuse sigmoid0
   auto abs0_node = impl_graph.FindNode("abs0");
   ASSERT_NE(abs0_node, nullptr);
   auto sigmoid0_node = impl_graph.FindNode("sigmoid0");

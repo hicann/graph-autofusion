@@ -1108,7 +1108,7 @@ graphStatus NodeUtils::GetInNodeCrossPartionedCallNode(const NodePtr &node, uint
   peer_node = (node->GetType() == DATA) ? node : GetInDataNodeByIndex(*node, static_cast<int32_t>(index));
   if (peer_node == nullptr) {
     // A->B
-    // Asuming A and B belongs to different engine, during graph partition, A will be set to B's extra attr as
+    // Assuming A and B belongs to different engine, during graph partition, A will be set to B's extra attr as
     // parent node. when FE get parent node A from B, check A's in_anchor peer_out_anchor is null.
     return GRAPH_SUCCESS;
   }

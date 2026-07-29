@@ -120,7 +120,7 @@
 
 ### 方式三：手动安装软件包
 
-1. **安装驱动与固件（可选，仅运行[样例](../../autofuse/examples/README.md)依赖）**
+1. **安装驱动与固件（可选，仅运行[样例](../../autofuse/examples/pytorch/README.md)依赖）**
 
     驱动与固件的下载和安装操作请参考《[CANN软件安装指南](https://www.hiascend.com/document/redirect/CannCommunityInstWizard)》中“准备软件包”和“安装NPU驱动和固件”章节。驱动与固件是运行样例依赖，若仅编译环境，可以不安装。
 
