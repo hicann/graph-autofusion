@@ -947,7 +947,7 @@ bool SuperKernelKernelNode::InitNode(const SuperKernelOptionsManager *opts) {
       scopeName = std::string(rawPtr);
     }
   } else {
-    SK_LOGI("Kernel node %lu is a regular kernel node.", nodeId);
+    SK_LOGD("Kernel node %lu is a regular kernel node.", nodeId);
   }
 
   int64_t kernelType = 0;
