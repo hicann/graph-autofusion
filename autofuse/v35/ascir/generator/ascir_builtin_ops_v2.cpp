@@ -947,7 +947,7 @@ REG_ASC_IR(IndirectLoad)
 REG_ASC_IR(Transpose).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::TransposeAscIrAttImplV2>(),
                                              af::ascir::AscIrImplCreator<af::ascir::TransposeAscIrCodegenImplV2>(),
                                              {{"T", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_FLOAT16,
-                                                               DT_FLOAT, DT_BOOL}}}});
+                                                               DT_FLOAT, DT_BF16, DT_BOOL}}}});
 // todo:目前前端dt构图用到了FlashSoftmax，暂时无法删除
 REG_ASC_IR(FlashSoftmax)
     .Impl({}, {af::ascir::AscIrImplCreator<af::ascir::AbsAscIrAttImplV2>(),
