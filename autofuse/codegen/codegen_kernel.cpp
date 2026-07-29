@@ -4810,6 +4810,15 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
       // 分支14: HIGH_LEVEL, AB_FULL_LOAD, BASIC, ON_THE_FLY
       ss << "  } else if (API_LEVEL == 0 && FULL_LOAD == 3 && MODEL == 0 && L0C2OUT_MODEL == 0) {" << std::endl;
       ss << "    _DISPATCH_MATMUL(0, 0, 3, 0, MatMulV3TilingDataCopy);" << std::endl;
+      // 分支15: BASIC_LEVEL, NO_FULL_LOAD, BASIC_SPLIT_K, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 6 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 6, 0, 0, MatMulV3BasicTilingData);" << std::endl;
+      // 分支16: BASIC_LEVEL, NO_FULL_LOAD, SK_SPLIT_K, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 7 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 7, 0, 0, MatMulV3BasicTilingData);" << std::endl;
+      // 分支17: BASIC_LEVEL, NO_FULL_LOAD, SK_SPLIT_K, 1V2_ND_ALIG_FIXPIPE
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 7 && L0C2OUT_MODEL == 2) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 7, 0, 2, MatMulV3BasicTilingData);" << std::endl;
       ss << "  } else {" << std::endl;
       ss << "    return -1;" << std::endl;
       ss << "  }" << std::endl;
