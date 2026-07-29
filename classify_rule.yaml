@@ -16,11 +16,14 @@ superkernel:
   src:
     release:
       - super_kernel/src
+      - autofuse
     unrelease:
       - super_kernel/tests
       - super_kernel/docs
       - super_kernel/examples
       - autofuse/tests
+      - autofuse/graph_metadef
+      - autofuse/examples
   llt:
     ut_check: true
     st_check: true
