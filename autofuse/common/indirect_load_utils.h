@@ -21,7 +21,6 @@ namespace ascgen_utils::indirect_load {
 enum class TemplateRole : int64_t {
   kNone,
   kSimdInputPre,
-  kSimdOp,
   kSimtInputBoundary,
   kSimtDirectGmBoundary,
   kSimtInlineTransform,
@@ -29,11 +28,11 @@ enum class TemplateRole : int64_t {
 };
 
 struct TemplateBehavior {
+  bool excludes_tiling_group = false;
   bool skips_main_schedule_tiling = false;
   bool skips_api_emit = false;
   bool uses_direct_gm_pipeline = false;
   bool skips_ub_lifecycle = false;
-  bool skips_ub_expr = false;
   bool preserves_vectorized_axis = false;
 };
 

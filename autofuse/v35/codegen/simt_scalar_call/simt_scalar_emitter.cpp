@@ -12,20 +12,11 @@
 
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
+#include "v35/ascir/ascir_codegen_v2.h"
 #include "common/checker.h"
 #include "common_utils.h"
-#include "indirect_load_utils.h"
-#include "schedule_result.h"
 
 namespace codegen {
-bool CanEmitSimtScalar(const ascir::NodeView &node) {
-  if (node == nullptr) {
-    return false;
-  }
-  const auto impl = ascgen_utils::GetAscIrCodegenImpl(node->GetType());
-  return impl != nullptr && impl->IsSimtScalarSupported(*node);
-}
-
 af::Status EmitSimtScalarExpr(const ascir::NodeView &node, const std::vector<std::string> &inputs, std::string &expr) {
   GE_ASSERT_NOTNULL(node, "SIMT scalar node is null.");
   GE_ASSERT_TRUE(!inputs.empty() && inputs.size() == node->inputs.Size(),
@@ -34,12 +25,11 @@ af::Status EmitSimtScalarExpr(const ascir::NodeView &node, const std::vector<std
   const auto impl = ascgen_utils::GetAscIrCodegenImpl(node->GetType());
   GE_ASSERT_NOTNULL(impl, "SIMT scalar codegen is not registered for node %s[%s].", node->GetTypePtr(),
                     node->GetNamePtr());
-  GE_ASSERT_TRUE(impl->IsSimtScalarSupported(*node), "SIMT scalar codegen is not supported for node %s[%s].",
+  const auto *v2_impl = dynamic_cast<af::ascir::AscIrCodegenV2 *>(impl.get());
+  GE_ASSERT_NOTNULL(v2_impl, "SIMT scalar codegen for node %s[%s] is not a V2 implementation.", node->GetTypePtr(),
+                    node->GetNamePtr());
+  GE_ASSERT_TRUE(v2_impl->IsSimtScalarSupported(*node), "SIMT scalar codegen is not supported for node %s[%s].",
                  node->GetTypePtr(), node->GetNamePtr());
-  return impl->GenerateSimtScalarExpr(*node, inputs, expr);
-}
-
-bool IsSkippedApiEmitProcessNode(const ascir::NodeView &node) {
-  return ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(node)).skips_api_emit;
+  return v2_impl->GenerateSimtScalarExpr(*node, inputs, expr);
 }
 }  // namespace codegen

@@ -463,7 +463,7 @@ class Kernel {
                                       const std::vector<std::string> &func_names);
   static std::string PackingFuncDeclare(const std::string &func_name, const std::vector<Variable> &kernel_args);
   static void AppendFuncCall(std::stringstream &ss, std::vector<std::vector<std::string>>::const_iterator begin,
-                             std::vector<std::vector<std::string>>::const_iterator end, bool need_sync_all = true);
+                             std::vector<std::vector<std::string>>::const_iterator end);
   static void AppendFuncCall(std::stringstream &ss, std::vector<std::vector<TilingFuncCall>> &per_group_func_calls,
                              std::vector<TilingFuncCall> &current, size_t depth, uint32_t &tiling_key,
                              bool is_cube = false);

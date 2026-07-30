@@ -24,6 +24,82 @@
 namespace af {
 namespace ascir {
 
+namespace {
+ge::DataType GetSimtInputDtype(const AscNode &node) {
+  return const_cast<AscNode &>(node).inputs[0].attr.dtype;
+}
+
+ge::DataType GetSimtOutputDtype(const AscNode &node) {
+  return const_cast<AscNode &>(node).outputs[0].attr.dtype;
+}
+
+bool IsSimtFloatDtype(ge::DataType dtype) {
+  return dtype == DT_FLOAT || dtype == DT_FLOAT16 || dtype == DT_BF16;
+}
+
+const char *GetSimtDtypeName(ge::DataType dtype) {
+  static constexpr std::pair<ge::DataType, const char *> kDtypeNames[] = {
+      {DT_FLOAT, "float"},     {DT_FLOAT16, "half"},  {DT_BF16, "bfloat16_t"}, {DT_INT8, "int8_t"},
+      {DT_UINT8, "uint8_t"},   {DT_INT16, "int16_t"}, {DT_UINT16, "uint16_t"}, {DT_INT32, "int32_t"},
+      {DT_UINT32, "uint32_t"}, {DT_INT64, "int64_t"}, {DT_UINT64, "uint64_t"}, {DT_BOOL, "bool"},
+  };
+  for (const auto &entry : kDtypeNames) {
+    if (entry.first == dtype) {
+      return entry.second;
+    }
+  }
+  return nullptr;
+}
+
+ge::graphStatus GenerateSimtFloatUnaryExpr(const std::string &api, const std::vector<std::string> &inputs,
+                                           std::string &expr) {
+  expr = "AscendC::Simt::" + api + "(static_cast<float>(" + inputs[0] + "))";
+  return ge::GRAPH_SUCCESS;
+}
+
+bool IsSimtFloatToIntPair(const AscNode &node) {
+  static constexpr std::pair<ge::DataType, ge::DataType> kPairs[] = {
+      {DT_FLOAT, DT_INT64},   {DT_FLOAT, DT_INT32},  {DT_FLOAT, DT_INT16},   {DT_FLOAT16, DT_INT16},
+      {DT_FLOAT16, DT_INT32}, {DT_FLOAT16, DT_INT8}, {DT_FLOAT16, DT_UINT8}, {DT_BF16, DT_INT32},
+  };
+  const std::pair<ge::DataType, ge::DataType> pair{GetSimtInputDtype(node), GetSimtOutputDtype(node)};
+  return std::find(std::begin(kPairs), std::end(kPairs), pair) != std::end(kPairs);
+}
+
+ge::graphStatus GenerateSimtFloatToIntExpr(const AscNode &node, const std::vector<std::string> &inputs,
+                                           const std::string &round_mode, std::string &expr) {
+  const ge::DataType output_dtype = GetSimtOutputDtype(node);
+  const char *output_type = GetSimtDtypeName(output_dtype);
+  GE_ASSERT_NOTNULL(output_type, "Node %s[%s] has unsupported SIMT output dtype %d", node.GetTypePtr(),
+                    node.GetNamePtr(), static_cast<int32_t>(output_dtype));
+  const char *intermediate_type = output_dtype == DT_INT64 ? "int64_t" : "int32_t";
+  const std::string intermediate_expr = std::string("AscendC::Simt::Cast<") + intermediate_type +
+                                        ", float, AscendC::RoundMode::" + round_mode + ">(" + "static_cast<float>(" +
+                                        inputs[0] + "))";
+  expr = output_dtype == DT_INT32 || output_dtype == DT_INT64
+             ? intermediate_expr
+             : std::string("static_cast<") + output_type + ">(" + intermediate_expr + ")";
+  return ge::GRAPH_SUCCESS;
+}
+
+}  // namespace
+
+class SimtFloatUnaryAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return IsSimtFloatDtype(GetSimtInputDtype(node)) && GetSimtInputDtype(node) == GetSimtOutputDtype(node);
+  }
+
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtFloatUnaryExpr(GetSimtScalarApiName(), inputs, expr);
+  }
+
+ protected:
+  [[nodiscard]] virtual std::string GetSimtScalarApiName() const = 0;
+};
+
 /*********************************************************************************/
 class VfAscIrCodegenImpl : public AscIrCodegenV2 {
  public:
@@ -283,17 +359,46 @@ class CastAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return false;
   }
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    return IsVectorFunctionSupported(node);
+    static constexpr std::pair<ge::DataType, ge::DataType> kSupportedPairs[] = {
+        {DT_FLOAT, DT_FLOAT},   {DT_FLOAT, DT_FLOAT16}, {DT_FLOAT, DT_INT64},   {DT_FLOAT, DT_INT32},
+        {DT_FLOAT, DT_INT16},   {DT_FLOAT, DT_BF16},    {DT_FLOAT, DT_INT8},    {DT_FLOAT16, DT_FLOAT},
+        {DT_FLOAT16, DT_INT32}, {DT_FLOAT16, DT_INT16}, {DT_FLOAT16, DT_INT8},  {DT_FLOAT16, DT_UINT8},
+        {DT_UINT64, DT_INT64},  {DT_FLOAT16, DT_INT64}, {DT_UINT16, DT_INT16},  {DT_UINT8, DT_FLOAT16},
+        {DT_UINT8, DT_FLOAT},   {DT_UINT8, DT_INT32},   {DT_UINT8, DT_INT16},   {DT_UINT8, DT_INT8},
+        {DT_UINT8, DT_INT64},   {DT_UINT32, DT_INT32},  {DT_INT8, DT_FLOAT16},  {DT_INT8, DT_UINT8},
+        {DT_INT8, DT_FLOAT},    {DT_INT8, DT_INT16},    {DT_INT16, DT_FLOAT16}, {DT_INT16, DT_FLOAT},
+        {DT_INT16, DT_UINT16},  {DT_INT16, DT_INT8},    {DT_INT16, DT_UINT8},   {DT_INT32, DT_FLOAT},
+        {DT_INT32, DT_INT64},   {DT_INT32, DT_INT16},   {DT_INT32, DT_FLOAT16}, {DT_INT32, DT_UINT32},
+        {DT_INT64, DT_INT32},   {DT_INT64, DT_FLOAT},   {DT_INT64, DT_UINT8},   {DT_INT64, DT_UINT64},
+        {DT_INT64, DT_FLOAT16}, {DT_BF16, DT_FLOAT},    {DT_BF16, DT_INT32},    {DT_FLOAT, DT_BOOL},
+    };
+    const std::pair<ge::DataType, ge::DataType> pair{GetSimtInputDtype(node), GetSimtOutputDtype(node)};
+    return std::find(std::begin(kSupportedPairs), std::end(kSupportedPairs), pair) != std::end(kSupportedPairs);
   }
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
                                                        std::string &expr) const override {
     auto outputs = const_cast<AscNode &>(node).outputs();
     GE_ASSERT_TRUE(outputs.size() == 1UL, "Cast node %s[%s] must have one output", node.GetTypePtr(),
                    node.GetNamePtr());
-    const char *output_dtype = GetSimtDtypeName(outputs[0]->attr.dtype);
+    const ge::DataType input_dtype = GetSimtInputDtype(node);
+    const ge::DataType output_dtype_value = outputs[0]->attr.dtype;
+    const char *output_dtype = GetSimtDtypeName(output_dtype_value);
     GE_ASSERT_NOTNULL(output_dtype, "Cast node %s[%s] has unsupported SIMT output dtype %d", node.GetTypePtr(),
-                      node.GetNamePtr(), static_cast<int32_t>(outputs[0]->attr.dtype));
-    expr = std::string("static_cast<") + output_dtype + ">(" + inputs[0] + ")";
+                      node.GetNamePtr(), static_cast<int32_t>(output_dtype_value));
+    const bool integer_output = output_dtype_value == DT_INT8 || output_dtype_value == DT_UINT8 ||
+                                output_dtype_value == DT_INT16 || output_dtype_value == DT_UINT16 ||
+                                output_dtype_value == DT_INT32 || output_dtype_value == DT_INT64;
+    if (IsSimtFloatDtype(input_dtype) && integer_output) {
+      const char *intermediate_type = output_dtype_value == DT_INT64 ? "int64_t" : "int32_t";
+      const std::string intermediate_expr = std::string("AscendC::Simt::Cast<") + intermediate_type +
+                                            ", float, AscendC::RoundMode::CAST_ZERO>(static_cast<float>(" + inputs[0] +
+                                            "))";
+      expr = output_dtype_value == DT_INT32 || output_dtype_value == DT_INT64
+                 ? intermediate_expr
+                 : std::string("static_cast<") + output_dtype + ">(" + intermediate_expr + ")";
+    } else {
+      expr = std::string("static_cast<") + output_dtype + ">(" + inputs[0] + ")";
+    }
     return ge::GRAPH_SUCCESS;
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
@@ -305,20 +410,6 @@ class CastAscIrCodegenImplV2 : public AscIrCodegenV2 {
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
     return true;
-  }
-
- private:
-  static const char *GetSimtDtypeName(ge::DataType dtype) {
-    static constexpr std::pair<ge::DataType, const char *> kDtypeNames[] = {
-        {DT_FLOAT, "float"},   {DT_FLOAT16, "half"},  {DT_BF16, "bfloat16_t"}, {DT_INT8, "int8_t"},
-        {DT_UINT8, "uint8_t"}, {DT_INT16, "int16_t"}, {DT_INT32, "int32_t"},   {DT_INT64, "int64_t"},
-    };
-    for (const auto &entry : kDtypeNames) {
-      if (entry.first == dtype) {
-        return entry.second;
-      }
-    }
-    return nullptr;
   }
 };
 
@@ -345,14 +436,24 @@ class AbsAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    const ge::DataType dtype = GetSimtOutputDtype(node);
+    return dtype == DT_FLOAT || dtype == DT_FLOAT16 || dtype == DT_BF16 || dtype == DT_INT8 || dtype == DT_INT16 ||
+           dtype == DT_INT32 || dtype == DT_INT64 || dtype == DT_UINT8;
   }
 
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
                                                        const std::vector<std::string> &inputs,
                                                        std::string &expr) const override {
-    expr = "AscendC::Simt::Abs(" + inputs[0] + ")";
+    const ge::DataType dtype = GetSimtOutputDtype(node);
+    if (dtype == DT_FLOAT || dtype == DT_FLOAT16 || dtype == DT_INT32 || dtype == DT_INT64) {
+      expr = "AscendC::Simt::Abs(" + inputs[0] + ")";
+    } else if (dtype == DT_UINT8) {
+      expr = inputs[0];
+    } else if (dtype == DT_BF16) {
+      expr = "AscendC::Simt::Abs(static_cast<float>(" + inputs[0] + "))";
+    } else {
+      expr = "(" + inputs[0] + " < 0) ? -(" + inputs[0] + ") : " + inputs[0];
+    }
     return ge::GRAPH_SUCCESS;
   }
 
@@ -489,7 +590,7 @@ class Exp2AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class FloorAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class FloorAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcVoidTmpSizeV2(node);
@@ -498,6 +599,9 @@ class FloorAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Floor";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Floor";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -519,7 +623,7 @@ class FloorAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class ModifiedBesselI0AscIrCodegenImplV2 : public AscIrCodegenV2 {
+class ModifiedBesselI0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcModifiedBesselI0TmpSizeV2(node);
@@ -529,6 +633,9 @@ class ModifiedBesselI0AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "ModifiedBesselI0Extend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "CylBesselI0";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"modified_bessel_utils_reg_base.h", "modified_bessel_i0_reg_base.h"};
@@ -542,7 +649,7 @@ class ModifiedBesselI0AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class ModifiedBesselI1AscIrCodegenImplV2 : public AscIrCodegenV2 {
+class ModifiedBesselI1AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcModifiedBesselI1TmpSizeV2(node);
@@ -552,6 +659,9 @@ class ModifiedBesselI1AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "ModifiedBesselI1Extend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "CylBesselI1";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"modified_bessel_utils_reg_base.h", "modified_bessel_i1_reg_base.h"};
@@ -611,7 +721,7 @@ class ModifiedBesselK1AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class BesselJ0AscIrCodegenImplV2 : public AscIrCodegenV2 {
+class BesselJ0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcVoidTmpSizeV2(node);
@@ -621,6 +731,9 @@ class BesselJ0AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "BesselJ0Extend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "J0";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"bessel_j_utils_reg_base.h", "trigonometric_function_utils_reg_base.h", "bessel_j0_reg_base.h"};
@@ -634,7 +747,7 @@ class BesselJ0AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class BesselJ1AscIrCodegenImplV2 : public AscIrCodegenV2 {
+class BesselJ1AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcVoidTmpSizeV2(node);
@@ -644,6 +757,9 @@ class BesselJ1AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "BesselJ1Extend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "J1";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"bessel_j_utils_reg_base.h", "trigonometric_function_utils_reg_base.h", "bessel_j1_reg_base.h"};
@@ -657,7 +773,7 @@ class BesselJ1AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class BesselY0AscIrCodegenImplV2 : public AscIrCodegenV2 {
+class BesselY0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcVoidTmpSizeV2(node);
@@ -667,6 +783,9 @@ class BesselY0AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "BesselY0Extend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "Y0";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"bessel_j_utils_reg_base.h", "trigonometric_function_utils_reg_base.h", "bessel_j0_reg_base.h",
@@ -681,7 +800,7 @@ class BesselY0AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class BesselY1AscIrCodegenImplV2 : public AscIrCodegenV2 {
+class BesselY1AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcVoidTmpSizeV2(node);
@@ -691,6 +810,9 @@ class BesselY1AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "BesselY1Extend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "Y1";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"bessel_j_utils_reg_base.h", "trigonometric_function_utils_reg_base.h", "bessel_j1_reg_base.h",
@@ -776,7 +898,7 @@ class SphericalBesselJ0AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class NdtrAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class NdtrAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcVoidTmpSizeV2(node);
@@ -786,6 +908,9 @@ class NdtrAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "NdtrExtend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "Normcdf";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"ndtr_reg_base.h"};
@@ -1122,12 +1247,15 @@ class AiryAiAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class ErfinvAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class ErfinvAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::string GetApiCallName() const override {
     return "UnaryApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Erfinv";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Erfinv";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
@@ -1222,7 +1350,7 @@ class PadAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class RoundAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class RoundAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcVoidTmpSizeV2(node);
@@ -1231,6 +1359,9 @@ class RoundAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Round";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Round";
   }
   // 如果需要插入cast节点，返回cast的目的类型
@@ -1317,13 +1448,16 @@ class LnAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class ExpmAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class ExpmAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::string GetApiCallName() const override {
     return "UnaryApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "ExpmExtend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "Expm1";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"expm_reg_base.h"};
@@ -1347,7 +1481,7 @@ class ExpmAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class Log2AscIrCodegenImplV2 : public AscIrCodegenV2 {
+class Log2AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcLog2TmpSizeV2(node);
@@ -1356,6 +1490,9 @@ class Log2AscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Log2";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Log2";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -1501,12 +1638,15 @@ class SqrtAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class RsqrtAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class RsqrtAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::string GetApiCallName() const override {
     return "UnaryApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Rsqrt";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Rsqrt";
   }
   [[nodiscard]] bool IsInplaceSupported(const AscNode &rsqrt_node) const override {
@@ -1669,6 +1809,15 @@ class ReciprocalAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::string GetApiName() const override {
     return "Reciprocal";
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return IsSimtFloatDtype(GetSimtInputDtype(node)) && GetSimtInputDtype(node) == GetSimtOutputDtype(node);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    expr = "1.0F / static_cast<float>(" + inputs[0] + ")";
+    return ge::GRAPH_SUCCESS;
+  }
   [[nodiscard]] bool IsInplaceSupported(const AscNode &reciprocal_node) const override {
     (void)reciprocal_node;
     return true;
@@ -1703,6 +1852,17 @@ class SignAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "SignExtend";
+  }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    const ge::DataType dtype = GetSimtInputDtype(node);
+    return dtype == GetSimtOutputDtype(node) &&
+           (IsSimtFloatDtype(dtype) || dtype == DT_INT32 || dtype == DT_INT64 || dtype == DT_UINT8);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    expr = "(" + inputs[0] + " > 0) ? 1 : ((" + inputs[0] + " < 0) ? -1 : 0)";
+    return ge::GRAPH_SUCCESS;
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"cast.h", "sign_reg_base.h"};
@@ -1739,6 +1899,15 @@ class IsnanAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::string GetApiName() const override {
     return "IsNan";
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return IsSimtFloatDtype(GetSimtInputDtype(node)) &&
+           (GetSimtOutputDtype(node) == DT_UINT8 || GetSimtOutputDtype(node) == DT_BOOL);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtFloatUnaryExpr("IsNan", inputs, expr);
+  }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {{DT_BF16, DT_FLOAT}};
@@ -1765,6 +1934,15 @@ class IsFiniteAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "IsFinite";
+  }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return IsSimtFloatDtype(GetSimtInputDtype(node)) &&
+           (GetSimtOutputDtype(node) == DT_UINT8 || GetSimtOutputDtype(node) == DT_BOOL);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtFloatUnaryExpr("IsFinite", inputs, expr);
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) {
@@ -1793,6 +1971,15 @@ class IsInfAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::string GetApiName() const override {
     return "IsInf";
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return IsSimtFloatDtype(GetSimtInputDtype(node)) &&
+           (GetSimtOutputDtype(node) == DT_UINT8 || GetSimtOutputDtype(node) == DT_BOOL);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtFloatUnaryExpr("IsInf", inputs, expr);
+  }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {{DT_BF16, DT_FLOAT}};
@@ -1819,6 +2006,18 @@ class LogicalNotAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "LogicalNotExtend";
+  }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    const ge::DataType input_dtype = GetSimtInputDtype(node);
+    const ge::DataType output_dtype = GetSimtOutputDtype(node);
+    return (input_dtype == DT_BOOL && output_dtype == DT_BOOL) ||
+           (input_dtype != DT_BOOL && GetSimtDtypeName(input_dtype) != nullptr && output_dtype == DT_UINT8);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    expr = "!(" + inputs[0] + ")";
+    return ge::GRAPH_SUCCESS;
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {std::string("logical_not") + std::string("_reg_base.h")};
@@ -2199,6 +2398,15 @@ class SigmoidAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "Sigmoid";
+  }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return IsSimtFloatDtype(GetSimtInputDtype(node)) && GetSimtInputDtype(node) == GetSimtOutputDtype(node);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    expr = "1.0F / (1.0F + AscendC::Simt::Exp(-static_cast<float>(" + inputs[0] + ")))";
+    return ge::GRAPH_SUCCESS;
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) {
@@ -2872,27 +3080,13 @@ class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
     if (::ascir::GetTemplateIdOrDefault(node) != ::ascir::TemplateId::kIndirectLoadSimd) {
       return {};
     }
-    auto node_inputs = node.inputs;
     auto node_outputs = node.outputs;
-    const auto &x = node_inputs[0].attr;
-    const auto &index = node_inputs[1].attr;
     const auto &y = node_outputs[0].attr;
-    Expression x_size = Symbol(GetSizeByDataType(x.dtype));
-    for (const auto &repeat : x.repeats) {
-      x_size = x_size * repeat;
-    }
-    Expression index_size = Symbol(GetSizeByDataType(index.dtype));
-    for (const auto &repeat : y.repeats) {
-      index_size = index_size * repeat;
-    }
     Expression offset_size = Symbol(sizeof(uint32_t));
     for (const auto &repeat : y.repeats) {
       offset_size = offset_size * repeat;
     }
-    const size_t index_dtype_size = static_cast<size_t>(GetSizeByDataType(index.dtype));
-    const Expression aligned_x_size = af::sym::Align(x_size, 32);
-    const Expression offset_or_index_size = index_dtype_size > sizeof(uint32_t) ? index_size : offset_size;
-    TmpBufDesc desc = {Symbol(2) * aligned_x_size + af::sym::Align(offset_or_index_size, 32), -1};
+    TmpBufDesc desc = {af::sym::Align(offset_size, 32), -1};
     std::vector<std::unique_ptr<TmpBufDesc>> tmp_buf_descs;
     tmp_buf_descs.emplace_back(std::make_unique<TmpBufDesc>(desc));
     return tmp_buf_descs;
@@ -2909,7 +3103,7 @@ class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return false;
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"datacopy_reg_base.h"};
+    return {"indirect_load_simd_reg_base.h", "indirect_load_simt_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {"basic_api/kernel_operator_vec_gather_intf.h", "simt_api/cpp/kernel_simt_intf.h"};
@@ -2948,7 +3142,7 @@ class TransposeAscIrCodegenImplV2 : public AscIrCodegenV2 {
 };
 /*********************************************************************************/
 
-class ErfAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class ErfAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcVoidTmpSizeV2(node);
@@ -2959,6 +3153,9 @@ class ErfAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "ErfExtend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "Erf";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"erf_reg_base.h"};
@@ -2983,7 +3180,7 @@ class ErfAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class CeilAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class CeilAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcCeilTmpSizeV2(node);
@@ -2992,6 +3189,9 @@ class CeilAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Ceil";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Ceil";
   }
   // 如果需要插入cast节点，返回cast的目的类型
@@ -3016,7 +3216,7 @@ class CeilAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class CosAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcCosTmpSizeV2(node);
@@ -3025,6 +3225,9 @@ class CosAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Cos";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Cos";
   }
   // 如果需要插入cast节点，返回cast的目的类型
@@ -3049,7 +3252,7 @@ class CosAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class AcosAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class AcosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcAcosTmpSizeV2(node);
@@ -3058,6 +3261,9 @@ class AcosAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Acos";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Acos";
   }
   // 如果需要插入cast节点，返回cast的目的类型
@@ -3082,7 +3288,7 @@ class AcosAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class AcoshAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class AcoshAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcAcoshTmpSizeV2(node);
@@ -3091,6 +3297,9 @@ class AcoshAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Acosh";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Acosh";
   }
   // 如果需要插入cast节点，返回cast的目的类型
@@ -3115,7 +3324,7 @@ class AcoshAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class CoshAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class CoshAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcCoshTmpSizeV2(node);
@@ -3124,6 +3333,9 @@ class CoshAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Cosh";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Cosh";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -3147,7 +3359,7 @@ class CoshAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class AsinAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class AsinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcAsinTmpSizeV2(node);
@@ -3156,6 +3368,9 @@ class AsinAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Asin";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Asin";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -3179,7 +3394,7 @@ class AsinAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class AsinhAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class AsinhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcAsinhTmpSizeV2(node);
@@ -3188,6 +3403,9 @@ class AsinhAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Asinh";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Asinh";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -3211,7 +3429,7 @@ class AsinhAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class AtanAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class AtanAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcAtanTmpSizeV2(node);
@@ -3220,6 +3438,9 @@ class AtanAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Atan";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Atan";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -3241,7 +3462,7 @@ class AtanAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class AtanhAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class AtanhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcAtanhTmpSizeV2(node);
@@ -3250,6 +3471,9 @@ class AtanhAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Atanh";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Atanh";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -3301,7 +3525,7 @@ class DigammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class ErfcAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class ErfcAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcErfcTmpSizeV2(node);
@@ -3310,6 +3534,9 @@ class ErfcAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Erfc";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Erfc";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -3331,7 +3558,7 @@ class ErfcAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class ErfcxAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class ErfcxAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcErfcTmpSizeV2(node);
@@ -3341,6 +3568,9 @@ class ErfcxAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "ErfcxExtend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "Erfcx";
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
@@ -3432,6 +3662,13 @@ class Ceil2IntAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::string GetApiName() const override {
     return "Ceil2IntExtend";
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return IsSimtFloatDtype(GetSimtInputDtype(node)) && GetSimtOutputDtype(node) == DT_INT32;
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtFloatToIntExpr(node, inputs, "CAST_CEIL", expr);
+  }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {std::string("cast") + std::string("_reg_base.h")};
   }
@@ -3449,7 +3686,7 @@ class Ceil2IntAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class TanhAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class TanhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcVoidTmpSizeV2(node);
@@ -3460,6 +3697,9 @@ class TanhAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "TanhExtend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "Tanh";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"tanh_reg_base.h"};
@@ -3756,6 +3996,13 @@ class FloorToIntAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::string GetApiName() const override {
     return "FloorToInt";
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return IsSimtFloatDtype(GetSimtInputDtype(node)) && GetSimtOutputDtype(node) == DT_INT32;
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtFloatToIntExpr(node, inputs, "CAST_FLOOR", expr);
+  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "basic_api/reg_compute/kernel_reg_compute_intf.h",
@@ -3826,7 +4073,7 @@ class HypotAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class LgammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class LgammaAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcLgammaTmpSizeV2(node);
@@ -3835,6 +4082,9 @@ class LgammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Lgamma";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Lgamma";
   }
   // 如果需要插入cast节点，返回cast的目的类型
@@ -3857,12 +4107,15 @@ class LgammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class Log10AscIrCodegenImplV2 : public AscIrCodegenV2 {
+class Log10AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::string GetApiCallName() const override {
     return "UnaryApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Log10";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Log10";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -3909,12 +4162,15 @@ class LogicalXorAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class Log1pAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class Log1pAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::string GetApiCallName() const override {
     return "UnaryApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Log1p";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Log1p";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -4098,12 +4354,15 @@ class Conv2DAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class SinAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::string GetApiCallName() const override {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Sin";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Sin";
   }
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
@@ -4163,6 +4422,13 @@ class RoundToIntAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::string GetApiName() const override {
     return "RoundToInt";
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return IsSimtFloatToIntPair(node);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtFloatToIntExpr(node, inputs, "CAST_EVEN", expr);
+  }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {std::string("cast") + std::string("_reg_base.h")};
   }
@@ -4189,6 +4455,13 @@ class TruncToIntAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::string GetApiName() const override {
     return "TruncToInt";
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return IsSimtFloatToIntPair(node);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtFloatToIntExpr(node, inputs, "CAST_ZERO", expr);
+  }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {std::string("cast") + std::string("_reg_base.h")};
   }
@@ -4204,7 +4477,7 @@ class TruncToIntAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class TruncAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class TruncAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcTruncTmpSizeV2(node);
@@ -4213,6 +4486,9 @@ class TruncAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Trunc";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Trunc";
   }
   // 如果需要插入cast节点，返回cast的目的类型
@@ -4230,7 +4506,7 @@ class TruncAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class SinhAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class SinhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcSinhTmpSizeV2(node);
@@ -4239,6 +4515,9 @@ class SinhAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Sinh";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Sinh";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -4255,7 +4534,7 @@ class SinhAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class TanAscIrCodegenImplV2 : public AscIrCodegenV2 {
+class TanAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     return CalcTanTmpSizeV2(node);
@@ -4264,6 +4543,9 @@ class TanAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
+    return "Tan";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Tan";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
@@ -4356,6 +4638,22 @@ class SquareAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "Square";
+  }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    const ge::DataType dtype = GetSimtInputDtype(node);
+    return dtype == GetSimtOutputDtype(node) && (IsSimtFloatDtype(dtype) || dtype == DT_UINT8 || dtype == DT_INT16 ||
+                                                 dtype == DT_UINT16 || dtype == DT_UINT32 || dtype == DT_UINT64);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    if (GetSimtInputDtype(node) == DT_FLOAT16 || GetSimtInputDtype(node) == DT_BF16) {
+      expr = "static_cast<float>(" + inputs[0] + ") * static_cast<float>(" + inputs[0] + ")";
+    } else if (GetSimtInputDtype(node) == DT_UINT16) {
+      expr = "static_cast<uint32_t>(" + inputs[0] + ") * static_cast<uint32_t>(" + inputs[0] + ")";
+    } else {
+      expr = "(" + inputs[0] + ") * (" + inputs[0] + ")";
+    }
+    return ge::GRAPH_SUCCESS;
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"scalar_mul.h"};

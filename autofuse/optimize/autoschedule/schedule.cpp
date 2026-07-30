@@ -520,7 +520,8 @@ Status AddIndirectLoadSyntheticOuterAxis(const af::AscNodePtr &node, ascir::Axis
   return af::SUCCESS;
 }
 
-Status ApplyIndirectLoadTemplateMerge(ascir::ImplGraph &graph, const af::AscNodePtr &node, ascir::AxisId axis_id) {
+Status ApplyIndirectLoadTemplateMerge(ascir::ImplGraph &graph, const af::AscNodePtr &node, ascir::AxisId axis_id,
+                                      bool merge_tensor_axis = true) {
   if (axis_id == af::kIdNone) {
     return af::SUCCESS;
   }
@@ -531,15 +532,19 @@ Status ApplyIndirectLoadTemplateMerge(ascir::ImplGraph &graph, const af::AscNode
            node->GetNamePtr());
     GE_ASSERT_TRUE(graph.ApplySchedAxisMerge(node, axis_id), "Failed to merge schedule axis[%ld] for node[%s].",
                    axis_id, node->GetNamePtr());
-    GE_ASSERT_TRUE(graph.ApplyTensorAxisMerge(node, axis_id), "Failed to merge tensor axis[%ld] for node[%s].", axis_id,
-                   node->GetNamePtr());
+    if (merge_tensor_axis) {
+      GE_ASSERT_TRUE(graph.ApplyTensorAxisMerge(node, axis_id), "Failed to merge tensor axis[%ld] for node[%s].",
+                     axis_id, node->GetNamePtr());
+    }
   } else {
     GELOGD("[IndirectLoad] Graph[%s] apply single-axis template merge axis[%ld] for node[%s].", graph.GetName().c_str(),
            axis_id, node->GetNamePtr());
     GE_ASSERT_TRUE(graph.ApplySchedAxisMerge(node, axis_id, {axis_id}),
                    "Failed to merge schedule axis[%ld] for node[%s].", axis_id, node->GetNamePtr());
-    GE_ASSERT_TRUE(graph.ApplyTensorAxisMerge(node, axis_id, {axis_id}),
-                   "Failed to merge tensor axis[%ld] for node[%s].", axis_id, node->GetNamePtr());
+    if (merge_tensor_axis) {
+      GE_ASSERT_TRUE(graph.ApplyTensorAxisMerge(node, axis_id, {axis_id}),
+                     "Failed to merge tensor axis[%ld] for node[%s].", axis_id, node->GetNamePtr());
+    }
   }
   return af::SUCCESS;
 }
@@ -598,8 +603,10 @@ Status Scheduler::ApplyIndirectLoadNodeAxes(const af::AscNodePtr &node, bool &sk
     return af::SUCCESS;
   }
   if (ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(node)) {
-    skip_main_tiling = true;
     GE_ASSERT_SUCCESS(ApplyInputInnerVectorizedAxis(graph_, node, indirect_load_axes_.input_inner_axis));
+    GE_ASSERT_SUCCESS(AddIndirectLoadSyntheticOuterAxis(node, indirect_load_axes_.outer_axis,
+                                                        has_indirect_load_synthetic_outer_axis_));
+    GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_axes_.outer_axis, false));
     return af::SUCCESS;
   }
   if (ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(node)) {

@@ -19,7 +19,6 @@
 #include "api_call/utils/api_call_factory.h"
 #include "graph/ascendc_ir/utils/asc_tensor_utils.h"
 #include "indirect_load_utils.h"
-#include "v35/codegen/simt_scalar_call/simt_scalar_emitter.h"
 
 using namespace std;
 using namespace af::ops;
@@ -305,7 +304,7 @@ Status Loop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const Tiler &
   TraverseGraphForReduceNodes(nodes, current_loop->is_graph_has_reduce_node, current_loop->is_ar);
   auto lifecycle_edge = GetLifecycleEdge(nodes, tpipe);
   for (auto node : nodes) {
-    if (IsSkippedApiEmitProcessNode(node)) {
+    if (ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(node)).skips_api_emit) {
       GE_CHK_STATUS_RET(AddSkippedApiEmitProcessCall(node, current_loop, current_axis, tensor_calls));
       continue;
     }
@@ -716,9 +715,7 @@ Status Loop::GenerateLoop(const Tiler &tiler, const TPipe &tpipe, std::vector<as
     }
     ss << "for (" << axis.AsArg() << " = 0; " << axis << " < " << axis.loop_size.Str() << "; " << axis << "++) "
        << "{" << std::endl;
-    const bool skip_calc_from_axis_for_indirect_load_simt =
-        axis.type == Axis::Type::kAxisTypeTileInner && FindIndirectLoadOpCall(this, true) != nullptr;
-    if (tpipe.cv_fusion_type != ascir::CubeTemplateType::kUBFuse && !skip_calc_from_axis_for_indirect_load_simt) {
+    if (tpipe.cv_fusion_type != ascir::CubeTemplateType::kUBFuse) {
       ss << tiler.CalcFromAxis(axis.id);
     }
     GenerateEnCacheCondition(tiler, tpipe, axis, ss);

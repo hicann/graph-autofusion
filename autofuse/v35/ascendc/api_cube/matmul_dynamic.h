@@ -104,7 +104,8 @@ __aicore__ void mat_mul_v3(GM_ADDR aGM, GM_ADDR bGM, GM_ADDR biasGM, GM_ADDR off
                           MatmulV3Advanced::MatmulAswBlock, MM_CFG_NO_PRELOAD);
 #if !(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102))
   } else if constexpr (API_LEVEL == MAT_MUL_BASIC_LEVEL && FULL_LOAD == MAT_MUL_NO_FULL_LOAD &&
-                       MODEL == MAT_MUL_BASIC && L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
+                       (MODEL == MAT_MUL_BASIC || MODEL == MAT_MUL_SLICE || MODEL == MAT_MUL_BASIC_SPLIT_K) &&
+                       L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
     GET_TILING_DATA_WITH_STRUCT(MatMulV3BasicTilingData, tilingData, tilingGM);
     MatmulV3Advanced::MatMulActKernel<DTYPE_X1, DTYPE_X2, DTYPE_Y, DTYPE_BIAS, aLayout, bLayout, layout::RowMajor, 0,
                                       OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, nullptr, tilingData);
@@ -114,13 +115,15 @@ __aicore__ void mat_mul_v3(GM_ADDR aGM, GM_ADDR bGM, GM_ADDR biasGM, GM_ADDR off
     MatmulV3Advanced::MatMulActKernel<DTYPE_X1, DTYPE_X2, DTYPE_Y, DTYPE_BIAS, aLayout, bLayout, layout::RowMajor,
                                       B_FULL_LOAD_MODE, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, nullptr, tilingData);
   } else if constexpr (API_LEVEL == MAT_MUL_BASIC_LEVEL && FULL_LOAD == MAT_MUL_NO_FULL_LOAD &&
-                       MODEL == MAT_MUL_STREAM_K && L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
+                       (MODEL == MAT_MUL_STREAM_K || MODEL == MAT_MUL_SK_SPLIT_K) &&
+                       L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
     GET_TILING_DATA_WITH_STRUCT(MatMulV3BasicTilingData, tilingData, tilingGM);
     MatMulStreamKActKernel<DTYPE_X1, DTYPE_X2, DTYPE_Y, DTYPE_BIAS, aLayout, bLayout, layout::RowMajor,
                            MatMulL0C2Out::ON_THE_FLY, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, workspaceGM,
                                                                           tilingData);
   } else if constexpr (API_LEVEL == MAT_MUL_BASIC_LEVEL && FULL_LOAD == MAT_MUL_NO_FULL_LOAD &&
-                       MODEL == MAT_MUL_STREAM_K && L0C2OUT_MODEL == MAT_MUL_1V2_ND_ALIG_FIXPIPE) {
+                       (MODEL == MAT_MUL_STREAM_K || MODEL == MAT_MUL_SK_SPLIT_K) &&
+                       L0C2OUT_MODEL == MAT_MUL_1V2_ND_ALIG_FIXPIPE) {
     GET_TILING_DATA_WITH_STRUCT(MatMulV3BasicTilingData, tilingData, tilingGM);
     MatMulStreamKActKernel<DTYPE_X1, DTYPE_X2, DTYPE_Y, DTYPE_BIAS, aLayout, bLayout, layout::RowMajor,
                            MatMulL0C2Out::ND_FIXPIPE_1_2, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, workspaceGM,
@@ -212,7 +215,8 @@ __aicore__ void mat_mul_v3_fusion(GM_ADDR aGM, GM_ADDR bGM, GM_ADDR biasGM, GM_A
                           MatmulV3Advanced::MatmulAswBlock, MM_CFG_NO_PRELOAD);
 #if !(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102))
   } else if constexpr (API_LEVEL == MAT_MUL_BASIC_LEVEL && FULL_LOAD == MAT_MUL_NO_FULL_LOAD &&
-                       MODEL == MAT_MUL_BASIC && L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
+                       (MODEL == MAT_MUL_BASIC || MODEL == MAT_MUL_SLICE || MODEL == MAT_MUL_BASIC_SPLIT_K) &&
+                       L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
     GET_TILING_DATA_WITH_STRUCT(MatMulV3BasicTilingData, tilingData, tilingGM);
     MatmulV3Advanced::MatMulActKernelFusion<DTYPE_X1, DTYPE_X2, DTYPE_Y, DTYPE_BIAS, aLayout, bLayout, layout::RowMajor,
                                             0, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, nullptr, tilingData, param);
@@ -223,13 +227,15 @@ __aicore__ void mat_mul_v3_fusion(GM_ADDR aGM, GM_ADDR bGM, GM_ADDR biasGM, GM_A
                                             B_FULL_LOAD_MODE, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, nullptr,
                                                                                   tilingData, param);
   } else if constexpr (API_LEVEL == MAT_MUL_BASIC_LEVEL && FULL_LOAD == MAT_MUL_NO_FULL_LOAD &&
-                       MODEL == MAT_MUL_STREAM_K && L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
+                       (MODEL == MAT_MUL_STREAM_K || MODEL == MAT_MUL_SK_SPLIT_K) &&
+                       L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
     GET_TILING_DATA_WITH_STRUCT(MatMulV3BasicTilingData, tilingData, tilingGM);
     MatMulStreamKActKernel<DTYPE_X1, DTYPE_X2, DTYPE_Y, DTYPE_BIAS, aLayout, bLayout, layout::RowMajor,
                            MatMulL0C2Out::ON_THE_FLY, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, workspaceGM,
                                                                           tilingData);
   } else if constexpr (API_LEVEL == MAT_MUL_BASIC_LEVEL && FULL_LOAD == MAT_MUL_NO_FULL_LOAD &&
-                       MODEL == MAT_MUL_STREAM_K && L0C2OUT_MODEL == MAT_MUL_1V2_ND_ALIG_FIXPIPE) {
+                       (MODEL == MAT_MUL_STREAM_K || MODEL == MAT_MUL_SK_SPLIT_K) &&
+                       L0C2OUT_MODEL == MAT_MUL_1V2_ND_ALIG_FIXPIPE) {
     GET_TILING_DATA_WITH_STRUCT(MatMulV3BasicTilingData, tilingData, tilingGM);
     MatMulStreamKActKernel<DTYPE_X1, DTYPE_X2, DTYPE_Y, DTYPE_BIAS, aLayout, bLayout, layout::RowMajor,
                            MatMulL0C2Out::ND_FIXPIPE_1_2, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, workspaceGM,
@@ -322,7 +328,8 @@ __aicore__ void mat_mul_v3_fusion_db(GM_ADDR aGM, GM_ADDR bGM, GM_ADDR biasGM, G
                           MatmulV3Advanced::MatmulAswBlock, MM_CFG_NO_PRELOAD);
 #if !(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102))
   } else if constexpr (API_LEVEL == MAT_MUL_BASIC_LEVEL && FULL_LOAD == MAT_MUL_NO_FULL_LOAD &&
-                       MODEL == MAT_MUL_BASIC && L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
+                       (MODEL == MAT_MUL_BASIC || MODEL == MAT_MUL_SLICE || MODEL == MAT_MUL_BASIC_SPLIT_K) &&
+                       L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
     GET_TILING_DATA_WITH_STRUCT(MatMulV3BasicTilingData, tilingData, tilingGM);
     MatmulV3Advanced::MatMulActKernelFusion<DTYPE_X1, DTYPE_X2, DTYPE_Y, DTYPE_BIAS, aLayout, bLayout, layout::RowMajor,
                                             0, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, nullptr, tilingData, param);
@@ -333,13 +340,15 @@ __aicore__ void mat_mul_v3_fusion_db(GM_ADDR aGM, GM_ADDR bGM, GM_ADDR biasGM, G
                                             B_FULL_LOAD_MODE, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, nullptr,
                                                                                   tilingData, param);
   } else if constexpr (API_LEVEL == MAT_MUL_BASIC_LEVEL && FULL_LOAD == MAT_MUL_NO_FULL_LOAD &&
-                       MODEL == MAT_MUL_STREAM_K && L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
+                       (MODEL == MAT_MUL_STREAM_K || MODEL == MAT_MUL_SK_SPLIT_K) &&
+                       L0C2OUT_MODEL == MAT_MUL_ON_THE_FLY) {
     GET_TILING_DATA_WITH_STRUCT(MatMulV3BasicTilingData, tilingData, tilingGM);
     MatMulStreamKActKernel<DTYPE_X1, DTYPE_X2, DTYPE_Y, DTYPE_BIAS, aLayout, bLayout, layout::RowMajor,
                            MatMulL0C2Out::ON_THE_FLY, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, workspaceGM,
                                                                           tilingData);
   } else if constexpr (API_LEVEL == MAT_MUL_BASIC_LEVEL && FULL_LOAD == MAT_MUL_NO_FULL_LOAD &&
-                       MODEL == MAT_MUL_STREAM_K && L0C2OUT_MODEL == MAT_MUL_1V2_ND_ALIG_FIXPIPE) {
+                       (MODEL == MAT_MUL_STREAM_K || MODEL == MAT_MUL_SK_SPLIT_K) &&
+                       L0C2OUT_MODEL == MAT_MUL_1V2_ND_ALIG_FIXPIPE) {
     GET_TILING_DATA_WITH_STRUCT(MatMulV3BasicTilingData, tilingData, tilingGM);
     MatMulStreamKActKernel<DTYPE_X1, DTYPE_X2, DTYPE_Y, DTYPE_BIAS, aLayout, bLayout, layout::RowMajor,
                            MatMulL0C2Out::ND_FIXPIPE_1_2, OP_TYPE_RELU_VALUE>(aGM, bGM, biasGM, cGM, workspaceGM,

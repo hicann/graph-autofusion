@@ -28,7 +28,6 @@
 #include "indirect_load_utils.h"
 #include "optimize/platform/platform_factory.h"
 #include "optimize/schedule_utils.h"
-#include "v35/codegen/simt_scalar_call/simt_scalar_emitter.h"
 #include "common/platform_context.h"
 #include "codegen_graph_check.h"
 
@@ -67,10 +66,7 @@ Status AllocateQues(TPipe &tpipe, const QueCollection &collection) {
       const auto new_que = tpipe.ques.emplace(iter.first, TQue{iter.first, iter.second, position});
       GE_CHK_BOOL_RET_STATUS(new_que.second, af::FAILED, "Codegen emplace que [%ld] failed", iter.first);
     }
-    const auto skip_iter = collection.direct_gm_ques.find(iter.first);
-    if (skip_iter != collection.direct_gm_ques.end()) {
-      tpipe.ques.at(iter.first).skip_init_for_simt_direct_gm = skip_iter->second;
-    }
+    tpipe.ques.at(iter.first).skip_init_for_simt_direct_gm = collection.direct_gm_ques.at(iter.first);
   }
   for (auto &[id, que] : tpipe.ques) {
     if (id != tpipe.cube_output_que_id) {
@@ -2215,8 +2211,7 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
       continue;
     }
     const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
-    if (indirect_load_behavior.skips_api_emit && indirect_load_behavior.uses_direct_gm_pipeline &&
-        !IsOps<Store>(node)) {
+    if (indirect_load_behavior.skips_api_emit && !IsOps<Store>(node)) {
       continue;
     }
 
@@ -2923,7 +2918,7 @@ Status Kernel::GenCubeCommonFuncOfCVFusion(const ascir::FusedScheduledResult &fu
       }
     }
   }
-  AppendFuncCall(ss1, per_group_func_calls.cbegin(), per_group_func_calls.cend(), false);
+  AppendFuncCall(ss1, per_group_func_calls.cbegin(), per_group_func_calls.cend());
   return af::SUCCESS;
 }
 
@@ -3451,11 +3446,8 @@ bool Kernel::GetEnableParallelCompile() const {
 }
 
 void Kernel::AppendFuncCall(std::stringstream &ss, std::vector<std::vector<std::string>>::const_iterator begin,
-                            std::vector<std::vector<std::string>>::const_iterator end, bool need_sync_all) {
+                            std::vector<std::vector<std::string>>::const_iterator end) {
   for (auto it = begin; it != end; ++it) {
-    if (it != begin && need_sync_all) {
-      ss << "    AscendC::PipeBarrier<PIPE_ALL>();" << std::endl;
-    }
     for (const auto &call_statement : *it) {
       ss << call_statement;
     }
@@ -4810,6 +4802,15 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
       // 分支14: HIGH_LEVEL, AB_FULL_LOAD, BASIC, ON_THE_FLY
       ss << "  } else if (API_LEVEL == 0 && FULL_LOAD == 3 && MODEL == 0 && L0C2OUT_MODEL == 0) {" << std::endl;
       ss << "    _DISPATCH_MATMUL(0, 0, 3, 0, MatMulV3TilingDataCopy);" << std::endl;
+      // 分支15: BASIC_LEVEL, NO_FULL_LOAD, BASIC_SPLIT_K, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 6 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 6, 0, 0, MatMulV3BasicTilingData);" << std::endl;
+      // 分支16: BASIC_LEVEL, NO_FULL_LOAD, SK_SPLIT_K, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 7 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 7, 0, 0, MatMulV3BasicTilingData);" << std::endl;
+      // 分支17: BASIC_LEVEL, NO_FULL_LOAD, SK_SPLIT_K, 1V2_ND_ALIG_FIXPIPE
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 7 && L0C2OUT_MODEL == 2) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 7, 0, 2, MatMulV3BasicTilingData);" << std::endl;
       ss << "  } else {" << std::endl;
       ss << "    return -1;" << std::endl;
       ss << "  }" << std::endl;

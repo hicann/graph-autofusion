@@ -297,26 +297,6 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, DoesNotStoreFixedTileAxesAsTemplateM
             af::kIdNone);
 }
 
-TEST(IndirectLoadScheduleCaseGeneratorTest, StoresInputVectorizedAxisAsTemplateMetadata) {
-  auto graph = BuildIndirectLoadGraph(2, true);
-  optimize::IndirectLoadScheduleCaseGenerator generator;
-  std::vector<af::AscGraph> graphs;
-  std::vector<std::string> score_functions;
-  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
-  auto &simd_graph = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
-  const auto indirect_load = simd_graph.FindNode("indirect_load");
-  const auto pre_abs = simd_graph.FindNode("pre_abs");
-  ASSERT_NE(indirect_load, nullptr);
-  ASSERT_NE(pre_abs, nullptr);
-
-  ascgen_utils::indirect_load::TemplateAxes axes;
-  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, axes), af::SUCCESS);
-  ExpectAxisNames(simd_graph, pre_abs->attr.sched.axis, {"z0", "z1", "z2", "z3"});
-  ExpectAxisNames(simd_graph, pre_abs->outputs()[0]->attr.axis, {"z0", "z1", "z2", "z3"});
-  EXPECT_TRUE(pre_abs->outputs()[0]->attr.vectorized_axis.empty());
-  ExpectAxisNames(simd_graph, {axes.input_inner_axis}, {"indirect_load_input_inner"});
-}
-
 TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratedSimdCandidateKeepsPublicBehavior) {
   auto graph = BuildIndirectLoadGraph(2, true);
   optimize::IndirectLoadScheduleCaseGenerator generator;
@@ -332,7 +312,6 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratedSimdCandidateKeepsPublicBeh
   EXPECT_FALSE(il_behavior.skips_api_emit);
   EXPECT_FALSE(il_behavior.uses_direct_gm_pipeline);
   EXPECT_FALSE(il_behavior.skips_ub_lifecycle);
-  EXPECT_FALSE(il_behavior.skips_ub_expr);
   EXPECT_FALSE(il_behavior.preserves_vectorized_axis);
   EXPECT_FALSE(ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(indirect_load));
 }
@@ -348,7 +327,6 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratedSimtCandidateKeepsPublicBeh
   EXPECT_FALSE(behavior.skips_api_emit);
   EXPECT_TRUE(behavior.uses_direct_gm_pipeline);
   EXPECT_TRUE(behavior.skips_ub_lifecycle);
-  EXPECT_TRUE(behavior.skips_ub_expr);
   EXPECT_TRUE(behavior.preserves_vectorized_axis);
   EXPECT_FALSE(ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(indirect_load));
   EXPECT_FALSE(ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(indirect_load));
@@ -356,7 +334,26 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratedSimtCandidateKeepsPublicBeh
   EXPECT_TRUE(ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(indirect_load));
 }
 
-TEST(IndirectLoadScheduleCaseGeneratorTest, SimtMovesInputPrecisionCastAfterIndirectLoad) {
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimdMovesInputPreAfterIndirectLoad) {
+  auto graph = BuildIndirectLoadGraph(2, true);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  auto &simd_graph = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
+  const auto indirect_load = simd_graph.FindNode("indirect_load");
+  const auto pre_abs = simd_graph.FindNode("pre_abs");
+  ASSERT_NE(indirect_load, nullptr);
+  ASSERT_NE(pre_abs, nullptr);
+
+  EXPECT_EQ(ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL)->GetName(), "x");
+  EXPECT_EQ(ascgen_utils::indirect_load::GetInputProducer(pre_abs, 0UL), indirect_load);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetOnlyOutputConsumer(indirect_load), pre_abs);
+  ExpectAxisNames(simd_graph, pre_abs->attr.sched.axis, {"z4", "z5", "z6", "z7"});
+  ExpectAxisNames(simd_graph, pre_abs->outputs()[0]->attr.axis, {"z4", "z5", "z6", "z7"});
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, MovesInputPrecisionCastAfterIndirectLoad) {
   auto graph = BuildIndirectLoadPrecisionCastGraph();
   optimize::IndirectLoadScheduleCaseGenerator generator;
   std::vector<af::AscGraph> graphs;
@@ -372,8 +369,14 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimtMovesInputPrecisionCastAfterIndi
   EXPECT_NE(simd_graph.FindNode("output_cast"), nullptr);
   ASSERT_NE(simd_graph.FindNode("indirect_load"), nullptr);
   ASSERT_NE(simd_graph.FindNode("output_exp"), nullptr);
-  EXPECT_EQ(simd_graph.FindNode("indirect_load")->outputs()[0]->attr.dtype, af::DT_FLOAT);
+  EXPECT_EQ(simd_graph.FindNode("indirect_load")->outputs()[0]->attr.dtype, af::DT_FLOAT16);
   EXPECT_EQ(simd_graph.FindNode("output_exp")->outputs()[0]->attr.dtype, af::DT_FLOAT);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetInputProducer(simd_graph.FindNode("indirect_load"), 0UL)->GetName(),
+            "input_load");
+  EXPECT_EQ(ascgen_utils::indirect_load::GetInputProducer(simd_graph.FindNode("input_cast"), 0UL),
+            simd_graph.FindNode("indirect_load"));
+  EXPECT_EQ(ascgen_utils::indirect_load::GetOnlyOutputConsumer(simd_graph.FindNode("input_cast"))->GetName(),
+            "output_exp");
 
   auto &simt_graph = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
   const auto input_cast = simt_graph.FindNode("input_cast");

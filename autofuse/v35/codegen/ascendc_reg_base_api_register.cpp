@@ -243,6 +243,12 @@ Register::Register() {
   const std::string kAscendcShiftedChebyshevPolynomialWRegBaseStr = {
 #include "shifted_chebyshev_polynomial_w_reg_base.h"
   };
+  const std::string kAscendcIndirectLoadSimtRegBaseStr = {
+#include "indirect_load_simt_reg_base.h"
+  };
+  const std::string kAscendcIndirectLoadSimdRegBaseStr = {
+#include "indirect_load_simd_reg_base.h"
+  };
   std::unordered_map<std::string, std::string> api_to_file{
       {"cast_reg_base.h", kAscendcCastRegStr},
       {"compare_reg_base.h", kAscendcCompareRegStr},
@@ -313,6 +319,8 @@ Register::Register() {
       {"shifted_chebyshev_polynomial_u_reg_base.h", kAscendcShiftedChebyshevPolynomialURegBaseStr},
       {"shifted_chebyshev_polynomial_v_reg_base.h", kAscendcShiftedChebyshevPolynomialVRegBaseStr},
       {"shifted_chebyshev_polynomial_w_reg_base.h", kAscendcShiftedChebyshevPolynomialWRegBaseStr},
+      {"indirect_load_simt_reg_base.h", kAscendcIndirectLoadSimtRegBaseStr},
+      {"indirect_load_simd_reg_base.h", kAscendcIndirectLoadSimdRegBaseStr},
   };
 
   AscendCApiRegistry::GetInstance().RegisterApi(api_to_file);

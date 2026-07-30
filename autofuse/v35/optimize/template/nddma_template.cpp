@@ -207,7 +207,7 @@ af::Status NddmaTemplate::ProcessSliceToNddma(const af::AscNodePtr &node_load, b
   GE_CHECK_NOTNULL(node_load->GetOpDesc());
 
   const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node_load);
-  if (indirect_load_behavior.uses_direct_gm_pipeline || indirect_load_behavior.skips_api_emit) {
+  if (indirect_load_behavior.uses_direct_gm_pipeline) {
     return af::SUCCESS;
   }
 

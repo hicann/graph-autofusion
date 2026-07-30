@@ -484,8 +484,8 @@ Status TilingGroup::GenTilingGroup(const ascir::ImplGraph &impl_graph, AxisGroup
   std::vector<std::pair<std::string, AxisGroup>> node_name_to_tiling_group;
   std::set<af::AxisId> n_groupset;
   for (const auto &node : impl_graph.GetAllNodes()) {
-    if (ScheduleUtils::IsBuffer(node) ||
-        ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_main_schedule_tiling) {
+    const auto behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
+    if (ScheduleUtils::IsBuffer(node) || behavior.skips_main_schedule_tiling || behavior.excludes_tiling_group) {
       continue;
     }
     AxisGroup single_node_axes_group;

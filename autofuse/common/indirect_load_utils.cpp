@@ -14,7 +14,6 @@
 
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
-#include "common_utils.h"
 #include "schedule_result.h"
 
 namespace ascgen_utils::indirect_load {
@@ -39,30 +38,24 @@ TemplateBehavior GetBehavior(TemplateRole role) {
   TemplateBehavior behavior;
   switch (role) {
     case TemplateRole::kSimdInputPre:
-      behavior.skips_main_schedule_tiling = true;
-      behavior.skips_api_emit = true;
+      behavior.excludes_tiling_group = true;
       behavior.preserves_vectorized_axis = true;
-      break;
-    case TemplateRole::kSimdOp:
       break;
     case TemplateRole::kSimtInputBoundary:
       behavior.skips_main_schedule_tiling = true;
       behavior.skips_api_emit = true;
       behavior.uses_direct_gm_pipeline = true;
-      behavior.skips_ub_expr = true;
       behavior.preserves_vectorized_axis = true;
       break;
     case TemplateRole::kSimtDirectGmBoundary:
     case TemplateRole::kSimtInlineTransform:
       behavior.skips_api_emit = true;
       behavior.uses_direct_gm_pipeline = true;
-      behavior.skips_ub_expr = true;
       behavior.preserves_vectorized_axis = true;
       break;
     case TemplateRole::kSimtOp:
       behavior.uses_direct_gm_pipeline = true;
       behavior.skips_ub_lifecycle = true;
-      behavior.skips_ub_expr = true;
       behavior.preserves_vectorized_axis = true;
       break;
     case TemplateRole::kNone:
@@ -82,8 +75,7 @@ TemplateBehavior GetTemplateBehavior(const af::AscNodePtr &node) {
 
 af::Status InheritTemplateRoleIfIL(af::AscGraph &graph, const std::string &vf_node_name, const af::AscNodePtr &src) {
   GE_ASSERT_NOTNULL(src);
-  const auto &behavior = GetTemplateBehavior(src);
-  if (!behavior.skips_api_emit && !behavior.uses_direct_gm_pipeline) {
+  if (GetTemplateRole(src) == TemplateRole::kNone) {
     return af::SUCCESS;
   }
   auto vf_node = graph.FindNode(vf_node_name.c_str());
@@ -157,9 +149,7 @@ bool ShouldApplyInputInnerVectorization(const af::AscNodePtr &node) {
 }
 
 bool ShouldDisableRegularVectorFunc(const af::AscNodePtr &node) {
-  const TemplateRole role = GetTemplateRole(node);
-  return role == TemplateRole::kSimtInputBoundary || role == TemplateRole::kSimtDirectGmBoundary ||
-         role == TemplateRole::kSimtInlineTransform || role == TemplateRole::kSimtOp;
+  return GetTemplateBehavior(node).uses_direct_gm_pipeline;
 }
 
 af::AscNodePtr GetInputProducer(const af::AscNodePtr &node, size_t input_index) {

@@ -307,7 +307,7 @@ af::Status AscGraphUbExprBuilder::Build(const af::AscGraph &graph, UbExprContext
   std::map<int64_t, ContainerState> buffer_bytes;
   for (const auto &node : graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node);
-    if (ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_ub_expr) {
+    if (ascgen_utils::indirect_load::GetTemplateBehavior(node).uses_direct_gm_pipeline) {
       continue;
     }
     for (const auto &output : node->outputs()) {
