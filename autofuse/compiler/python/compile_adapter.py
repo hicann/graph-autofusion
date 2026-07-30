@@ -355,7 +355,7 @@ def execute_compile(sources, args):
     base_device_file = args.graph_name + "_op_kernel.cpp"
     if args.stage in ["all", "host"]:
         with InductorCompileDuration(
-            args.trace_stage, "GenerateHostSource", args.graph_name
+            args.trace_stage, "WriteHostSource", args.graph_name
         ):
             host_file_path = os.path.join(args.temp_dir, "host")
             generate_file(
@@ -369,7 +369,7 @@ def execute_compile(sources, args):
             )
     if args.stage in ["all", "device"]:
         with InductorCompileDuration(
-            args.trace_stage, "GenerateDeviceSource", args.graph_name
+            args.trace_stage, "WriteDeviceSource", args.graph_name
         ):
             device_file_path = os.path.join(args.temp_dir, "device")
             generate_file(
@@ -380,7 +380,9 @@ def execute_compile(sources, args):
             )
             args.device_files = os.path.join(device_file_path, base_device_file)
 
-    with InductorCompileDuration(args.trace_stage, "AscendCCompile", args.graph_name):
+    with InductorCompileDuration(
+        args.trace_stage, "BuildCompiledArtifacts", args.graph_name
+    ):
         ascendc_compile.main(args)
     return args.temp_dir
 
@@ -413,7 +415,7 @@ def compile_core(
             total_end = time.time_ns()
             record_inductor_compile_duration(
                 args.trace_stage,
-                "Total",
+                "AutoFuseCompileTotal",
                 args.graph_name,
                 total_start,
                 total_end - total_start,

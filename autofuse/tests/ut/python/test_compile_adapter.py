@@ -103,17 +103,27 @@ def test_jit_compile_records_atrace_and_reports(compile_adapter_module, tmpdir, 
     assert [
         "InductorCompile",
         "jit_compile",
-        "GenerateHostSource",
+        "WriteHostSource",
         "autofuse",
     ] in labels
     assert [
         "InductorCompile",
         "jit_compile",
-        "GenerateDeviceSource",
+        "WriteDeviceSource",
         "autofuse",
     ] in labels
-    assert ["InductorCompile", "jit_compile", "AscendCCompile", "autofuse"] in labels
-    assert ["InductorCompile", "jit_compile", "Total", "autofuse"] in labels
+    assert [
+        "InductorCompile",
+        "jit_compile",
+        "BuildCompiledArtifacts",
+        "autofuse",
+    ] in labels
+    assert [
+        "InductorCompile",
+        "jit_compile",
+        "AutoFuseCompileTotal",
+        "autofuse",
+    ] in labels
     assert compile_adapter_module.duration_reports == [True]
     assert capsys.readouterr().out == ""
 
@@ -130,11 +140,21 @@ def test_host_compile_records_duration_without_stdout(
     assert [
         "InductorCompile",
         "host_compile",
-        "GenerateHostSource",
+        "WriteHostSource",
         "autofuse",
     ] in labels
-    assert ["InductorCompile", "host_compile", "AscendCCompile", "autofuse"] in labels
-    assert ["InductorCompile", "host_compile", "Total", "autofuse"] in labels
+    assert [
+        "InductorCompile",
+        "host_compile",
+        "BuildCompiledArtifacts",
+        "autofuse",
+    ] in labels
+    assert [
+        "InductorCompile",
+        "host_compile",
+        "AutoFuseCompileTotal",
+        "autofuse",
+    ] in labels
     assert capsys.readouterr().out == ""
 
 
@@ -150,11 +170,21 @@ def test_kernel_compile_records_device_stage(compile_adapter_module, tmpdir):
     assert [
         "InductorCompile",
         "kernel_compile",
-        "GenerateDeviceSource",
+        "WriteDeviceSource",
         "autofuse",
     ] in labels
-    assert ["InductorCompile", "kernel_compile", "AscendCCompile", "autofuse"] in labels
-    assert ["InductorCompile", "kernel_compile", "Total", "autofuse"] in labels
+    assert [
+        "InductorCompile",
+        "kernel_compile",
+        "BuildCompiledArtifacts",
+        "autofuse",
+    ] in labels
+    assert [
+        "InductorCompile",
+        "kernel_compile",
+        "AutoFuseCompileTotal",
+        "autofuse",
+    ] in labels
 
 
 def test_execute_compile_keeps_single_host_file_without_marker(
