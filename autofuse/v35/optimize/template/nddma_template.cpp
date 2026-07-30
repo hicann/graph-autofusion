@@ -23,6 +23,7 @@ namespace {
 constexpr uint32_t kAlignBytes = 32U;
 constexpr int32_t kTwoBytes = 2;
 constexpr int32_t kFourBytes = 4;
+constexpr char kTransposePrefix[] = "transpose_";
 
 bool IsNddma(const af::AscNodePtr &node) {
   return ScheduleUtils::IsLoad(node) && node->attr.type == "Nddma";
@@ -211,11 +212,8 @@ af::Status NddmaTemplate::ProcessSliceToNddma(const af::AscNodePtr &node_load, b
     return af::SUCCESS;
   }
 
-  const std::vector<int64_t> &node_axis = node_load->attr.sched.axis;
-  const std::vector<int64_t> &tensor_axis = node_load->outputs[0].attr.axis;
-  bool is_axis_consistent = (node_axis == tensor_axis);
-
-  if (is_axis_consistent && !(IsTailAxisTransposeV2(node_load) || IsTailAxisTranspose(node_load->outputs[0].attr))) {
+  bool is_node_no_transpose = node_load->GetName().rfind(kTransposePrefix, 0U) != 0U;
+  if (is_node_no_transpose && !(IsTailAxisTransposeV2(node_load) || IsTailAxisTranspose(node_load->outputs[0].attr))) {
     if (!ScheduleUtils::IsVectorizedAxisContinuousInGM(node_load->outputs[0].attr)) {
       node_load->GetOpDesc()->SetType("Nddma");
       node_load->attr.type = "Nddma";

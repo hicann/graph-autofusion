@@ -73,6 +73,10 @@ TEST_F(TransposeScheduleCaseGeneratorTest, MultiTranspose_TwoBranchAdd) {
   EXPECT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
   ASSERT_EQ(graphs.size(), 1UL);
   EXPECT_TRUE(score_functions.empty());
+  EXPECT_NE(graphs[0].FindNode("transpose_load0"), nullptr);
+  EXPECT_NE(graphs[0].FindNode("transpose_load1"), nullptr);
+  EXPECT_EQ(graphs[0].FindNode("load0"), nullptr);
+  EXPECT_EQ(graphs[0].FindNode("load1"), nullptr);
 }
 
 // 两个Load各接一个Transpose（中间夹Abs），汇聚到Add，验证task结构
@@ -98,6 +102,35 @@ TEST_F(TransposeScheduleCaseGeneratorTest, MultiTranspose_TwoBranchAdd_TaskStruc
   std::vector<ScheduleTask> tasks;
   EXPECT_EQ(generator.GeneratorTask(graph, tasks, {}), af::SUCCESS);
   ASSERT_EQ(tasks.size(), 1UL);
+  const auto abs0 = tasks[0].optimize_graph.FindNode("abs0");
+  ASSERT_NE(abs0, nullptr);
+  const auto &abs0_inputs = abs0->GetInDataNodes();
+  ASSERT_EQ(abs0_inputs.size(), 1UL);
+  EXPECT_EQ(abs0_inputs.begin()->get()->GetName(), "transpose_load0");
+}
+
+TEST_F(TransposeScheduleCaseGeneratorTest, SingleTranspose_RenameOnlyEliminatedCandidate) {
+  auto s0 = Sym("s0"), s1 = Sym("s1");
+  auto graph = AscGraphBuilder("single_transpose_candidate_isolation")
+                   .Loops({s0, s1, Sym(32)})
+                   .Data("data0", 0)
+                   .Load("load0", "data0")
+                   .Transpose("transpose0", "load0", {1, 0, 2})
+                   .Store("store0", "transpose0")
+                   .Output("out0", "store0", 0)
+                   .Build();
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  SetupTransposeSchedAxis(graph);
+
+  optimize::TransposeFusionCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  EXPECT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  ASSERT_EQ(graphs.size(), 2UL);
+  EXPECT_NE(graphs[0].FindNode("load0"), nullptr);
+  EXPECT_EQ(graphs[0].FindNode("transpose_load0"), nullptr);
+  EXPECT_EQ(graphs[1].FindNode("load0"), nullptr);
+  EXPECT_NE(graphs[1].FindNode("transpose_load0"), nullptr);
 }
 
 // Load → Transpose → Sum(Reduce) → Store → Output，图上有 Reduce 节点，
@@ -132,6 +165,8 @@ TEST_F(TransposeScheduleCaseGeneratorTest, SingleTransposeWithReduce_EliminateIn
     }
   }
   EXPECT_FALSE(has_transpose);
+  EXPECT_NE(graph.FindNode("transpose_load0"), nullptr);
+  EXPECT_EQ(graph.FindNode("load0"), nullptr);
 }
 
 }  // namespace schedule

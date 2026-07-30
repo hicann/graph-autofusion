@@ -22,8 +22,9 @@
 
 namespace optimize {
 namespace {
-constexpr int32_t transposeNoNeedUBConvertSize = 512;  // 以512Byte作为是否需要消除Transpose的阈值
-}
+constexpr int32_t kTransposeNoNeedUBConvertSize = 512;  // 以512Byte作为是否需要消除Transpose的阈值
+constexpr char kTransposePrefix[] = "transpose_";
+}  // namespace
 
 std::vector<af::AscNodePtr> TransposeFusionCaseGenerator::FindTransposeNodes(const ascir::HintGraph &owner_graph) {
   std::vector<af::AscNodePtr> transpose_nodes;
@@ -56,6 +57,12 @@ void TransposeFusionCaseGenerator::UpdateAxisByPath(::ascir::ImplGraph &owner_gr
     if (!ScheduleUtils::IsBuffer(input_view)) {
       owner_graph.ApplyTensorAxisReorder(input_view, reordered_axis);
       owner_graph.ApplySchedAxisReorder(input_view, reordered_sched_axis);
+      if (af::ops::IsOps<af::ascir_op::Load>(input_view)) {
+        const std::string old_name = input_view->GetName();
+        if (old_name.rfind(kTransposePrefix, 0U) != 0U) {
+          input_view->GetOpDesc()->SetName(kTransposePrefix + old_name);
+        }
+      }
     }
     // 向上遍历。 暂时不考虑transpose之上的节点有额外向下的分支，如果有额外分支，则不能将transpose消除。
     for (size_t idx = 0UL; idx < top->GetInDataNodesSize(); ++idx) {
@@ -194,7 +201,7 @@ Status TransposeScoreFunctionGenerator::GetScoreByExpr(int32_t &score) const {
   int32_t dim = -1;
   GE_ASSERT_TRUE(repeat_.GetHint(dim), "Failed to get int value, expr = %s",
                  af::SymbolicUtils::ToString(repeat_).c_str());
-  const auto limited_size = transposeNoNeedUBConvertSize / GetSizeByDataType(transpose_node_->inputs[0].attr.dtype);
+  const auto limited_size = kTransposeNoNeedUBConvertSize / GetSizeByDataType(transpose_node_->inputs[0].attr.dtype);
   score = dim < limited_size ? 1 : -1;
   return af::SUCCESS;
 }
