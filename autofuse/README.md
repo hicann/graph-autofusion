@@ -116,7 +116,7 @@ export ASCEND_LAUNCH_BLOCKING=1
 ```bash
 export AUTOFUSE_DFX_FLAGS="--codegen_compile_debug=true;--debug_dir=/path-to-dump/"
 ```
-注意：在设置的dump图路径下，生成 Autofuse 后端，对于每个融合算子的dump图。
+注意：Autofuse 后端会在设置的 dump 路径下生成每个融合算子的 dump 图。
 
 ### 结果分析 & 调测输出分析
 用户开启 TORCH_COMPILE_DEBUG 后，调试信息输出位于执行目录下的torch_compile_debug子目录，带有 autofused_ 前缀的目录为 inductor-npu-ext 相关产物，其余均为 inductor 原生产物。每一个autofused_ 前缀的目录，都表示一个融合算子的白盒结构。如果没有融合算子产生（即未发生融合，需要通过打屏的 "Fallback aten.xxxx $reason: xx原因" 信息去判断原因。具体可参考[inductor-npu-ext使用手册](https://gitcode.com/Ascend/torchair/blob/master/experimental/_inductor_npu_ext/docs/manuals.md)。
