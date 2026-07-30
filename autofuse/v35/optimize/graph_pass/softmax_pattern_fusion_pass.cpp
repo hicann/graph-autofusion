@@ -198,7 +198,7 @@ Status ReplaceWithSoftmax(af::AscGraph &graph, const SoftmaxPattern &pattern) {
   softmax_node->attr = pattern.true_div_node->attr;
   softmax_node->inputs[0].attr = pattern.sub_node->inputs[0].attr;
   softmax_node->outputs[0].attr = pattern.true_div_node->outputs[0].attr;
-  softmax_node->attr.api.compute_type = af::ComputeType::kComputeElewise;
+  softmax_node->attr.api.compute_type = af::ComputeType::kComputeReduce;
   softmax_node->attr.api.type = af::ApiType::kAPITypeCompute;
 
   const auto true_div_out_anchor = pattern.true_div_node->GetOutDataAnchor(0);
