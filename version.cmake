@@ -8,11 +8,11 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
-set_cann_package(graph-autofusion VERSION "9.1.0")
+set_cann_package(graph-autofusion VERSION "9.2.0")
 
-set_cann_build_dependencies(asc-devkit ">=9.0")
-set_cann_build_dependencies(runtime ">=9.0")
-set_cann_build_dependencies(metadef ">=9.0")
+set_cann_build_dependencies(asc-devkit ">=9.2")
+set_cann_build_dependencies(runtime ">=9.2")
+set_cann_build_dependencies(metadef ">=9.2")
 
 set_cann_run_dependencies(runtime "CUR_MAJOR_MINOR_VER")
 set_cann_run_dependencies(asc-devkit "CUR_MAJOR_MINOR_VER")
