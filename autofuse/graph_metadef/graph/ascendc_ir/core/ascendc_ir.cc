@@ -637,19 +637,19 @@ bool AscGraphImpl::DoCopyAscNodeAndRelink(const AscGraph &src_asc_graph, AscGrap
   auto dst_compute_graph = AscGraphUtils::GetComputeGraph(dst_asc_graph);
   GE_ASSERT_NOTNULL(src_compute_graph);
   GE_ASSERT_NOTNULL(dst_compute_graph);
-  std::unordered_map<std::string, NodePtr> all_new_nodes;
+  NodeCloneMap node_clone_map;
   for (const auto &src_node : src_asc_graph.GetAllNodes()) {
     const auto &op_desc = GraphUtils::CopyOpDesc(src_node->GetOpDesc(), nullptr);
     GE_ASSERT_NOTNULL(op_desc);
     op_desc->SetName(src_node->GetName());
     Operator op = OpDescUtils::CreateOperatorFromOpDesc(op_desc);
     auto dst_new_node = dst_asc_graph.AddNode(op);
-    all_new_nodes[dst_new_node->GetName()] = std::dynamic_pointer_cast<Node>(dst_new_node);
+    node_clone_map[src_node.get()] = std::dynamic_pointer_cast<Node>(dst_new_node);
     DoCopyAscNodeTensorAttr(src_node, dst_new_node);
   }
 
   for (const auto &src_node : src_compute_graph->GetAllNodes()) {
-    GE_ASSERT_GRAPH_SUCCESS(GraphUtils::RelinkGraphEdges(src_node, "", all_new_nodes));
+    GE_ASSERT_GRAPH_SUCCESS(GraphUtils::RelinkGraphEdges(src_node, node_clone_map));
   }
   return true;
 }

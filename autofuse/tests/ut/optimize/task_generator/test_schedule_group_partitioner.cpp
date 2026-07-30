@@ -81,7 +81,110 @@ class ScheduleGroupGraphPartitionerTest : public ::testing::Test {
     auto target_attr = target_cg->GetOrCreateAttrsGroup<af::AscGraphAttr>();
     target_attr->axis = source_attr->axis;
   }
+
+  static void VerifyWorkspaceEdges(const af::AscGraph &graph) {
+    af::AscNodePtr workspace_with_input;
+    af::AscNodePtr workspace_with_output;
+    for (const auto &node : graph.GetAllNodes()) {
+      const auto asc_node = std::dynamic_pointer_cast<af::AscNode>(node);
+      ASSERT_NE(asc_node, nullptr);
+      if (asc_node->GetType() != af::ascir_op::Workspace::Type) {
+        continue;
+      }
+      if (!asc_node->GetInDataNodes().empty()) {
+        workspace_with_input = asc_node;
+      }
+      if (!asc_node->GetOutDataNodes().empty()) {
+        workspace_with_output = asc_node;
+      }
+    }
+    ASSERT_NE(workspace_with_input, nullptr);
+    ASSERT_NE(workspace_with_output, nullptr);
+    EXPECT_NE(workspace_with_input, workspace_with_output);
+    ASSERT_EQ(workspace_with_input->GetInDataNodes().size(), 1UL);
+    EXPECT_EQ(workspace_with_input->GetInDataNodes().at(0)->GetType(), af::ascir_op::Data::Type);
+    ASSERT_EQ(workspace_with_output->GetOutDataNodes().size(), 1UL);
+    EXPECT_EQ(workspace_with_output->GetOutDataNodes().at(0)->GetType(), af::ascir_op::Load::Type);
+  }
+
+  static void VerifyPartitionedWorkspaceEdges(const std::vector<af::AscGraph> &grouped_graphs) {
+    bool found_workspace_with_input = false;
+    bool found_workspace_with_output = false;
+    for (const auto &grouped_graph : grouped_graphs) {
+      for (const auto &node : grouped_graph.GetAllNodes()) {
+        const auto asc_node = std::dynamic_pointer_cast<af::AscNode>(node);
+        ASSERT_NE(asc_node, nullptr);
+        if (asc_node->GetType() != af::ascir_op::Workspace::Type) {
+          continue;
+        }
+        if (!asc_node->GetInDataNodes().empty()) {
+          found_workspace_with_input = true;
+          ASSERT_EQ(asc_node->GetInDataNodes().size(), 1UL);
+          EXPECT_EQ(asc_node->GetInDataNodes().at(0)->GetType(), af::ascir_op::Data::Type);
+        }
+        if (!asc_node->GetOutDataNodes().empty()) {
+          found_workspace_with_output = true;
+          ASSERT_EQ(asc_node->GetOutDataNodes().size(), 1UL);
+          EXPECT_EQ(asc_node->GetOutDataNodes().at(0)->GetType(), af::ascir_op::Load::Type);
+        }
+      }
+    }
+    EXPECT_TRUE(found_workspace_with_input);
+    EXPECT_TRUE(found_workspace_with_output);
+  }
 };
+
+TEST_F(ScheduleGroupGraphPartitionerTest, DuplicateWorkspaceNames_CopyAndPartitionKeepEdges) {
+  auto graph = AscGraphBuilder("duplicate_workspace")
+                   .Loops({Sym(128)})
+                   .Data("data", 0)
+                   .Workspace("workspace_pre", "data")
+                   .Workspace("workspace_post")
+                   .Load("load", "workspace_post")
+                   .Store("store", "load")
+                   .Output("out", "store", 0)
+                   .Build();
+  const auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
+  ASSERT_NE(compute_graph, nullptr);
+  const auto workspace_pre = compute_graph->FindNode("workspace_pre");
+  const auto workspace_post = compute_graph->FindNode("workspace_post");
+  ASSERT_NE(workspace_pre, nullptr);
+  ASSERT_NE(workspace_post, nullptr);
+  workspace_pre->GetOpDesc()->SetName("workspace");
+  workspace_post->GetOpDesc()->SetName("workspace");
+
+  af::AscGraph copied_graph("copied_duplicate_workspace");
+  ASSERT_TRUE(copied_graph.CopyFrom(graph));
+
+  VerifyWorkspaceEdges(copied_graph);
+
+  std::vector<af::AscGraph> grouped_graphs;
+  ASSERT_EQ(ScheduleGroupGraphPartitioner::PartitionByConnectivity(graph, grouped_graphs), af::SUCCESS);
+  ASSERT_EQ(grouped_graphs.size(), 2UL);
+  VerifyPartitionedWorkspaceEdges(grouped_graphs);
+}
+
+TEST_F(ScheduleGroupGraphPartitionerTest, DuplicateWorkspaceNames_PartitionDoesNotDropComponents) {
+  auto graph = AscGraphBuilder("duplicate_outputs")
+                   .Loops({Sym(128)})
+                   .Data("data0", 0)
+                   .Data("data1", 1)
+                   .Workspace("workspace0", "data0")
+                   .Workspace("workspace1", "data1")
+                   .Build();
+  const auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
+  ASSERT_NE(compute_graph, nullptr);
+  const auto workspace0 = compute_graph->FindNode("workspace0");
+  const auto workspace1 = compute_graph->FindNode("workspace1");
+  ASSERT_NE(workspace0, nullptr);
+  ASSERT_NE(workspace1, nullptr);
+  workspace0->GetOpDesc()->SetName("workspace");
+  workspace1->GetOpDesc()->SetName("workspace");
+
+  std::vector<af::AscGraph> grouped_graphs;
+  EXPECT_EQ(ScheduleGroupGraphPartitioner::PartitionByConnectivity(graph, grouped_graphs), af::SUCCESS);
+  EXPECT_EQ(grouped_graphs.size(), 2UL);
+}
 
 // Test 1: Less than 5 graphs - should do nothing
 TEST_F(ScheduleGroupGraphPartitionerTest, ReduceGraphCount_LessThan5_NoChange) {

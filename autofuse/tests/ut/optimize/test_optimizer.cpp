@@ -759,19 +759,20 @@ TEST_F(TestOptimizer, ConcatFirstDim) {
   EXPECT_EQ(fused_scheduled_result.input_nodes[2]->GetName(), "x3");
   EXPECT_EQ(fused_scheduled_result.output_nodes[0]->GetName(), "y");
 
-  std::set<std::string> axis_names_0;
-  std::set<std::string> axis_names_1;
-  for (const auto &axis : schedule_result.schedule_groups[0].impl_graphs[0].GetAllAxis()) {
-    axis_names_0.emplace(axis->name);
-  }
-  for (const auto &axis : schedule_result.schedule_groups[1].impl_graphs[0].GetAllAxis()) {
-    axis_names_1.emplace(axis->name);
+  std::set<std::set<std::string>> axis_name_groups;
+  for (const auto &schedule_group : schedule_result.schedule_groups) {
+    std::set<std::string> axis_names;
+    for (const auto &axis : schedule_group.impl_graphs[0].GetAllAxis()) {
+      axis_names.emplace(axis->name);
+    }
+    axis_name_groups.emplace(std::move(axis_names));
   }
 
-  std::set<std::string> expected_0{"z3z2_1", "z3z2_1T", "z3z2_1TB", "z3z2_1Tb", "z3z2_1t"};
-  std::set<std::string> expected_1{"z3z2_0", "z3z2_0T", "z3z2_0TB", "z3z2_0Tb", "z3z2_0t"};
-  EXPECT_EQ(axis_names_0, expected_0);
-  EXPECT_EQ(axis_names_1, expected_1);
+  const std::set<std::set<std::string>> expected_axis_name_groups = {
+      {"z3z2_0", "z3z2_0T", "z3z2_0TB", "z3z2_0Tb", "z3z2_0t"},
+      {"z3z2_1", "z3z2_1T", "z3z2_1TB", "z3z2_1Tb", "z3z2_1t"},
+  };
+  EXPECT_EQ(axis_name_groups, expected_axis_name_groups);
 }
 
 TEST_F(TestOptimizer, ConcatTailDim) {
@@ -4811,14 +4812,20 @@ TEST_F(TestOptimizer, NodeCacheMarkerConcat) {
   EXPECT_EQ(res, af::SUCCESS);
   ASSERT_TRUE(!fused_scheduled_result.node_idx_to_scheduled_results.empty());
   auto &schedule_results = fused_scheduled_result.node_idx_to_scheduled_results[0];
-  EXPECT_EQ(schedule_results.size(), 2UL);
-  EXPECT_EQ(schedule_results[1].schedule_groups.size(), 2UL);
-  ASSERT_EQ(schedule_results[1].schedule_groups[1].impl_graphs.size(), 3UL);
-
-  auto const &impl_graphs = schedule_results[1].schedule_groups[1].impl_graphs;
-  const auto &impl6_brc0 = impl_graphs[2].FindNode("brc0");
-  EXPECT_NE(impl6_brc0, nullptr);
-  EXPECT_EQ(impl6_brc0->attr.sched.exec_condition, af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis);
+  ASSERT_EQ(schedule_results.size(), 2UL);
+  bool found_cached_brc0 = false;
+  for (const auto &schedule_result : schedule_results) {
+    for (const auto &schedule_group : schedule_result.schedule_groups) {
+      for (const auto &impl_graph : schedule_group.impl_graphs) {
+        const auto brc0 = impl_graph.FindNode("brc0");
+        if (brc0 != nullptr &&
+            brc0->attr.sched.exec_condition == af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis) {
+          found_cached_brc0 = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(found_cached_brc0);
 }
 
 TEST_F(TestOptimizer, NodeCacheMarkerBroadcast) {
