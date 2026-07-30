@@ -28,7 +28,7 @@ env:
 
 stages:
   stage1:
-    name: image
+    name: PreBuild
     jobs:
       JOB_image:
         name: Test_image
@@ -65,6 +65,9 @@ stages:
             with:
               workspace: ${{ steps.process_checkout.outputs.path }}
               target_branch: ${{ env.TARGET_BRANCH }}
+              owner: ${{ env.org_name }}
+              repo: ${{ env.repo_name }}
+              pr_number: ${{ atomgit.event.pull_request.number }}
               git_token: ${{secrets.GIT_TOKEN}}
           -
             name: upload
@@ -110,7 +113,7 @@ stages:
     - type: auto
     fail-fast: true
   stage2:
-    name: compile
+    name: Compile
     jobs:
       JOB_codecheck_action:
         name: CodeCheck
@@ -184,7 +187,7 @@ stages:
     - type: auto
     fail-fast: false
   stage3:
-    name: ut
+    name: UT
     select: selected_by_default
     jobs:
       JOB_api_check:
@@ -295,6 +298,7 @@ stages:
     jobs:
       A2_smoke:
         name: PreSmoke_A2
+        timeout-minutes: 30
         steps:
           -
             name: Checkout
@@ -368,11 +372,12 @@ stages:
           -
             name: smoke resource clean
             uses: manifest-management-plugin
+            if: ${{ always() }}
             with:
               action: CRUSH
               repo: ${{ steps.process_checkout.outputs.path }}
               file_path: ${{ steps.process_checkout.outputs.path }}/ci/smoke-conf/smoke-A2.yaml
-        if: "${{ default() }}"
+        if: env.TARGET_BRANCH == 'master'
         runs-on: ['self-hosted','arch=arm','smoke=204']
     pre:
     - type: auto
