@@ -29,7 +29,6 @@
 
 #include "sk_node.h"
 #include "sk_log.h"
-#include "sk_scope_launch.h"
 #include "sk_scope_info.h"
 #include "sk_lock_detector.h"
 #include "sk_common.h"
@@ -879,20 +878,19 @@ struct JudgeTaskKernelInfo {
   std::unique_ptr<char[]> scopeName;
 };
 
-bool IsScopeKernel(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info) {
-  const char *defaultScopeName = "default_sk_scope_name";
+bool GetScopeKernelInfo(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info) {
   char kernelName[MAX_SCOPE_NAME_LEN] = {0};
   int32_t ret = aclrtGetFunctionName(params.funcHandle, sizeof(kernelName), kernelName);
   if (ret != ACL_SUCCESS) {
     SK_LOGE("Failed to get kernel name for funcHandle, ret: %d", ret);
     return false;
   }
-  bool isBegin = IsScopeKernelNameWithSupportedArch(kernelName, "sk_scope_kernel_begin");
-  bool isEnd = IsScopeKernelNameWithSupportedArch(kernelName, "sk_scope_kernel_end");
-  bool isPlaceholder = IsScopeKernelNameWithSupportedArch(kernelName, "sk_placeholder_kernel");
-  if (!isBegin && !isEnd && !isPlaceholder) {
-    SK_LOGD("Current kernel is not a scope kernel or uses unsupported arch suffix, kernelName=%s", kernelName);
-    return false;
+  info->isBegin = IsScopeKernelNameWithSupportedArch(kernelName, "sk_scope_kernel_begin");
+  info->isEnd = IsScopeKernelNameWithSupportedArch(kernelName, "sk_scope_kernel_end");
+  info->isPlaceholder = IsScopeKernelNameWithSupportedArch(kernelName, "sk_placeholder_kernel");
+  if (!info->isBegin && !info->isEnd && !info->isPlaceholder) {
+    SK_LOGD("Kernel task is not recognized as a valid scope kernel task, kernelName=%s", kernelName);
+    return true;
   }
   auto parseArgsAddr = std::make_unique<ScopeKernelArgs>();
   ret = aclrtMemcpy((void *)parseArgsAddr.get(), sizeof(ScopeKernelArgs), params.args, sizeof(ScopeKernelArgs),
@@ -909,10 +907,7 @@ bool IsScopeKernel(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info) {
     SK_LOGE("Failed to copy scope name '%s', memcpy_s error code: %d", parseArgsAddr->name, res);
     return false;
   }
-  info->isBegin = isBegin;
-  info->isEnd = isEnd;
-  info->isPlaceholder = isPlaceholder;
-  if (strcmp(info->scopeName.get(), defaultScopeName) == 0) {
+  if (strcmp(info->scopeName.get(), DEFAULT_SK_SCOPE_NAME) == 0) {
     info->isFuseEnable = false;
   }
   SK_LOGI(
@@ -935,7 +930,11 @@ bool SuperKernelKernelNode::InitNode(const SuperKernelOptionsManager *opts) {
   }
   JudgeTaskKernelInfo scopeKernelInfo;
   auto &kernelParams = taskParams.kernelTaskParams;
-  if (IsScopeKernel(kernelParams, &scopeKernelInfo)) {
+  if (!GetScopeKernelInfo(kernelParams, &scopeKernelInfo)) {
+    SK_LOGE("Failed to get scope kernel information for kernel node %lu", nodeId);
+    return false;
+  }
+  if (scopeKernelInfo.isBegin || scopeKernelInfo.isEnd || scopeKernelInfo.isPlaceholder) {
     SK_LOGI("Kernel node %lu is a scope kernel node.", nodeId);
     isScopeNode = true;
     isFusible = scopeKernelInfo.isFuseEnable;

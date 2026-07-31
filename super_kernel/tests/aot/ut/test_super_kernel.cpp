@@ -14,7 +14,7 @@
 #include <string>
 
 #include "super_kernel.h"
-#include "sk_scope_kernel_types.h"
+#include "sk_common.h"
 #include "securec.h"
 #include "stub/ut_common_stubs.h"
 

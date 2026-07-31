@@ -75,6 +75,7 @@ foreach(SK_KERNEL_ARCH IN LISTS SK_KERNEL_ARCHS)
       ${CMAKE_CURRENT_SOURCE_DIR}/../src/aot/
    )
    target_link_libraries(${SK_SCOPE_TARGET} PRIVATE
+      $<BUILD_INTERFACE:runtime_headers>
       $<BUILD_INTERFACE:asc_kernel_headers>
       $<BUILD_INTERFACE:kernel_tiling_headers>
    )

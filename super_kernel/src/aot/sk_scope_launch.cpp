@@ -16,7 +16,6 @@
 #include "sk_scope_launch.h"
 
 #include <cstring>
-#include <cstdlib>
 
 #include "securec.h"
 #include "sk_common.h"
@@ -56,7 +55,7 @@ aclError LaunchScopeKernelImpl(const char *scopeName, aclrtStream stream, ScopeF
                                const char *markerType) {
   ScopeKernelArgs args;
   if (scopeName == nullptr) {
-    scopeName = "default_sk_scope_name";
+    scopeName = DEFAULT_SK_SCOPE_NAME;
   }
   size_t len = strlen(scopeName);
   size_t maxLen = MAX_SCOPE_NAME_LEN - 1;

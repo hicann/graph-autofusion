@@ -251,7 +251,7 @@ class SuperKernelScopeSplitterTest : public testing::Test {
     node->nodeInfos.kernelInfos.cubeNum = 1;
     node->nodeInfos.kernelInfos.vecNum = 0;
     SuperKernelKernelNode *kernelNode = static_cast<SuperKernelKernelNode *>(node.get());
-    kernelNode->scopeName = "default_sk_scope_name";
+    kernelNode->scopeName = DEFAULT_SK_SCOPE_NAME;
     kernelNode->isScopeBegin = true;
     SuperKernelBaseNode *ptr = node.get();
     graph->graphMap[nodeId] = std::move(node);
@@ -273,7 +273,7 @@ class SuperKernelScopeSplitterTest : public testing::Test {
     node->nodeInfos.kernelInfos.cubeNum = 1;
     node->nodeInfos.kernelInfos.vecNum = 0;
     SuperKernelKernelNode *kernelNode = static_cast<SuperKernelKernelNode *>(node.get());
-    kernelNode->scopeName = "default_sk_scope_name";
+    kernelNode->scopeName = DEFAULT_SK_SCOPE_NAME;
     kernelNode->isScopeBegin = false;
     kernelNode->isScopeEnd = true;
     SuperKernelBaseNode *ptr = node.get();

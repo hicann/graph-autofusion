@@ -202,9 +202,9 @@ static void ExtractFunctionSymbols(const ElfSymbolTables &tables, SkFuncSymbolTa
       continue;
     }
 
-    SymBindType bindType = (sym.st_info >> 4) == STB_WEAK
-                               ? SymBindType::WEAK
-                               : (sym.st_info >> 4) == STB_GLOBAL ? SymBindType::GLOBAL : SymBindType::LOCAL;
+    SymBindType bindType = (sym.st_info >> 4) == STB_WEAK     ? SymBindType::WEAK
+                           : (sym.st_info >> 4) == STB_GLOBAL ? SymBindType::GLOBAL
+                                                              : SymBindType::LOCAL;
     funcSymTable[sym.st_value] = {name, sym.st_size, bindType};
   }
 }

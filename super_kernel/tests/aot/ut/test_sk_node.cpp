@@ -25,7 +25,6 @@
 #define protected public
 #include "sk_graph.h"
 #include "sk_node.h"
-#include "sk_scope_launch.h"
 #include "sk_common.h"
 #include "sk_options_manager.h"
 #include "ut_common_stubs.h"
@@ -72,14 +71,16 @@ struct JudgeTaskKernelInfo {
   std::unique_ptr<char[]> scopeName;
 };
 
-extern bool IsScopeKernel(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info);
+extern bool GetScopeKernelInfo(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info);
 extern bool DumpSingleKernelBinary(const KernelInfos &kernelInfo, const std::string &kernelBinsDir);
+aclError FakeAclrtGetFunctionNameFailure(aclrtFuncHandle funcHandle, uint32_t maxLen, char *name);
 
-TEST_F(SkNodeTest, IsScopeKernel_GetFunctionName_Failed) {
+TEST_F(SkNodeTest, GetScopeKernelInfo_GetFunctionName_Failed) {
   aclmdlRIKernelTaskParams params{};
   params.funcHandle = nullptr;
   JudgeTaskKernelInfo info;
-  bool ret = IsScopeKernel(params, &info);
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameFailure));
+  bool ret = GetScopeKernelInfo(params, &info);
   EXPECT_EQ(ret, false);
 }
 
@@ -109,59 +110,74 @@ int Fake_aclrtGetFunctionNameBeginWithoutSuffix(void *funcHandle, size_t size, c
 
 int Fake_aclrtMemcpy(void *dst, size_t dstSize, const void *src, size_t count, aclrtMemcpyKind kind) {
   ScopeKernelArgs fakeArgs;
-  const char *defaultName = "default_sk_scope_name";
-  snprintf_s(fakeArgs.name, sizeof(fakeArgs.name), sizeof(fakeArgs.name), "%s", defaultName);
+  snprintf_s(fakeArgs.name, sizeof(fakeArgs.name), sizeof(fakeArgs.name), "%s", DEFAULT_SK_SCOPE_NAME);
   fakeArgs.name[MAX_SCOPE_NAME_LEN - 1] = '\0';
   memcpy_s(dst, sizeof(ScopeKernelArgs), &fakeArgs, sizeof(ScopeKernelArgs));
   return 0;
 }
 
-TEST_F(SkNodeTest, IsScopeKernel_Normal_ScopeName) {
+int Fake_aclrtMemcpyFailed(void *dst, size_t dstSize, const void *src, size_t count, aclrtMemcpyKind kind) {
+  return ACL_ERROR_FAILURE;
+}
+
+TEST_F(SkNodeTest, GetScopeKernelInfo_CopyScopeArgsFailed) {
+  aclmdlRIKernelTaskParams params{};
+  params.funcHandle = nullptr;
+  JudgeTaskKernelInfo info;
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(Fake_aclrtGetFunctionNameBeginDav2201));
+  MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpyFailed));
+  EXPECT_FALSE(GetScopeKernelInfo(params, &info));
+}
+
+TEST_F(SkNodeTest, GetScopeKernelInfo_Normal_ScopeName) {
   aclmdlRIKernelTaskParams params{};
   params.funcHandle = nullptr;
   JudgeTaskKernelInfo info;
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(Fake_aclrtGetFunctionNameBeginDav2201));
   MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpy));
-  bool ret = IsScopeKernel(params, &info);
+  bool ret = GetScopeKernelInfo(params, &info);
   EXPECT_EQ(ret, true);
   EXPECT_TRUE(info.isBegin);
   EXPECT_FALSE(info.isEnd);
   EXPECT_FALSE(info.isPlaceholder);
 }
 
-TEST_F(SkNodeTest, IsScopeKernel_Dav3510EndScopeName) {
+TEST_F(SkNodeTest, GetScopeKernelInfo_Dav3510EndScopeName) {
   aclmdlRIKernelTaskParams params{};
   params.funcHandle = nullptr;
   JudgeTaskKernelInfo info;
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(Fake_aclrtGetFunctionNameEndDav3510));
   MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpy));
-  bool ret = IsScopeKernel(params, &info);
+  bool ret = GetScopeKernelInfo(params, &info);
   EXPECT_EQ(ret, true);
   EXPECT_FALSE(info.isBegin);
   EXPECT_TRUE(info.isEnd);
   EXPECT_FALSE(info.isPlaceholder);
 }
 
-TEST_F(SkNodeTest, IsScopeKernel_PlaceholderScopeName) {
+TEST_F(SkNodeTest, GetScopeKernelInfo_PlaceholderScopeName) {
   aclmdlRIKernelTaskParams params{};
   params.funcHandle = nullptr;
   JudgeTaskKernelInfo info;
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(Fake_aclrtGetFunctionNamePlaceholderDav2201));
   MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpy));
-  bool ret = IsScopeKernel(params, &info);
+  bool ret = GetScopeKernelInfo(params, &info);
   EXPECT_EQ(ret, true);
   EXPECT_FALSE(info.isBegin);
   EXPECT_FALSE(info.isEnd);
   EXPECT_TRUE(info.isPlaceholder);
 }
 
-TEST_F(SkNodeTest, IsScopeKernel_WithoutArchSuffix_ReturnsFalse) {
+TEST_F(SkNodeTest, GetScopeKernelInfo_WithoutArchSuffix_ReturnsRegularKernelInfo) {
   aclmdlRIKernelTaskParams params{};
   params.funcHandle = nullptr;
   JudgeTaskKernelInfo info;
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(Fake_aclrtGetFunctionNameBeginWithoutSuffix));
-  bool ret = IsScopeKernel(params, &info);
-  EXPECT_EQ(ret, false);
+  bool ret = GetScopeKernelInfo(params, &info);
+  EXPECT_TRUE(ret);
+  EXPECT_FALSE(info.isBegin);
+  EXPECT_FALSE(info.isEnd);
+  EXPECT_FALSE(info.isPlaceholder);
 }
 
 namespace {
@@ -519,8 +535,7 @@ TEST_F(SkNodeTest, FusionFailReasonStrings_CoverAllEnumNamesAndDetails) {
   };
   const std::vector<FusionReasonCase> fusionReasonCases = {
       {FusionFailReason::CAN_FUSE, "CAN_FUSE", "node can fuse"},
-      {FusionFailReason::OP_UNSUPPORT, "OP_UNSUPPORT",
-       "Failed to resolve SuperKernel bind map for the operator"},
+      {FusionFailReason::OP_UNSUPPORT, "OP_UNSUPPORT", "Failed to resolve SuperKernel bind map for the operator"},
       {FusionFailReason::DYNAMIC_TASK_UNSUPPORT, "DYNAMIC_TASK_UNSUPPORT",
        "The operator will refresh task information at runtime"},
       {FusionFailReason::NOT_IN_SCOPE, "NOT_IN_SCOPE", "The user actively marked that this operator is not fused"},
@@ -1894,7 +1909,7 @@ aclError FakeAclrtGetFunctionNameFailure(aclrtFuncHandle funcHandle, uint32_t ma
   return ACL_ERROR_FAILURE;
 }
 
-TEST_F(SkNodeTest, KernelInitNode_FunctionNameGetFailed_RecordsKernelAttrFailed) {
+TEST_F(SkNodeTest, KernelInitNode_FunctionNameGetFailed_ReturnsFalse) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 1103;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
@@ -1903,12 +1918,10 @@ TEST_F(SkNodeTest, KernelInitNode_FunctionNameGetFailed_RecordsKernelAttrFailed)
   task.params.kernelTaskParams.numBlocks = 4;
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameFailure));
-  MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix11));
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   EXPECT_FALSE(node.InitNode());
   EXPECT_FALSE(node.IsFusible());
-  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::KERNEL_ATTR_GET_FAILED);
 }
 
 // ==================== IdentifyAndHandleSimtKernel Tests ====================

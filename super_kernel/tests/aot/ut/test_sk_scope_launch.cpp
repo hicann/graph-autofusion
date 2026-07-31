@@ -15,7 +15,7 @@
 
 #define private public
 #define protected public
-#include "sk_scope_launch.h"
+#include "sk_common.h"
 #include "super_kernel.h"
 #include "securec.h"
 
@@ -28,33 +28,33 @@ class SkScopeLaunchTest : public testing::Test {
   }
 };
 
-TEST_F(SkScopeLaunchTest, LaunchScopeKernel_Begin_Success) {
+TEST_F(SkScopeLaunchTest, ScopeBeginSuccess) {
   const char *scopeName = "test_scope";
   aclrtStream stream = nullptr;
-  aclError ret = LaunchScopeKernel(scopeName, stream, true);
+  aclError ret = aclskScopeBegin(scopeName, stream);
   EXPECT_EQ(ret, ACL_SUCCESS);
 }
 
-TEST_F(SkScopeLaunchTest, LaunchScopeKernel_End_Success) {
+TEST_F(SkScopeLaunchTest, ScopeEndSuccess) {
   const char *scopeName = "test_scope";
   aclrtStream stream = nullptr;
-  aclError ret = LaunchScopeKernel(scopeName, stream, false);
+  aclError ret = aclskScopeEnd(scopeName, stream);
   EXPECT_EQ(ret, ACL_SUCCESS);
 }
 
-TEST_F(SkScopeLaunchTest, LaunchScopeKernel_NullScopeName_Begin) {
+TEST_F(SkScopeLaunchTest, ScopeBeginWithNullScopeName) {
   aclrtStream stream = nullptr;
-  aclError ret = LaunchScopeKernel(nullptr, stream, true);
+  aclError ret = aclskScopeBegin(nullptr, stream);
   EXPECT_EQ(ret, ACL_SUCCESS);
 }
 
-TEST_F(SkScopeLaunchTest, LaunchScopeKernel_NullScopeName_End) {
+TEST_F(SkScopeLaunchTest, ScopeEndWithNullScopeName) {
   aclrtStream stream = nullptr;
-  aclError ret = LaunchScopeKernel(nullptr, stream, false);
+  aclError ret = aclskScopeEnd(nullptr, stream);
   EXPECT_EQ(ret, ACL_SUCCESS);
 }
 
-TEST_F(SkScopeLaunchTest, LaunchScopeKernel_EmptyScopeName) {
+TEST_F(SkScopeLaunchTest, ScopeBeginAndEndWithEmptyScopeName) {
   const char *scopeName = "";
   aclrtStream stream = nullptr;
   aclError ret = aclskScopeBegin(scopeName, stream);
@@ -63,30 +63,30 @@ TEST_F(SkScopeLaunchTest, LaunchScopeKernel_EmptyScopeName) {
   EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
 }
 
-TEST_F(SkScopeLaunchTest, LaunchScopeKernel_MaxLengthScopeName) {
+TEST_F(SkScopeLaunchTest, ScopeBeginWithMaxLengthScopeName) {
   char scopeName[MAX_SCOPE_NAME_LEN];
   (void)memset_s(scopeName, sizeof(scopeName), 'a', MAX_SCOPE_NAME_LEN - 1);
   scopeName[MAX_SCOPE_NAME_LEN - 1] = '\0';
   aclrtStream stream = nullptr;
-  aclError ret = LaunchScopeKernel(scopeName, stream, true);
+  aclError ret = aclskScopeBegin(scopeName, stream);
   EXPECT_EQ(ret, ACL_SUCCESS);
 }
 
-TEST_F(SkScopeLaunchTest, LaunchScopeKernel_ExceedMaxLengthScopeName) {
+TEST_F(SkScopeLaunchTest, ScopeBeginWithExceedMaxLengthScopeName) {
   char scopeName[MAX_SCOPE_NAME_LEN + 10];
   (void)memset_s(scopeName, sizeof(scopeName), 'a', MAX_SCOPE_NAME_LEN + 9);
   scopeName[MAX_SCOPE_NAME_LEN + 9] = '\0';
   aclrtStream stream = nullptr;
-  aclError ret = LaunchScopeKernel(scopeName, stream, true);
+  aclError ret = aclskScopeBegin(scopeName, stream);
   EXPECT_EQ(ret, ACL_ERROR_INVALID_PARAM);
 }
 
-TEST_F(SkScopeLaunchTest, LaunchScopeKernel_BeginEndConsistency) {
+TEST_F(SkScopeLaunchTest, ScopeBeginAndEndReturnConsistentResult) {
   const char *scopeName = "consistency_test";
   aclrtStream stream = nullptr;
 
-  aclError retBegin = LaunchScopeKernel(scopeName, stream, true);
-  aclError retEnd = LaunchScopeKernel(scopeName, stream, false);
+  aclError retBegin = aclskScopeBegin(scopeName, stream);
+  aclError retEnd = aclskScopeEnd(scopeName, stream);
 
   EXPECT_EQ(retBegin, retEnd);
   EXPECT_EQ(retBegin, ACL_SUCCESS);
