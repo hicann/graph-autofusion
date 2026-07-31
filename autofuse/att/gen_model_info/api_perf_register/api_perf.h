@@ -29,6 +29,7 @@ struct NodeDetail {
   Expr gm_stride{CreateExpr(0)};
   Expr ub_stride{CreateExpr(0)};
   ascir_param::CastNodeParams cast_node_params;
+  ascir_param::CompareNodeParams compare_node_params;
   int32_t block_count_idx{0};                      // 用于 LoadStoreStrideV2Func，表示发生非连续的轴索引
   std::map<Expr, TernaryOp, ExprCmp> ternary_ops;  // 动态shape表达式
 

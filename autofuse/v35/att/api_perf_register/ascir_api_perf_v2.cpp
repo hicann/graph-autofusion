@@ -152,8 +152,8 @@ af::Status CompareApiV2([[maybe_unused]] const std::vector<TensorShapeInfo> &inp
   GE_ASSERT_SUCCESS(GetOuterParams(output_shapes[0].dims, outer_repeat, used_dims));
   GE_ASSERT_SUCCESS(SetNodeDetail(input_shapes, output_shapes, node_info));
   GE_ASSERT_SUCCESS(SetDims(used_dims, node_info));
+  node_info.compare_node_params = node.compare_node_params;
   GE_ASSERT_SUCCESS(CompareSpecificPerf(mode, node_info, perf_res));
-  perf_res.pipe_res[PipeType::AIV_VEC] = outer_repeat * GetPipeCost(perf_res, PipeType::AIV_VEC);
   return af::SUCCESS;
 }
 

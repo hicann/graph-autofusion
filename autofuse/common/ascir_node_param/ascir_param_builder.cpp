@@ -26,6 +26,11 @@ constexpr const char *kAscirNodeParams = "AscirNodeParams";
 constexpr const char *kVectorFunc = "VectorFunc";
 constexpr const char *kCast = "Cast";
 
+bool IsCompareParamSupported(const std::string &api_name) {
+  static const std::set<std::string> kCompareTypes = {"Ge", "Eq", "Ne", "Gt", "Le", "Lt"};
+  return kCompareTypes.count(api_name) != 0U;
+}
+
 struct AscirParamSourceContext {
   af::AscNodePtr node;
   const af::AscGraph *graph{nullptr};
@@ -115,6 +120,15 @@ af::Status RegisterCastAscirNodeParams(const af::AscNodePtr &node) {
   params->api_name = node->GetType();
   params->status = ParamBuildStatus::kBuilt;
   params->specific_params = CastNodeParams{};
+  return RegisterAscirNodeParams(node, params);
+}
+
+af::Status RegisterCompareAscirNodeParams(const af::AscNodePtr &node) {
+  GE_ASSERT_NOTNULL(node);
+  auto params = std::make_shared<AscirNodeParams>();
+  params->api_name = node->GetType();
+  params->status = ParamBuildStatus::kBuilt;
+  params->specific_params = CompareNodeParams{};
   return RegisterAscirNodeParams(node, params);
 }
 
@@ -516,6 +530,9 @@ af::Status EnrichAscirNodeParams(const AscirParamSourceContext &source) {
   }
   if (source.node->GetType() == kCast) {
     return RegisterCastAscirNodeParams(source.node);
+  }
+  if (IsCompareParamSupported(source.node->GetType())) {
+    return RegisterCompareAscirNodeParams(source.node);
   }
   if (!IsReduceParamSupported(source.node->GetType())) {
     return RegisterSkippedAscirNodeParams(source.node);

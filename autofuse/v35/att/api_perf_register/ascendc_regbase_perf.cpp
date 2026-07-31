@@ -217,29 +217,39 @@ bool IsB64TransferCast(const NodeDetail &node_info) {
 ===========================================================================
 */
 namespace {
-af::Status CompareB64SpecificPerf(const std::string &compare_mode, const Expr &cal_count, const Expr &repeat_elm,
-                                  Expr &max_latency, Expr &all_vf_instruct_cost) {
-  Expr repeat_time = af::sym::Ceiling(cal_count / (repeat_elm * kSymTwo));
-  GELOGD("cal_count is [%s], repeat_elm is [%s], repeat_time is [%s].", af::SymbolicUtils::ToString(cal_count).c_str(),
-         af::SymbolicUtils::ToString(repeat_elm).c_str(), af::SymbolicUtils::ToString(repeat_time).c_str());
-  if (compare_mode == kEq) {
-    GE_ASSERT_SUCCESS(
-        VfPerfUtils::AddVfInstructPerf(kEq, kFloat32, max_latency, all_vf_instruct_cost, repeat_time * kSymTwo));
-    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kMaskAnd, kUInt8, max_latency, all_vf_instruct_cost, repeat_time));
-    return af::SUCCESS;
+constexpr int32_t kCompare8BitVfHeadCost = 30;
+constexpr int32_t kCompare16BitVfHeadCost = 44;
+constexpr int32_t kCompare32BitVfHeadCost = 49;
+constexpr int32_t kCompare64BitVfHeadCost = 51;
+
+Expr GetCompareVfHeadCost(const std::string &input_dtype) {
+  if (input_dtype == kUInt8 || input_dtype == kInt8) {
+    return CreateExpr(kCompare8BitVfHeadCost);
   }
-  if (compare_mode == kNe) {
-    GE_ASSERT_SUCCESS(
-        VfPerfUtils::AddVfInstructPerf(kNe, kFloat32, max_latency, all_vf_instruct_cost, repeat_time * kSymTwo));
-    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kMaskOr, kUInt8, max_latency, all_vf_instruct_cost, repeat_time));
-    return af::SUCCESS;
+  if (input_dtype == kFloat16 || input_dtype == kBfloat16 || input_dtype == kUInt16 || input_dtype == kInt16) {
+    return CreateExpr(kCompare16BitVfHeadCost);
   }
-  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kEq, kFloat32, max_latency, all_vf_instruct_cost, repeat_time));
-  GE_ASSERT_SUCCESS(
-      VfPerfUtils::AddVfInstructPerf(compare_mode, kFloat32, max_latency, all_vf_instruct_cost, repeat_time * kSymTwo));
-  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kMaskSel, kUInt8, max_latency, all_vf_instruct_cost, repeat_time));
-  return af::SUCCESS;
+  if (input_dtype == kUInt64 || input_dtype == kInt64) {
+    return CreateExpr(kCompare64BitVfHeadCost);
+  }
+  return CreateExpr(kCompare32BitVfHeadCost);
 }
+
+Expr GetCompareBlockCount(const NodeDetail &node_info, const Expr &repeat_elm) {
+  const auto &params = node_info.compare_node_params;
+  std::vector<Expr> output_dims =
+      params.valid && !params.output_dims.empty() ? params.output_dims : node_info.input_dims;
+  if (output_dims.empty()) {
+    return CreateExpr(1);
+  }
+
+  Expr vl_size =
+      (node_info.input_dtype[0] == kUInt64 || node_info.input_dtype[0] == kInt64) ? repeat_elm * kSymTwo : repeat_elm;
+  Expr counter_first = output_dims.size() > 1U ? output_dims.front() : CreateExpr(1);
+  Expr inner_count = output_dims.back();
+  return counter_first * af::sym::Ceiling(inner_count / vl_size);
+}
+
 }  // namespace
 
 af::Status CompareSpecificPerf(const std::string compare_mode, const NodeDetail &node_info, PerfOutputInfo &perf) {
@@ -254,17 +264,45 @@ af::Status CompareSpecificPerf(const std::string compare_mode, const NodeDetail 
                  af::SymbolicUtils::ToString(repeat_elm).c_str());
   Expr max_latency = CreateExpr(0);
   Expr all_vf_instruct_cost = CreateExpr(0);
-  if (node_info.input_dtype[0] == kUInt64 || node_info.input_dtype[0] == kInt64) {
-    GE_ASSERT_SUCCESS(CompareB64SpecificPerf(compare_mode, cal_count, repeat_elm, max_latency, all_vf_instruct_cost));
-  } else {
-    Expr repeat_time = af::sym::Ceiling(cal_count / repeat_elm);
-    GELOGD("cal_count is [%s], repeat_elm is [%s], repeat_time is [%s].",
-           af::SymbolicUtils::ToString(cal_count).c_str(), af::SymbolicUtils::ToString(repeat_elm).c_str(),
-           af::SymbolicUtils::ToString(repeat_time).c_str());
-    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(compare_mode, node_info.input_dtype[0], max_latency,
-                                                     all_vf_instruct_cost, repeat_time));
+  Expr block_count = GetCompareBlockCount(node_info, repeat_elm);
+  Expr compare_vf_head_cost = GetCompareVfHeadCost(node_info.input_dtype[0]);
+  GELOGD("cal_count is [%s], repeat_elm is [%s], block_count is [%s].", af::SymbolicUtils::ToString(cal_count).c_str(),
+         af::SymbolicUtils::ToString(repeat_elm).c_str(), af::SymbolicUtils::ToString(block_count).c_str());
+  // MicroAPI::CreateMask<uint8_t>.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kPlaceholder, kUInt8, max_latency, all_vf_instruct_cost, kSymOne));
+  // MicroAPI::Duplicate(oneAllReg, 1) and Duplicate(zeroAllReg, 0).
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kDuplicate, kUInt8, max_latency, all_vf_instruct_cost, kSymTwo));
+  if (node_info.compare_node_params.valid && node_info.compare_node_params.is_scalar) {
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kDuplicate, node_info.input_dtype[0], max_latency,
+                                                     all_vf_instruct_cost, kSymOne));
   }
-  Expr res = VfPerfUtils::GetVFHeadCost() + max_latency + all_vf_instruct_cost;
+  // MicroAPI::UpdateMask<uint8_t>(mainBlockCount) and UpdateMask<uint8_t>(counterTail).
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kUpdateMask, kUInt8, max_latency, all_vf_instruct_cost, kSymTwo));
+  // MicroAPI::DataCopy load src0/src1.
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kLoad, node_info.input_dtype[0], max_latency, all_vf_instruct_cost, block_count));
+  if (!node_info.compare_node_params.valid || !node_info.compare_node_params.is_scalar) {
+    GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kLoad, node_info.input_dtype[0], max_latency, all_vf_instruct_cost,
+                                                     block_count));
+  }
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(compare_mode, node_info.input_dtype[0], max_latency,
+                                                   all_vf_instruct_cost, block_count));
+  if (node_info.input_dtype[0] == kFloat16 || node_info.input_dtype[0] == kBfloat16 ||
+      node_info.input_dtype[0] == kUInt16 || node_info.input_dtype[0] == kInt16) {
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, block_count));
+  }
+  if (node_info.input_dtype[0] == kFloat32 || node_info.input_dtype[0] == kUInt32 ||
+      node_info.input_dtype[0] == kInt32 || node_info.input_dtype[0] == kUInt64 || node_info.input_dtype[0] == kInt64) {
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, block_count * kSymTwo));
+  }
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kSelect, kUInt8, max_latency, all_vf_instruct_cost, block_count));
+  // MicroAPI::DataCopy store dst.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructDtypeMappingPerf(kStore, node_info.input_dtype[0], kUInt8, max_latency,
+                                                               all_vf_instruct_cost, block_count));
+  Expr res = compare_vf_head_cost + max_latency + all_vf_instruct_cost;
+  res = res * node_info.compare_node_params.outer_call_count;
   res.Simplify();
   perf.pipe_res[PipeType::AIV_VEC] = res;
   return af::SUCCESS;
