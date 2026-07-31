@@ -98,7 +98,7 @@ __simd_vf__ inline void MaskDupVF(__ubuf__ uint32_t *maskBuf, uint32_t count, ui
 }
 
 template <typename T>
-__aicore__ inline bool MaskPreprocess(__ubuf__ uint32_t *maskBuf, uint32_t dim_a, uint32_t inner_r,
+__aicore__ inline bool MaskPreprocess(__ubuf__ uint32_t *maskBuf, uint32_t blockCount, uint32_t inner_r,
                                       uint32_t inner_r_down) {
   uint16_t shift_length = (inner_r - inner_r_down) * sizeof(T);
   uint32_t full_mask_u32 = (shift_length == 0) ? 0x00000000 : 0xffffffff;
@@ -106,8 +106,7 @@ __aicore__ inline bool MaskPreprocess(__ubuf__ uint32_t *maskBuf, uint32_t dim_a
     return false;
   }
   uint32_t pad_mask = full_mask_u32 << shift_length;
-  uint32_t count = dim_a;
-  uint32_t count_tail = dim_a % 8;
+  uint32_t count_tail = blockCount % 8;
   uint32_t count_total = 8 + count_tail;
   MaskDupVF(maskBuf, count_total, pad_mask);
   return true;
@@ -161,6 +160,30 @@ __simd_vf__ inline void ReduceInitUnalignImpl(__local_mem__ T *dstUb, uint32_t r
   }
 }
 
+template <typename T>
+__simd_vf__ inline void ReduceInitRowImpl(__ubuf__ T *dst, __ubuf__ uint32_t *maskBuf, uint32_t innerLoopRepeat,
+                                          uint16_t tailBlockCount, uint32_t dataBlockStride, uint16_t inner_r_upper,
+                                          uint16_t inner_r_down, T padValue) {
+  MicroAPI::RegTensor<T> mainPadReg;
+  MicroAPI::MaskReg mainBlockPreg;
+
+  MicroAPI::LoadAlign(mainBlockPreg, maskBuf);
+  MicroAPI::Duplicate<T>(mainPadReg, padValue, mainBlockPreg);
+
+  for (uint32_t i = 0; i < innerLoopRepeat; ++i) {
+    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(dst + inner_r_down + 8 * i * inner_r_upper,
+                                                                     mainPadReg, dataBlockStride, mainBlockPreg);
+  }
+  if (tailBlockCount != 0) {
+    MicroAPI::RegTensor<T> tailPadReg;
+    MicroAPI::MaskReg tailBlockPreg;
+    MicroAPI::LoadAlign(tailBlockPreg, maskBuf + 8);
+    MicroAPI::Duplicate<T>(tailPadReg, padValue, tailBlockPreg);
+    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+        dst + inner_r_down + 8 * innerLoopRepeat * inner_r_upper, tailPadReg, dataBlockStride, tailBlockPreg);
+  }
+}
+
 template <typename T, int32_t ReduceType, bool isTailLast>
 __aicore__ inline void ReduceInit(const LocalTensor<T> &dstTensor, const uint32_t dim_a, const uint32_t dim_r,
                                   const uint32_t dim_r_current, const uint32_t inner_r) {
@@ -174,6 +197,7 @@ __aicore__ inline void ReduceInit(const LocalTensor<T> &dstTensor, const uint32_
   inner_r_upper = CeilDivision(inner_r, alignCount) * alignCount;
   inner_r_down = (inner_r / alignCount) * alignCount;
 
+  // Unfold to column major
   if ((dim_r % inner_r_upper == 0) && (dim_r == dim_r_current)) {
     un_dim_a = dim_a * dim_r / inner_r_upper;
     un_dim_r = inner_r_upper;
@@ -193,6 +217,9 @@ __aicore__ inline void ReduceInit(const LocalTensor<T> &dstTensor, const uint32_
   uint16_t tailBlockCount = un_dim_a % BLOCK_COUNT_PER_REPEAT;
   uint16_t dataBlockStride = un_dim_r * sizeof(T) / 32;
   uint16_t repeatStride = dataBlockStride * 8;
+  uint32_t rowInnerLoopRepeat = blockCountOp1 / BLOCK_COUNT_PER_REPEAT;
+  uint16_t rowTailBlockCount = blockCountOp1 % BLOCK_COUNT_PER_REPEAT;
+  uint32_t rowDataBlockStride = inner_r_upper * sizeof(T) / 32;
   T padValue = GetPaddingValue<T, ReduceType>();
 
   // unalign
@@ -221,7 +248,8 @@ __aicore__ inline void ReduceInit(const LocalTensor<T> &dstTensor, const uint32_
 #else
   maskBuf = AscendCUtils::GetTemporaryBufferAddr<uint32_t>(TMP_UB_OFFSET, 64);
 #endif
-  bool need_exec = MaskPreprocess<T>(maskBuf, un_dim_a, inner_r, inner_r_down);
+  uint32_t maskBlockCount = (un_dim_a == 1) ? blockCountOp1 : blockCountOp0;
+  bool need_exec = MaskPreprocess<T>(maskBuf, maskBlockCount, inner_r, inner_r_down);
   if constexpr (is_b64) {
     if (!is_inner_r_align) {
       ReduceInitUnalignImpl<T>((__ubuf__ T *)dstTensor.GetPhyAddr(), repeatTimesAlign, pad_length_total, inner_r_offset,
@@ -230,21 +258,22 @@ __aicore__ inline void ReduceInit(const LocalTensor<T> &dstTensor, const uint32_
     }
     ReduceInitAlignImpl<T>((__ubuf__ T *)dstTensor.GetPhyAddr(), repeatTimesAlign, pad_length_total, inner_r_offset,
                            stride_element, tail_pad_count, tail_ctrl, padValue, un_dim_a, un_dim_r);
-    AscendC::AscendCUtils::FreeTemporaryBuffer<uint32_t>(maskBuf);
   } else {
     if (un_dim_r > un_dim_r_current) {
       ReduceInitAlignImpl<T>((__ubuf__ T *)dstTensor.GetPhyAddr(), repeatTimesAlign, pad_length_total, inner_r_offset,
                              stride_element, tail_pad_count, tail_ctrl, padValue, un_dim_a, un_dim_r);
-      AscendC::AscendCUtils::FreeTemporaryBuffer<uint32_t>(maskBuf);
     }
-    if (!need_exec) {
-      AscendC::AscendCUtils::FreeTemporaryBuffer<uint32_t>(maskBuf);
-      return;
-    } else {
-      OptImpl<T>((__ubuf__ T *)dstTensor.GetPhyAddr(), maskBuf, un_dim_a, un_dim_r, un_dim_r_current, outterLoopRepeat,
-                 innerLoopRepeat, tailBlockCount, dataBlockStride, repeatStride, inner_r_upper, inner_r_down, padValue);
-      AscendC::AscendCUtils::FreeTemporaryBuffer<uint32_t>(maskBuf);
+    if (need_exec) {
+      if (un_dim_a == 1) {
+        ReduceInitRowImpl<T>((__ubuf__ T *)dstTensor.GetPhyAddr(), maskBuf, rowInnerLoopRepeat, rowTailBlockCount,
+                             rowDataBlockStride, inner_r_upper, inner_r_down, padValue);
+      } else {
+        OptImpl<T>((__ubuf__ T *)dstTensor.GetPhyAddr(), maskBuf, un_dim_a, un_dim_r, un_dim_r_current,
+                   outterLoopRepeat, innerLoopRepeat, tailBlockCount, dataBlockStride, repeatStride, inner_r_upper,
+                   inner_r_down, padValue);
+      }
     }
   }
+  AscendC::AscendCUtils::FreeTemporaryBuffer<uint32_t>(maskBuf);
 }
 #endif
