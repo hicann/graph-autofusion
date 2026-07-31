@@ -56,6 +56,8 @@
   } while (false)
 
 namespace af {
+using NodeCloneMap = std::unordered_map<const Node *, NodePtr>;
+
 enum class DumpLevel { NO_DUMP = 0, DUMP_ALL = 1, DUMP_WITH_OUT_DATA = 2, DUMP_WITH_OUT_DESC = 3, DUMP_LEVEL_END = 4 };
 enum class DumpFormat { GE_PROTO = 0, ONNX = 1, READABLE = 2 };
 enum class MemType { OUTPUT_MEM, WORKSPACE_MEM };
@@ -936,6 +938,12 @@ class GraphUtils {
    * @return 成功时，返回SUCCESS 失败返回FAILED
    */
   static graphStatus ExpandNodeWithGraph(const NodePtr &target_node, const ComputeGraphPtr &expand_graph);
+
+  /// Relink all edges for cloned ComputeGraph.
+  /// @param [in] node: original node.
+  /// @param [in] node_clone_map: source-node to cloned-node mapping.
+  /// @return success: GRAPH_SUCESS
+  static graphStatus RelinkGraphEdges(const NodePtr &node, const NodeCloneMap &node_clone_map);
 
   /// Relink all edges for cloned ComputeGraph.
   /// @param [in] node: original node.

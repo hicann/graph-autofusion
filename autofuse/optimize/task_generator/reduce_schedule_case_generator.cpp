@@ -50,6 +50,30 @@ Status DoCopyAscNodeTensorAttr(const af::AscNodePtr &src_node, af::AscNodePtr &d
   return af::SUCCESS;
 }
 
+Status DoCopyAscNodeOutputTensorAttr(const af::AscNodePtr &src_node, af::AscNodePtr &dst_node,
+                                     const uint32_t src_output_index) {
+  GE_ASSERT_NOTNULL(src_node);
+  GE_ASSERT_NOTNULL(dst_node);
+  GE_ASSERT_TRUE(src_output_index < src_node->outputs().size());
+  GE_ASSERT_TRUE(!dst_node->outputs().empty());
+  auto op_desc = dst_node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  auto dst_asc_node_attr = op_desc->GetOrCreateAttrsGroup<af::AscNodeAttr>();
+  auto src_asc_node_attr = src_node->GetOpDesc()->GetOrCreateAttrsGroup<af::AscNodeAttr>();
+  if (src_asc_node_attr != nullptr && dst_asc_node_attr != nullptr) {
+    dst_asc_node_attr->sched = src_asc_node_attr->sched;
+    if (src_asc_node_attr->ir_attr) {
+      dst_asc_node_attr->ir_attr = src_asc_node_attr->ir_attr->Clone();
+    }
+  }
+  const auto output_desc = op_desc->MutableOutputDesc(0U);
+  GE_ASSERT_NOTNULL(output_desc);
+  auto tensor_attr_group = output_desc->GetOrCreateAttrsGroup<af::AscTensorAttr>();
+  GE_ASSERT_NOTNULL(tensor_attr_group);
+  *tensor_attr_group = src_node->outputs[src_output_index].attr;
+  return af::SUCCESS;
+}
+
 Status DoCopyWorkspaceTensorAttr(const af::AscNodePtr &src_node, af::AscNodePtr &workspace_node) {
   GE_ASSERT_NOTNULL(src_node);
   GE_ASSERT_NOTNULL(workspace_node);
@@ -448,8 +472,8 @@ Status ReducePartitionCaseGenerator::PartitionByNode(af::AscNodePtr &src_node, a
     auto workspace_post_node = impl_graph.AddNode(workspace_post);
     auto load_node = impl_graph.AddNode(load);
     auto store_node = impl_graph.AddNode(store);
-    GE_CHK_STATUS_RET(DoCopyAscNodeTensorAttr(src_node, load_node));
-    GE_CHK_STATUS_RET(DoCopyAscNodeTensorAttr(src_node, store_node));
+    GE_CHK_STATUS_RET(DoCopyAscNodeOutputTensorAttr(src_node, load_node, out_anchor->GetIdx()));
+    GE_CHK_STATUS_RET(DoCopyAscNodeOutputTensorAttr(src_node, store_node, out_anchor->GetIdx()));
     GE_CHK_STATUS_RET(DoCopyWorkspaceTensorAttr(store_node, workspace_pre_node));
     GE_CHK_STATUS_RET(DoCopyWorkspaceTensorAttr(load_node, workspace_post_node));
     for (const auto &peer_in_anchor : out_anchor->GetPeerInDataAnchors()) {
@@ -457,7 +481,7 @@ Status ReducePartitionCaseGenerator::PartitionByNode(af::AscNodePtr &src_node, a
       GE_CHK_BOOL_EXEC(peer_in_anchor->GetOwnerNodeBarePtr() != nullptr,
                        REPORT_INNER_ERR_MSG("E18888", "Peer in node:%s is null", src_node->GetName().c_str());
                        return ge::GRAPH_FAILED, "Peer in node:%s is null", src_node->GetName().c_str());
-      if (peer_in_anchor->GetOwnerNodeBarePtr()->GetName() == dst_node->GetName()) {
+      if (peer_in_anchor->GetOwnerNodeBarePtr() == dst_node.get()) {
         // remove src->dst
         GE_CHK_STATUS_RET(af::GraphUtils::RemoveEdge(src_node->GetOutAnchor(out_anchor->GetIdx()),
                                                      dst_node->GetInAnchor(peer_in_anchor->GetIdx())));
@@ -504,7 +528,7 @@ Status ReducePartitionCaseGenerator::PartitionLoad(af::AscNodePtr &src_node, af:
       GE_CHK_BOOL_EXEC(peer_in_anchor->GetOwnerNodeBarePtr() != nullptr,
                        REPORT_INNER_ERR_MSG("E18888", "Peer in node:%s is null", src_node->GetName().c_str());
                        return ge::GRAPH_FAILED, "Peer in node:%s is null", src_node->GetName().c_str());
-      if (peer_in_anchor->GetOwnerNodeBarePtr()->GetName() == dst_node->GetName()) {
+      if (peer_in_anchor->GetOwnerNodeBarePtr() == dst_node.get()) {
         // remove load->dst
         GE_CHK_STATUS_RET(af::GraphUtils::RemoveEdge(src_node->GetOutAnchor(out_anchor->GetIdx()),
                                                      dst_node->GetInAnchor(peer_in_anchor->GetIdx())));
@@ -540,7 +564,7 @@ Status ReducePartitionCaseGenerator::PartitionScalar(af::AscNodePtr &src_node, a
       GE_CHK_BOOL_EXEC(peer_in_anchor->GetOwnerNodeBarePtr() != nullptr,
                        REPORT_INNER_ERR_MSG("E18888", "Peer in node:%s is null", src_node->GetName().c_str());
                        return ge::GRAPH_FAILED, "Peer in node:%s is null", src_node->GetName().c_str());
-      if (peer_in_anchor->GetOwnerNodeBarePtr()->GetName() == dst_node->GetName()) {
+      if (peer_in_anchor->GetOwnerNodeBarePtr() == dst_node.get()) {
         // remove src->dst
         GE_CHK_STATUS_RET(af::GraphUtils::RemoveEdge(src_node->GetOutAnchor(out_anchor->GetIdx()),
                                                      dst_node->GetInAnchor(peer_in_anchor->GetIdx())));

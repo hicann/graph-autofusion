@@ -202,7 +202,7 @@ def test_try_static_shape_compile_records_stage_when_force_unknown(
     )
 
     labels = [item[0] for item in ascendc_compile_module.duration_records]
-    assert ["InductorCompile", "all", "TryStaticShapeCompile", "graph"] in labels
+    assert ["InductorCompile", "all", "PrepareStaticShapeRecompile", "graph"] in labels
 
 
 def test_copy_so_to_output_records_stage(ascendc_compile_module, tmpdir):

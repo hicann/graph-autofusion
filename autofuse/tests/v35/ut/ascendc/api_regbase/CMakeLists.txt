@@ -38,6 +38,7 @@ add_library(test_regbase_ascendc OBJECT
     ./test_scaled_modified_bessel_k0.cpp
     ./test_scaled_modified_bessel_k1.cpp
     ./test_i0e.cpp
+    ./test_i1e.cpp
     ./test_erfinv.cpp
     ./test_laguerre_polynomial_l.cpp
     ./test_legendre_polynomial_p.cpp

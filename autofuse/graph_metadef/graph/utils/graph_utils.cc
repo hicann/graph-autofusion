@@ -2975,6 +2975,86 @@ graphStatus GraphUtils::CopyTensorAttrs(const OpDescPtr &dst_desc, const NodePtr
   return af::GRAPH_SUCCESS;
 }
 
+graphStatus RelinkClonedDataEdges(const NodePtr &node, const NodePtr &new_node, const NodeCloneMap &node_clone_map) {
+  for (const auto &out_anchor : node->GetAllOutDataAnchors()) {
+    GE_CHK_BOOL_EXEC(out_anchor != nullptr,
+                     REPORT_INNER_ERR_MSG("E18888", "out data anchor is null, node:%s.", node->GetName().c_str());
+                     return af::GRAPH_FAILED, "[Check][Param] Out data anchor is null, node:%s",
+                            node->GetName().c_str());
+    for (const auto &peer_in_anchor : out_anchor->GetPeerInDataAnchors()) {
+      GE_CHECK_NOTNULL(peer_in_anchor);
+      const auto *peer_node = peer_in_anchor->GetOwnerNodeBarePtr();
+      GE_CHK_BOOL_EXEC(peer_node != nullptr,
+                       REPORT_INNER_ERR_MSG("E18888", "Peer in node:%s is null", node->GetName().c_str());
+                       return af::GRAPH_FAILED, "Peer in node:%s is null", node->GetName().c_str());
+      const auto peer_it = node_clone_map.find(peer_node);
+      if (peer_it == node_clone_map.end()) {
+        REPORT_INNER_ERR_MSG("E18888", "node_clone_map does not contain peer node:%s.",
+                             peer_in_anchor->GetOwnerNode()->GetName().c_str());
+        GELOGE(af::GRAPH_FAILED, "[Check][Param] peer node[%s] not found",
+               peer_in_anchor->GetOwnerNode()->GetName().c_str());
+        return af::GRAPH_FAILED;
+      }
+      const auto ret = GraphUtils::AddEdge(new_node->GetOutAnchor(out_anchor->GetIdx()),
+                                           peer_it->second->GetInAnchor(peer_in_anchor->GetIdx()));
+      GE_CHK_BOOL_EXEC(ret == af::GRAPH_SUCCESS,
+                       REPORT_INNER_ERR_MSG("E18888", "add data edge from %s to %s failed", new_node->GetName().c_str(),
+                                            peer_it->second->GetName().c_str());
+                       return af::GRAPH_FAILED, "[Invoke][AddEdge] link data edge failed[%s to %s]",
+                              new_node->GetName().c_str(), peer_it->second->GetName().c_str());
+    }
+  }
+  return af::GRAPH_SUCCESS;
+}
+
+graphStatus RelinkClonedControlEdges(const NodePtr &node, const NodePtr &new_node, const NodeCloneMap &node_clone_map) {
+  if (node->GetOutControlAnchor() != nullptr) {
+    for (const auto peer_in_control_anchor : node->GetOutControlAnchor()->GetPeerAnchorsPtr()) {
+      GE_CHECK_NOTNULL(peer_in_control_anchor);
+      const auto *peer_node = peer_in_control_anchor->GetOwnerNodeBarePtr();
+      GE_CHK_BOOL_EXEC(peer_node != nullptr, REPORT_INNER_ERR_MSG("E18888", "Peer out node is null");
+                       return af::GRAPH_FAILED, "[Invoke][GetOwnerNode] Peer out node is null");
+      const auto peer_it = node_clone_map.find(peer_node);
+      if (peer_it == node_clone_map.end()) {
+        REPORT_INNER_ERR_MSG("E18888", "node_clone_map does not contain peer node:%s.",
+                             peer_in_control_anchor->GetOwnerNode()->GetName().c_str());
+        GELOGE(af::GRAPH_FAILED, "[Check][Param] peer node[%s] not found",
+               peer_in_control_anchor->GetOwnerNode()->GetName().c_str());
+        return af::GRAPH_FAILED;
+      }
+      const auto ret = GraphUtils::AddEdge(new_node->GetOutControlAnchor(),
+                                           peer_it->second->GetInAnchor(peer_in_control_anchor->GetIdx()));
+      GE_CHK_BOOL_EXEC(ret == af::GRAPH_SUCCESS,
+                       REPORT_INNER_ERR_MSG("E18888", "add control edge from %s to %s failed.",
+                                            new_node->GetName().c_str(), peer_it->second->GetName().c_str());
+                       return af::GRAPH_FAILED, "[Invoke][AddEdge] link control edge failed[%s to %s]",
+                              new_node->GetName().c_str(), peer_it->second->GetName().c_str());
+    }
+  }
+  return af::GRAPH_SUCCESS;
+}
+
+/// Relink all edges for cloned ComputeGraph.
+/// @param [in] node: original node.
+/// @param [in] node_clone_map: source-node to cloned-node mapping.
+/// @return success: GRAPH_SUCESS
+GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY graphStatus
+GraphUtils::RelinkGraphEdges(const NodePtr &node, const NodeCloneMap &node_clone_map) {
+  if ((node == nullptr) || (node->GetOpDesc() == nullptr)) {
+    REPORT_INNER_ERR_MSG("E18888", "param node is nullptr or it's opdesc is nullptr. check invalid");
+    GELOGE(af::GRAPH_FAILED, "[Check][Param] Input node not valid");
+    return af::GRAPH_FAILED;
+  }
+  const auto node_it = node_clone_map.find(node.get());
+  if (node_it == node_clone_map.end()) {
+    REPORT_INNER_ERR_MSG("E18888", "node_clone_map does not contain node:%s.", node->GetName().c_str());
+    GELOGE(af::GRAPH_FAILED, "[Check][Param] node[%s] not found", node->GetName().c_str());
+    return af::GRAPH_FAILED;
+  }
+  GE_CHK_STATUS_RET(RelinkClonedDataEdges(node, node_it->second, node_clone_map), "Failed to relink data edges");
+  return RelinkClonedControlEdges(node, node_it->second, node_clone_map);
+}
+
 /// Relink all edges for cloned ComputeGraph.
 /// @param [in] node: original node.
 /// @param [in] suffix: node name suffix of new node.

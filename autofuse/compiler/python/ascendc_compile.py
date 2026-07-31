@@ -343,6 +343,7 @@ def compile_device_obj(args: argparse.Namespace, temp_dir):
     return f"{temp_dir}/device/{base_device_file}.o"
 
 
+@inductor_compile_duration("BuildDeviceSo")
 def build_device_so(args: argparse.Namespace, host_obj_path, temp_dir):
     device_obj_path = compile_device_obj(args, temp_dir)
     target_file = os.path.join(temp_dir, os.path.basename(args.output_file))
@@ -499,7 +500,7 @@ def rewrite_static_shape_kernel_launches(
 
 
 def static_shape_kernel_proc(args: argparse.Namespace, temp_dir, tiling_repr=None):
-    with InductorCompileDuration(args, "StaticShapeKernelProc"):
+    with InductorCompileDuration(args, "RewriteDeviceKernelForStaticTiling"):
         clean_before_modify(temp_dir)
         kernel_file, lines = prepare_static_shape_kernel(args, temp_dir, tiling_repr)
         if tiling_repr is None and getattr(args, "stage", None) == "device":
@@ -579,7 +580,7 @@ def init_torch_npu_for_const_tiling():
     torch.npu.synchronize()
 
 
-@inductor_compile_duration("TryStaticShapeCompile")
+@inductor_compile_duration("PrepareStaticShapeRecompile")
 def try_static_shape_compile(args: argparse.Namespace, temp_dir, so_path):
     if args.force_unknown:
         return False
@@ -590,15 +591,17 @@ def try_static_shape_compile(args: argparse.Namespace, temp_dir, so_path):
         return False
     print("static shape detected, recompile kernel with const tiling data")
     static_shape_kernel_proc(args, temp_dir)
-    init_torch_npu_for_const_tiling()
-    lib.GenConstTilingData.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
-    lib.GenConstTilingData.restype = ctypes.c_char_p
-    config_file = ctypes.c_char_p(args.config_file.encode("utf-8"))
-    aiv_num = int(get_soc_spec("vector_core_cnt"))
-    ub_size = int(get_soc_spec("ub_size"))
-    result = lib.GenConstTilingData(
-        config_file, ctypes.c_int(aiv_num), ctypes.c_int(ub_size)
-    )
+    with InductorCompileDuration(args, "InitTorchNpu"):
+        init_torch_npu_for_const_tiling()
+    with InductorCompileDuration(args, "GenerateConstTilingData"):
+        lib.GenConstTilingData.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
+        lib.GenConstTilingData.restype = ctypes.c_char_p
+        config_file = ctypes.c_char_p(args.config_file.encode("utf-8"))
+        aiv_num = int(get_soc_spec("vector_core_cnt"))
+        ub_size = int(get_soc_spec("ub_size"))
+        result = lib.GenConstTilingData(
+            config_file, ctypes.c_int(aiv_num), ctypes.c_int(ub_size)
+        )
     const_tiling_data = result.decode("utf-8")
     tiling_data = os.path.join(temp_dir, "device", "autofuse_tiling_data.h")
     tiling_data_bak = os.path.join(temp_dir, "device", "autofuse_tiling_data_bak.h")
@@ -620,6 +623,7 @@ def link_host_target(args, temp_dir):
     return so_file
 
 
+@inductor_compile_duration("BuildKernelTarget")
 def link_kernel_target(args, host_obj_path, temp_dir):
     if args.stage == "device":
         if args.tiling_repr is not None or has_inductor_const_tiling_data(

@@ -65,20 +65,19 @@ size_t FindRoot(std::unordered_map<size_t, size_t> &idx_to_parent, size_t x) {
 Status ScheduleGroupGraphPartitioner::PartitionByConnectivity(const ::ascir::ImplGraph &optimize_graph,
                                                               std::vector<::ascir::ImplGraph> &sub_optimize_graphs,
                                                               std::vector<AscNodePtr> node_order) {
-  std::map<std::string, ::ascir::NodeView> name_to_output_nodes;
+  std::vector<AscNodePtr> output_nodes;
   size_t num_nodes = 0;
   for (const auto &node : optimize_graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node);
     if (node->GetOutDataNodes().empty()) {
-      name_to_output_nodes.emplace(node->GetName(), node);
+      output_nodes.emplace_back(node);
       GELOGI("Output node: %s[%s]", node->GetName().c_str(), node->GetType().c_str());
     }
     ++num_nodes;
   }
   if (node_order.empty()) {
-    for (const auto &name_and_node : name_to_output_nodes) {
-      node_order.emplace_back(name_and_node.second);
-    }
+    node_order = std::move(output_nodes);
+    std::sort(node_order.begin(), node_order.end(), CompareByNodeId);
   }
   int32_t index = 0;
   std::set<af::NodePtr> visited;
@@ -153,7 +152,7 @@ Status ScheduleGroupGraphPartitioner::CollectConnectedNodes(const af::AscNodePtr
 Status ScheduleGroupGraphPartitioner::AddConnectedNodes(const af::AscNodePtr &root_node, ::ascir::ImplGraph &sub_graph,
                                                         std::set<af::NodePtr> &all_visited) {
   GELOGI("AddConnectedNodes in, root_node = %s[%s]", root_node->GetName().c_str(), root_node->GetType().c_str());
-  std::unordered_map<std::string, af::NodePtr> all_new_nodes;
+  af::NodeCloneMap node_clone_map;
   std::set<af::NodePtr> visited;
   std::vector<af::AscNodePtr> asc_nodes;
   GE_ASSERT_SUCCESS(CollectConnectedNodes(root_node, visited, asc_nodes));
@@ -164,13 +163,13 @@ Status ScheduleGroupGraphPartitioner::AddConnectedNodes(const af::AscNodePtr &ro
     op_desc->SetName(asc_node->GetName());
     af::Operator op = af::OpDescUtils::CreateOperatorFromOpDesc(op_desc);
     auto dst_new_node = sub_graph.AddNode(op);
-    all_new_nodes[dst_new_node->GetName()] = dst_new_node;
+    node_clone_map[asc_node.get()] = dst_new_node;
     GE_ASSERT_TRUE(AscGraph::CopyAscNodeTensorAttr(asc_node, dst_new_node),
                    "DoCopyAscNodeTensorAttr failed, node = %s[%s]", asc_node->GetNamePtr(), asc_node->GetTypePtr());
   }
 
   for (const auto &src_node : visited) {
-    GE_CHK_STATUS_RET(af::GraphUtils::RelinkGraphEdges(src_node, "", all_new_nodes), "RelinkGraphEdges failed");
+    GE_CHK_STATUS_RET(af::GraphUtils::RelinkGraphEdges(src_node, node_clone_map), "RelinkGraphEdges failed");
   }
   all_visited.insert(visited.cbegin(), visited.cend());
   return af::SUCCESS;
@@ -299,7 +298,7 @@ Status ScheduleGroupGraphPartitioner::MergeGraphs(::ascir::ImplGraph &dst,
     const auto &src = grouped_graphs[idx];
     GELOGI("MergeGraphs: merging %s into %s", src.GetName().c_str(), dst.GetName().c_str());
 
-    std::unordered_map<std::string, af::NodePtr> all_new_nodes;
+    af::NodeCloneMap node_clone_map;
     for (const auto &node : src.GetAllNodes()) {
       const auto asc_node = std::dynamic_pointer_cast<af::AscNode>(node);
       GE_CHECK_NOTNULL(asc_node);
@@ -310,12 +309,12 @@ Status ScheduleGroupGraphPartitioner::MergeGraphs(::ascir::ImplGraph &dst,
       auto dst_new_node = dst.AddNode(op);
       GE_ASSERT_TRUE(AscGraph::CopyAscNodeTensorAttr(asc_node, dst_new_node),
                      "CopyAscNodeTensorAttr failed, node = %s[%s]", asc_node->GetNamePtr(), asc_node->GetTypePtr());
-      all_new_nodes.emplace(asc_node->GetName(), std::move(dst_new_node));
+      node_clone_map[asc_node.get()] = std::move(dst_new_node);
     }
 
     for (const auto &node : src.GetAllNodes()) {
       auto asc_node = std::dynamic_pointer_cast<af::AscNode>(node);
-      GE_CHK_STATUS_RET(af::GraphUtils::RelinkGraphEdges(asc_node, "", all_new_nodes), "RelinkGraphEdges failed");
+      GE_CHK_STATUS_RET(af::GraphUtils::RelinkGraphEdges(asc_node, node_clone_map), "RelinkGraphEdges failed");
     }
   }
 

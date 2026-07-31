@@ -3131,19 +3131,20 @@ TEST_F(OptimizerSt, ConcatFirstDim) {
   EXPECT_EQ(fused_scheduled_result.input_nodes[2]->GetName(), "x3");
   EXPECT_EQ(fused_scheduled_result.output_nodes[0]->GetName(), "y");
 
-  std::set<std::string> axis_names_0;
-  std::set<std::string> axis_names_1;
-  for (const auto &axis : schedule_result.schedule_groups[0].impl_graphs[0].GetAllAxis()) {
-    axis_names_0.emplace(axis->name);
-  }
-  for (const auto &axis : schedule_result.schedule_groups[1].impl_graphs[0].GetAllAxis()) {
-    axis_names_1.emplace(axis->name);
+  std::set<std::set<std::string>> axis_name_groups;
+  for (const auto &schedule_group : schedule_result.schedule_groups) {
+    std::set<std::string> axis_names;
+    for (const auto &axis : schedule_group.impl_graphs[0].GetAllAxis()) {
+      axis_names.emplace(axis->name);
+    }
+    axis_name_groups.emplace(std::move(axis_names));
   }
 
-  std::set<std::string> expected_0{"z3z2_1", "z3z2_1T", "z3z2_1TB", "z3z2_1Tb", "z3z2_1t"};
-  std::set<std::string> expected_1{"z3z2_0", "z3z2_0T", "z3z2_0TB", "z3z2_0Tb", "z3z2_0t"};
-  EXPECT_EQ(axis_names_0, expected_0);
-  EXPECT_EQ(axis_names_1, expected_1);
+  const std::set<std::set<std::string>> expected_axis_name_groups = {
+      {"z3z2_0", "z3z2_0T", "z3z2_0TB", "z3z2_0Tb", "z3z2_0t"},
+      {"z3z2_1", "z3z2_1T", "z3z2_1TB", "z3z2_1Tb", "z3z2_1t"},
+  };
+  EXPECT_EQ(axis_name_groups, expected_axis_name_groups);
 }
 
 TEST_F(OptimizerSt, gather_last1dim) {
@@ -4362,50 +4363,15 @@ TEST_F(OptimizerSt, EliminateSizeVar) {
   Status res = optimizer.Optimize(graph, fused_scheduled_result);
   EXPECT_EQ(res, af::SUCCESS);
   ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0].size(), 1UL);
-  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups.size(), 7UL);
-
-  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0]
-                .schedule_groups[0]
-                .impl_graphs[0]
-                .GetAllSizeVar()
-                .size(),
-            4UL);
-  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0]
-                .schedule_groups[1]
-                .impl_graphs[0]
-                .GetAllSizeVar()
-                .size(),
-            5UL);
-  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0]
-                .schedule_groups[2]
-                .impl_graphs[0]
-                .GetAllSizeVar()
-                .size(),
-            6UL);
-  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0]
-                .schedule_groups[3]
-                .impl_graphs[0]
-                .GetAllSizeVar()
-                .size(),
-            7UL);
-  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0]
-                .schedule_groups[4]
-                .impl_graphs[0]
-                .GetAllSizeVar()
-                .size(),
-            8UL);
-  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0]
-                .schedule_groups[5]
-                .impl_graphs[0]
-                .GetAllSizeVar()
-                .size(),
-            9UL);
-  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0]
-                .schedule_groups[6]
-                .impl_graphs[0]
-                .GetAllSizeVar()
-                .size(),
-            10UL);
+  const auto &schedule_groups = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups;
+  ASSERT_EQ(schedule_groups.size(), 7UL);
+  std::set<size_t> size_var_counts;
+  for (const auto &schedule_group : schedule_groups) {
+    ASSERT_EQ(schedule_group.impl_graphs.size(), 1UL);
+    size_var_counts.emplace(schedule_group.impl_graphs[0].GetAllSizeVar().size());
+  }
+  const std::set<size_t> expected_size_var_counts{4UL, 5UL, 6UL, 7UL, 8UL, 9UL, 10UL};
+  EXPECT_EQ(size_var_counts, expected_size_var_counts);
 }
 
 TEST_F(OptimizerSt, SliceSliceConcatD) {
