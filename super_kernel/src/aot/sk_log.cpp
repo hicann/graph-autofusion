@@ -1,11 +1,10 @@
 /**
  * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it
- * under the terms of CANN Open Software License Agreement Version 2.0 (the "License").
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
@@ -171,15 +170,29 @@ FileHandleManager::~FileHandleManager() {
 }
 
 // ==================== LogContextGuard Implementation ====================
-LogContextGuard::LogContextGuard(const std::string &fileName, const std::string &filePath)
-    : previousHandle_(FileHandleManager::Instance().GetCurrentHandle()), active_(false) {
-  if (!FileHandleManager::Instance().RegisterFile(fileName, filePath)) {
-    SK_DLOGE("Failed to register log file: %s", fileName.c_str());
+LogContextGuard::LogContextGuard(const std::string &modelLabel) {
+  auto &logger = FileLogger::Instance();
+  if (!logger.IsInitialized() || !logger.IsEnabled()) {
     return;
   }
 
-  if (!FileHandleManager::Instance().SwitchToFile(fileName)) {
-    SK_DLOGE("Failed to switch to log file: %s", fileName.c_str());
+  previousModelLabel_ = FileLogger::GetCurrentModelLabel();
+  previousHandle_ = FileHandleManager::Instance().GetCurrentHandle();
+  FileLogger::SetCurrentModelLabel(modelLabel);
+  FileHandleManager::Instance().SwitchToDefault();
+  active_ = true;
+}
+
+LogContextGuard::LogContextGuard(const std::string &handleName, const std::string &filePath)
+    : previousModelLabel_(FileLogger::GetCurrentModelLabel()),
+      previousHandle_(FileHandleManager::Instance().GetCurrentHandle()) {
+  if (!FileHandleManager::Instance().RegisterFile(handleName, filePath)) {
+    SK_DLOGE("Failed to register log file: %s", handleName.c_str());
+    return;
+  }
+
+  if (!FileHandleManager::Instance().SwitchToFile(handleName)) {
+    SK_DLOGE("Failed to switch to log file: %s", handleName.c_str());
     return;
   }
 
@@ -187,27 +200,39 @@ LogContextGuard::LogContextGuard(const std::string &fileName, const std::string 
 }
 
 LogContextGuard::~LogContextGuard() {
-  if (active_ && !previousHandle_.empty()) {
-    // Restore to previous handle, not just default
-    FileHandleManager::Instance().SwitchToFile(previousHandle_);
-  }
+  Restore();
 }
 
 LogContextGuard::LogContextGuard(LogContextGuard &&other) noexcept
-    : previousHandle_(std::move(other.previousHandle_)), active_(other.active_) {
+    : previousModelLabel_(std::move(other.previousModelLabel_)),
+      previousHandle_(std::move(other.previousHandle_)),
+      active_(other.active_) {
   other.active_ = false;
 }
 
 LogContextGuard &LogContextGuard::operator=(LogContextGuard &&other) noexcept {
   if (this != &other) {
-    if (active_) {
-      FileHandleManager::Instance().SwitchToDefault();
-    }
+    Restore();
+    previousModelLabel_ = std::move(other.previousModelLabel_);
     previousHandle_ = std::move(other.previousHandle_);
     active_ = other.active_;
     other.active_ = false;
   }
   return *this;
+}
+
+void LogContextGuard::Restore() {
+  if (!active_) {
+    return;
+  }
+
+  FileLogger::SetCurrentModelLabel(previousModelLabel_);
+  if (previousHandle_ == "default") {
+    FileHandleManager::Instance().SwitchToDefault();
+  } else if (!previousHandle_.empty()) {
+    FileHandleManager::Instance().SwitchToFile(previousHandle_);
+  }
+  active_ = false;
 }
 
 // ==================== FileLogger Implementation ====================
