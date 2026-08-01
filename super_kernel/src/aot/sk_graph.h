@@ -171,7 +171,7 @@ class SuperKernelGraph {
   bool PostProcessMemoryNode();
   bool ProcessMemoryWriteNodes(const uint64_t eventId, const MemoryInfos &memoryInfo, const uint64_t memoryWaitValue,
                                const uint32_t waitFlag);
-  void UpdateNodeScopeBitFlags();
+  bool UpdateNodeScopeBitFlags();
   bool InitStreamsFromModelRI();
   bool ProcessAllStreamsAndTasks();
   bool ProcessSingleTask(aclmdlRITask &task, uint32_t streamIdx, uint32_t taskIdx, uint64_t &preNodeId);

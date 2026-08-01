@@ -727,13 +727,13 @@ void ProcessScopeBegin(SuperKernelGraph *graph, SuperKernelBaseNode *node, std::
 }
 
 // Process scope end node: parse scope info, pop from stack, and mark associated event nodes
-void ProcessScopeEnd(SuperKernelGraph *graph, SuperKernelBaseNode *node, std::vector<ScopeStackEntry> &scopeStack,
+bool ProcessScopeEnd(SuperKernelGraph *graph, SuperKernelBaseNode *node, std::vector<ScopeStackEntry> &scopeStack,
                      const std::unordered_map<std::string, uint32_t> &scopeNameToIdx) {
   std::string scopeName = node->GetScopeName();
   uint32_t scopeIdx = GetScopeIdx(node, scopeNameToIdx);
 
   SK_LOGI("Scope end: name='%s' idx=%u", scopeName.c_str(), scopeIdx);
-  PopScopeByName(scopeStack, scopeName);
+  return PopScopeByName(scopeStack, scopeName);
 }
 
 // Log warning if there are unclosed scopes remaining in the stack at the end of graph processing
@@ -765,7 +765,7 @@ void LogUnclosedScopes(const std::vector<ScopeStackEntry> &scopeStack) {
 // - Regular kernel nodes: normal computation nodes
 //
 // Note: Scopes with the same name follow stack semantics (LIFO), allowing nested and sequential scopes
-void SuperKernelGraph::UpdateNodeScopeBitFlags() {
+bool SuperKernelGraph::UpdateNodeScopeBitFlags() {
   std::vector<ScopeStackEntry> scopeStack;
   std::vector<uint64_t> orderedNodeIds = GetSortedNodeIds();
 
@@ -788,7 +788,9 @@ void SuperKernelGraph::UpdateNodeScopeBitFlags() {
       // Scope end nodes belong to their parent scopes, compute flags before popping
       std::bitset<MAX_SCOPE_NUM> currentScopeFlags = ComputeScopeBitFlags(scopeStack);
       node->SetScopeBitFlags(currentScopeFlags);
-      ProcessScopeEnd(this, node, scopeStack, scopeNameToIdx);
+      if (!ProcessScopeEnd(this, node, scopeStack, scopeNameToIdx)) {
+        return false;
+      }
     }
 
     // Update flags for all nodes except scope end nodes (already handled above)
@@ -829,7 +831,11 @@ void SuperKernelGraph::UpdateNodeScopeBitFlags() {
             scopeStack.size());
   }
   LogUnclosedScopes(scopeStack);
+  if (!scopeStack.empty()) {
+    return false;
+  }
   SK_LOGI("UpdateNodeScopeBitFlags completed");
+  return true;
 }
 
 namespace {
@@ -1006,7 +1012,10 @@ bool SuperKernelGraph::InitSKGraph() {
 
   SK_LOGI("Total nodes added: %zu, total streams: %zu", graphMap.size(), streams.size());
   SK_LOGI("Starting UpdateNodeScopeBitFlags");
-  UpdateNodeScopeBitFlags();
+  if (!UpdateNodeScopeBitFlags()) {
+    SK_LOGE("Failed to update node scope bit flags: scope begin and end nodes are not matched");
+    return false;
+  }
   SK_LOGI("UpdateNodeScopeBitFlags completed");
 
   SK_LOGI("Starting ParseOriginalScopes");
