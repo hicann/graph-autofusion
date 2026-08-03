@@ -15,7 +15,7 @@
 
 #include "acl/acl.h"
 #include "runtime/kernel.h"
-#include "sk_scope_kernel_types.h"
+#include "sk_common.h"
 #include <chrono>
 #include <deque>
 #include <string>

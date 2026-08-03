@@ -51,6 +51,13 @@ constexpr uint32_t SK_EVENT_DAV_3510_CORE_NUM = 108;
 constexpr uint32_t SK_DAV_2201_TICK_US_MULTIPLIER = 50;
 constexpr uint32_t SK_DAV_3510_TICK_US_MULTIPLIER = 1000;
 
+constexpr uint32_t MAX_SCOPE_NAME_LEN = 256;
+constexpr char DEFAULT_SK_SCOPE_NAME[] = "default_sk_scope_name";
+
+struct ScopeKernelArgs {
+  char name[MAX_SCOPE_NAME_LEN] = "";
+};
+
 struct SkRuntimeConfig {
   SkKernelArch kernelArch = SkKernelArch::DAV_2201;
   uint32_t eventCoreNum = SK_EVENT_DAV_2201_CORE_NUM;

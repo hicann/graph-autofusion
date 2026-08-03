@@ -35,8 +35,8 @@ SkRuntimeConfig BuildSkRuntimeConfig() {
   SkRuntimeConfig config;
   const char *socName = aclrtGetSocName();
   if (socName == nullptr) {
-    SK_LOGI("SK runtime config: soc name is null, fallback to arch=%s, eventCoreNum=%u, tickUsMultiplier=%u",
-            to_string(config.kernelArch), config.eventCoreNum, config.tickUsMultiplier);
+    SK_DLOGI("SK runtime config: soc name is null, fallback to arch=%s, eventCoreNum=%u, tickUsMultiplier=%u",
+             to_string(config.kernelArch), config.eventCoreNum, config.tickUsMultiplier);
     return config;
   }
 
@@ -46,8 +46,8 @@ SkRuntimeConfig BuildSkRuntimeConfig() {
     config.tickUsMultiplier = SK_DAV_3510_TICK_US_MULTIPLIER;
   }
 
-  SK_LOGI("SK runtime config initialized: socName=%s, arch=%s, eventCoreNum=%u, tickUsMultiplier=%u", socName,
-          to_string(config.kernelArch), config.eventCoreNum, config.tickUsMultiplier);
+  SK_DLOGI("SK runtime config initialized: socName=%s, arch=%s, eventCoreNum=%u, tickUsMultiplier=%u", socName,
+           to_string(config.kernelArch), config.eventCoreNum, config.tickUsMultiplier);
   return config;
 }
 
@@ -202,9 +202,9 @@ static void ExtractFunctionSymbols(const ElfSymbolTables &tables, SkFuncSymbolTa
       continue;
     }
 
-    SymBindType bindType = (sym.st_info >> 4) == STB_WEAK
-                               ? SymBindType::WEAK
-                               : (sym.st_info >> 4) == STB_GLOBAL ? SymBindType::GLOBAL : SymBindType::LOCAL;
+    SymBindType bindType = (sym.st_info >> 4) == STB_WEAK     ? SymBindType::WEAK
+                           : (sym.st_info >> 4) == STB_GLOBAL ? SymBindType::GLOBAL
+                                                              : SymBindType::LOCAL;
     funcSymTable[sym.st_value] = {name, sym.st_size, bindType};
   }
 }
