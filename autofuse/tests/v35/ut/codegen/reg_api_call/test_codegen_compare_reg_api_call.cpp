@@ -13,6 +13,7 @@
 #include "codegen_kernel.h"
 #include "utils/api_call_factory.h"
 #include "compare_v2_api_call.h"
+#include "ascir_node_param/ascir_node_param.h"
 
 #include "runtime_stub.h"
 #include "platform_context.h"
@@ -150,6 +151,18 @@ TEST(CompareV2ApiCallTest, CompareV2ApiCall_Counter) {
           "CompareExtend<float, 2, CMPMODE::ge>(local_3[0], local_0[0], local_1[0], {static_cast<uint16_t>(t->s1), "
           "static_cast<uint16_t>(t->s2)}, {static_cast<uint16_t>(t->s2), static_cast<uint16_t>(1)}, "
           "{static_cast<uint16_t>(t->s2), static_cast<uint16_t>(1)});\n"});
+
+  const auto params = ascir_param::GetAscirNodeParams(ge);
+  ASSERT_NE(params, nullptr);
+  const auto *compare_params = std::get_if<ascir_param::CompareNodeParams>(&params->specific_params);
+  ASSERT_NE(compare_params, nullptr);
+  EXPECT_TRUE(compare_params->valid);
+  EXPECT_FALSE(compare_params->is_scalar);
+  ASSERT_EQ(compare_params->output_dims.size(), 2U);
+  EXPECT_STREQ(compare_params->output_dims[0].Serialize().get(), "s1");
+  EXPECT_STREQ(compare_params->output_dims[1].Serialize().get(), "s2");
+  EXPECT_STREQ(compare_params->output_strides[0].Serialize().get(), "s2");
+  EXPECT_STREQ(compare_params->input_strides[0].Serialize().get(), "s2");
 }
 
 TEST(CompareV2ApiCallTest, BoolDtypeNameIsBool) {
@@ -255,6 +268,17 @@ TEST(CompareV2ApiCallTest, CompareV2ApiCall_Scalar) {
       std::string{
           "CompareScalarExtend<float, 1, CMPMODE::ge>(local_2[0], local_0[0], scalar_1, "
           "{static_cast<uint16_t>(local_0_actual_size)}, {static_cast<uint16_t>(1)}, {static_cast<uint16_t>(1)});\n"});
+
+  const auto params = ascir_param::GetAscirNodeParams(ge);
+  ASSERT_NE(params, nullptr);
+  const auto *compare_params = std::get_if<ascir_param::CompareNodeParams>(&params->specific_params);
+  ASSERT_NE(compare_params, nullptr);
+  EXPECT_TRUE(compare_params->valid);
+  EXPECT_TRUE(compare_params->is_scalar);
+  ASSERT_EQ(compare_params->output_dims.size(), 1U);
+  EXPECT_STREQ(compare_params->output_dims[0].Serialize().get(), "(s1 * s2)");
+  EXPECT_STREQ(compare_params->output_strides[0].Serialize().get(), "1");
+  EXPECT_STREQ(compare_params->input_strides[0].Serialize().get(), "1");
 }
 
 TEST(CompareV2ApiCallTest, CompareV2ApiCall_Scalar_Normal) {

@@ -624,7 +624,7 @@ TEST_F(STestAscirPerfV2, TestCompareGeV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareEqV2) {
@@ -653,7 +653,7 @@ TEST_F(STestAscirPerfV2, TestCompareEqV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareNeV2) {
@@ -682,7 +682,7 @@ TEST_F(STestAscirPerfV2, TestCompareNeV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareGtV2) {
@@ -711,7 +711,7 @@ TEST_F(STestAscirPerfV2, TestCompareGtV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareLeV2) {
@@ -740,7 +740,7 @@ TEST_F(STestAscirPerfV2, TestCompareLeV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareLtV2) {
@@ -769,7 +769,7 @@ TEST_F(STestAscirPerfV2, TestCompareLtV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareEqInt64V2) {
@@ -798,7 +798,7 @@ TEST_F(STestAscirPerfV2, TestCompareEqInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "36");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareNeInt64V2) {
@@ -827,7 +827,7 @@ TEST_F(STestAscirPerfV2, TestCompareNeInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "36");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareGtInt64V2) {
@@ -856,7 +856,7 @@ TEST_F(STestAscirPerfV2, TestCompareGtInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "39");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareGeInt64V2) {
@@ -885,7 +885,7 @@ TEST_F(STestAscirPerfV2, TestCompareGeInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "39");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareLtInt64V2) {
@@ -914,7 +914,7 @@ TEST_F(STestAscirPerfV2, TestCompareLtInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "39");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(STestAscirPerfV2, TestCompareLeInt64V2) {
@@ -943,7 +943,7 @@ TEST_F(STestAscirPerfV2, TestCompareLeInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "39");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(STestAscirPerfV2, TestGetOpHeadCostValid) {

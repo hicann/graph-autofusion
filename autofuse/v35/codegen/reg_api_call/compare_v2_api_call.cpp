@@ -9,6 +9,7 @@
  */
 #include "compare_v2_api_call.h"
 
+#include <memory>
 #include <sstream>
 #include "attr_utils.h"
 #include "ascir_ops.h"
@@ -18,6 +19,7 @@
 #include "common/checker.h"
 #include "api_call/utils/api_call_factory.h"
 #include "api_call/utils/api_call_utils.h"
+#include "ascir_node_param/ascir_node_param.h"
 #include "codegen/expression_convert_struct.h"
 
 namespace codegen {
@@ -25,6 +27,68 @@ using namespace std;
 using namespace af::ops;
 using namespace af::ascir_op;
 using namespace ascgen_utils;
+
+namespace {
+constexpr const char *kAscirNodeParams = "AscirNodeParams";
+
+af::Status FillCompareNodeParams(const af::AscNodePtr &node, bool is_scalar, const ge::Expression &outer_call_count,
+                                 const std::vector<ge::Expression> &output_dims,
+                                 const std::vector<ge::Expression> &output_strides,
+                                 const std::vector<ge::Expression> &input_strides) {
+  GE_ASSERT_NOTNULL(node);
+  auto params = ascir_param::GetAscirNodeParams(node);
+  if (params == nullptr) {
+    auto op_desc = node->GetOpDesc();
+    GE_ASSERT_NOTNULL(op_desc);
+    params = std::make_shared<ascir_param::AscirNodeParams>();
+    GE_ASSERT_TRUE(op_desc->SetExtAttr(kAscirNodeParams, params), "Node:%s SetExtAttr failed", node->GetNamePtr());
+  }
+
+  auto *compare_params = std::get_if<ascir_param::CompareNodeParams>(&params->specific_params);
+  if (compare_params == nullptr) {
+    params->specific_params = ascir_param::CompareNodeParams{};
+    compare_params = std::get_if<ascir_param::CompareNodeParams>(&params->specific_params);
+  }
+  GE_ASSERT_NOTNULL(compare_params, "Compare specific params is null, node[%s].", node->GetNamePtr());
+  params->api_name = node->GetType();
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+
+  *compare_params = ascir_param::CompareNodeParams{};
+  compare_params->valid = true;
+  compare_params->is_scalar = is_scalar;
+  compare_params->outer_call_count = outer_call_count;
+  compare_params->output_dims = output_dims;
+  compare_params->output_strides = output_strides;
+  compare_params->input_strides = input_strides;
+  return af::SUCCESS;
+}
+
+void BuildCompareLoopParams(const VectorizedAxisLoopMergeStatus &merge_info, const ApiLoopParams &param,
+                            ge::Expression &outer_call_count, std::vector<ge::Expression> &output_dims,
+                            std::vector<ge::Expression> &output_strides, std::vector<ge::Expression> &input_strides) {
+  if (param.outer_repeats.empty()) {
+    outer_call_count = af::ops::One;
+    if (!merge_info.merge_repeats.empty()) {
+      output_dims.emplace_back(merge_info.merge_repeats.back());
+    }
+    output_strides.emplace_back(af::ops::One);
+    input_strides.emplace_back(af::ops::One);
+    return;
+  }
+
+  const size_t outer_repeats_size = param.outer_repeats.size();
+  outer_call_count = af::ops::One;
+  for (size_t i = 0U; i + 1U < outer_repeats_size; ++i) {
+    outer_call_count = outer_call_count * merge_info.merge_repeats[i];
+  }
+  output_dims.emplace_back(merge_info.merge_repeats[outer_repeats_size - 1]);
+  output_dims.emplace_back(param.cal_count);
+  output_strides.emplace_back(param.output_second_to_last_stride);
+  output_strides.emplace_back(af::ops::One);
+  input_strides.emplace_back(param.input_second_to_last_stride);
+  input_strides.emplace_back(af::ops::One);
+}
+}  // namespace
 
 static void CreateComputeNodeOuterForIfRequired(size_t outer_repeats_size, ApiLoopParams param,
                                                 const std::stringstream &ss1, std::stringstream &ss) {
@@ -66,6 +130,13 @@ Status CompareV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::A
     bool status = GenerateVectorizedAxisMergeStatus(ub_inputs, ub_outputs, merge_info, tpipe);
     GE_ASSERT_TRUE(status, "GenerateVectorizedAxisMergeStatus failed");
     SaveApiLoopAxisParams(merge_info, param);
+    std::vector<ge::Expression> output_dims;
+    std::vector<ge::Expression> output_strides;
+    std::vector<ge::Expression> input_strides;
+    ge::Expression outer_call_count = af::ops::One;
+    BuildCompareLoopParams(merge_info, param, outer_call_count, output_dims, output_strides, input_strides);
+    GE_ASSERT_SUCCESS(
+        FillCompareNodeParams(this->node, true, outer_call_count, output_dims, output_strides, input_strides));
     std::string scalar_local_blk_tensor_name_x2 = x2.IsConstScalar() ? "local_blk_tensor_of_" + x2.name : x2.name;
     scalar_local_blk_tensor_name_x2 = scalar_local_blk_tensor_name_x2;
     size_t outer_repeats_size = param.outer_repeats.size();
@@ -105,6 +176,13 @@ Status CompareV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::A
     bool status = GenerateVectorizedAxisMergeStatus(ub_inputs, ub_outputs, merge_info, tpipe);
     GE_ASSERT_TRUE(status, "GenerateVectorizedAxisMergeStatus failed");
     SaveApiLoopAxisParams(merge_info, param);
+    std::vector<ge::Expression> output_dims;
+    std::vector<ge::Expression> output_strides;
+    std::vector<ge::Expression> input_strides;
+    ge::Expression outer_call_count = af::ops::One;
+    BuildCompareLoopParams(merge_info, param, outer_call_count, output_dims, output_strides, input_strides);
+    GE_ASSERT_SUCCESS(
+        FillCompareNodeParams(this->node, false, outer_call_count, output_dims, output_strides, input_strides));
     size_t outer_repeats_size = param.outer_repeats.size();
     if (outer_repeats_size == 0U) {
       ss << "CompareExtend<" << dtype_name << ", 1, CMPMODE::" << this->api_name_ << ">(" << y << "["

@@ -126,3 +126,11 @@ class TestApiReduceInit : public testing::Test {
 TEST_F(TestApiReduceInit, ReduceInit_Test) {
   ReduceInitTest<float, 3, 1>(1, 32, 16, 3);
 }
+
+TEST_F(TestApiReduceInit, ReduceInitSingleRowFullVlTest) {
+  ReduceInitTest<float, 3, 1>(1, 1024, 512, 3);
+}
+
+TEST_F(TestApiReduceInit, ReduceInitSingleRowTailVlTest) {
+  ReduceInitTest<float, 2, 1>(1, 1024, 520, 3);
+}

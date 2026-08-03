@@ -100,6 +100,33 @@ ascir_param::CastNodeParams MakeCastParams(const std::vector<Expr> &output_dims,
   return params;
 }
 
+ascir_param::CompareNodeParams MakeCompareParams(bool is_scalar, const std::vector<Expr> &output_dims,
+                                                 const std::vector<Expr> &output_strides,
+                                                 const std::vector<Expr> &input_strides) {
+  ascir_param::CompareNodeParams params;
+  params.valid = true;
+  params.is_scalar = is_scalar;
+  params.output_dims = output_dims;
+  params.output_strides = output_strides;
+  params.input_strides = input_strides;
+  return params;
+}
+
+std::string GetComparePerfExpr(const std::string &api_name, const std::string &input_dtype,
+                               const ascir_param::CompareNodeParams &compare_params) {
+  auto cmp_v2 = ApiPerfFactory::Instance().Create(api_name);
+  EXPECT_NE(cmp_v2, nullptr);
+  auto cmp_v2_perf = cmp_v2->GetPerfFunc();
+  const Expr dim = CreateExpr(129);
+  std::vector<att::TensorShapeInfo> input_shapes = {MakeCastShape(input_dtype, dim), MakeCastShape(input_dtype, dim)};
+  std::vector<att::TensorShapeInfo> output_shapes = {MakeCastShape(kUInt8, dim)};
+  NodeInfo node;
+  node.compare_node_params = compare_params;
+  PerfOutputInfo perf_res;
+  EXPECT_EQ(cmp_v2_perf(input_shapes, output_shapes, node, perf_res), af::SUCCESS);
+  return Str(perf_res.pipe_res[PipeType::AIV_VEC]);
+}
+
 NodeDetail MakeCastNodeDetail(const std::string &input_dtype, const std::string &output_dtype) {
   NodeDetail node_detail;
   node_detail.name = "CastNode";
@@ -149,6 +176,63 @@ TEST_F(UTestAscirPerfV2, FillSpecificParamsStoresSharedReduceParamsOnAscNode) {
   EXPECT_EQ(node_info.reduce_specific_params.canonical_params.pattern, reduce_params->canonical_params.pattern);
   EXPECT_EQ(node_info.reduce_specific_params.canonical_params.merge_mode, reduce_params->canonical_params.merge_mode);
   EXPECT_EQ(node_info.reduce_specific_params.canonical_params.merge_size, reduce_params->canonical_params.merge_size);
+}
+
+TEST_F(UTestAscirPerfV2, FillSpecificParamsStoresCompareParamsOnAscNode) {
+  af::AscGraph graph("compare_param_graph");
+  af::ascir_op::Data x1("x1", graph);
+  af::ascir_op::Data x2("x2", graph);
+  af::ascir_op::Ge ge_op("ge");
+  graph.AddNode(ge_op);
+  ge_op.x1 = x1.y;
+  ge_op.x2 = x2.y;
+
+  auto ge_node = graph.FindNode("ge");
+  ASSERT_NE(ge_node, nullptr);
+  auto params = std::make_shared<ascir_param::AscirNodeParams>();
+  params->api_name = "Ge";
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+  auto compare_params =
+      MakeCompareParams(true, {CreateExpr("outer"), CreateExpr("inner")}, {CreateExpr("out_stride"), CreateExpr(1)},
+                        {CreateExpr("in_stride"), CreateExpr(1)});
+  compare_params.outer_call_count = CreateExpr("outer_call_count");
+  params->specific_params = compare_params;
+  ASSERT_TRUE(ge_node->GetOpDesc()->SetExtAttr("AscirNodeParams", params));
+
+  NodeInfo node_info;
+  node_info.name = "ge";
+  node_info.node_type = kGe;
+  EXPECT_EQ(FillSpecificParams(ge_node, node_info), af::SUCCESS);
+  EXPECT_TRUE(node_info.compare_node_params.valid);
+  EXPECT_TRUE(node_info.compare_node_params.is_scalar);
+  ASSERT_EQ(node_info.compare_node_params.output_dims.size(), 2U);
+  EXPECT_EQ(Str(node_info.compare_node_params.outer_call_count), "outer_call_count");
+  EXPECT_EQ(Str(node_info.compare_node_params.output_dims[0]), "outer");
+  EXPECT_EQ(Str(node_info.compare_node_params.input_strides[0]), "in_stride");
+}
+
+TEST_F(UTestAscirPerfV2, CompareVfHeadCostByInputType) {
+  const auto params = MakeCompareParams(false, {CreateExpr(1)}, {CreateExpr(1)}, {CreateExpr(1)});
+
+  EXPECT_EQ(GetComparePerfExpr(kGe + "V2", kUInt8, params), "45");
+  EXPECT_EQ(GetComparePerfExpr(kGe + "V2", kFloat16, params), "60");
+  EXPECT_EQ(GetComparePerfExpr(kGe + "V2", kFloat32, params), "66");
+  EXPECT_EQ(GetComparePerfExpr(kGe + "V2", kInt64, params), "68");
+}
+
+TEST_F(UTestAscirPerfV2, CompareDoesNotMultiplyOuterRepeat) {
+  const auto params = MakeCompareParams(false, {CreateExpr(4), CreateExpr(256)}, {CreateExpr(256), CreateExpr(1)},
+                                        {CreateExpr(256), CreateExpr(1)});
+
+  EXPECT_EQ(GetComparePerfExpr(kGe + "V2", kFloat16, params), "88");
+}
+
+TEST_F(UTestAscirPerfV2, CompareMultipliesOuterCallCount) {
+  auto params = MakeCompareParams(false, {CreateExpr(4), CreateExpr(256)}, {CreateExpr(256), CreateExpr(1)},
+                                  {CreateExpr(256), CreateExpr(1)});
+  params.outer_call_count = CreateExpr(3);
+
+  EXPECT_EQ(GetComparePerfExpr(kGe + "V2", kFloat16, params), "264");
 }
 
 // 测试 LoadApi API 边界条件
@@ -971,7 +1055,22 @@ TEST_F(UTestAscirPerfV2, TestCompareGeV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
+}
+
+TEST_F(UTestAscirPerfV2, TestCompareV2StoreUsesDtypeMappingPerf) {
+  auto compare_params = MakeCompareParams(false, {CreateExpr(129)}, {CreateExpr(1)}, {CreateExpr(1)});
+  EXPECT_EQ(GetComparePerfExpr("GeV2", kInt32, compare_params), "76");
+}
+
+TEST_F(UTestAscirPerfV2, TestCompareV2UsesRegbaseMicroApiCost) {
+  auto compare_params = MakeCompareParams(false, {CreateExpr(129)}, {CreateExpr(1)}, {CreateExpr(1)});
+  EXPECT_EQ(GetComparePerfExpr("GeV2", kFloat16, compare_params), "64");
+}
+
+TEST_F(UTestAscirPerfV2, TestCompareV2ScalarAddsScalarDuplicateCost) {
+  auto compare_params = MakeCompareParams(true, {CreateExpr(129)}, {CreateExpr(1)}, {CreateExpr(1)});
+  EXPECT_EQ(GetComparePerfExpr("GeV2", kFloat16, compare_params), "65");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareEqV2) {
@@ -1000,7 +1099,7 @@ TEST_F(UTestAscirPerfV2, TestCompareEqV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareNeV2) {
@@ -1029,7 +1128,7 @@ TEST_F(UTestAscirPerfV2, TestCompareNeV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareGtV2) {
@@ -1058,7 +1157,7 @@ TEST_F(UTestAscirPerfV2, TestCompareGtV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareLeV2) {
@@ -1087,7 +1186,7 @@ TEST_F(UTestAscirPerfV2, TestCompareLeV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareLtV2) {
@@ -1116,7 +1215,7 @@ TEST_F(UTestAscirPerfV2, TestCompareLtV2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "25");
+  EXPECT_EQ(Str(res), "64");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareEqInt64V2) {
@@ -1145,7 +1244,7 @@ TEST_F(UTestAscirPerfV2, TestCompareEqInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "36");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareNeInt64V2) {
@@ -1174,7 +1273,7 @@ TEST_F(UTestAscirPerfV2, TestCompareNeInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "36");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareGtInt64V2) {
@@ -1203,7 +1302,7 @@ TEST_F(UTestAscirPerfV2, TestCompareGtInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "39");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareGeInt64V2) {
@@ -1232,7 +1331,7 @@ TEST_F(UTestAscirPerfV2, TestCompareGeInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "39");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareLtInt64V2) {
@@ -1261,7 +1360,7 @@ TEST_F(UTestAscirPerfV2, TestCompareLtInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "39");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(UTestAscirPerfV2, TestCompareLeInt64V2) {
@@ -1290,7 +1389,7 @@ TEST_F(UTestAscirPerfV2, TestCompareLeInt64V2) {
   cmp_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "39");
+  EXPECT_EQ(Str(res), "78");
 }
 
 TEST_F(UTestAscirPerfV2, TestGetOpHeadCostValid) {

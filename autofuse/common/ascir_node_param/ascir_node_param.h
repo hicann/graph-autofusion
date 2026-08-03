@@ -81,7 +81,17 @@ struct CastNodeParams {
   std::vector<ge::Expression> input_strides;
 };
 
-using AnySpecificParams = std::variant<std::monostate, ReduceNodeParams, VectorFuncNodeParams, CastNodeParams>;
+struct CompareNodeParams {
+  bool valid{false};
+  bool is_scalar{false};
+  ge::Expression outer_call_count{ge::Symbol(1U)};
+  std::vector<ge::Expression> output_dims;
+  std::vector<ge::Expression> output_strides;
+  std::vector<ge::Expression> input_strides;
+};
+
+using AnySpecificParams =
+    std::variant<std::monostate, ReduceNodeParams, VectorFuncNodeParams, CastNodeParams, CompareNodeParams>;
 
 struct AscirNodeParams {
   // 扩展属性载荷版本，用于后续兼容。
