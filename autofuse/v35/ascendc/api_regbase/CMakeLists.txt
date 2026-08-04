@@ -82,6 +82,11 @@ set(ascendc_api_regbase_extend_src
         indirect_load_simd.h
         indirect_load_sk.h
         indirect_load_simt.h
+        chebyshev_polynomial_utils.h
+        chebyshev_polynomial_t.h
+        chebyshev_polynomial_u.h
+        chebyshev_polynomial_v.h
+        chebyshev_polynomial_w.h
 )
 
 set(generated_regbase_files)
