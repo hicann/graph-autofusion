@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------------------------------------
-# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -19,14 +19,19 @@
 #
 
 import argparse
+import glob
+import os
+import subprocess
+
 
 import numpy as np
 import tensorflow as tf
 
+_PROFILING_DIR = os.path.abspath("./profiling")
 _PROFILES_JSON = (
-    '{"output":"./profiling","training_trace":"on","task_time":"on",'
+    '{"output":"%s","training_trace":"on","task_time":"on",'
     '"hccl":"on","aicpu":"on","aic_metrics":"PipeUtilization","msproftx":"off"}'
-)
+) % _PROFILING_DIR
 
 
 def configure_npu(sess_config):
@@ -40,8 +45,24 @@ def configure_npu(sess_config):
     return sess_config
 
 
+def get_profile_dirs():
+    """获取当前已有的 PROF_* 目录。"""
+    profile_pattern = os.path.join(_PROFILING_DIR, "PROF_*")
+    return set(glob.glob(profile_pattern))
+
+
+def export_new_profiling(profile_dirs_before):
+    """解析本次执行新生成的 Profiling 数据。"""
+    for profile_dir in sorted(get_profile_dirs() - profile_dirs_before):
+        subprocess.run(
+            ["msprof", "--export=on", "--output={}".format(profile_dir)],
+            check=True,
+        )
+
+
 def run_model(placeholder_fn, configproto_fn):
     """构建 abs->relu->exp 模型并在 NPU 上执行 100 步。"""
+    profile_dirs_before = get_profile_dirs()
     data1 = placeholder_fn(tf.float16, shape=[128, 192])
     input_data = np.random.rand(128, 192).astype(np.float16)
     abs_0 = tf.abs(data1)
@@ -54,6 +75,7 @@ def run_model(placeholder_fn, configproto_fn):
     with tf.compat.v1.Session(config=sess_config) as sess:
         for _ in range(step):
             sess.run(exp_0, feed_dict=feed_dict)
+    export_new_profiling(profile_dirs_before)
 
 
 def run_tf1():
