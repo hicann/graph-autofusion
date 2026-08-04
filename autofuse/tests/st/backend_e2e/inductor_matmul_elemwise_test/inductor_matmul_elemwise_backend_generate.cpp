@@ -12,6 +12,7 @@
 #include <fstream>
 #include <gtest/gtest.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -83,5 +84,23 @@ TEST_F(TestBackendInductorMatmulElemwiseE2e, InductorMatmulElemwiseE2eCodegen) {
   } catch (...) {
     FAIL() << "inductor matmul elemwise codegen failed";
   }
+}
+
+TEST_F(TestBackendInductorMatmulElemwiseE2e, CvTilingUsesDirectLogHeaderDependency) {
+  auto graph = ascir::ShareGraph::LoadMatmulElewiseBrcFusedGraph(true);
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.node_idx_to_scheduled_results.push_back({});
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), 0);
+  ASSERT_TRUE(ascgen_utils::IsCubeFusedScheduled(fused_schedule_result));
+
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  const std::map<std::string, std::string> shape_info = {{"s0", "stub_s0"}, {"s1", "stub_s1"}};
+  const auto tiling_files = codegen.GenerateTiling(fused_schedule_result, shape_info, "", "0");
+  EXPECT_EQ(tiling_files.find("TilingDataLog"), tiling_files.end());
+  ASSERT_NE(tiling_files.find("BCubeKernelTilingWrapperCpp"), tiling_files.end());
+  const auto &wrapper_cpp = tiling_files.at("BCubeKernelTilingWrapperCpp");
+  EXPECT_NE(wrapper_cpp.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
+  EXPECT_EQ(wrapper_cpp.find("autofuse_tiling_data_log.h"), std::string::npos);
 }
 }  // namespace

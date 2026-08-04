@@ -99,11 +99,13 @@ TEST_F(TestBackendInductorMatmulElemwiseSplitCompile, SplitCompileChainWorks) {
 
   EXPECT_NE(tiling_def.find("CVAutofuseTilingData"), std::string::npos);
   EXPECT_NE(host_code.find("CallCubeTiling"), std::string::npos);
+  EXPECT_EQ(host_code.find("// AUTOFUSE_SPLIT_FILE_BEGIN: TilingDataLog"), std::string::npos);
   EXPECT_EQ(host_code.find("GenerateTopnSolutions"), std::string::npos);
   EXPECT_EQ(host_code.find("AscirCompileAndLaunch"), std::string::npos);
 
   const std::string host_bin = OUTPUT_DIR "/inductor_matmul_elemwise_host.so";
   ASSERT_EQ(autofuse::tests::RunHostCompile(tiling_def, host_code, host_bin, "inductor_matmul_elemwise", "-Werror"), 0);
+  ASSERT_TRUE(FileExists(OUTPUT_DIR "/host_out/host/autofuse_tiling_func_log.h"));
   ASSERT_TRUE(FileExists(host_bin)) << "host so not found: " << host_bin;
   ASSERT_TRUE(autofuse::tests::HasCxx11AbiSymbols(host_bin)) << "host so should use ABI=1: " << host_bin;
   const std::string tiling_repr_file = OUTPUT_DIR "/tiling_repr.txt";

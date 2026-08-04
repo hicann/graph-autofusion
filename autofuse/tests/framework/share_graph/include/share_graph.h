@@ -142,7 +142,7 @@ struct ShareGraph {
   static af::ComputeGraphPtr LoadWhereReduceStoreFusedGraph(size_t dims_size, bool x2_scalar, bool x3_scalar);
   static af::ComputeGraphPtr LoadCompareStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr LoadCompareCastSumStoreFusedGraph(size_t dims_size);
-  static af::ComputeGraphPtr LoadMatmulElewiseBrcFusedGraph();
+  static af::ComputeGraphPtr LoadMatmulElewiseBrcFusedGraph(bool is_dynamic = false);
   static af::ComputeGraphPtr LoadMatmulCompareScalarFusedGraph();
   static af::ComputeGraphPtr DivAbsFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr TrueDivBf16FusedGraph(size_t dims_size);
