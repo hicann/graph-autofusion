@@ -18,6 +18,8 @@ class IndirectLoadScheduleCaseGenerator : public FusionCaseGenerator {
  public:
   Status Generate(ascir::HintGraph &graph, std::vector<ascir::ImplGraph> &graphs,
                   std::vector<std::string> &score_functions) override;
+  Status GeneratorTask(ascir::HintGraph &optimize_graph, std::vector<ScheduleTask> &tasks,
+                       const OptimizerOptions &options) override;
 };
 }  // namespace optimize
 

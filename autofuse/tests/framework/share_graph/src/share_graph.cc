@@ -9188,6 +9188,149 @@ af::ComputeGraphPtr ShareGraph::LoadLShiftStoreFusedGraph(size_t dims_size, af::
   return compute_graph;
 }
 
+struct MatmulGraphContext {
+  af::AscGraph &graph;
+  af::Expression s0;
+  af::Expression s1;
+  af::AxisId z0;
+  af::AxisId z1;
+};
+
+static MatmulGraphContext CreateMatmulGraphContext(af::AscGraph &graph, bool is_dynamic = false) {
+  auto s0 = is_dynamic ? graph.CreateSizeVar("s0") : graph.CreateSizeVar(32);
+  auto s1 = is_dynamic ? graph.CreateSizeVar("s1") : graph.CreateSizeVar(32);
+  auto &z0 = graph.CreateAxis("z0", s0);
+  auto &z1 = graph.CreateAxis("z1", s1);
+  return {graph, s0, s1, z0.id, z1.id};
+}
+
+template <typename T>
+static void SetMatmulGraphLayout(T &op, const MatmulGraphContext &context, af::DataType dtype,
+                                 const std::vector<af::Expression> &repeats,
+                                 const std::vector<af::Expression> &strides) {
+  op.attr.sched.axis = {context.z0, context.z1};
+  op.y.dtype = dtype;
+  *op.y.axis = {context.z0, context.z1};
+  *op.y.repeats = repeats;
+  *op.y.strides = strides;
+}
+
+template <typename T>
+static void SetFullMatmulGraphLayout(T &op, const MatmulGraphContext &context, af::DataType dtype) {
+  SetMatmulGraphLayout(op, context, dtype, {context.s0, context.s1}, {context.s1, af::ops::One});
+}
+
+static void CreateMatmulPrefix(const MatmulGraphContext &context, af::ascir_op::MatMul &matmul) {
+  af::ascir_op::Data data0("data0", context.graph);
+  SetFullMatmulGraphLayout(data0, context, af::DT_FLOAT16);
+  data0.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  data0.ir_attr.SetIndex(0);
+  af::ascir_op::Load load0("load0");
+  load0.x = data0.y;
+  SetFullMatmulGraphLayout(load0, context, af::DT_FLOAT16);
+
+  af::ascir_op::Data data1("data1", context.graph);
+  SetFullMatmulGraphLayout(data1, context, af::DT_FLOAT16);
+  data1.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  data1.ir_attr.SetIndex(1);
+  af::ascir_op::Load load1("load1");
+  load1.x = data1.y;
+  SetFullMatmulGraphLayout(load1, context, af::DT_FLOAT16);
+
+  matmul.x1 = load0.y;
+  matmul.x2 = load1.y;
+  SetFullMatmulGraphLayout(matmul, context, af::DT_FLOAT);
+  matmul.ir_attr.SetTranspose_x1(1);
+  matmul.ir_attr.SetTranspose_x2(0);
+  matmul.ir_attr.SetHas_relu(0);
+  matmul.ir_attr.SetEnable_hf32(0);
+  matmul.ir_attr.SetOffset_x(0);
+}
+
+static void ConnectAddBroadcast(const MatmulGraphContext &context, af::ascir_op::Add &add_op) {
+  af::ascir_op::Data data2("data2", context.graph);
+  SetMatmulGraphLayout(data2, context, af::DT_FLOAT, {af::ops::One, af::ops::One}, {af::ops::Zero, af::ops::Zero});
+  data2.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  data2.ir_attr.SetIndex(2);
+  af::ascir_op::Load load2("load2");
+  load2.x = data2.y;
+  SetMatmulGraphLayout(load2, context, af::DT_FLOAT, {af::ops::One, af::ops::One}, {af::ops::Zero, af::ops::Zero});
+
+  af::ascir_op::Broadcast broadcast0("broadcast0");
+  broadcast0.x = load2.y;
+  SetMatmulGraphLayout(broadcast0, context, af::DT_FLOAT, {af::ops::One, context.s1}, {af::ops::Zero, af::ops::One});
+  af::ascir_op::Broadcast broadcast1("broadcast1");
+  broadcast1.x = broadcast0.y;
+  SetFullMatmulGraphLayout(broadcast1, context, af::DT_FLOAT);
+  add_op.x2 = broadcast1.y;
+}
+
+static void ConnectSigmoidBroadcast(const MatmulGraphContext &context, af::ascir_op::Mul &mul) {
+  af::ascir_op::Data data3("data3", context.graph);
+  SetMatmulGraphLayout(data3, context, af::DT_FLOAT, {context.s0, af::ops::One}, {af::ops::One, af::ops::Zero});
+  data3.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  data3.ir_attr.SetIndex(3);
+  af::ascir_op::Load load3("load3");
+  load3.x = data3.y;
+  SetMatmulGraphLayout(load3, context, af::DT_FLOAT, {context.s0, af::ops::One}, {af::ops::One, af::ops::Zero});
+  af::ascir_op::Broadcast broadcast2("broadcast2");
+  broadcast2.x = load3.y;
+  SetFullMatmulGraphLayout(broadcast2, context, af::DT_FLOAT);
+  af::ascir_op::Sigmoid sigmoid0("sigmoid0");
+  sigmoid0.x = broadcast2.y;
+  SetFullMatmulGraphLayout(sigmoid0, context, af::DT_FLOAT);
+  mul.x2 = sigmoid0.y;
+}
+
+static void ConnectRsqrtBroadcast(const MatmulGraphContext &context, af::ascir_op::Sub &sub) {
+  af::ascir_op::Data data4("data4", context.graph);
+  SetMatmulGraphLayout(data4, context, af::DT_FLOAT, {af::ops::One, context.s1}, {af::ops::Zero, af::ops::One});
+  data4.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  data4.ir_attr.SetIndex(4);
+  af::ascir_op::Load load4("load4");
+  load4.x = data4.y;
+  SetMatmulGraphLayout(load4, context, af::DT_FLOAT, {af::ops::One, context.s1}, {af::ops::Zero, af::ops::One});
+  af::ascir_op::Broadcast broadcast3("broadcast3");
+  broadcast3.x = load4.y;
+  SetFullMatmulGraphLayout(broadcast3, context, af::DT_FLOAT);
+  af::ascir_op::Rsqrt rsqrt0("rsqrt0");
+  rsqrt0.x = broadcast3.y;
+  SetFullMatmulGraphLayout(rsqrt0, context, af::DT_FLOAT);
+  sub.x2 = rsqrt0.y;
+}
+
+static void CreateMatmulGraphOutput(const MatmulGraphContext &context, const af::AscOpOutput &input) {
+  af::ascir_op::Store store_op("store");
+  store_op.x = input;
+  SetFullMatmulGraphLayout(store_op, context, af::DT_FLOAT);
+  af::ascir_op::Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = af::DT_FLOAT;
+  output_op.ir_attr.SetIndex(0);
+}
+
+static void ConnectCompareInputs(const MatmulGraphContext &context, af::ascir_op::Eq &eq0) {
+  af::ascir_op::Data data2("data2", context.graph);
+  SetFullMatmulGraphLayout(data2, context, af::DT_FLOAT);
+  data2.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  data2.ir_attr.SetIndex(2);
+  af::ascir_op::Load load2("load2");
+  load2.x = data2.y;
+  SetFullMatmulGraphLayout(load2, context, af::DT_FLOAT);
+
+  af::ascir_op::Data data3("data3", context.graph);
+  SetMatmulGraphLayout(data3, context, af::DT_FLOAT, {af::ops::One, af::ops::One}, {af::ops::Zero, af::ops::Zero});
+  data3.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  data3.ir_attr.SetIndex(3);
+  af::ascir_op::Load load3("load3");
+  load3.x = data3.y;
+  SetMatmulGraphLayout(load3, context, af::DT_FLOAT, {af::ops::One, af::ops::One}, {af::ops::Zero, af::ops::Zero});
+
+  eq0.x1 = load2.y;
+  eq0.x2 = load3.y;
+  SetFullMatmulGraphLayout(eq0, context, af::DT_UINT8);
+}
+
 /**
  *                  sub
  *               mul    \
@@ -9198,201 +9341,29 @@ af::ComputeGraphPtr ShareGraph::LoadLShiftStoreFusedGraph(size_t dims_size, af::
  *      /     \   \     \    \
  *   data0 data1 data2 data3 data4
  */
-static void CreateMatmulElewiseBrcGraph(af::AscGraph &graph) {
-  auto s0 = graph.CreateSizeVar(32);
-  auto s1 = graph.CreateSizeVar(32);
-  auto z0 = graph.CreateAxis("z0", s0);
-  auto z1 = graph.CreateAxis("z1", s1);
-
-  af::ascir_op::Data data0("data0", graph);
-  data0.attr.sched.axis = {z0.id, z1.id};
-  data0.y.dtype = af::DT_FLOAT16;
-  *data0.y.axis = {z0.id, z1.id};
-  data0.attr.api.compute_type = af::ComputeType::kComputeInvalid;
-  *data0.y.repeats = {s0, s1};
-  *data0.y.strides = {s1, af::ops::One};
-  data0.ir_attr.SetIndex(0);
-
-  af::ascir_op::Load load0("load0");
-  load0.attr.sched.axis = {z0.id, z1.id};
-  load0.y.dtype = af::DT_FLOAT16;
-  load0.x = data0.y;
-  *load0.y.axis = {z0.id, z1.id};
-  *load0.y.repeats = {s0, s1};
-  *load0.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Data data1("data1", graph);
-  data1.attr.sched.axis = {z0.id, z1.id};
-  data1.y.dtype = af::DT_FLOAT16;
-  *data1.y.axis = {z0.id, z1.id};
-  data1.attr.api.compute_type = af::ComputeType::kComputeInvalid;
-  *data1.y.repeats = {s0, s1};
-  *data1.y.strides = {s1, af::ops::One};
-  data1.ir_attr.SetIndex(1);
-
-  af::ascir_op::Load load1("load1");
-  load1.attr.sched.axis = {z0.id, z1.id};
-  load1.y.dtype = af::DT_FLOAT16;
-  load1.x = data1.y;
-  *load1.y.axis = {z0.id, z1.id};
-  *load1.y.repeats = {s0, s1};
-  *load1.y.strides = {s1, af::ops::One};
-
+static void CreateMatmulElewiseBrcGraph(af::AscGraph &graph, bool is_dynamic) {
+  const auto context = CreateMatmulGraphContext(graph, is_dynamic);
   af::ascir_op::MatMul matmul("matmul");
-  matmul.attr.sched.axis = {z0.id, z1.id};
-  matmul.x1 = load0.y;
-  matmul.x2 = load1.y;
-  matmul.y.dtype = af::DT_FLOAT;
-  *matmul.y.axis = {z0.id, z1.id};
-  *matmul.y.repeats = {s0, s1};
-  *matmul.y.strides = {s1, af::ops::One};
-  matmul.ir_attr.SetTranspose_x1(1);
-  matmul.ir_attr.SetTranspose_x2(0);
-  matmul.ir_attr.SetHas_relu(0);
-  matmul.ir_attr.SetEnable_hf32(0);
-  matmul.ir_attr.SetOffset_x(0);
-
-  af::ascir_op::Data data2("data2", graph);
-  data2.y.dtype = af::DT_FLOAT;
-  data2.attr.sched.axis = {z0.id, z1.id};
-  *data2.y.axis = {z0.id, z1.id};
-  data2.attr.api.compute_type = af::ComputeType::kComputeInvalid;
-  *data2.y.repeats = {af::ops::One, af::ops::One};
-  *data2.y.strides = {af::ops::Zero, af::ops::Zero};
-  data2.ir_attr.SetIndex(2);
-
-  af::ascir_op::Load load2("load2");
-  load2.x = data2.y;
-  load2.attr.sched.axis = {z0.id, z1.id};
-  load2.y.dtype = af::DT_FLOAT;
-  *load2.y.axis = {z0.id, z1.id};
-  *load2.y.repeats = {af::ops::One, af::ops::One};
-  *load2.y.strides = {af::ops::Zero, af::ops::Zero};
-
-  af::ascir_op::Broadcast broadcast0("broadcast0");
-  broadcast0.x = load2.y;
-  broadcast0.attr.sched.axis = {z0.id, z1.id};
-  *broadcast0.y.axis = {z0.id, z1.id};
-  broadcast0.y.dtype = af::DT_FLOAT;
-  *broadcast0.y.repeats = {af::ops::One, s1};
-  *broadcast0.y.strides = {af::ops::Zero, af::ops::One};
-
-  af::ascir_op::Broadcast broadcast1("broadcast1");
-  broadcast1.x = broadcast0.y;
-  broadcast1.attr.sched.axis = {z0.id, z1.id};
-  *broadcast1.y.axis = {z0.id, z1.id};
-  broadcast1.y.dtype = af::DT_FLOAT;
-  *broadcast1.y.repeats = {s0, s1};
-  *broadcast1.y.strides = {s1, af::ops::One};
+  CreateMatmulPrefix(context, matmul);
 
   af::ascir_op::Add add_op("add");
-  add_op.attr.sched.axis = {z0.id, z1.id};
   add_op.x1 = matmul.y;
-  add_op.x2 = broadcast1.y;
-  add_op.y.dtype = af::DT_FLOAT;
-  *add_op.y.axis = {z0.id, z1.id};
-  *add_op.y.repeats = {s0, s1};
-  *add_op.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Data data3("data3", graph);
-  data3.y.dtype = af::DT_FLOAT;
-  data3.attr.sched.axis = {z0.id, z1.id};
-  *data3.y.axis = {z0.id, z1.id};
-  data3.attr.api.compute_type = af::ComputeType::kComputeInvalid;
-  *data3.y.repeats = {s0, af::ops::One};
-  *data3.y.strides = {af::ops::One, af::ops::Zero};
-  data3.ir_attr.SetIndex(3);
-
-  af::ascir_op::Load load3("load3");
-  load3.x = data3.y;
-  load3.attr.sched.axis = {z0.id, z1.id};
-  load3.y.dtype = af::DT_FLOAT;
-  *load3.y.axis = {z0.id, z1.id};
-  *load3.y.repeats = {s0, af::ops::One};
-  *load3.y.strides = {af::ops::One, af::ops::Zero};
-
-  af::ascir_op::Broadcast broadcast2("broadcast2");
-  broadcast2.x = load3.y;
-  broadcast2.attr.sched.axis = {z0.id, z1.id};
-  *broadcast2.y.axis = {z0.id, z1.id};
-  broadcast2.y.dtype = af::DT_FLOAT;
-  *broadcast2.y.repeats = {s0, s1};
-  *broadcast2.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Sigmoid sigmoid0("sigmoid0");
-  sigmoid0.x = broadcast2.y;
-  sigmoid0.attr.sched.axis = {z0.id, z1.id};
-  *sigmoid0.y.axis = {z0.id, z1.id};
-  sigmoid0.y.dtype = af::DT_FLOAT;
-  *sigmoid0.y.repeats = {s0, s1};
-  *sigmoid0.y.strides = {s1, af::ops::One};
+  SetFullMatmulGraphLayout(add_op, context, af::DT_FLOAT);
+  ConnectAddBroadcast(context, add_op);
 
   af::ascir_op::Mul mul("mul");
-  mul.attr.sched.axis = {z0.id, z1.id};
   mul.x1 = add_op.y;
-  mul.x2 = sigmoid0.y;
-  mul.y.dtype = af::DT_FLOAT;
-  *mul.y.axis = {z0.id, z1.id};
-  *mul.y.repeats = {s0, s1};
-  *mul.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Data data4("data4", graph);
-  data4.y.dtype = af::DT_FLOAT;
-  data4.attr.sched.axis = {z0.id, z1.id};
-  *data4.y.axis = {z0.id, z1.id};
-  data4.attr.api.compute_type = af::ComputeType::kComputeInvalid;
-  *data4.y.repeats = {af::ops::One, s1};
-  *data4.y.strides = {af::ops::Zero, af::ops::One};
-  data4.ir_attr.SetIndex(4);
-
-  af::ascir_op::Load load4("load4");
-  load4.x = data4.y;
-  load4.attr.sched.axis = {z0.id, z1.id};
-  load4.y.dtype = af::DT_FLOAT;
-  *load4.y.axis = {z0.id, z1.id};
-  *load4.y.repeats = {af::ops::One, s1};
-  *load4.y.strides = {af::ops::Zero, af::ops::One};
-
-  af::ascir_op::Broadcast broadcast3("broadcast3");
-  broadcast3.x = load4.y;
-  broadcast3.attr.sched.axis = {z0.id, z1.id};
-  *broadcast3.y.axis = {z0.id, z1.id};
-  broadcast3.y.dtype = af::DT_FLOAT;
-  *broadcast3.y.repeats = {s0, s1};
-  *broadcast3.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Rsqrt rsqrt0("rsqrt0");
-  rsqrt0.x = broadcast3.y;
-  rsqrt0.attr.sched.axis = {z0.id, z1.id};
-  *rsqrt0.y.axis = {z0.id, z1.id};
-  rsqrt0.y.dtype = af::DT_FLOAT;
-  *rsqrt0.y.repeats = {s0, s1};
-  *rsqrt0.y.strides = {s1, af::ops::One};
+  SetFullMatmulGraphLayout(mul, context, af::DT_FLOAT);
+  ConnectSigmoidBroadcast(context, mul);
 
   af::ascir_op::Sub sub("sub");
-  sub.attr.sched.axis = {z0.id, z1.id};
   sub.x1 = mul.y;
-  sub.x2 = rsqrt0.y;
-  sub.y.dtype = af::DT_FLOAT;
-  *sub.y.axis = {z0.id, z1.id};
-  *sub.y.repeats = {s0, s1};
-  *sub.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Store store_op("store");
-  store_op.attr.sched.axis = {z0.id, z1.id};
-  store_op.x = sub.y;
-  *store_op.y.axis = {z0.id, z1.id};
-  store_op.y.dtype = af::DT_FLOAT;
-  *store_op.y.repeats = {s0, s1};
-  *store_op.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Output output_op("output");
-  output_op.x = store_op.y;
-  output_op.y.dtype = af::DT_FLOAT;
-  output_op.ir_attr.SetIndex(0);
+  SetFullMatmulGraphLayout(sub, context, af::DT_FLOAT);
+  ConnectRsqrtBroadcast(context, sub);
+  CreateMatmulGraphOutput(context, sub.y);
 }
 
-af::ComputeGraphPtr ShareGraph::LoadMatmulElewiseBrcFusedGraph() {
+af::ComputeGraphPtr ShareGraph::LoadMatmulElewiseBrcFusedGraph(bool is_dynamic) {
   auto builder = GraphBuilder("load_matmul_elewise_brc_store_test");
   auto data0 = builder.AddNode("data0", "Data", 0, 1);
   af::AttrUtils::SetInt(data0->GetOpDescBarePtr(), "_parent_node_index", 0);
@@ -9420,7 +9391,7 @@ af::ComputeGraphPtr ShareGraph::LoadMatmulElewiseBrcFusedGraph() {
   }
   auto ascbc_node = compute_graph->FindNode("ascbc");
   af::AscGraph sub_graph("load_matmul_elewise_brc_store");
-  CreateMatmulElewiseBrcGraph(sub_graph);
+  CreateMatmulElewiseBrcGraph(sub_graph, is_dynamic);
 
   std::string sub_graph_str;
   af::AscGraphUtils::SerializeToReadable(sub_graph, sub_graph_str);
@@ -9436,101 +9407,11 @@ af::ComputeGraphPtr ShareGraph::LoadMatmulElewiseBrcFusedGraph() {
  *   data0 data1 data2 data3 scalar0
  */
 static void CreateMatmulCompareScalarGraph(af::AscGraph &graph) {
-  auto s0 = graph.CreateSizeVar(32);
-  auto s1 = graph.CreateSizeVar(32);
-  auto z0 = graph.CreateAxis("z0", s0);
-  auto z1 = graph.CreateAxis("z1", s1);
-
-  af::ascir_op::Data data0("data0", graph);
-  data0.attr.sched.axis = {z0.id, z1.id};
-  data0.y.dtype = af::DT_FLOAT16;
-  *data0.y.axis = {z0.id, z1.id};
-  data0.attr.api.compute_type = af::ComputeType::kComputeInvalid;
-  *data0.y.repeats = {s0, s1};
-  *data0.y.strides = {s1, af::ops::One};
-  data0.ir_attr.SetIndex(0);
-
-  af::ascir_op::Load load0("load0");
-  load0.attr.sched.axis = {z0.id, z1.id};
-  load0.y.dtype = af::DT_FLOAT16;
-  load0.x = data0.y;
-  *load0.y.axis = {z0.id, z1.id};
-  *load0.y.repeats = {s0, s1};
-  *load0.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Data data1("data1", graph);
-  data1.attr.sched.axis = {z0.id, z1.id};
-  data1.y.dtype = af::DT_FLOAT16;
-  *data1.y.axis = {z0.id, z1.id};
-  data1.attr.api.compute_type = af::ComputeType::kComputeInvalid;
-  *data1.y.repeats = {s0, s1};
-  *data1.y.strides = {s1, af::ops::One};
-  data1.ir_attr.SetIndex(1);
-
-  af::ascir_op::Load load1("load1");
-  load1.attr.sched.axis = {z0.id, z1.id};
-  load1.y.dtype = af::DT_FLOAT16;
-  load1.x = data1.y;
-  *load1.y.axis = {z0.id, z1.id};
-  *load1.y.repeats = {s0, s1};
-  *load1.y.strides = {s1, af::ops::One};
-
+  const auto context = CreateMatmulGraphContext(graph);
   af::ascir_op::MatMul matmul("matmul");
-  matmul.attr.sched.axis = {z0.id, z1.id};
-  matmul.x1 = load0.y;
-  matmul.x2 = load1.y;
-  matmul.y.dtype = af::DT_FLOAT;
-  *matmul.y.axis = {z0.id, z1.id};
-  *matmul.y.repeats = {s0, s1};
-  *matmul.y.strides = {s1, af::ops::One};
-  matmul.ir_attr.SetTranspose_x1(1);
-  matmul.ir_attr.SetTranspose_x2(0);
-  matmul.ir_attr.SetHas_relu(0);
-  matmul.ir_attr.SetEnable_hf32(0);
-  matmul.ir_attr.SetOffset_x(0);
-
-  af::ascir_op::Data data2("data2", graph);
-  data2.y.dtype = af::DT_FLOAT;
-  data2.attr.sched.axis = {z0.id, z1.id};
-  *data2.y.axis = {z0.id, z1.id};
-  data2.attr.api.compute_type = af::ComputeType::kComputeInvalid;
-  *data2.y.repeats = {s0, s1};
-  *data2.y.strides = {s1, af::ops::One};
-  data2.ir_attr.SetIndex(2);
-
-  af::ascir_op::Load load2("load2");
-  load2.x = data2.y;
-  load2.attr.sched.axis = {z0.id, z1.id};
-  load2.y.dtype = af::DT_FLOAT;
-  *load2.y.axis = {z0.id, z1.id};
-  *load2.y.repeats = {s0, s1};
-  *load2.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Data data3("data3", graph);
-  data3.y.dtype = af::DT_FLOAT;
-  data3.attr.sched.axis = {z0.id, z1.id};
-  *data3.y.axis = {z0.id, z1.id};
-  data3.attr.api.compute_type = af::ComputeType::kComputeInvalid;
-  *data3.y.repeats = {af::ops::One, af::ops::One};
-  *data3.y.strides = {af::ops::Zero, af::ops::Zero};
-  data3.ir_attr.SetIndex(3);
-
-  af::ascir_op::Load load3("load3");
-  load3.x = data3.y;
-  load3.attr.sched.axis = {z0.id, z1.id};
-  load3.y.dtype = af::DT_FLOAT;
-  *load3.y.axis = {z0.id, z1.id};
-  *load3.y.repeats = {af::ops::One, af::ops::One};
-  *load3.y.strides = {af::ops::Zero, af::ops::Zero};
-
+  CreateMatmulPrefix(context, matmul);
   af::ascir_op::Eq eq0("eq0");
-  eq0.x1 = load2.y;
-  eq0.x2 = load3.y;
-  eq0.attr.sched.axis = {z0.id, z1.id};
-  eq0.y.dtype = af::DT_UINT8;
-  *eq0.y.axis = {z0.id, z1.id};
-  *eq0.y.repeats = {s0, s1};
-  *eq0.y.strides = {s1, af::ops::One};
+  ConnectCompareInputs(context, eq0);
 
   af::ascir_op::Scalar scalar0("scalar0", graph);
   scalar0.ir_attr.SetValue("1");
@@ -9539,24 +9420,8 @@ static void CreateMatmulCompareScalarGraph(af::AscGraph &graph) {
   where0.x1 = eq0.y;
   where0.x2 = matmul.y;
   where0.x3 = scalar0.y;
-  where0.attr.sched.axis = {z0.id, z1.id};
-  where0.y.dtype = af::DT_FLOAT;
-  *where0.y.axis = {z0.id, z1.id};
-  *where0.y.repeats = {s0, s1};
-  *where0.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Store store_op("store");
-  store_op.x = where0.y;
-  store_op.attr.sched.axis = {z0.id, z1.id};
-  store_op.y.dtype = af::DT_FLOAT;
-  *store_op.y.axis = {z0.id, z1.id};
-  *store_op.y.repeats = {s0, s1};
-  *store_op.y.strides = {s1, af::ops::One};
-
-  af::ascir_op::Output output_op("output");
-  output_op.x = store_op.y;
-  output_op.y.dtype = af::DT_FLOAT;
-  output_op.ir_attr.SetIndex(0);
+  SetFullMatmulGraphLayout(where0, context, af::DT_FLOAT);
+  CreateMatmulGraphOutput(context, where0.y);
 }
 
 af::ComputeGraphPtr ShareGraph::LoadMatmulCompareScalarFusedGraph() {

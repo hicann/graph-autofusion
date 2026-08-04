@@ -58,6 +58,13 @@ TemplateBehavior GetBehavior(TemplateRole role) {
       behavior.skips_ub_lifecycle = true;
       behavior.preserves_vectorized_axis = true;
       break;
+    case TemplateRole::kSkInputBoundary:
+      behavior.skips_main_schedule_tiling = true;
+      behavior.skips_api_emit = true;
+      behavior.preserves_vectorized_axis = true;
+      break;
+    case TemplateRole::kSkOp:
+      break;
     case TemplateRole::kNone:
       break;
   }
@@ -145,7 +152,8 @@ bool ShouldPreserveVectorizedAxis(const af::AscNodePtr &node) {
 }
 
 bool ShouldApplyInputInnerVectorization(const af::AscNodePtr &node) {
-  return GetTemplateRole(node) == TemplateRole::kSimdInputPre;
+  const TemplateRole role = GetTemplateRole(node);
+  return role == TemplateRole::kSimdInputPre || role == TemplateRole::kSkInputBoundary;
 }
 
 bool ShouldDisableRegularVectorFunc(const af::AscNodePtr &node) {

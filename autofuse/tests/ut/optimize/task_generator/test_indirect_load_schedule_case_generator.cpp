@@ -228,8 +228,8 @@ std::vector<af::AscGraph> GenerateIndirectLoadCases(int64_t axis) {
   std::vector<af::AscGraph> graphs;
   std::vector<std::string> score_functions;
   EXPECT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
-  EXPECT_EQ(graphs.size(), 2UL);
-  EXPECT_EQ(score_functions.size(), 2UL);
+  EXPECT_EQ(graphs.size(), 3UL);
+  EXPECT_EQ(score_functions.size(), 3UL);
   return graphs;
 }
 
@@ -297,6 +297,76 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, DoesNotStoreFixedTileAxesAsTemplateM
             af::kIdNone);
 }
 
+TEST(IndirectLoadScheduleCaseGeneratorTest, SkBuildsInputInnerAxisFromInputBoundary) {
+  auto graph = BuildIndirectLoadGraph(2, true);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  auto &sk_graph = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSK);
+  const auto indirect_load = sk_graph.FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  const auto input_boundary = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL);
+  ASSERT_NE(input_boundary, nullptr);
+
+  ascgen_utils::indirect_load::TemplateAxes axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, axes), af::SUCCESS);
+  const auto *input_inner_axis = sk_graph.FindAxis(axes.input_inner_axis);
+  ASSERT_NE(input_inner_axis, nullptr);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(input_boundary),
+            ascgen_utils::indirect_load::TemplateRole::kSkInputBoundary);
+  ExpectAxisNames(sk_graph, input_boundary->outputs()[0]->attr.axis, {"z0", "z1", "z2", "z3"});
+  ExpectAxisNames(sk_graph, input_inner_axis->from, {"z2", "z3"});
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratorTaskKeepsSkPartitionOrder) {
+  auto graph = BuildIndirectLoadGraph(2);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<optimize::ScheduleTask> tasks;
+  ASSERT_EQ(generator.GeneratorTask(graph, tasks, {}), af::SUCCESS);
+  const auto sk_task = std::find_if(tasks.begin(), tasks.end(), [](const optimize::ScheduleTask &task) {
+    const auto node = task.optimize_graph.FindNode("indirect_load");
+    return node != nullptr && ascir::GetTemplateIdOrDefault(*node) == ascir::TemplateId::kIndirectLoadSK;
+  });
+  ASSERT_NE(sk_task, tasks.end());
+
+  auto &grouped_graphs = sk_task->grouped_graphs;
+  ASSERT_EQ(grouped_graphs.size(), 4UL);
+  EXPECT_NE(grouped_graphs[0].FindNode("x"), nullptr);
+  EXPECT_NE(grouped_graphs[1].FindNode("index"), nullptr);
+  const auto indirect_load = grouped_graphs[2].FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  EXPECT_NE(grouped_graphs[3].FindNode("y"), nullptr);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratorTaskRestoresSkLogicalViewAfterPartition) {
+  auto graph = BuildIndirectLoadGraph(2);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<optimize::ScheduleTask> tasks;
+  ASSERT_EQ(generator.GeneratorTask(graph, tasks, {}), af::SUCCESS);
+  const auto sk_task = std::find_if(tasks.begin(), tasks.end(), [](const optimize::ScheduleTask &task) {
+    const auto node = task.optimize_graph.FindNode("indirect_load");
+    return node != nullptr && ascir::GetTemplateIdOrDefault(*node) == ascir::TemplateId::kIndirectLoadSK;
+  });
+  ASSERT_NE(sk_task, tasks.end());
+
+  const auto grouped_graph =
+      std::find_if(sk_task->grouped_graphs.begin(), sk_task->grouped_graphs.end(),
+                   [](const af::AscGraph &candidate) { return candidate.FindNode("indirect_load") != nullptr; });
+  ASSERT_NE(grouped_graph, sk_task->grouped_graphs.end());
+  const auto indirect_load = grouped_graph->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+
+  ascgen_utils::indirect_load::TemplateLogicalView logical_view;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
+  EXPECT_EQ(logical_view.data.axis_ids, indirect_load->inputs()[0]->attr.axis);
+  EXPECT_EQ(logical_view.data.strides, indirect_load->inputs()[0]->attr.strides);
+  EXPECT_EQ(logical_view.index.axis_ids, indirect_load->inputs()[1]->attr.axis);
+  EXPECT_EQ(logical_view.index.strides, indirect_load->inputs()[1]->attr.strides);
+  EXPECT_EQ(logical_view.output.axis_ids, indirect_load->outputs()[0]->attr.axis);
+  EXPECT_EQ(logical_view.output.strides, indirect_load->outputs()[0]->attr.strides);
+}
+
 TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratedSimdCandidateKeepsPublicBehavior) {
   auto graph = BuildIndirectLoadGraph(2, true);
   optimize::IndirectLoadScheduleCaseGenerator generator;
@@ -334,6 +404,31 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratedSimtCandidateKeepsPublicBeh
   EXPECT_TRUE(ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(indirect_load));
 }
 
+TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratedSkCandidateUsesSkBehavior) {
+  auto graphs = GenerateIndirectLoadCases(2);
+  auto &sk_graph = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSK);
+  const auto indirect_load = sk_graph.FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+
+  const auto behavior = ascgen_utils::indirect_load::GetTemplateBehavior(indirect_load);
+  EXPECT_FALSE(behavior.skips_main_schedule_tiling);
+  EXPECT_FALSE(behavior.skips_api_emit);
+  EXPECT_FALSE(behavior.uses_direct_gm_pipeline);
+  EXPECT_FALSE(behavior.skips_ub_lifecycle);
+  EXPECT_FALSE(behavior.preserves_vectorized_axis);
+  EXPECT_FALSE(ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(indirect_load));
+
+  const auto input_boundary = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL);
+  ASSERT_NE(input_boundary, nullptr);
+  const auto input_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(input_boundary);
+  EXPECT_TRUE(input_behavior.skips_main_schedule_tiling);
+  EXPECT_TRUE(input_behavior.skips_api_emit);
+  EXPECT_FALSE(input_behavior.uses_direct_gm_pipeline);
+  EXPECT_FALSE(input_behavior.skips_ub_lifecycle);
+  EXPECT_TRUE(input_behavior.preserves_vectorized_axis);
+  EXPECT_TRUE(ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(input_boundary));
+}
+
 TEST(IndirectLoadScheduleCaseGeneratorTest, SimdMovesInputPreAfterIndirectLoad) {
   auto graph = BuildIndirectLoadGraph(2, true);
   optimize::IndirectLoadScheduleCaseGenerator generator;
@@ -362,7 +457,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, MovesInputPrecisionCastAfterIndirect
   const auto status = generator.Generate(graph, graphs, score_functions);
   ge::PlatformContext::GetInstance().Reset();
   ASSERT_EQ(status, af::SUCCESS);
-  ASSERT_EQ(graphs.size(), 2UL);
+  ASSERT_EQ(graphs.size(), 3UL);
 
   auto &simd_graph = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
   EXPECT_NE(simd_graph.FindNode("input_cast"), nullptr);

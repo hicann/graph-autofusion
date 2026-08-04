@@ -6,6 +6,27 @@ set(INDUCTOR_MATMUL_ELEMWISE_OUTPUT_DIR ${INDUCTOR_MATMUL_ELEMWISE_WORKDIR}/spli
 
 set(PYAUTOFUSE_DIR ${CMAKE_BINARY_DIR}/autofuse/tests)
 set(AUTOFUSE_PYTHON_DIR ${CODE_ROOT_DIR}/compiler/python)
+string(CONCAT INDUCTOR_MATMUL_ELEMWISE_KERNEL_SRC_LIST
+    "${INDUCTOR_MATMUL_ELEMWISE_TILING_DEF}:"
+    "${INDUCTOR_MATMUL_ELEMWISE_HOST_CODE}:"
+    "${INDUCTOR_MATMUL_ELEMWISE_DEVICE_CODE}"
+)
+
+add_executable(inductor_matmul_elemwise_test_codegen inductor_matmul_elemwise_backend_generate.cpp)
+target_link_options(inductor_matmul_elemwise_test_codegen PRIVATE -Wl,--no-as-needed)
+target_link_libraries(inductor_matmul_elemwise_test_codegen
+    atrace optimize att codegen common_stub share_graph ascgen_common
+    aihac_symbolizer_af asc_slog_stub error_manager metadef json
+    GTest::gtest GTest::gtest_main)
+target_compile_definitions(inductor_matmul_elemwise_test_codegen PRIVATE
+    ATT_SO_NAME="./libatt.so"
+    KERNEL_SRC_LIST="${INDUCTOR_MATMUL_ELEMWISE_KERNEL_SRC_LIST}"
+)
+add_test(NAME inductor_matmul_elemwise_test_codegen
+    COMMAND inductor_matmul_elemwise_test_codegen
+            --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/inductor_matmul_elemwise_test_codegen.xml)
+set_tests_properties(inductor_matmul_elemwise_test_codegen PROPERTIES
+    LABELS "st;build_backend_test1;inductor_matmul_elemwise_test_codegen")
 
 set(MATMUL_TILING_DATA_SEARCH_DIRS ${ASCEND_INSTALL_PATH}/opp)
 foreach(OPP_ENV ASCEND_OPP_PATH ASCEND_CUSTOM_OPP_PATH)
@@ -21,28 +42,15 @@ foreach(SEARCH_DIR ${MATMUL_TILING_DATA_SEARCH_DIRS})
     list(APPEND MATMUL_TILING_DATA_HEADERS ${MATMUL_TILING_DATA_HEADERS_IN_DIR})
 endforeach()
 if(NOT MATMUL_TILING_DATA_HEADERS)
-    message(WARNING "Skip inductor_matmul_elemwise_test: arch35/mat_mul_tiling_data.h not found in Ascend install or OPP paths")
-    add_custom_target(inductor_matmul_elemwise_test_codegen)
+    message(WARNING
+        "Skip inductor_matmul_elemwise_test_e2e: "
+        "arch35/mat_mul_tiling_data.h not found in Ascend install or OPP paths")
     add_custom_target(inductor_matmul_elemwise_test_e2e)
     return()
 endif()
 list(GET MATMUL_TILING_DATA_HEADERS 0 MATMUL_TILING_DATA_HEADER)
 get_filename_component(MATMUL_TILING_DATA_INCLUDE_DIR ${MATMUL_TILING_DATA_HEADER} DIRECTORY)
 get_filename_component(MATMUL_TILING_DATA_INCLUDE_DIR ${MATMUL_TILING_DATA_INCLUDE_DIR} DIRECTORY)
-
-add_executable(inductor_matmul_elemwise_test_codegen inductor_matmul_elemwise_backend_generate.cpp)
-target_link_options(inductor_matmul_elemwise_test_codegen PRIVATE -Wl,--no-as-needed)
-target_link_libraries(inductor_matmul_elemwise_test_codegen
-    atrace optimize att codegen common_stub share_graph ascgen_common
-    aihac_symbolizer_af asc_slog_stub error_manager metadef json
-    GTest::gtest GTest::gtest_main)
-target_compile_definitions(inductor_matmul_elemwise_test_codegen PRIVATE
-    ATT_SO_NAME="./libatt.so"
-    KERNEL_SRC_LIST="${INDUCTOR_MATMUL_ELEMWISE_TILING_DEF}:${INDUCTOR_MATMUL_ELEMWISE_HOST_CODE}:${INDUCTOR_MATMUL_ELEMWISE_DEVICE_CODE}"
-)
-add_test(NAME inductor_matmul_elemwise_test_codegen
-    COMMAND inductor_matmul_elemwise_test_codegen --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/inductor_matmul_elemwise_test_codegen.xml)
-set_tests_properties(inductor_matmul_elemwise_test_codegen PROPERTIES LABELS "st;build_backend_test1;inductor_matmul_elemwise_test_codegen")
 
 file(MAKE_DIRECTORY ${INDUCTOR_MATMUL_ELEMWISE_OUTPUT_DIR})
 add_custom_command(

@@ -20,6 +20,7 @@
 #include "schedule_result.h"
 
 #include <algorithm>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -97,6 +98,19 @@ af::Status ValidateTemplateCandidate(ascir::TemplateId template_id, const Indire
   return af::SUCCESS;
 }
 
+bool IsSkTemplateCandidateLegal(const af::AscNodePtr &indirect_load) {
+  if (indirect_load == nullptr || indirect_load->GetOutDataNodesSize() != 1UL) {
+    return false;
+  }
+  for (size_t input_idx = 0UL; input_idx < 2UL; ++input_idx) {
+    const auto input_anchor = indirect_load->GetInDataAnchor(input_idx);
+    if (input_anchor == nullptr || input_anchor->GetPeerOutAnchor() == nullptr) {
+      return false;
+    }
+  }
+  return true;
+}
+
 af::Status GetIndirectLoadAxis(const af::AscNodePtr &node, int64_t &axis) {
   GE_ASSERT_NOTNULL(node, "IndirectLoad node is null.");
   GE_ASSERT_NOTNULL(node->attr.ir_attr, "IndirectLoad ir attr is null, node = %s", node->GetNamePtr());
@@ -167,6 +181,148 @@ af::Status CreateFixedTileSplit(af::AscGraph &graph, af::AxisId axis_id) {
   return af::SUCCESS;
 }
 
+af::Status CopyBoundaryTensorAttr(const af::AscNodePtr &src_node, size_t src_output_idx,
+                                  const af::AscNodePtr &dst_node) {
+  GE_ASSERT_NOTNULL(src_node);
+  GE_ASSERT_NOTNULL(dst_node);
+  GE_ASSERT_TRUE(src_output_idx < src_node->outputs().size(),
+                 "IndirectLoad SK boundary output index %zu is out of range for node[%s].", src_output_idx,
+                 src_node->GetNamePtr());
+  GE_ASSERT_TRUE(!dst_node->outputs().empty(), "IndirectLoad SK boundary node[%s] has no output.",
+                 dst_node->GetNamePtr());
+  auto dst_op_desc = dst_node->GetOpDesc();
+  GE_ASSERT_NOTNULL(dst_op_desc);
+  auto dst_node_attr = dst_op_desc->GetOrCreateAttrsGroup<af::AscNodeAttr>();
+  auto src_node_attr = src_node->GetOpDesc()->GetOrCreateAttrsGroup<af::AscNodeAttr>();
+  GE_ASSERT_NOTNULL(dst_node_attr);
+  if (src_node_attr != nullptr) {
+    dst_node_attr->sched = src_node_attr->sched;
+    if (src_node_attr->ir_attr != nullptr) {
+      dst_node_attr->ir_attr = src_node_attr->ir_attr->Clone();
+    }
+  }
+  auto output_desc = dst_op_desc->MutableOutputDesc(0UL);
+  GE_ASSERT_NOTNULL(output_desc);
+  auto output_attr = output_desc->GetOrCreateAttrsGroup<af::AscTensorAttr>();
+  GE_ASSERT_NOTNULL(output_attr);
+  *output_attr = src_node->outputs()[src_output_idx]->attr;
+  return af::SUCCESS;
+}
+
+af::Status CopyWorkspaceTensorAttr(const af::AscNodePtr &boundary_node, const af::AscNodePtr &workspace_node) {
+  GE_ASSERT_NOTNULL(boundary_node);
+  GE_ASSERT_NOTNULL(workspace_node);
+  GE_ASSERT_TRUE(!boundary_node->outputs().empty(), "IndirectLoad SK boundary node[%s] has no output.",
+                 boundary_node->GetNamePtr());
+  GE_ASSERT_TRUE(!workspace_node->outputs().empty(), "IndirectLoad SK workspace node[%s] has no output.",
+                 workspace_node->GetNamePtr());
+  workspace_node->outputs()[0]->attr = boundary_node->outputs()[0]->attr;
+  return af::SUCCESS;
+}
+
+af::Status InsertWorkspaceBoundary(af::AscGraph &graph, const af::AscNodePtr &src_node, size_t src_output_idx,
+                                   const af::AscNodePtr &dst_node, size_t dst_input_idx,
+                                   const std::string &boundary_name) {
+  GE_ASSERT_NOTNULL(src_node);
+  GE_ASSERT_NOTNULL(dst_node);
+  const auto src_anchor = src_node->GetOutDataAnchor(src_output_idx);
+  const auto dst_anchor = dst_node->GetInDataAnchor(dst_input_idx);
+  GE_ASSERT_NOTNULL(src_anchor, "IndirectLoad SK source anchor is null for boundary[%s].", boundary_name.c_str());
+  GE_ASSERT_NOTNULL(dst_anchor, "IndirectLoad SK destination anchor is null for boundary[%s].", boundary_name.c_str());
+  GE_ASSERT_TRUE(dst_anchor->GetPeerOutAnchor() == src_anchor,
+                 "IndirectLoad SK boundary[%s] does not match edge %s:%zu -> %s:%zu.", boundary_name.c_str(),
+                 src_node->GetNamePtr(), src_output_idx, dst_node->GetNamePtr(), dst_input_idx);
+
+  const std::string workspace_name = boundary_name + "_workspace";
+  af::ascir_op::Workspace workspace_pre(workspace_name.c_str());
+  af::ascir_op::Workspace workspace_post(workspace_name.c_str());
+  af::ascir_op::Load load((boundary_name + "_load").c_str());
+  af::ascir_op::Store store((boundary_name + "_store").c_str());
+  auto workspace_pre_node = graph.AddNode(workspace_pre);
+  auto workspace_post_node = graph.AddNode(workspace_post);
+  auto load_node = graph.AddNode(load);
+  auto store_node = graph.AddNode(store);
+  GE_ASSERT_NOTNULL(workspace_pre_node);
+  GE_ASSERT_NOTNULL(workspace_post_node);
+  GE_ASSERT_NOTNULL(load_node);
+  GE_ASSERT_NOTNULL(store_node);
+
+  GE_ASSERT_SUCCESS(CopyBoundaryTensorAttr(src_node, src_output_idx, load_node));
+  GE_ASSERT_SUCCESS(CopyBoundaryTensorAttr(src_node, src_output_idx, store_node));
+  GE_ASSERT_SUCCESS(CopyWorkspaceTensorAttr(store_node, workspace_pre_node));
+  GE_ASSERT_SUCCESS(CopyWorkspaceTensorAttr(load_node, workspace_post_node));
+
+  GE_ASSERT_GRAPH_SUCCESS(af::GraphUtils::RemoveEdge(src_anchor, dst_anchor));
+  GE_ASSERT_GRAPH_SUCCESS(af::GraphUtils::AddEdge(src_anchor, store_node->GetInDataAnchor(0UL)));
+  GE_ASSERT_GRAPH_SUCCESS(
+      af::GraphUtils::AddEdge(store_node->GetOutDataAnchor(0UL), workspace_pre_node->GetInDataAnchor(0UL)));
+  GE_ASSERT_GRAPH_SUCCESS(
+      af::GraphUtils::AddEdge(workspace_post_node->GetOutDataAnchor(0UL), load_node->GetInDataAnchor(0UL)));
+  GE_ASSERT_GRAPH_SUCCESS(af::GraphUtils::AddEdge(load_node->GetOutDataAnchor(0UL), dst_anchor));
+  return af::SUCCESS;
+}
+
+af::Status PartitionSkGraph(af::AscGraph &graph, const af::AscNodePtr &indirect_load) {
+  GE_ASSERT_NOTNULL(indirect_load);
+  for (size_t input_idx = 0UL; input_idx < 2UL; ++input_idx) {
+    const auto input_anchor = indirect_load->GetInDataAnchor(input_idx);
+    GE_ASSERT_NOTNULL(input_anchor);
+    const auto peer_out_anchor = input_anchor->GetPeerOutAnchor();
+    GE_ASSERT_NOTNULL(peer_out_anchor);
+    auto producer = std::dynamic_pointer_cast<af::AscNode>(peer_out_anchor->GetOwnerNode());
+    GE_ASSERT_NOTNULL(producer);
+    const std::string role = input_idx == 0UL ? "input" : "index";
+    GE_ASSERT_SUCCESS(InsertWorkspaceBoundary(graph, producer, static_cast<size_t>(peer_out_anchor->GetIdx()),
+                                              indirect_load, input_idx, indirect_load->GetName() + "_sk_" + role));
+  }
+
+  const auto output_anchor = indirect_load->GetOutDataAnchor(0UL);
+  GE_ASSERT_NOTNULL(output_anchor);
+  const auto peer_input_anchors = output_anchor->GetPeerInDataAnchors();
+  GE_ASSERT_TRUE(peer_input_anchors.size() == 1UL,
+                 "IndirectLoad SK requires exactly one output consumer, node[%s], consumer count:%zu.",
+                 indirect_load->GetNamePtr(), peer_input_anchors.size());
+  const auto peer_input_anchor = *peer_input_anchors.begin();
+  GE_ASSERT_NOTNULL(peer_input_anchor);
+  auto consumer = std::dynamic_pointer_cast<af::AscNode>(peer_input_anchor->GetOwnerNode());
+  GE_ASSERT_NOTNULL(consumer);
+  GE_ASSERT_SUCCESS(InsertWorkspaceBoundary(graph, indirect_load, 0UL, consumer,
+                                            static_cast<size_t>(peer_input_anchor->GetIdx()),
+                                            indirect_load->GetName() + "_sk_output"));
+  return af::SUCCESS;
+}
+
+af::Status BuildSkPartitionOrder(const ascir::ImplGraph &graph, const af::AscNodePtr &indirect_load,
+                                 std::vector<af::AscNodePtr> &node_order) {
+  GE_ASSERT_NOTNULL(indirect_load);
+  std::set<af::NodePtr> ordered_nodes;
+  for (const char *role : {"input", "index", "output"}) {
+    const std::string workspace_name = indirect_load->GetName() + "_sk_" + role + "_workspace";
+    af::AscNodePtr workspace_pre;
+    for (const auto &node : graph.GetAllNodes()) {
+      if (node->GetName() == workspace_name && node->GetOutDataNodes().empty()) {
+        workspace_pre = node;
+        break;
+      }
+    }
+    GE_ASSERT_NOTNULL(workspace_pre, "IndirectLoad SK terminal workspace[%s] is not found.", workspace_name.c_str());
+    node_order.emplace_back(workspace_pre);
+    ordered_nodes.emplace(workspace_pre);
+  }
+  std::vector<af::AscNodePtr> remaining_outputs;
+  for (const auto &node : graph.GetAllNodes()) {
+    if (node->GetOutDataNodes().empty() && ordered_nodes.find(node) == ordered_nodes.end()) {
+      remaining_outputs.emplace_back(node);
+    }
+  }
+  std::sort(remaining_outputs.begin(), remaining_outputs.end(),
+            [](const af::AscNodePtr &lhs, const af::AscNodePtr &rhs) {
+              return lhs->GetOpDescBarePtr()->GetId() < rhs->GetOpDescBarePtr()->GetId();
+            });
+  node_order.insert(node_order.end(), remaining_outputs.begin(), remaining_outputs.end());
+  return af::SUCCESS;
+}
+
 af::Status BuildSimdInputInnerAxis(af::AscGraph &graph, const af::AscNodePtr &input_producer, size_t axis_index,
                                    ascir::AxisId &input_inner_axis) {
   GE_ASSERT_NOTNULL(input_producer, "IndirectLoad SIMD input0 producer is null.");
@@ -177,6 +333,15 @@ af::Status BuildSimdInputInnerAxis(af::AscGraph &graph, const af::AscNodePtr &in
   GE_ASSERT_SUCCESS(MergeAxesForTemplate(graph, input_inner_axes, "indirect_load_input_inner", input_inner_axis));
   return af::SUCCESS;
 }
+
+af::Status BuildSkInputInnerAxis(af::AscGraph &graph, const af::AscNodePtr &indirect_load, size_t axis_index,
+                                 ascir::AxisId &input_inner_axis) {
+  const auto input_boundary = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL);
+  GE_ASSERT_TRUE(input_boundary != nullptr && af::ops::IsOps<af::ascir_op::Load>(input_boundary),
+                 "IndirectLoad SK input boundary must be a Load node, node[%s].", indirect_load->GetNamePtr());
+  return BuildSimdInputInnerAxis(graph, input_boundary, axis_index, input_inner_axis);
+}
+
 af::Status BuildAxisViewByBoundary(af::AscGraph &graph, const std::vector<af::AxisId> &axes, size_t boundary,
                                    af::AxisId &outer_axis, af::AxisId &inner_axis) {
   GE_ASSERT_TRUE(!axes.empty(), "IndirectLoad output axis is empty.");
@@ -205,6 +370,26 @@ af::Status NormalizeAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &i
   GE_ASSERT_SUCCESS(CreateFixedTileSplit(graph, outer_axis));
   GE_ASSERT_SUCCESS(
       ascgen_utils::indirect_load::SetTemplateAxes(indirect_load, {outer_axis, inner_axis, input_inner_axis}));
+  return af::SUCCESS;
+}
+
+af::Status RestoreSkTemplateAxes(std::vector<ascir::ImplGraph> &grouped_graphs) {
+  for (auto &graph : grouped_graphs) {
+    af::AscNodePtr indirect_load;
+    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ValidateSingleIndirectLoadNode(graph, indirect_load));
+    if (indirect_load == nullptr) {
+      continue;
+    }
+    GE_ASSERT_TRUE(ascir::GetTemplateIdOrDefault(*indirect_load) == ascir::TemplateId::kIndirectLoadSK,
+                   "IndirectLoad partitioned graph[%s] has unexpected template.", graph.GetName().c_str());
+    int64_t axis = 0L;
+    GE_ASSERT_SUCCESS(GetIndirectLoadAxis(indirect_load, axis));
+    const int64_t rank = static_cast<int64_t>(indirect_load->outputs()[0]->attr.axis.size());
+    const size_t axis_index = static_cast<size_t>(axis < 0L ? axis + rank : axis);
+    ascir::AxisId input_inner_axis = af::kIdNone;
+    GE_ASSERT_SUCCESS(BuildSkInputInnerAxis(graph, indirect_load, axis_index, input_inner_axis));
+    GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, axis, rank, input_inner_axis));
+  }
   return af::SUCCESS;
 }
 
@@ -517,6 +702,32 @@ af::Status ApplySimtGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirec
   return af::SUCCESS;
 }
 
+af::Status ApplySkGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_load, bool &is_candidate_legal) {
+  is_candidate_legal = false;
+  if (!IsSkTemplateCandidateLegal(indirect_load)) {
+    return af::SUCCESS;
+  }
+  is_candidate_legal = true;
+  GE_ASSERT_SUCCESS(::ascir::SetTemplateId(indirect_load, ascir::TemplateId::kIndirectLoadSK));
+  GE_ASSERT_SUCCESS(RecordTemplateLogicalView(indirect_load));
+  GE_ASSERT_SUCCESS(PartitionSkGraph(graph, indirect_load));
+  int64_t axis = 0L;
+  GE_ASSERT_SUCCESS(GetIndirectLoadAxis(indirect_load, axis));
+  const int64_t rank = static_cast<int64_t>(indirect_load->outputs()[0]->attr.axis.size());
+  const size_t axis_index = static_cast<size_t>(axis < 0L ? axis + rank : axis);
+  ascir::AxisId input_inner_axis = af::kIdNone;
+  GE_ASSERT_SUCCESS(BuildSkInputInnerAxis(graph, indirect_load, axis_index, input_inner_axis));
+  GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, axis, rank, input_inner_axis));
+  GE_ASSERT_SUCCESS(
+      ascgen_utils::indirect_load::SetTemplateRole(indirect_load, ascgen_utils::indirect_load::TemplateRole::kSkOp));
+  const auto input_boundary = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL);
+  GE_ASSERT_TRUE(input_boundary != nullptr && af::ops::IsOps<af::ascir_op::Load>(input_boundary),
+                 "IndirectLoad SK input boundary must be a Load node, node[%s].", indirect_load->GetNamePtr());
+  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
+      input_boundary, ascgen_utils::indirect_load::TemplateRole::kSkInputBoundary));
+  return af::SUCCESS;
+}
+
 af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_load, ascir::TemplateId template_id,
                           bool &is_candidate_legal) {
   GELOGD("[IndirectLoad] Apply graph pass for node[%s], template_id[%d].", indirect_load->GetNamePtr(),
@@ -527,6 +738,9 @@ af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_lo
   }
   if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
     return ApplySimtGraphPass(graph, indirect_load, is_candidate_legal);
+  }
+  if (template_id == ascir::TemplateId::kIndirectLoadSK) {
+    return ApplySkGraphPass(graph, indirect_load, is_candidate_legal);
   }
   return af::SUCCESS;
 }
@@ -544,7 +758,8 @@ Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std:
          indirect_load->GetNamePtr());
   const std::string indirect_load_name = indirect_load->GetName();
   const bool prefer_simd = HasExp2(graph);
-  for (ascir::TemplateId template_id : {ascir::TemplateId::kIndirectLoadSimd, ascir::TemplateId::kIndirectLoadSimt}) {
+  for (ascir::TemplateId template_id : {ascir::TemplateId::kIndirectLoadSimd, ascir::TemplateId::kIndirectLoadSimt,
+                                        ascir::TemplateId::kIndirectLoadSK}) {
     ascir::ImplGraph candidate_graph(graph.GetName().c_str());
     GE_ASSERT_TRUE(candidate_graph.CopyFrom(graph), "Failed to copy graph [%s].", graph.GetName().c_str());
     const af::AscNodePtr candidate_indirect_load = candidate_graph.FindNode(indirect_load_name.c_str());
@@ -561,6 +776,50 @@ Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std:
     score_functions.emplace_back(GenerateScoreFunc(template_id, prefer_simd));
     GELOGI("[IndirectLoad] Add schedule candidate[%d] for node[%s].", static_cast<int32_t>(template_id),
            candidate_indirect_load->GetNamePtr());
+  }
+  return af::SUCCESS;
+}
+
+Status IndirectLoadScheduleCaseGenerator::GeneratorTask(ascir::HintGraph &optimize_graph,
+                                                        std::vector<ScheduleTask> &tasks,
+                                                        const OptimizerOptions &options) {
+  bool need_update_axis = false;
+  GE_ASSERT_SUCCESS(ScheduleGroupGraphPartitioner::NeedRefreshAxisSize(optimize_graph, need_update_axis));
+  std::vector<ascir::ImplGraph> optimize_graphs;
+  std::vector<std::string> score_funcs;
+  GE_CHK_STATUS_RET(Generate(optimize_graph, optimize_graphs, score_funcs), "GenerateScheduleCases failed");
+  for (size_t i = 0UL; i < optimize_graphs.size(); ++i) {
+    const auto &graph = optimize_graphs[i];
+    ScheduleTask task{graph, {}, score_funcs[i]};
+    task.has_load_store_conversion = HasLoadStoreConversion();
+    af::AscNodePtr indirect_load;
+    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ValidateSingleIndirectLoadNode(graph, indirect_load));
+    if (indirect_load != nullptr &&
+        ascir::GetTemplateIdOrDefault(*indirect_load) == ascir::TemplateId::kIndirectLoadSK) {
+      std::vector<af::AscNodePtr> node_order = {};
+      GE_ASSERT_SUCCESS(BuildSkPartitionOrder(graph, indirect_load, node_order));
+      GE_CHK_STATUS_RET(ScheduleGroupGraphPartitioner::PartitionByConnectivity(graph, task.grouped_graphs, node_order),
+                        "Failed to partition graph");
+      GE_ASSERT_SUCCESS(RestoreSkTemplateAxes(task.grouped_graphs));
+    } else {
+      GE_CHK_STATUS_RET(ScheduleGroupGraphPartitioner::PartitionByConnectivity(graph, task.grouped_graphs),
+                        "Failed to partition graph");
+    }
+    if (need_update_axis && task.grouped_graphs.size() > 1UL) {
+      for (const auto &subgraph : task.grouped_graphs) {
+        if (ScheduleUtils::FindFirstNodeOfType<af::ascir_op::Concat>(subgraph) == nullptr) {
+          GE_ASSERT_SUCCESS(ScheduleGroupGraphPartitioner::RefreshAxisSize(subgraph));
+        }
+      }
+    }
+    if (options.graph_type == GraphType::kFusedAscBackend) {
+      const auto backend_spec = BackendSpec::GetInstance();
+      GE_ASSERT_NOTNULL(backend_spec);
+      GE_CHK_STATUS_RET(ScheduleGroupGraphPartitioner::ReduceGraphCount(task.grouped_graphs,
+                                                                        backend_spec->max_group_num_per_compile_unit),
+                        "Failed to reduce graph count");
+    }
+    tasks.emplace_back(std::move(task));
   }
   return af::SUCCESS;
 }

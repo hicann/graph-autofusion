@@ -31,6 +31,34 @@ std::string GetNewNodeName(const af::AscNodePtr &src_node, const af::AscNodePtr 
   return src_node->GetName() + "_to_" + dst_node->GetName() + "_" + type + "_" + to_string(idx);
 }
 
+bool IsLegacyFullLoadReduce(const std::vector<ascir::SizeExpr> &input_repeats,
+                            const std::vector<ascir::SizeExpr> &output_repeats) {
+  if (output_repeats.size() > kMaxFullLoadAxisSize) {
+    return false;
+  }
+  return af::SymbolicUtils::StaticCheckEq(input_repeats[0], output_repeats[0]) == af::TriBool::kTrue;
+}
+
+bool IsTailReduceFullLoad(const af::AscNodePtr &node, const std::vector<ascir::SizeExpr> &input_repeats,
+                          const std::vector<ascir::SizeExpr> &output_repeats) {
+  if (input_repeats.size() < kMaxFullLoadAxisSize) {
+    return false;
+  }
+  const auto tail_index = input_repeats.size() - 1U;
+  for (size_t i = 0U; i < tail_index; ++i) {
+    if (af::SymbolicUtils::StaticCheckEq(input_repeats[i], output_repeats[i]) != af::TriBool::kTrue) {
+      return false;
+    }
+  }
+  if (node != nullptr && node->GetType() == "Softmax") {
+    GELOGD("IsTailReduceFullLoad node=%s is Softmax, return true.", node->GetName().c_str());
+    return true;
+  }
+  return (af::SymbolicUtils::StaticCheckEq(input_repeats[tail_index], output_repeats[tail_index]) !=
+          af::TriBool::kTrue) &&
+         (af::SymbolicUtils::StaticCheckEq(output_repeats[tail_index], af::ops::One) == af::TriBool::kTrue);
+}
+
 Status DoCopyAscNodeTensorAttr(const af::AscNodePtr &src_node, af::AscNodePtr &dst_node) {
   auto op_desc = dst_node->GetOpDesc();
   auto dst_asc_node_attr = op_desc->GetOrCreateAttrsGroup<af::AscNodeAttr>();
@@ -184,7 +212,9 @@ Status ReducePartitionCaseGenerator::GeneratorGeneralTask(ascir::HintGraph &opti
 
 Status ReducePartitionCaseGenerator::GeneratorAllLoadTask(ascir::HintGraph &optimize_graph,
                                                           std::vector<ScheduleTask> &tasks) {
-  if (!CanReduceFuse(optimize_graph)) {
+  if (!CanFullLoadReduceFuse(optimize_graph)) {
+    GELOGD("Graph %s does not support FullLoadReduceFuse, skip AllLoad task generation.",
+           optimize_graph.GetName().c_str());
     return ge::GRAPH_SUCCESS;
   }
   std::vector<ascir::ImplGraph> optimize_graphs;
@@ -705,9 +735,8 @@ bool ReducePartitionCaseGenerator::HasArgMaxReduce(const ScheduleTask &task) {
   return false;
 }
 
-// 全载模板只支持reduce AR ARA
-bool ReducePartitionCaseGenerator::CanReduceFuse(const ascir::ImplGraph &impl_graph) {
-  std::vector<ascir::SizeExpr> temp_strides;
+// 全载模板支持历史 AR/ARA 类短轴场景，并额外支持 AA...AR 尾轴 reduce 场景。
+bool ReducePartitionCaseGenerator::CanFullLoadReduceFuse(const ascir::ImplGraph &impl_graph) {
   for (const auto &node : impl_graph.GetAllNodes()) {
     if (!ScheduleUtils::IsReduce(node)) {
       continue;
@@ -715,11 +744,12 @@ bool ReducePartitionCaseGenerator::CanReduceFuse(const ascir::ImplGraph &impl_gr
     std::vector<ascir::SizeExpr> input_repeats = node->inputs[0].attr.repeats;
     std::vector<ascir::SizeExpr> output_repeats = node->outputs[0].attr.repeats;
     GE_ASSERT_TRUE(input_repeats.size() == output_repeats.size());
-    if (output_repeats.empty() || (output_repeats.size() > kMaxFullLoadAxisSize)) {
+    if (output_repeats.empty()) {
       return false;
     }
 
-    if (af::SymbolicUtils::StaticCheckEq(input_repeats[0], output_repeats[0]) != af::TriBool::kTrue) {
+    if (!IsLegacyFullLoadReduce(input_repeats, output_repeats) &&
+        !IsTailReduceFullLoad(node, input_repeats, output_repeats)) {
       return false;
     }
   }

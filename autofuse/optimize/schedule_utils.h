@@ -68,8 +68,9 @@ class ScheduleUtils {
   }
 
   static bool IsGatherLikeLoad(const af::AscNodePtr &node) {
-    return af::ops::IsOps<af::ascir_op::Gather>(node) ||
-           ::ascir::GetTemplateIdOrDefault(*node) == ascir::TemplateId::kIndirectLoadSimd;
+    const auto template_id = ::ascir::GetTemplateIdOrDefault(*node);
+    return af::ops::IsOps<af::ascir_op::Gather>(node) || template_id == ascir::TemplateId::kIndirectLoadSimd ||
+           template_id == ascir::TemplateId::kIndirectLoadSK;
   }
 
   static bool IsBuffer(const af::AscNodePtr &node) {

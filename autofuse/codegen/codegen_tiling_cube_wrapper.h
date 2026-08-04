@@ -29,6 +29,7 @@ inline const std::string kCubeKernelTilingWrapperHppValue = R"(
 #include <algorithm>
 #include <limits>
 #include "acl/acl.h"
+#include "arch35/mat_mul_tiling_data.h"
 #include "platform/platform_info.h"
 
 namespace ge {
@@ -810,8 +811,6 @@ private:
 
 using Json = json_internal::Json;
 
-#include "arch35/mat_mul_tiling_data.h"
-
 struct TensorInfo {
     std::string param_name;
     std::vector<int64_t> shape;
@@ -916,6 +915,7 @@ private:
 )";
 
 inline const std::string kCubeKernelTilingWrapperCppValue = R"(
+#include "autofuse_tiling_func_log.h"
 #include <sstream>
 #include <iomanip>
 #include <dlfcn.h>

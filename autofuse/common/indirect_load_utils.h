@@ -25,6 +25,8 @@ enum class TemplateRole : int64_t {
   kSimtDirectGmBoundary,
   kSimtInlineTransform,
   kSimtOp,
+  kSkInputBoundary,
+  kSkOp,
 };
 
 struct TemplateBehavior {

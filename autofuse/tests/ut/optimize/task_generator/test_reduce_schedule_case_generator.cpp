@@ -69,6 +69,140 @@ class ReduceScheduleCaseGeneratorTest : public ::testing::Test {
     return ss.str();
   }
 };
+
+bool HasReduceTemplateType(const std::vector<ScheduleTask> &tasks, ReduceTemplateType reduce_type) {
+  for (const auto &task : tasks) {
+    if (task.reduce_type == reduce_type) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void ConstructFourAxisReduce(af::AscGraph &graph, bool tail_reduce) {
+  auto s0 = graph.CreateSizeVar(128);
+  auto s1 = graph.CreateSizeVar(64);
+  auto s2 = graph.CreateSizeVar(32);
+  auto s3 = graph.CreateSizeVar(16);
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  auto z2 = graph.CreateAxis("z2", s2);
+  auto z3 = graph.CreateAxis("z3", s3);
+  std::vector<af::AxisId> axes = {z0.id, z1.id, z2.id, z3.id};
+
+  Data data("data", graph);
+  data.y.dtype = ge::DT_FLOAT;
+  data.ir_attr.SetIndex(0);
+
+  Load load("load");
+  load.attr.sched.axis = axes;
+  load.x = data.y;
+  *load.y.axis = axes;
+  load.y.dtype = ge::DT_FLOAT;
+  *load.y.strides = {s1 * s2 * s3, s2 * s3, s3, af::ops::One};
+  *load.y.repeats = {s0, s1, s2, s3};
+
+  Sum sum("sum");
+  sum.attr.sched.axis = axes;
+  sum.attr.api.compute_type = af::ComputeType::kComputeReduce;
+  sum.x = load.y;
+  *sum.y.axis = axes;
+  sum.y.dtype = ge::DT_FLOAT;
+  if (tail_reduce) {
+    *sum.y.repeats = {s0, s1, s2, af::ops::One};
+    *sum.y.strides = {s1 * s2, s2, af::ops::One, af::ops::Zero};
+  } else {
+    *sum.y.repeats = {s0, s1, s2, s3};
+    *sum.y.strides = {s1 * s2 * s3, s2 * s3, s3, af::ops::One};
+  }
+
+  Store store_op("store");
+  store_op.attr.sched.axis = axes;
+  store_op.attr.api.compute_type = af::ComputeType::kComputeStore;
+  store_op.x = sum.y;
+  *store_op.y.axis = *sum.y.axis;
+  store_op.y.dtype = ge::DT_FLOAT;
+  *store_op.y.strides = *sum.y.strides;
+  *store_op.y.repeats = *sum.y.repeats;
+
+  Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = ge::DT_FLOAT;
+  output_op.ir_attr.SetIndex(0);
+}
+
+void ConstructEmptyRepeatReduce(af::AscGraph &graph) {
+  Data data("data", graph);
+  data.y.dtype = ge::DT_FLOAT;
+  data.ir_attr.SetIndex(0);
+
+  Load load("load");
+  load.x = data.y;
+  load.y.dtype = ge::DT_FLOAT;
+
+  Sum sum("sum");
+  sum.attr.api.compute_type = af::ComputeType::kComputeReduce;
+  sum.x = load.y;
+  sum.y.dtype = ge::DT_FLOAT;
+
+  Store store_op("store");
+  store_op.attr.api.compute_type = af::ComputeType::kComputeStore;
+  store_op.x = sum.y;
+  store_op.y.dtype = ge::DT_FLOAT;
+
+  Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = ge::DT_FLOAT;
+  output_op.ir_attr.SetIndex(0);
+}
+
+void ConstructFourAxisSoftmax(af::AscGraph &graph) {
+  auto s0 = graph.CreateSizeVar(128);
+  auto s1 = graph.CreateSizeVar(64);
+  auto s2 = graph.CreateSizeVar(32);
+  auto s3 = graph.CreateSizeVar(16);
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  auto z2 = graph.CreateAxis("z2", s2);
+  auto z3 = graph.CreateAxis("z3", s3);
+  std::vector<af::AxisId> axes = {z0.id, z1.id, z2.id, z3.id};
+
+  Data data("data", graph);
+  data.y.dtype = ge::DT_FLOAT;
+  data.ir_attr.SetIndex(0);
+
+  Load load("load");
+  load.attr.sched.axis = axes;
+  load.x = data.y;
+  *load.y.axis = axes;
+  load.y.dtype = ge::DT_FLOAT;
+  *load.y.strides = {s1 * s2 * s3, s2 * s3, s3, af::ops::One};
+  *load.y.repeats = {s0, s1, s2, s3};
+
+  Softmax softmax("softmax");
+  softmax.attr.sched.axis = axes;
+  softmax.attr.api.compute_type = af::ComputeType::kComputeReduce;
+  softmax.x = load.y;
+  *softmax.y.axis = axes;
+  softmax.y.dtype = ge::DT_FLOAT;
+  *softmax.y.repeats = {s0, s1, s2, s3};
+  *softmax.y.strides = {s1 * s2 * s3, s2 * s3, s3, af::ops::One};
+
+  Store store_op("store");
+  store_op.attr.sched.axis = axes;
+  store_op.attr.api.compute_type = af::ComputeType::kComputeStore;
+  store_op.x = softmax.y;
+  *store_op.y.axis = *softmax.y.axis;
+  store_op.y.dtype = ge::DT_FLOAT;
+  *store_op.y.strides = *softmax.y.strides;
+  *store_op.y.repeats = *softmax.y.repeats;
+
+  Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = ge::DT_FLOAT;
+  output_op.ir_attr.SetIndex(0);
+}
+
 void ConstructNormStruct3Elewise(af::AscGraph &graph) {
   auto s0 = graph.CreateSizeVar(128);
   auto s1 = graph.CreateSizeVar(64);
@@ -365,6 +499,46 @@ TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_Four_Elewise_Store) {
   ASSERT_EQ(tasks.size(), 2UL);
   ASSERT_EQ(tasks[0].grouped_graphs.size(), 2UL);
   ASSERT_EQ(tasks[1].grouped_graphs.size(), 3UL);
+}
+
+TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_AllLoadTailReduceFourAxis) {
+  af::AscGraph graph("reduce_all_load_tail_reduce_four_axis");
+  ConstructFourAxisReduce(graph, true);
+  std::vector<ScheduleTask> tasks;
+  optimize::ReducePartitionCaseGenerator generator;
+  OptimizerOptions options;
+  EXPECT_EQ(generator.GeneratorTask(graph, tasks, options), af::SUCCESS);
+  EXPECT_TRUE(HasReduceTemplateType(tasks, ReduceTemplateType::kAllLoad));
+}
+
+TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_NoAllLoadForFourAxisNonTailReduce) {
+  af::AscGraph graph("reduce_no_all_load_for_four_axis_non_tail_reduce");
+  ConstructFourAxisReduce(graph, false);
+  std::vector<ScheduleTask> tasks;
+  optimize::ReducePartitionCaseGenerator generator;
+  OptimizerOptions options;
+  EXPECT_EQ(generator.GeneratorTask(graph, tasks, options), af::SUCCESS);
+  EXPECT_FALSE(HasReduceTemplateType(tasks, ReduceTemplateType::kAllLoad));
+}
+
+TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_NoAllLoadForEmptyRepeats) {
+  af::AscGraph graph("reduce_no_all_load_for_empty_repeats");
+  ConstructEmptyRepeatReduce(graph);
+  std::vector<ScheduleTask> tasks;
+  optimize::ReducePartitionCaseGenerator generator;
+  OptimizerOptions options;
+  EXPECT_EQ(generator.GeneratorTask(graph, tasks, options), af::SUCCESS);
+  EXPECT_FALSE(HasReduceTemplateType(tasks, ReduceTemplateType::kAllLoad));
+}
+
+TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_AllLoadForSoftmaxWithUnchangedTailRepeat) {
+  af::AscGraph graph("reduce_all_load_for_softmax_with_unchanged_tail_repeat");
+  ConstructFourAxisSoftmax(graph);
+  std::vector<ScheduleTask> tasks;
+  optimize::ReducePartitionCaseGenerator generator;
+  OptimizerOptions options;
+  EXPECT_EQ(generator.GeneratorTask(graph, tasks, options), af::SUCCESS);
+  EXPECT_TRUE(HasReduceTemplateType(tasks, ReduceTemplateType::kAllLoad));
 }
 
 TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_Multi_Cita_Store) {

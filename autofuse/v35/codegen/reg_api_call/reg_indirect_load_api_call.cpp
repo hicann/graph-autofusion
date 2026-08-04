@@ -183,7 +183,8 @@ Status IndirectLoadRegApiCall::ParseAttr(const ascir::NodeView &node) {
   outer_axis_ = template_axes.outer_axis;
   template_id_ = ::ascir::GetTemplateIdOrDefault(*node);
   GE_ASSERT_TRUE(
-      template_id_ == ascir::TemplateId::kIndirectLoadSimd || template_id_ == ascir::TemplateId::kIndirectLoadSimt,
+      template_id_ == ascir::TemplateId::kIndirectLoadSK || template_id_ == ascir::TemplateId::kIndirectLoadSimd ||
+          template_id_ == ascir::TemplateId::kIndirectLoadSimt,
       "IndirectLoad node[%s] has invalid template id[%d].", node->GetNamePtr(), static_cast<int32_t>(template_id_));
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateLogicalView(node, logical_view_));
   const int64_t rank = static_cast<int64_t>(logical_view_.data.axis_ids.size());
@@ -250,13 +251,18 @@ Status IndirectLoadRegApiCall::Generate(const TPipe &tpipe, const std::vector<as
                                         const std::vector<std::reference_wrapper<const Tensor>> &outputs,
                                         std::string &result) const {
   GE_ASSERT_TRUE(inputs.size() == 2U && outputs.size() == 1U, "IndirectLoad expects 2 inputs and 1 output.");
-  GE_ASSERT_TRUE(template_id_ == ascir::TemplateId::kIndirectLoadSimd,
-                 "IndirectLoad tensor-based Generate only supports SIMD.");
+  GE_ASSERT_TRUE(
+      template_id_ == ascir::TemplateId::kIndirectLoadSK || template_id_ == ascir::TemplateId::kIndirectLoadSimd,
+      "IndirectLoad tensor-based Generate only supports SK and SIMD.");
   const LogicalTensorInfo x_info = BuildLogicalTensorInfo(logical_view_.data, tpipe);
   const LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
   const LogicalTensorInfo output_info = BuildLogicalTensorInfo(logical_view_.output, tpipe);
   GE_ASSERT_SUCCESS(CheckIndirectLoadShape(x_info, index_info, output_info));
   (void)RegisterBasicDumpParam(this->api_name_, inputs, outputs);
+  if (template_id_ == ascir::TemplateId::kIndirectLoadSK) {
+    GELOGI("[IndirectLoad] Generate SK API body for node[%s].", node_name.c_str());
+    return GenerateSk(tpipe, current_axis, inputs, outputs, result);
+  }
   GELOGI("[IndirectLoad] Generate SIMD API body for node[%s].", node_name.c_str());
   return GenerateSimd(tpipe, current_axis, inputs, outputs, result);
 }
@@ -273,6 +279,41 @@ Status IndirectLoadRegApiCall::Generate(const TPipe &tpipe, const std::vector<as
     input_tensors.emplace_back(*tensor_ptr);
   }
   return GenerateSimt(tpipe, current_axis, input_tensors, result);
+}
+
+Status IndirectLoadRegApiCall::GenerateSk(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis,
+                                          const std::vector<std::reference_wrapper<const Tensor>> &inputs,
+                                          const std::vector<std::reference_wrapper<const Tensor>> &outputs,
+                                          std::string &result) const {
+  const Tensor &x = inputs[0].get();
+  const Tensor &index = inputs[1].get();
+  const Tensor &y = outputs[0].get();
+  const auto tmp_iter = tmp_buf_id.find(-1L);
+  GE_ASSERT_TRUE(tmp_iter != tmp_buf_id.end(), "IndirectLoad SK requires an API-level tmp buffer.");
+
+  const LogicalTensorInfo x_info = BuildLogicalTensorInfo(logical_view_.data, tpipe);
+  const LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
+  const size_t axis_pos = static_cast<size_t>(axis_);
+  std::string x_dtype_name;
+  std::string index_dtype_name;
+  GE_ASSERT_SUCCESS(Tensor::DtypeName(x.dtype, x_dtype_name));
+  GE_ASSERT_SUCCESS(Tensor::DtypeName(index.dtype, index_dtype_name));
+  GE_ASSERT_TRUE(x.dtype == y.dtype, "IndirectLoad SK input/output dtype must match.");
+  GELOGD("[IndirectLoad] Generate SK body for node[%s], rank[%zu], axis[%zu].", node_name.c_str(), x_info.sizes.size(),
+         axis_pos);
+
+  std::stringstream ss;
+  ss << "// IndirectLoad SK" << std::endl;
+  ss << "{" << std::endl;
+  ss << "  AscendC::IndirectLoadSk<" << x_dtype_name << ", " << index_dtype_name << ", " << x_info.sizes.size() << ", "
+     << axis_ << ">(" << std::endl;
+  ss << "      " << x << ", " << index << ", " << y << ", " << tpipe.tmp_buf.name << "_" << tmp_iter->second << ", "
+     << y.actual_size << ", " << tpipe.tiler.Offset(current_axis, y.axis, y.axis_strides) << ", "
+     << tpipe.tiler.Size(x_info.sizes[axis_pos]) << ", " << JoinSizeExprs(index_info.sizes, tpipe) << ", "
+     << JoinSizeExprs(x_info.strides, tpipe) << ");" << std::endl;
+  ss << "}" << std::endl;
+  result = ss.str();
+  return af::SUCCESS;
 }
 
 Status IndirectLoadRegApiCall::GenerateSimd(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis,
