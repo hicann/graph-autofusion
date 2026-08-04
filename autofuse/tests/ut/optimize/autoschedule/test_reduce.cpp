@@ -39,7 +39,15 @@ using namespace af::ops;
 using namespace af::ascir_op;
 using namespace optimize::autoschedule;
 
-void Construct_Reduce_RARA(af::AscGraph &graph) {
+struct FourAxisLoadContext {
+  ascir::SizeExpr s0;
+  ascir::SizeExpr s1;
+  ascir::SizeExpr s2;
+  ascir::SizeExpr s3;
+  std::vector<af::AxisId> axes;
+};
+
+FourAxisLoadContext InitFourAxisLoad(af::AscGraph &graph, Load &load) {
   auto s0 = graph.CreateSizeVar("s0");
   auto s1 = graph.CreateSizeVar("s1");
   auto s2 = graph.CreateSizeVar("s2");
@@ -49,61 +57,67 @@ void Construct_Reduce_RARA(af::AscGraph &graph) {
   auto z1 = graph.CreateAxis("z1", s1);
   auto z2 = graph.CreateAxis("z2", s2);
   auto z3 = graph.CreateAxis("z3", s3);
+  std::vector<af::AxisId> axes = {z0.id, z1.id, z2.id, z3.id};
 
   Data arg4_1("arg4_1", graph);
   arg4_1.attr.api.compute_type = af::ComputeType::kComputeInvalid;
   arg4_1.attr.api.type = af::ApiType::kAPITypeBuffer;
   arg4_1.y.dtype = ge::DT_FLOAT;
 
+  load.x = arg4_1.y;
+  load.attr.sched.axis = axes;
+  load.attr.api.compute_type = af::ComputeType::kComputeLoad;
+  load.attr.api.type = af::ApiType::kAPITypeCompute;
+  load.y.dtype = ge::DT_FLOAT;
+  *load.y.axis = axes;
+  *load.y.repeats = {s0, s1, s2, s3};
+  *load.y.strides = {s1 * s2 * s3, s2 * s3, s3, One};
+  return {s0, s1, s2, s3, axes};
+}
+
+void Construct_Reduce_RARA(af::AscGraph &graph) {
   Load b0_load("b0_load");
-  b0_load.x = arg4_1.y;
-  b0_load.attr.sched.axis = {z0.id, z1.id, z2.id, z3.id};
-  b0_load.attr.api.compute_type = af::ComputeType::kComputeLoad;
-  b0_load.attr.api.type = af::ApiType::kAPITypeCompute;
-  b0_load.y.dtype = ge::DT_FLOAT;
-  *b0_load.y.axis = {z0.id, z1.id, z2.id, z3.id};
-  *b0_load.y.repeats = {s0, s1, s2, s3};
-  *b0_load.y.strides = {s1 * s2 * s3, s2 * s3, s3, One};
+  auto input = InitFourAxisLoad(graph, b0_load);
 
   Abs abs("abs");
   abs.x = b0_load.y;
-  abs.attr.sched.axis = {z0.id, z1.id, z2.id, z3.id};
+  abs.attr.sched.axis = input.axes;
   abs.attr.api.compute_type = af::ComputeType::kComputeElewise;
   abs.attr.api.type = af::ApiType::kAPITypeCompute;
   abs.y.dtype = ge::DT_FLOAT;
-  *abs.y.axis = {z0.id, z1.id, z2.id, z3.id};
-  *abs.y.repeats = {s0, s1, s2, s3};
-  *abs.y.strides = {s1 * s2 * s3, s2 * s3, s3, One};
+  *abs.y.axis = input.axes;
+  *abs.y.repeats = {input.s0, input.s1, input.s2, input.s3};
+  *abs.y.strides = {input.s1 * input.s2 * input.s3, input.s2 * input.s3, input.s3, One};
 
   af::ascir_op::Max b0_max("b0_max");
   b0_max.x = abs.y;
-  b0_max.attr.sched.axis = {z0.id, z1.id, z2.id, z3.id};
+  b0_max.attr.sched.axis = input.axes;
   b0_max.attr.api.compute_type = af::ComputeType::kComputeReduce;
   b0_max.attr.api.type = af::ApiType::kAPITypeCompute;
   b0_max.y.dtype = ge::DT_FLOAT;
-  *b0_max.y.axis = {z0.id, z1.id, z2.id, z3.id};
-  *b0_max.y.repeats = {One, s1, One, s3};
-  *b0_max.y.strides = {Zero, s3, Zero, One};
+  *b0_max.y.axis = input.axes;
+  *b0_max.y.repeats = {One, input.s1, One, input.s3};
+  *b0_max.y.strides = {Zero, input.s3, Zero, One};
 
   Abs abs1("abs1");
   abs1.x = b0_max.y;
-  abs1.attr.sched.axis = {z0.id, z1.id, z2.id, z3.id};
+  abs1.attr.sched.axis = input.axes;
   abs1.attr.api.compute_type = af::ComputeType::kComputeElewise;
   abs1.attr.api.type = af::ApiType::kAPITypeCompute;
   abs1.y.dtype = ge::DT_FLOAT;
-  *abs1.y.axis = {z0.id, z1.id, z2.id, z3.id};
-  *abs1.y.repeats = {One, s1, One, s3};
-  *abs1.y.strides = {Zero, s3, Zero, One};
+  *abs1.y.axis = input.axes;
+  *abs1.y.repeats = {One, input.s1, One, input.s3};
+  *abs1.y.strides = {Zero, input.s3, Zero, One};
 
   Store b3_store("b3_store");
   b3_store.x = abs1.y;
-  b3_store.attr.sched.axis = {z0.id, z1.id, z2.id, z3.id};
+  b3_store.attr.sched.axis = input.axes;
   b3_store.attr.api.compute_type = af::ComputeType::kComputeStore;
   b3_store.attr.api.type = af::ApiType::kAPITypeCompute;
   b3_store.y.dtype = ge::DT_FLOAT;
-  *b3_store.y.axis = {z0.id, z1.id, z2.id, z3.id};
-  *b3_store.y.repeats = {One, s1, One, s3};
-  *b3_store.y.strides = {Zero, s3, Zero, One};
+  *b3_store.y.axis = input.axes;
+  *b3_store.y.repeats = {One, input.s1, One, input.s3};
+  *b3_store.y.strides = {Zero, input.s3, Zero, One};
 
   Output buf3("buf3");
   buf3.x = b3_store.y;
@@ -113,70 +127,79 @@ void Construct_Reduce_RARA(af::AscGraph &graph) {
 }
 
 void Construct_Reduce_ARAR(af::AscGraph &graph) {
-  auto s0 = graph.CreateSizeVar("s0");
-  auto s1 = graph.CreateSizeVar("s1");
-  auto s2 = graph.CreateSizeVar("s2");
-  auto s3 = graph.CreateSizeVar("s3");
-
-  auto z0 = graph.CreateAxis("z0", s0);
-  auto z1 = graph.CreateAxis("z1", s1);
-  auto z2 = graph.CreateAxis("z2", s2);
-  auto z3 = graph.CreateAxis("z3", s3);
-
-  Data arg4_1("arg4_1", graph);
-  arg4_1.attr.api.compute_type = af::ComputeType::kComputeInvalid;
-  arg4_1.attr.api.type = af::ApiType::kAPITypeBuffer;
-  arg4_1.y.dtype = ge::DT_FLOAT;
-
   Load b0_load("b0_load");
-  b0_load.x = arg4_1.y;
-  b0_load.attr.sched.axis = {z0.id, z1.id, z2.id, z3.id};
-  b0_load.attr.api.compute_type = af::ComputeType::kComputeLoad;
-  b0_load.attr.api.type = af::ApiType::kAPITypeCompute;
-  b0_load.y.dtype = ge::DT_FLOAT;
-  *b0_load.y.axis = {z0.id, z1.id, z2.id, z3.id};
-  *b0_load.y.repeats = {s0, s1, s2, s3};
-  *b0_load.y.strides = {s1 * s2 * s3, s2 * s3, s3, One};
+  auto input = InitFourAxisLoad(graph, b0_load);
 
   Abs abs("abs");
   abs.x = b0_load.y;
-  abs.attr.sched.axis = {z0.id, z1.id, z2.id, z3.id};
+  abs.attr.sched.axis = input.axes;
   abs.attr.api.compute_type = af::ComputeType::kComputeElewise;
   abs.attr.api.type = af::ApiType::kAPITypeCompute;
   abs.y.dtype = ge::DT_FLOAT;
-  *abs.y.axis = {z0.id, z1.id, z2.id, z3.id};
-  *abs.y.repeats = {s0, s1, s2, s3};
-  *abs.y.strides = {s1 * s2 * s3, s2 * s3, s3, One};
+  *abs.y.axis = input.axes;
+  *abs.y.repeats = {input.s0, input.s1, input.s2, input.s3};
+  *abs.y.strides = {input.s1 * input.s2 * input.s3, input.s2 * input.s3, input.s3, One};
 
   af::ascir_op::Max b0_max("b0_max");
   b0_max.x = abs.y;
-  b0_max.attr.sched.axis = {z0.id, z1.id, z2.id, z3.id};
+  b0_max.attr.sched.axis = input.axes;
   b0_max.attr.api.compute_type = af::ComputeType::kComputeReduce;
   b0_max.attr.api.type = af::ApiType::kAPITypeCompute;
   b0_max.y.dtype = ge::DT_FLOAT;
-  *b0_max.y.axis = {z0.id, z1.id, z2.id, z3.id};
-  *b0_max.y.repeats = {s0, One, s2, One};
-  *b0_max.y.strides = {s2, Zero, One, Zero};
+  *b0_max.y.axis = input.axes;
+  *b0_max.y.repeats = {input.s0, One, input.s2, One};
+  *b0_max.y.strides = {input.s2, Zero, One, Zero};
 
   Abs abs1("abs1");
   abs1.x = b0_max.y;
-  abs1.attr.sched.axis = {z0.id, z1.id, z2.id, z3.id};
+  abs1.attr.sched.axis = input.axes;
   abs1.attr.api.compute_type = af::ComputeType::kComputeElewise;
   abs1.attr.api.type = af::ApiType::kAPITypeCompute;
   abs1.y.dtype = ge::DT_FLOAT;
-  *abs1.y.axis = {z0.id, z1.id, z2.id, z3.id};
-  *abs1.y.repeats = {s0, One, s2, One};
-  *abs1.y.strides = {s2, Zero, One, Zero};
+  *abs1.y.axis = input.axes;
+  *abs1.y.repeats = {input.s0, One, input.s2, One};
+  *abs1.y.strides = {input.s2, Zero, One, Zero};
 
   Store b3_store("b3_store");
   b3_store.x = abs1.y;
-  b3_store.attr.sched.axis = {z0.id, z1.id, z2.id, z3.id};
+  b3_store.attr.sched.axis = input.axes;
   b3_store.attr.api.compute_type = af::ComputeType::kComputeStore;
   b3_store.attr.api.type = af::ApiType::kAPITypeCompute;
   b3_store.y.dtype = ge::DT_FLOAT;
-  *b3_store.y.axis = {z0.id, z1.id, z2.id, z3.id};
-  *b3_store.y.repeats = {s0, One, s2, One};
-  *b3_store.y.strides = {s2, Zero, One, Zero};
+  *b3_store.y.axis = input.axes;
+  *b3_store.y.repeats = {input.s0, One, input.s2, One};
+  *b3_store.y.strides = {input.s2, Zero, One, Zero};
+
+  Output buf3("buf3");
+  buf3.x = b3_store.y;
+  buf3.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  buf3.attr.api.type = af::ApiType::kAPITypeBuffer;
+  buf3.y.dtype = ge::DT_FLOAT;
+}
+
+void Construct_Reduce_AAAR(af::AscGraph &graph) {
+  Load b0_load("b0_load");
+  auto input = InitFourAxisLoad(graph, b0_load);
+
+  Max b0_max("b0_max");
+  b0_max.x = b0_load.y;
+  b0_max.attr.sched.axis = input.axes;
+  b0_max.attr.api.compute_type = af::ComputeType::kComputeReduce;
+  b0_max.attr.api.type = af::ApiType::kAPITypeCompute;
+  b0_max.y.dtype = ge::DT_FLOAT;
+  *b0_max.y.axis = input.axes;
+  *b0_max.y.repeats = {input.s0, input.s1, input.s2, One};
+  *b0_max.y.strides = {input.s1 * input.s2, input.s2, One, Zero};
+
+  Store b3_store("b3_store");
+  b3_store.x = b0_max.y;
+  b3_store.attr.sched.axis = input.axes;
+  b3_store.attr.api.compute_type = af::ComputeType::kComputeStore;
+  b3_store.attr.api.type = af::ApiType::kAPITypeCompute;
+  b3_store.y.dtype = ge::DT_FLOAT;
+  *b3_store.y.axis = input.axes;
+  *b3_store.y.repeats = {input.s0, input.s1, input.s2, One};
+  *b3_store.y.strides = {input.s1 * input.s2, input.s2, One, Zero};
 
   Output buf3("buf3");
   buf3.x = b3_store.y;
@@ -213,6 +236,23 @@ TEST_F(AutoSchedulerReduceUT, Autoschedule_reduce_rara_axesgroup) {
   EXPECT_EQ(axis_group.y_group, y_group);
   EXPECT_EQ(axis_group.r_group.size(), 2);
   EXPECT_EQ(axis_group.r_group, r_group);
+}
+
+TEST_F(AutoSchedulerReduceUT, Autoschedule_reduce_aaar_fullload_axesgroup) {
+  af::AscGraph graph("Reduce_AAAR");
+  Construct_Reduce_AAAR(graph);
+
+  auto store = graph.FindNode("b3_store");
+  std::vector<af::AxisId> axes = store->attr.sched.axis;
+  std::vector<af::AxisId> y_group = {axes[0], axes[1], axes[2]};
+  std::vector<af::AxisId> n_group = {axes[3]};
+
+  AxisGroup axis_group;
+  ASSERT_EQ(TilingGroup::GenTilingGroup(graph, axis_group, true), 0);
+  EXPECT_EQ(axis_group.x_group.size(), 0);
+  EXPECT_EQ(axis_group.y_group, y_group);
+  EXPECT_EQ(axis_group.r_group.size(), 0);
+  EXPECT_EQ(axis_group.n_group, n_group);
 }
 
 TEST_F(AutoSchedulerReduceUT, Autoschedule_reduce_rara_tilingcase) {
