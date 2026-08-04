@@ -32,6 +32,9 @@ class IndirectLoadRegApiCall final : public ApiCall {
   Status ParseAttr(const ascir::NodeView &node) override;
 
  private:
+  Status GenerateSk(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis,
+                    const std::vector<std::reference_wrapper<const Tensor>> &inputs,
+                    const std::vector<std::reference_wrapper<const Tensor>> &outputs, std::string &result) const;
   Status GenerateSimd(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis,
                       const std::vector<std::reference_wrapper<const Tensor>> &inputs,
                       const std::vector<std::reference_wrapper<const Tensor>> &outputs, std::string &result) const;

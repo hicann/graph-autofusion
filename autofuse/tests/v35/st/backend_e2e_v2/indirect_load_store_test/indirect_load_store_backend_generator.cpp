@@ -8,6 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
+#include <algorithm>
 #include <exception>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -161,6 +162,16 @@ void ExpectLoopFramework(af::AscGraph &graph, const af::AscNodePtr &indirect_loa
     EXPECT_EQ(axes.inner_axis, af::kIdNone);
     return;
   }
+  if (template_id == ascir::TemplateId::kIndirectLoadSK) {
+    const auto input_boundary = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL);
+    ASSERT_NE(input_boundary, nullptr);
+    EXPECT_TRUE(af::ops::IsOps<af::ascir_op::Load>(input_boundary));
+    EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(input_boundary),
+              ascgen_utils::indirect_load::TemplateRole::kSkInputBoundary);
+    EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(indirect_load),
+              ascgen_utils::indirect_load::TemplateRole::kSkOp);
+    return;
+  }
 
   ASSERT_EQ(template_id, ascir::TemplateId::kIndirectLoadSimd);
   const size_t split = static_cast<size_t>(normalized_axis);
@@ -206,41 +217,114 @@ void ExpectLoopFramework(af::AscGraph &graph, const af::AscNodePtr &indirect_loa
 #endif
 }
 
+void CollectImplGraphs(ascir::ScheduleGroup &group, std::vector<af::AscGraph *> &graphs) {
+  for (auto &graph : group.impl_graphs) {
+    graphs.emplace_back(&graph);
+  }
+}
+
+void CollectImplGraphs(ascir::ScheduledResult &candidate, std::vector<af::AscGraph *> &graphs) {
+  for (auto &group : candidate.schedule_groups) {
+    CollectImplGraphs(group, graphs);
+  }
+}
+
+void CollectImplGraphs(std::vector<ascir::ScheduledResult> &candidates, std::vector<af::AscGraph *> &graphs) {
+  for (auto &candidate : candidates) {
+    CollectImplGraphs(candidate, graphs);
+  }
+}
+
+std::vector<af::AscGraph *> CollectImplGraphs(ascir::FusedScheduledResult &result) {
+  std::vector<af::AscGraph *> graphs;
+  for (auto &candidates : result.node_idx_to_scheduled_results) {
+    CollectImplGraphs(candidates, graphs);
+  }
+  return graphs;
+}
+
 bool CheckScheduledLoopFramework(ascir::FusedScheduledResult &result) {
   size_t simd_count = 0UL;
   size_t simt_count = 0UL;
-  for (auto &candidates : result.node_idx_to_scheduled_results) {
-    for (auto &candidate : candidates) {
-      for (auto &group : candidate.schedule_groups) {
-        for (auto &graph : group.impl_graphs) {
-          const af::AscNodePtr indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(graph);
-          if (indirect_load == nullptr) {
-            continue;
-          }
-          ExpectLoopFramework(graph, indirect_load);
-          if (ascir::GetTemplateIdOrDefault(*indirect_load) == ascir::TemplateId::kIndirectLoadSimd) {
-            ++simd_count;
-          } else {
-            ++simt_count;
-          }
-        }
-      }
+  size_t sk_count = 0UL;
+  for (auto *graph : CollectImplGraphs(result)) {
+    const af::AscNodePtr indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(*graph);
+    if (indirect_load == nullptr) {
+      continue;
+    }
+    ExpectLoopFramework(*graph, indirect_load);
+    const auto template_id = ascir::GetTemplateIdOrDefault(*indirect_load);
+    if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
+      ++simd_count;
+    } else if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
+      ++simt_count;
+    } else if (template_id == ascir::TemplateId::kIndirectLoadSK) {
+      ++sk_count;
     }
   }
   EXPECT_GT(simd_count, 0UL);
+  EXPECT_GT(sk_count, 0UL);
   if (kExpectSimt) {
     EXPECT_GT(simt_count, 0UL);
-    return simd_count > 0UL && simt_count > 0UL;
+    return simd_count > 0UL && simt_count > 0UL && sk_count > 0UL;
   } else {
     EXPECT_EQ(simt_count, 0UL);
-    return simd_count > 0UL && simt_count == 0UL;
+    return simd_count > 0UL && simt_count == 0UL && sk_count > 0UL;
   }
 }
+
+bool IsSkTemplateGraph(const af::AscGraph &graph) {
+  const auto indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(graph);
+  return indirect_load != nullptr &&
+         ascir::GetTemplateIdOrDefault(*indirect_load) == ascir::TemplateId::kIndirectLoadSK;
+}
+
+bool ContainsSkTemplate(const ascir::ScheduleGroup &group) {
+  return std::any_of(group.impl_graphs.cbegin(), group.impl_graphs.cend(), IsSkTemplateGraph);
+}
+
+bool ContainsSkTemplate(const ascir::ScheduledResult &candidate) {
+  return std::any_of(candidate.schedule_groups.cbegin(), candidate.schedule_groups.cend(),
+                     [](const ascir::ScheduleGroup &group) { return ContainsSkTemplate(group); });
+}
+
+void RemoveSkTemplateCandidates(ascir::FusedScheduledResult &result) {
+  for (auto &candidates : result.node_idx_to_scheduled_results) {
+    candidates.erase(
+        std::remove_if(candidates.begin(), candidates.end(),
+                       [](const ascir::ScheduledResult &candidate) { return ContainsSkTemplate(candidate); }),
+        candidates.end());
+  }
+}
+
+#ifdef IL_EXPECT_SK
+void SetTemplateScores(std::vector<ascir::ScheduledResult> &candidates, const char *preferred_score,
+                       const char *fallback_score) {
+  for (auto &candidate : candidates) {
+    candidate.score_func = ContainsSkTemplate(candidate) ? preferred_score : fallback_score;
+  }
+}
+
+void PreferSkTemplate(ascir::FusedScheduledResult &result) {
+  constexpr char kPreferredScore[] = "int32_t CalcScore(AutofuseTilingData &tiling_data) { return 2; }";
+  constexpr char kFallbackScore[] = "int32_t CalcScore(AutofuseTilingData &tiling_data) { return 0; }";
+  for (auto &candidates : result.node_idx_to_scheduled_results) {
+    SetTemplateScores(candidates, kPreferredScore, kFallbackScore);
+  }
+}
+#endif
 
 void CheckGeneratedKernel(const std::string &kernel) {
   EXPECT_NE(kernel.find("// IndirectLoad SIMD"), std::string::npos);
   EXPECT_NE(kernel.find("IndirectLoadSimd<"), std::string::npos);
+#ifdef IL_EXPECT_SK
+  EXPECT_NE(kernel.find("// IndirectLoad SK"), std::string::npos);
+  EXPECT_NE(kernel.find("IndirectLoadSk<"), std::string::npos);
   EXPECT_EQ(kernel.find("auto indirect_load_offset"), std::string::npos);
+  EXPECT_EQ(kernel.find("int64_t inner = global_idx % index_inner;"), std::string::npos);
+#else
+  EXPECT_EQ(kernel.find("// IndirectLoad SK"), std::string::npos);
+#endif
   if (kExpectSimt) {
     EXPECT_NE(kernel.find("// IndirectLoad SIMT"), std::string::npos);
     EXPECT_NE(kernel.find("IndirectLoadSimt<"), std::string::npos);
@@ -255,6 +339,61 @@ void CheckGeneratedKernel(const std::string &kernel) {
 #ifdef IL_DATA_UINT32
   EXPECT_NE(kernel.find("IndirectLoadSimd<uint32_t, int32_t"), std::string::npos);
 #endif
+}
+
+std::map<std::string, std::string> BuildShapeInfo() {
+  std::map<std::string, std::string> shape_info;
+  for (size_t i = 0UL; i < 2UL * kRank; ++i) {
+    shape_info.emplace("s" + std::to_string(i), "stub_s" + std::to_string(i));
+  }
+  return shape_info;
+}
+
+void OptimizeGraph(const af::ComputeGraphPtr &graph, ascir::FusedScheduledResult &fused_schedule_result) {
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{.graph_type = optimize::GraphType::kFusedAscBackend});
+  testing::internal::CaptureStdout();
+  const auto optimize_status = optimizer.Optimize(graph, fused_schedule_result);
+  const std::string optimize_logs = testing::internal::GetCapturedStdout();
+  EXPECT_EQ(optimize_logs.find("[ERROR]"), std::string::npos) << optimize_logs;
+  ASSERT_EQ(optimize_status, 0) << optimize_logs;
+  ASSERT_TRUE(CheckScheduledLoopFramework(fused_schedule_result)) << optimize_logs;
+#ifdef IL_EXPECT_SK
+  PreferSkTemplate(fused_schedule_result);
+#else
+  RemoveSkTemplateCandidates(fused_schedule_result);
+#endif
+}
+
+void GenerateKernel(const std::map<std::string, std::string> &shape_info,
+                    const ascir::FusedScheduledResult &fused_schedule_result, codegen::CodegenResult &result) {
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  testing::internal::CaptureStdout();
+  const auto codegen_status = codegen.Generate(shape_info, fused_schedule_result, result);
+  const std::string codegen_logs = testing::internal::GetCapturedStdout();
+  EXPECT_EQ(codegen_logs.find("[ERROR]"), std::string::npos) << codegen_logs;
+  ASSERT_EQ(codegen_status, 0) << codegen_logs;
+  CheckGeneratedKernel(result.kernel);
+}
+
+void WriteGeneratedFiles(const codegen::CodegenResult &result) {
+  constexpr char kTilingStub[] = R"(
+#define REGISTER_TILING_DEFAULT(tiling)
+#define GET_TILING_DATA(t, tiling)  AutofuseTilingData t = *(AutofuseTilingData*)tiling;
+)";
+  const std::vector<std::string> parts = splitString(KERNEL_SRC_LIST, ':');
+  ASSERT_EQ(parts.size(), 3U);
+  std::fstream kernel_file(parts[0], std::ios::out);
+  std::fstream tiling_file(parts[1], std::ios::out);
+  std::fstream tiling_data_file(parts[2], std::ios::out);
+  ASSERT_TRUE(kernel_file.is_open());
+  ASSERT_TRUE(tiling_file.is_open());
+  ASSERT_TRUE(tiling_data_file.is_open());
+  kernel_file << kTilingStub << RemoveSubDirInclude(result.kernel);
+  tiling_file << result.tiling;
+  tiling_data_file << result.tiling_data;
+  EXPECT_TRUE(kernel_file.good());
+  EXPECT_TRUE(tiling_file.good());
+  EXPECT_TRUE(tiling_data_file.good());
 }
 }  // namespace
 
@@ -273,52 +412,17 @@ class TestBackendIndirectLoadStoreE2e : public testing::Test {
 };
 
 TEST_F(TestBackendIndirectLoadStoreE2e, IndirectLoadStoreCodegen) {
-  const std::string tiling_stub = R"(
-#define REGISTER_TILING_DEFAULT(tiling)
-#define GET_TILING_DATA(t, tiling)  AutofuseTilingData t = *(AutofuseTilingData*)tiling;
-)";
-  auto graph = ascir::ShareGraph::IndirectLoadStoreFusedGraph(kRank, kAxis, kDataType, kIndexType, kInputPreType,
-                                                              kUseExp2, kOutputPostType, GetStaticShape(true),
-                                                              GetStaticShape(false), kMixedIndexPre);
-  ASSERT_NE(graph, nullptr);
-  std::map<std::string, std::string> shape_info;
-  for (size_t i = 0UL; i < 2UL * kRank; ++i) {
-    shape_info.emplace("s" + std::to_string(i), "stub_s" + std::to_string(i));
-  }
-
-  const std::vector<std::string> parts = splitString(KERNEL_SRC_LIST, ':');
-  ASSERT_EQ(parts.size(), 3U);
   try {
-    optimize::Optimizer optimizer(optimize::OptimizerOptions{.graph_type = optimize::GraphType::kFusedAscBackend});
-    codegen::Codegen codegen(codegen::CodegenOptions{});
+    auto graph = ascir::ShareGraph::IndirectLoadStoreFusedGraph(kRank, kAxis, kDataType, kIndexType, kInputPreType,
+                                                                kUseExp2, kOutputPostType, GetStaticShape(true),
+                                                                GetStaticShape(false), kMixedIndexPre);
+    ASSERT_NE(graph, nullptr);
+    const auto shape_info = BuildShapeInfo();
     ascir::FusedScheduledResult fused_schedule_result;
+    ASSERT_NO_FATAL_FAILURE(OptimizeGraph(graph, fused_schedule_result));
     codegen::CodegenResult result;
-    testing::internal::CaptureStdout();
-    const auto optimize_status = optimizer.Optimize(graph, fused_schedule_result);
-    const std::string optimize_logs = testing::internal::GetCapturedStdout();
-    EXPECT_EQ(optimize_logs.find("[ERROR]"), std::string::npos) << optimize_logs;
-    ASSERT_EQ(optimize_status, 0) << optimize_logs;
-    ASSERT_TRUE(CheckScheduledLoopFramework(fused_schedule_result)) << optimize_logs;
-
-    testing::internal::CaptureStdout();
-    const auto codegen_status = codegen.Generate(shape_info, fused_schedule_result, result);
-    const std::string codegen_logs = testing::internal::GetCapturedStdout();
-    EXPECT_EQ(codegen_logs.find("[ERROR]"), std::string::npos) << codegen_logs;
-    ASSERT_EQ(codegen_status, 0) << codegen_logs;
-    CheckGeneratedKernel(result.kernel);
-
-    std::fstream kernel_file(parts[0], std::ios::out);
-    std::fstream tiling_file(parts[1], std::ios::out);
-    std::fstream tiling_data_file(parts[2], std::ios::out);
-    ASSERT_TRUE(kernel_file.is_open());
-    ASSERT_TRUE(tiling_file.is_open());
-    ASSERT_TRUE(tiling_data_file.is_open());
-    kernel_file << tiling_stub << RemoveSubDirInclude(result.kernel);
-    tiling_file << result.tiling;
-    tiling_data_file << result.tiling_data;
-    EXPECT_TRUE(kernel_file.good());
-    EXPECT_TRUE(tiling_file.good());
-    EXPECT_TRUE(tiling_data_file.good());
+    ASSERT_NO_FATAL_FAILURE(GenerateKernel(shape_info, fused_schedule_result, result));
+    ASSERT_NO_FATAL_FAILURE(WriteGeneratedFiles(result));
   } catch (const std::exception &e) {
     FAIL() << e.what();
   } catch (...) {

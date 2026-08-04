@@ -34,6 +34,11 @@ function(mark_indirect_load_static_shape test_name)
     target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_STATIC_SHAPE)
 endfunction()
 
+function(mark_indirect_load_sk test_name)
+    target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_EXPECT_SK)
+    target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_EXPECT_SK)
+endfunction()
+
 function(mark_indirect_load_wide_types test_name)
     target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_DATA_FLOAT IL_INDEX_INT64)
     target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_DATA_FLOAT IL_INDEX_INT64)
@@ -70,6 +75,9 @@ add_indirect_load_e2e_case(indirect_load_rank3_axis1_simt 3 1 1 0 1 3 5 8 1 2 7 
 add_indirect_load_e2e_case(indirect_load_rank3_axis1_simd 3 1 1 1 0 3 5 8 1 2 7 6 1)
 add_indirect_load_e2e_case(indirect_load_rank4_axis2_simt 4 2 1 0 1 3 3 5 8 2 2 5 6)
 add_indirect_load_e2e_case(indirect_load_rank4_axis2_simd 4 2 1 1 0 3 3 5 8 2 2 5 6)
+add_indirect_load_e2e_case(indirect_load_rank4_axis2_sk 4 2 1 0 2 2 2 5 6 2 2 5 6)
+mark_indirect_load_static_shape(indirect_load_rank4_axis2_sk)
+mark_indirect_load_sk(indirect_load_rank4_axis2_sk)
 add_indirect_load_e2e_case(indirect_load_rank2_axis1_relu_exp2_pre_simd 2 1 3 0 0 5 8 1 1 4 6 1 1)
 
 # Static output expansion keeps both data and index preprocessing before IndirectLoad SIMD.

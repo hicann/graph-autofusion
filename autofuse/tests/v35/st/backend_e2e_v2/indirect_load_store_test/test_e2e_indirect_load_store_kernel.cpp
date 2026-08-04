@@ -185,13 +185,19 @@ TEST(E2EIndirectLoadStore, GeneratedKernelMatchesReference) {
   ASSERT_EQ(tiling_data.graph0_tiling_key, IL_TILING_KEY);
 #endif
   ASSERT_GT(tiling_data.block_dim, 0U);
+  std::unique_ptr<uint8_t, decltype(gm_free)> workspace(nullptr, gm_free);
+  if (workspace_size > 0U) {
+    workspace.reset(reinterpret_cast<uint8_t *>(AscendC::GmAlloc(workspace_size)));
+    ASSERT_NE(workspace, nullptr);
+    std::fill_n(workspace.get(), workspace_size, uint8_t{0});
+  }
 #ifdef IL_EXPECT_SIMT_MULTI_ROUND
   ASSERT_GT((static_cast<uint32_t>(output_count) + tiling_data.block_dim - 1U) / tiling_data.block_dim, 1024U);
 #endif
 
   AscendC::SetKernelMode(KernelMode::AIV_MODE);
   ICPU_RUN_KF(indirect_load_store_test, tiling_data.block_dim, reinterpret_cast<uint8_t *>(x.get()),
-              reinterpret_cast<uint8_t *>(index.get()), reinterpret_cast<uint8_t *>(output.get()), nullptr,
+              reinterpret_cast<uint8_t *>(index.get()), reinterpret_cast<uint8_t *>(output.get()), workspace.get(),
               reinterpret_cast<uint8_t *>(&tiling_data));
   for (int32_t i = 0; i < output_count; ++i) {
 #if defined(IL_DATA_BF16) || defined(IL_DATA_UINT32)

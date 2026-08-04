@@ -58,6 +58,7 @@ enum class TemplateId : int64_t {
   kDefault = -1,
   kIndirectLoadSimd = 0,
   kIndirectLoadSimt = 1,
+  kIndirectLoadSK = 2,
 };
 
 inline af::Status SetTemplateId(const af::AscNodePtr &node, TemplateId template_id) {

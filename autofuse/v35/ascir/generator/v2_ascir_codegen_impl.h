@@ -3077,7 +3077,8 @@ class GatherAscIrCodegenImplV2 : public AscIrCodegenV2 {
 class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
-    if (::ascir::GetTemplateIdOrDefault(node) != ::ascir::TemplateId::kIndirectLoadSimd) {
+    const auto template_id = ::ascir::GetTemplateIdOrDefault(node);
+    if (template_id != ::ascir::TemplateId::kIndirectLoadSimd && template_id != ::ascir::TemplateId::kIndirectLoadSK) {
       return {};
     }
     auto node_outputs = node.outputs;
@@ -3103,7 +3104,7 @@ class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return false;
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"indirect_load_simd_reg_base.h", "indirect_load_simt_reg_base.h"};
+    return {"indirect_load_simd_reg_base.h", "indirect_load_sk_reg_base.h", "indirect_load_simt_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {"basic_api/kernel_operator_vec_gather_intf.h", "simt_api/cpp/kernel_simt_intf.h"};
