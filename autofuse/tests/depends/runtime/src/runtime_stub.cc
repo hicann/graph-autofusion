@@ -55,6 +55,10 @@ rtError_t RuntimeStub::rtGetSocSpec(const char *label, const char *key, char *va
     (void)strcpy_s(val, maxLen, "245760");
     return RT_ERROR_NONE;
   }
+  if (strcmp(key, "l2_size") == 0) {
+    (void)strcpy_s(val, maxLen, "134217728");
+    return RT_ERROR_NONE;
+  }
   // 返回 padding_size = 32 (兼容旧平台)
   if (strcmp(key, "padding_size") == 0) {
     (void)strcpy_s(val, maxLen, "32");

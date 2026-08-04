@@ -446,6 +446,7 @@ class Kernel {
   void SetUsingAttCalcQBTSizeConfig(bool using_att_calc_qbt_size);
   void SetEnableParallelCompile(bool enable_parallel_compile);
   bool GetEnableParallelCompile() const;
+  Status InitL2CacheHintInfo(const ascir::FusedScheduledResult &fused_scheduled_result, const ascir::ImplGraph &graph);
   Status GenerateVecFuncOfCVFusion(std::stringstream &result, bool vector_no_db_flag, bool is_conv2d,
                                    bool is_dynamic = false, bool is_inductor = false);
   Status InitCVFusionAddr(std::stringstream &result, bool vector_no_db_flag, bool is_dynamic = false,
@@ -515,6 +516,7 @@ class Kernel {
   Status AppendConstTensorInit(std::stringstream &ss) const;
   Status AppendUbScalarTensorInit(std::stringstream &ss) const;
   Status AppendWorkspaceTensorInit(std::stringstream &ss, const std::string &workspace_buffer_arg_override) const;
+  Status GenL2CacheHintCode(std::stringstream &ss) const;
   static Status GenCVKernelFuncWithMulGroup(const ascir::FusedScheduledResult &fused_schedule_result,
                                             const CodegenConfig &config, std::stringstream &ss, std::stringstream &ss1,
                                             bool use_list_tensor);
@@ -563,6 +565,9 @@ class Kernel {
   std::map<std::string, size_t> output_name_to_index_;
   bool use_list_tensor_ = false;
   bool enable_parallel_compile_ = true;
+  const ascir::GmTensorSizes *gm_tensor_sizes_{};
+  std::set<size_t> skip_l2_cache_hint_input_indices_;
+  int64_t l2_size_ = 0;
 };
 }  // namespace codegen
 

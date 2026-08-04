@@ -29,6 +29,7 @@
 #include "optimize/platform/platform_factory.h"
 #include "optimize/schedule_utils.h"
 #include "common/platform_context.h"
+#include "common/l2_cache_hint_manager.h"
 #include "codegen_graph_check.h"
 
 using namespace std;
@@ -1944,6 +1945,7 @@ Status Kernel::GlobalTensorInit(std::string &result, const std::string &workspac
   GE_CHK_STATUS_RET(AppendConstTensorInit(ss));
   GE_CHK_STATUS_RET(AppendUbScalarTensorInit(ss));
   GE_CHK_STATUS_RET(AppendWorkspaceTensorInit(ss, workspace_buffer_arg_override));
+  GE_CHK_STATUS_RET(GenL2CacheHintCode(ss));
   result = ss.str();
   return af::SUCCESS;
 }
@@ -1993,6 +1995,57 @@ Status Kernel::AppendOutputGlobalTensorInit(std::stringstream &ss) const {
                         "Codegen set global buffer failed");
     }
     ss << local_result << std::endl;
+  }
+  return af::SUCCESS;
+}
+
+Status Kernel::GenL2CacheHintCode(std::stringstream &ss) const {
+  GE_CHK_BOOL_RET_SPECIAL_STATUS(gm_tensor_sizes_ == nullptr, af::SUCCESS, "no need to  gen code for L2 cache hint");
+  ss << "const int64_t kL2CacheSize = " << l2_size_ << ";" << std::endl;
+  if (gm_tensor_sizes_->min_total_size > l2_size_) {
+    ss << "constexpr bool enable_l2_cache_hint = true;" << std::endl;
+  } else {
+    ss << "const int64_t total_gm_size = " << this->tiler.Size(gm_tensor_sizes_->total_size) << ";" << std::endl;
+    ss << "const bool enable_l2_cache_hint = total_gm_size >= kL2CacheSize;" << std::endl;
+  }
+  std::vector<std::string> input_names;
+  for (std::size_t i = 0; i < this->inputs.size(); i++) {
+    const auto &tensor = this->tpipe.tensors.at(this->input_tensors[i]);
+    if (tensor.is_constant) {
+      continue;
+    }
+    const size_t input_index = input_name_to_index_.at(this->inputs[i].Str());
+    if (skip_l2_cache_hint_input_indices_.find(input_index) == skip_l2_cache_hint_input_indices_.end()) {
+      input_names.push_back(tensor.name);
+    }
+  }
+  if (!input_names.empty()) {
+    ss << "if (enable_l2_cache_hint) {" << std::endl;
+    for (const auto &input_name : input_names) {
+      ss << "  " << input_name << ".SetL2CacheHint(AscendC::CacheMode::CACHE_MODE_DISABLE);" << std::endl;
+    }
+    ss << "}" << std::endl;
+  }
+  for (size_t i = 0; i < this->outputs.size(); i++) {
+    const auto &tensor = this->tpipe.tensors.at(this->output_tensors[i]);
+    size_t output_index = output_name_to_index_.at(this->outputs[i].Str());
+    GE_ASSERT_TRUE(output_index < gm_tensor_sizes_->output_sizes.size(), "output_index[%zu] out of range[%zu]",
+                   output_index, gm_tensor_sizes_->output_sizes.size());
+    const auto &output_size = gm_tensor_sizes_->output_sizes[output_index];
+    if (output_size.IsConstExpr()) {
+      int64_t output_size_value = 0;
+      GE_ASSERT_TRUE(output_size.GetConstValue(output_size_value));
+      constexpr int64_t kL2SizeScaleThreshold = 2;
+      if (output_size_value > (l2_size_ * kL2SizeScaleThreshold)) {
+        ss << tensor.name << ".SetL2CacheHint(AscendC::CacheMode::CACHE_MODE_DISABLE);" << std::endl;
+      } else {
+        GELOGD("outputs[%zu] is static-shaped, size = %ld, skip gen hint code", output_index, output_size_value);
+      }
+    } else {
+      ss << "if (" << this->tiler.Size(output_size) << " > kL2CacheSize * 2) {" << std::endl;
+      ss << "  " << tensor.name << ".SetL2CacheHint(AscendC::CacheMode::CACHE_MODE_DISABLE);" << std::endl;
+      ss << "}" << std::endl;
+    }
   }
   return af::SUCCESS;
 }
@@ -2310,6 +2363,7 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
   uint32_t total_blk_num = 0U;
   GetApiExtractDupSet(graph, kernel.pre_api_extract_dup, total_blk_num);
   kernel.SetEnableParallelCompile((!has_gather));
+  GE_CHK_STATUS_RET(kernel.InitL2CacheHintInfo(fused_schedule_result, graph));
   if (IsCVFusionUBGraph(graph, kernel.tpipe.cv_fusion_type)) {
     GE_CHK_STATUS_RET(kernel.tpipe.GetCVFusionCubeOutputUBTensorIdAndQueId(graph), "get cube output tensor id failed");
   }
@@ -3442,6 +3496,31 @@ void Kernel::SetEnableParallelCompile(bool enable_parallel_compile) {
 
 bool Kernel::GetEnableParallelCompile() const {
   return enable_parallel_compile_;
+}
+
+Status Kernel::InitL2CacheHintInfo(const ascir::FusedScheduledResult &fused_scheduled_result,
+                                   const ascir::ImplGraph &graph) {
+  GE_CHK_BOOL_RET_SPECIAL_STATUS(!tpipe.is_inductor, af::SUCCESS, "not inductor");
+  const auto &sizes = fused_scheduled_result.gm_tensor_sizes;
+  if (sizes.input_sizes.empty() || sizes.output_sizes.empty()) {
+    return af::SUCCESS;
+  }
+  GE_ASSERT_SUCCESS(optimize::L2CacheHintManager::GetL2Size(l2_size_), "Get l2_size failed");
+  if (sizes.total_size.IsConstExpr()) {
+    int64_t total_size_value = 0;
+    GE_ASSERT_TRUE(sizes.total_size.GetConstValue(total_size_value));
+    GE_CHK_BOOL_RET_SPECIAL_STATUS(total_size_value <= l2_size_, af::SUCCESS,
+                                   "InitL2CacheHintInfo skip: total_size[%lld] <= l2_size[%lld].", total_size_value,
+                                   l2_size_);
+  }
+  const auto symbol_absent = !optimize::L2CacheHintManager::AllExprSymbolsInGraph(sizes, graph);
+  GE_CHK_BOOL_RET_SPECIAL_STATUS(symbol_absent, af::SUCCESS,
+                                 "InitL2CacheHintInfo skip: expressions contain symbols not in current graph: %s.",
+                                 graph.GetName().c_str());
+  gm_tensor_sizes_ = &fused_scheduled_result.gm_tensor_sizes;
+  skip_l2_cache_hint_input_indices_ = optimize::L2CacheHintManager::CollectSkipL2CacheHintIndices(graph);
+  GELOGD("InitL2CacheHintInfo success");
+  return af::SUCCESS;
 }
 
 void Kernel::AppendFuncCall(std::stringstream &ss, std::vector<std::vector<std::string>>::const_iterator begin,

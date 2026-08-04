@@ -20,6 +20,7 @@ struct PlatformInfo {
   std::string soc_ver;
   int64_t aiv_num = 0;
   int64_t ub_size = 0;
+  int64_t l2_size = 0;
 };
 
 class PlatformContext {
@@ -46,6 +47,7 @@ class PlatformContext {
     platform_info_.soc_ver = "";
     platform_info_.aiv_num = 0;
     platform_info_.ub_size = 0;
+    platform_info_.l2_size = 0;
     ub_size_override_ = 0;
     has_ub_size_override_ = false;
   }

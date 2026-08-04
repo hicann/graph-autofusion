@@ -19,6 +19,7 @@ const char *kSocInfo = "SoCInfo";
 const char *kAICoreSpec = "AICoreSpec";
 const char *kVectorCoreCnt = "vector_core_cnt";
 const char *kUbSize = "ub_size";
+const char *kL2Size = "l2_size";
 
 bool ParseInt64(const char *value, const char *key_name, int64_t &result) {
   try {
@@ -56,8 +57,8 @@ void PlatformContext::SetPlatformInfo(const PlatformInfo &platform_info) {
   if (!platform_info.soc_ver.empty()) {
     platform_info_ = platform_info;
     initialized_ = true;
-    GELOGI("Set platform info: soc_ver=%s, aiv_num=%lld, ub_size=%lld", platform_info_.soc_ver.c_str(),
-           platform_info_.aiv_num, platform_info_.ub_size);
+    GELOGI("Set platform info: soc_ver=%s, aiv_num=%lld, ub_size=%lld, l2_size=%lld", platform_info_.soc_ver.c_str(),
+           platform_info_.aiv_num, platform_info_.ub_size, platform_info_.l2_size);
   }
 }
 
@@ -102,9 +103,14 @@ af::Status PlatformContext::InitPlatformInfo() {
   res = rtGetSocSpec(kAICoreSpec, kUbSize, ub_size_str, kMaxValueLen);
   GE_ASSERT_TRUE(res == RT_ERROR_NONE, "Failed to get ub_size.");
   GE_ASSERT_TRUE(ParseInt64(ub_size_str, "ub_size", platform_info_.ub_size), "Failed to parse ub_size.");
+
+  char l2_size_str[kMaxValueLen] = {};
+  res = rtGetSocSpec(kSocInfo, kL2Size, l2_size_str, kMaxValueLen);
+  GE_ASSERT_TRUE(res == RT_ERROR_NONE, "Failed to get l2_size.");
+  GE_ASSERT_TRUE(ParseInt64(l2_size_str, "l2_size", platform_info_.l2_size), "Failed to parse l2_size.");
   initialized_ = true;
-  GELOGI("Platform info: soc_ver=%s, aiv_num=%lld, ub_size=%lld", platform_info_.soc_ver.c_str(),
-         platform_info_.aiv_num, platform_info_.ub_size);
+  GELOGI("Platform info: soc_ver=%s, aiv_num=%lld, ub_size=%lld, l2_size=%lld", platform_info_.soc_ver.c_str(),
+         platform_info_.aiv_num, platform_info_.ub_size, platform_info_.l2_size);
 
   return af::SUCCESS;
 }

@@ -33,6 +33,7 @@
 #include "optimize/graph_completeness/dtype_consistency.h"
 #include "pre_process/pre_process.h"
 #include "static_ub_template_filter.h"
+#include "common/l2_cache_hint_manager.h"
 
 using namespace ascir;
 using namespace optimize;
@@ -644,6 +645,7 @@ Status Optimizer::OptimizeFusedAscBackend(const af::ComputeGraphPtr &fused_graph
   GE_CHK_STATUS_RET(allocator.PrepareImplGraphMemoryPlan(fused_scheduled_result));
   GE_CHK_STATUS_RET(StaticUbTemplateFilter().Filter(fused_scheduled_result));
   GE_CHK_STATUS_RET(allocator.CollectFusedIoNodes(fused_scheduled_result));
+  GE_CHK_STATUS_RET(optimize::L2CacheHintManager::ParseGraph(*fused_graph, fused_scheduled_result));
   GELOGI("AllocBufQue end");
   TryEnableGroupParallel(fused_scheduled_result);
   for (auto &scheduled_results : fused_scheduled_result.node_idx_to_scheduled_results) {
@@ -978,6 +980,9 @@ Status Optimizer::Optimize(af::AscGraph &hint_graph, FusedScheduledResult &fused
   }
   GE_CHK_STATUS_RET(StaticUbTemplateFilter().Filter(fused_scheduled_result));
   GE_CHK_STATUS_RET(allocator.CollectFusedIoNodes(fused_scheduled_result));
+  const auto compute_graph = af::AscGraphUtils::GetComputeGraph(hint_graph);
+  GE_ASSERT_NOTNULL(compute_graph);
+  GE_CHK_STATUS_RET(optimize::L2CacheHintManager::ParseGraph(*compute_graph, fused_scheduled_result));
   GELOGI("AllocBufQue end");
   TryEnableGroupParallel(fused_scheduled_result);
   ExecSeqAdvancedOfLoad(fused_scheduled_result);

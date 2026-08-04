@@ -39,6 +39,7 @@ inline rtError_t CopyRuntimeSocSpecValue(const char *label, const char *key, cha
       {"NpuArch", defaults.npu_arch},
       {"vector_core_cnt", "48"},
       {"ub_size", "245760"},
+      {"l2_size", "134217728"},
   };
   for (const auto &spec : specs) {
     if (std::strcmp(key, spec.key) == 0) {
