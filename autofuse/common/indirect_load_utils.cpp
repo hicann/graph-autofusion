@@ -21,10 +21,30 @@ namespace {
 constexpr char kTemplateOuterAxisAttr[] = "af.internal.indirect_load.outer_axis";
 constexpr char kTemplateInnerAxisAttr[] = "af.internal.indirect_load.inner_axis";
 constexpr char kTemplateInputInnerAxisAttr[] = "af.internal.indirect_load.input_inner_axis";
+constexpr char kTemplateTileOuterAxisAttr[] = "af.internal.indirect_load.tile_outer_axis";
+constexpr char kTemplateTileInnerAxisAttr[] = "af.internal.indirect_load.tile_inner_axis";
+constexpr char kTemplateVectorizedAxesAttr[] = "af.internal.indirect_load.vectorized_axes";
+constexpr char kTemplateSyntheticOuterAttr[] = "af.internal.indirect_load.synthetic_outer";
 constexpr char kTemplateLogicalViewAttr[] = "af.internal.indirect_load.logical_view";
 
 bool IsValidLogicalTensorView(const LogicalTensorView &view) {
   return !view.axis_ids.empty() && view.axis_ids.size() == view.strides.size();
+}
+
+TemplateAxes ReadTemplateAxes(const af::AscNodePtr &node) {
+  TemplateAxes axes;
+  if (node == nullptr || node->GetOpDesc() == nullptr) {
+    return axes;
+  }
+  const auto op_desc = node->GetOpDesc();
+  axes.outer_axis = op_desc->TryGetExtAttr(kTemplateOuterAxisAttr, static_cast<int64_t>(af::kIdNone));
+  axes.inner_axis = op_desc->TryGetExtAttr(kTemplateInnerAxisAttr, static_cast<int64_t>(af::kIdNone));
+  axes.input_inner_axis = op_desc->TryGetExtAttr(kTemplateInputInnerAxisAttr, static_cast<int64_t>(af::kIdNone));
+  axes.tile_outer_axis = op_desc->TryGetExtAttr(kTemplateTileOuterAxisAttr, static_cast<int64_t>(af::kIdNone));
+  axes.tile_inner_axis = op_desc->TryGetExtAttr(kTemplateTileInnerAxisAttr, static_cast<int64_t>(af::kIdNone));
+  axes.vectorized_axes = op_desc->TryGetExtAttr(kTemplateVectorizedAxesAttr, std::vector<af::AxisId>{});
+  axes.synthetic_outer = op_desc->TryGetExtAttr(kTemplateSyntheticOuterAttr, false);
+  return axes;
 }
 
 TemplateRole GetAnnotatedTemplateRole(const af::AscNodePtr &node) {
@@ -49,6 +69,7 @@ TemplateBehavior GetBehavior(TemplateRole role) {
       break;
     case TemplateRole::kSimtDirectGmBoundary:
     case TemplateRole::kSimtInlineTransform:
+      behavior.skips_main_schedule_tiling = true;
       behavior.skips_api_emit = true;
       behavior.uses_direct_gm_pipeline = true;
       behavior.preserves_vectorized_axis = true;
@@ -76,8 +97,56 @@ TemplateRole GetTemplateRole(const af::AscNodePtr &node) {
   return GetAnnotatedTemplateRole(node);
 }
 
+bool IsSimtInlineTransform(const af::AscNodePtr &node) {
+  return GetTemplateRole(node) == TemplateRole::kSimtInlineTransform;
+}
+
 TemplateBehavior GetTemplateBehavior(const af::AscNodePtr &node) {
-  return GetBehavior(GetTemplateRole(node));
+  const TemplateRole role = GetTemplateRole(node);
+  TemplateBehavior behavior = GetBehavior(role);
+  if (role == TemplateRole::kSimtOp && HasPostReduceConsumer(node)) {
+    behavior = {};
+    behavior.excludes_tiling_group = true;
+  }
+  return behavior;
+}
+
+bool HasPostReduceConsumer(const af::AscNodePtr &node) {
+  return GetPostReduceConsumer(node) != nullptr;
+}
+
+af::AscNodePtr GetPostReduceConsumer(const af::AscNodePtr &node) {
+  for (af::AscNodePtr consumer = GetOnlyOutputConsumer(node); consumer != nullptr;
+       consumer = GetOnlyOutputConsumer(consumer)) {
+    if (consumer->attr.api.compute_type == af::ComputeType::kComputeReduce) {
+      return consumer;
+    }
+  }
+  return nullptr;
+}
+
+af::AscNodePtr GetPostReduceInputProducer(const af::AscNodePtr &node) {
+  af::AscNodePtr producer = node;
+  while (producer != nullptr) {
+    const af::AscNodePtr consumer = GetOnlyOutputConsumer(producer);
+    if (consumer == nullptr) {
+      return nullptr;
+    }
+    if (consumer->attr.api.compute_type == af::ComputeType::kComputeReduce) {
+      return producer;
+    }
+    producer = consumer;
+  }
+  return nullptr;
+}
+
+bool IsPostReduceInputProducer(const af::AscNodePtr &node) {
+  const af::AscNodePtr consumer = GetOnlyOutputConsumer(node);
+  return consumer != nullptr && consumer->attr.api.compute_type == af::ComputeType::kComputeReduce;
+}
+
+bool ShouldSkipTpipeTensorCollection(const af::AscNodePtr &node) {
+  return GetTemplateBehavior(node).skips_api_emit && !(IsSimtInlineTransform(node) && IsPostReduceInputProducer(node));
 }
 
 af::Status InheritTemplateRoleIfIL(af::AscGraph &graph, const std::string &vf_node_name, const af::AscNodePtr &src) {
@@ -105,16 +174,20 @@ af::Status SetTemplateAxes(const af::AscNodePtr &node, const TemplateAxes &axes)
                  "Set IndirectLoad inner axis failed, node = %s", node->GetNamePtr());
   GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateInputInnerAxisAttr, static_cast<int64_t>(axes.input_inner_axis)),
                  "Set IndirectLoad input inner axis failed, node = %s", node->GetNamePtr());
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateTileOuterAxisAttr, static_cast<int64_t>(axes.tile_outer_axis)),
+                 "Set IndirectLoad tile outer axis failed, node = %s", node->GetNamePtr());
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateTileInnerAxisAttr, static_cast<int64_t>(axes.tile_inner_axis)),
+                 "Set IndirectLoad tile inner axis failed, node = %s", node->GetNamePtr());
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateVectorizedAxesAttr, axes.vectorized_axes),
+                 "Set IndirectLoad vectorized axes failed, node = %s", node->GetNamePtr());
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateSyntheticOuterAttr, axes.synthetic_outer),
+                 "Set IndirectLoad synthetic outer failed, node = %s", node->GetNamePtr());
   return af::SUCCESS;
 }
 
 af::Status GetTemplateAxes(const af::AscNodePtr &node, TemplateAxes &axes) {
   GE_ASSERT_NOTNULL(node);
-  auto op_desc = node->GetOpDesc();
-  GE_ASSERT_NOTNULL(op_desc);
-  axes.outer_axis = op_desc->TryGetExtAttr(kTemplateOuterAxisAttr, static_cast<int64_t>(af::kIdNone));
-  axes.inner_axis = op_desc->TryGetExtAttr(kTemplateInnerAxisAttr, static_cast<int64_t>(af::kIdNone));
-  axes.input_inner_axis = op_desc->TryGetExtAttr(kTemplateInputInnerAxisAttr, static_cast<int64_t>(af::kIdNone));
+  axes = ReadTemplateAxes(node);
   GE_ASSERT_TRUE(axes.outer_axis != af::kIdNone, "IndirectLoad template axes are missing, node = %s",
                  node->GetNamePtr());
   return af::SUCCESS;
@@ -122,7 +195,7 @@ af::Status GetTemplateAxes(const af::AscNodePtr &node, TemplateAxes &axes) {
 
 af::Status SetTemplateLogicalView(const af::AscNodePtr &node, const TemplateLogicalView &view) {
   GE_ASSERT_NOTNULL(node);
-  GE_ASSERT_TRUE(IsValidLogicalTensorView(view.data) && IsValidLogicalTensorView(view.index) &&
+  GE_ASSERT_TRUE(IsValidLogicalTensorView(view.input) && IsValidLogicalTensorView(view.index) &&
                      IsValidLogicalTensorView(view.output),
                  "IndirectLoad logical view is invalid, node = %s", node->GetNamePtr());
   auto op_desc = node->GetOpDesc();
@@ -137,7 +210,7 @@ af::Status GetTemplateLogicalView(const af::AscNodePtr &node, TemplateLogicalVie
   auto op_desc = node->GetOpDesc();
   GE_ASSERT_NOTNULL(op_desc);
   view = op_desc->TryGetExtAttr(kTemplateLogicalViewAttr, TemplateLogicalView{});
-  GE_ASSERT_TRUE(IsValidLogicalTensorView(view.data) && IsValidLogicalTensorView(view.index) &&
+  GE_ASSERT_TRUE(IsValidLogicalTensorView(view.input) && IsValidLogicalTensorView(view.index) &&
                      IsValidLogicalTensorView(view.output),
                  "IndirectLoad logical view is missing or invalid, node = %s", node->GetNamePtr());
   return af::SUCCESS;
@@ -203,39 +276,26 @@ af::Status ValidateSingleIndirectLoadNode(const af::AscGraph &graph, af::AscNode
   return af::SUCCESS;
 }
 
-af::Status GetPrebuiltYTilingCase(const af::AscGraph &graph, bool &has_case, af::AxisId &tile_id,
-                                  std::pair<af::AxisPtr, af::AxisPtr> &tiling) {
-  has_case = false;
+bool GetPrebuiltYTilingCase(const af::AscGraph &graph, af::AxisId &tile_id,
+                            std::pair<af::AxisPtr, af::AxisPtr> &tiling) {
   tile_id = af::kIdNone;
   tiling = {nullptr, nullptr};
 
   const af::AscNodePtr indirect_load = FindIndirectLoadNode(graph);
   if (indirect_load == nullptr) {
-    return af::SUCCESS;
+    return false;
   }
 
-  TemplateAxes axes;
-  GE_ASSERT_SUCCESS(GetTemplateAxes(indirect_load, axes), "[IndirectLoad] Failed to get template axes for node[%s].",
-                    indirect_load->GetNamePtr());
-
-  for (const auto &axis : graph.GetAllAxis()) {
-    if (axis == nullptr || axis->type != af::Axis::Type::kAxisTypeTileOuter || axis->from.size() != 1UL ||
-        axis->from[0] != axes.outer_axis) {
-      continue;
-    }
-    GE_ASSERT_TRUE(
-        axis->split_pair_other_id >= 0L && static_cast<size_t>(axis->split_pair_other_id) < graph.GetAllAxis().size(),
-        "[IndirectLoad] Invalid split pair axis[%ld] for graph[%s].", axis->split_pair_other_id,
-        graph.GetName().c_str());
-    tiling.first = axis;
-    tiling.second = graph.GetAllAxis()[static_cast<size_t>(axis->split_pair_other_id)];
-    has_case = true;
-    tile_id = axes.outer_axis;
-    return af::SUCCESS;
+  const TemplateAxes axes = ReadTemplateAxes(indirect_load);
+  tile_id = axes.outer_axis;
+  const auto all_axes = graph.GetAllAxis();
+  if (axes.tile_outer_axis >= 0L && static_cast<size_t>(axes.tile_outer_axis) < all_axes.size()) {
+    tiling.first = all_axes[static_cast<size_t>(axes.tile_outer_axis)];
   }
-  GELOGE(af::FAILED, "[IndirectLoad] Template fixed split is missing for axis[%ld] in graph[%s].", axes.outer_axis,
-         graph.GetName().c_str());
-  return af::FAILED;
+  if (axes.tile_inner_axis >= 0L && static_cast<size_t>(axes.tile_inner_axis) < all_axes.size()) {
+    tiling.second = all_axes[static_cast<size_t>(axes.tile_inner_axis)];
+  }
+  return true;
 }
 
 }  // namespace ascgen_utils::indirect_load

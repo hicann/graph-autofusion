@@ -39,6 +39,56 @@ bool HasComputeType(const ascir::ImplGraph &impl_graph, const af::ComputeType co
   }
   return false;
 }
+
+// 通过输出获取当前节点单次执行涉及到的轴的范围
+std::vector<int64_t> GetNodeVectorizedAxis(const af::AscNodePtr &ge_node, int64_t loop_axis_id) {
+  std::vector<int64_t> total_vectorized_axis;
+  for (size_t out_id = 0U; out_id < ge_node->outputs().size(); out_id++) {
+    auto &output_tensor = ge_node->outputs[out_id].attr;
+    if (output_tensor.vectorized_axis.empty()) {
+      continue;
+    }
+    bool inside_loop_flag{false};
+    std::vector<int64_t> vectorized_axis_ids;
+    for (auto &axis_id : output_tensor.vectorized_axis) {
+      if (inside_loop_flag) {
+        vectorized_axis_ids.emplace_back(axis_id);
+      }
+      if (axis_id == loop_axis_id) {
+        inside_loop_flag = true;
+      }
+    }
+    // 在vectorized_axis中找不到loop_axis，默认vecotrized_axis中所有轴都是单次执行涉及到的轴
+    if (!inside_loop_flag) {
+      vectorized_axis_ids = output_tensor.vectorized_axis;
+    }
+    // 取所有输出节点vectorized_axis并集
+    for (auto &axis_id : vectorized_axis_ids) {
+      if (std::find(total_vectorized_axis.begin(), total_vectorized_axis.end(), axis_id) ==
+          total_vectorized_axis.end()) {
+        total_vectorized_axis.emplace_back(axis_id);
+      }
+    }
+  }
+  return total_vectorized_axis;
+}
+
+void UpdateConcatVectorizedAxes(const af::AscNodePtr &ge_node, int64_t loop_axis,
+                                std::map<size_t, SubAxisPtr> &sub_axes_info) {
+  if (ge_node->GetType() != "Concat" || ge_node->outputs().empty()) {
+    return;
+  }
+  const auto dtype = ge_node->outputs()[0]->attr.dtype;
+  const auto data_type_size = ge::GetSizeByDataType(dtype);
+  for (int64_t axis_id : GetNodeVectorizedAxis(ge_node, loop_axis)) {
+    const auto sub_axis_iter = sub_axes_info.find(axis_id);
+    if (sub_axis_iter == sub_axes_info.end()) {
+      continue;
+    }
+    sub_axis_iter->second->data_type_size = data_type_size;
+    sub_axis_iter->second->is_concat_vec_axis = true;
+  }
+}
 }  // namespace
 const std::string kInputNamePrefix = "_input_";
 const std::string kOutputNamePrefix = "_output_";
@@ -544,39 +594,6 @@ af::Status AscendGraphParser::SetAxisPriority(const af::AscGraph &graph) {
   return af::SUCCESS;
 }
 
-// 通过输出获取当前节点单次执行涉及到的轴的范围
-std::vector<int64_t> GetNodeVectorizedAxis(const af::AscNodePtr &ge_node, int64_t loop_axis_id) {
-  std::vector<int64_t> total_vectorized_axis;
-  for (size_t out_id = 0U; out_id < ge_node->outputs().size(); out_id++) {
-    auto &output_tensor = ge_node->outputs[out_id].attr;
-    if (output_tensor.vectorized_axis.empty()) {
-      continue;
-    }
-    bool inside_loop_flag{false};
-    std::vector<int64_t> vectorized_axis_ids;
-    for (auto &axis_id : output_tensor.vectorized_axis) {
-      if (inside_loop_flag) {
-        vectorized_axis_ids.emplace_back(axis_id);
-      }
-      if (axis_id == loop_axis_id) {
-        inside_loop_flag = true;
-      }
-    }
-    // 在vectorized_axis中找不到loop_axis，默认vecotrized_axis中所有轴都是单次执行涉及到的轴
-    if (!inside_loop_flag) {
-      vectorized_axis_ids = output_tensor.vectorized_axis;
-    }
-    // 取所有输出节点vectorized_axis并集
-    for (auto &axis_id : vectorized_axis_ids) {
-      if (std::find(total_vectorized_axis.begin(), total_vectorized_axis.end(), axis_id) ==
-          total_vectorized_axis.end()) {
-        total_vectorized_axis.emplace_back(axis_id);
-      }
-    }
-  }
-  return total_vectorized_axis;
-}
-
 af::Status AscendGraphParser::ParseWorkspaceNode(const af::AscNodePtr &ge_node) {
   if (ge_node->GetType() == kWorkspace) {
     auto ws_size = ascgen_utils::CalculateOneWorkspaceSize(ge_node);
@@ -747,6 +764,14 @@ af::Status AscendGraphParser::GetNodeFromData(const af::AscNodePtr &ge_node, Nod
 
 af::Status AscendGraphParser::ConvertNodeInfos(const af::AscNodePtr &ge_node, const ScheduleAttr &attrs,
                                                const af::AscGraph &graph, const bool use_cache_flag) {
+  if (ascgen_utils::indirect_load::GetTemplateBehavior(ge_node).uses_direct_gm_pipeline) {
+    if (ascgen_utils::indirect_load::IsPostReduceInputProducer(ge_node)) {
+      NodeInfo reduce_input_tensor_info;
+      reduce_input_tensor_info.name = ge_node->GetName();
+      GE_ASSERT_SUCCESS(ParserNodeOutputInfos(ge_node, graph, reduce_input_tensor_info));
+    }
+    return af::SUCCESS;
+  }
   static const std::map<af::ComputeUnit, std::string> kUnitMap = {
       {af::ComputeUnit::kUnitNone, "UnitNone"},     {af::ComputeUnit::kUnitMTE1, "UnitMTE1"},
       {af::ComputeUnit::kUnitMTE2, "UnitMTE2"},     {af::ComputeUnit::kUnitMTE3, "UnitMTE3"},
@@ -774,20 +799,7 @@ af::Status AscendGraphParser::ConvertNodeInfos(const af::AscNodePtr &ge_node, co
   }
   node_info.node_ptr = ge_node;
   GE_ASSERT_SUCCESS(FillSpecificParams(ge_node, node_info));
-  auto vectorized_axis_ids = GetNodeVectorizedAxis(ge_node, loop_axis);
-  for (const auto &axis_info : vectorized_axis_ids) {
-    auto sub_axis_iter = sub_axes_info_.find(axis_info);
-    if (sub_axis_iter != sub_axes_info_.end()) {
-      if (node_info.node_type == "Concat") {
-        if (!ge_node->outputs().empty()) {
-          const auto dtype = ge_node->outputs[0].attr.dtype;
-          const auto data_type_size = ge::GetSizeByDataType(dtype);
-          sub_axis_iter->second->data_type_size = data_type_size;
-        }
-        sub_axis_iter->second->is_concat_vec_axis = true;
-      }
-    }
-  }
+  UpdateConcatVectorizedAxes(ge_node, loop_axis, sub_axes_info_);
   GE_ASSERT_SUCCESS(GetNodeFromData(ge_node, node_info));
   VectorFunctionGraphParser vector_function_graph_parser(ge_node, graph);
   GE_ASSERT_SUCCESS(vector_function_graph_parser.Parse(), "Parse node infos failed, graph = %s, node = %s %s.",
@@ -875,13 +887,6 @@ af::Status AscendGraphParser::ConvertToTuningSpace(const af::AscGraph &graph) {
     auto &node = node_order.second;
     auto node_iter = graph_sched_info_.find(node);
     if (node_iter == graph_sched_info_.end()) {
-      continue;
-    }
-    const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
-    if (indirect_load_behavior.uses_direct_gm_pipeline) {
-      GELOGD("[IndirectLoad] Skip tuning-space node info for node[%s], direct_gm[%d], skips_emit[%d].",
-             node->GetNamePtr(), static_cast<int32_t>(indirect_load_behavior.uses_direct_gm_pipeline),
-             static_cast<int32_t>(indirect_load_behavior.skips_api_emit));
       continue;
     }
     const auto &sched_attrs = node_iter->second;

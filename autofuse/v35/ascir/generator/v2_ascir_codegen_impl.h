@@ -25,12 +25,30 @@ namespace af {
 namespace ascir {
 
 namespace {
+bool HasSimtArity(const AscNode &node, size_t input_count) {
+  AscNode &mutable_node = const_cast<AscNode &>(node);
+  return mutable_node.inputs.Size() == input_count && mutable_node.outputs().size() == 1UL;
+}
+
 ge::DataType GetSimtInputDtype(const AscNode &node) {
   return const_cast<AscNode &>(node).inputs[0].attr.dtype;
 }
 
 ge::DataType GetSimtOutputDtype(const AscNode &node) {
   return const_cast<AscNode &>(node).outputs[0].attr.dtype;
+}
+
+bool HasSameSimtUnaryDtype(const AscNode &node) {
+  return HasSimtArity(node, 1UL) && GetSimtInputDtype(node) == GetSimtOutputDtype(node);
+}
+
+bool HasSameSimtBinaryDtype(const AscNode &node) {
+  AscNode &mutable_node = const_cast<AscNode &>(node);
+  if (!HasSimtArity(node, 2UL)) {
+    return false;
+  }
+  const ge::DataType dtype = GetSimtOutputDtype(node);
+  return mutable_node.inputs[0].attr.dtype == dtype && mutable_node.inputs[1].attr.dtype == dtype;
 }
 
 bool IsSimtFloatDtype(ge::DataType dtype) {
@@ -49,6 +67,23 @@ const char *GetSimtDtypeName(ge::DataType dtype) {
     }
   }
   return nullptr;
+}
+
+bool HasSameSimtBinaryArithmeticDtype(const AscNode &node) {
+  return HasSameSimtBinaryDtype(node) && GetSimtOutputDtype(node) != DT_BOOL &&
+         GetSimtDtypeName(GetSimtOutputDtype(node)) != nullptr;
+}
+
+ge::graphStatus GenerateSimtBinaryExpr(const std::string &op, const std::vector<std::string> &inputs,
+                                       std::string &expr) {
+  expr = "(" + inputs[0] + " " + op + " " + inputs[1] + ")";
+  return ge::GRAPH_SUCCESS;
+}
+
+ge::graphStatus GenerateSimtFloatBinaryExpr(const std::string &op, const std::vector<std::string> &inputs,
+                                            std::string &expr) {
+  expr = "(static_cast<float>(" + inputs[0] + ") " + op + " static_cast<float>(" + inputs[1] + "))";
+  return ge::GRAPH_SUCCESS;
 }
 
 ge::graphStatus GenerateSimtFloatUnaryExpr(const std::string &api, const std::vector<std::string> &inputs,
@@ -87,7 +122,7 @@ ge::graphStatus GenerateSimtFloatToIntExpr(const AscNode &node, const std::vecto
 class SimtFloatUnaryAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    return IsSimtFloatDtype(GetSimtInputDtype(node)) && GetSimtInputDtype(node) == GetSimtOutputDtype(node);
+    return HasSameSimtUnaryDtype(node) && IsSimtFloatDtype(GetSimtInputDtype(node));
   }
 
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
@@ -359,6 +394,9 @@ class CastAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return false;
   }
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    if (!HasSimtArity(node, 1UL)) {
+      return false;
+    }
     static constexpr std::pair<ge::DataType, ge::DataType> kSupportedPairs[] = {
         {DT_FLOAT, DT_FLOAT},   {DT_FLOAT, DT_FLOAT16}, {DT_FLOAT, DT_INT64},   {DT_FLOAT, DT_INT32},
         {DT_FLOAT, DT_INT16},   {DT_FLOAT, DT_BF16},    {DT_FLOAT, DT_INT8},    {DT_FLOAT16, DT_FLOAT},
@@ -436,6 +474,9 @@ class AbsAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    if (!HasSameSimtUnaryDtype(node)) {
+      return false;
+    }
     const ge::DataType dtype = GetSimtOutputDtype(node);
     return dtype == DT_FLOAT || dtype == DT_FLOAT16 || dtype == DT_BF16 || dtype == DT_INT8 || dtype == DT_INT16 ||
            dtype == DT_INT32 || dtype == DT_INT64 || dtype == DT_UINT8;
@@ -528,9 +569,7 @@ class ExpAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    auto &outputs = const_cast<AscNode &>(node).outputs;
-    auto dt = static_cast<ge::DataType>(outputs[0].attr.dtype);
-    return dt == DT_FLOAT16 || dt == DT_FLOAT || dt == DT_BF16;
+    return HasSameSimtUnaryDtype(node) && IsSimtFloatDtype(GetSimtInputDtype(node));
   }
 
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
@@ -573,9 +612,7 @@ class Exp2AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    auto &outputs = const_cast<AscNode &>(node).outputs;
-    auto dt = static_cast<ge::DataType>(outputs[0].attr.dtype);
-    return dt == DT_FLOAT16 || dt == DT_FLOAT || dt == DT_BF16;
+    return HasSameSimtUnaryDtype(node) && IsSimtFloatDtype(GetSimtInputDtype(node));
   }
 
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
@@ -1431,9 +1468,7 @@ class LnAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    auto &outputs = const_cast<AscNode &>(node).outputs;
-    auto dt = static_cast<ge::DataType>(outputs[0].attr.dtype);
-    return dt == DT_FLOAT16 || dt == DT_FLOAT || dt == DT_BF16;
+    return HasSameSimtUnaryDtype(node) && IsSimtFloatDtype(GetSimtInputDtype(node));
   }
 
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
@@ -1621,9 +1656,7 @@ class SqrtAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    auto &outputs = const_cast<AscNode &>(node).outputs;
-    auto dt = static_cast<ge::DataType>(outputs[0].attr.dtype);
-    return dt == DT_FLOAT16 || dt == DT_FLOAT || dt == DT_BF16;
+    return HasSameSimtUnaryDtype(node) && IsSimtFloatDtype(GetSimtInputDtype(node));
   }
 
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
@@ -1702,8 +1735,12 @@ class NegAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    if (!HasSameSimtUnaryDtype(node)) {
+      return false;
+    }
+    const ge::DataType dtype = GetSimtOutputDtype(node);
+    return dtype == DT_BF16 || dtype == DT_INT8 || dtype == DT_INT16 || dtype == DT_INT32 || dtype == DT_INT64 ||
+           dtype == DT_FLOAT16 || dtype == DT_FLOAT;
   }
 
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
@@ -1766,8 +1803,11 @@ class ReluAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    if (!HasSameSimtUnaryDtype(node)) {
+      return false;
+    }
+    const ge::DataType dtype = GetSimtOutputDtype(node);
+    return dtype == DT_INT32 || dtype == DT_FLOAT16 || dtype == DT_FLOAT || dtype == DT_UINT8 || dtype == DT_INT64;
   }
 
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
@@ -2288,6 +2328,21 @@ class CompareAscIrCodegenImplV2 : public AscIrCodegenV2 {
     }
     return true;
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    AscNode &mutable_node = const_cast<AscNode &>(node);
+    if (!HasSimtArity(node, 2UL) || mutable_node.inputs[0].attr.dtype != mutable_node.inputs[1].attr.dtype) {
+      return false;
+    }
+    const ge::DataType input_dtype = mutable_node.inputs[0].attr.dtype;
+    const ge::DataType output_dtype = GetSimtOutputDtype(node);
+    return input_dtype != DT_BOOL && GetSimtDtypeName(input_dtype) != nullptr &&
+           (output_dtype == DT_BOOL || output_dtype == DT_UINT8);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtBinaryExpr(GetSimtScalarOperator(), inputs, expr);
+  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "basic_api/reg_compute/kernel_reg_compute_intf.h",
@@ -2300,6 +2355,9 @@ class CompareAscIrCodegenImplV2 : public AscIrCodegenV2 {
                       "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
     return true;
   }
+
+ protected:
+  [[nodiscard]] virtual std::string GetSimtScalarOperator() const = 0;
 };
 
 class GeAscIrCodegenImplV2 : public CompareAscIrCodegenImplV2 {
@@ -2309,6 +2367,11 @@ class GeAscIrCodegenImplV2 : public CompareAscIrCodegenImplV2 {
   }
   [[nodiscard]] std::string GetMicroApiName() const override {
     return "GE";
+  }
+
+ protected:
+  [[nodiscard]] std::string GetSimtScalarOperator() const override {
+    return ">=";
   }
 };
 
@@ -2323,6 +2386,11 @@ class EqAscIrCodegenImplV2 : public CompareAscIrCodegenImplV2 {
   }
   [[nodiscard]] std::string GetMicroApiName() const override {
     return "EQ";
+  }
+
+ protected:
+  [[nodiscard]] std::string GetSimtScalarOperator() const override {
+    return "==";
   }
 };
 
@@ -2355,6 +2423,11 @@ class NeAscIrCodegenImplV2 : public CompareAscIrCodegenImplV2 {
   [[nodiscard]] std::string GetMicroApiName() const override {
     return "NE";
   }
+
+ protected:
+  [[nodiscard]] std::string GetSimtScalarOperator() const override {
+    return "!=";
+  }
 };
 
 class GtAscIrCodegenImplV2 : public CompareAscIrCodegenImplV2 {
@@ -2364,6 +2437,11 @@ class GtAscIrCodegenImplV2 : public CompareAscIrCodegenImplV2 {
   }
   [[nodiscard]] std::string GetMicroApiName() const override {
     return "GT";
+  }
+
+ protected:
+  [[nodiscard]] std::string GetSimtScalarOperator() const override {
+    return ">";
   }
 };
 
@@ -2375,6 +2453,11 @@ class LeAscIrCodegenImplV2 : public CompareAscIrCodegenImplV2 {
   [[nodiscard]] std::string GetMicroApiName() const override {
     return "LE";
   }
+
+ protected:
+  [[nodiscard]] std::string GetSimtScalarOperator() const override {
+    return "<=";
+  }
 };
 
 class LtAscIrCodegenImplV2 : public CompareAscIrCodegenImplV2 {
@@ -2384,6 +2467,11 @@ class LtAscIrCodegenImplV2 : public CompareAscIrCodegenImplV2 {
   }
   [[nodiscard]] std::string GetMicroApiName() const override {
     return "LT";
+  }
+
+ protected:
+  [[nodiscard]] std::string GetSimtScalarOperator() const override {
+    return "<";
   }
 };
 
@@ -2475,6 +2563,17 @@ class DivAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return true;
   }
 
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return HasSameSimtBinaryDtype(node) &&
+           (GetSimtOutputDtype(node) == DT_FLOAT16 || GetSimtOutputDtype(node) == DT_FLOAT);
+  }
+
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtFloatBinaryExpr("/", inputs, expr);
+  }
+
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
     (void)node;
     return true;
@@ -2534,6 +2633,16 @@ class SubAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return true;
   }
 
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return HasSameSimtBinaryArithmeticDtype(node);
+  }
+
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtBinaryExpr("-", inputs, expr);
+  }
+
   [[nodiscard]] bool IsInplaceSupported(const AscNode &sub_node) const override {
     (void)sub_node;
     return true;
@@ -2570,6 +2679,16 @@ class AddAscIrCodegenImplV2 : public AscIrCodegenV2 {
 
   [[nodiscard]] std::string GetMicroApiName() const override {
     return "Add";
+  }
+
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return HasSameSimtBinaryArithmeticDtype(node);
+  }
+
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtBinaryExpr("+", inputs, expr);
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
@@ -2623,6 +2742,16 @@ class MulAscIrCodegenImplV2 : public AscIrCodegenV2 {
 
   [[nodiscard]] std::string GetMicroApiName() const override {
     return "Mul";
+  }
+
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return HasSameSimtBinaryArithmeticDtype(node) && GetSimtOutputDtype(node) != DT_UINT16;
+  }
+
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtBinaryExpr("*", inputs, expr);
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
@@ -2688,6 +2817,14 @@ class TrueDivAscIrCodegenImplV2 : public AscIrCodegenV2 {
     (void)node;
     return true;
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return HasSameSimtBinaryDtype(node) && IsSimtFloatDtype(GetSimtOutputDtype(node));
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    return GenerateSimtFloatBinaryExpr("/", inputs, expr);
+  }
   [[nodiscard]] bool IsInplaceSupported(const AscNode &true_div_node) const override {
     (void)true_div_node;
     return true;
@@ -2749,6 +2886,15 @@ class MinimumAscIrCodegenImplV2 : public AscIrCodegenV2 {
     (void)node;
     return true;
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return HasSameSimtBinaryArithmeticDtype(node);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    expr = "(" + inputs[0] + " < " + inputs[1] + " ? " + inputs[0] + " : " + inputs[1] + ")";
+    return ge::GRAPH_SUCCESS;
+  }
   [[nodiscard]] bool IsInplaceSupported(const AscNode &minimum_node) const override {
     (void)minimum_node;
     return true;
@@ -2803,6 +2949,15 @@ class MaximumAscIrCodegenImplV2 : public AscIrCodegenV2 {
     (void)node;
     return true;
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return HasSameSimtBinaryArithmeticDtype(node);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    expr = "(" + inputs[0] + " > " + inputs[1] + " ? " + inputs[0] + " : " + inputs[1] + ")";
+    return ge::GRAPH_SUCCESS;
+  }
   [[nodiscard]] bool IsInplaceSupported(const AscNode &maximum_node) const override {
     (void)maximum_node;
     return true;
@@ -2849,6 +3004,27 @@ class WhereAscIrCodegenImplV2 : public AscIrCodegenV2 {
     }
     return true;
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    AscNode &mutable_node = const_cast<AscNode &>(node);
+    if (!HasSimtArity(node, 3UL)) {
+      return false;
+    }
+    const ge::DataType mask_dtype = mutable_node.inputs[0].attr.dtype;
+    const ge::DataType output_dtype = GetSimtOutputDtype(node);
+    bool value_dtype_supported = output_dtype != DT_BOOL && GetSimtDtypeName(output_dtype) != nullptr;
+    if (node.GetType() == "Select") {
+      value_dtype_supported = output_dtype == DT_FLOAT16 || output_dtype == DT_FLOAT || output_dtype == DT_BF16 ||
+                              output_dtype == DT_INT16 || output_dtype == DT_INT32 || output_dtype == DT_INT64;
+    }
+    return (mask_dtype == DT_BOOL || mask_dtype == DT_UINT8) && mutable_node.inputs[1].attr.dtype == output_dtype &&
+           mutable_node.inputs[2].attr.dtype == output_dtype && value_dtype_supported;
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    expr = "((" + inputs[0] + " != 0) ? " + inputs[1] + " : " + inputs[2] + ")";
+    return ge::GRAPH_SUCCESS;
+  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "basic_api/reg_compute/kernel_reg_compute_intf.h",
@@ -2875,6 +3051,10 @@ class MaskedFillAscIrCodegenImplV2 : public WhereAscIrCodegenImplV2 {
   [[nodiscard]] bool IsScalarInputSupported(const std::vector<bool> &is_scalar_list) const override {
     GE_ASSERT_EQ(is_scalar_list.size(), 3UL);
     return !is_scalar_list[1];
+  }
+  [[nodiscard]] bool IsSimtScalarSupported([[maybe_unused]] const AscNode &node) const override {
+    // MaskedFillInputReorderPass converts supported nodes to Select(mask, value, x).
+    return false;
   }
 };
 /*********************************************************************************/
@@ -2918,8 +3098,8 @@ class LeakyReluAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return HasSameSimtUnaryDtype(node) &&
+           (GetSimtOutputDtype(node) == DT_FLOAT16 || GetSimtOutputDtype(node) == DT_FLOAT);
   }
 
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
@@ -3638,6 +3818,16 @@ class CopySignAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::string GetApiName() const override {
     return "CopySignExtend";
   }
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    const ge::DataType dtype = GetSimtOutputDtype(node);
+    return HasSameSimtBinaryDtype(node) && (dtype == DT_FLOAT16 || dtype == DT_FLOAT);
+  }
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    expr = "AscendC::Simt::CopySign(static_cast<float>(" + inputs[0] + "), static_cast<float>(" + inputs[1] + "))";
+    return ge::GRAPH_SUCCESS;
+  }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"copy_sign_reg_base.h"};
   }
@@ -3783,6 +3973,18 @@ class LogicalOrAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return true;
   }
 
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return HasSameSimtBinaryDtype(node) &&
+           (GetSimtOutputDtype(node) == DT_BOOL || GetSimtOutputDtype(node) == DT_UINT8);
+  }
+
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    expr = "((" + inputs[0] + " != 0) || (" + inputs[1] + " != 0))";
+    return ge::GRAPH_SUCCESS;
+  }
+
   [[nodiscard]] bool IsInplaceSupported(const AscNode &or_node) const override {
     (void)or_node;
     return true;
@@ -3900,10 +4102,12 @@ class BitwiseNotAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
-    auto &outputs = const_cast<AscNode &>(node).outputs;
-    auto dt = static_cast<ge::DataType>(outputs[0].attr.dtype);
-    return dt == DT_INT8 || dt == DT_INT16 || dt == DT_INT32 || dt == DT_INT64 || dt == DT_UINT8 || dt == DT_UINT16 ||
-           dt == DT_UINT32 || dt == DT_UINT64;
+    if (!HasSameSimtUnaryDtype(node)) {
+      return false;
+    }
+    const ge::DataType dtype = GetSimtOutputDtype(node);
+    return dtype == DT_INT8 || dtype == DT_INT16 || dtype == DT_INT32 || dtype == DT_INT64 || dtype == DT_UINT8 ||
+           dtype == DT_UINT16 || dtype == DT_UINT32 || dtype == DT_UINT64;
   }
 
   [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,

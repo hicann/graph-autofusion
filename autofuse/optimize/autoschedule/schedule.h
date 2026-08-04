@@ -41,6 +41,13 @@ struct TilingCase {
   af::Expression a_org_size;   // R轴切多核时，A轴大小
 };
 
+struct IndirectLoadInfo {
+  bool active = false;
+  af::AscNodePtr reduce;
+  af::AscNodePtr reduce_input;
+  ascgen_utils::indirect_load::TemplateAxes axes;
+};
+
 class Scheduler {
  public:
   Scheduler() = delete;
@@ -109,9 +116,7 @@ class Scheduler {
   bool is_last_axis_reduce_;
   optimize::ReduceTemplateType reduce_template_;
   ascir::CubeTemplateType cube_template_;
-  bool is_indirect_load_schedule_case_ = false;
-  bool has_indirect_load_synthetic_outer_axis_ = false;
-  ascgen_utils::indirect_load::TemplateAxes indirect_load_axes_;
+  IndirectLoadInfo indirect_load_info_;
   GraphPropertiesCache graph_cache_;  // 图属性缓存，避免重复遍历
 };
 }  // namespace optimize::autoschedule

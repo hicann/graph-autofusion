@@ -69,17 +69,17 @@ class VectorizedAlignmentUT : public testing::Test {
     }
 
     af::Status AccessAddRemovePadForTailAxisDiscontinuousLoad(ImplGraph &impl_graph) {
-      return AddRemovePadForTailAxisDiscontinuousLoad(impl_graph);
+      return ForEachNode(impl_graph, &AlignmentStrategyShadow::AddRemovePadForOneNode);
     }
     af::Status AccessAddPadForAlignmentConflictNode(ImplGraph &impl_graph) {
-      return AddPadForAlignmentConflictNode(impl_graph);
+      return ForEachNode(impl_graph, &AlignmentStrategyShadow::AddPadForAlignmentConflictOneNode);
     }
-    af::Status AccessInferAlignmentForOneNode(const af::AscNodePtr &node) {
-      return InferAlignmentForOneNode(node);
+    af::Status AccessInferAlignment(ImplGraph &impl_graph) {
+      return ForEachNode(impl_graph, &AlignmentStrategyShadow::InferAlignmentForOneNode);
     }
     // 当前tensor的对齐行为只会出现在尾轴,如果没有新的对齐行为或者类型,该函数不应该修改
-    af::Status AccessSetVectorizedStridesForOneNode(const af::AscNodePtr &node) {
-      return SetVectorizedStridesForOneNode(node);
+    af::Status AccessSetVectorizedStrides(ImplGraph &impl_graph) {
+      return ForEachNode(impl_graph, &AlignmentStrategyShadow::SetVectorizedStridesForOneNode);
     }
   };
 };
@@ -729,17 +729,9 @@ TEST_F(VectorizedAlignmentUT, removepad_and_add_pad) {
   AlignmentStrategyShadow handler;
   EXPECT_EQ(handler.AccessSetAlignWidth(graph), af::SUCCESS);
   EXPECT_EQ(handler.AccessAddRemovePadForTailAxisDiscontinuousLoad(graph), af::SUCCESS);
-  for (const auto &node : graph.GetAllNodes()) {
-    EXPECT_EQ(handler.AccessInferAlignmentForOneNode(node), af::SUCCESS);
-  }
+  EXPECT_EQ(handler.AccessInferAlignment(graph), af::SUCCESS);
   EXPECT_EQ(handler.AccessAddPadForAlignmentConflictNode(graph), af::SUCCESS);
-
-  for (const auto &node : graph.GetAllNodes()) {
-    if (ScheduleUtils::IsBuffer(node)) {
-      continue;
-    }
-    EXPECT_EQ(handler.AccessSetVectorizedStridesForOneNode(node), af::SUCCESS);
-  }
+  EXPECT_EQ(handler.AccessSetVectorizedStrides(graph), af::SUCCESS);
 
   std::vector<af::Expression> golden1 = {af::Symbol(160), af::Symbol(16)};
   std::vector<af::Expression> golden2 = {af::Symbol(16), af::Symbol(1)};

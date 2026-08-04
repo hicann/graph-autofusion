@@ -33,39 +33,71 @@ struct IndirectLoadSimtOffset {
   }
 };
 
-template <typename X, typename Index, typename Y, int32_t Rank, int32_t Axis, typename IndexTransform,
-          typename OutputTransform, typename... ShapeArgs>
+template <typename X, typename Y, int32_t Rank, int32_t Axis, typename FusedBody, typename Context,
+          typename... ShapeArgs>
 __simt_vf__ __aicore__ LAUNCH_BOUND(kIndirectLoadSimtThreadNum) inline void IndirectLoadSimtKernel(
-    __gm__ X *x, __gm__ Index *index, __gm__ Y *y, uint32_t actual_size, int64_t output_offset, int64_t x_axis_size,
+    __gm__ X *x, __gm__ Y *y, Context context, uint32_t actual_size, int64_t output_offset, int64_t x_axis_size,
     ShapeArgs... shape_args) {
   static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMT rank or axis is invalid.");
   static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(2 * Rank), "IndirectLoad SIMT shape is invalid.");
   const int64_t shape[] = {static_cast<int64_t>(shape_args)...};
   for (uint32_t i = threadIdx.x; i < actual_size; i += blockDim.x) {
     const int64_t output_index = output_offset + i;
-    const int64_t indirect_index = static_cast<int64_t>(IndexTransform::Call(index[output_index]));
+    const int64_t indirect_index = static_cast<int64_t>(FusedBody::Index(output_index, context));
     if (unlikely(indirect_index < 0 || indirect_index >= x_axis_size)) {
       y[output_index] = static_cast<Y>(0);
       continue;
     }
     const int64_t input_offset =
         IndirectLoadSimtOffset<Rank - 1, Axis, Rank>::Call(output_index, indirect_index, shape);
-    y[output_index] = OutputTransform::Call(x[input_offset]);
+    y[output_index] = FusedBody::Output(x[input_offset], output_index, context);
   }
 }
 }  // namespace Internal
 
-template <typename X, typename Index, typename Y, int32_t Rank, int32_t Axis, typename IndexTransform,
-          typename OutputTransform, typename... ShapeArgs>
-__aicore__ inline void IndirectLoadSimt(__gm__ X *x, __gm__ Index *index, __gm__ Y *y, uint32_t actual_size,
+template <typename X, typename Y, int32_t Rank, int32_t Axis, typename FusedBody, typename Context,
+          typename... ShapeArgs>
+__aicore__ inline void IndirectLoadSimt(__gm__ X *x, __gm__ Y *y, Context context, uint32_t actual_size,
                                         int64_t output_offset, int64_t x_axis_size, ShapeArgs... shape_args) {
-  Simt::VF_CALL<
-      Internal::IndirectLoadSimtKernel<X, Index, Y, Rank, Axis, IndexTransform, OutputTransform, ShapeArgs...>>(
-      Simt::Dim3(Internal::kIndirectLoadSimtThreadNum), x, index, y, actual_size, output_offset, x_axis_size,
+  Simt::VF_CALL<Internal::IndirectLoadSimtKernel<X, Y, Rank, Axis, FusedBody, Context, ShapeArgs...>>(
+      Simt::Dim3(Internal::kIndirectLoadSimtThreadNum), x, y, context, actual_size, output_offset, x_axis_size,
       shape_args...);
   const int32_t event_id = static_cast<int32_t>(GetTPipePtr()->FetchEventID(HardEvent::V_MTE3));
   SetFlag<HardEvent::V_MTE3>(event_id);
   WaitFlag<HardEvent::V_MTE3>(event_id);
+}
+
+namespace Internal {
+template <typename X, typename Y, int32_t Rank, int32_t Axis, typename FusedBody, typename Context,
+          typename... ShapeArgs>
+__simt_vf__ __aicore__ LAUNCH_BOUND(kIndirectLoadSimtThreadNum) inline void IndirectLoadSimtUbKernel(
+    __gm__ X *x, __ubuf__ Y *y, Context context, uint32_t actual_size, int64_t output_offset, int64_t x_axis_size,
+    ShapeArgs... shape_args) {
+  static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMT rank or axis is invalid.");
+  static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(2 * Rank), "IndirectLoad SIMT shape is invalid.");
+  const int64_t shape[] = {static_cast<int64_t>(shape_args)...};
+  for (uint32_t i = threadIdx.x; i < actual_size; i += blockDim.x) {
+    const int64_t output_index = output_offset + i;
+    const int64_t indirect_index = static_cast<int64_t>(FusedBody::Index(output_index, context));
+    if (unlikely(indirect_index < 0 || indirect_index >= x_axis_size)) {
+      y[i] = static_cast<Y>(0);
+      continue;
+    }
+    const int64_t input_offset =
+        IndirectLoadSimtOffset<Rank - 1, Axis, Rank>::Call(output_index, indirect_index, shape);
+    y[i] = FusedBody::Output(x[input_offset], output_index, context);
+  }
+}
+}  // namespace Internal
+
+template <typename X, typename Y, int32_t Rank, int32_t Axis, typename FusedBody, typename Context,
+          typename... ShapeArgs>
+__aicore__ inline void IndirectLoadSimt(__gm__ X *x, LocalTensor<Y> y, Context context, uint32_t actual_size,
+                                        int64_t output_offset, int64_t x_axis_size, ShapeArgs... shape_args) {
+  Simt::VF_CALL<Internal::IndirectLoadSimtUbKernel<X, Y, Rank, Axis, FusedBody, Context, ShapeArgs...>>(
+      Simt::Dim3(Internal::kIndirectLoadSimtThreadNum), x, (__ubuf__ Y *)y.GetPhyAddr(), context, actual_size,
+      output_offset, x_axis_size, shape_args...);
+  PipeBarrier<PIPE_V>();
 }
 }  // namespace AscendC
 

@@ -207,11 +207,6 @@ af::Status NddmaTemplate::ProcessSliceToNddma(const af::AscNodePtr &node_load, b
   GE_CHECK_NOTNULL(node_load);
   GE_CHECK_NOTNULL(node_load->GetOpDesc());
 
-  const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node_load);
-  if (indirect_load_behavior.uses_direct_gm_pipeline) {
-    return af::SUCCESS;
-  }
-
   bool is_node_no_transpose = node_load->GetName().rfind(kTransposePrefix, 0U) != 0U;
   if (is_node_no_transpose && !(IsTailAxisTransposeV2(node_load) || IsTailAxisTranspose(node_load->outputs[0].attr))) {
     if (!ScheduleUtils::IsVectorizedAxisContinuousInGM(node_load->outputs[0].attr)) {
@@ -250,7 +245,8 @@ af::Status NddmaTemplate::Generate([[maybe_unused]] const af::AscGraph &origin_g
   bool is_transpose_nddma_generated = is_nddma_generated;
   for (const auto &node : new_case.GetAllNodes()) {
     GE_CHECK_NOTNULL(node);
-    if (!af::ops::IsOps<af::ascir_op::Load>(node) && !af::ops::IsOps<af::ascir_op::Nddma>(node)) {
+    if ((!af::ops::IsOps<af::ascir_op::Load>(node) && !af::ops::IsOps<af::ascir_op::Nddma>(node)) ||
+        ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(node)) {
       continue;
     }
     if (node->GetOutAllNodes().size() > 1UL) {

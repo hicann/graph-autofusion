@@ -58,6 +58,8 @@ class BaseAlignmentStrategy {
   }
 
  protected:
+  using NodeProcessor = af::Status (BaseAlignmentStrategy::*)(ascir::ImplGraph &, const af::AscNodePtr &, bool &);
+
   virtual AlignmentType GetDefaultAlignmentType() = 0;
 
   virtual void InitAlignmentInferFunc();
@@ -71,9 +73,10 @@ class BaseAlignmentStrategy {
   virtual af::Status SplitAlignmentInferFunc(const af::AscNodePtr &node);
 
   virtual af::Status SetAlignWidth(const ascir::ImplGraph &impl_graph);
-  af::Status InferAlignmentForOneNode(const af::AscNodePtr &node);
+  af::Status ForEachNode(ascir::ImplGraph &impl_graph, NodeProcessor processor);
+  af::Status InferAlignmentForOneNode(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node, bool &changed);
   // 当前tensor的对齐行为只会出现在尾轴,如果没有新的对齐行为或者类型,该函数不应该修改
-  af::Status SetVectorizedStridesForOneNode(const af::AscNodePtr &node);
+  af::Status SetVectorizedStridesForOneNode(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node, bool &changed);
   // 反向推导对齐逻辑
   virtual af::Status BackPropagateAlignment(const af::AscNodePtr &node,
                                             AlignmentType aligned_type = AlignmentType::kAligned);
@@ -82,9 +85,10 @@ class BaseAlignmentStrategy {
   bool SetAlignInfoForNodeOutputs(AlignmentType aligned_type, af::AscNode *node, std::set<af::Node *> &visited_nodes,
                                   std::queue<af::Node *> &node_queue);
 
-  static af::Status AddRemovePadForTailAxisDiscontinuousLoad(ascir::ImplGraph &impl_graph);
+  af::Status AddRemovePadForOneNode(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node, bool &inserted);
   af::Status CheckIsNoNeedPad(const af::AscNodePtr &node, af::AscTensorAttr &out_attr, bool &is_no_need_pad) const;
-  af::Status AddPadForAlignmentConflictNode(ascir::ImplGraph &impl_graph);
+  af::Status AddPadForAlignmentConflictOneNode(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node,
+                                               bool &inserted);
   // 多输入elewise,有一个fix,需要向上传递fix状态,防止输入链路上被后续节点刷成align
   af::Status BackPropagateFixUnAlignType(const af::AscNodePtr &node);
 

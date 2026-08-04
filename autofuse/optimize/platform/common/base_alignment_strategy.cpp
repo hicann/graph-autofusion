@@ -15,6 +15,30 @@
 #include "platform/platform_factory.h"
 
 namespace optimize {
+namespace {
+bool ShouldSkipRegularAlignment(const af::AscNodePtr &node) {
+  return ScheduleUtils::IsBuffer(node) ||
+         ascgen_utils::indirect_load::GetTemplateBehavior(node).uses_direct_gm_pipeline;
+}
+}  // namespace
+
+af::Status BaseAlignmentStrategy::ForEachNode(ascir::ImplGraph &graph, NodeProcessor processor) {
+  bool changed = false;
+  for (const auto &node : graph.GetAllNodes()) {
+    GE_ASSERT_NOTNULL(node);
+    if (ShouldSkipRegularAlignment(node)) {
+      continue;
+    }
+    const af::Status status = (this->*processor)(graph, node, changed);
+    if (status != af::SUCCESS) {
+      return status;
+    }
+  }
+  if (changed) {
+    GE_ASSERT_GRAPH_SUCCESS(ScheduleUtils::TopologicalSorting(graph));
+  }
+  return af::SUCCESS;
+}
 
 bool IsTailAxisTranspose(const af::AscTensorAttr &attr) {
   const size_t axis_size = attr.vectorized_axis.size();
@@ -64,7 +88,7 @@ bool IsHasReduceNode(const af::AscNodePtr &node) {
     node_queue.pop();
     for (auto &out_node : top_node->GetOutNodes()) {
       auto asc_node = std::dynamic_pointer_cast<af::AscNode>(out_node);
-      if ((asc_node == nullptr) || optimize::ScheduleUtils::IsBuffer(asc_node)) {
+      if ((asc_node == nullptr) || ShouldSkipRegularAlignment(asc_node)) {
         continue;
       }
       if (optimize::ScheduleUtils::IsReduce(asc_node)) {
@@ -246,27 +270,17 @@ af::Status BaseAlignmentStrategy::ReduceAlignmentInferFunc(const af::AscNodePtr 
   return af::SUCCESS;
 }
 
-af::Status BaseAlignmentStrategy::AddRemovePadForTailAxisDiscontinuousLoad(ascir::ImplGraph &impl_graph) {
+af::Status BaseAlignmentStrategy::AddRemovePadForOneNode(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node,
+                                                         bool &inserted) {
   const auto &config = PlatformFactory::GetInstance().GetPlatform()->GetPlatformConfig();
-  if (config.is_support_compat_mode) {
+  if (config.is_support_compat_mode || !ScheduleUtils::IsLoad(node) ||
+      !ScheduleUtils::IsNeedDiscontinuousAligned(node->outputs[0].attr)) {
     return af::SUCCESS;
   }
-  bool inserted = false;
-  for (const auto &node : impl_graph.GetAllNodes()) {
-    GE_ASSERT_NOTNULL(node);
-    if (!ScheduleUtils::IsLoad(node) || !ScheduleUtils::IsNeedDiscontinuousAligned(node->outputs[0].attr)) {
-      continue;
-    }
-    af::AscNodePtr remove_pad_node = nullptr;
-    if (ScheduleUtils::AddRemovePadAfter(impl_graph, node, remove_pad_node) != af::SUCCESS) {
-      continue;
-    }
+  af::AscNodePtr remove_pad_node = nullptr;
+  if (ScheduleUtils::AddRemovePadAfter(impl_graph, node, remove_pad_node) == af::SUCCESS) {
     inserted = true;
   }
-  if (inserted) {
-    GE_ASSERT_GRAPH_SUCCESS(ScheduleUtils::TopologicalSorting(impl_graph));
-  }
-
   return af::SUCCESS;
 }
 
@@ -298,63 +312,44 @@ af::Status BaseAlignmentStrategy::CheckIsNoNeedPad(const af::AscNodePtr &node, a
   return af::SUCCESS;
 }
 
-af::Status BaseAlignmentStrategy::AddPadForAlignmentConflictNode(ascir::ImplGraph &impl_graph) {
-  bool inserted = false;
-  for (const auto &node : impl_graph.GetAllNodes()) {
-    GE_ASSERT_NOTNULL(node);
-    const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
-    if (ScheduleUtils::IsBuffer(node) || indirect_load_behavior.uses_direct_gm_pipeline) {
+af::Status BaseAlignmentStrategy::AddPadForAlignmentConflictOneNode(ascir::ImplGraph &impl_graph,
+                                                                    const af::AscNodePtr &node, bool &inserted) {
+  for (size_t i = 0UL; i < node->GetAllOutDataAnchorsSize(); ++i) {
+    auto &out_attr = node->outputs[i].attr;
+    if (!tensor_to_align_type_[&out_attr].conflict_with_output) {
       continue;
     }
-
-    for (size_t i = 0UL; i < node->GetAllOutDataAnchorsSize(); ++i) {
-      auto &out_attr = node->outputs[i].attr;
-      if (!tensor_to_align_type_[&out_attr].conflict_with_output) {
-        continue;
-      }
-
-      bool is_no_need_pad{false};
-      GE_ASSERT_SUCCESS(CheckIsNoNeedPad(node, out_attr, is_no_need_pad));
-      if (is_no_need_pad) {
-        tensor_to_align_type_[&out_attr] = {AlignmentType::kAligned};
-        continue;
-      }
-
-      const auto &dtype = node->outputs[0].attr.dtype;
-      std::vector<af::DataType> exp_dtypes{dtype};
-
-      auto ret = ScheduleUtils::CallAscirInferDataType<af::ascir_op::Pad>({dtype}, exp_dtypes);
-      if (ret != af::SUCCESS) {
-        GELOGW("Pad is unsupported for dtype [%s] in graph [%s], skip this template.",
-               af::TypeUtils::DataTypeToSerialString(dtype).c_str(), impl_graph.GetName().c_str());
-        return af::UNSUPPORTED;
-      }
-      inserted = true;
-      // Add pad node
-      const std::string node_name = node->GetName() + "_" + std::to_string(i) + "_pad";
-      af::ascir_op::Pad pad_op(node_name.c_str());
-      auto pad_node = impl_graph.AddNode(pad_op);
-      GE_ASSERT_NOTNULL(pad_node);
-      pad_node->attr = node->attr;
-      pad_node->outputs[0].attr = out_attr;
-      pad_node->attr.api.compute_type = af::ComputeType::kComputeElewise;
-      pad_node->attr.api.type = af::ApiType::kAPITypeCompute;
-      pad_node->attr.api.unit = af::ComputeUnit::kUnitVector;
-      tensor_to_align_type_[&pad_node->outputs[0].attr] = {AlignmentType::kAligned};
-
-      auto out_anchor = node->GetOutDataAnchor(static_cast<int32_t>(i));
-      GE_ASSERT_NOTNULL(out_anchor);
-      for (auto &in_anchor : out_anchor->GetPeerInDataAnchors()) {
-        GE_ASSERT_SUCCESS(af::GraphUtils::ReplaceEdgeSrc(out_anchor, in_anchor, pad_node->GetOutDataAnchor(0)));
-      }
-      GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(out_anchor, pad_node->GetInDataAnchor(0)));
+    bool is_no_need_pad = false;
+    GE_ASSERT_SUCCESS(CheckIsNoNeedPad(node, out_attr, is_no_need_pad));
+    if (is_no_need_pad) {
+      tensor_to_align_type_[&out_attr] = {AlignmentType::kAligned};
+      continue;
     }
+    const auto dtype = node->outputs[0].attr.dtype;
+    std::vector<af::DataType> exp_dtypes{dtype};
+    if (ScheduleUtils::CallAscirInferDataType<af::ascir_op::Pad>({dtype}, exp_dtypes) != af::SUCCESS) {
+      GELOGW("Pad is unsupported for dtype [%s] in graph [%s], skip this template.",
+             af::TypeUtils::DataTypeToSerialString(dtype).c_str(), impl_graph.GetName().c_str());
+      return af::UNSUPPORTED;
+    }
+    inserted = true;
+    const std::string node_name = node->GetName() + "_" + std::to_string(i) + "_pad";
+    af::ascir_op::Pad pad_op(node_name.c_str());
+    const auto pad_node = impl_graph.AddNode(pad_op);
+    GE_ASSERT_NOTNULL(pad_node);
+    pad_node->attr = node->attr;
+    pad_node->outputs[0].attr = out_attr;
+    pad_node->attr.api.compute_type = af::ComputeType::kComputeElewise;
+    pad_node->attr.api.type = af::ApiType::kAPITypeCompute;
+    pad_node->attr.api.unit = af::ComputeUnit::kUnitVector;
+    tensor_to_align_type_[&pad_node->outputs[0].attr] = {AlignmentType::kAligned};
+    auto out_anchor = node->GetOutDataAnchor(static_cast<int32_t>(i));
+    GE_ASSERT_NOTNULL(out_anchor);
+    for (auto &in_anchor : out_anchor->GetPeerInDataAnchors()) {
+      GE_ASSERT_SUCCESS(af::GraphUtils::ReplaceEdgeSrc(out_anchor, in_anchor, pad_node->GetOutDataAnchor(0)));
+    }
+    GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(out_anchor, pad_node->GetInDataAnchor(0)));
   }
-
-  if (inserted) {
-    GE_ASSERT_GRAPH_SUCCESS(ScheduleUtils::TopologicalSorting(impl_graph));
-  }
-
   return af::SUCCESS;
 }
 
@@ -370,34 +365,14 @@ af::Status BaseAlignmentStrategy::AlignVectorizedStrides(ascir::ImplGraph &impl_
   if (compute_type_to_infer_func_.empty()) {
     InitAlignmentInferFunc();
   }
-  // Add RemovePad
-  GE_ASSERT_SUCCESS(AddRemovePadForTailAxisDiscontinuousLoad(impl_graph), "Failed to add removepad for [%s].",
-                    impl_graph.GetName().c_str());
-  for (const auto &node : impl_graph.GetAllNodes()) {
-    GE_ASSERT_NOTNULL(node);
-    GE_ASSERT_SUCCESS(InferAlignmentForOneNode(node));
-  }
-  // Add pad nodes for alignment conflict
-  auto ret = AddPadForAlignmentConflictNode(impl_graph);
-  if (ret != af::SUCCESS) {
-    return ret;
-  }
-
-  for (const auto &node : impl_graph.GetAllNodes()) {
-    GE_ASSERT_NOTNULL(node);
-    const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
-    if (ScheduleUtils::IsBuffer(node) || indirect_load_behavior.uses_direct_gm_pipeline) {
-      continue;
-    }
-    GE_ASSERT_SUCCESS(SetVectorizedStridesForOneNode(node));
-  }
+  GE_CHK_STATUS_RET_NOLOG(ForEachNode(impl_graph, &BaseAlignmentStrategy::AddRemovePadForOneNode));
+  GE_CHK_STATUS_RET_NOLOG(ForEachNode(impl_graph, &BaseAlignmentStrategy::InferAlignmentForOneNode));
+  GE_CHK_STATUS_RET_NOLOG(ForEachNode(impl_graph, &BaseAlignmentStrategy::AddPadForAlignmentConflictOneNode));
+  GE_CHK_STATUS_RET_NOLOG(ForEachNode(impl_graph, &BaseAlignmentStrategy::SetVectorizedStridesForOneNode));
   return af::SUCCESS;
 }
 
-af::Status BaseAlignmentStrategy::InferAlignmentForOneNode(const af::AscNodePtr &node) {
-  if (ScheduleUtils::IsBuffer(node)) {
-    return af::SUCCESS;
-  }
+af::Status BaseAlignmentStrategy::InferAlignmentForOneNode(ascir::ImplGraph &, const af::AscNodePtr &node, bool &) {
   GE_ASSERT_TRUE(!node->inputs().empty(), "The inputs of %s(%s) is empty.", node->GetTypePtr(), node->GetNamePtr());
   GE_ASSERT_TRUE(!node->outputs().empty(), "The output of %s(%s) is empty.", node->GetTypePtr(), node->GetNamePtr());
   af::ComputeType compute_type = node->attr.api.compute_type;
@@ -420,7 +395,7 @@ void BaseAlignmentStrategy::SetAlignInfoForNodeInputs(AlignmentType aligned_type
                                                       std::queue<af::Node *> &node_queue) {
   for (const auto &input : node->inputs()) {
     auto asc_node = std::dynamic_pointer_cast<af::AscNode>(input->anchor.GetOwnerNode());
-    if ((asc_node == nullptr) || ScheduleUtils::IsBuffer(asc_node)) {
+    if ((asc_node == nullptr) || ShouldSkipRegularAlignment(asc_node)) {
       continue;
     }
 
@@ -463,7 +438,7 @@ bool BaseAlignmentStrategy::SetAlignInfoForNodeOutputs(AlignmentType aligned_typ
       }
       auto asc_node = std::dynamic_pointer_cast<af::AscNode>(peer_in->GetOwnerNode());
       GE_ASSERT_NOTNULL(asc_node);
-      if (ScheduleUtils::IsBuffer(asc_node)) {
+      if (ShouldSkipRegularAlignment(asc_node)) {
         continue;
       }
       if (ScheduleUtils::IsReduce(asc_node)) {
@@ -509,7 +484,7 @@ af::Status BaseAlignmentStrategy::BackPropagateFixUnAlignType(const af::AscNodeP
 
     for (const auto &input : node->inputs()) {
       auto asc_node = std::dynamic_pointer_cast<af::AscNode>(input->anchor.GetOwnerNode());
-      if ((asc_node == nullptr) || ScheduleUtils::IsBuffer(asc_node)) {
+      if (asc_node == nullptr) {
         continue;
       }
 
@@ -526,7 +501,8 @@ af::Status BaseAlignmentStrategy::BackPropagateFixUnAlignType(const af::AscNodeP
   return af::SUCCESS;
 }
 
-af::Status BaseAlignmentStrategy::SetVectorizedStridesForOneNode(const af::AscNodePtr &node) {
+af::Status BaseAlignmentStrategy::SetVectorizedStridesForOneNode(ascir::ImplGraph &, const af::AscNodePtr &node,
+                                                                 bool &) {
   if (ScheduleUtils::IsStore(node)) {
     node->outputs[0].attr.vectorized_strides = node->inputs[0].attr.vectorized_strides;
     return af::SUCCESS;

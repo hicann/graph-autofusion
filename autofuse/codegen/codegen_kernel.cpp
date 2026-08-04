@@ -2210,8 +2210,7 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
     if (IsOps<Output>(node) || IsOps<Data>(node) || IsOps<ScalarData>(node)) {
       continue;
     }
-    const auto indirect_load_behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
-    if (indirect_load_behavior.skips_api_emit && !IsOps<Store>(node)) {
+    if (ascgen_utils::indirect_load::ShouldSkipTpipeTensorCollection(node) && !IsOps<Store>(node)) {
       continue;
     }
 

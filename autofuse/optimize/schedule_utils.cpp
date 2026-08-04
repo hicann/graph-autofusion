@@ -69,6 +69,25 @@ Status FindNodeSequence(af::Node *start_node, std::unordered_set<af::Node *> &re
 }
 }  // namespace
 namespace optimize {
+std::vector<af::AxisId> ScheduleUtils::CalcReduceAxes(const std::vector<af::Expression> &src_strides,
+                                                      const std::vector<af::Expression> &dst_strides,
+                                                      const std::vector<ascir::AxisId> &axes) {
+  GE_ASSERT_TRUE(src_strides.size() == dst_strides.size(),
+                 "The output dim cnt [%zu] of reduce mismatch with input dim cnt [%zu].", dst_strides.size(),
+                 src_strides.size());
+  GE_ASSERT_TRUE(src_strides.size() == axes.size(),
+                 "The input dim cnt [%zu] of reduce mismatch with axis dim cnt [%zu].", src_strides.size(),
+                 axes.size());
+  std::vector<af::AxisId> reduce_axes;
+  for (size_t i = 0UL; i < src_strides.size(); ++i) {
+    if (af::SymbolicUtils::StaticCheckEq(src_strides[i], dst_strides[i]) != af::TriBool::kTrue &&
+        af::SymbolicUtils::StaticCheckEq(dst_strides[i], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      reduce_axes.emplace_back(axes[i]);
+    }
+  }
+  return reduce_axes;
+}
+
 bool ScheduleUtils::IsNextNodeRemovePad(const ascir::NodeView &node) {
   // 如果当前节点是单输出多引用，则后继节点中只会有1个RemovePad，不会每个引用都单独去Pad。
   const auto &out_nodes = node->GetOutDataNodes();

@@ -239,6 +239,10 @@ class ScheduleUtils {
     return af::SUCCESS;
   }
 
+  static std::vector<af::AxisId> CalcReduceAxes(const std::vector<af::Expression> &src_strides,
+                                                const std::vector<af::Expression> &dst_strides,
+                                                const std::vector<ascir::AxisId> &axes);
+
   template <typename T>
   static Status GetNodeIrAttrValue(const af::NodePtr &node, const string &attr_name, T &attr_value) {
     auto asc_node = std::dynamic_pointer_cast<af::AscNode>(node);

@@ -8429,12 +8429,100 @@ static void AddIndirectLoadCustomOutputChain(af::AscGraph &graph, const std::vec
                                              const std::vector<af::Expression> &strides, af::DataType data_type,
                                              IndirectLoadOutputPostType output_post_type, Op &op) {
   af::AscOpOutput *output = &op.y;
-  if (output_post_type == IndirectLoadOutputPostType::kModifiedBesselK0) {
+  if (output_post_type == IndirectLoadOutputPostType::kModifiedBesselK0 ||
+      output_post_type == IndirectLoadOutputPostType::kModifiedBesselK0Sum) {
     af::ascir_op::ModifiedBesselK0 modified_bessel_k0("output_modified_bessel_k0");
     graph.AddNode(modified_bessel_k0);
     modified_bessel_k0.x = *output;
     SetIndirectLoadNodeView(modified_bessel_k0, axes, repeats, strides, data_type);
     output = &modified_bessel_k0.y;
+  }
+  if (output_post_type == IndirectLoadOutputPostType::kExp2Sum) {
+    af::ascir_op::Exp2 exp2("output_exp2");
+    graph.AddNode(exp2);
+    exp2.x = *output;
+    SetIndirectLoadNodeView(exp2, axes, repeats, strides, data_type);
+    output = &exp2.y;
+  }
+  if (output_post_type == IndirectLoadOutputPostType::kAbsExp2Sum) {
+    af::ascir_op::Abs abs("output_abs");
+    graph.AddNode(abs);
+    abs.x = *output;
+    SetIndirectLoadNodeView(abs, axes, repeats, strides, data_type);
+    af::ascir_op::Exp2 exp2("output_exp2");
+    graph.AddNode(exp2);
+    exp2.x = abs.y;
+    SetIndirectLoadNodeView(exp2, axes, repeats, strides, data_type);
+    output = &exp2.y;
+  }
+  if (output_post_type == IndirectLoadOutputPostType::kCastSum) {
+    af::ascir_op::Cast cast("output_cast");
+    graph.AddNode(cast);
+    cast.x = *output;
+    SetIndirectLoadNodeView(cast, axes, repeats, strides, af::DT_FLOAT);
+    output = &cast.y;
+    data_type = af::DT_FLOAT;
+  }
+  if (output_post_type == IndirectLoadOutputPostType::kAddSum) {
+    af::ascir_op::Data addend("output_addend");
+    graph.AddNode(addend);
+    addend.ir_attr.SetIndex(2);
+    SetIndirectLoadNodeView(addend, axes, repeats, strides, data_type);
+    af::ascir_op::Load addend_load("output_addend_load");
+    graph.AddNode(addend_load);
+    addend_load.x = addend.y;
+    SetIndirectLoadNodeView(addend_load, axes, repeats, strides, data_type);
+    af::ascir_op::Add add("output_add");
+    graph.AddNode(add);
+    add.x1 = *output;
+    add.x2 = addend_load.y;
+    SetIndirectLoadNodeView(add, axes, repeats, strides, data_type);
+    output = &add.y;
+  }
+  if (output_post_type == IndirectLoadOutputPostType::kSum ||
+      output_post_type == IndirectLoadOutputPostType::kSumKeepTail ||
+      output_post_type == IndirectLoadOutputPostType::kSumLastAxis ||
+      output_post_type == IndirectLoadOutputPostType::kExp2Sum ||
+      output_post_type == IndirectLoadOutputPostType::kAbsExp2Sum ||
+      output_post_type == IndirectLoadOutputPostType::kCastSum ||
+      output_post_type == IndirectLoadOutputPostType::kAddSum ||
+      output_post_type == IndirectLoadOutputPostType::kModifiedBesselK0Sum) {
+    af::ascir_op::Sum sum("output_sum");
+    graph.AddNode(sum);
+    sum.x = *output;
+    auto reduce_repeats = repeats;
+    auto reduce_strides = strides;
+    if (output_post_type == IndirectLoadOutputPostType::kSumLastAxis) {
+      reduce_repeats[3] = af::ops::One;
+      reduce_strides[0] = repeats[1] * repeats[2];
+      reduce_strides[1] = repeats[2];
+      reduce_strides[2] = af::ops::One;
+      reduce_strides[3] = af::ops::Zero;
+    } else if (output_post_type == IndirectLoadOutputPostType::kSumKeepTail) {
+      reduce_repeats[2] = af::ops::One;
+      reduce_strides[2] = af::ops::Zero;
+      reduce_strides[0] = repeats[1] * repeats[3];
+      reduce_strides[1] = repeats[3];
+    } else {
+      reduce_repeats[2] = af::ops::One;
+      reduce_strides[2] = af::ops::Zero;
+      reduce_repeats[3] = af::ops::One;
+      reduce_strides[0] = repeats[1];
+      reduce_strides[1] = af::ops::One;
+      reduce_strides[3] = af::ops::Zero;
+    }
+    SetIndirectLoadNodeView(sum, axes, reduce_repeats, reduce_strides, data_type);
+
+    af::ascir_op::Store store("store");
+    graph.AddNode(store);
+    store.x = sum.y;
+    SetIndirectLoadNodeView(store, axes, reduce_repeats, reduce_strides, data_type);
+    af::ascir_op::Output y("y");
+    graph.AddNode(y);
+    y.x = store.y;
+    SetIndirectLoadNodeView(y, axes, reduce_repeats, reduce_strides, data_type);
+    y.ir_attr.SetIndex(0);
+    return;
   }
   af::ascir_op::Store store("store");
   graph.AddNode(store);
@@ -8593,6 +8681,10 @@ af::ComputeGraphPtr ShareGraph::IndirectLoadStoreFusedGraph(
   data0.ir_attr.SetIndex(0);
   af::ascir_op::Data data1("data1", fused_graph);
   data1.ir_attr.SetIndex(1);
+  if (output_post_type == IndirectLoadOutputPostType::kAddSum) {
+    af::ascir_op::Data data2("data2", fused_graph);
+    data2.ir_attr.SetIndex(2);
+  }
   ComputeGraphPtr compute_graph = af::AscGraphUtils::GetComputeGraph(fused_graph);
   if (compute_graph == nullptr) {
     return nullptr;
@@ -8605,7 +8697,14 @@ af::ComputeGraphPtr ShareGraph::IndirectLoadStoreFusedGraph(
   auto backend_desc = std::make_shared<OpDesc>("asc_backend", "AscBackend");
   backend_desc->AddInputDesc(data_desc->Clone());
   backend_desc->AddInputDesc(index_desc->Clone());
-  backend_desc->AddOutputDesc(data_desc->Clone());
+  if (output_post_type == IndirectLoadOutputPostType::kAddSum) {
+    backend_desc->AddInputDesc(data_desc->Clone());
+  }
+  auto output_desc = data_desc->Clone();
+  if (output_post_type == IndirectLoadOutputPostType::kCastSum) {
+    output_desc.SetDataType(af::DT_FLOAT);
+  }
+  backend_desc->AddOutputDesc(output_desc);
   auto backend = compute_graph->AddNode(backend_desc);
   if (backend == nullptr) {
     return nullptr;
@@ -8625,16 +8724,315 @@ af::ComputeGraphPtr ShareGraph::IndirectLoadStoreFusedGraph(
   auto output_node = compute_graph->AddNode(af::OpDescUtils::GetOpDescFromOperator(output));
   auto data0_node = fused_graph.FindNode("data0");
   auto data1_node = fused_graph.FindNode("data1");
-  if (data0_node == nullptr || data1_node == nullptr || output_node == nullptr) {
+  auto data2_node = fused_graph.FindNode("data2");
+  if (data0_node == nullptr || data1_node == nullptr || output_node == nullptr ||
+      (output_post_type == IndirectLoadOutputPostType::kAddSum && data2_node == nullptr)) {
     return nullptr;
   }
   if (af::GraphUtils::AddEdge(data0_node->GetOutDataAnchor(0), backend->GetInDataAnchor(0)) != ge::GRAPH_SUCCESS ||
       af::GraphUtils::AddEdge(data1_node->GetOutDataAnchor(0), backend->GetInDataAnchor(1)) != ge::GRAPH_SUCCESS ||
+      (output_post_type == IndirectLoadOutputPostType::kAddSum &&
+       af::GraphUtils::AddEdge(data2_node->GetOutDataAnchor(0), backend->GetInDataAnchor(2)) != ge::GRAPH_SUCCESS) ||
       af::GraphUtils::AddEdge(backend->GetOutDataAnchor(0), output_node->GetInDataAnchor(0)) != ge::GRAPH_SUCCESS ||
       compute_graph->TopologicalSorting() != ge::GRAPH_SUCCESS) {
     return nullptr;
   }
   return compute_graph;
+}
+
+template <typename Input>
+static void AddIndirectLoadMixedInput(af::AscGraph &graph, const std::string &name, int64_t index, af::DataType dtype,
+                                      const std::vector<int64_t> &axes, const std::vector<af::Expression> &repeats,
+                                      const std::vector<af::Expression> &strides, Input &input) {
+  af::ascir_op::Data data((name + "_data").c_str());
+  graph.AddNode(data);
+  data.y.dtype = dtype;
+  data.ir_attr.SetIndex(index);
+  af::ascir_op::Load load((name + "_load").c_str());
+  graph.AddNode(load);
+  load.x = data.y;
+  SetIndirectLoadNodeView(load, axes, repeats, strides, dtype);
+  input = load.y;
+}
+
+static void AddIndirectLoadMixedIndexChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                           const std::vector<af::Expression> &repeats,
+                                           const std::vector<af::Expression> &strides,
+                                           af::ascir_op::IndirectLoad &indirect_load, int64_t input_index,
+                                           bool is_simt) {
+  af::ascir_op::Add add("index_add");
+  graph.AddNode(add);
+  AddIndirectLoadMixedInput(graph, "index0", input_index, af::DT_INT32, axes, repeats, strides, add.x1);
+  AddIndirectLoadMixedInput(graph, "index1", input_index + 1, af::DT_INT32, axes, repeats, strides, add.x2);
+  SetIndirectLoadNodeView(add, axes, repeats, strides, af::DT_INT32);
+  af::ascir_op::Cast cast("index_cast");
+  graph.AddNode(cast);
+  cast.x = add.y;
+  SetIndirectLoadNodeView(cast, axes, repeats, strides, af::DT_FLOAT);
+  af::AscOpOutput *floor_input = &cast.y;
+  af::ascir_op::Exp2 exp2("index_exp2");
+  af::ascir_op::Log2 log2("index_log2");
+  if (!is_simt) {
+    graph.AddNode(exp2);
+    exp2.x = cast.y;
+    SetIndirectLoadNodeView(exp2, axes, repeats, strides, af::DT_FLOAT);
+    graph.AddNode(log2);
+    log2.x = exp2.y;
+    SetIndirectLoadNodeView(log2, axes, repeats, strides, af::DT_FLOAT);
+    floor_input = &log2.y;
+  }
+  af::ascir_op::FloorToInt floor("index_floor");
+  graph.AddNode(floor);
+  floor.x = *floor_input;
+  SetIndirectLoadNodeView(floor, axes, repeats, strides, af::DT_INT32);
+  indirect_load.x2 = floor.y;
+}
+
+static void AddIndirectLoadMixedOutputChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                            const std::vector<af::Expression> &repeats,
+                                            const std::vector<af::Expression> &strides,
+                                            af::ascir_op::IndirectLoad &indirect_load, int64_t input_index) {
+  af::ascir_op::Add add("output_add");
+  graph.AddNode(add);
+  add.x1 = indirect_load.y;
+  AddIndirectLoadMixedInput(graph, "addend", input_index, af::DT_FLOAT16, axes, repeats, strides, add.x2);
+  SetIndirectLoadNodeView(add, axes, repeats, strides, af::DT_FLOAT16);
+  af::ascir_op::CopySign copy_sign("output_copy_sign");
+  graph.AddNode(copy_sign);
+  copy_sign.x1 = add.y;
+  AddIndirectLoadMixedInput(graph, "sign", input_index + 1, af::DT_FLOAT16, axes, repeats, strides, copy_sign.x2);
+  SetIndirectLoadNodeView(copy_sign, axes, repeats, strides, af::DT_FLOAT16);
+  af::ascir_op::Mul mul("output_mul");
+  graph.AddNode(mul);
+  mul.x1 = copy_sign.y;
+  AddIndirectLoadMixedInput(graph, "scale", input_index + 2, af::DT_FLOAT16, axes, repeats, strides, mul.x2);
+  SetIndirectLoadNodeView(mul, axes, repeats, strides, af::DT_FLOAT16);
+  af::ascir_op::Store store("store");
+  graph.AddNode(store);
+  store.x = mul.y;
+  SetIndirectLoadNodeView(store, axes, repeats, strides, af::DT_FLOAT16);
+  af::ascir_op::Output output("output");
+  graph.AddNode(output);
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  SetIndirectLoadNodeView(output, axes, repeats, strides, af::DT_FLOAT16);
+}
+
+static void AddIndirectLoadSimtCoverageIndexChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                                  const std::vector<af::Expression> &repeats,
+                                                  const std::vector<af::Expression> &strides,
+                                                  af::ascir_op::IndirectLoad &indirect_load) {
+  af::ascir_op::Data index0_data("index0_data");
+  graph.AddNode(index0_data);
+  index0_data.y.dtype = af::DT_INT32;
+  index0_data.ir_attr.SetIndex(1L);
+  af::ascir_op::Load index0_load("index0_load");
+  graph.AddNode(index0_load);
+  index0_load.x = index0_data.y;
+  SetIndirectLoadNodeView(index0_load, axes, repeats, strides, af::DT_INT32);
+  af::ascir_op::Data index1_data("index1_data");
+  graph.AddNode(index1_data);
+  index1_data.y.dtype = af::DT_INT32;
+  index1_data.ir_attr.SetIndex(2L);
+  af::ascir_op::Load index1_load("index1_load");
+  graph.AddNode(index1_load);
+  index1_load.x = index1_data.y;
+  SetIndirectLoadNodeView(index1_load, axes, repeats, strides, af::DT_INT32);
+  af::ascir_op::Maximum maximum("index_maximum");
+  graph.AddNode(maximum);
+  maximum.x1 = index0_load.y;
+  maximum.x2 = index1_load.y;
+  SetIndirectLoadNodeView(maximum, axes, repeats, strides, af::DT_INT32);
+
+  af::ascir_op::Minimum minimum("index_minimum");
+  graph.AddNode(minimum);
+  minimum.x1 = index0_load.y;
+  minimum.x2 = index1_load.y;
+  SetIndirectLoadNodeView(minimum, axes, repeats, strides, af::DT_INT32);
+  af::ascir_op::Gt greater("index_gt");
+  graph.AddNode(greater);
+  greater.x1 = index0_load.y;
+  greater.x2 = index1_load.y;
+  SetIndirectLoadNodeView(greater, axes, repeats, strides, af::DT_UINT8);
+  af::ascir_op::Lt less("index_lt");
+  graph.AddNode(less);
+  less.x1 = index0_load.y;
+  less.x2 = index1_load.y;
+  SetIndirectLoadNodeView(less, axes, repeats, strides, af::DT_UINT8);
+  af::ascir_op::LogicalOr logical_or("index_logical_or");
+  graph.AddNode(logical_or);
+  logical_or.x1 = greater.y;
+  logical_or.x2 = less.y;
+  SetIndirectLoadNodeView(logical_or, axes, repeats, strides, af::DT_UINT8);
+  af::ascir_op::Where where("index_where");
+  graph.AddNode(where);
+  where.x1 = logical_or.y;
+  where.x2 = maximum.y;
+  where.x3 = minimum.y;
+  SetIndirectLoadNodeView(where, axes, repeats, strides, af::DT_INT32);
+  indirect_load.x2 = where.y;
+}
+
+static void AddIndirectLoadSimtCoverageOutputChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
+                                                   const std::vector<af::Expression> &repeats,
+                                                   const std::vector<af::Expression> &strides,
+                                                   af::ascir_op::IndirectLoad &indirect_load) {
+  af::ascir_op::Sub sub("output_sub");
+  graph.AddNode(sub);
+  sub.x1 = indirect_load.y;
+  AddIndirectLoadMixedInput(graph, "addend", 3L, af::DT_FLOAT16, axes, repeats, strides, sub.x2);
+  SetIndirectLoadNodeView(sub, axes, repeats, strides, af::DT_FLOAT16);
+  af::ascir_op::Div div("output_div");
+  graph.AddNode(div);
+  div.x1 = sub.y;
+  AddIndirectLoadMixedInput(graph, "scale", 5L, af::DT_FLOAT16, axes, repeats, strides, div.x2);
+  SetIndirectLoadNodeView(div, axes, repeats, strides, af::DT_FLOAT16);
+  af::ascir_op::CopySign copy_sign("output_copy_sign");
+  graph.AddNode(copy_sign);
+  copy_sign.x1 = div.y;
+  AddIndirectLoadMixedInput(graph, "sign", 4L, af::DT_FLOAT16, axes, repeats, strides, copy_sign.x2);
+  SetIndirectLoadNodeView(copy_sign, axes, repeats, strides, af::DT_FLOAT16);
+  af::ascir_op::Store store("store");
+  graph.AddNode(store);
+  store.x = copy_sign.y;
+  SetIndirectLoadNodeView(store, axes, repeats, strides, af::DT_FLOAT16);
+  af::ascir_op::Output output("output");
+  graph.AddNode(output);
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  SetIndirectLoadNodeView(output, axes, repeats, strides, af::DT_FLOAT16);
+}
+
+static std::shared_ptr<af::AscGraph> CreateIndirectLoadMixedElementwiseSubGraph(
+    size_t rank, int64_t axis, bool is_simt, const std::vector<int64_t> &input_shape,
+    const std::vector<int64_t> &output_shape, bool simt_coverage) {
+  auto graph = std::make_shared<af::AscGraph>("indirect_load_mixed_elementwise_test");
+  std::vector<int64_t> input_axes;
+  std::vector<af::Expression> input_repeats;
+  std::vector<af::Expression> input_strides;
+  CreateIndirectLoadAxes(*graph, rank, 0UL, input_axes, input_repeats, input_strides, input_shape);
+  std::vector<int64_t> output_axes;
+  std::vector<af::Expression> output_repeats;
+  std::vector<af::Expression> output_strides;
+  CreateIndirectLoadAxes(*graph, rank, rank, output_axes, output_repeats, output_strides, output_shape);
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  graph->AddNode(indirect_load);
+  if (is_simt) {
+    AddIndirectLoadMixedInput(*graph, "x", 0, af::DT_FLOAT16, input_axes, input_repeats, input_strides,
+                              indirect_load.x1);
+  } else {
+    af::ascir_op::CopySign x_copy_sign("x_copy_sign");
+    graph->AddNode(x_copy_sign);
+    AddIndirectLoadMixedInput(*graph, "x0", 0, af::DT_FLOAT16, input_axes, input_repeats, input_strides,
+                              x_copy_sign.x1);
+    AddIndirectLoadMixedInput(*graph, "x1", 1, af::DT_FLOAT16, input_axes, input_repeats, input_strides,
+                              x_copy_sign.x2);
+    SetIndirectLoadNodeView(x_copy_sign, input_axes, input_repeats, input_strides, af::DT_FLOAT16);
+    indirect_load.x1 = x_copy_sign.y;
+  }
+  const int64_t index_input = is_simt ? 1L : 2L;
+  if (simt_coverage) {
+    AddIndirectLoadSimtCoverageIndexChain(*graph, output_axes, output_repeats, output_strides, indirect_load);
+  } else {
+    AddIndirectLoadMixedIndexChain(*graph, output_axes, output_repeats, output_strides, indirect_load, index_input,
+                                   is_simt);
+  }
+  indirect_load.ir_attr.SetAxis(axis);
+  SetIndirectLoadNodeView(indirect_load, output_axes, output_repeats, output_strides, af::DT_FLOAT16);
+  if (simt_coverage) {
+    AddIndirectLoadSimtCoverageOutputChain(*graph, output_axes, output_repeats, output_strides, indirect_load);
+  } else {
+    AddIndirectLoadMixedOutputChain(*graph, output_axes, output_repeats, output_strides, indirect_load,
+                                    index_input + 2L);
+  }
+  return graph;
+}
+
+static af::ComputeGraphPtr CreateIndirectLoadMixedElementwiseFusedGraph(size_t rank, int64_t axis, bool is_simt,
+                                                                        const std::vector<int64_t> &input_shape,
+                                                                        const std::vector<int64_t> &output_shape,
+                                                                        bool simt_coverage) {
+  af::AscGraph fused_graph("indirect_load_mixed_elementwise_test");
+  std::vector<af::AscNodePtr> inputs;
+  const int32_t input_count = is_simt ? 6 : 7;
+  for (int32_t i = 0; i < input_count; ++i) {
+    const std::string name = "data" + std::to_string(i);
+    af::ascir_op::Data data(name.c_str(), fused_graph);
+    data.ir_attr.SetIndex(i);
+    inputs.emplace_back(fused_graph.FindNode(name.c_str()));
+  }
+  const af::ComputeGraphPtr compute_graph = af::AscGraphUtils::GetComputeGraph(fused_graph);
+  if (compute_graph == nullptr || std::any_of(inputs.begin(), inputs.end(), [](const auto &node) { return !node; })) {
+    return nullptr;
+  }
+  auto data_desc = std::make_shared<GeTensorDesc>();
+  data_desc->SetDataType(af::DT_FLOAT16);
+  auto index_desc = std::make_shared<GeTensorDesc>();
+  index_desc->SetDataType(af::DT_INT32);
+  auto backend_desc = std::make_shared<OpDesc>("asc_backend", "AscBackend");
+  for (size_t i = 0UL; i < inputs.size(); ++i) {
+    const size_t index_input = is_simt ? 1UL : 2UL;
+    backend_desc->AddInputDesc((i == index_input || i == index_input + 1UL) ? index_desc->Clone() : data_desc->Clone());
+  }
+  backend_desc->AddOutputDesc(data_desc->Clone());
+  const af::NodePtr backend = compute_graph->AddNode(backend_desc);
+  af::ascir_op::Output output("output");
+  output.ir_attr.SetIndex(0);
+  const af::NodePtr output_node = compute_graph->AddNode(af::OpDescUtils::GetOpDescFromOperator(output));
+  if (backend == nullptr || output_node == nullptr) {
+    return nullptr;
+  }
+  auto fuse_attrs = backend->GetOpDesc()->GetOrCreateAttrsGroup<af::AutoFuseAttrs>();
+  if (fuse_attrs == nullptr) {
+    return nullptr;
+  }
+  fuse_attrs->SetAscGraph(
+      CreateIndirectLoadMixedElementwiseSubGraph(rank, axis, is_simt, input_shape, output_shape, simt_coverage));
+  for (size_t i = 0UL; i < inputs.size(); ++i) {
+    if (af::GraphUtils::AddEdge(inputs[i]->GetOutDataAnchor(0), backend->GetInDataAnchor(i)) != ge::GRAPH_SUCCESS) {
+      return nullptr;
+    }
+  }
+  if (af::GraphUtils::AddEdge(backend->GetOutDataAnchor(0), output_node->GetInDataAnchor(0)) != ge::GRAPH_SUCCESS ||
+      compute_graph->TopologicalSorting() != ge::GRAPH_SUCCESS) {
+    return nullptr;
+  }
+  return compute_graph;
+}
+
+static bool IsIndirectLoadMixedShapeValid(size_t rank, int64_t axis, const std::vector<int64_t> &input_shape,
+                                          const std::vector<int64_t> &output_shape) {
+  const int64_t normalized_axis = axis < 0L ? axis + static_cast<int64_t>(rank) : axis;
+  if (rank < 2UL || rank > 4UL || normalized_axis < 0L || normalized_axis >= static_cast<int64_t>(rank) ||
+      input_shape.empty() != output_shape.empty() || (!input_shape.empty() && input_shape.size() != rank) ||
+      (!output_shape.empty() && output_shape.size() != rank) || (!input_shape.empty() && input_shape == output_shape)) {
+    return false;
+  }
+  if (!input_shape.empty()) {
+    for (size_t i = 0UL; i < rank; ++i) {
+      if (static_cast<int64_t>(i) != normalized_axis && input_shape[i] < output_shape[i]) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+af::ComputeGraphPtr ShareGraph::IndirectLoadMixedElementwiseFusedGraph(size_t rank, int64_t axis, bool is_simt,
+                                                                       const std::vector<int64_t> &input_shape,
+                                                                       const std::vector<int64_t> &output_shape) {
+  if (!IsIndirectLoadMixedShapeValid(rank, axis, input_shape, output_shape)) {
+    return nullptr;
+  }
+  return CreateIndirectLoadMixedElementwiseFusedGraph(rank, axis, is_simt, input_shape, output_shape, false);
+}
+
+af::ComputeGraphPtr ShareGraph::IndirectLoadSimtElementwiseCoverageFusedGraph(
+    size_t rank, int64_t axis, const std::vector<int64_t> &input_shape, const std::vector<int64_t> &output_shape) {
+  if (!IsIndirectLoadMixedShapeValid(rank, axis, input_shape, output_shape)) {
+    return nullptr;
+  }
+  return CreateIndirectLoadMixedElementwiseFusedGraph(rank, axis, true, input_shape, output_shape, true);
 }
 
 static void ConstructVVAscGraphAxisInfoForOneAxisGather(af::AscGraph &graph, size_t dims_size) {

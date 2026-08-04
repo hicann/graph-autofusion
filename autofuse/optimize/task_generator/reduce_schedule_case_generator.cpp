@@ -20,6 +20,7 @@
 #include "register/op_def_factory_af.h"
 #include "base/err_msg.h"
 #include "graph/symbolizer/symbolic.h"
+#include "indirect_load_utils.h"
 
 namespace optimize {
 namespace {
@@ -286,6 +287,10 @@ Status ReducePartitionCaseGenerator::GeneratorRCoreTask(ascir::HintGraph &optimi
 Status ReducePartitionCaseGenerator::GeneratorTask(ascir::HintGraph &optimize_graph, std::vector<ScheduleTask> &tasks,
                                                    const OptimizerOptions &options) {
   (void)options;
+  const af::AscNodePtr indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(optimize_graph);
+  if (indirect_load != nullptr && ascgen_utils::indirect_load::HasPostReduceConsumer(indirect_load)) {
+    return ge::GRAPH_SUCCESS;
+  }
   if (ShouldForceAllLoad(optimize_graph)) {
     GELOGI("Graph %s satisfies force AllLoad conditions, only generate AllLoad tasks",
            optimize_graph.GetName().c_str());

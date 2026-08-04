@@ -34,6 +34,13 @@ const std::string kEnCacheFusedBroadcastAxis = "enable_cache_fused_brc_axis";
 const std::string kEnCacheA = "dis_enable_cache_a";
 const std::string kEnCacheR = "dis_enable_cache_r";
 
+struct ConstructState {
+  std::map<ascir::TensorId, ApiCall *> tensor_calls;
+  std::map<ascir::BufId, ApiTensor *> buf_last_use;
+  std::map<ascir::QueId, ApiTensor *> que_last_use;
+  std::map<ascir::QueId, std::map<ascir::ReuseId, ApiTensor *>> que_last_share;
+};
+
 ApiCall *FindIndirectLoadOpCall(Loop *loop, bool require_direct_gm) {
   if (loop == nullptr) {
     return nullptr;
@@ -55,6 +62,41 @@ ApiCall *FindIndirectLoadOpCall(Loop *loop, bool require_direct_gm) {
   return nullptr;
 }
 
+bool HasRedirectedIndirectLoadOutput(const ApiCall *call) {
+  if (call == nullptr || !IsOps<IndirectLoad>(call->node) || call->outputs.size() != 1UL ||
+      call->node->outputs().size() != 1UL) {
+    return false;
+  }
+  return call->outputs[0].id != call->node->outputs()[0]->attr.mem.tensor_id;
+}
+
+Status ResolveSkippedOutputCall(const ascir::NodeView &node, const std::map<ascir::TensorId, ApiCall *> &tensor_calls,
+                                ApiCall *call, ApiCall *&output_call) {
+  output_call = call;
+  if (IsOps<Store>(node) || node->outputs().size() != 1UL) {
+    return af::SUCCESS;
+  }
+  ApiCall *common_input_call = nullptr;
+  for (const auto input : node->inputs()) {
+    if (input == nullptr) {
+      return af::SUCCESS;
+    }
+    const auto input_call = tensor_calls.find(input->attr.mem.tensor_id);
+    GE_CHK_BOOL_RET_STATUS(input_call != tensor_calls.end(), af::FAILED,
+                           "Codegen node[%s] no API call found for skipped input tensor id[%ld]", node->GetNamePtr(),
+                           input->attr.mem.tensor_id);
+    if (common_input_call == nullptr) {
+      common_input_call = input_call->second;
+    } else if (common_input_call != input_call->second) {
+      return af::SUCCESS;
+    }
+  }
+  if (common_input_call != nullptr && common_input_call->outputs.size() == 1UL) {
+    output_call = common_input_call;
+  }
+  return af::SUCCESS;
+}
+
 Status AddSkippedApiEmitProcessCall(const ascir::NodeView &node, Loop *current_loop,
                                     const std::vector<ascir::AxisId> &current_axis,
                                     std::map<ascir::TensorId, ApiCall *> &tensor_calls) {
@@ -66,45 +108,37 @@ Status AddSkippedApiEmitProcessCall(const ascir::NodeView &node, Loop *current_l
   call->exec_condition = node->attr.sched.exec_condition;
   call->axis = current_loop->axis_id;
   call->depth = current_axis.size();
-  if (IsOps<Store>(node)) {
-    for (auto out : node->outputs()) {
-      tensor_calls.insert({out->attr.mem.tensor_id, call});
-    }
-    return af::SUCCESS;
-  }
-  GE_ASSERT_TRUE(node->inputs.Size() == 1UL,
-                 "Skipped api emit process node only supports single-input tensor mapping, node[%s].",
-                 node->GetNamePtr());
-  auto input = node->inputs()[0];
-  GE_ASSERT_NOTNULL(input, "Skipped api emit process node[%s] input is null", node->GetNamePtr());
-  auto in_call = tensor_calls.find(input->attr.mem.tensor_id);
-  GE_CHK_BOOL_RET_STATUS(in_call != tensor_calls.end(), af::FAILED,
-                         "Codegen node[%s] no API call found for process input tensor id[%ld]", node->GetNamePtr(),
-                         input->attr.mem.tensor_id);
+  ApiCall *output_call = nullptr;
+  GE_ASSERT_SUCCESS(ResolveSkippedOutputCall(node, tensor_calls, call, output_call));
   for (auto out : node->outputs()) {
-    tensor_calls.insert({out->attr.mem.tensor_id, in_call->second});
+    tensor_calls.insert({out->attr.mem.tensor_id, output_call});
   }
   return af::SUCCESS;
 }
-}  // namespace
 
-Loop::Loop(const ascir::AxisId axis) : axis_id(axis), parent(nullptr) {}
-
-void Loop::AddLoop(Loop *loop) {
-  LoopBody tmp;
-  tmp.type = LoopType::LOOP;
-  tmp.loop = loop;
-  tmp.loop->is_graph_has_reduce_node = this->is_graph_has_reduce_node;
-  tmp.loop->is_ar = this->is_ar;
-  this->bodys.emplace_back(tmp);
-  loop->parent = this;
-}
-
-void Loop::AddCall(ApiCall *call) {
-  LoopBody tmp;
-  tmp.type = LoopType::CALL;
-  tmp.call = call;
-  this->bodys.emplace_back(tmp);
+Status MoveToNodeLoop(const ascir::NodeView &node, std::vector<ascir::AxisId> &current_axis, Loop *&current_loop) {
+  if (node->attr.api.unit == af::ComputeUnit::kUnitNone) {
+    return af::SUCCESS;
+  }
+  const auto &node_axis = node->attr.sched.axis;
+  const auto &node_loop_axis = node->attr.sched.loop_axis;
+  int32_t loop_distance = 0;
+  GE_CHK_STATUS_RET(LoopAxisDistance(current_axis, node_axis, node_loop_axis, loop_distance),
+                    "Codegen get loop axis distance failed");
+  while (loop_distance != 0) {
+    if (loop_distance > 0) {
+      const auto axis = node_axis[current_axis.size()];
+      current_axis.push_back(axis);
+      current_loop->AddLoop(new Loop(axis));
+      current_loop = current_loop->bodys.back().loop;
+    } else {
+      current_axis.pop_back();
+      current_loop = current_loop->parent;
+    }
+    GE_CHK_STATUS_RET(LoopAxisDistance(current_axis, node_axis, node_loop_axis, loop_distance),
+                      "Codegen get loop axis distance failed");
+  }
+  return af::SUCCESS;
 }
 
 bool IsShareInputs(const af::AscNodePtr &node) {
@@ -157,6 +191,121 @@ Status RequireContiguousInputBufs(const af::AscNodePtr &node, ApiCall &api_call,
   GELOGD("%s(%s) can require contiguous input TBuf, buf list = %s", node->GetNamePtr(), api_call.api_name_.c_str(),
          af::ToString(tpipe.contiguous_buf_ids).c_str());
   return af::SUCCESS;
+}
+
+Status ConnectApiCallInputs(const ascir::NodeView &node, const std::map<ascir::TensorId, ApiCall *> &tensor_calls,
+                            ApiCall &call, TPipe &tpipe) {
+  const bool contiguous_bufs_preferred = call.AreContiguousBufsPreferred();
+  for (const auto input : node->inputs()) {
+    if (input == nullptr) {
+      call.inputs.emplace_back(nullptr);
+      continue;
+    }
+    const auto input_call = tensor_calls.find(input->attr.mem.tensor_id);
+    GE_CHK_BOOL_RET_STATUS(input_call != tensor_calls.end(), af::FAILED,
+                           "Codegen node[%s] no API call found for input tensor id[%ld]", node->GetNamePtr(),
+                           input->attr.mem.tensor_id);
+    const auto input_index = af::ascir::AscTensorUtils::Index(*input);
+    ApiTensor *input_tensor = &input_call->second->outputs[input_index];
+    input_tensor->reads.push_back(&call);
+    call.inputs.emplace_back(input_tensor);
+    GELOGI("node[%s] input tensor id[%ld] from call type[%s] outputs[%d], read by call type[%s]", node->GetNamePtr(),
+           input->attr.mem.tensor_id, input_call->second->type.c_str(), input_index, call.type.c_str());
+  }
+  if (contiguous_bufs_preferred) {
+    GE_ASSERT_SUCCESS(RequireContiguousInputBufs(node, call, tpipe));
+  }
+  return af::SUCCESS;
+}
+
+Status UpdateQueueOutputReuse(const af::AscTensor *output, size_t output_index, ApiCall &call, TPipe &tpipe,
+                              ConstructState &state) {
+  const auto &attr = output->attr;
+  GELOGI("Que[%ld] update last use call type[%s] output[%zu]", attr.que.id, call.type.c_str(), output_index);
+  GE_CHK_BOOL_RET_STATUS(attr.que.id != af::kIdNone && attr.mem.reuse_id != af::kIdNone, af::FAILED,
+                         "ConstructFromNodes tensor[%ld] que id[%ld] or reuse id[%ld] invalid",
+                         call.outputs[output_index].id, attr.que.id, attr.mem.reuse_id);
+  auto &last_share = state.que_last_share[attr.que.id];
+  const auto share_tensor = last_share.find(attr.mem.reuse_id);
+  if (share_tensor != last_share.end()) {
+    Tensor *tensor = tpipe.GetTensor(attr.mem.tensor_id);
+    Tensor *previous_tensor = tpipe.GetTensor(share_tensor->second->id);
+    GE_ASSERT_NOTNULL(tensor, "Queue output tensor[%ld] is missing.", attr.mem.tensor_id);
+    GE_ASSERT_NOTNULL(previous_tensor, "Queue shared tensor[%ld] is missing.", share_tensor->second->id);
+    tensor->share_pre_size = previous_tensor->size.name;
+    share_tensor->second->share_next = &call.outputs[output_index];
+    call.outputs[output_index].share_prev = share_tensor->second;
+    GELOGI("Que[%ld] reuse id[%ld] tensor id[%ld] share with id[%ld]", attr.que.id, attr.mem.reuse_id,
+           call.outputs[output_index].id, share_tensor->second->id);
+  }
+  last_share[attr.mem.reuse_id] = &call.outputs[output_index];
+  const auto reused_tensor = state.que_last_use.find(attr.que.id);
+  if (reused_tensor != state.que_last_use.end() &&
+      reused_tensor->second->reuse_id != call.outputs[output_index].reuse_id) {
+    reused_tensor->second->reuse_next = &call.outputs[output_index];
+    call.outputs[output_index].reuse_from = reused_tensor->second;
+    GELOGI("Que[%ld] reuse id[%ld] tensor id[%ld] reuse from tensor id[%ld] reuse id[%ld]", attr.que.id,
+           attr.mem.reuse_id, call.outputs[output_index].id, reused_tensor->second->id,
+           reused_tensor->second->reuse_id);
+  } else if (reused_tensor != state.que_last_use.end()) {
+    GELOGI("Que[%ld] reuse id[%ld] tensor id[%ld] share with last same que tensor", attr.que.id, attr.mem.reuse_id,
+           call.outputs[output_index].id, reused_tensor->second->id);
+  }
+  state.que_last_use[attr.que.id] = &call.outputs[output_index];
+  return af::SUCCESS;
+}
+
+void UpdateBufferOutputReuse(const af::AscTensor *output, size_t output_index, ApiCall &call, ConstructState &state) {
+  const auto buffer_id = output->attr.buf.id;
+  GELOGI("Buf[%ld] update last use call type[%s] output[%zu]", buffer_id, call.type.c_str(), output_index);
+  const auto reused_tensor = state.buf_last_use.find(buffer_id);
+  if (reused_tensor != state.buf_last_use.end()) {
+    reused_tensor->second->reuse_next = &call.outputs[output_index];
+    call.outputs[output_index].reuse_from = reused_tensor->second;
+    GELOGI("Buf[%ld] tensor id[%ld] reuse from tensor id[%ld]", buffer_id, call.outputs[output_index].id,
+           reused_tensor->second->id);
+  }
+  state.buf_last_use[buffer_id] = &call.outputs[output_index];
+}
+
+Status RegisterApiCallOutputs(const ascir::NodeView &node, ApiCall &call, TPipe &tpipe, ConstructState &state) {
+  for (const auto output : node->outputs()) {
+    state.tensor_calls.insert({output->attr.mem.tensor_id, &call});
+    const size_t output_index = af::ascir::AscTensorUtils::Index(*output);
+    if (IsOps<IndirectLoad>(node) && HasRedirectedIndirectLoadOutput(&call)) {
+      Tensor *output_tensor = tpipe.GetTensor(call.outputs[output_index].id);
+      GE_ASSERT_NOTNULL(output_tensor, "Codegen output tensor[%ld] is missing.", call.outputs[output_index].id);
+      call.outputs[output_index].reuse_id = output_tensor->reuse_id;
+      state.tensor_calls.insert({output_tensor->id, &call});
+      continue;
+    }
+    if (output->attr.mem.alloc_type == af::AllocType::kAllocTypeQueue) {
+      GE_ASSERT_SUCCESS(UpdateQueueOutputReuse(output, output_index, call, tpipe, state));
+    } else if (output->attr.mem.alloc_type == af::AllocType::kAllocTypeBuffer) {
+      UpdateBufferOutputReuse(output, output_index, call, state);
+    }
+  }
+  return af::SUCCESS;
+}
+}  // namespace
+
+Loop::Loop(const ascir::AxisId axis) : axis_id(axis), parent(nullptr) {}
+
+void Loop::AddLoop(Loop *loop) {
+  LoopBody tmp;
+  tmp.type = LoopType::LOOP;
+  tmp.loop = loop;
+  tmp.loop->is_graph_has_reduce_node = this->is_graph_has_reduce_node;
+  tmp.loop->is_ar = this->is_ar;
+  this->bodys.emplace_back(tmp);
+  loop->parent = this;
+}
+
+void Loop::AddCall(ApiCall *call) {
+  LoopBody tmp;
+  tmp.type = LoopType::CALL;
+  tmp.call = call;
+  this->bodys.emplace_back(tmp);
 }
 
 static bool IsReduceOp(const ascir::NodeView &node) {
@@ -296,44 +445,18 @@ static void InitApiCallContext(const ascir::NodeView &node, const TPipe &tpipe, 
 Status Loop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const Tiler &tiler, TPipe &tpipe) {
   auto current_loop = this;
   std::vector<ascir::AxisId> current_axis;
-
-  std::map<ascir::TensorId, ApiCall *> tensor_calls;
-  map<ascir::BufId, ApiTensor *> buf_last_use;
-  map<ascir::QueId, ApiTensor *> que_last_use;
-  map<ascir::QueId, map<ascir::ReuseId, ApiTensor *>> que_last_share;
+  ConstructState state;
   TraverseGraphForReduceNodes(nodes, current_loop->is_graph_has_reduce_node, current_loop->is_ar);
-  auto lifecycle_edge = GetLifecycleEdge(nodes, tpipe);
-  for (auto node : nodes) {
+  const int64_t lifecycle_edge = GetLifecycleEdge(nodes, tpipe);
+  for (const auto &node : nodes) {
     if (ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(node)).skips_api_emit) {
-      GE_CHK_STATUS_RET(AddSkippedApiEmitProcessCall(node, current_loop, current_axis, tensor_calls));
+      GE_CHK_STATUS_RET(AddSkippedApiEmitProcessCall(node, current_loop, current_axis, state.tensor_calls));
       continue;
     }
 
-    // Loop enter or create
     GELOGI("node:%s, ComputeUnit:%u\r\n", node->GetNamePtr(), static_cast<uint32_t>(node->attr.api.unit));
-    if (node->attr.api.unit != af::ComputeUnit::kUnitNone) {
-      auto node_axis = node->attr.sched.axis;
-      auto node_loop_axis = node->attr.sched.loop_axis;
-      int32_t loop_distance;
-      GE_CHK_STATUS_RET(LoopAxisDistance(current_axis, node_axis, node_loop_axis, loop_distance),
-                        "Codegen get loop axis distance failed");
-      while (loop_distance != 0) {
-        if (loop_distance > 0) {
-          auto axis = node_axis[current_axis.size()];
-          current_axis.push_back(axis);
-          current_loop->AddLoop(new Loop(axis));
-          current_loop = current_loop->bodys.back().loop;
-        } else {
-          current_axis.pop_back();
-          current_loop = current_loop->parent;
-        }
+    GE_ASSERT_SUCCESS(MoveToNodeLoop(node, current_axis, current_loop));
 
-        GE_CHK_STATUS_RET(LoopAxisDistance(current_axis, node_axis, node_loop_axis, loop_distance),
-                          "Codegen get loop axis distance failed");
-      }
-    }
-
-    // Add call
     auto call = CreateApiCallObject(node);
     GE_ASSERT_NOTNULL(call, "Create api call object failed, ascir type:%s", node->GetTypePtr());
     current_loop->AddCall(call);
@@ -345,83 +468,11 @@ Status Loop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const Tiler &
     call->axis = current_loop->axis_id;
     call->depth = current_axis.size();
     InitApiCallContext(node, tpipe, call, lifecycle_edge);
-    const auto are_cont_bufs_preferred = call->AreContiguousBufsPreferred();
-    for (auto in : node->inputs()) {
-      if (in == nullptr) {
-        call->inputs.emplace_back(nullptr);
-        continue;
-      }
-
-      auto in_call = tensor_calls.find(in->attr.mem.tensor_id);
-      GE_CHK_BOOL_RET_STATUS(in_call != tensor_calls.end(), af::FAILED,
-                             "Codegen node[%s] no API call found for input tensor id[%ld]", node->GetNamePtr(),
-                             in->attr.mem.tensor_id);
-
-      auto in_index = af::ascir::AscTensorUtils::Index(*in);
-      auto in_tensor = &in_call->second->outputs[in_index];
-      in_tensor->reads.push_back(call);
-      call->inputs.emplace_back(in_tensor);
-      GELOGI("node[%s] input tensor id[%ld] from call type[%s] outputs[%d], read by call type[%s]", node->GetNamePtr(),
-             in->attr.mem.tensor_id, in_call->second->type.c_str(), in_index, call->type.c_str());
-    }
-    if (are_cont_bufs_preferred) {
-      GE_ASSERT_SUCCESS(RequireContiguousInputBufs(node, *call, tpipe));
-    }
+    GE_ASSERT_SUCCESS(ConnectApiCallInputs(node, state.tensor_calls, *call, tpipe));
     if (IsOps<Output>(node)) {
       continue;
     }
-    for (auto out : node->outputs()) {
-      tensor_calls.insert({out->attr.mem.tensor_id, call});
-
-      auto out_index = af::ascir::AscTensorUtils::Index(*out);
-      if (out->attr.mem.alloc_type == af::AllocType::kAllocTypeQueue) {
-        GELOGI("Que[%ld] update last use call type[%s] output[%d]", out->attr.que.id, call->type.c_str(), out_index);
-        GE_CHK_BOOL_RET_STATUS(out->attr.que.id != af::kIdNone && out->attr.mem.reuse_id != af::kIdNone, af::FAILED,
-                               "ConstructFromNodes tensor[%ld] que id[%ld] or reuse id[%ld] invalid",
-                               call->outputs[out_index].id, out->attr.que.id, out->attr.mem.reuse_id);
-        map<ascir::ReuseId, ApiTensor *> &last_share = que_last_share[out->attr.que.id];
-        auto share_tensor = last_share.find(out->attr.mem.reuse_id);
-        if (share_tensor != last_share.end()) {
-          auto t_ptr = tpipe.GetTensor(out->attr.mem.tensor_id);
-          auto t_share_prev_ptr = tpipe.GetTensor(share_tensor->second->id);
-          GE_CHK_BOOL_RET_STATUS(t_ptr != nullptr, af::FAILED, "Check[Param] t_ptr is nullptr");
-          GE_CHK_BOOL_RET_STATUS(t_share_prev_ptr != nullptr, af::FAILED, "Check[Param] t_share_prev_ptr is nullptr");
-          auto &t = *t_ptr;
-          auto &t_share_prev = *t_share_prev_ptr;
-          t.share_pre_size = t_share_prev.size.name;
-          share_tensor->second->share_next = &call->outputs[out_index];
-          call->outputs[out_index].share_prev = share_tensor->second;
-          GELOGI("Que[%ld] reuse id[%ld] tensor id[%ld] share with id[%ld]", out->attr.que.id, out->attr.mem.reuse_id,
-                 call->outputs[out_index].id, share_tensor->second->id);
-        }
-        last_share[out->attr.mem.reuse_id] = &call->outputs[out_index];
-
-        auto reused_tensor = que_last_use.find(out->attr.que.id);
-        if (reused_tensor != que_last_use.end()) {
-          if (reused_tensor->second->reuse_id != call->outputs[out_index].reuse_id) {
-            reused_tensor->second->reuse_next = &call->outputs[out_index];
-            call->outputs[out_index].reuse_from = reused_tensor->second;
-            GELOGI("Que[%ld] reuse id[%ld] tensor id[%ld] reuse from tensor id[%ld] reuse id[%ld]", out->attr.que.id,
-                   out->attr.mem.reuse_id, call->outputs[out_index].id, reused_tensor->second->id,
-                   reused_tensor->second->reuse_id);
-          } else {
-            GELOGI("Que[%ld] reuse id[%ld] tensor id[%ld] share with last same que tensor", out->attr.que.id,
-                   out->attr.mem.reuse_id, call->outputs[out_index].id, reused_tensor->second->id);
-          }
-        }
-        que_last_use[out->attr.que.id] = &call->outputs[out_index];
-      } else if (out->attr.mem.alloc_type == af::AllocType::kAllocTypeBuffer) {
-        GELOGI("Buf[%ld] update last use call type[%s] output[%d]", out->attr.buf.id, call->type.c_str(), out_index);
-        auto reused_tensor = buf_last_use.find(out->attr.buf.id);
-        if (reused_tensor != buf_last_use.end()) {
-          reused_tensor->second->reuse_next = &call->outputs[out_index];
-          call->outputs[out_index].reuse_from = reused_tensor->second;
-          GELOGI("Buf[%ld] tensor id[%ld] reuse from tensor id[%ld]", out->attr.buf.id, call->outputs[out_index].id,
-                 reused_tensor->second->id);
-        }
-        buf_last_use[out->attr.buf.id] = &call->outputs[out_index];
-      }
-    }
+    GE_ASSERT_SUCCESS(RegisterApiCallOutputs(node, *call, tpipe, state));
   }
   return af::SUCCESS;
 }
@@ -513,19 +564,13 @@ Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<as
     }
     if (body.type == LoopType::LOOP) {
       for (auto call : target_calls) {
-        if (!ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(call->node))
-                 .skips_ub_lifecycle) {
-          GE_CHK_STATUS_RET(call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
-        }
+        GE_CHK_STATUS_RET(call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
         used_calls.insert(call);
       }
       body.loop->compute_stage = this->compute_stage;
       GE_CHK_STATUS_RET(body.loop->GenerateLoop(tiler, tpipe, current_axis, ss), "Generate loop for body failed");
       for (auto call : target_calls) {
-        if (!ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(call->node))
-                 .skips_ub_lifecycle) {
-          GE_CHK_BOOL_RET_STATUS(call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
-        }
+        GE_CHK_BOOL_RET_STATUS(call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
       }
       used_calls.clear();
     } else {
@@ -684,6 +729,9 @@ Status Loop::GenerateLoop(const Tiler &tiler, const TPipe &tpipe, std::vector<as
     GE_CHK_STATUS_RET(this->GenerateBody(tiler, tpipe, current_axis, ss),
                       "Codegen generate body failed when axis type is block outer");
   } else {
+    if (axis.type == Axis::Type::kAxisTypeTileInner && FindIndirectLoadOpCall(this, false) != nullptr) {
+      ss << tiler.GenInnerLoopSizeAndActualSize(axis.id, axis.split_pair_other_id);
+    }
     std::string reduce_dim_a = "reduce_dim_a";
     if (IsHaveReduceType("Mean")) {
       ss << "uint32_t " << reduce_dim_a << ";" << std::endl;
@@ -706,9 +754,6 @@ Status Loop::GenerateLoop(const Tiler &tiler, const TPipe &tpipe, std::vector<as
         current_axis.pop_back();
         return af::SUCCESS;
       }
-    }
-    if (axis.type == Axis::Type::kAxisTypeTileInner && FindIndirectLoadOpCall(this, false) != nullptr) {
-      ss << tiler.GenInnerLoopSizeAndActualSize(axis.id, axis.split_pair_other_id);
     }
     if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse && axis.type == Axis::Type::kAxisTypeTileOuter) {
       ss << axis.loop_size.AsArg() << " = 1;" << std::endl;
@@ -782,8 +827,9 @@ Status Loop::GenerateLoop(const Tiler &tiler, const TPipe &tpipe, std::vector<as
         }
       }
       ss << ");" << std::endl;
-      ss << "Muls(" << reduce_dst_tensor->Str() << ", " << reduce_dst_tensor->Str() << ", " << "dimr_recip, "
-         << KernelUtils::SizeAlign() << "(" << reduce_dim_a << ", 32 / sizeof(" << dtype_name << ")));" << std::endl;
+      ss << "Muls(" << reduce_dst_tensor->Str() << ", " << reduce_dst_tensor->Str() << ", "
+         << "dimr_recip, " << KernelUtils::SizeAlign() << "(" << reduce_dim_a << ", 32 / sizeof(" << dtype_name
+         << ")));" << std::endl;
     }
   }
   current_axis.pop_back();
