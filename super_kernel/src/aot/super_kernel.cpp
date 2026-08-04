@@ -204,6 +204,17 @@ aclError aclskScopeEnd(const char *scopeName, aclrtStream stream) {
   return LaunchScopeKernel(scopeName, stream, false);
 }
 
+aclError aclskScopeVerify(const aclskScopeVerifyGraphInfo *verifyGraph, size_t maxSplitResultCount,
+                          aclskScopeVerifySplitResult *splitResults, size_t *realSplitResultCount) {
+  (void)verifyGraph;
+  (void)maxSplitResultCount;
+  (void)splitResults;
+  if (realSplitResultCount != nullptr) {
+    *realSplitResultCount = 0;
+  }
+  return ACL_SUCCESS;
+}
+
 #ifdef __cplusplus
 }
 #endif
