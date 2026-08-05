@@ -40,6 +40,7 @@ enum class TopoSortingMode : int32_t {
   kDFS,
   kRDFS,
   kStableRDFS,
+  kRDFSV2,
   // add before this
   kInvalid
 };

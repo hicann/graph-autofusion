@@ -16,7 +16,7 @@
 namespace af {
 inline const ge::char_t *GetTopoSortingModeStr(const TopoSortingMode &mode) {
   static const ge::char_t *topo_sorting_mode_strs[static_cast<int32_t>(TopoSortingMode::kInvalid) + 1U] = {
-      "BFS", "DFS", "RDFS", "StableRDFS", "Invalid"};
+      "BFS", "DFS", "RDFS", "StableRDFS", "RDFSV2", "Invalid"};
   if ((mode >= TopoSortingMode::kInvalid) || (mode < TopoSortingMode::kBFS)) {
     return topo_sorting_mode_strs[static_cast<int32_t>(TopoSortingMode::kInvalid)];
   }
@@ -221,6 +221,8 @@ class ComputeGraphImpl {
    */
   graphStatus RDFSTopologicalSorting(std::vector<NodePtr> &node_vec, const bool reverse,
                                      const ConstComputeGraphPtr &compute_graph) const;
+  graphStatus RDFSTopologicalSortingV2(std::vector<NodePtr> &node_vec, const bool reverse,
+                                       const ConstComputeGraphPtr &compute_graph) const;
   /**
    * 基于调用此接口之前的原始topo顺序，仅对拓扑错误的节点做部分调整，部分调整的算法RDFS
    * @param node_vec

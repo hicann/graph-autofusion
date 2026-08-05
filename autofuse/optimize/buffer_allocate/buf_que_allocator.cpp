@@ -856,7 +856,7 @@ Status BufQueAllocator::ShortenVecoutLifetime(af::AscGraph &graph, size_t max_qu
 }
 
 Status BufQueAllocator::TopoSortByLoadPriority(af::AscGraph &graph) {
-  GE_ASSERT_GRAPH_SUCCESS(ScheduleUtils::TopologicalSorting(graph));
+  GE_ASSERT_GRAPH_SUCCESS(ScheduleUtils::TopologicalSorting(graph, true));
   std::unordered_set<af::Node *> priority_sequences;
   for (const auto &node : graph.GetAllNodes()) {
     if (!ScheduleUtils::IsLoad(node) || node->GetOutDataNodesSize() > 1UL) {
@@ -894,6 +894,9 @@ Status BufQueAllocator::ProcessSingleImplGraph(af::AscGraph &impl_graph, BasePla
                     impl_graph.GetName().c_str());
   if (cube_type == ascir::CubeTemplateType::kUBFuse) {
     GE_ASSERT_SUCCESS(TopoSortByCubeLoadPriority(impl_graph), "Failed to topo sort by cube load priority for graph %s.",
+                      impl_graph.GetName().c_str());
+  } else {
+    GE_ASSERT_SUCCESS(ScheduleUtils::TopologicalSorting(impl_graph, true), "Failed to topo sort for graph %s.",
                       impl_graph.GetName().c_str());
   }
   return AllocBufQueForSingleImplGraph(impl_graph, max_que_num, is_reduce_mem_reuse);

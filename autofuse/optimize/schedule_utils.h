@@ -29,7 +29,7 @@ class ScheduleUtils {
   }
 
   // 后端默认采用逆dfs的拓扑排序方式
-  static Status TopologicalSorting(af::AscGraph &graph);
+  static Status TopologicalSorting(af::AscGraph &graph, bool use_rdfs_v2 = false);
 
   static bool IsElewise(const af::AscNodePtr &node) {
     return node->attr.api.compute_type == af::ComputeType::kComputeElewise;
