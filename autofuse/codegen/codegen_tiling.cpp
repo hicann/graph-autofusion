@@ -16,11 +16,9 @@
 #include <initializer_list>
 #include <string>
 #include <cstdlib>
-#include <fstream>
 #include <set>
+#include <fstream>
 #include <securec.h>
-#include "runtime/base.h"
-#include "runtime/dev.h"
 
 #include "dlfcn.h"
 
@@ -33,8 +31,6 @@
 #include "graph/symbolizer/symbolic_utils.h"
 #include "autofuse_config/auto_fuse_config.h"
 #include "graph/ge_context.h"
-#include "common/platform_context.h"
-#include "graph/utils/type_utils.h"
 #include "backend/backend_spec.h"
 #include "common/ascgraph_info_complete.h"
 #include "codegen_tiling_cube_wrapper.h"
@@ -49,7 +45,6 @@ using namespace codegen;
 using namespace af::ops;
 using namespace ascgen_utils;
 namespace {
-
 bool CheckTilingHeadersValid(const std::map<std::string, std::string> &tiling_file_name_to_content) {
   for (const auto &pair : tiling_file_name_to_content) {
     if (pair.second == INVALID_TILING) {
@@ -141,7 +136,7 @@ std::string RenderEntryTranslationUnit(const std::string &body, const EntryTrans
     autofuse::RequireGeneratedHeader(code.dependencies, autofuse::GeneratedHeaderId::kPgo);
   }
   if (options.enable_pgo_runtime) {
-    RequireSystemHeaders(code.dependencies, {"fstream", "securec.h", "unordered_set"});
+    RequireSystemHeaders(code.dependencies, {"fstream", "securec.h", "unordered_set", "utility"});
   }
   if (options.include_solver) {
     autofuse::RequireGeneratedHeader(code.dependencies, autofuse::GeneratedHeaderId::kSolver);
@@ -460,6 +455,10 @@ std::map<std::string, std::string> TilingLib::GenerateForInductor(
     const ascir::FusedScheduledResult &fused_schedule_result) const {
   ascir::FusedScheduledResult elemwise_schedule_result = fused_schedule_result;
   const bool is_cube_fused_scheduled = ascgen_utils::IsCubeFusedScheduled(fused_schedule_result);
+  if (enable_autofuse_pgo_ && !IsSupportedInductorPgoScene(fused_schedule_result)) {
+    GELOGE(af::FAILED, "Inductor MSPTI PGO only supports static, non-CV kernels");
+    return {{kTilingDefAndConstIdentify, ascgen_utils::INVALID_TILING}};
+  }
   if (is_cube_fused_scheduled) {
     GE_ASSERT_SUCCESS(ascgen_utils::ProcessCubeFusionResultDynamic(elemwise_schedule_result));
   }
@@ -473,23 +472,7 @@ std::map<std::string, std::string> TilingLib::GenerateForInductor(
   ss << "#pragma GCC diagnostic pop\n";
   ss << TilingFuncDefForInductor(fused_schedule_result, elemwise_schedule_result) << std::endl;
   if (!is_cube_fused_scheduled) {
-    ss << this->GenCandidateSolutionProtocolForInductor("AutofuseTilingData") << std::endl;
-    ss << this->GenTopnSelectorHelpersForInductor() << std::endl;
-    ss << this->GenBuiltinTfPgoConfigsForInductor() << std::endl;
-    ss << this->GenInductorConfigParserForInductor() << std::endl;
-    ss << GenGetTilingKeyCount(elemwise_schedule_result) << std::endl;
-    if (!ascgen_utils::IsSingleGroup(elemwise_schedule_result)) {
-      ss << GenUpdateCurPerfAndBlockByGroupHelper() << std::endl;
-    }
-    ss << this->GenEvaluateModeledPerfForInductor("AutofuseTilingData", elemwise_schedule_result) << std::endl;
-    ss << "extern \"C\" double GetModeledPerfForTesting(const AutofuseTilingData *tiling_data) {\n"
-       << "  if (tiling_data == nullptr) { return 0.0; }\n"
-       << "  double modeled_perf = EvaluateModeledPerf(*tiling_data);\n"
-       << "  return std::isfinite(modeled_perf) ? modeled_perf : DBL_MAX;\n"
-       << "}\n"
-       << std::endl;
-    ss << this->GenGetTopnSolutionsFuncForInductor(elemwise_schedule_result, "AutofuseTilingData") << std::endl;
-    ss << this->GenGetTilingDataReprFuncForInductor(elemwise_schedule_result, "AutofuseTilingData") << std::endl;
+    GenInductorTopnSources(elemwise_schedule_result, ss, tiling_file_name_to_content);
   }
   // 生成GenConstTilingData方法（对所有场景生成，包括CV fusion静态shape）
   ss << TilingData("Autofuse").GenerateConst(fused_schedule_result) << std::endl;
@@ -504,6 +487,10 @@ std::map<std::string, std::string> TilingLib::GenerateForInductor(
   tiling_file_name_to_content[kTilingDefAndConstIdentify] = RenderEntryTranslationUnit(entry_body, entry_options);
 
   return tiling_file_name_to_content;
+}
+
+bool TilingLib::IsSupportedInductorPgoScene(const ascir::FusedScheduledResult &fused_schedule_result) const {
+  return !ascgen_utils::IsCubeFusedScheduled(fused_schedule_result) && IsStaticSchedResult(fused_schedule_result);
 }
 
 void TilingLib::GenPgoMixTilingTable(const ascir::FusedScheduledResult &fused_schedule_result,
@@ -772,6 +759,9 @@ std::map<std::string, std::string> TilingLib::GetTilingHeaders(const ascir::Fuse
     tiling_file_name_to_content[kTilingHeadIdentify] += ss.str();
     options.emplace("tiling_data_type_name", tiling_name);
     options.emplace("solver_type", "AxesReorder");
+    if (is_inductor_scene) {
+      options.emplace(att::kInternalEnableAutofusePgo, enable_autofuse_pgo_ ? "true" : "false");
+    }
     GE_CHK_BOOL_EXEC(
         this->codegen_func_(fused_schedule_result.fused_graph_name.GetString(), fused_schedule_result, options,
                             tiling_file_name_to_content, is_inductor_scene),

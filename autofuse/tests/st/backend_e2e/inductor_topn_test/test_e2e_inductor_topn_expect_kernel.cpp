@@ -33,7 +33,6 @@ extern "C" int64_t GenerateTopnSolutions(const std::vector<std::map<std::string,
 extern "C" int64_t AutofuseTiling(AutofuseTilingData *tiling, uint32_t *workspaceSize, uint32_t *blockDim,
                                   ResLimit *res_limit = nullptr);
 std::string GetTilingDataRepr(const AutofuseTilingData *tiling_data);
-extern "C" double GetModeledPerfForTesting(const AutofuseTilingData *tiling_data);
 
 class E2EBackendInductorTopnCode : public testing::Test {};
 
@@ -71,7 +70,7 @@ TEST_F(E2EBackendInductorTopnCode, GenerateTopnSolutionsRejectsInvalidTopn) {
   EXPECT_TRUE(block_dims.empty());
 }
 
-TEST_F(E2EBackendInductorTopnCode, GenerateTopnSolutionsReturnsDistinctCandidatesSortedByModeledPerf) {
+TEST_F(E2EBackendInductorTopnCode, GenerateTopnSolutionsReturnsDistinctCandidates) {
   ResLimit res_limit = {1, 48, 0, 192 * 1024, {0}};
   const std::vector<std::map<std::string, std::string>> input_configs;
   std::vector<AutofuseTilingData> tiling_datas;
@@ -103,8 +102,5 @@ TEST_F(E2EBackendInductorTopnCode, GenerateTopnSolutionsReturnsDistinctCandidate
     for (size_t j = 0; j < i; ++j) {
       EXPECT_NE(reprs[i], reprs[j]);
     }
-  }
-  for (size_t i = 2; i < tiling_datas.size(); ++i) {
-    EXPECT_LE(GetModeledPerfForTesting(&tiling_datas[i - 1]), GetModeledPerfForTesting(&tiling_datas[i]));
   }
 }

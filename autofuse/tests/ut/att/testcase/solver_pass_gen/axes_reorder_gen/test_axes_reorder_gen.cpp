@@ -853,7 +853,8 @@ TEST_F(TestAxesReorderSolverGen, GenPgo_SolverwithClassImpl) {
   std::string className = "AxesReorderSolverGen";
   AxesReorderSolverGen solver("GenPgo_test", "TilingData");
   solver.SetEnableAutofusePGO(true);
-  solver.GenSolverClassImpl();
+  const std::string code = solver.GenSolverClassImpl();
+  EXPECT_NE(code.find("bool SatisfyUBSizeCacheLine(uint32_t) override {return false;};"), std::string::npos);
   solver.GenSolverFuncImpl();
 }
 

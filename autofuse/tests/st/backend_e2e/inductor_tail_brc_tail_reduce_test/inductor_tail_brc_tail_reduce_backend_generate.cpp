@@ -18,8 +18,10 @@
 
 #include "backend_common.h"
 #include "codegen.h"
+#include "common_utils.h"
 #include "optimize.h"
 #include "share_graph.h"
+#include "tests/common/inductor_pgo_codegen_test_utils.h"
 
 namespace {
 constexpr size_t kTilingDataFileIndex = 0;
@@ -89,5 +91,25 @@ TEST_F(TestBackendInductorTailBrcTailReduceE2e, InductorTailBrcTailReduceE2eCode
   } catch (...) {
     FAIL() << "inductor tail brc tail reduce codegen failed";
   }
+}
+
+TEST_F(TestBackendInductorTailBrcTailReduceE2e, InductorTailBrcTailReducePgoCodegen) {
+  autofuse::tests::ScopedAutofusePgoFlag pgo_flag;
+  auto graph = ascir::ShareGraph::TailBrcTailReduceFusedGraph(3);
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), af::SUCCESS);
+  ASSERT_FALSE(ascgen_utils::IsSingleGroup(fused_schedule_result));
+  ASSERT_FALSE(fused_schedule_result.workspace_nodes.empty());
+  ASSERT_TRUE(ascgen_utils::IsStaticSchedResult(fused_schedule_result));
+  ASSERT_TRUE(ascgen_utils::CanUseTilingKey(fused_schedule_result));
+
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+  EXPECT_NE(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoRunner"), std::string::npos);
+  EXPECT_NE(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoDeviceSource"), std::string::npos);
+  EXPECT_NE(result.kernel.find("SyncAll();"), std::string::npos);
+  autofuse::tests::WriteCodegenResult(result, splitString(PGO_KERNEL_SRC_LIST, ':'));
 }
 }  // namespace

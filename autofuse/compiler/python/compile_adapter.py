@@ -44,6 +44,9 @@ HISTORICAL_SPLIT_DISCRIMINATOR_KEYS = {
     "TilingEntryHeader",
     "TilingTailHeader",
 }
+SPLIT_PGO_RUNNER_KEY = "PgoRunner"
+SPLIT_PGO_DEVICE_SOURCE_KEY = "PgoDeviceSource"
+CANN_ROOT_ENV_NAMES = ("ASCEND_TOOLKIT_HOME", "ASCEND_HOME_PATH", "ASCEND_HOME")
 
 
 def str2bool(v):
@@ -230,23 +233,82 @@ def add_split_header_include(cpp_content):
     return SPLIT_HEADER_INCLUDE + "\n" + cpp_content
 
 
-def write_split_host_sources(host_file_path, graph_name, host_impl_code):
-    headers, cpp_sources = parse_split_host_sources(host_impl_code)
-    is_split_format = bool(
+def is_versioned_split_format(headers):
+    return bool(
         (FINAL_SPLIT_DISCRIMINATOR_KEYS | HISTORICAL_SPLIT_DISCRIMINATOR_KEYS)
         & set(headers)
     )
+
+
+def write_split_source_files(
+    host_file_path, graph_name, headers, cpp_sources, excluded_keys
+):
     for key, content in headers.items():
         generate_file(host_file_path, SPLIT_HEADER_FILES[key], content)
-    host_files = []
+    source_files = {}
+    is_split_format = is_versioned_split_format(headers)
     for key, cpp_content in cpp_sources:
+        if key in excluded_keys:
+            continue
         file_name = f"{graph_name}_tiling_func_{key}.cpp"
         content = (
             cpp_content if is_split_format else add_split_header_include(cpp_content)
         )
         generate_file(host_file_path, file_name, content)
-        host_files.append(os.path.join(host_file_path, file_name))
+        source_files[key] = os.path.join(host_file_path, file_name)
+    return source_files
+
+
+def write_split_host_source_groups(host_file_path, graph_name, host_impl_code):
+    headers, cpp_sources = parse_split_host_sources(host_impl_code)
+    source_files = write_split_source_files(
+        host_file_path,
+        graph_name,
+        headers,
+        cpp_sources,
+        {SPLIT_PGO_DEVICE_SOURCE_KEY},
+    )
+    runner_file = source_files.pop(SPLIT_PGO_RUNNER_KEY, None)
+    return list(source_files.values()), runner_file
+
+
+def write_split_host_sources(host_file_path, graph_name, host_impl_code):
+    host_files, _ = write_split_host_source_groups(
+        host_file_path, graph_name, host_impl_code
+    )
     return host_files
+
+
+def write_inductor_pgo_sources(host_dir, device_dir, graph_name, host_impl_code):
+    headers, cpp_sources = parse_split_host_sources(host_impl_code)
+    source_map = dict(cpp_sources)
+    runner_content = source_map.get(SPLIT_PGO_RUNNER_KEY)
+    device_content = source_map.get(SPLIT_PGO_DEVICE_SOURCE_KEY)
+    if runner_content is None or device_content is None:
+        raise ascendc_compile.CompileError(
+            "PgoRunner and PgoDeviceSource must be generated together"
+        )
+    source_files = write_split_source_files(
+        host_dir,
+        graph_name,
+        headers,
+        cpp_sources,
+        {SPLIT_PGO_DEVICE_SOURCE_KEY},
+    )
+    runner_file = source_files.pop(SPLIT_PGO_RUNNER_KEY)
+    device_name = f"{graph_name}_pgo_device.cpp"
+    generate_file(device_dir, device_name, device_content)
+    return (
+        list(source_files.values()),
+        runner_file,
+        os.path.join(device_dir, device_name),
+    )
+
+
+def has_inductor_pgo_split(host_impl_code):
+    _, cpp_sources = parse_split_host_sources(host_impl_code)
+    keys = {key for key, _ in cpp_sources}
+    return bool(keys & {SPLIT_PGO_RUNNER_KEY, SPLIT_PGO_DEVICE_SOURCE_KEY})
 
 
 def write_host_sources(host_file_path, base_host_file, graph_name, host_impl_code):
@@ -349,6 +411,40 @@ def prepare_compile_context(argv, stage, tiling_repr):
     return args, None, False
 
 
+def write_compile_host_sources(sources, args, tiling_def_file, base_host_file):
+    host_file_path = os.path.join(args.temp_dir, "host")
+    generate_file(host_file_path, tiling_def_file, sources["tiling_struct_code"])
+    host_impl_code = sources["host_impl_code"]
+    if not (
+        has_split_host_marker(host_impl_code) and has_inductor_pgo_split(host_impl_code)
+    ):
+        args.host_files = write_host_sources(
+            host_file_path, base_host_file, args.graph_name, host_impl_code
+        )
+        return
+    if args.stage != "host":
+        raise ascendc_compile.CompileError(
+            "Inductor PGO sidecar is supported only in host_compile stage"
+        )
+    device_file_path = os.path.join(args.temp_dir, "device")
+    generate_file(device_file_path, tiling_def_file, sources["tiling_struct_code"])
+    args.host_files, args.pgo_runner_file, args.pgo_device_file = (
+        write_inductor_pgo_sources(
+            host_file_path, device_file_path, args.graph_name, host_impl_code
+        )
+    )
+    args.pgo_mspti_config = get_inductor_pgo_mspti_config()
+    if args.pgo_mspti_config is None:
+        print("[PGO] MSPTI is unavailable, skip Inductor PGO sidecars")
+
+
+def write_compile_device_sources(sources, args, tiling_def_file, base_device_file):
+    device_file_path = os.path.join(args.temp_dir, "device")
+    generate_file(device_file_path, tiling_def_file, sources["tiling_struct_code"])
+    generate_file(device_file_path, base_device_file, sources["kernel_impl_code"])
+    args.device_files = os.path.join(device_file_path, base_device_file)
+
+
 def execute_compile(sources, args):
     tiling_def_file = "autofuse_tiling_data.h"
     base_host_file = args.graph_name + "_tiling_func.cpp"
@@ -357,28 +453,14 @@ def execute_compile(sources, args):
         with InductorCompileDuration(
             args.trace_stage, "WriteHostSource", args.graph_name
         ):
-            host_file_path = os.path.join(args.temp_dir, "host")
-            generate_file(
-                host_file_path, tiling_def_file, sources["tiling_struct_code"]
-            )
-            args.host_files = write_host_sources(
-                host_file_path,
-                base_host_file,
-                args.graph_name,
-                sources["host_impl_code"],
-            )
+            write_compile_host_sources(sources, args, tiling_def_file, base_host_file)
     if args.stage in ["all", "device"]:
         with InductorCompileDuration(
             args.trace_stage, "WriteDeviceSource", args.graph_name
         ):
-            device_file_path = os.path.join(args.temp_dir, "device")
-            generate_file(
-                device_file_path, tiling_def_file, sources["tiling_struct_code"]
+            write_compile_device_sources(
+                sources, args, tiling_def_file, base_device_file
             )
-            generate_file(
-                device_file_path, base_device_file, sources["kernel_impl_code"]
-            )
-            args.device_files = os.path.join(device_file_path, base_device_file)
 
     with InductorCompileDuration(
         args.trace_stage, "BuildCompiledArtifacts", args.graph_name
@@ -462,6 +544,56 @@ def kernel_compile(
         tiling_repr,
         trace_stage="kernel_compile",
     )
+
+
+def get_inductor_pgo_mspti_config_from_dir(mspti_dir):
+    mspti_dir = os.path.realpath(mspti_dir)
+    include_file = os.path.join(mspti_dir, "include", "mspti.h")
+    lib_dir = os.path.join(mspti_dir, "lib64")
+    mspti_so = os.path.join(lib_dir, "libmspti.so")
+    if not os.path.isfile(include_file) or not os.path.isfile(mspti_so):
+        return None
+    prof_common_so = os.path.join(lib_dir, "libprof_common.so")
+    preload_files = [mspti_so]
+    link_flags = [f"-L{lib_dir}", "-lmspti"]
+    if os.path.isfile(prof_common_so):
+        preload_files.insert(0, prof_common_so)
+        link_flags.append("-lprof_common")
+    return mspti_dir, preload_files, link_flags
+
+
+def get_current_cann_root():
+    module_file = getattr(ascendc_compile, "__file__", "")
+    if not module_file:
+        return None
+    return os.path.realpath(
+        os.path.join(os.path.dirname(module_file), "..", "..", "..")
+    )
+
+
+def get_inductor_pgo_cann_root_candidates():
+    candidates = []
+
+    def add_candidate(path):
+        if not path:
+            return
+        real_path = os.path.realpath(path)
+        if real_path not in candidates:
+            candidates.append(real_path)
+
+    add_candidate(get_current_cann_root())
+    for env_name in CANN_ROOT_ENV_NAMES:
+        add_candidate(os.getenv(env_name))
+    return candidates
+
+
+def get_inductor_pgo_mspti_config():
+    for cann_root in get_inductor_pgo_cann_root_candidates():
+        mspti_dir = os.path.join(cann_root, "tools", "mspti")
+        config = get_inductor_pgo_mspti_config_from_dir(mspti_dir)
+        if config is not None:
+            return config
+    return None
 
 
 def extract_time(line):

@@ -11,20 +11,41 @@
 #include "codegen_tiling.h"
 
 namespace codegen {
+void TilingLib::GenSharedPgoRuntimeLaunch(const ascir::FusedScheduledResult &fused_schedule_result,
+                                          const std::string &pgo_dir, std::stringstream &ss, bool direct_link) const {
+  GenPgoToolFunction(fused_schedule_result, pgo_dir, ss, direct_link);
+  GenPgoWrapper(fused_schedule_result, ss, direct_link);
+}
+
+void TilingLib::GenSharedPgoRuntimeProfiling(const ascir::FusedScheduledResult &fused_schedule_result,
+                                             std::stringstream &ss, bool direct_link) const {
+  GenPgoMsptiProfiling(ss, direct_link);
+  GenPgoBatchProcess(ss, direct_link);
+  GenPgoGetProfilingBatch(fused_schedule_result, ss, direct_link);
+  GenPgoGetProfiling(fused_schedule_result, ss, direct_link);
+}
 
 std::string TilingLib::GenerateForPgo(const ascir::FusedScheduledResult &fused_schedule_result,
                                       const std::string &pgo_dir) const {
-  // 生成PGO的头文件和函数定义
   std::stringstream ss;
-  GenPgoHeaders(ss);
-  // 生成PGO需要的工具函数
-  GenPgoToolFunction(fused_schedule_result, pgo_dir, ss);
-  // 生成PGO需要的wrapper函数
-  GenPgoWrapper(fused_schedule_result, ss);
-  // 生成PGO需要的求解代码
+  GenPgoHeaders(ss, false);
+  GenSharedPgoRuntimeLaunch(fused_schedule_result, pgo_dir, ss, false);
+  GenSharedPgoRuntimeProfiling(fused_schedule_result, ss, false);
   GenPgoProfiling(fused_schedule_result, ss);
-  // 生成PGO的main函数
   GenPgoMain(fused_schedule_result, ss);
+  return ss.str();
+}
+
+std::string TilingLib::GenInductorPgoRunner(const ascir::FusedScheduledResult &fused_schedule_result) const {
+  std::stringstream ss;
+  GenPgoHeaders(ss, true);
+  GenSharedPgoRuntimeLaunch(fused_schedule_result, "", ss, true);
+  GenInductorPgoResultTypes(ss);
+  GenInductorPgoHostLoader(ss);
+  GenSharedPgoRuntimeProfiling(fused_schedule_result, ss, true);
+  GenInductorPgoResultProtocol(ss);
+  GenInductorPgoRuntime(fused_schedule_result, ss);
+  GenInductorPgoMain(ss);
   return ss.str();
 }
 

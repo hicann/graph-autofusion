@@ -16,6 +16,7 @@ import types
 import pytest
 
 from compile_test_utils import PYTHON_DIR, load_compile_module
+import autofuse
 
 MODULE_NAME = "autofuse.compile_adapter"
 MODULE_PATH = os.path.join(PYTHON_DIR, "compile_adapter.py")
@@ -32,6 +33,35 @@ def _host_compile_args(tmpdir):
             "trace_stage": "host_compile",
         },
     )()
+
+
+def _scheme_a_sources():
+    return {
+        "tiling_struct_code": "struct AutofuseTilingData {};",
+        "host_impl_code": _make_scheme_a_split_host_impl(),
+        "kernel_impl_code": None,
+    }
+
+
+def _execute_scheme_a_host_compile(compile_adapter_module, tmpdir):
+    args = _host_compile_args(tmpdir)
+    compile_adapter_module.execute_compile(_scheme_a_sources(), args)
+    return args
+
+
+def _make_mspti_install(tmpdir):
+    cann_root = tmpdir.mkdir("cann")
+    mspti_dir = cann_root.mkdir("tools").mkdir("mspti")
+    mspti_dir.mkdir("include").join("mspti.h").write("header")
+    lib_dir = mspti_dir.mkdir("lib64")
+    mspti_so = lib_dir.join("libmspti.so")
+    mspti_so.write("library")
+    return cann_root, mspti_dir, lib_dir, mspti_so
+
+
+def _clear_cann_root_envs(monkeypatch):
+    for env_name in ("ASCEND_TOOLKIT_HOME", "ASCEND_HOME_PATH", "ASCEND_HOME"):
+        monkeypatch.delenv(env_name, raising=False)
 
 
 @pytest.fixture()
@@ -347,6 +377,340 @@ int Solver() {{ return 0; }}
         compile_adapter_module.write_split_host_sources(
             str(tmpdir), "demo_graph", host_code
         )
+
+
+def _make_pgo_split_host_impl(runner_key="PgoRunner"):
+    return "\n".join(
+        [
+            "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+            "struct CommonType {};",
+            "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+            "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
+            'extern "C" int Solver() { return 0; }',
+            "// AUTOFUSE_SPLIT_FILE_END: solver_func",
+            f"// AUTOFUSE_SPLIT_FILE_BEGIN: {runner_key}",
+            "int main() { return Solver(); }",
+            f"// AUTOFUSE_SPLIT_FILE_END: {runner_key}",
+        ]
+    )
+
+
+def _make_scheme_a_split_host_impl(
+    runner_key="PgoRunner", device_key="PgoDeviceSource"
+):
+    return "\n".join(
+        [
+            "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+            "struct CommonType {};",
+            "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+            "// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func",
+            'extern "C" int Solver() { return 0; }',
+            "// AUTOFUSE_SPLIT_FILE_END: solver_func",
+            f"// AUTOFUSE_SPLIT_FILE_BEGIN: {runner_key}",
+            "int main() { return Solver(); }",
+            f"// AUTOFUSE_SPLIT_FILE_END: {runner_key}",
+            f"// AUTOFUSE_SPLIT_FILE_BEGIN: {device_key}",
+            'extern "C" __global__ __aicore__ void graph() {}',
+            f"// AUTOFUSE_SPLIT_FILE_END: {device_key}",
+        ]
+    )
+
+
+def test_write_split_host_sources_excludes_exact_pgo_runner(
+    compile_adapter_module, tmpdir
+):
+    host_dir = str(tmpdir.mkdir("host"))
+
+    host_files = compile_adapter_module.write_split_host_sources(
+        host_dir, "graph", _make_pgo_split_host_impl()
+    )
+
+    assert host_files == [os.path.join(host_dir, "graph_tiling_func_solver_func.cpp")]
+    assert os.path.exists(os.path.join(host_dir, "graph_tiling_func_PgoRunner.cpp"))
+
+
+def test_write_split_host_sources_keeps_similar_runner_key(
+    compile_adapter_module, tmpdir
+):
+    host_dir = str(tmpdir.mkdir("host"))
+
+    host_files = compile_adapter_module.write_split_host_sources(
+        host_dir, "graph", _make_pgo_split_host_impl("PgoRunnerExtra")
+    )
+
+    assert host_files == [
+        os.path.join(host_dir, "graph_tiling_func_solver_func.cpp"),
+        os.path.join(host_dir, "graph_tiling_func_PgoRunnerExtra.cpp"),
+    ]
+
+
+def test_write_inductor_pgo_sources_classifies_exact_versioned_splits(
+    compile_adapter_module, tmpdir
+):
+    host_dir = str(tmpdir.mkdir("host"))
+    device_dir = str(tmpdir.mkdir("device"))
+
+    normal_files, runner_file, device_file = (
+        compile_adapter_module.write_inductor_pgo_sources(
+            host_dir, device_dir, "graph", _make_scheme_a_split_host_impl()
+        )
+    )
+
+    assert normal_files == [os.path.join(host_dir, "graph_tiling_func_solver_func.cpp")]
+    assert runner_file == os.path.join(host_dir, "graph_tiling_func_PgoRunner.cpp")
+    assert device_file == os.path.join(device_dir, "graph_pgo_device.cpp")
+    assert all(
+        "PgoRunner" not in path and "PgoDeviceSource" not in path
+        for path in normal_files
+    )
+    assert "int main()" in open(runner_file).read()
+    assert "__aicore__ void graph()" in open(device_file).read()
+
+
+def test_write_inductor_pgo_sources_supports_final_split_headers(
+    compile_adapter_module, tmpdir
+):
+    host_impl = """// AUTOFUSE_SPLIT_FILE_BEGIN: TilingStateHeader
+state header
+// AUTOFUSE_SPLIT_FILE_END: TilingStateHeader
+// AUTOFUSE_SPLIT_FILE_BEGIN: solver_func
+#include "autofuse_tiling_func_state.h"
+int Solver() { return 0; }
+// AUTOFUSE_SPLIT_FILE_END: solver_func
+// AUTOFUSE_SPLIT_FILE_BEGIN: PgoRunner
+int main() { return 0; }
+// AUTOFUSE_SPLIT_FILE_END: PgoRunner
+// AUTOFUSE_SPLIT_FILE_BEGIN: PgoDeviceSource
+extern "C" __global__ __aicore__ void graph() {}
+// AUTOFUSE_SPLIT_FILE_END: PgoDeviceSource
+"""
+    host_dir = str(tmpdir.mkdir("host"))
+    device_dir = str(tmpdir.mkdir("device"))
+
+    normal_files, runner_file, device_file = (
+        compile_adapter_module.write_inductor_pgo_sources(
+            host_dir, device_dir, "graph", host_impl
+        )
+    )
+
+    assert not tmpdir.join("host", "autofuse_tiling_func_common.h").check()
+    assert (
+        tmpdir.join("host", "autofuse_tiling_func_state.h").read() == "state header\n"
+    )
+    assert (
+        '#include "autofuse_tiling_func_common.h"' not in open(normal_files[0]).read()
+    )
+    assert '#include "autofuse_tiling_func_common.h"' not in open(runner_file).read()
+    assert device_file == os.path.join(device_dir, "graph_pgo_device.cpp")
+
+
+@pytest.mark.parametrize(
+    "host_impl",
+    [
+        _make_pgo_split_host_impl(),
+    ],
+)
+def test_write_inductor_pgo_sources_rejects_missing_pair(
+    compile_adapter_module, tmpdir, host_impl
+):
+    host_dir = str(tmpdir.mkdir("host"))
+    device_dir = str(tmpdir.mkdir("device"))
+
+    with pytest.raises(
+        compile_adapter_module.ascendc_compile.CompileError, match="PGO|Pgo"
+    ):
+        compile_adapter_module.write_inductor_pgo_sources(
+            host_dir, device_dir, "graph", host_impl
+        )
+
+
+def test_write_split_host_sources_keeps_similar_pgo_keys(
+    compile_adapter_module, tmpdir
+):
+    host_dir = str(tmpdir.mkdir("host"))
+    host_impl = _make_scheme_a_split_host_impl("PgoRunnerExtra", "PgoDeviceSourceExtra")
+
+    host_files = compile_adapter_module.write_split_host_sources(
+        host_dir, "graph", host_impl
+    )
+
+    assert any("PgoRunnerExtra" in path for path in host_files)
+    assert any("PgoDeviceSourceExtra" in path for path in host_files)
+
+
+def test_execute_compile_prepares_scheme_a_sidecars_without_changing_host_api(
+    compile_adapter_module, tmpdir, monkeypatch
+):
+    captured = {}
+
+    def capture_args(args):
+        captured["args"] = args
+
+    compile_adapter_module.ascendc_compile.main = capture_args
+    monkeypatch.setattr(
+        compile_adapter_module.module,
+        "get_inductor_pgo_mspti_config",
+        lambda: ("/mspti", ["/mspti/libmspti.so"], ["-lmspti"]),
+    )
+    _execute_scheme_a_host_compile(compile_adapter_module, tmpdir)
+
+    compiled_args = captured["args"]
+    assert compiled_args.host_files == [
+        os.path.join(str(tmpdir), "host", "graph_tiling_func_solver_func.cpp")
+    ]
+    assert compiled_args.pgo_runner_file.endswith("graph_tiling_func_PgoRunner.cpp")
+    assert compiled_args.pgo_device_file.endswith("graph_pgo_device.cpp")
+    assert compiled_args.pgo_mspti_config == (
+        "/mspti",
+        ["/mspti/libmspti.so"],
+        ["-lmspti"],
+    )
+
+
+def test_execute_compile_scheme_a_without_mspti_keeps_pgo_proxy_runtime_linkage(
+    compile_adapter_module, tmpdir, monkeypatch
+):
+    captured = {}
+
+    def capture_args(args):
+        captured["args"] = args
+
+    compile_adapter_module.ascendc_compile.main = capture_args
+    monkeypatch.setattr(
+        compile_adapter_module.module, "get_inductor_pgo_mspti_config", lambda: None
+    )
+    _execute_scheme_a_host_compile(compile_adapter_module, tmpdir)
+
+    compiled_args = captured["args"]
+    assert compiled_args.pgo_runner_file.endswith("graph_tiling_func_PgoRunner.cpp")
+    assert compiled_args.pgo_device_file.endswith("graph_pgo_device.cpp")
+    assert compiled_args.pgo_mspti_config is None
+
+
+def test_execute_compile_scheme_a_rejects_stage_all(
+    compile_adapter_module, tmpdir, monkeypatch
+):
+    monkeypatch.setattr(
+        compile_adapter_module.module,
+        "get_inductor_pgo_mspti_config",
+        lambda: ("/mspti", ["/mspti/libmspti.so"], ["-lmspti"]),
+    )
+    args = type(
+        "Args",
+        (),
+        {
+            "stage": "all",
+            "temp_dir": str(tmpdir),
+            "graph_name": "graph",
+            "trace_stage": "jit_compile",
+        },
+    )()
+
+    with pytest.raises(
+        compile_adapter_module.ascendc_compile.CompileError, match="host_compile"
+    ):
+        compile_adapter_module.execute_compile(
+            {
+                "tiling_struct_code": "struct AutofuseTilingData {};",
+                "host_impl_code": _make_scheme_a_split_host_impl(),
+                "kernel_impl_code": 'extern "C" void kernel() {}',
+            },
+            args,
+        )
+
+
+def test_get_inductor_pgo_mspti_config_uses_ascend_toolkit_home(
+    compile_adapter_module, tmpdir, monkeypatch
+):
+    _clear_cann_root_envs(monkeypatch)
+    cann_root, mspti_dir, lib_dir, mspti_so = _make_mspti_install(tmpdir)
+    monkeypatch.setenv("ASCEND_TOOLKIT_HOME", str(cann_root))
+
+    config = compile_adapter_module.get_inductor_pgo_mspti_config()
+
+    assert config == (
+        os.path.realpath(str(mspti_dir)),
+        [os.path.realpath(str(mspti_so))],
+        [f"-L{os.path.realpath(str(lib_dir))}", "-lmspti"],
+    )
+
+
+def test_get_inductor_pgo_mspti_config_includes_optional_prof_common(
+    compile_adapter_module, tmpdir, monkeypatch
+):
+    _clear_cann_root_envs(monkeypatch)
+    cann_root = tmpdir.mkdir("cann")
+    mspti_dir = cann_root.mkdir("tools").mkdir("mspti")
+    mspti_dir.mkdir("include").join("mspti.h").write("header")
+    lib_dir = mspti_dir.mkdir("lib64")
+    mspti_so = lib_dir.join("libmspti.so")
+    prof_common_so = lib_dir.join("libprof_common.so")
+    mspti_so.write("library")
+    prof_common_so.write("library")
+    monkeypatch.setenv("ASCEND_TOOLKIT_HOME", str(cann_root))
+
+    config = compile_adapter_module.get_inductor_pgo_mspti_config()
+
+    assert config == (
+        os.path.realpath(str(mspti_dir)),
+        [os.path.realpath(str(prof_common_so)), os.path.realpath(str(mspti_so))],
+        [f"-L{os.path.realpath(str(lib_dir))}", "-lmspti", "-lprof_common"],
+    )
+
+
+def test_get_inductor_pgo_mspti_config_rejects_incomplete_cann_root(
+    compile_adapter_module, tmpdir, monkeypatch
+):
+    _clear_cann_root_envs(monkeypatch)
+    cann_root = tmpdir.mkdir("cann")
+    mspti_dir = cann_root.mkdir("tools").mkdir("mspti")
+    mspti_dir.mkdir("include").join("mspti.h").write("header")
+    monkeypatch.setenv("ASCEND_TOOLKIT_HOME", str(cann_root))
+
+    assert compile_adapter_module.get_inductor_pgo_mspti_config() is None
+
+
+def test_get_inductor_pgo_mspti_config_uses_current_cann_root(
+    compile_adapter_module, tmpdir, monkeypatch
+):
+    _clear_cann_root_envs(monkeypatch)
+    cann_root, mspti_dir, lib_dir, mspti_so = _make_mspti_install(tmpdir)
+    package_dir = cann_root.mkdir("python").mkdir("site-packages").mkdir("autofuse")
+    monkeypatch.setattr(
+        compile_adapter_module.ascendc_compile,
+        "__file__",
+        str(package_dir.join("ascendc_compile.py")),
+        raising=False,
+    )
+
+    assert compile_adapter_module.get_inductor_pgo_mspti_config() == (
+        os.path.realpath(str(mspti_dir)),
+        [os.path.realpath(str(mspti_so))],
+        [f"-L{os.path.realpath(str(lib_dir))}", "-lmspti"],
+    )
+
+
+def test_get_inductor_pgo_mspti_config_uses_cann_root_without_importing_codegen(
+    compile_adapter_module, tmpdir, monkeypatch
+):
+    _clear_cann_root_envs(monkeypatch)
+    cann_root, mspti_dir, lib_dir, mspti_so = _make_mspti_install(tmpdir)
+    monkeypatch.setenv("ASCEND_TOOLKIT_HOME", str(cann_root))
+
+    asc_codegen_compile = types.SimpleNamespace(
+        pgo_get_mspti_config=lambda: (_ for _ in ()).throw(
+            AssertionError("asc_codegen_compile should not be used")
+        )
+    )
+    monkeypatch.setattr(
+        autofuse, "asc_codegen_compile", asc_codegen_compile, raising=False
+    )
+
+    assert compile_adapter_module.get_inductor_pgo_mspti_config() == (
+        os.path.realpath(str(mspti_dir)),
+        [os.path.realpath(str(mspti_so))],
+        [f"-L{os.path.realpath(str(lib_dir))}", "-lmspti"],
+    )
 
 
 @pytest.mark.parametrize(

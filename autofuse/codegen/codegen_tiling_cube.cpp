@@ -71,8 +71,8 @@ void AppendCvUbFusionStageSizeName(const ascir::FusedScheduledResult &fused_sche
   }
   ss << "}" << std::endl;
 }
-}  // namespace
 
+}  // namespace
 std::string DtypeToStr(ge::DataType dtype) {
   const std::map<ge::DataType, const ge::char_t *> kTypeName = {
       {ge::DT_FLOAT, "float32"}, {ge::DT_FLOAT16, "float16"}, {ge::DT_BF16, "bfloat16"}, {ge::DT_INT8, "int8"},
