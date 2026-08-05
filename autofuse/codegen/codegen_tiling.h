@@ -99,6 +99,7 @@ struct PgoShapeStringStream {
 };
 class TilingLib {
  public:
+  // Core generation entry points are implemented in codegen_tiling.cpp.
   TilingLib(const std::string &lib_path, const std::string &codegen_symbol_name);
   std::map<std::string, std::string> Generate(const ::ascir::FusedScheduledResult &fused_schedule_result,
                                               const std::map<std::string, std::string> &shape_info,
@@ -106,11 +107,13 @@ class TilingLib {
   std::map<std::string, std::string> GenerateForInductor(
       const ::ascir::FusedScheduledResult &fused_schedule_result) const;
 
+  // The TF PGO generation entry point is implemented in codegen_tiling_pgo_runtime.cpp.
   std::string GenerateForPgo(const ::ascir::FusedScheduledResult &fused_schedule_result,
                              const std::string &pgo_dir) const;
   std::string GetTilingIncludeHead(bool is_cv = false) const;
 
  protected:
+  // Common tiling generation is implemented in codegen_tiling.cpp.
   std::string TilingFuncDef(const ::ascir::FusedScheduledResult &fused_schedule_result,
                             const ::ascir::FusedScheduledResult &elemwise_schedule_result,
                             const std::map<std::string, std::string> &shape_info, const std::string &pgo_dir,
@@ -125,6 +128,7 @@ class TilingLib {
   std::string OpInputDef(const ::ascir::NodeView &node) const;
   std::string OpOutputDef(const ::ascir::NodeView &node) const;
 
+  // PGO tensor arguments and memory management are implemented in codegen_tiling_pgo_memory.cpp.
   std::string ExternFunctionDeclare(const ::ascir::FusedScheduledResult &fused_schedule_result,
                                     const std::string tiling) const;
   std::string PGOTensorArgsDef() const;
@@ -144,17 +148,22 @@ class TilingLib {
   std::string CalculateTensorMemorySizeStr(const ::ascir::TensorAttr &tensor) const;
   std::string PGOSearchTensorMallocDef(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   std::string PGOSearchTensorFreeDef(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
+
+  // Fallback headers are implemented in codegen_tiling.cpp.
   std::string StubHeadersWithoutCodegenFunc() const;
   std::string GetStubTilingHeaders(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   std::string GetStubTilingApi(const ::ascir::FusedScheduledResult &fused_schedule_result, bool include_pgo) const;
   void PopulateFallbackAtomicHeaders(std::map<std::string, std::string> &tiling_file_name_to_content,
                                      const ::ascir::FusedScheduledResult &fused_schedule_result, bool use_att_codegen,
                                      bool include_pgo) const;
+
+  // Shared PGO search helpers are implemented in codegen_tiling_pgo_search.cpp.
   std::string GenGetAutoFuseTilingInput(bool is_inductor_scene) const;
   std::string GenGetResLimitStru(void) const;
   bool IsMixKernelTaskType(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
 
  private:
+  // Common tiling generation is implemented in codegen_tiling.cpp.
   // 判断某个 origin_var 是否被特定 schedule_group 使用
   bool IsVarUsedInScheduleGroup(const std::string &var_define, const ::ascir::ScheduleGroup &schedule_group) const;
   std::string GenGetTilingSizeFunc(const ::ascir::FusedScheduledResult &fused_schedule_result,
@@ -166,6 +175,8 @@ class TilingLib {
   std::string GenTilingFuncForInductor(const ::ascir::FusedScheduledResult &fused_schedule_result,
                                        const ::ascir::FusedScheduledResult &elemwise_schedule_result,
                                        const std::string func, const std::string tiling) const;
+
+  // Inductor TopN generation is implemented in codegen_tiling_inductor_topn.cpp.
   std::string GenGetTopnSolutionsFuncForInductor(const ::ascir::FusedScheduledResult &fused_schedule_result,
                                                  const std::string &tiling) const;
   void GenTopnInitSearchTiling(std::stringstream &ss, const ::ascir::FusedScheduledResult &fused_schedule_result,
@@ -206,6 +217,8 @@ class TilingLib {
                               const std::string &field_prefix, bool top_level) const;
   void GenReprSingleGroup(std::stringstream &ss, const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   void GenReprMultiGroup(std::stringstream &ss, const ::ascir::FusedScheduledResult &fused_schedule_result) const;
+
+  // PGO candidate search is implemented in codegen_tiling_pgo_search.cpp.
   std::string GenPgoTilingFunc(const ::ascir::FusedScheduledResult &fused_schedule_result, const std::string &tiling,
                                codegen::PgoShapeStringStream &pgo_shape_dim, bool is_inductor_scene,
                                const std::string &core_num = "0") const;
@@ -229,6 +242,8 @@ class TilingLib {
   std::string GenPGOGetTilingKey(const std::string tiling) const;
   std::string GenSavePGOSearchTilingDataFunc(const std::string tiling) const;
   std::string GenSavePGOConfigTilingDataFunc() const;
+
+  // PGO runtime source generation is implemented in codegen_tiling_pgo_common.cpp.
   void GenPgoSaveTilingKey(std::stringstream &ss) const;
   void GenPgoAppendSearchTilingData(std::stringstream &ss) const;
   void GenPgoKernelLaunchOpArgs(const ::ascir::FusedScheduledResult &fused_schedule_result,
@@ -265,6 +280,8 @@ class TilingLib {
   void GenPgoFunc(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss) const;
   void GenPgoStaticFunc(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss) const;
   void GenPgoProfiling(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss) const;
+
+  // Common tiling helpers are implemented in codegen_tiling.cpp.
   std::string GenExternTilingFunc(const ::ascir::FusedScheduledResult &fused_schedule_result,
                                   const std::map<std::string, std::string> &shape_info, const std::string tiling,
                                   const std::string &pgo_dir, const std::string &core_num) const;
@@ -289,6 +306,8 @@ class TilingLib {
   std::string GenGetTilingKeyCount(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   std::string GenGetTilingKeyForStatic() const;
   std::string GenGetTilingKeyKernelTypeForStatic(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
+
+  // Cube tiling generation is implemented in codegen_tiling_cube.cpp.
   std::string GenCVTilingFunc() const;
   std::string GenTilingDataBlockDimAndWss() const;
   std::map<std::string, std::string> GenerateCVFusionStatic(

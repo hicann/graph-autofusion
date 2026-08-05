@@ -515,32 +515,13 @@ Status TilingGroup::GenElewiseTilingGroup(af::AscNode &node, AxisGroup &axes_gro
   return af::SUCCESS;
 }
 
-std::vector<af::AxisId> CalcReduceAxes(const std::vector<af::Expression> &src_strides,
-                                       const std::vector<af::Expression> &dst_strides,
-                                       const std::vector<ascir::AxisId> &axes) {
-  GE_ASSERT_TRUE((src_strides.size() == dst_strides.size()),
-                 "The output dim cnt [%zu] of reduce mismatch with input dim cnt [%zu].", dst_strides.size(),
-                 src_strides.size());
-  GE_ASSERT_TRUE((src_strides.size() == axes.size()),
-                 "The input dim cnt [%zu] of reduce mismatch with input dim cnt [%zu].", src_strides.size(),
-                 axes.size());
-  std::vector<ascir::AxisId> reduce_axes;
-  for (size_t i = 0; i < src_strides.size(); ++i) {
-    if (af::SymbolicUtils::StaticCheckEq(src_strides[i], dst_strides[i]) != af::TriBool::kTrue &&
-        af::SymbolicUtils::StaticCheckEq(dst_strides[i], af::sym::kSymbolZero) == af::TriBool::kTrue) {
-      reduce_axes.push_back(axes[i]);
-    }
-  }
-  return reduce_axes;
-}
-
 Status TilingGroup::GenReduceTilingGroup(af::AscNode &node, AxisGroup &axes_group) {
   std::vector<ascir::AxisId> axes;
   GE_CHK_STATUS_RET(ScheduleUtils::GetLoopAxis(node, axes), "Get loop axis failed.");
   axes_group.axes_order.resize(axes.size());
   std::vector<ascir::SizeExpr> src_strides;
   GE_CHK_STATUS_RET(ScheduleUtils::GetReduceInputStrides(node, src_strides), "Get loop strides failed.");
-  axes_group.r_group = CalcReduceAxes(src_strides, node.outputs[0].attr.strides, axes);
+  axes_group.r_group = ScheduleUtils::CalcReduceAxes(src_strides, node.outputs[0].attr.strides, axes);
   int64_t y_order_index = 0;
   int64_t r_order_index = axes.size() - axes_group.r_group.size();
   for (size_t i = 0; i < axes.size(); ++i) {
@@ -566,7 +547,7 @@ Status TilingGroup::GenReduceTilingGroupFullLoad(af::AscNode &node, AxisGroup &a
   } else {
     std::vector<ascir::SizeExpr> src_strides;
     GE_CHK_STATUS_RET(ScheduleUtils::GetReduceInputStrides(node, src_strides), "Get loop strides failed.");
-    axes_group.n_group = CalcReduceAxes(src_strides, node.outputs[0].attr.strides, axes);
+    axes_group.n_group = ScheduleUtils::CalcReduceAxes(src_strides, node.outputs[0].attr.strides, axes);
   }
 
   int64_t y_order_index = 0;

@@ -185,27 +185,17 @@ void AppendIdIfNotDefault(std::stringstream &ss, const std::string &prefix, int6
 // Returns true if an IndirectLoad prebuilt tiling case was generated, and the caller should return early.
 bool TryGenIndirectLoadTilingCase(ascir::ImplGraph &graph,
                                   std::vector<optimize::autoschedule::TilingCase> &tiling_cases) {
-  bool has_indirect_load_case = false;
-  af::AxisId indirect_load_tile_id = kDefaultAxisId;
-  std::pair<af::AxisPtr, af::AxisPtr> indirect_load_tiling;
-  if (ascgen_utils::indirect_load::GetPrebuiltYTilingCase(graph, has_indirect_load_case, indirect_load_tile_id,
-                                                          indirect_load_tiling) != af::SUCCESS) {
-    GELOGE(af::FAILED, "[IndirectLoad] Failed to generate prebuilt tiling case for graph[%s].",
-           graph.GetName().c_str());
-    return true;
-  }
-  if (!has_indirect_load_case) {
+  optimize::autoschedule::TilingCase tiling_case;
+  if (!ascgen_utils::indirect_load::GetPrebuiltYTilingCase(graph, tiling_case.ub_tiling_id_y,
+                                                           tiling_case.ub_tiling_y)) {
     return false;
   }
-  optimize::autoschedule::TilingCase tiling_case;
-  if (indirect_load_tile_id != kDefaultAxisId) {
-    tiling_case.ub_tiling_id_y = indirect_load_tile_id;
+  if (tiling_case.ub_tiling_y.first != nullptr && tiling_case.ub_tiling_y.second != nullptr) {
+    tiling_case.block_tiling_id = 0;
+    tiling_cases.push_back(tiling_case);
+    GELOGD("[IndirectLoad] Graph[%s] generate prebuilt outer tiling case for axis[%ld].", graph.GetName().c_str(),
+           tiling_case.ub_tiling_id_y);
   }
-  tiling_case.ub_tiling_y = indirect_load_tiling;
-  tiling_case.block_tiling_id = 0;
-  tiling_cases.push_back(tiling_case);
-  GELOGD("[IndirectLoad] Graph[%s] generate prebuilt outer tiling case for axis[%ld].", graph.GetName().c_str(),
-         indirect_load_tile_id);
   return true;
 }
 }  // namespace
@@ -216,8 +206,8 @@ Status AutoSchedule::SelectLoopAxis(ascir::ImplGraph &impl_graph, bool is_reduce
   for (auto node : impl_graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node);
     node->attr.sched.loop_axis = af::kIdNone;
-    const auto behavior = ascgen_utils::indirect_load::GetTemplateBehavior(node);
-    if (node->attr.api.type != af::ApiType::kAPITypeCompute || behavior.skips_main_schedule_tiling) {
+    if (node->attr.api.type != af::ApiType::kAPITypeCompute ||
+        ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_main_schedule_tiling) {
       continue;
     }
     if (ScheduleUtils::IsReduce(node) && !is_reduce_fullload) {
@@ -350,9 +340,6 @@ Status BuildIndirectLoadAxisGroup(const ascir::ImplGraph &graph, const AxisGroup
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, axes));
   axis_group = {};
   axis_group.y_group.push_back(axes.outer_axis);
-  if (axes.inner_axis != af::kIdNone) {
-    axis_group.y_group.push_back(axes.inner_axis);
-  }
   axis_group.axes_order.resize(axis_group.y_group.size());
   std::iota(axis_group.axes_order.begin(), axis_group.axes_order.end(), 0UL);
   GELOGD("[IndirectLoad] Graph[%s] use template axis group[%s].", graph.GetName().c_str(),

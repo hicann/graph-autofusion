@@ -1,4 +1,4 @@
-function(add_indirect_load_e2e_case test_name rank axis input_pre_type use_exp2 tiling_key x0 x1 x2 x3 index0 index1 index2 index3)
+function(add_indirect_load_e2e_case test_name rank axis input_pre_type use_exp2 tiling_key selected_template expected_templates x0 x1 x2 x3 index0 index1 index2 index3)
     set(case_workdir ${CMAKE_CURRENT_BINARY_DIR}/${test_name})
     file(MAKE_DIRECTORY ${case_workdir})
     do_backend_e2e_st_test(${test_name}
@@ -17,6 +17,8 @@ function(add_indirect_load_e2e_case test_name rank axis input_pre_type use_exp2 
         IL_INPUT_PRE_TYPE=${input_pre_type}
         IL_USE_EXP2=${use_exp2}
         IL_TILING_KEY=${tiling_key}
+        IL_SELECTED_TEMPLATE=${selected_template}
+        IL_EXPECTED_TEMPLATES=${expected_templates}
         IL_X_S0=${x0}
         IL_X_S1=${x1}
         IL_X_S2=${x2}
@@ -37,11 +39,6 @@ endfunction()
 function(mark_indirect_load_sk test_name)
     target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_EXPECT_SK)
     target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_EXPECT_SK)
-endfunction()
-
-function(mark_indirect_load_wide_types test_name)
-    target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_DATA_FLOAT IL_INDEX_INT64)
-    target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_DATA_FLOAT IL_INDEX_INT64)
 endfunction()
 
 function(mark_indirect_load_large_simt test_name)
@@ -66,60 +63,172 @@ function(mark_indirect_load_output_post test_name output_post_type expect_simt)
         IL_EXPECT_SIMT=${expect_simt})
 endfunction()
 
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_simt 2 1 1 0 1 5 8 1 1 4 6 1 1)
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_simd 2 1 1 1 0 5 8 1 1 4 6 1 1)
+function(mark_indirect_load_forced_simd_reduce test_name output_post_type)
+    mark_indirect_load_static_shape(${test_name})
+    mark_indirect_load_mixed_index_pre(${test_name})
+    mark_indirect_load_output_post(${test_name} ${output_post_type} 1)
+    target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_POST_REDUCE IL_EXPECT_SIMD_SELECTED ${ARGN})
+    target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_POST_REDUCE IL_EXPECT_SIMD_SELECTED ${ARGN})
+endfunction()
+
+function(mark_indirect_load_simt_selected test_name)
+    target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_EXPECT_SIMT_SELECTED)
+    target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_EXPECT_SIMT_SELECTED)
+endfunction()
+
+function(add_indirect_load_mixed_e2e_case test_name rank axis is_simt selected_template expected_templates static_shape x0 x1 x2 x3 index0 index1 index2 index3)
+    set(case_workdir ${CMAKE_CURRENT_BINARY_DIR}/${test_name})
+    file(MAKE_DIRECTORY ${case_workdir})
+    do_backend_e2e_st_test(${test_name}
+        WORKDIR ${case_workdir}
+        CODEGEN indirect_load_store_backend_generator.cpp
+        TILING_KEY ${is_simt}
+        KERNEL_SRC
+            indirect_load_mixed_elementwise_test_kernel.cpp
+            indirect_load_mixed_elementwise_test_tiling.cpp
+            autofuse_tiling_data.h
+        TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
+    set(case_definitions
+        IL_MIXED_ELEMENTWISE
+        IL_EXPECT_SIMT=${is_simt}
+        IL_RANK=${rank}
+        IL_AXIS=${axis}
+        IL_INPUT_PRE_TYPE=0
+        IL_USE_EXP2=1
+        IL_TILING_KEY=${is_simt}
+        IL_SELECTED_TEMPLATE=${selected_template}
+        IL_EXPECTED_TEMPLATES=${expected_templates}
+        IL_X_S0=${x0}
+        IL_X_S1=${x1}
+        IL_X_S2=${x2}
+        IL_X_S3=${x3}
+        IL_INDEX_S0=${index0}
+        IL_INDEX_S1=${index1}
+        IL_INDEX_S2=${index2}
+        IL_INDEX_S3=${index3})
+    if(static_shape)
+        list(APPEND case_definitions IL_STATIC_SHAPE)
+    endif()
+    target_compile_definitions(${test_name}_codegen_v2 PRIVATE ${case_definitions})
+    target_compile_definitions(${test_name}_e2e_v2 PRIVATE ${case_definitions})
+endfunction()
+
+function(mark_indirect_load_simt_elementwise_coverage test_name)
+    target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_SIMT_ELEMENTWISE_COVERAGE)
+    target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_SIMT_ELEMENTWISE_COVERAGE)
+endfunction()
+
+add_indirect_load_e2e_case(indirect_load_rank2_axis1_simd 2 1 1 1 0 0 3 5 8 1 1 4 6 1 1)
 mark_indirect_load_static_shape(indirect_load_rank2_axis1_simd)
-add_indirect_load_e2e_case(indirect_load_rank2_axisneg2_simt 2 -2 1 0 1 4 9 1 1 4 8 1 1)
-add_indirect_load_e2e_case(indirect_load_rank2_axisneg2_simd 2 -2 1 1 0 4 9 1 1 4 8 1 1)
-add_indirect_load_e2e_case(indirect_load_rank3_axis1_simt 3 1 1 0 1 3 5 8 1 2 7 6 1)
-add_indirect_load_e2e_case(indirect_load_rank3_axis1_simd 3 1 1 1 0 3 5 8 1 2 7 6 1)
-add_indirect_load_e2e_case(indirect_load_rank4_axis2_simt 4 2 1 0 1 3 3 5 8 2 2 5 6)
-add_indirect_load_e2e_case(indirect_load_rank4_axis2_simd 4 2 1 1 0 3 3 5 8 2 2 5 6)
-add_indirect_load_e2e_case(indirect_load_rank4_axis2_sk 4 2 1 0 2 2 2 5 6 2 2 5 6)
+add_indirect_load_e2e_case(indirect_load_rank4_axis2_sk 4 2 1 0 2 2 7 2 2 5 6 2 2 5 6)
 mark_indirect_load_static_shape(indirect_load_rank4_axis2_sk)
 mark_indirect_load_sk(indirect_load_rank4_axis2_sk)
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_relu_exp2_pre_simd 2 1 3 0 0 5 8 1 1 4 6 1 1)
+add_indirect_load_e2e_case(indirect_load_rank2_axisneg2_simd 2 -2 1 1 0 0 3 4 9 1 1 4 8 1 1)
+add_indirect_load_e2e_case(indirect_load_rank2_axis1_relu_exp2_pre_simd 2 1 3 0 0 0 3 5 8 1 1 4 6 1 1)
 
 # Static output expansion keeps both data and index preprocessing before IndirectLoad SIMD.
-add_indirect_load_e2e_case(indirect_load_rank2_axis0_relu_pre_expanded_simd 2 0 1 1 0 4 9 1 1 6 8 1 1)
-add_indirect_load_e2e_case(indirect_load_rank2_axis0_relu_relu_pre_expanded_simd 2 0 4 1 0 4 9 1 1 6 8 1 1)
-add_indirect_load_e2e_case(indirect_load_rank3_axis2_exp2_pre_expanded_simd 3 2 2 0 0 4 5 6 1 3 4 11 1)
-add_indirect_load_e2e_case(indirect_load_rank4_axis1_relu_exp2_pre_expanded_simd 4 1 3 0 0 2 3 4 5 2 7 4 3)
-add_indirect_load_e2e_case(indirect_load_rank3_axis2_mixed_vf_pre_expanded_simd 3 2 3 0 0 4 5 6 1 3 4 11 1)
-mark_indirect_load_static_shape(indirect_load_rank2_axis0_relu_pre_expanded_simd)
+add_indirect_load_e2e_case(indirect_load_rank2_axis0_relu_relu_pre_expanded_simd 2 0 4 1 0 0 3 4 9 1 1 6 8 1 1)
 mark_indirect_load_static_shape(indirect_load_rank2_axis0_relu_relu_pre_expanded_simd)
-mark_indirect_load_static_shape(indirect_load_rank3_axis2_exp2_pre_expanded_simd)
-mark_indirect_load_static_shape(indirect_load_rank4_axis1_relu_exp2_pre_expanded_simd)
-mark_indirect_load_static_shape(indirect_load_rank3_axis2_mixed_vf_pre_expanded_simd)
-mark_indirect_load_mixed_index_pre(indirect_load_rank3_axis2_mixed_vf_pre_expanded_simd)
-target_compile_definitions(indirect_load_rank2_axis0_relu_pre_expanded_simd_codegen_v2 PRIVATE IL_DATA_FLOAT)
-target_compile_definitions(indirect_load_rank2_axis0_relu_pre_expanded_simd_e2e_v2 PRIVATE IL_DATA_FLOAT)
 target_compile_definitions(indirect_load_rank2_axis0_relu_relu_pre_expanded_simd_codegen_v2 PRIVATE IL_DATA_FLOAT)
 target_compile_definitions(indirect_load_rank2_axis0_relu_relu_pre_expanded_simd_e2e_v2 PRIVATE IL_DATA_FLOAT)
-mark_indirect_load_input_pre_vf(indirect_load_rank2_axis0_relu_pre_expanded_simd 0)
 mark_indirect_load_input_pre_vf(indirect_load_rank2_axis0_relu_relu_pre_expanded_simd 1)
 
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_large_simt 2 1 1 0 1 2 64 1 1 2 32771 1 1)
+add_indirect_load_e2e_case(indirect_load_rank2_axis1_large_simt 2 1 1 0 1 1 3 2 64 1 1 2 32771 1 1)
 mark_indirect_load_large_simt(indirect_load_rank2_axis1_large_simt)
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_float_int64_simd 2 1 0 1 0 4 8 1 1 3 6 1 1)
-mark_indirect_load_wide_types(indirect_load_rank2_axis1_float_int64_simd)
 
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_modified_bessel_k0_simd_only 2 1 0 0 0 5 8 1 1 4 6 1 1)
+add_indirect_load_e2e_case(indirect_load_rank2_axis1_modified_bessel_k0_simd_only 2 1 0 0 0 0 1 5 8 1 1 4 6 1 1)
 mark_indirect_load_output_post(indirect_load_rank2_axis1_modified_bessel_k0_simd_only 1 0)
 target_compile_definitions(indirect_load_rank2_axis1_modified_bessel_k0_simd_only_codegen_v2 PRIVATE IL_DATA_FLOAT)
 target_compile_definitions(indirect_load_rank2_axis1_modified_bessel_k0_simd_only_e2e_v2 PRIVATE IL_DATA_FLOAT)
 target_include_directories(indirect_load_rank2_axis1_modified_bessel_k0_simd_only_e2e_v2 PRIVATE
     ${CODE_ROOT_DIR}/v35/ascendc/api_regbase)
 
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_precision_cast_simt 2 1 5 0 1 5 8 1 1 4 6 1 1)
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_precision_cast_simd 2 1 5 1 0 5 8 1 1 4 6 1 1)
+add_indirect_load_e2e_case(indirect_load_rank2_axis1_precision_cast_simd 2 1 5 1 0 0 3 5 8 1 1 4 6 1 1)
 
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_bf16_int64_simt 2 1 0 0 1 5 8 1 1 4 6 1 1)
+add_indirect_load_e2e_case(indirect_load_rank2_axis1_bf16_int64_simt 2 1 0 0 1 1 3 5 8 1 1 4 6 1 1)
 mark_indirect_load_output_post(indirect_load_rank2_axis1_bf16_int64_simt 2 1)
 target_compile_definitions(indirect_load_rank2_axis1_bf16_int64_simt_codegen_v2 PRIVATE IL_DATA_BF16 IL_INDEX_INT64)
 target_compile_definitions(indirect_load_rank2_axis1_bf16_int64_simt_e2e_v2 PRIVATE IL_DATA_BF16 IL_INDEX_INT64)
 
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_uint32_int32_simd 2 1 0 1 0 5 8 1 1 4 6 1 1)
+add_indirect_load_e2e_case(indirect_load_rank2_axis1_uint32_int32_simd 2 1 0 1 0 0 3 5 8 1 1 4 6 1 1)
 mark_indirect_load_output_post(indirect_load_rank2_axis1_uint32_int32_simd 3 1)
 target_compile_definitions(indirect_load_rank2_axis1_uint32_int32_simd_codegen_v2 PRIVATE IL_DATA_UINT32)
 target_compile_definitions(indirect_load_rank2_axis1_uint32_int32_simd_e2e_v2 PRIVATE IL_DATA_UINT32)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_exp2_sum_selected_simd 4 1 0 0 0 0 3 8 13 3 8 8 12 3 8)
+mark_indirect_load_static_shape(indirect_load_rank4_axis1_exp2_sum_selected_simd)
+mark_indirect_load_output_post(indirect_load_rank4_axis1_exp2_sum_selected_simd 7 1)
+target_compile_definitions(indirect_load_rank4_axis1_exp2_sum_selected_simd_codegen_v2 PRIVATE IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_EXP2 IL_EXPECT_SIMD_SELECTED)
+target_compile_definitions(indirect_load_rank4_axis1_exp2_sum_selected_simd_e2e_v2 PRIVATE IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_EXP2 IL_EXPECT_SIMD_SELECTED)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_sum_forced_simd 4 1 3 0 0 0 3 8 13 3 8 8 17 3 8)
+mark_indirect_load_forced_simd_reduce(indirect_load_rank4_axis1_sum_forced_simd 4 IL_DATA_FLOAT)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_abs_exp2_sum_selected_simd 4 1 0 0 0 0 3 8 13 3 8 8 12 3 8)
+mark_indirect_load_static_shape(indirect_load_rank4_axis1_abs_exp2_sum_selected_simd)
+mark_indirect_load_output_post(indirect_load_rank4_axis1_abs_exp2_sum_selected_simd 8 1)
+target_compile_definitions(indirect_load_rank4_axis1_abs_exp2_sum_selected_simd_codegen_v2 PRIVATE IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_EXP2 IL_POST_REDUCE_ABS IL_EXPECT_SIMD_SELECTED)
+target_compile_definitions(indirect_load_rank4_axis1_abs_exp2_sum_selected_simd_e2e_v2 PRIVATE IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_EXP2 IL_POST_REDUCE_ABS IL_EXPECT_SIMD_SELECTED)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_abs_exp2_sum_forced_simd 4 1 3 0 0 0 3 8 13 3 8 8 17 3 8)
+mark_indirect_load_forced_simd_reduce(indirect_load_rank4_axis1_abs_exp2_sum_forced_simd 8
+    IL_DATA_FLOAT IL_POST_REDUCE_EXP2 IL_POST_REDUCE_ABS)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_cast_sum_simt 4 1 0 0 0 1 3 8 13 3 8 8 12 3 8)
+mark_indirect_load_static_shape(indirect_load_rank4_axis1_cast_sum_simt)
+mark_indirect_load_output_post(indirect_load_rank4_axis1_cast_sum_simt 9 1)
+target_compile_definitions(indirect_load_rank4_axis1_cast_sum_simt_codegen_v2 PRIVATE IL_POST_REDUCE IL_OUTPUT_FLOAT)
+target_compile_definitions(indirect_load_rank4_axis1_cast_sum_simt_e2e_v2 PRIVATE IL_POST_REDUCE IL_OUTPUT_FLOAT)
+mark_indirect_load_simt_selected(indirect_load_rank4_axis1_cast_sum_simt)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_cast_sum_forced_simd 4 1 3 0 0 0 3 8 13 3 8 8 17 3 8)
+mark_indirect_load_forced_simd_reduce(indirect_load_rank4_axis1_cast_sum_forced_simd 9 IL_OUTPUT_FLOAT)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_add_sum_simt 4 1 0 0 0 1 3 8 13 3 8 8 12 3 8)
+mark_indirect_load_static_shape(indirect_load_rank4_axis1_add_sum_simt)
+mark_indirect_load_output_post(indirect_load_rank4_axis1_add_sum_simt 10 1)
+target_compile_definitions(indirect_load_rank4_axis1_add_sum_simt_codegen_v2 PRIVATE IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_ADD)
+target_compile_definitions(indirect_load_rank4_axis1_add_sum_simt_e2e_v2 PRIVATE IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_ADD)
+mark_indirect_load_simt_selected(indirect_load_rank4_axis1_add_sum_simt)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_add_sum_forced_simd 4 1 3 0 0 0 3 8 13 3 8 8 17 3 8)
+mark_indirect_load_forced_simd_reduce(indirect_load_rank4_axis1_add_sum_forced_simd 10
+    IL_DATA_FLOAT IL_POST_REDUCE_ADD)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt 4 1 3 0 0 1 2 8 13 3 8 8 17 3 8)
+mark_indirect_load_static_shape(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt)
+mark_indirect_load_mixed_index_pre(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt)
+mark_indirect_load_output_post(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt 5 1)
+target_compile_definitions(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt_codegen_v2 PRIVATE
+    IL_DATA_FLOAT IL_POST_REDUCE IL_REDUCE_WITH_A IL_EXPECT_ONLY_SIMT)
+target_compile_definitions(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt_e2e_v2 PRIVATE
+    IL_DATA_FLOAT IL_POST_REDUCE IL_REDUCE_WITH_A IL_EXPECT_ONLY_SIMT)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_sum_last_axis_simt 4 1 0 0 0 1 3 8 13 3 8 8 12 3 8)
+mark_indirect_load_static_shape(indirect_load_rank4_axis1_sum_last_axis_simt)
+mark_indirect_load_output_post(indirect_load_rank4_axis1_sum_last_axis_simt 6 1)
+target_compile_definitions(indirect_load_rank4_axis1_sum_last_axis_simt_codegen_v2 PRIVATE IL_DATA_FLOAT IL_POST_REDUCE IL_REDUCE_LAST_AXIS)
+target_compile_definitions(indirect_load_rank4_axis1_sum_last_axis_simt_e2e_v2 PRIVATE IL_DATA_FLOAT IL_POST_REDUCE IL_REDUCE_LAST_AXIS)
+mark_indirect_load_simt_selected(indirect_load_rank4_axis1_sum_last_axis_simt)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_sum_last_axis_forced_simd 4 1 3 0 0 0 3 8 13 3 8 8 17 3 8)
+mark_indirect_load_forced_simd_reduce(indirect_load_rank4_axis1_sum_last_axis_forced_simd 6
+    IL_DATA_FLOAT IL_REDUCE_LAST_AXIS)
+
+add_indirect_load_e2e_case(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd 4 1 3 0 0 0 1 8 13 3 8 8 17 3 8)
+mark_indirect_load_static_shape(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd)
+mark_indirect_load_mixed_index_pre(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd)
+mark_indirect_load_output_post(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd 11 0)
+target_compile_definitions(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd_codegen_v2 PRIVATE
+    IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_SIMD)
+target_compile_definitions(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd_e2e_v2 PRIVATE
+    IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_SIMD)
+target_include_directories(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd_e2e_v2 PRIVATE
+    ${CODE_ROOT_DIR}/v35/ascendc/api_regbase)
+
+add_indirect_load_mixed_e2e_case(indirect_load_mixed_elementwise 2 1 0 0 1 TRUE 3 16 1 1 2 17 1 1)
+add_indirect_load_mixed_e2e_case(indirect_load_mixed_rank4_axis2_simd 4 2 0 0 1 FALSE 3 4 16 7 2 3 17 5)
+add_indirect_load_mixed_e2e_case(indirect_load_mixed_elementwise_simt 2 1 1 1 3 TRUE 3 16 1 1 2 17 1 1)
+add_indirect_load_mixed_e2e_case(indirect_load_mixed_rank4_axis2_simt 4 2 1 1 3 FALSE 3 4 16 7 2 3 17 5)
+add_indirect_load_mixed_e2e_case(indirect_load_simt_elementwise_coverage 3 1 1 1 3 FALSE 3 16 7 1 2 11 5 1)
+mark_indirect_load_simt_elementwise_coverage(indirect_load_simt_elementwise_coverage)

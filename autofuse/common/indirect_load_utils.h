@@ -18,6 +18,9 @@
 #include "graph/ascendc_ir/ascendc_ir_core/ascendc_ir.h"
 
 namespace ascgen_utils::indirect_load {
+constexpr size_t kInputTensorIndex = 0UL;
+constexpr size_t kIndexTensorIndex = 1UL;
+
 enum class TemplateRole : int64_t {
   kNone,
   kSimdInputPre,
@@ -42,6 +45,10 @@ struct TemplateAxes {
   af::AxisId outer_axis = af::kIdNone;
   af::AxisId inner_axis = af::kIdNone;
   af::AxisId input_inner_axis = af::kIdNone;
+  af::AxisId tile_outer_axis = af::kIdNone;
+  af::AxisId tile_inner_axis = af::kIdNone;
+  std::vector<af::AxisId> vectorized_axes;
+  bool synthetic_outer = false;
 };
 
 struct LogicalTensorView {
@@ -50,13 +57,19 @@ struct LogicalTensorView {
 };
 
 struct TemplateLogicalView {
-  LogicalTensorView data;
+  LogicalTensorView input;
   LogicalTensorView index;
   LogicalTensorView output;
 };
 
 TemplateBehavior GetTemplateBehavior(const af::AscNodePtr &node);
 TemplateRole GetTemplateRole(const af::AscNodePtr &node);
+bool IsSimtInlineTransform(const af::AscNodePtr &node);
+bool HasPostReduceConsumer(const af::AscNodePtr &node);
+af::AscNodePtr GetPostReduceConsumer(const af::AscNodePtr &node);
+af::AscNodePtr GetPostReduceInputProducer(const af::AscNodePtr &node);
+bool IsPostReduceInputProducer(const af::AscNodePtr &node);
+bool ShouldSkipTpipeTensorCollection(const af::AscNodePtr &node);
 af::Status InheritTemplateRoleIfIL(af::AscGraph &graph, const std::string &vf_node_name, const af::AscNodePtr &src);
 af::Status SetTemplateRole(const af::AscNodePtr &node, TemplateRole role);
 af::Status SetTemplateAxes(const af::AscNodePtr &node, const TemplateAxes &axes);
@@ -71,8 +84,8 @@ af::AscNodePtr GetInputProducer(const af::AscNodePtr &node, size_t input_index);
 af::AscNodePtr GetOnlyOutputConsumer(const af::AscNodePtr &node);
 af::AscNodePtr FindIndirectLoadNode(const af::AscGraph &graph);
 af::Status ValidateSingleIndirectLoadNode(const af::AscGraph &graph, af::AscNodePtr &node);
-af::Status GetPrebuiltYTilingCase(const af::AscGraph &graph, bool &has_case, af::AxisId &tile_id,
-                                  std::pair<af::AxisPtr, af::AxisPtr> &tiling);
+bool GetPrebuiltYTilingCase(const af::AscGraph &graph, af::AxisId &tile_id,
+                            std::pair<af::AxisPtr, af::AxisPtr> &tiling);
 }  // namespace ascgen_utils::indirect_load
 
 #endif  // __INDIRECT_LOAD_UTILS_H__

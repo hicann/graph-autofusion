@@ -30,6 +30,14 @@ enum class IndirectLoadOutputPostType : uint32_t {
   kModifiedBesselK0,
   kDirectStore,
   kCastExp2CastBack,
+  kSum,
+  kSumKeepTail,
+  kSumLastAxis,
+  kExp2Sum,
+  kAbsExp2Sum,
+  kCastSum,
+  kAddSum,
+  kModifiedBesselK0Sum,
 };
 
 struct ShareGraph {
@@ -198,6 +206,12 @@ struct ShareGraph {
   static af::ComputeGraphPtr SignBf16FusedGraph(size_t dims_size);
   static af::ComputeGraphPtr Atan2Bf16FusedGraph(size_t dims_size);
   static af::ComputeGraphPtr CopysignBf16FusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr IndirectLoadMixedElementwiseFusedGraph(size_t rank, int64_t axis, bool is_simt,
+                                                                    const std::vector<int64_t> &input_shape = {},
+                                                                    const std::vector<int64_t> &output_shape = {});
+  static af::ComputeGraphPtr IndirectLoadSimtElementwiseCoverageFusedGraph(
+      size_t rank, int64_t axis, const std::vector<int64_t> &input_shape = {},
+      const std::vector<int64_t> &output_shape = {});
   static af::ComputeGraphPtr Ceil2intBf16FusedGraph(size_t dims_size);
   static af::ComputeGraphPtr ErfcxTestFusedGraph(size_t dims_size, af::DataType dtype);
   static af::ComputeGraphPtr SinhBf16FusedGraph(size_t dims_size);

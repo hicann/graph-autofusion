@@ -361,8 +361,7 @@ bool NeedRemovePad(const af::AscNodePtr &node) {
   if (ascgen_utils::IsNodeContainsBrcInline(node)) {
     return true;
   }
-  if (optimize::ScheduleUtils::IsLoad(node) && !af::ops::IsOps<af::ascir_op::IndirectLoad>(node) &&
-      node->GetInDataNodesSize() == 1UL && node->GetOutDataNodesSize() > 0UL) {
+  if (optimize::ScheduleUtils::IsLoad(node) && node->GetInDataNodesSize() == 1UL && node->GetOutDataNodesSize() > 0UL) {
     // 判断Load是否是非连续的
     const auto &repeats = node->outputs[0].attr.repeats;
     const auto &strides = node->outputs[0].attr.strides;
@@ -1091,7 +1090,7 @@ af::Status VectorFuncPartitioner::SetSubGraphAttrs(af::AscGraph &vf_graph) {
     node->attr.sched.axis = node->outputs[0].attr.vectorized_axis;
 
     af::Position pos = af::Position::kPositionVecCalc;
-    if (ScheduleUtils::IsLoad(node) && !af::ops::IsOps<af::ascir_op::IndirectLoad>(node)) {
+    if (ScheduleUtils::IsLoad(node)) {
       pos = af::Position::kPositionVecIn;
     } else if (ScheduleUtils::IsStore(node)) {
       pos = af::Position::kPositionVecOut;

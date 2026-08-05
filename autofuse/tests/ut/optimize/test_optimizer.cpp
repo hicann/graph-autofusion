@@ -11,6 +11,7 @@
 #include "gtest/gtest.h"
 
 #include <ascendc_ir.h>
+#include <map>
 #include "ascir.h"
 #include <ascir_ops.h>
 #include <ascir_utils.h>
@@ -1951,6 +1952,182 @@ TEST_F(TestOptimizer, ReduceTaskGenerate) {
   std::vector<af::AscGraph> graphs;
   std::vector<std::string> score_functions;
   EXPECT_EQ(generator.Generate(graph, graphs, score_functions), 0);
+}
+
+static af::AscGraph CreateContinuousAxisGraph(bool with_indirect_load) {
+  af::AscGraph graph(with_indirect_load ? "ContinuousAxisWithIndirectLoad" : "ContinuousAxisControl");
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  const std::vector<af::AxisId> axes = {z0.id, z1.id};
+  const std::vector<af::Expression> repeats = {s0, s1};
+  const std::vector<af::Expression> strides = {s1, One};
+
+  Data data("data", graph);
+  data.ir_attr.SetIndex(0);
+  data.attr.api.type = af::ApiType::kAPITypeBuffer;
+  data.y.dtype = ge::DT_FLOAT16;
+  data.attr.sched.axis = axes;
+  *data.y.axis = axes;
+  *data.y.repeats = repeats;
+  *data.y.strides = strides;
+
+  Load load("load");
+  load.x = data.y;
+  load.attr.api.compute_type = af::ComputeType::kComputeLoad;
+  load.attr.api.type = af::ApiType::kAPITypeCompute;
+  load.y.dtype = ge::DT_FLOAT16;
+  load.attr.sched.axis = axes;
+  *load.y.axis = axes;
+  *load.y.repeats = repeats;
+  *load.y.strides = strides;
+
+  Store store("store");
+  if (with_indirect_load) {
+    Data index("index", graph);
+    index.ir_attr.SetIndex(1);
+    index.attr.api.type = af::ApiType::kAPITypeBuffer;
+    index.y.dtype = ge::DT_INT32;
+    index.attr.sched.axis = axes;
+    *index.y.axis = axes;
+    *index.y.repeats = repeats;
+    *index.y.strides = strides;
+
+    IndirectLoad indirect_load("indirect_load");
+    indirect_load.x1 = load.y;
+    indirect_load.x2 = index.y;
+    indirect_load.ir_attr.SetAxis(1);
+    indirect_load.attr.api.compute_type = af::ComputeType::kComputeLoad;
+    indirect_load.attr.api.type = af::ApiType::kAPITypeCompute;
+    indirect_load.y.dtype = ge::DT_FLOAT16;
+    indirect_load.attr.sched.axis = axes;
+    *indirect_load.y.axis = axes;
+    *indirect_load.y.repeats = repeats;
+    *indirect_load.y.strides = strides;
+    store.x = indirect_load.y;
+  } else {
+    store.x = load.y;
+  }
+  store.attr.api.compute_type = af::ComputeType::kComputeStore;
+  store.attr.api.type = af::ApiType::kAPITypeCompute;
+  store.y.dtype = ge::DT_FLOAT16;
+  store.attr.sched.axis = axes;
+  *store.y.axis = axes;
+  *store.y.repeats = repeats;
+  *store.y.strides = strides;
+
+  Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  output.attr.api.type = af::ApiType::kAPITypeBuffer;
+  output.y.dtype = ge::DT_FLOAT16;
+  output.attr.sched.axis = axes;
+  *output.y.axis = axes;
+  *output.y.repeats = repeats;
+  *output.y.strides = strides;
+  return graph;
+}
+
+TEST_F(TestOptimizer, MergeContinuousAxisSkipsWholeGraphContainingIndirectLoad) {
+  struct TensorViewSnapshot {
+    std::vector<af::AxisId> axis;
+    std::vector<af::Expression> repeats;
+    std::vector<af::Expression> strides;
+  };
+  struct NodeViewSnapshot {
+    std::vector<af::AxisId> sched_axis;
+    std::vector<TensorViewSnapshot> outputs;
+  };
+
+  auto indirect_load_graph = CreateContinuousAxisGraph(true);
+  std::map<af::AxisId, std::pair<std::string, af::Expression>> original_axes;
+  for (const auto &axis : indirect_load_graph.GetAllAxis()) {
+    ASSERT_NE(axis, nullptr);
+    ASSERT_TRUE(original_axes.emplace(axis->id, std::make_pair(axis->name, axis->size)).second);
+  }
+  ASSERT_EQ(original_axes.size(), 2UL);
+
+  std::map<std::string, NodeViewSnapshot> original_nodes;
+  for (const auto &node : indirect_load_graph.GetAllNodes()) {
+    ASSERT_NE(node, nullptr);
+    NodeViewSnapshot snapshot{node->attr.sched.axis, {}};
+    for (const auto &output : node->outputs()) {
+      ASSERT_NE(output, nullptr);
+      snapshot.outputs.push_back({output->attr.axis, output->attr.repeats, output->attr.strides});
+    }
+    ASSERT_TRUE(original_nodes.emplace(node->GetName(), std::move(snapshot)).second);
+  }
+  ASSERT_EQ(original_nodes.count("indirect_load"), 1UL);
+
+  ASSERT_EQ(optimizer.MergeContinuousAxis(indirect_load_graph), af::SUCCESS);
+
+  const auto remaining_axes = indirect_load_graph.GetAllAxis();
+  ASSERT_EQ(remaining_axes.size(), original_axes.size());
+  for (const auto &axis : remaining_axes) {
+    ASSERT_NE(axis, nullptr);
+    const auto original_axis = original_axes.find(axis->id);
+    ASSERT_NE(original_axis, original_axes.end());
+    EXPECT_EQ(axis->name, original_axis->second.first);
+    EXPECT_EQ(axis->size, original_axis->second.second);
+  }
+
+  auto remaining_nodes = indirect_load_graph.GetAllNodes();
+  size_t remaining_node_count = 0UL;
+  for (const auto &node : remaining_nodes) {
+    ++remaining_node_count;
+    ASSERT_NE(node, nullptr);
+    SCOPED_TRACE(node->GetName());
+    const auto original_node = original_nodes.find(node->GetName());
+    ASSERT_NE(original_node, original_nodes.end());
+    EXPECT_EQ(node->attr.sched.axis, original_node->second.sched_axis);
+    ASSERT_EQ(node->outputs().size(), original_node->second.outputs.size());
+    for (size_t i = 0UL; i < node->outputs().size(); ++i) {
+      const auto output = node->outputs()[i];
+      ASSERT_TRUE(static_cast<bool>(output));
+      EXPECT_EQ(output->attr.axis, original_node->second.outputs[i].axis);
+      EXPECT_EQ(output->attr.repeats, original_node->second.outputs[i].repeats);
+      EXPECT_EQ(output->attr.strides, original_node->second.outputs[i].strides);
+    }
+  }
+  ASSERT_EQ(remaining_node_count, original_nodes.size());
+
+  auto control_graph = CreateContinuousAxisGraph(false);
+  const auto control_original_axes = control_graph.GetAllAxis();
+  ASSERT_EQ(control_original_axes.size(), 2UL);
+  ASSERT_NE(control_original_axes[0], nullptr);
+  ASSERT_NE(control_original_axes[1], nullptr);
+  const auto merged_size = control_original_axes[0]->size * control_original_axes[1]->size;
+
+  ASSERT_EQ(optimizer.MergeContinuousAxis(control_graph), af::SUCCESS);
+
+  const auto control_merged_axes = control_graph.GetAllAxis();
+  const std::set<af::AxisId> original_axis_ids = {control_original_axes[0]->id, control_original_axes[1]->id};
+  const auto merged_axis = std::find_if(
+      control_merged_axes.begin(), control_merged_axes.end(),
+      [&original_axis_ids](const auto &axis) { return axis != nullptr && original_axis_ids.count(axis->id) == 0UL; });
+  ASSERT_NE(merged_axis, control_merged_axes.end());
+  EXPECT_EQ((*merged_axis)->size, merged_size);
+  const auto merged_axis_id = (*merged_axis)->id;
+  for (const auto &node : control_graph.GetAllNodes()) {
+    ASSERT_NE(node, nullptr);
+    if (node->attr.api.type == af::ApiType::kAPITypeBuffer) {
+      continue;
+    }
+    SCOPED_TRACE(node->GetName());
+    ASSERT_EQ(node->attr.sched.axis.size(), 1UL);
+    EXPECT_EQ(node->attr.sched.axis[0], merged_axis_id);
+    ASSERT_FALSE(node->outputs().empty());
+    for (const auto &output : node->outputs()) {
+      ASSERT_NE(output, nullptr);
+      ASSERT_EQ(output->attr.axis.size(), output->attr.repeats.size());
+      ASSERT_EQ(output->attr.axis.size(), output->attr.strides.size());
+      ASSERT_EQ(output->attr.axis.size(), 1UL);
+      EXPECT_EQ(output->attr.axis[0], merged_axis_id);
+      EXPECT_EQ(output->attr.repeats[0], merged_size);
+      EXPECT_EQ(output->attr.strides[0], One);
+    }
+  }
 }
 
 TEST_F(TestOptimizer, MergeAxesElewiseOnly) {

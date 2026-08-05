@@ -45,6 +45,13 @@ struct ScheduledResult {
   CubeTemplateType cube_type{CubeTemplateType::kDefault};
 };
 
+struct GmTensorSizes {
+  af::Expression total_size;
+  int64_t min_total_size;
+  std::vector<af::Expression> input_sizes;
+  std::vector<af::Expression> output_sizes;
+};
+
 struct FusedScheduledResult {
   ge::AscendString fused_graph_name;
   std::vector<af::AscNodePtr> input_nodes;
@@ -52,6 +59,7 @@ struct FusedScheduledResult {
   std::vector<af::AscNodePtr> workspace_nodes;
   std::vector<af::Expression> origin_vars;
   std::vector<std::vector<ScheduledResult>> node_idx_to_scheduled_results;
+  GmTensorSizes gm_tensor_sizes;
 };
 
 enum class TemplateId : int64_t {

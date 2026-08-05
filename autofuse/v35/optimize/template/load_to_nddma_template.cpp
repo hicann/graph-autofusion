@@ -10,6 +10,7 @@
 
 #include "load_to_nddma_template.h"
 #include "graph_utils.h"
+#include "indirect_load_utils.h"
 #include "un_alignment_strategy.h"
 #include "tensor_layout_utils.h"
 #include "platform/common/base_alignment_strategy.h"
@@ -36,6 +37,9 @@ af::Status LoadToNddmaTemplate::Generate(const af::AscGraph &origin_graph,
   for (const auto &node : new_case.GetAllNodes()) {
     GE_CHECK_NOTNULL(node);
     if (!af::ops::IsOps<af::ascir_op::Load>(node)) {
+      continue;
+    }
+    if (ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(node)) {
       continue;
     }
     DiscontinuityInfo info;

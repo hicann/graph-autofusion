@@ -8,15 +8,24 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-#ifndef __AUTOFUSE_SIMT_SCALAR_EMITTER_H__
-#define __AUTOFUSE_SIMT_SCALAR_EMITTER_H__
-
-#include <string>
-#include <vector>
-#include "ascir.h"
+#include "codegen_tiling.h"
 
 namespace codegen {
-af::Status EmitSimtScalarExpr(const ascir::NodeView &node, const std::vector<std::string> &inputs, std::string &expr);
-}  // namespace codegen
 
-#endif  // __AUTOFUSE_SIMT_SCALAR_EMITTER_H__
+std::string TilingLib::GenerateForPgo(const ascir::FusedScheduledResult &fused_schedule_result,
+                                      const std::string &pgo_dir) const {
+  // 生成PGO的头文件和函数定义
+  std::stringstream ss;
+  GenPgoHeaders(ss);
+  // 生成PGO需要的工具函数
+  GenPgoToolFunction(fused_schedule_result, pgo_dir, ss);
+  // 生成PGO需要的wrapper函数
+  GenPgoWrapper(fused_schedule_result, ss);
+  // 生成PGO需要的求解代码
+  GenPgoProfiling(fused_schedule_result, ss);
+  // 生成PGO的main函数
+  GenPgoMain(fused_schedule_result, ss);
+  return ss.str();
+}
+
+}  // namespace codegen

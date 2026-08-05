@@ -2795,6 +2795,20 @@ TEST_F(TestCodegenTiling, GenerateForInductorCvFusionShouldEmitCvTilingAndCubeWr
   const auto &api_header = tiling_files.at(codegen::kTilingApiHeaderIdentify);
   EXPECT_NE(api_header.find("int32_t get_g_basen_basem_align();"), std::string::npos);
   EXPECT_NE(api_header.find("void set_g_basen_basem_align(int32_t value);"), std::string::npos);
+  const std::string base_align_defs = R"(
+static int32_t g_basen_basem_align = 0;
+
+int32_t get_g_basen_basem_align() {
+  return g_basen_basem_align;
+}
+
+void set_g_basen_basem_align(int32_t value) {
+  g_basen_basem_align = value;
+}
+)";
+  const auto base_align_defs_pos = tiling_impl.find(base_align_defs);
+  ASSERT_NE(base_align_defs_pos, std::string::npos);
+  EXPECT_EQ(tiling_impl.find(base_align_defs, base_align_defs_pos + base_align_defs.size()), std::string::npos);
   EXPECT_NE(tiling_impl.find("CVAutofuseTilingData"), std::string::npos);
   EXPECT_NE(tiling_impl.find("CVTilingData"), std::string::npos);
   EXPECT_NE(tiling_impl.find("CallCubeTiling"), std::string::npos);

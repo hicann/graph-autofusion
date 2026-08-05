@@ -56,6 +56,10 @@ add_library(test_regbase_ascendc OBJECT
     ./test_shifted_chebyshev_polynomial_u.cpp
     ./test_shifted_chebyshev_polynomial_v.cpp
     ./test_shifted_chebyshev_polynomial_w.cpp
+    ./test_chebyshev_polynomial_t.cpp
+    ./test_chebyshev_polynomial_u.cpp
+    ./test_chebyshev_polynomial_v.cpp
+    ./test_chebyshev_polynomial_w.cpp
     ./test_zeta.cpp
     ./test_spherical_bessel_j0.cpp
     ./test_ndtri.cpp

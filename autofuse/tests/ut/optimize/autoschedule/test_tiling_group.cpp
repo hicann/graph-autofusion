@@ -21,6 +21,7 @@
 #include "ascir_utils.h"
 
 #include "graph_utils_ex.h"
+#include "indirect_load_utils.h"
 
 #define private public
 #include "autoschedule/autoschedule.h"
@@ -45,6 +46,137 @@ class TilingGroupUT : public testing::Test {
  protected:
   void SetUp() override {}
 };
+
+using ascgen_utils::indirect_load::TemplateRole;
+
+class TilingGroupRoleExclusionUT : public TilingGroupUT, public testing::WithParamInterface<TemplateRole> {};
+
+static std::vector<af::AxisId> ConstructRoleExclusionGraph(af::AscGraph &graph) {
+  graph.SetGraphType(af::AscGraphType::kImplGraph);
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+  auto s2 = graph.CreateSizeVar("s2");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  auto z2 = graph.CreateAxis("z2", s2);
+
+  af::ascir_op::Data data("data", graph);
+  data.attr.api.type = af::ApiType::kAPITypeBuffer;
+  data.y.dtype = ge::DT_FLOAT16;
+  *data.y.axis = {z0.id, z1.id, z2.id};
+
+  af::ascir_op::Abs ordinary("ordinary");
+  ordinary.x = data.y;
+  ordinary.attr.sched.axis = {z0.id, z1.id, z2.id};
+  ordinary.attr.api.type = af::ApiType::kAPITypeCompute;
+  ordinary.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  ordinary.y.dtype = ge::DT_FLOAT16;
+  *ordinary.y.axis = {z0.id, z1.id, z2.id};
+
+  af::ascir_op::Transpose role_transpose("role_transpose");
+  role_transpose.x = data.y;
+  role_transpose.attr.sched.axis = {z0.id, z1.id, z2.id};
+  role_transpose.attr.api.type = af::ApiType::kAPITypeCompute;
+  role_transpose.attr.api.compute_type = af::ComputeType::kComputeTranspose;
+  role_transpose.y.dtype = ge::DT_FLOAT16;
+  *role_transpose.y.axis = {z1.id, z0.id, z2.id};
+
+  return {z0.id, z1.id, z2.id};
+}
+
+TEST_P(TilingGroupRoleExclusionUT, GenTilingGroupExcludesIndirectLoadRole) {
+  af::AscGraph graph("role_exclusion");
+  const auto axes = ConstructRoleExclusionGraph(graph);
+  const auto role_node = graph.FindNode("role_transpose");
+  ASSERT_NE(role_node, nullptr);
+  ASSERT_EQ(ascgen_utils::indirect_load::SetTemplateRole(role_node, GetParam()), af::SUCCESS);
+
+  const auto behavior = ascgen_utils::indirect_load::GetTemplateBehavior(role_node);
+  if (GetParam() == TemplateRole::kSimdInputPre) {
+    EXPECT_TRUE(behavior.excludes_tiling_group);
+    EXPECT_FALSE(behavior.skips_main_schedule_tiling);
+  } else {
+    EXPECT_FALSE(behavior.excludes_tiling_group);
+    EXPECT_TRUE(behavior.skips_main_schedule_tiling);
+  }
+
+  AxisGroup group;
+  ASSERT_EQ(TilingGroup::GenTilingGroup(graph, group), af::SUCCESS);
+  EXPECT_FALSE(group.IsEmpty());
+  EXPECT_EQ(group.x_group, std::vector<af::AxisId>{});
+  EXPECT_EQ(group.y_group, axes);
+  EXPECT_EQ(group.r_group, std::vector<af::AxisId>{});
+  EXPECT_EQ(group.n_group, std::vector<af::AxisId>{});
+  EXPECT_EQ(group.axes_order, (std::vector<size_t>{0UL, 1UL, 2UL}));
+}
+
+INSTANTIATE_TEST_SUITE_P(IndirectLoadRoles, TilingGroupRoleExclusionUT,
+                         testing::Values(TemplateRole::kSimdInputPre, TemplateRole::kSimtInputBoundary,
+                                         TemplateRole::kSimtDirectGmBoundary, TemplateRole::kSimtInlineTransform),
+                         [](const testing::TestParamInfo<TemplateRole> &info) {
+                           switch (info.param) {
+                             case TemplateRole::kSimdInputPre:
+                               return "SimdInputPre";
+                             case TemplateRole::kSimtInputBoundary:
+                               return "SimtInputBoundary";
+                             case TemplateRole::kSimtDirectGmBoundary:
+                               return "SimtDirectGmBoundary";
+                             case TemplateRole::kSimtInlineTransform:
+                               return "SimtInlineTransform";
+                             default:
+                               return "UnexpectedRole";
+                           }
+                         });
+
+TEST_F(TilingGroupUT, GenTilingGroupExcludesPostReduceSimtOpButKeepsReduceGroup) {
+  af::AscGraph graph("post_reduce_simt_op");
+  graph.SetGraphType(af::AscGraphType::kImplGraph);
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+
+  af::ascir_op::Data data("data", graph);
+  data.attr.api.type = af::ApiType::kAPITypeBuffer;
+  data.y.dtype = ge::DT_FLOAT16;
+  *data.y.axis = {z0.id, z1.id};
+
+  af::ascir_op::Transpose simt_op("simt_op");
+  simt_op.x = data.y;
+  simt_op.attr.sched.axis = {z0.id, z1.id};
+  simt_op.attr.api.type = af::ApiType::kAPITypeCompute;
+  simt_op.attr.api.compute_type = af::ComputeType::kComputeTranspose;
+  simt_op.y.dtype = ge::DT_FLOAT16;
+  *simt_op.y.axis = {z1.id, z0.id};
+  *simt_op.y.repeats = {s1, s0};
+  *simt_op.y.strides = {s0, af::ops::One};
+
+  af::ascir_op::Max reduce("reduce");
+  reduce.x = simt_op.y;
+  reduce.attr.sched.axis = {z1.id, z0.id};
+  reduce.attr.api.type = af::ApiType::kAPITypeCompute;
+  reduce.attr.api.compute_type = af::ComputeType::kComputeReduce;
+  reduce.y.dtype = ge::DT_FLOAT16;
+  *reduce.y.axis = {z1.id, z0.id};
+  *reduce.y.repeats = {af::ops::One, s0};
+  *reduce.y.strides = {af::ops::Zero, af::ops::One};
+
+  const auto simt_node = graph.FindNode("simt_op");
+  ASSERT_NE(simt_node, nullptr);
+  ASSERT_EQ(ascgen_utils::indirect_load::SetTemplateRole(simt_node, TemplateRole::kSimtOp), af::SUCCESS);
+  const auto behavior = ascgen_utils::indirect_load::GetTemplateBehavior(simt_node);
+  EXPECT_TRUE(behavior.excludes_tiling_group);
+  EXPECT_FALSE(behavior.skips_main_schedule_tiling);
+
+  AxisGroup group;
+  ASSERT_EQ(TilingGroup::GenTilingGroup(graph, group), af::SUCCESS);
+  EXPECT_FALSE(group.IsEmpty());
+  EXPECT_EQ(group.x_group, std::vector<af::AxisId>{});
+  EXPECT_EQ(group.y_group, std::vector<af::AxisId>{z0.id});
+  EXPECT_EQ(group.r_group, std::vector<af::AxisId>{z1.id});
+  EXPECT_EQ(group.n_group, std::vector<af::AxisId>{});
+  EXPECT_EQ(group.axes_order, (std::vector<size_t>{1UL, 0UL}));
+}
 TEST_F(TilingGroupUT, get_group_type) {
   AxisGroup g0;
   EXPECT_EQ(TilingGroup::GetGroupType(g0), GroupType::GROUP_INVALID);

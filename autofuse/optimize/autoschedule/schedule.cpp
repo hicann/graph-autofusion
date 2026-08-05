@@ -411,11 +411,10 @@ void Scheduler::AdjustVectorizedAxesOrderOffsets(std::vector<size_t> &vectorized
 
 void Scheduler::FindVectorizedAxes(std::vector<ascir::AxisId> &vectorized_axes,
                                    std::vector<size_t> &vectorized_axes_order) {
-  if (is_indirect_load_schedule_case_) {
-    if (indirect_load_axes_.inner_axis != af::kIdNone) {
-      vectorized_axes.push_back(indirect_load_axes_.inner_axis);
-      vectorized_axes_order.push_back(0UL);
-    }
+  if (indirect_load_info_.active) {
+    vectorized_axes = indirect_load_info_.axes.vectorized_axes;
+    vectorized_axes_order.resize(vectorized_axes.size());
+    std::iota(vectorized_axes_order.begin(), vectorized_axes_order.end(), 0UL);
     return;
   }
 
@@ -506,13 +505,12 @@ Status AddIndirectLoadSyntheticOuterAxis(const af::AscNodePtr &node, ascir::Axis
   if (!has_synthetic_outer_axis) {
     return af::SUCCESS;
   }
-
   node->attr.sched.axis.insert(node->attr.sched.axis.begin(), outer_axis_id);
   for (const auto &output : node->outputs()) {
-    ascir::SizeExpr stride = af::sym::kSymbolOne;
-    if (!output->attr.axis.empty()) {
-      stride = af::sym::Mul(output->attr.repeats.front(), output->attr.strides.front());
-    }
+    GE_ASSERT_TRUE(!output->attr.axis.empty() && output->attr.axis.size() == output->attr.repeats.size() &&
+                       output->attr.axis.size() == output->attr.strides.size(),
+                   "Node[%s] has invalid tensor view.", node->GetNamePtr());
+    const ascir::SizeExpr stride = af::sym::Mul(output->attr.repeats.front(), output->attr.strides.front());
     output->attr.axis.insert(output->attr.axis.begin(), outer_axis_id);
     output->attr.repeats.insert(output->attr.repeats.begin(), af::sym::kSymbolOne);
     output->attr.strides.insert(output->attr.strides.begin(), stride);
@@ -551,9 +549,8 @@ Status ApplyIndirectLoadTemplateMerge(ascir::ImplGraph &graph, const af::AscNode
 
 Status ApplyInputInnerVectorizedAxis(ascir::ImplGraph &graph, const af::AscNodePtr &node,
                                      ascir::AxisId input_inner_axis_id) {
-  if (input_inner_axis_id == af::kIdNone) {
-    return af::SUCCESS;
-  }
+  GE_ASSERT_TRUE(input_inner_axis_id != af::kIdNone, "IndirectLoad input inner axis is missing for node[%s].",
+                 node->GetNamePtr());
   GE_ASSERT_TRUE(!node->outputs().empty(), "IndirectLoad input-pre node[%s] has no output.", node->GetNamePtr());
   for (const auto &output : node->outputs()) {
     output->attr.vectorized_axis = {input_inner_axis_id};
@@ -574,49 +571,85 @@ Status ApplyInputInnerVectorizedAxis(ascir::ImplGraph &graph, const af::AscNodeP
                  "Failed to merge input inner tensor axis[%ld] for node[%s].", input_inner_axis_id, node->GetNamePtr());
   return af::SUCCESS;
 }
+
+Status SetOuterRepeatsToOne(const af::AscNodePtr &node, const std::vector<ascir::AxisId> &vectorized_axes) {
+  GE_ASSERT_TRUE(!vectorized_axes.empty(), "Node[%s] has no IndirectLoad vector axes.", node->GetNamePtr());
+  for (const auto &output : node->outputs()) {
+    GE_ASSERT_TRUE(output->attr.axis.size() == output->attr.repeats.size());
+    GE_ASSERT_TRUE(output->attr.axis.size() >= vectorized_axes.size());
+    std::fill_n(output->attr.repeats.begin(), output->attr.axis.size() - vectorized_axes.size(), af::sym::kSymbolOne);
+  }
+  return af::SUCCESS;
+}
+
+Status SetReduceInputVectorizedView(const af::AscNodePtr &reduce, const af::AscNodePtr &input_producer,
+                                    const std::vector<ascir::AxisId> &vectorized_axes) {
+  GE_ASSERT_TRUE(!vectorized_axes.empty(), "Reduce node[%s] has no IndirectLoad vector axes.", reduce->GetNamePtr());
+  for (size_t i = 0UL; i < reduce->inputs.Size(); ++i) {
+    if (ascgen_utils::indirect_load::GetInputProducer(reduce, i) != input_producer) {
+      continue;
+    }
+    auto &input = reduce->inputs[i].attr;
+    GE_ASSERT_TRUE(input.axis.size() == input.strides.size());
+    input.vectorized_axis = vectorized_axes;
+    input.vectorized_strides.clear();
+    input.vectorized_strides.reserve(vectorized_axes.size());
+    for (ascir::AxisId axis : vectorized_axes) {
+      const auto iter = std::find(input.axis.begin(), input.axis.end(), axis);
+      GE_ASSERT_TRUE(iter != input.axis.end(), "Reduce node[%s] has no IndirectLoad vector axis[%ld].",
+                     reduce->GetNamePtr(), axis);
+      input.vectorized_strides.emplace_back(
+          input.strides[static_cast<size_t>(std::distance(input.axis.begin(), iter))]);
+    }
+    return af::SUCCESS;
+  }
+  GELOGE(af::FAILED, "Reduce node[%s] is not connected to IndirectLoad output path.", reduce->GetNamePtr());
+  return af::FAILED;
+}
 }  // namespace
 
 Status Scheduler::InitIndirectLoadScheduleCase() {
-  is_indirect_load_schedule_case_ = false;
-  has_indirect_load_synthetic_outer_axis_ = false;
-  if (tiling_case_.ub_tiling_y.first == nullptr) {
-    return af::SUCCESS;
-  }
+  indirect_load_info_ = {};
   const af::AscNodePtr indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(graph_);
   if (indirect_load == nullptr) {
     return af::SUCCESS;
   }
-  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, indirect_load_axes_));
-  const auto outer_axis = graph_.FindAxis(indirect_load_axes_.outer_axis);
-  GE_ASSERT_NOTNULL(outer_axis, "IndirectLoad outer axis[%ld] is not found.", indirect_load_axes_.outer_axis);
-  has_indirect_load_synthetic_outer_axis_ =
-      outer_axis->from.empty() &&
-      std::find(indirect_load->attr.sched.axis.begin(), indirect_load->attr.sched.axis.end(),
-                indirect_load_axes_.outer_axis) == indirect_load->attr.sched.axis.end();
-  is_indirect_load_schedule_case_ = true;
+  GE_ASSERT_NOTNULL(tiling_case_.ub_tiling_y.first);
+  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, indirect_load_info_.axes));
+  if (ascgen_utils::indirect_load::HasPostReduceConsumer(indirect_load)) {
+    indirect_load_info_.reduce = ascgen_utils::indirect_load::GetPostReduceConsumer(indirect_load);
+    indirect_load_info_.reduce_input = ascgen_utils::indirect_load::GetPostReduceInputProducer(indirect_load);
+    GE_ASSERT_NOTNULL(indirect_load_info_.reduce_input, "IndirectLoad post Reduce input producer is missing.");
+  }
+  indirect_load_info_.active = true;
   return af::SUCCESS;
 }
 
 Status Scheduler::ApplyIndirectLoadNodeAxes(const af::AscNodePtr &node, bool &skip_main_tiling) const {
   skip_main_tiling = false;
-  if (!is_indirect_load_schedule_case_) {
+  if (!indirect_load_info_.active) {
     return af::SUCCESS;
   }
-  if (ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(node)) {
-    GE_ASSERT_SUCCESS(ApplyInputInnerVectorizedAxis(graph_, node, indirect_load_axes_.input_inner_axis));
-    GE_ASSERT_SUCCESS(AddIndirectLoadSyntheticOuterAxis(node, indirect_load_axes_.outer_axis,
-                                                        has_indirect_load_synthetic_outer_axis_));
-    GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_axes_.outer_axis, false));
+  const bool is_input_pre = ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(node);
+  if (is_input_pre) {
+    GE_ASSERT_SUCCESS(ApplyInputInnerVectorizedAxis(graph_, node, indirect_load_info_.axes.input_inner_axis));
+  }
+  skip_main_tiling = ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(node);
+  if (skip_main_tiling) {
     return af::SUCCESS;
   }
-  if (ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(node)) {
-    skip_main_tiling = true;
+  GE_ASSERT_SUCCESS(AddIndirectLoadSyntheticOuterAxis(node, indirect_load_info_.axes.outer_axis,
+                                                      indirect_load_info_.axes.synthetic_outer));
+  GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_info_.axes.outer_axis, !is_input_pre));
+  if (is_input_pre) {
     return af::SUCCESS;
   }
-  GE_ASSERT_SUCCESS(
-      AddIndirectLoadSyntheticOuterAxis(node, indirect_load_axes_.outer_axis, has_indirect_load_synthetic_outer_axis_));
-  GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_axes_.outer_axis));
-  GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_axes_.inner_axis));
+  GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_info_.axes.inner_axis, false));
+  if (node == indirect_load_info_.reduce) {
+    GE_ASSERT_SUCCESS(SetOuterRepeatsToOne(node, indirect_load_info_.axes.vectorized_axes));
+    GE_ASSERT_SUCCESS(
+        SetReduceInputVectorizedView(node, indirect_load_info_.reduce_input, indirect_load_info_.axes.vectorized_axes));
+  }
   return af::SUCCESS;
 }
 
@@ -677,7 +710,7 @@ Status Scheduler::TileSplit() {
     // 非reduce场景应该将向量化轴调整为tensor中的相对顺序, 带reduce场景由于tiling策略已经做了特别的reorder,需要跳过
     // tiling策略暂时无法支持具有reduce和transpose融合的场景
     for (auto &output : node->outputs()) {
-      if (is_indirect_load_schedule_case_ && ascgen_utils::indirect_load::ShouldPreserveVectorizedAxis(node)) {
+      if (indirect_load_info_.active && ascgen_utils::indirect_load::ShouldPreserveVectorizedAxis(node)) {
         continue;
       }
       output->attr.vectorized_axis = node_vectorized_axes;
@@ -726,7 +759,7 @@ Status Scheduler::ApplyBlockSplit(const std::vector<ascir::AxisId> &new_sched_ax
   bool is_reduce_after = false;
   for (auto node : graph_.GetAllNodes()) {
     if (ScheduleUtils::IsBuffer(node) ||
-        (is_indirect_load_schedule_case_ && ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(node))) {
+        (indirect_load_info_.active && ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(node))) {
       continue;
     }
     if ((!is_reduce_after) && ScheduleUtils::IsReduce(node)) {
@@ -736,12 +769,12 @@ Status Scheduler::ApplyBlockSplit(const std::vector<ascir::AxisId> &new_sched_ax
     std::vector<ascir::AxisId> node_new_sched_axes = new_sched_axes;
     GE_ASSERT_TRUE(!node->outputs.operator()().empty());
     auto &vectorized_axis = node->outputs[0].attr.vectorized_axis;
-    if (!is_indirect_load_schedule_case_) {
+    if (!indirect_load_info_.active) {
       node_new_sched_axes.insert(node_new_sched_axes.end(), vectorized_axis.begin(), vectorized_axis.end());
     }
     bool is_store_after_reduce = is_reduce_after && ScheduleUtils::IsStore(node);
     GE_ASSERT_SUCCESS(ApplyBlockSplitToNode(node, is_store_after_reduce));
-    if (is_indirect_load_schedule_case_) {
+    if (indirect_load_info_.active) {
       continue;
     }
     graph_.ApplySchedAxisReorder(node, node_new_sched_axes);

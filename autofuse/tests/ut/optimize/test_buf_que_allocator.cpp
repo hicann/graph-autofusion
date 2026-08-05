@@ -28,6 +28,7 @@
 #undef private
 #include "ascir_ops_utils.h"
 #include "autoschedule/tiling_group.h"
+#include "indirect_load_utils.h"
 #include "schedule_utils.h"
 #include "ascir_utils.h"
 #include "platform_context.h"
@@ -94,6 +95,153 @@ static ascir::FusedScheduledResult MakeFusedScheduledResultWithGraphs(std::vecto
   auto &group = scheduled_result.schedule_groups.emplace_back();
   group.impl_graphs = std::move(impl_graphs);
   return fused_result;
+}
+
+static af::AscGraph MakeSimtInlineTransformGraph() {
+  af::AscGraph graph("simt_inline_transform");
+  const auto size = graph.CreateSizeVar(8);
+  const auto axis = graph.CreateAxis("axis", size);
+  const std::vector<af::AxisId> axes = {axis.id};
+  const std::vector<af::Expression> repeats = {size};
+  const std::vector<af::Expression> strides = {af::ops::One};
+
+  af::ascir_op::Data input("input", graph);
+  input.ir_attr.SetIndex(0);
+  input.y.dtype = ge::DT_FLOAT16;
+  input.attr.api.type = af::ApiType::kAPITypeBuffer;
+  *input.y.axis = axes;
+  *input.y.repeats = repeats;
+  *input.y.strides = strides;
+
+  af::ascir_op::Load input_boundary("input_boundary");
+  input_boundary.x = input.y;
+  input_boundary.y.dtype = ge::DT_FLOAT16;
+  input_boundary.attr.api.compute_type = af::ComputeType::kComputeLoad;
+  input_boundary.attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  *input_boundary.y.axis = axes;
+  *input_boundary.y.repeats = repeats;
+  *input_boundary.y.strides = strides;
+
+  af::ascir_op::Pow inline_transform("inline_transform");
+  inline_transform.x1 = input_boundary.y;
+  inline_transform.x2 = input_boundary.y;
+  inline_transform.y.dtype = ge::DT_FLOAT16;
+  inline_transform.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  inline_transform.attr.api.type = af::ApiType::kAPITypeCompute;
+  inline_transform.attr.api.unit = af::ComputeUnit::kUnitVector;
+  *inline_transform.y.axis = axes;
+  *inline_transform.y.repeats = repeats;
+  *inline_transform.y.strides = strides;
+
+  af::ascir_op::Store store("store");
+  store.x = inline_transform.y;
+  store.attr.api.compute_type = af::ComputeType::kComputeStore;
+  store.attr.api.unit = af::ComputeUnit::kUnitMTE3;
+  store.y.dtype = ge::DT_FLOAT16;
+  *store.y.axis = axes;
+  *store.y.repeats = repeats;
+  *store.y.strides = strides;
+
+  af::ascir_op::Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+
+  return graph;
+}
+
+static af::AscGraph MakeDirectGmLoadGraph() {
+  af::AscGraph graph("direct_gm_load");
+  const auto size = graph.CreateSizeVar(8);
+  const auto axis = graph.CreateAxis("axis", size);
+  const std::vector<af::AxisId> axes = {axis.id};
+  const std::vector<af::Expression> repeats = {size};
+  const std::vector<af::Expression> strides = {af::ops::One};
+
+  af::ascir_op::Data input("input", graph);
+  input.ir_attr.SetIndex(0);
+  input.y.dtype = ge::DT_FLOAT16;
+  input.attr.api.type = af::ApiType::kAPITypeBuffer;
+
+  af::ascir_op::Load direct_gm_load("direct_gm_load");
+  direct_gm_load.x = input.y;
+  direct_gm_load.y.dtype = ge::DT_FLOAT16;
+  direct_gm_load.attr.api.compute_type = af::ComputeType::kComputeLoad;
+  direct_gm_load.attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  *direct_gm_load.y.axis = axes;
+  *direct_gm_load.y.repeats = repeats;
+  *direct_gm_load.y.strides = strides;
+
+  af::ascir_op::Abs supported_op("supported_op");
+  supported_op.x = direct_gm_load.y;
+  supported_op.y.dtype = ge::DT_FLOAT16;
+  supported_op.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  supported_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  *supported_op.y.axis = axes;
+  *supported_op.y.repeats = repeats;
+  *supported_op.y.strides = strides;
+
+  af::ascir_op::Store store("store");
+  store.x = supported_op.y;
+  store.y.dtype = ge::DT_FLOAT16;
+  store.attr.api.compute_type = af::ComputeType::kComputeStore;
+  store.attr.api.unit = af::ComputeUnit::kUnitMTE3;
+  *store.y.axis = axes;
+  *store.y.repeats = repeats;
+  *store.y.strides = strides;
+
+  af::ascir_op::Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  return graph;
+}
+
+TEST_F(BufQueAllocatorUT, GetAndSetNodeTempBufferSkipsSimtInlineTransform) {
+  auto graph = MakeSimtInlineTransformGraph();
+  auto input_boundary = graph.FindNode("input_boundary");
+  auto inline_transform = graph.FindNode("inline_transform");
+  ASSERT_NE(input_boundary, nullptr);
+  ASSERT_NE(inline_transform, nullptr);
+
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateRole(inline_transform),
+            ascgen_utils::indirect_load::TemplateRole::kNone);
+  ASSERT_EQ(BufQueAllocator().GetAndSetNodeTempBuffer(inline_transform), af::SUCCESS);
+  ASSERT_FALSE(inline_transform->attr.tmp_buffers.empty());
+
+  ASSERT_EQ(ascgen_utils::indirect_load::SetTemplateRole(
+                inline_transform, ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform),
+            af::SUCCESS);
+  ASSERT_EQ(BufQueAllocator().GetAndSetNodeTempBuffer(inline_transform), af::SUCCESS);
+
+  EXPECT_TRUE(inline_transform->attr.tmp_buffers.empty());
+  EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(inline_transform),
+            ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetInputProducer(inline_transform, 0UL), input_boundary);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetInputProducer(inline_transform, 1UL), input_boundary);
+  const auto consumer = ascgen_utils::indirect_load::GetOnlyOutputConsumer(inline_transform);
+  ASSERT_NE(consumer, nullptr);
+  EXPECT_EQ(consumer->GetName(), "store");
+}
+
+TEST_F(BufQueAllocatorUT, AllocBufQueKeepsSimtDirectGmLoadAsNormalQueue) {
+  auto graph = MakeDirectGmLoadGraph();
+  auto direct_gm_load = graph.FindNode("direct_gm_load");
+  ASSERT_NE(direct_gm_load, nullptr);
+  ASSERT_EQ(ascgen_utils::indirect_load::SetTemplateRole(
+                direct_gm_load, ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary),
+            af::SUCCESS);
+
+  ASSERT_EQ(BufQueAllocator().AllocBufQueForSingleImplGraph(graph, 4UL), af::SUCCESS);
+
+  ASSERT_EQ(direct_gm_load->GetOutDataNodesPtr().size(), 1UL);
+  ASSERT_NE(direct_gm_load->GetOutDataNodesPtr()[0], nullptr);
+  EXPECT_EQ(direct_gm_load->GetOutDataNodesPtr()[0]->GetName(), "supported_op");
+  ASSERT_EQ(direct_gm_load->outputs().size(), 1UL);
+  ASSERT_NE(direct_gm_load->outputs()[0], nullptr);
+  EXPECT_EQ(direct_gm_load->outputs()[0]->attr.mem.alloc_type, af::AllocType::kAllocTypeQueue);
+  EXPECT_EQ(direct_gm_load->outputs()[0]->attr.mem.position, af::Position::kPositionVecIn);
+  EXPECT_NE(direct_gm_load->outputs()[0]->attr.que.id, af::kIdNone);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(direct_gm_load),
+            ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary);
 }
 
 TEST_F(BufQueAllocatorUT, PrepareImplGraphMemoryPlanDoesNotPopulateFusedIoNodes) {

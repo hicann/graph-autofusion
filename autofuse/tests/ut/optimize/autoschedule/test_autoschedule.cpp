@@ -11,6 +11,7 @@
 #include <ascendc_ir.h>
 #include <ascir_ops.h>
 #include <ascir_utils.h>
+#include <algorithm>
 #include <iostream>
 
 #include "gtest/gtest.h"
@@ -32,6 +33,9 @@
 #include "platform_context.h"
 #include "platform/v1/platformv1.h"
 #include "ascgraph_info_complete.h"
+#include "indirect_load_utils.h"
+#include "schedule_result.h"
+#include "task_generator/indirect_load_schedule_case_generator.h"
 
 using namespace std;
 using namespace ascir;
@@ -1974,11 +1978,481 @@ void Construct_Normal_Struct(af::AscGraph &graph) {
   *b1_store.y.strides = {s3, One};
 }
 
+template <typename Op>
+static void SetIndirectLoadView(Op &op, af::DataType dtype, const std::vector<af::AxisId> &axes,
+                                const std::vector<af::Expression> &repeats,
+                                const std::vector<af::Expression> &strides) {
+  op.y.dtype = dtype;
+  op.attr.sched.axis = axes;
+  *op.y.axis = axes;
+  *op.y.repeats = repeats;
+  *op.y.strides = strides;
+}
+
+static af::AscGraph BuildIndirectLoadAutoScheduleGraph(int64_t axis, bool with_input_pre, bool with_post_reduce,
+                                                       bool with_output_transform = true) {
+  af::AscGraph graph("indirect_load_autoschedule_ut");
+  const auto x0_size = graph.CreateSizeVar(2);
+  const auto x1_size = graph.CreateSizeVar(8);
+  const auto x2_size = graph.CreateSizeVar(4);
+  const auto x3_size = graph.CreateSizeVar(3);
+  const auto y0_size = graph.CreateSizeVar(2);
+  const auto y1_size = graph.CreateSizeVar(with_input_pre ? 9 : 8);
+  const auto y2_size = graph.CreateSizeVar(4);
+  const auto y3_size = graph.CreateSizeVar(3);
+  const auto x0 = graph.CreateAxis("x0", x0_size);
+  const auto x1 = graph.CreateAxis("x1", x1_size);
+  const auto x2 = graph.CreateAxis("x2", x2_size);
+  const auto x3 = graph.CreateAxis("x3", x3_size);
+  const auto y0 = graph.CreateAxis("y0", y0_size);
+  const auto y1 = graph.CreateAxis("y1", y1_size);
+  const auto y2 = graph.CreateAxis("y2", y2_size);
+  const auto y3 = graph.CreateAxis("y3", y3_size);
+  const std::vector<af::AxisId> input_axes = {x0.id, x1.id, x2.id, x3.id};
+  const std::vector<af::AxisId> output_axes = {y0.id, y1.id, y2.id, y3.id};
+  const std::vector<af::Expression> input_repeats = {x0_size, x1_size, x2_size, x3_size};
+  const std::vector<af::Expression> output_repeats = {y0_size, y1_size, y2_size, y3_size};
+  const std::vector<af::Expression> input_strides = {x1_size * x2_size * x3_size, x2_size * x3_size, x3_size, One};
+  const std::vector<af::Expression> output_strides = {y1_size * y2_size * y3_size, y2_size * y3_size, y3_size, One};
+
+  Data x("x", graph);
+  x.ir_attr.SetIndex(0);
+  x.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  x.attr.api.type = af::ApiType::kAPITypeBuffer;
+  SetIndirectLoadView(x, ge::DT_FLOAT16, input_axes, input_repeats, input_strides);
+
+  Load input_load("input_load");
+  input_load.x = x.y;
+  SetIndirectLoadView(input_load, ge::DT_FLOAT16, input_axes, input_repeats, input_strides);
+
+  Data index("index", graph);
+  index.ir_attr.SetIndex(1);
+  index.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  index.attr.api.type = af::ApiType::kAPITypeBuffer;
+  SetIndirectLoadView(index, ge::DT_INT32, output_axes, output_repeats, output_strides);
+  Load index_load("index_load");
+  index_load.x = index.y;
+  SetIndirectLoadView(index_load, ge::DT_INT32, output_axes, output_repeats, output_strides);
+
+  IndirectLoad indirect_load("indirect_load");
+  if (with_input_pre) {
+    Abs input_abs("input_abs");
+    input_abs.x = input_load.y;
+    SetIndirectLoadView(input_abs, ge::DT_FLOAT16, input_axes, input_repeats, input_strides);
+    indirect_load.x1 = input_abs.y;
+  } else {
+    indirect_load.x1 = input_load.y;
+  }
+  indirect_load.x2 = index_load.y;
+  indirect_load.ir_attr.SetAxis(axis);
+  SetIndirectLoadView(indirect_load, ge::DT_FLOAT16, output_axes, output_repeats, output_strides);
+
+  Store store("store");
+  std::vector<af::Expression> final_repeats = output_repeats;
+  std::vector<af::Expression> final_strides = output_strides;
+  if (with_post_reduce) {
+    Sum reduce("reduce");
+    if (with_output_transform) {
+      Abs output_abs("output_abs");
+      output_abs.x = indirect_load.y;
+      SetIndirectLoadView(output_abs, ge::DT_FLOAT16, output_axes, output_repeats, output_strides);
+      reduce.x = output_abs.y;
+    } else {
+      reduce.x = indirect_load.y;
+    }
+    reduce.attr.api.compute_type = af::ComputeType::kComputeReduce;
+    final_repeats = {y0_size, One, One, One};
+    final_strides = {One, Zero, Zero, Zero};
+    SetIndirectLoadView(reduce, ge::DT_FLOAT16, output_axes, final_repeats, final_strides);
+    store.x = reduce.y;
+    SetIndirectLoadView(store, ge::DT_FLOAT16, output_axes, final_repeats, final_strides);
+  } else {
+    store.x = indirect_load.y;
+    SetIndirectLoadView(store, ge::DT_FLOAT16, output_axes, output_repeats, output_strides);
+  }
+
+  Output output("output");
+  output.ir_attr.SetIndex(0);
+  output.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  output.attr.api.type = af::ApiType::kAPITypeBuffer;
+  output.x = store.y;
+  SetIndirectLoadView(output, ge::DT_FLOAT16, output_axes, final_repeats, final_strides);
+  return graph;
+}
+
+static std::vector<af::AscGraph>::iterator FindIndirectLoadCandidate(std::vector<af::AscGraph> &candidates,
+                                                                     ascir::TemplateId template_id) {
+  return std::find_if(candidates.begin(), candidates.end(), [template_id](const af::AscGraph &candidate) {
+    const auto indirect_load = candidate.FindNode("indirect_load");
+    return indirect_load != nullptr && ascir::GetTemplateIdOrDefault(*indirect_load) == template_id;
+  });
+}
+
+static const af::Axis *FindDerivedAxis(af::AscGraph &graph, af::Axis::Type type, af::AxisId source) {
+  const auto axes = graph.GetAllAxis();
+  const auto iter = std::find_if(axes.begin(), axes.end(), [type, source](const auto &axis) {
+    return axis != nullptr && axis->type == type && axis->from == std::vector<af::AxisId>{source};
+  });
+  return iter == axes.end() ? nullptr : iter->get();
+}
+
+static bool AxisDescendsFrom(af::AscGraph &graph, af::AxisId axis_id, af::AxisId origin_id) {
+  if (axis_id == origin_id) {
+    return true;
+  }
+  const auto *axis = graph.FindAxis(axis_id);
+  if (axis == nullptr) {
+    return false;
+  }
+  return std::any_of(axis->from.begin(), axis->from.end(),
+                     [&graph, origin_id](af::AxisId source) { return AxisDescendsFrom(graph, source, origin_id); });
+}
+
+static std::vector<af::AxisId> GetAxisOrigins(af::AscGraph &graph, af::AxisId axis_id) {
+  const auto *axis = graph.FindAxis(axis_id);
+  if (axis == nullptr) {
+    return {};
+  }
+  if (axis->from.empty()) {
+    return {axis_id};
+  }
+  std::vector<af::AxisId> origins;
+  for (af::AxisId source : axis->from) {
+    auto source_origins = GetAxisOrigins(graph, source);
+    origins.insert(origins.end(), source_origins.begin(), source_origins.end());
+  }
+  std::sort(origins.begin(), origins.end());
+  origins.erase(std::unique(origins.begin(), origins.end()), origins.end());
+  return origins;
+}
+
 namespace optimize {
 class AutoSchedulerUT : public ::testing::Test {
  protected:
   void SetUp() override {}
 };
+
+TEST_F(AutoSchedulerUT, IndirectLoadPrebuiltFixedYTilingGeneratesOnlyTemplateOuterCase) {
+  auto graph = BuildIndirectLoadAutoScheduleGraph(1L, false, false);
+  IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> candidates;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, candidates, score_functions), af::SUCCESS);
+  auto simd = FindIndirectLoadCandidate(candidates, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, candidates.end());
+  auto candidate_indirect_load = simd->FindNode("indirect_load");
+  ASSERT_NE(candidate_indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateAxes template_axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(candidate_indirect_load, template_axes), af::SUCCESS);
+
+  std::vector<autoschedule::AutoScheduleOutput> results;
+  AutoSchedule autoschedule(*simd, results);
+  ASSERT_EQ(autoschedule.DoAutoSchedule(), af::SUCCESS);
+  ASSERT_EQ(results.size(), 1UL);
+  auto &scheduled_graph = results[0].scheduled_graph;
+  auto scheduled_indirect_load = scheduled_graph.FindNode("indirect_load");
+  ASSERT_NE(scheduled_indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateAxes scheduled_axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(scheduled_indirect_load, scheduled_axes), af::SUCCESS);
+  EXPECT_EQ(scheduled_axes.outer_axis, template_axes.outer_axis);
+
+  const auto *outer = scheduled_graph.FindAxis(scheduled_axes.outer_axis);
+  const auto *tile_outer =
+      FindDerivedAxis(scheduled_graph, af::Axis::Type::kAxisTypeTileOuter, scheduled_axes.outer_axis);
+  const auto *tile_inner =
+      FindDerivedAxis(scheduled_graph, af::Axis::Type::kAxisTypeTileInner, scheduled_axes.outer_axis);
+  ASSERT_NE(outer, nullptr);
+  ASSERT_NE(tile_outer, nullptr);
+  ASSERT_NE(tile_inner, nullptr);
+  EXPECT_EQ(tile_outer->size, outer->size);
+  EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(tile_inner->size, One), af::TriBool::kTrue);
+  EXPECT_EQ(tile_outer->split_pair_other_id, tile_inner->id);
+  EXPECT_EQ(tile_inner->split_pair_other_id, tile_outer->id);
+  ASSERT_EQ(scheduled_indirect_load->outputs().size(), 1UL);
+  const auto *inner = scheduled_graph.FindAxis(scheduled_axes.inner_axis);
+  ASSERT_NE(inner, nullptr);
+  EXPECT_EQ(scheduled_indirect_load->outputs()[0]->attr.vectorized_axis, inner->from);
+  for (af::AxisId axis : inner->from) {
+    EXPECT_NE(std::find(scheduled_indirect_load->outputs()[0]->attr.axis.begin(),
+                        scheduled_indirect_load->outputs()[0]->attr.axis.end(), axis),
+              scheduled_indirect_load->outputs()[0]->attr.axis.end());
+  }
+}
+
+TEST_F(AutoSchedulerUT, IndirectLoadSimtKeepsDirectGmBoundariesOutsideMainTiling) {
+  auto graph = BuildIndirectLoadAutoScheduleGraph(1L, false, false);
+  IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> candidates;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, candidates, score_functions), af::SUCCESS);
+  auto simt = FindIndirectLoadCandidate(candidates, ascir::TemplateId::kIndirectLoadSimt);
+  ASSERT_NE(simt, candidates.end());
+
+  std::map<std::string, std::pair<std::vector<af::AxisId>, af::AscTensorAttr>> boundary_views;
+  const std::map<std::string, ascgen_utils::indirect_load::TemplateRole> expected_roles = {
+      {"input_load", ascgen_utils::indirect_load::TemplateRole::kSimtInputBoundary},
+      {"store", ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary}};
+  for (const auto &[name, expected_role] : expected_roles) {
+    const auto node = simt->FindNode(name.c_str());
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->outputs().size(), 1UL);
+    ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateRole(node), expected_role);
+    boundary_views.emplace(name, std::make_pair(node->attr.sched.axis, node->outputs()[0]->attr));
+  }
+
+  std::vector<autoschedule::AutoScheduleOutput> results;
+  AutoSchedule autoschedule(*simt, results);
+  ASSERT_EQ(autoschedule.DoAutoSchedule(), af::SUCCESS);
+  ASSERT_EQ(results.size(), 1UL);
+  auto &scheduled_graph = results[0].scheduled_graph;
+  for (const auto &[name, original] : boundary_views) {
+    const auto node = scheduled_graph.FindNode(name.c_str());
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->outputs().size(), 1UL);
+    EXPECT_EQ(node->attr.sched.loop_axis, af::kIdNone) << name;
+    EXPECT_EQ(node->attr.sched.axis, original.first) << name;
+    EXPECT_EQ(node->outputs()[0]->attr.axis, original.second.axis) << name;
+    EXPECT_EQ(node->outputs()[0]->attr.repeats, original.second.repeats) << name;
+    EXPECT_EQ(node->outputs()[0]->attr.strides, original.second.strides) << name;
+    EXPECT_EQ(node->outputs()[0]->attr.vectorized_axis, original.second.vectorized_axis) << name;
+  }
+
+  const auto indirect_load = scheduled_graph.FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  bool has_block_inner = false;
+  bool has_tile_inner = false;
+  for (af::AxisId axis_id : indirect_load->attr.sched.axis) {
+    const auto *axis = scheduled_graph.FindAxis(axis_id);
+    ASSERT_NE(axis, nullptr);
+    has_block_inner = has_block_inner || axis->type == af::Axis::Type::kAxisTypeBlockInner;
+    has_tile_inner = has_tile_inner || axis->type == af::Axis::Type::kAxisTypeTileInner;
+  }
+  EXPECT_TRUE(has_block_inner);
+  EXPECT_TRUE(has_tile_inner);
+}
+
+TEST_F(AutoSchedulerUT, IndirectLoadSchedulerUsesOnlyTemplateOuterForMainBlockTiling) {
+  auto graph = BuildIndirectLoadAutoScheduleGraph(1L, false, false);
+  IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> candidates;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, candidates, score_functions), af::SUCCESS);
+  auto simd = FindIndirectLoadCandidate(candidates, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, candidates.end());
+  auto indirect_load = simd->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateAxes template_axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, template_axes), af::SUCCESS);
+
+  std::vector<autoschedule::AutoScheduleOutput> results;
+  AutoSchedule autoschedule(*simd, results);
+  ASSERT_EQ(autoschedule.DoAutoSchedule(), af::SUCCESS);
+  ASSERT_EQ(results.size(), 1UL);
+  auto &scheduled_graph = results[0].scheduled_graph;
+  const auto template_outer_origins = GetAxisOrigins(scheduled_graph, template_axes.outer_axis);
+  ASSERT_FALSE(template_outer_origins.empty());
+  std::vector<const af::Axis *> block_outers;
+  std::vector<const af::Axis *> block_inners;
+  for (const auto &axis : scheduled_graph.GetAllAxis()) {
+    if (axis == nullptr) {
+      continue;
+    }
+    if (axis->type == af::Axis::Type::kAxisTypeBlockOuter) {
+      block_outers.push_back(axis.get());
+    } else if (axis->type == af::Axis::Type::kAxisTypeBlockInner) {
+      block_inners.push_back(axis.get());
+    }
+  }
+  ASSERT_EQ(block_outers.size(), 1UL);
+  ASSERT_EQ(block_inners.size(), 1UL);
+  for (const auto *axis : {block_outers[0], block_inners[0]}) {
+    EXPECT_TRUE(AxisDescendsFrom(scheduled_graph, axis->id, template_axes.outer_axis));
+    EXPECT_FALSE(AxisDescendsFrom(scheduled_graph, axis->id, template_axes.inner_axis));
+    EXPECT_EQ(GetAxisOrigins(scheduled_graph, axis->id), template_outer_origins);
+  }
+  EXPECT_EQ(block_outers[0]->split_pair_other_id, block_inners[0]->id);
+  EXPECT_EQ(block_inners[0]->split_pair_other_id, block_outers[0]->id);
+}
+
+TEST_F(AutoSchedulerUT, IndirectLoadAxisZeroSyntheticOuterParticipatesWithConsistentTensorRanks) {
+  auto graph = BuildIndirectLoadAutoScheduleGraph(0L, false, false);
+  IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> candidates;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, candidates, score_functions), af::SUCCESS);
+  auto simd = FindIndirectLoadCandidate(candidates, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, candidates.end());
+  auto indirect_load = simd->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateAxes template_axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, template_axes), af::SUCCESS);
+  const auto *synthetic_outer = simd->FindAxis(template_axes.outer_axis);
+  ASSERT_NE(synthetic_outer, nullptr);
+  EXPECT_TRUE(synthetic_outer->from.empty());
+  EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(synthetic_outer->size, One), af::TriBool::kTrue);
+
+  std::vector<autoschedule::AutoScheduleOutput> results;
+  AutoSchedule autoschedule(*simd, results);
+  ASSERT_EQ(autoschedule.DoAutoSchedule(), af::SUCCESS);
+  ASSERT_EQ(results.size(), 1UL);
+  auto &scheduled_graph = results[0].scheduled_graph;
+  for (const auto &node : scheduled_graph.GetAllNodes()) {
+    if (ScheduleUtils::IsBuffer(node)) {
+      continue;
+    }
+    EXPECT_TRUE(std::any_of(node->attr.sched.axis.begin(), node->attr.sched.axis.end(),
+                            [&scheduled_graph, &template_axes](af::AxisId axis_id) {
+                              return AxisDescendsFrom(scheduled_graph, axis_id, template_axes.outer_axis);
+                            }))
+        << node->GetName();
+    for (const auto &output : node->outputs()) {
+      ASSERT_NE(output, nullptr);
+      ASSERT_EQ(output->attr.axis.size(), output->attr.repeats.size()) << node->GetName();
+      ASSERT_EQ(output->attr.axis.size(), output->attr.strides.size()) << node->GetName();
+      bool found_synthetic_axis = false;
+      for (size_t i = 0UL; i < output->attr.axis.size(); ++i) {
+        if (AxisDescendsFrom(scheduled_graph, output->attr.axis[i], template_axes.outer_axis)) {
+          found_synthetic_axis = true;
+          EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(output->attr.repeats[i], One), af::TriBool::kTrue)
+              << node->GetName();
+        }
+      }
+      EXPECT_TRUE(found_synthetic_axis) << node->GetName();
+    }
+  }
+}
+
+TEST_F(AutoSchedulerUT, IndirectLoadSimdInputPreUsesMergedInputInnerInFinalTensorView) {
+  auto graph = BuildIndirectLoadAutoScheduleGraph(1L, true, false);
+  IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> candidates;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, candidates, score_functions), af::SUCCESS);
+  auto simd = FindIndirectLoadCandidate(candidates, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, candidates.end());
+  auto indirect_load = simd->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateAxes template_axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, template_axes), af::SUCCESS);
+  const auto *input_inner = simd->FindAxis(template_axes.input_inner_axis);
+  ASSERT_NE(input_inner, nullptr);
+  ASSERT_EQ(input_inner->type, af::Axis::Type::kAxisTypeMerged);
+  ASSERT_EQ(input_inner->from.size(), 3UL);
+
+  std::vector<autoschedule::AutoScheduleOutput> results;
+  AutoSchedule autoschedule(*simd, results);
+  ASSERT_EQ(autoschedule.DoAutoSchedule(), af::SUCCESS);
+  ASSERT_EQ(results.size(), 1UL);
+  auto input_abs = results[0].scheduled_graph.FindNode("input_abs");
+  ASSERT_NE(input_abs, nullptr);
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateRole(input_abs),
+            ascgen_utils::indirect_load::TemplateRole::kSimdInputPre);
+  ASSERT_EQ(input_abs->outputs().size(), 1UL);
+  const auto &output = input_abs->outputs()[0]->attr;
+  EXPECT_NE(
+      std::find(input_abs->attr.sched.axis.begin(), input_abs->attr.sched.axis.end(), template_axes.input_inner_axis),
+      input_abs->attr.sched.axis.end());
+  EXPECT_NE(std::find(output.axis.begin(), output.axis.end(), template_axes.input_inner_axis), output.axis.end());
+  EXPECT_EQ(output.axis.size(), output.repeats.size());
+  EXPECT_EQ(output.axis.size(), output.strides.size());
+  EXPECT_EQ(output.vectorized_axis, std::vector<af::AxisId>{template_axes.input_inner_axis});
+  ASSERT_EQ(output.vectorized_strides.size(), 1UL);
+  EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(output.vectorized_strides[0], One), af::TriBool::kTrue);
+}
+
+TEST_F(AutoSchedulerUT, IndirectLoadPostReduceSetsConnectedInputVectorizedViewAndOuterRepeats) {
+  auto graph = BuildIndirectLoadAutoScheduleGraph(1L, false, true);
+  IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> candidates;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, candidates, score_functions), af::SUCCESS);
+  auto simd = FindIndirectLoadCandidate(candidates, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, candidates.end());
+  auto indirect_load = simd->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateAxes template_axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, template_axes), af::SUCCESS);
+  const auto *inner = simd->FindAxis(template_axes.inner_axis);
+  ASSERT_NE(inner, nullptr);
+  ASSERT_FALSE(inner->from.empty());
+  const af::AxisId first_inner_axis = inner->from.front();
+  std::vector<autoschedule::AutoScheduleOutput> results;
+  AutoSchedule autoschedule(*simd, results);
+  ASSERT_EQ(autoschedule.DoAutoSchedule(), af::SUCCESS);
+  ASSERT_EQ(results.size(), 1UL);
+  auto &scheduled_graph = results[0].scheduled_graph;
+  auto reduce = scheduled_graph.FindNode("reduce");
+  auto output_abs = scheduled_graph.FindNode("output_abs");
+  ASSERT_NE(reduce, nullptr);
+  ASSERT_NE(output_abs, nullptr);
+  ASSERT_EQ(ascgen_utils::indirect_load::GetInputProducer(reduce, 0UL), output_abs);
+  ASSERT_EQ(reduce->inputs.Size(), 1UL);
+  const auto &reduce_input = reduce->inputs[0].attr;
+  const auto first_inner = std::find(reduce_input.axis.begin(), reduce_input.axis.end(), first_inner_axis);
+  ASSERT_NE(first_inner, reduce_input.axis.end());
+  const size_t inner_offset = static_cast<size_t>(std::distance(reduce_input.axis.begin(), first_inner));
+  EXPECT_EQ(
+      reduce_input.vectorized_axis,
+      std::vector<af::AxisId>(reduce_input.axis.begin() + static_cast<int64_t>(inner_offset), reduce_input.axis.end()));
+  ASSERT_EQ(output_abs->outputs().size(), 1UL);
+  const auto &producer_output = output_abs->outputs()[0]->attr;
+  EXPECT_FALSE(producer_output.vectorized_axis.empty());
+  EXPECT_EQ(reduce_input.vectorized_axis, producer_output.vectorized_axis);
+  EXPECT_EQ(reduce_input.vectorized_strides, producer_output.vectorized_strides);
+
+  ASSERT_EQ(reduce->outputs().size(), 1UL);
+  const auto &reduce_output = reduce->outputs()[0]->attr;
+  const auto output_first_inner = std::find(reduce_output.axis.begin(), reduce_output.axis.end(), first_inner_axis);
+  ASSERT_NE(output_first_inner, reduce_output.axis.end());
+  const size_t output_inner_offset = static_cast<size_t>(std::distance(reduce_output.axis.begin(), output_first_inner));
+  for (size_t i = 0UL; i < output_inner_offset; ++i) {
+    EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(reduce_output.repeats[i], One), af::TriBool::kTrue);
+  }
+}
+
+TEST_F(AutoSchedulerUT, IndirectLoadSimtPostReducePreservesOuterRepeatsAndKeepsVectorRegionsConsistent) {
+  auto graph = BuildIndirectLoadAutoScheduleGraph(1L, false, true, false);
+  IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> candidates;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, candidates, score_functions), af::SUCCESS);
+  auto simt = FindIndirectLoadCandidate(candidates, ascir::TemplateId::kIndirectLoadSimt);
+  ASSERT_NE(simt, candidates.end());
+  const auto candidate_il = simt->FindNode("indirect_load");
+  ASSERT_NE(candidate_il, nullptr);
+  ascgen_utils::indirect_load::TemplateAxes template_axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(candidate_il, template_axes), af::SUCCESS);
+  const auto *inner = simt->FindAxis(template_axes.inner_axis);
+  ASSERT_NE(inner, nullptr);
+  ASSERT_FALSE(inner->from.empty());
+  const af::AxisId first_inner_axis = inner->from.front();
+
+  std::vector<autoschedule::AutoScheduleOutput> results;
+  AutoSchedule autoschedule(*simt, results);
+  ASSERT_EQ(autoschedule.DoAutoSchedule(), af::SUCCESS);
+  ASSERT_EQ(results.size(), 1UL);
+  auto &scheduled_graph = results[0].scheduled_graph;
+  const auto indirect_load = scheduled_graph.FindNode("indirect_load");
+  const auto reduce = scheduled_graph.FindNode("reduce");
+  ASSERT_NE(indirect_load, nullptr);
+  ASSERT_NE(reduce, nullptr);
+  ASSERT_EQ(indirect_load->outputs().size(), 1UL);
+  const auto &il_output = indirect_load->outputs()[0]->attr;
+  const auto first_inner = std::find(il_output.axis.begin(), il_output.axis.end(), first_inner_axis);
+  ASSERT_NE(first_inner, il_output.axis.end());
+  const size_t inner_offset = static_cast<size_t>(std::distance(il_output.axis.begin(), first_inner));
+  bool has_non_unit_outer_repeat = false;
+  for (size_t i = 0UL; i < inner_offset; ++i) {
+    has_non_unit_outer_repeat |= af::SymbolicUtils::StaticCheckEq(il_output.repeats[i], One) != af::TriBool::kTrue;
+  }
+  EXPECT_TRUE(has_non_unit_outer_repeat);
+  ASSERT_EQ(ascgen_utils::indirect_load::GetInputProducer(reduce, 0UL), indirect_load);
+  ASSERT_EQ(reduce->inputs.Size(), 1UL);
+  EXPECT_EQ(reduce->inputs[0].attr.vectorized_axis, il_output.vectorized_axis);
+  EXPECT_EQ(reduce->inputs[0].attr.vectorized_strides, il_output.vectorized_strides);
+  EXPECT_FALSE(reduce->inputs[0].attr.vectorized_axis.empty());
+}
+
 TEST_F(AutoSchedulerUT, TilingGroup_gen_elementwise_tilingGroup) {
   af::AscGraph graph("LoadAbsStore");
   Construct_LoadAbsStore(graph);
