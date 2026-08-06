@@ -1682,6 +1682,19 @@ class RsqrtAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Rsqrt";
   }
+  [[nodiscard]] std::string GetMicroApiCallName() const override {
+    return "MicroRsqrtApiCall";
+  }
+
+  [[nodiscard]] std::string GetMicroApiName() const override {
+    return "Rsqrt";
+  }
+
+  [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
+    (void)node;
+    return true;
+  }
+
   [[nodiscard]] bool IsInplaceSupported(const AscNode &rsqrt_node) const override {
     (void)rsqrt_node;
     return true;
@@ -1697,6 +1710,7 @@ class RsqrtAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "basic_api/kernel_operator_vec_unary_intf.h",
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {

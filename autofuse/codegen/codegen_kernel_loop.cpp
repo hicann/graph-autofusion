@@ -462,9 +462,16 @@ Status Loop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const Tiler &
     current_loop->AddCall(call);
     GE_CHK_STATUS_RET(call->Init(node), "ApiCall Init failed, ascir type:%s", node->GetTypePtr());
     call->exec_condition = node->attr.sched.exec_condition;
+    // Reduce 图必须通过整条 Broadcast 输入链的 split-B 检查，非 Reduce 图使用 AutoSchedule 缓存标记。
     call->enable_cache = this->is_graph_has_reduce_node
                              ? IsNodeSplitB(node, tiler, call->enable_cache_with_condition, current_loop->is_ar)
                              : IsValidCacheCondition(call->exec_condition);
+    GELOGI(
+        "Node[%s][%s] cache eligibility: has_reduce[%d], enable_cache[%d], exec_condition[%u], "
+        "reduce_cache_condition[%s]",
+        node->GetNamePtr(), node->GetTypePtr(), static_cast<int32_t>(this->is_graph_has_reduce_node),
+        static_cast<int32_t>(call->enable_cache), static_cast<uint32_t>(call->exec_condition),
+        call->enable_cache_with_condition.c_str());
     call->axis = current_loop->axis_id;
     call->depth = current_axis.size();
     InitApiCallContext(node, tpipe, call, lifecycle_edge);
@@ -548,6 +555,25 @@ static bool IsReduceDoubleTile(const Tiler &tiler, const TPipe &tpipe, bool has_
   return false;
 }
 
+static std::string GetCacheGuardCondition(const ApiCall &call, bool is_enable_cache, bool is_double_tile) {
+  if (!is_enable_cache) {
+    return "";
+  }
+  // 双 Tile Reduce 使用专用的 A/R 缓存条件，其他场景使用 AutoSchedule 缓存标记。
+  if (is_double_tile) {
+    return call.enable_cache_with_condition;
+  }
+  // 外层有效轴均为广播轴，缓存值在当前分块循环内保持不变，只需在第一次迭代生成。
+  if (call.exec_condition == af::ExecuteCondition::kCacheBlockSplitOriginBroadcastAxis) {
+    return kEnCacheOriginBroadcastAxis;
+  }
+  // 广播轴与非广播轴融合，缓存值只在一个广播复用周期内不变，需要在每个周期起点重新生成。
+  if (call.exec_condition == af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis) {
+    return kEnCacheFusedBroadcastAxis;
+  }
+  return "";
+}
+
 Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<ascir::AxisId> &current_axis,
                           std::stringstream &ss) {
   bool need_collect = this->bodys.size() > 1;
@@ -585,33 +611,23 @@ Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<as
         GE_CHK_STATUS_RET(body.call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
       }
       std::string call;
+      std::string cache_guard;
 
       if (this->axis_id != af::kIdNone) {
         auto axis = tiler.GetAxis(this->axis_id);
-        bool is_enable_cache = axis.is_split_b && body.call->enable_cache;
-        bool is_double_tile = IsReduceDoubleTile(tiler, tpipe, this->is_graph_has_reduce_node) &&
-                              current_axis.size() > kDoubleTileAxisSize;
-        if (is_enable_cache && is_double_tile) {
-          ss << "if (" << body.call->enable_cache_with_condition << ") {" << std::endl;
-        } else if (is_enable_cache && !this->is_graph_has_reduce_node) {
-          if (body.call->exec_condition == af::ExecuteCondition::kCacheBlockSplitOriginBroadcastAxis) {
-            ss << "if (" << kEnCacheOriginBroadcastAxis << ") {" << std::endl;
-          } else if (body.call->exec_condition == af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis) {
-            ss << "if (" << kEnCacheFusedBroadcastAxis << ") {" << std::endl;
-          }
+        const bool is_enable_cache = axis.is_split_b && body.call->enable_cache;
+        const bool is_double_tile = IsReduceDoubleTile(tiler, tpipe, this->is_graph_has_reduce_node) &&
+                                    current_axis.size() > kDoubleTileAxisSize;
+        cache_guard = GetCacheGuardCondition(*body.call, is_enable_cache, is_double_tile);
+        if (!cache_guard.empty()) {
+          ss << "if (" << cache_guard << ") {" << std::endl;
         }
       }
       GE_CHK_STATUS_RET(body.call->Generate(tpipe, current_axis, call), "Codegen generate call failed");
       ss << call;
 
-      if (this->axis_id != af::kIdNone) {
-        auto axis = tiler.GetAxis(this->axis_id);
-        bool is_enable_cache = axis.is_split_b && body.call->enable_cache;
-        bool is_double_tile = IsReduceDoubleTile(tiler, tpipe, this->is_graph_has_reduce_node) &&
-                              current_axis.size() > kDoubleTileAxisSize;
-        if (is_enable_cache && (is_double_tile || !this->is_graph_has_reduce_node)) {
-          ss << "}" << std::endl;
-        }
+      if (!cache_guard.empty()) {
+        ss << "}" << std::endl;
       }
 
       if (!skips_ub_lifecycle) {

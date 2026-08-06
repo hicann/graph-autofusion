@@ -10,6 +10,8 @@
 
 #include "gtest/gtest.h"
 
+#include <algorithm>
+
 #include "node_utils_ex.h"
 #include "graph_utils.h"
 
@@ -5952,6 +5954,73 @@ TEST(CodegenKernel, BroadcastInlineWithExecCondition) {
                         "}\n\n"
                         "}\n"
                         "}\n"});
+}
+
+TEST(CodegenKernel, CacheGuardIsOnlyClosedWhenAConditionIsGenerated) {
+  af::SizeVar size(af::Symbol("size"));
+  af::Axis axis{.id = 0, .name = "axis", .size = size.expr};
+
+  codegen::Tiler tiler;
+  tiler.AddSizeVar(size);
+  tiler.AddAxis(axis);
+  tiler.axis_map.at(axis.id).is_split_b = true;
+
+  codegen::Loop loop(axis.id);
+  auto valid_call = new MockApiCall("valid_call");
+  valid_call->enable_cache = true;
+  valid_call->exec_condition = af::ExecuteCondition::kCacheBlockSplitOriginBroadcastAxis;
+  valid_call->unit = af::ComputeUnit::kUnitVector;
+  auto invalid_call = new MockApiCall("invalid_call");
+  invalid_call->enable_cache = true;
+  invalid_call->exec_condition = af::ExecuteCondition::kConditionInvalid;
+  invalid_call->unit = af::ComputeUnit::kUnitVector;
+  loop.AddCall(valid_call);
+  loop.AddCall(invalid_call);
+
+  codegen::TPipe tpipe("tpipe", tiler);
+  std::string result;
+  ASSERT_EQ(loop.Generate(tiler, tpipe, result), af::SUCCESS);
+  EXPECT_NE(result.find("if (enable_cache_origin_brc_axis) {\n();\n}\n"), std::string::npos);
+  EXPECT_NE(result.find("}\n\n();\n\n}"), std::string::npos);
+  EXPECT_EQ(std::count(result.begin(), result.end(), '{'), std::count(result.begin(), result.end(), '}'));
+}
+
+TEST(CodegenKernel, ReduceDoubleTileUsesReduceSpecificCacheCondition) {
+  af::SizeVar outer_size(af::Symbol("outer_size"));
+  af::SizeVar tile0_size(af::Symbol("tile0_size"));
+  af::SizeVar tile1_size(af::Symbol("tile1_size"));
+  af::Axis outer{.id = 0, .name = "outer", .size = outer_size.expr};
+  af::Axis tile0{.id = 1, .name = "tile0", .type = af::Axis::Type::kAxisTypeTileInner, .size = tile0_size.expr};
+  af::Axis tile1{.id = 2, .name = "tile1", .type = af::Axis::Type::kAxisTypeTileInner, .size = tile1_size.expr};
+  codegen::Tiler tiler;
+  tiler.AddSizeVar(outer_size);
+  tiler.AddSizeVar(tile0_size);
+  tiler.AddSizeVar(tile1_size);
+  tiler.AddAxis(outer);
+  tiler.AddAxis(tile0);
+  tiler.AddAxis(tile1);
+  tiler.axis_map.at(outer.id).is_split_b = true;
+  tiler.axis_map.at(tile0.id).is_split_b = true;
+  tiler.axis_map.at(tile1.id).is_split_b = true;
+
+  codegen::TPipe tpipe("tpipe", tiler);
+  codegen::Loop loop(tile1.id);
+  loop.is_graph_has_reduce_node = true;
+
+  auto cached_call = new MockApiCall("cached_call");
+  cached_call->enable_cache = true;
+  cached_call->enable_cache_with_condition = "dis_enable_cache_r";
+  cached_call->exec_condition = af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis;
+  cached_call->unit = af::ComputeUnit::kUnitVector;
+
+  const auto &axis = tiler.GetAxis(tile1.id);
+  const bool is_split_b = axis.is_split_b;
+  const bool is_double_tile = true;
+  ASSERT_TRUE(is_split_b);
+  ASSERT_TRUE(is_double_tile);
+  EXPECT_EQ(cached_call->enable_cache_with_condition, "dis_enable_cache_r");
+  EXPECT_EQ(cached_call->exec_condition, af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis);
+  delete cached_call;
 }
 
 TEST(CodegenKernel, CalculateVectorizedAixsMergeStatus) {

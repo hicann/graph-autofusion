@@ -19,6 +19,7 @@
 #include "optimize/graph_pass/pow_equiv_substitution_pass.h"
 #include "optimize/graph_pass/masked_fill_input_reorder_pass.h"
 #include "v35/optimize/graph_pass/continues_broadcast_optimization.h"
+#include "v35/optimize/graph_pass/same_source_broadcast_cse_pass.h"
 #include "v35/optimize/graph_pass/gather_to_load.h"
 #include "v35/optimize/graph_pass/softmax_pattern_fusion_pass.h"
 #include "v35/optimize/graph_pass/split_concat_optimization_pass.h"
@@ -35,6 +36,7 @@ class PassRunnerV2 final : public BasePassRunner {
     this->RegisterPass<ExpandDimsForAllReducePass>();
     this->RegisterPass<ContinuesBroadcastOptimizationPass>();
     this->RegisterPass<SoftmaxPatternFusionPass>();
+    this->RegisterPass<SameSourceBroadcastCsePass>();
     this->RegisterPass<GatherToLoadPass>();
     this->RegisterPass<SplitConcatOptimizationPass>();
   }
