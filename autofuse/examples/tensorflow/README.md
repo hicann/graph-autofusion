@@ -8,8 +8,10 @@
 
 ```text
 ├── README.md                              # 本文档
+├── README_en.md                           # 英文文档
 └── af_tf_eleandele/                       # elementwise 类型算子融合的样例
     ├── README.md                          # 样例说明
+    ├── README_en.md                       # 英文样例说明
     └── test_abs_relu_exp.py               # 通过 autofuse 完成 abs + relu + exp 三个 elementwise 算子的融合
 ```
 
@@ -71,7 +73,6 @@ python3 test_abs_relu_exp.py --mode tf2-compat
 ## 参考
 
 - [Autofuse 简介](../../README.md)
-- [Autofuse 业务流程](../../../docs/zh/component_workflow.md)
 - [环境编译部署](../../../docs/env_install/tensorflow/env_tf.md)
 - [aarch64 架构 TF 源码编译](../../../docs/env_install/tensorflow/build_tf_aarch64.md)
 - [精度调试工具指南](https://hiascend.com/document/redirect/CannCommunityToolAccucacy)

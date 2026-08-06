@@ -2,31 +2,29 @@
 
 ## Introduction
 
-AutoFuse is an automatic fusion framework based on Ascend C, supporting automatic fusion scope identification, automatic operator code generation, Auto Tiling optimization, dynamic shape, and mixed precision features. In algorithm networks, due to numerous Vector calculations, substantial memory transfers occur between Vector calculations, causing Memory Bound issues. AutoFuse automatically fuses multiple operators into a single operator, reducing the number of operators and memory transfers in the network, thereby alleviating Memory Bound issues, releasing Ascend computing power, and improving model execution performance.
+AutoFuse is an automatic fusion framework based on Ascend C. It supports automatic fusion scope identification, automatic operator code generation, Auto Tiling optimization, dynamic shape, mixed precision, and other features. In algorithm networks, a large number of Vector computations may cause substantial memory transfers between Vector computations, resulting in Memory Bound issues. AutoFuse automatically fuses multiple operators into a single operator, reducing the number of operators and memory transfers in the network. This alleviates Memory Bound issues, unleashes Ascend computing power, and improves model execution performance.
 
-For detailed introduction, refer to "[Autofuse Automatic Fusion](https://www.hiascend.com/document/detail/zh/canncommercial/850/graph/autofuse)".
+For details, refer to [AutoFuse Automatic Fusion](https://www.hiascend.com/document/detail/zh/canncommercial/850/graph/autofuse).
 
 ## Autofuse Directory Structure
 
 ```text
 autofuse/
-├── ascendc                # ascendc api definitions
-├── ascir                  # operator registration ascir
-├── att                    # automatic tiling generation module
-├── autofuse               # config configuration
-├── cmake                  # third-party library related configuration
-├── codegen                # kernel code generation module
-├── common                 # common utility methods
-├── compiler               # external API interface
-├── examples               # example scripts demonstrating typical usage
-├── graph_metadef          # basic graph interface
-├── inc                    # interface for GE calls
-├── optimize               # scheduling and partitioning module
-├── scripts                # script path
-├── v35                    # Ascend 950 chip related optimization
+├── ascendc                # Ascend C API definitions
+├── ascir                  # AscIR operator registration
+├── att                    # Automatic tiling generation module
+├── cmake                  # CMake script files
+├── codegen                # Kernel code generation module
+├── common                 # Common utility methods
+├── compiler               # External API interfaces
+├── examples               # Example scripts demonstrating typical usage
+├── graph_metadef          # Basic graph interfaces
+├── inc                    # Interfaces provided for GE
+├── optimize               # Scheduling and partitioning module
+├── scripts                # Script directory
+├── v35                    # Ascend 950 chip-related optimizations
 ├── CMakeLists.txt         # CMake configuration file
-├── blacklist.txt          # project configuration file
-├── build_third_party.sh   # third-party library installation script
+├── blacklist.txt          # Project configuration file
 ├── README.md
 ```
 
@@ -36,11 +34,14 @@ Refer to [Build Instructions](../docs/en/build.md).
 
 ## On-Device Verification Guide
 
-Users who wish to experience AutoFuse functionality and performance on Ascend devices can first refer to [Quick Installation](../docs/en/quick_install.md) to prepare the environment. Whether developers have Ascend devices or not, they can quickly set up the environment. On this basis, following the previous [Build and Installation](../docs/en/build.md), incrementally install the CANN package compiled from the graph-autofusion repository.
+Users who want to experience the functionality and performance of AutoFuse on Ascend devices can first refer to [Quick Installation](../docs/en/quick_install.md) to prepare the environment. Both developers without Ascend devices and developers who already have Ascend devices can quickly set up the environment. On this basis, follow the previous [Build and Installation](../docs/en/build.md) instructions to incrementally install the CANN package compiled from the graph-autofusion repository.
 
-This section guides how to set up a PyTorch environment, create scripts, run through the Inductor + AutoFuse scenario, visualize generated auto-fusion operators, and observe final kernel performance.
+AutoFuse currently provides sample use cases for both PyTorch and TensorFlow, with support for additional frameworks planned in the future. Refer to the corresponding documentation based on your actual use case to set up the environment and run the samples:
 
-Currently, auto-fusion supports fusion of elementwise + element type, element + broadcast type, and element + reduce type operators. Support for more fusion scenarios (concat, gather, and so on) is gradually being released.
+- [PyTorch Scenario Use Cases](./examples/pytorch/README_en.md)
+- [TensorFlow Scenario Use Cases](./examples/tensorflow/README.md)
+
+The following uses a PyTorch scenario as an example to demonstrate how to set up the PyTorch environment, run the sample, and evaluate the performance of the resulting kernels using profiling data.
 
 ### Install Dependencies
 
@@ -50,15 +51,7 @@ Currently, auto-fusion supports fusion of elementwise + element type, element + 
 pip3 install numpy
 pip3 install pyyaml
 pip3 install setuptools
-pip3 install torch_npu==2.8  # Installing torch_npu via pip automatically installs the dependent torch version
-```
-
-#### Install inductor-npu-ext (AutoFuse enabling framework in Inductor)
-
-```bash
-git clone https://gitcode.com/Ascend/torchair.git
-cd torchair/experimental/_inductor_npu_ext/
-pip3 install -e ./python/
+pip3 install torch_npu==2.10.0  # torch_npu must be version 2.9.0 or later. Installing torch_npu through pip automatically installs the required torch version.
 ```
 
 #### Other Environment Dependencies
@@ -67,91 +60,126 @@ pip3 install -e ./python/
 CMake >= 3.16.0
 GCC >= 7.3.0
 ```
-On openEuler systems, you can install through the following commands:
+
+On openEuler systems, run the following command:
+
 ```bash
 sudo yum install cmake gcc
 ```
-On Ubuntu systems, you can install through the following commands:
+
+On Ubuntu systems, run the following command:
+
 ```bash
 sudo apt-get install cmake gcc
 ```
 
-### Sample Use Cases
-
-AutoFuse provides abundant sample use cases. Refer to [AutoFuse Samples](./examples/pytorch/README_en.md).
-
 ### Set Environment Variables
 
-Before executing use cases, set the following environment variables to configure the NPU device:
+Before executing the use cases, set the following environment variables to configure the NPU device:
+
 ```bash
-# Your own driver package installation path
+# Installation path of your driver package
 source /usr/local/Ascend/driver/bin/setenv.sh
-# Your own CANN package installation path
+# Installation path of your CANN package
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
-# Assume running on card 0, keep consistent with script
+# Assume that the script runs on device 0, consistent with the device configured in the script
 export ASCEND_DEVICE_ID=0
 ```
 
 ### Execute Use Cases
 
-Assume the use case name is test.py, execute directly:
+Assume that the use case is named `test.py`. Run it directly:
 
 ```bash
 python3 test.py
 ```
 
-### More Debugging Related Environment Variables
+### More Debugging-Related Environment Variables
 
 #### TORCH_COMPILE_DEBUG
 
-Purpose: Native torch environment variable that enables detailed debug logging and saving of compilation intermediate artifacts.
+Purpose: A native torch environment variable that enables detailed debugging logs and saves intermediate compilation artifacts.
 
 Usage:
+
 ```bash
 export TORCH_COMPILE_DEBUG=1
 ```
-Note: Multiple executions of the same script may skip compilation due to cache. Can use with TORCHINDUCTOR_FORCE_DISABLE_CACHES to force recompilation each execution.
+
+Note: Repeatedly executing the same script may skip compilation because of cached data. You can use `TORCHINDUCTOR_FORCE_DISABLE_CACHES` together with this variable to force recompilation during each execution.
 
 #### TORCHINDUCTOR_FORCE_DISABLE_CACHES
 
-Purpose: Native torch environment variable that disables Inductor cache, forcing recompilation each execution.
+Purpose: A native torch environment variable that disables the Inductor cache and forces recompilation during each execution.
 
 Usage:
+
 ```bash
 export TORCHINDUCTOR_FORCE_DISABLE_CACHES=1
 ```
-Note: Significantly increases graph startup time. Do not use this environment variable in actual deployment.
+
+Note: This significantly increases graph startup time. Do not use this environment variable in actual deployment.
 
 #### Optional: ASCEND_LAUNCH_BLOCKING
 
-Purpose: Native torch_npu environment variable that enables Ascend kernel synchronous execution. Each kernel launch waits for completion, facilitating identification of the first erroneous kernel.
+Purpose: A native torch_npu environment variable that enables synchronous execution of Ascend kernels. Each Kernel launch waits for completion, making it easier to identify the first Kernel that reports an error.
 
 Usage:
+
 ```bash
 export ASCEND_LAUNCH_BLOCKING=1
 ```
-Note: Significantly reduces launch performance. Do not use this environment variable in actual deployment.
+
+Note: This significantly reduces launch performance. Do not use this environment variable in actual deployment.
 
 #### Optional: AUTOFUSE_DFX_FLAGS
 
-Purpose: AutoFuse DFX environment variable that dumps internal fusion graph structure for each auto-fusion operator. pbtxt files can be opened with netron.app.
+Purpose: An AutoFuse DFX environment variable that saves the internal fusion graph structure corresponding to each automatically fused operator. The generated `.pbtxt` files can be opened and viewed using netron.app.
 
 Usage:
+
 ```bash
 export AUTOFUSE_DFX_FLAGS="--codegen_compile_debug=true;--debug_dir=/path-to-dump/"
 ```
-Note: Generates dump graphs for each fused operator from AutoFuse backend in the specified dump path.
+
+Note: The AutoFuse backend generates a dump graph for each fused operator in the specified dump path.
 
 ### Result Analysis & Debug Output Analysis
 
-After enabling TORCH_COMPILE_DEBUG, debug information output is located in the torch_compile_debug subdirectory under the execution directory. Directories prefixed with autofused_ are artifacts related to inductor-npu-ext, others are native Inductor artifacts. Each autofused_ prefix directory represents a white-box structure of a fusion operator. If no fusion operator is generated (that is, no fusion occurs), check the printed "Fallback aten.xxxx $reason: xx reason" information to determine the cause. Refer to [inductor-npu-ext User Manual](https://gitcode.com/Ascend/torchair/blob/master/experimental/_inductor_npu_ext/docs/manuals.md).
+After `TORCH_COMPILE_DEBUG` is enabled, debugging information is output to the `torch_compile_debug` subdirectory under the current execution directory. Directories prefixed with `autofused_` contain fused operator artifacts generated by the `torch_npu` AscendC backend, while the remaining directories contain native artifacts generated by PyTorch Inductor. Each directory prefixed with `autofused_` corresponds to the white-box structure of a fused operator and can be used to view the fusion scope and code generation results. If no directory prefixed with `autofused_` is generated, no fused operator was produced during the current compilation process. In this case, analyze the reason why fusion did not occur based on information such as `Fallback aten.xxxx $reason: xx reason` in the terminal output.
 
-Users can also observe operator performance gains after enabling auto-fusion through profiling configuration. For the sample use cases above, comment the "model = torch.compile(model, dynamic=False, fullgraph=True)" line to run single-operator flow. Then compare the total time of all operators in single-operator scenario in profiling with the total time of fusion operators when enabling Inductor + AutoFuse. For detailed Profiling performance analysis tool usage, refer to [Profiling Performance Analysis Tool Guide](https://hiascend.com/document/redirect/CannCommunityToolProfiling).
+Users can also use Profiling configurations to observe the operator performance gains after automatic fusion is enabled. For the preceding Sample use cases, comment out the entire `torch.compile(...)` code block so that the model runs in non-compiled mode, which can be used as a comparison scenario without automatic fusion enabled.
 
-Note that not all operators in the model can be fused. Operators not lowered at the Inductor layer still exist as single operators. Fusion improvement ratio equals (total operator time after fusion - total operator time before fusion) / total operator time before fusion. Further, observe the improvement of aiv_mte2_time (input transfer time) and aiv_mte3_time (output transfer time) for fusion operators.
+```python
+# model = torch.compile(
+#     model,
+#     dynamic=False,
+#     fullgraph=True,
+#     options={"npu_backend": "ascendc"},
+# )
+```
 
-For precision analysis, refer to [Precision Debugging Tool Guide](https://hiascend.com/document/redirect/CannCommunityToolAccucacy).
+Collect profiling data for both scenarios—with auto-fusion disabled and enabled—and compare the total execution time of all relevant operators within the same computation scope.
 
-### Enabling in Complex Networks
+For details about how to use the Profiling performance analysis tool, refer to the [Profiling Performance Analysis Tool Guide](https://hiascend.com/document/redirect/CannCommunityToolProfiling).
 
-Users who wish to enable AutoFuse in networks only need to import inductor_npu_ext after importing torch at the beginning of the model file.
+Note that not all operators in a model can be fused. Operators that are not lowered at the Inductor layer remain as standalone operators.The fusion performance improvement is calculated as follows:
+
+`(Total execution time of all operators before fusion - Total execution time of all operators after fusion) / Total execution time of all operators before fusion`
+
+For further analysis, you can compare the fused operator with the corresponding standalone operators in terms of `aiv_mte2_time` (input data transfer time) and `aiv_mte3_time` (output data transfer time) to evaluate the reduction in data transfer overhead.
+
+For precision analysis, refer to the [Precision Debugging Tool Guide](https://hiascend.com/document/redirect/CannCommunityToolAccucacy).
+
+### Enabling AutoFuse in Complex Networks
+
+To enable AutoFuse in a network, users do not need to import `inductor_npu_ext` separately. Specify the AscendC backend in `torch.compile`:
+
+```python
+model = torch.compile(
+    model,
+    dynamic=False,
+    fullgraph=True,
+    options={"npu_backend": "ascendc"},
+)
+```

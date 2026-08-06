@@ -320,4 +320,4 @@ bash build.sh --pkg
 
    执行完成后根据输出日志查看覆盖率情况，确认所有测试用例通过。
 
-**安装完成后可参考[样例运行](../../super_kernel/examples/README.md)尝试运行样例**。
+**安装完成后可参考[super_kernel样例运行](../../super_kernel/examples/README.md)或[autofusion样例运行](../../autofuse/examples/pytorch/README.md)尝试运行样例**。

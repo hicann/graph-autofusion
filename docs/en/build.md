@@ -320,4 +320,4 @@ After installation, you can perform developer testing. Ensure you have completed
 
    After execution, check the coverage status through the output log. Confirm all test cases pass.
 
-**After installation, refer to [Sample Execution](../../super_kernel/examples/README_en.md) to try running samples**.
+**After the installation is complete, you can refer to the [SuperKernel sample](../../super_kernel/examples/README_en.md) or the [AutoFusion sample](../../autofuse/examples/pytorch/README_en.md) to run the examples.**
