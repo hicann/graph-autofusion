@@ -390,10 +390,32 @@ Status Codegen::Generate(const ascir::FusedScheduledResult &fused_schedule_resul
 // inductor路径仍返回单个host_tiling字符串，通过注释marker保留拆分边界
 Status Codegen::GenerateForInductor(const ascir::FusedScheduledResult &fused_schedule_result,
                                     CodegenResult &result) const {
+  const auto generate_tiling_without_pgo = [&]() {
+    if (!tiling_lib_.IsInductorPgoEnabled() || ascgen_utils::IsCubeFusedScheduled(fused_schedule_result) ||
+        !ascgen_utils::IsStaticSchedResult(fused_schedule_result)) {
+      return af::FAILED;
+    }
+    GELOGW("Inductor PGO codegen failed, fallback to non-PGO codegen for static non-CV kernel");
+    Codegen fallback(*this);
+    fallback.tiling_lib_.DisableInductorPgo();
+    return fallback.GenerateForInductor(fused_schedule_result, result);
+  };
   GE_CHK_STATUS_RET(GenerateKernel(fused_schedule_result, result.kernel, true), "Codegen generate kernel failed");
   result.tiling_data = GenerateTilingData(fused_schedule_result, true);
   std::map<std::string, std::string> tiling_file_name_to_content;
-  GE_CHK_STATUS_RET(GenerateTilingForInductor(fused_schedule_result, tiling_file_name_to_content));
+  const auto tiling_ret = GenerateTilingForInductor(fused_schedule_result, tiling_file_name_to_content);
+  if (tiling_ret != af::SUCCESS) {
+    if (generate_tiling_without_pgo() == af::SUCCESS) {
+      return af::SUCCESS;
+    }
+    GE_CHK_STATUS_RET(tiling_ret, "Codegen generate tiling failed");
+  }
+  const auto pgo_runner = tiling_file_name_to_content.find(kPgoRunnerIdentify);
+  if (pgo_runner != tiling_file_name_to_content.end()) {
+    GE_CHK_BOOL_RET_STATUS(!pgo_runner->second.empty() && !result.kernel.empty(), af::FAILED,
+                           "Inductor PGO runner or device source is empty");
+    tiling_file_name_to_content[kPgoDeviceSourceIdentify] = result.kernel;
+  }
   GE_CHK_STATUS_RET(CombineTilingsWithSplitMarkers(tiling_file_name_to_content, result.tiling));
   return af::SUCCESS;
 }

@@ -463,8 +463,10 @@ std::string WrapAtomicHeaderBody(autofuse::GeneratedHeaderId header_id, const st
              " &tiling_data);\nnamespace optiling {\nstruct PgoTensorArgs;\nstruct SearchConfig;\n" + body +
              "}  // namespace optiling\n";
     }
-    return "struct AutofuseTilingDataPerf;\nnamespace optiling {\nstruct " + tiling_data_type_name +
-           ";\nstruct PgoTensorArgs;\nstruct SearchConfig;\n" + body + "}  // namespace optiling\n";
+    const std::string global_tiling_decl = is_autofuse ? "struct AutofuseTilingData;\n" : "";
+    return global_tiling_decl + "struct AutofuseTilingDataPerf;\nnamespace optiling {\nstruct " +
+           tiling_data_type_name + ";\nstruct PgoTensorArgs;\nstruct SearchConfig;\n" + body +
+           "}  // namespace optiling\n";
   }
   std::string prefix;
   if (header_id == autofuse::GeneratedHeaderId::kSolver) {
@@ -1031,6 +1033,8 @@ void TilingCodeGenImpl::GenPgoConfigDefs(ge::CodePrinter &pgo_header) {
   pgo_header.AddLine("  ProfilingCallback single_callback;");
   pgo_header.AddLine("  ProfilingBatchCallback batch_callback;");
   pgo_header.AddLine("  PgoTensorArgs *tensor_args = nullptr;");
+  pgo_header.AddLine("  std::vector<AutofuseTilingDataPerf> *measured_candidates = nullptr;");
+  pgo_header.AddLine("  void *stream = nullptr;");
   pgo_header.AddLine("  int32_t pgo_algorithm = 1; // 0 for pruning, 1 for core num");
   pgo_header.AddLine("  bool need_change_solver_run = false;");
   pgo_header.AddLine("  size_t pgo_threshold_index = 0;");
@@ -2930,8 +2934,10 @@ void TilingCodeGenImpl::GenPGOSearchTilingKeyUniqGroupBatch() {
   tiling_func_.AddLine("  workspaceSize += 16 * 1024 * 1024;");
   tiling_func_.AddLine("  if (PgoConfig::Instance().batch_callback != nullptr) {");
   tiling_func_.AddLine(
-      "    PgoConfig::Instance().batch_callback(PgoConfig::Instance().tensor_args, stream, "
-      "workspaceSize, &tiling_data_list);");
+      "    if (PgoConfig::Instance().batch_callback(PgoConfig::Instance().tensor_args, stream, "
+      "workspaceSize, &tiling_data_list) != 0) {");
+  tiling_func_.AddLine("      return false;");
+  tiling_func_.AddLine("    }");
   tiling_func_.AddLine("  }");
   tiling_func_.AddLine("  for (const auto &tiling_data_perf : tiling_data_list) {");
   tiling_func_.AddLine("    if (best_perf > tiling_data_perf.best_perf) {");
@@ -3967,8 +3973,10 @@ af::Status TilingCodeGenImpl::GenPGOGetScheduleResultPerGroup(
   tiling_func_.AddLine("    workspaceSize += 16 * 1024 * 1024;");
   tiling_func_.AddLine("    if (PgoConfig::Instance().batch_callback) {");
   tiling_func_.AddLine(
-      "      PgoConfig::Instance().batch_callback(PgoConfig::Instance().tensor_args, stream, "
-      "workspaceSize, &tiling_data_list_tmp);");
+      "      if (PgoConfig::Instance().batch_callback(PgoConfig::Instance().tensor_args, stream, "
+      "workspaceSize, &tiling_data_list_tmp) != 0) {");
+  tiling_func_.AddLine("        return false;");
+  tiling_func_.AddLine("      }");
   tiling_func_.AddLine("    }");
   tiling_func_.AddLine("    for (size_t candidate_index = " + candidate_begin_name +
                        "; candidate_index < tiling_data_list_tmp.size(); ++candidate_index) {");
@@ -5074,7 +5082,7 @@ af::Status TilingCodeGenImpl::GenPGOReuseGroupTilingWrapper() {
   // Gen PGOProfileReuseGroup: reuse group does not search, only profiles by copying from primary group
   std::string pgo_profile_sig =
       std::string("bool PGOProfileReuseGroup(std::vector<AutofuseTilingDataPerf>& tiling_data_list, ") +
-      config_.tiling_data_type_name + "* output_tiling_data, void* stream, uint32_t workspaceSize, double& best_perf)";
+      "AutofuseTilingData* output_tiling_data, void* stream, uint32_t workspaceSize, double& best_perf)";
   AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kApi, pgo_profile_sig + ";");
   tiling_func_.AddLine(pgo_profile_sig + " {");
   tiling_func_.AddLine("  double cur_perf = DBL_MAX;");

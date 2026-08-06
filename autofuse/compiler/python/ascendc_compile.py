@@ -10,6 +10,8 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 import ctypes
+import hashlib
+import json
 import os
 import re
 import sys
@@ -17,8 +19,11 @@ import shutil
 import argparse
 import subprocess
 import platform
+import tempfile
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+from dataclasses import dataclass
 from functools import wraps
 from typing import List
 from asc_op_compile_base.common.platform.platform_info import get_soc_spec
@@ -30,6 +35,9 @@ HOST_LINK_LIBRARIES = ["tiling_api", "platform", "graph_base", "register"]
 CV_HOST_LINK_LIBRARIES = HOST_LINK_LIBRARIES + ["nnopbase"]
 INDUCTOR_COMPILE_TRACE_LABEL = "InductorCompile"
 HOST_COMPILE_MAX_WORKERS = 32
+PGO_BUNDLE_SCHEMA_VERSION = 1
+PGO_RESULT_PROTOCOL_VERSION = 1
+PGO_KERNEL_FORMAT = "aicore_binary_elf_v1"
 if not os.path.exists(ASCEND_PATH):
     ASCEND_PATH = os.getenv("ASCEND_HOME_PATH", ASCEND_PATH)
 
@@ -38,17 +46,14 @@ class CompileError(Exception):
     """Compile failed exception."""
 
 
-def parse_env_flags(env_name):
-    result = {}
-    flags = os.getenv(env_name)
-    if not flags:
-        return result
-    params = flags.split(";")
-    for param in params:
-        if "=" in param:
-            key_part, value_part = param.split("=", 1)
-            result[key_part.lstrip("-")] = value_part
-    return result
+@dataclass(frozen=True)
+class PgoBundle:
+    tiling_file: str
+    runner_file: str
+    kernel_file: str
+    output_file: str
+    generation: str
+    ld_preload: str = ""
 
 
 def record_inductor_compile_duration(stage, step, graph_name, start, duration):
@@ -127,6 +132,180 @@ def link_shared(target_file, obj_files, link_libraries=None):
     return target_file
 
 
+def link_pgo_executable(target_file, obj_files, mspti_link_flags):
+    link_command = [f"{ASCEND_PATH}/tools/bisheng_compiler/bin/bisheng", *obj_files]
+    link_command.extend(["-fPIC", "-o", target_file])
+    link_command.extend(["-L", f"{ASCEND_PATH}/lib64"])
+    link_command.extend(["-L", f"{ASCEND_PATH}/{machine}-linux/lib64"])
+    link_command.extend([f"-l{link_library}" for link_library in HOST_LINK_LIBRARIES])
+    link_command.extend(
+        ["-lascendcl", "-lruntime", "-lunified_dlog", "-lascendalog", "-lc_sec", "-lm"]
+    )
+    link_command.extend(
+        f"-Wl,-rpath,{option[2:]}"
+        for option in mspti_link_flags
+        if option.startswith("-L") and len(option) > 2
+    )
+    link_command.extend(mspti_link_flags)
+    link_command.extend(["-ldl", "-lpthread"])
+    run_compile_command(link_command, "LinkPgoExecutable")
+    return target_file
+
+
+def extract_aicore_binary(device_obj_file, output_file):
+    objcopy = shutil.which("llvm-objcopy")
+    if objcopy is None:
+        objcopy = os.path.join(
+            ASCEND_PATH, "tools", "bisheng_compiler", "bin", "llvm-objcopy"
+        )
+    if not os.path.isfile(objcopy):
+        raise CompileError("llvm-objcopy is required for Inductor PGO device binary")
+    run_compile_command(
+        [objcopy, "--dump-section", f".aicore_binary={output_file}", device_obj_file],
+        "ExtractPgoDeviceBinary",
+    )
+    if not os.path.isfile(output_file) or os.path.getsize(output_file) == 0:
+        raise CompileError("extracted Inductor PGO device binary is empty")
+    return output_file
+
+
+def build_pgo_sidecars(args, temp_dir):
+    mspti_dir, preload_files, link_flags = args.pgo_mspti_config
+    args.pgo_mspti_dir = mspti_dir
+    args.pgo_ld_preload = ":".join(preload_files)
+    runner_obj = compile_host_obj_file(args, temp_dir, args.pgo_runner_file)
+    runner_file = os.path.join(temp_dir, "pgo_runner")
+    link_pgo_executable(runner_file, [runner_obj], link_flags)
+    args.device_files = args.pgo_device_file
+    device_obj = compile_device_obj(args, temp_dir)
+    kernel_file = os.path.join(temp_dir, f"pgo_kernel.{PGO_KERNEL_FORMAT}")
+    extract_aicore_binary(device_obj, kernel_file)
+    return runner_file, kernel_file
+
+
+def get_pgo_sidecar_paths(output_file, generation):
+    generation_dir = f"{os.path.realpath(output_file)}.pgo.{generation}"
+    output_name = os.path.basename(output_file)
+    return {
+        "generation_dir": generation_dir,
+        "tiling_so": os.path.join(generation_dir, output_name),
+        "runner": os.path.join(generation_dir, f"{output_name}.pgo_runner"),
+        "kernel": os.path.join(
+            generation_dir, f"{output_name}.pgo_kernel.{PGO_KERNEL_FORMAT}"
+        ),
+        "manifest": os.path.join(generation_dir, "manifest.json"),
+    }
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_pgo_manifest(bundle):
+    return {
+        "bundle_schema_version": PGO_BUNDLE_SCHEMA_VERSION,
+        "generation": bundle.generation,
+        "result_protocol_version": PGO_RESULT_PROTOCOL_VERSION,
+        "ld_preload": bundle.ld_preload,
+        "artifacts": {
+            "tiling_so": {
+                "file": os.path.basename(bundle.output_file),
+                "sha256": file_sha256(bundle.tiling_file),
+            },
+            "runner": {
+                "file": os.path.basename(bundle.runner_file),
+                "sha256": file_sha256(bundle.runner_file),
+            },
+            "kernel": {
+                "file": os.path.basename(bundle.kernel_file),
+                "sha256": file_sha256(bundle.kernel_file),
+            },
+        },
+    }
+
+
+def write_pgo_manifest(path, manifest):
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(manifest, file, sort_keys=True)
+        file.flush()
+        os.fsync(file.fileno())
+
+
+def cleanup_stale_pgo_generations(output_file, current_generation_dir):
+    output_file = os.path.realpath(output_file)
+    output_dir = os.path.dirname(output_file)
+    generation_prefix = os.path.basename(output_file) + ".pgo."
+    previous_generations = []
+    try:
+        for entry in os.scandir(output_dir):
+            if not entry.name.startswith(generation_prefix) or not entry.is_dir(
+                follow_symlinks=False
+            ):
+                continue
+            if os.path.realpath(entry.path) == os.path.realpath(current_generation_dir):
+                continue
+            previous_generations.append(
+                (entry.stat(follow_symlinks=False).st_mtime_ns, entry.name, entry.path)
+            )
+    except OSError:
+        return
+    previous_generations.sort(reverse=True)
+    for _, _, generation_dir in previous_generations[1:]:
+        shutil.rmtree(generation_dir, ignore_errors=True)
+
+
+def publish_pgo_bundle(bundle):
+    output_file = os.path.realpath(bundle.output_file)
+    output_dir = os.path.dirname(output_file)
+    os.makedirs(output_dir, exist_ok=True)
+    paths = get_pgo_sidecar_paths(output_file, bundle.generation)
+    staging_dir = tempfile.mkdtemp(
+        prefix=f".{os.path.basename(output_file)}.pgo.", dir=output_dir
+    )
+    staged_tiling = os.path.join(
+        output_dir, f".{os.path.basename(output_file)}.{bundle.generation}.tmp"
+    )
+    generation_published = False
+    try:
+        staged_generation_tiling = os.path.join(
+            staging_dir, os.path.basename(paths["tiling_so"])
+        )
+        staged_runner = os.path.join(staging_dir, os.path.basename(paths["runner"]))
+        staged_kernel = os.path.join(staging_dir, os.path.basename(paths["kernel"]))
+        shutil.copy2(bundle.tiling_file, staged_generation_tiling)
+        shutil.copy2(bundle.runner_file, staged_runner)
+        shutil.copy2(bundle.kernel_file, staged_kernel)
+        shutil.copy2(staged_generation_tiling, staged_tiling)
+        manifest = build_pgo_manifest(
+            PgoBundle(
+                staged_generation_tiling,
+                staged_runner,
+                staged_kernel,
+                output_file,
+                bundle.generation,
+                bundle.ld_preload,
+            )
+        )
+        write_pgo_manifest(os.path.join(staging_dir, "manifest.json"), manifest)
+        os.replace(staging_dir, paths["generation_dir"])
+        generation_published = True
+        os.replace(staged_tiling, output_file)
+        cleanup_stale_pgo_generations(output_file, paths["generation_dir"])
+        return paths
+    except OSError as ex:
+        if generation_published:
+            shutil.rmtree(paths["generation_dir"], ignore_errors=True)
+        raise CompileError(f"publish Inductor PGO bundle failed: {ex}") from ex
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        if os.path.exists(staged_tiling):
+            os.remove(staged_tiling)
+
+
 def iter_compile_source_files(args: argparse.Namespace):
     for source_files in (
         getattr(args, "host_files", None),
@@ -201,7 +380,7 @@ def build_host_include_options(temp_dir):
 
 def build_host_base_options(args: argparse.Namespace, temp_dir):
     soc_version = get_soc_type(args)
-    return [
+    options = [
         f"{ASCEND_PATH}/tools/bisheng_compiler/bin/bisheng",
         "-D",
         "kernel_EXPORTS",
@@ -214,6 +393,13 @@ def build_host_base_options(args: argparse.Namespace, temp_dir):
         "-Wfloat-equal",
         "-fvisibility=default",
     ]
+    mspti_dir = getattr(args, "pgo_mspti_dir", None)
+    if mspti_dir:
+        options.extend(["-I", os.path.join(mspti_dir, "include")])
+    pgo_generation = getattr(args, "pgo_generation", None)
+    if pgo_generation:
+        options.extend(["-D", f'AUTOFUSE_PGO_GENERATION="{pgo_generation}"'])
+    return options
 
 
 def build_host_output_options(source_file, obj_file):
@@ -618,6 +804,8 @@ def link_host_target(args, temp_dir):
     link_libraries = (
         CV_HOST_LINK_LIBRARIES if is_cv_fusion_compile(args) else HOST_LINK_LIBRARIES
     )
+    if getattr(args, "pgo_runner_file", None) is not None:
+        link_libraries = link_libraries + ["ascendcl", "runtime"]
     with InductorCompileDuration(args, "LinkHostSo"):
         link_shared(so_file, host_obj_paths, link_libraries=link_libraries)
     return so_file
@@ -661,21 +849,53 @@ def copy_so_to_output(so_file, args, src_directory):
     os.chdir(src_directory)
 
 
+def build_host_output(args):
+    should_build_sidecars = (
+        getattr(args, "pgo_runner_file", None) is not None
+        and getattr(args, "pgo_mspti_config", None) is not None
+    )
+    if should_build_sidecars:
+        args.pgo_generation = uuid.uuid4().hex
+    so_file = link_host_target(args, args.temp_dir)
+    if not should_build_sidecars:
+        return so_file
+    try:
+        runner_file, kernel_file = build_pgo_sidecars(args, args.temp_dir)
+        publish_pgo_bundle(
+            PgoBundle(
+                so_file,
+                runner_file,
+                kernel_file,
+                args.output_file,
+                args.pgo_generation,
+                getattr(args, "pgo_ld_preload", ""),
+            )
+        )
+        return None
+    except CompileError as ex:
+        print(f"[PGO] Inductor PGO sidecar build failed, skip PGO: {ex}")
+        return so_file
+
+
 def main(args):
     print("compile args:", args)
     src_directory = os.getcwd()
     os.chdir(args.temp_dir)
     print("change work dir:", os.getcwd())
+    try:
+        if args.stage == "host":
+            so_file = build_host_output(args)
+            if so_file is None:
+                return
+        elif args.stage == "device":
+            so_file = link_kernel_target(args, None, args.temp_dir)
+        else:  # all
+            host_obj_paths = compile_host_objs(args, args.temp_dir)
+            so_file = link_kernel_target(args, host_obj_paths, args.temp_dir)
 
-    if args.stage == "host":
-        so_file = link_host_target(args, args.temp_dir)
-    elif args.stage == "device":
-        so_file = link_kernel_target(args, None, args.temp_dir)
-    else:  # all
-        host_obj_paths = compile_host_objs(args, args.temp_dir)
-        so_file = link_kernel_target(args, host_obj_paths, args.temp_dir)
-
-    copy_so_to_output(so_file, args, src_directory)
+        copy_so_to_output(so_file, args, src_directory)
+    finally:
+        os.chdir(src_directory)
 
 
 def main_with_except(argv: List[str]):

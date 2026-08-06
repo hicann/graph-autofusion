@@ -47,6 +47,14 @@ void PgoEnvConfigInit(TilingCodeGenConfig &generator_config) {
   }
 }
 
+void OverridePgoConfigByOptions(TilingCodeGenConfig &generator_config,
+                                const std::map<std::string, std::string> &options) {
+  const auto iter = options.find(kInternalEnableAutofusePgo);
+  if (iter != options.cend()) {
+    generator_config.enable_autofuse_pgo = (iter->second == "true");
+  }
+}
+
 af::Status InitializeConfigByEnvOrIni(TilingCodeGenConfig &generator_config) {
   // ATT的配置初始化，当前前端不支持传入配置文件的目录，所以这里直接使用默认的配置文件路径
   const auto res = AutoFuseConfig::MutableAttStrategyConfig().Init();
@@ -188,6 +196,7 @@ bool GenTilingImplAutoFuseV3(const std::string &op_name, const ascir::FusedSched
   generator_config.is_inductor_scene = is_inductor_scene;
   generator_config.is_cube = ascgen_utils::IsCubeFusedScheduled(fused_schedule_result);
   InitializeConfigByEnvOrIni(generator_config);
+  OverridePgoConfigByOptions(generator_config, options);
   TilingCodeGenerator generator;
   FusedParsedScheduleResult fused_parsed_schedule_result;
   GE_ASSERT_SUCCESS(GetModelInfoMap(fused_schedule_result, options, fused_parsed_schedule_result));

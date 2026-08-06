@@ -16,6 +16,8 @@
 #include "ascendc_ir/ascendc_ir_core/ascendc_ir.h"
 
 namespace att {
+inline constexpr char kInternalEnableAutofusePgo[] = "_internal_enable_autofuse_pgo";
+
 extern "C" {
 /**
  * @brief 生成Tiling函数

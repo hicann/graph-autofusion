@@ -175,8 +175,8 @@ void ExpectSimdFramework(const std::string &kernel) {
   ExpectBlockSplitFramework(function, "indirect_load_outer_axis_size = z4_loop_size * z5_loop_size * 1");
   EXPECT_NE(function.find("indirect_load_outert_axis_size = 1"), std::string::npos);
   EXPECT_TRUE(
-      ContainsInOrder(function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert", "VfNode_0",
-                                 "CopySignExtend(", "// IndirectLoad SIMD", "IndirectLoadSimd<", "CopySignExtend("}));
+      ContainsInOrder(function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert", "CopySignExtend(",
+                                 "// IndirectLoad SIMD", "IndirectLoadSimd<", "CopySignExtend("}));
   const std::vector<std::string> arguments = GetCallArguments(function, "IndirectLoadSimd<");
   ASSERT_GT(arguments.size(), 5UL);
   const std::string &actual_size = arguments[4UL];

@@ -116,6 +116,61 @@ struct NodeCmp {
   std::vector<NodeStatus> *nodes_info_;
 };
 
+int64_t GetNodeInputCount(const NodePtr &node) {
+  if ((node == nullptr) || (node->GetOpDesc() == nullptr)) {
+    return 0;
+  }
+  return static_cast<int64_t>(node->GetInDataNodesSize());
+}
+
+struct NodeCmpV2 {
+  NodeCmpV2(std::vector<NodeStatus> *nodes_info, const std::vector<int64_t> *branch_widths)
+      : nodes_info_(nodes_info), branch_widths_(branch_widths) {}
+  bool operator()(const NodePtr &lhs, const NodePtr &rhs) const {
+    const auto lhs_size = GetNodeOutputRealSize(lhs, *nodes_info_);
+    const auto rhs_size = GetNodeOutputRealSize(rhs, *nodes_info_);
+    if (lhs_size == rhs_size) {
+      const auto lhs_branch = (*branch_widths_)[static_cast<size_t>(lhs->GetOpDesc()->GetId())];
+      const auto rhs_branch = (*branch_widths_)[static_cast<size_t>(rhs->GetOpDesc()->GetId())];
+      if (lhs_branch == rhs_branch) {
+        return strcmp(lhs->GetNamePtr(), rhs->GetNamePtr()) > 0;
+      }
+      return lhs_branch < rhs_branch;
+    }
+    return lhs_size > rhs_size;
+  }
+  std::vector<NodeStatus> *nodes_info_;
+  const std::vector<int64_t> *branch_widths_;
+};
+
+template <typename Compare>
+graphStatus RDFSCoreSort(std::vector<NodePtr> &node_vec, std::vector<NodeStatus> &nodes_info,
+                         const ConstComputeGraphPtr &compute_graph, const Compare &cmp) {
+  for (const auto &node : compute_graph->GetDirectNode()) {
+    if (node->GetOutNodesSize() > 0U) {
+      continue;
+    }
+    std::vector<NodePtr> stack = {node};
+    while (!stack.empty()) {
+      const auto current = stack.back();
+      NodeStatus &info = nodes_info[current->GetOpDesc()->GetId()];
+      if (info.status == WalkStatus::kNotWalked) {
+        info.status = WalkStatus::kWalking;
+        const auto in_all_nodes = current->GetInAllNodes();
+        std::set<NodePtr, Compare> input_nodes{in_all_nodes.begin(), in_all_nodes.end(), cmp};
+        stack.insert(stack.end(), input_nodes.cbegin(), input_nodes.cend());
+        continue;
+      }
+      stack.pop_back();
+      if (info.status == WalkStatus::kWalking) {
+        info.status = WalkStatus::kWalked;
+        node_vec.emplace_back(current);
+      }
+    }
+  }
+  return GRAPH_SUCCESS;
+}
+
 struct NodeOutInfo {
   NodeOutInfo(const NodePtr &node, std::vector<NodeStatus> *nodes_info)
       : num_out_data_nodes(node->GetOutDataNodesSize()),
@@ -1464,39 +1519,46 @@ graphStatus ComputeGraphImpl::StableRDFSTopologicalSorting(std::vector<NodePtr> 
 graphStatus ComputeGraphImpl::RDFSTopologicalSorting(std::vector<NodePtr> &node_vec, const bool reverse,
                                                      const ConstComputeGraphPtr &compute_graph) const {
   (void)reverse;
-  GELOGI("Runing_Reverse_Dfs_Sort: %s", name_.c_str());
+  GELOGI("Running_Reverse_Dfs_Sort: %s", name_.c_str());
   std::vector<NodeStatus> nodes_info;
   InitNodeStatus(compute_graph, nodes_info);
+  NodeCmp cmp(&nodes_info);
+  return RDFSCoreSort(node_vec, nodes_info, compute_graph, cmp);
+}
 
-  for (const auto &node : compute_graph->GetDirectNode()) {
-    if (node->GetOutNodesSize() > 0U) {
-      continue;
-    }
+graphStatus ComputeGraphImpl::RDFSTopologicalSortingV2(std::vector<NodePtr> &node_vec, const bool reverse,
+                                                       const ConstComputeGraphPtr &compute_graph) const {
+  (void)reverse;
+  GELOGI("Running_Reverse_Dfs_Sort_V2: %s", name_.c_str());
+  std::vector<NodeStatus> nodes_info;
+  InitNodeStatus(compute_graph, nodes_info);
+  NodeCmp cmp(&nodes_info);
 
-    std::vector<NodePtr> stack = {node};
-    while (!stack.empty()) {
-      const auto current = stack.back();
-      NodeStatus &reverse_dfs_node_info = nodes_info[current->GetOpDesc()->GetId()];
-      if (reverse_dfs_node_info.status == WalkStatus::kNotWalked) {
-        reverse_dfs_node_info.status = WalkStatus::kWalking;
-
-        const auto in_all_nodes = current->GetInAllNodes();
-        NodeCmp cmp(&nodes_info);
-        std::set<NodePtr, NodeCmp> input_nodes{in_all_nodes.begin(), in_all_nodes.end(), cmp};
-        stack.insert(stack.end(), input_nodes.cbegin(), input_nodes.cend());
-        continue;
-      }
-      stack.pop_back();
-      if (reverse_dfs_node_info.status == WalkStatus::kWalking) {
-        reverse_dfs_node_info.status = WalkStatus::kWalked;
-        node_vec.emplace_back(current);
-        GE_CHECK_NOTNULL(current->GetOpDescBarePtr());
-        GELOGD("node_vec.push_back %s", current->GetOpDescBarePtr()->GetName().c_str());
-      }
-    }
+  std::vector<NodePtr> initial_vec;
+  if (RDFSCoreSort(initial_vec, nodes_info, compute_graph, cmp) != GRAPH_SUCCESS) {
+    return GRAPH_FAILED;
   }
 
-  return GRAPH_SUCCESS;
+  for (size_t i = 0UL; i < initial_vec.size(); ++i) {
+    initial_vec[i]->GetOpDescBarePtr()->SetId(static_cast<int64_t>(i));
+  }
+
+  std::vector<int64_t> branch_widths(initial_vec.size(), 0);
+  for (auto it = initial_vec.rbegin(); it != initial_vec.rend(); ++it) {
+    const auto &node = *it;
+    const auto id = static_cast<size_t>(node->GetOpDesc()->GetId());
+    int64_t width = GetNodeInputCount(node);
+    for (const auto &in_node : node->GetInAllNodes()) {
+      const auto in_id = static_cast<size_t>(in_node->GetOpDesc()->GetId());
+      width = std::max(width, branch_widths[in_id]);
+    }
+    branch_widths[id] = width;
+  }
+
+  std::fill(nodes_info.begin(), nodes_info.end(), NodeStatus{0U, WalkStatus::kNotWalked});
+
+  const NodeCmpV2 cmp_v2(&nodes_info, &branch_widths);
+  return RDFSCoreSort(node_vec, nodes_info, compute_graph, cmp_v2);
 }
 
 graphStatus ComputeGraphImpl::BFSTopologicalSorting(std::vector<NodePtr> &node_vec, const bool reverse,
@@ -2162,7 +2224,8 @@ graphStatus ComputeGraphImpl::DoTopologicalSorting(const ConstComputeGraphPtr &c
       {TopoSortingMode::kBFS, &ComputeGraphImpl::BFSTopologicalSorting},
       {TopoSortingMode::kDFS, &ComputeGraphImpl::DFSTopologicalSorting},
       {TopoSortingMode::kRDFS, &ComputeGraphImpl::RDFSTopologicalSorting},
-      {TopoSortingMode::kStableRDFS, &ComputeGraphImpl::StableRDFSTopologicalSorting}};
+      {TopoSortingMode::kStableRDFS, &ComputeGraphImpl::StableRDFSTopologicalSorting},
+      {TopoSortingMode::kRDFSV2, &ComputeGraphImpl::RDFSTopologicalSortingV2}};
 
   std::vector<NodePtr> node_vec;
   const auto it = topo_sorting_strategy.find(sorting_mode);
@@ -2194,7 +2257,7 @@ graphStatus ComputeGraphImpl::DoTopologicalSorting(const ConstComputeGraphPtr &c
 
   ClearNodeList();
   if ((IsMemoryPriority() && (sorting_mode != TopoSortingMode::kStableRDFS)) ||
-      (sorting_mode == TopoSortingMode::kRDFS)) {
+      (sorting_mode == TopoSortingMode::kRDFS) || (sorting_mode == TopoSortingMode::kRDFSV2)) {
     DelayTopoSort(node_vec, compute_graph);
   }
   for (size_t i = 0UL; i < node_vec.size(); i++) {

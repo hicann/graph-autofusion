@@ -323,11 +323,12 @@ bool ScheduleUtils::IsTailAxisAlignedBy(const af::AscNodePtr &node, const uint32
   return GetTailAxisDataSize(node, size) && size % align_bytes == 0;
 }
 
-Status ScheduleUtils::TopologicalSorting(af::AscGraph &graph) {
+Status ScheduleUtils::TopologicalSorting(af::AscGraph &graph, bool use_rdfs_v2) {
   auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
   GE_ASSERT_NOTNULL(compute_graph);
-  GE_ASSERT_GRAPH_SUCCESS(compute_graph->TopologicalSorting(af::TopoSortingMode::kRDFS),
-                          "TopologicalSorting failed, graph:[%s].", compute_graph->GetName().c_str());
+  const auto mode = use_rdfs_v2 ? af::TopoSortingMode::kRDFSV2 : af::TopoSortingMode::kRDFS;
+  GE_ASSERT_GRAPH_SUCCESS(compute_graph->TopologicalSorting(mode), "TopologicalSorting failed, graph:[%s].",
+                          compute_graph->GetName().c_str());
 
   bool is_need_fix_topo = false;
   for (const auto &node : graph.GetAllNodes()) {

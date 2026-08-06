@@ -864,7 +864,7 @@ std::string AxesReorderSolverGen::GenPGOSolverClassImpl() {
   codes += "  bool CalUsedCoreNum(double &used_core_num) override;\n";
   codes += "  bool CalRealUsedCoreNum(int64_t &used_corenum) override;\n";
   codes += "  bool SatisfyThresholdUBSize() override {return false;};\n";
-  codes += "  bool SatisfyUBSizeCacheLine(uint32_t idx) override {return false;};\n";
+  codes += "  bool SatisfyUBSizeCacheLine(uint32_t) override {return false;};\n";
   codes += "  double GetPerf() override {return 0;};\n";
   codes += "};\n";
   codes += "\n";

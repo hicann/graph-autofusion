@@ -184,7 +184,6 @@ inline int RunHostCompile(const std::string &tiling_def, const std::string &host
 struct HostHelperOptions {
   std::string input_configs_json = HOST_INPUT_CONFIGS_JSON;
   int64_t topn = HOST_TOPN;
-  std::string perf_order = HOST_PERF_ORDER;
   bool check_z0t_positive = false;
 };
 
@@ -193,8 +192,7 @@ inline int RunHostHelper(const std::string &host_bin, const std::string &tiling_
   const std::string input_configs_file = std::string(OUTPUT_DIR) + "/host_input_configs.json";
   WriteFile(input_configs_file, options.input_configs_json);
   std::string cmd = std::string(HOST_HELPER_BIN) + " --host-so " + host_bin + " --tiling-repr-out " + tiling_repr_file +
-                    " --input-configs " + input_configs_file + " --topn " + std::to_string(options.topn) +
-                    " --perf-order " + options.perf_order;
+                    " --input-configs " + input_configs_file + " --topn " + std::to_string(options.topn);
   if (!std::string(HOST_DYNAMIC_SHAPE_ARGS).empty()) {
     cmd += " --dynamic-shape-args " + std::string(HOST_DYNAMIC_SHAPE_ARGS);
   }

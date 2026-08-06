@@ -30,11 +30,6 @@ struct ResLimit {
   uint32_t resv[10];
 };
 
-enum class PerfOrderMode {
-  kAscendingSkipFirst,
-  kSortedByPerf,
-};
-
 struct HostHelperOptions {
   std::string host_so;
   std::string tiling_repr_out;
@@ -43,7 +38,6 @@ struct HostHelperOptions {
   int64_t topn = 4;
   bool verify_empty_config = false;
   bool check_z0t_positive = false;
-  PerfOrderMode perf_order_mode = PerfOrderMode::kAscendingSkipFirst;
 };
 
 class HostCaseRunner {
@@ -56,7 +50,6 @@ class HostCaseRunner {
   virtual int64_t ResultWorkspace(size_t index) const = 0;
   virtual int64_t ResultBlockDim(size_t index) const = 0;
   virtual std::string ResultRepr(size_t index) const = 0;
-  virtual double ResultPerf(size_t index) const = 0;
   virtual std::string DefaultRepr() const = 0;
   virtual uint32_t DefaultWorkspace() const = 0;
   virtual uint32_t DefaultBlockDim() const = 0;

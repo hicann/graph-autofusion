@@ -30,7 +30,6 @@ using autofuse::tests::ResolveSymbol;
 using autofuse::tests::RunHostCheck;
 
 using GetTilingDataReprFn = std::string (*)(const AutofuseTilingData *);
-using GetModeledPerfForTestingFn = double (*)(const AutofuseTilingData *);
 
 #ifndef INDUCTOR_HOST_HELPER_DYNAMIC_ARG_COUNT
 #define INDUCTOR_HOST_HELPER_DYNAMIC_ARG_COUNT 0
@@ -81,10 +80,9 @@ class TypedHostRunner : public HostCaseRunner {
 
   bool Resolve(void *handle) override {
     repr_ = ResolveSymbol<GetTilingDataReprFn>(handle, "GetTilingDataRepr");
-    perf_ = ResolveSymbol<GetModeledPerfForTestingFn>(handle, "GetModeledPerfForTesting");
     gen_ = ResolveSymbol<GenerateTopnSolutionsFn>(handle, "GenerateTopnSolutions");
     autofuse_tiling_ = ResolveSymbol<AutofuseTilingFn>(handle, "AutofuseTiling");
-    return repr_ != nullptr && perf_ != nullptr && gen_ != nullptr && autofuse_tiling_ != nullptr;
+    return repr_ != nullptr && gen_ != nullptr && autofuse_tiling_ != nullptr;
   }
 
   int64_t GenerateTopn(const InputConfigs &input_configs, int64_t topn) override {
@@ -110,9 +108,6 @@ class TypedHostRunner : public HostCaseRunner {
   }
   std::string ResultRepr(size_t index) const override {
     return repr_(&topn_result_.tiling_datas[index]);
-  }
-  double ResultPerf(size_t index) const override {
-    return perf_(&topn_result_.tiling_datas[index]);
   }
   bool VerifyExtraTopnResult() const override {
 #ifdef INDUCTOR_HOST_HELPER_CHECK_Z0T_POSITIVE
@@ -161,7 +156,6 @@ class TypedHostRunner : public HostCaseRunner {
   GenerateTopnSolutionsFn gen_ = nullptr;
   AutofuseTilingFn autofuse_tiling_ = nullptr;
   GetTilingDataReprFn repr_ = nullptr;
-  GetModeledPerfForTestingFn perf_ = nullptr;
 };
 
 }  // namespace

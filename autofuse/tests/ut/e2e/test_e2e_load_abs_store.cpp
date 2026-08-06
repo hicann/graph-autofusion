@@ -395,7 +395,9 @@ static std::string GetCodegenPGOCodeExpectCode() {
 #include <map>
 #include <string>
 #include <thread>
+#include <utility>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "acl/acl.h"
@@ -680,7 +682,7 @@ int WrapperOnlyLaunch(uint32_t workspace_size, AutofuseTilingData *tiling_data) 
   int64_t tiling_key = 0;
   if (find_best_tiling_key_fn != nullptr) {
     tiling_key = find_best_tiling_key_fn(*tiling_data);
-    if (tiling_key == -1) {
+    if (tiling_key < 0 || static_cast<uint64_t>(tiling_key) >= tiling_key_count) {
       DLOGE("find best tiling key failed");
       return FAILED;
     }
@@ -878,7 +880,7 @@ int ProfilingBatchProcess(uint32_t workspace_size, std::vector<AutofuseTilingDat
       durations.push_back(kernel->end - kernel->start);
       std::advance(it, 1);
     }
-    std::sort(durations.begin(), durations.end(), std::greater<int>());
+    std::sort(durations.begin(), durations.end(), std::greater<uint64_t>());
     for (size_t k = 1; k < 6; ++k) {
       total_duration += durations[k];
     }
@@ -995,7 +997,7 @@ extern "C" long int PGOGetProfiling(PgoTensorArgs *tensor_args, void *stream, ui
     durations.push_back(kernel->end - kernel->start);
     DLOGD("kernel duration:%" PRIu64 "", kernel->end - kernel->start);
   }
-  std::sort(durations.begin(), durations.end(), std::greater<int>());
+  std::sort(durations.begin(), durations.end(), std::greater<uint64_t>());
   for (size_t i = 1; i < 6; ++i) {
     total_duration += durations[i];
   }

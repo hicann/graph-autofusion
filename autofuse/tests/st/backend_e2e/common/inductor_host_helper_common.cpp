@@ -131,19 +131,6 @@ bool LoadInputConfigs(const std::string &path, InputConfigs *configs) {
   return true;
 }
 
-bool ParsePerfOrderMode(const std::string &text, PerfOrderMode *mode) {
-  if (text == "ascending-skip-first") {
-    *mode = PerfOrderMode::kAscendingSkipFirst;
-    return true;
-  }
-  if (text == "sorted-by-perf") {
-    *mode = PerfOrderMode::kSortedByPerf;
-    return true;
-  }
-  std::cerr << "unsupported perf order mode: " << text << std::endl;
-  return false;
-}
-
 bool ParseOptionValue(int argc, char **argv, int *index, std::string *value) {
   if (*index + 1 >= argc) {
     std::cerr << "missing value for " << argv[*index] << std::endl;
@@ -172,9 +159,6 @@ bool ApplyOption(const std::string &name, const std::string &value, HostHelperOp
   if (name == "--topn") {
     return ParseInt64(value, &options->topn);
   }
-  if (name == "--perf-order") {
-    return ParsePerfOrderMode(value, &options->perf_order_mode);
-  }
   std::cerr << "unsupported option: " << name << std::endl;
   return false;
 }
@@ -197,7 +181,7 @@ bool VerifyTopnResultShape(HostCaseRunner *runner, int64_t topn) {
          Check(runner->ResultSize() <= static_cast<size_t>(topn), "topn result size too large");
 }
 
-bool VerifyTopnResults(HostCaseRunner *runner, PerfOrderMode mode) {
+bool VerifyTopnResults(HostCaseRunner *runner) {
   std::vector<std::string> reprs;
   for (size_t i = 0; i < runner->ResultSize(); ++i) {
     const std::string repr = runner->ResultRepr(i);
@@ -214,24 +198,6 @@ bool VerifyTopnResults(HostCaseRunner *runner, PerfOrderMode mode) {
   if (!Check(std::unique(reprs.begin(), reprs.end()) == reprs.end(), "topn repr should be unique")) {
     return false;
   }
-  if (mode == PerfOrderMode::kSortedByPerf) {
-    std::vector<std::pair<double, std::string>> sorted_by_perf;
-    for (size_t i = 0; i < runner->ResultSize(); ++i) {
-      sorted_by_perf.emplace_back(runner->ResultPerf(i), runner->ResultRepr(i));
-    }
-    std::sort(sorted_by_perf.begin(), sorted_by_perf.end());
-    for (size_t i = 0; i < sorted_by_perf.size(); ++i) {
-      if (!Check(sorted_by_perf[i].second == runner->ResultRepr(i), "topn perf order mismatch")) {
-        return false;
-      }
-    }
-    return true;
-  }
-  for (size_t i = 2; i < runner->ResultSize(); ++i) {
-    if (!Check(runner->ResultPerf(i - 1) <= runner->ResultPerf(i), "topn perf should be ascending")) {
-      return false;
-    }
-  }
   return true;
 }
 
@@ -240,14 +206,13 @@ bool VerifyTopnUniqueness(HostCaseRunner *runner, const InputConfigs &input_conf
       !VerifyTopnResultShape(runner, options.topn)) {
     return false;
   }
-  return VerifyTopnResults(runner, options.perf_order_mode);
+  return VerifyTopnResults(runner);
 }
 
 bool VerifyEmptyConfigPath(HostCaseRunner *runner) {
   const InputConfigs empty_configs;
   return Check(runner->GenerateTopn(empty_configs, kTopnOne) == 0, "empty config GenerateTopnSolutions failed") &&
-         Check(runner->ResultSize() == 1U, "empty config result size should be 1") &&
-         VerifyTopnResults(runner, PerfOrderMode::kSortedByPerf);
+         Check(runner->ResultSize() == 1U, "empty config result size should be 1") && VerifyTopnResults(runner);
 }
 
 bool WriteFile(const std::string &path, const std::string &content) {

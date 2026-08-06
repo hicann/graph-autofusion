@@ -32,9 +32,6 @@
 #ifndef HOST_TOPN
 #define HOST_TOPN 4
 #endif
-#ifndef HOST_PERF_ORDER
-#define HOST_PERF_ORDER "ascending-skip-first"
-#endif
 #ifndef HOST_VERIFY_EMPTY_CONFIG
 #define HOST_VERIFY_EMPTY_CONFIG 0
 #endif

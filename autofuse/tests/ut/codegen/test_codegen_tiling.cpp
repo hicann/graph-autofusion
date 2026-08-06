@@ -25,6 +25,7 @@
 #include "ascgraph_info_complete.h"
 #include "optimize/optimize.h"
 #include "share_graph.h"
+#include "tests/common/inductor_pgo_codegen_test_utils.h"
 #include <fstream>
 #include <filesystem>
 
@@ -82,6 +83,31 @@ void ExpectSystemHeaders(const std::string &source, const std::vector<std::strin
     EXPECT_EQ(source.find("#include <" + header + ">"), std::string::npos) << header;
   }
 }
+
+std::string GetSplitContent(const std::string &combined, const std::string &key) {
+  const std::string begin_marker = "// AUTOFUSE_SPLIT_FILE_BEGIN: " + key + "\n";
+  const std::string end_marker = "// AUTOFUSE_SPLIT_FILE_END: " + key + "\n";
+  const size_t begin = combined.find(begin_marker);
+  if (begin == std::string::npos) {
+    return {};
+  }
+  const size_t content_begin = begin + begin_marker.size();
+  const size_t end = combined.find(end_marker, content_begin);
+  if (end == std::string::npos) {
+    return {};
+  }
+  return combined.substr(content_begin, end - content_begin);
+}
+
+uint64_t StableSourceHash(const std::string &source) {
+  uint64_t hash = 1469598103934665603ULL;
+  for (const unsigned char ch : source) {
+    hash = (hash ^ ch) * 1099511628211ULL;
+  }
+  return hash;
+}
+
+using autofuse::tests::ScopedAutofusePgoFlag;
 }  // namespace
 
 namespace {
@@ -1991,6 +2017,167 @@ TEST_F(TestCodegenTiling, TestPGOSearchTensorMallocDef) {
   ASSERT_EQ(mallocdef, expect);
 }
 
+TEST_F(TestCodegenTiling, TestPGOSearchTensorMallocDefUsesLargestCandidateOutput) {
+  af::AscGraph small_graph("small_graph");
+  af::ascir_op::Store small_store_op("small_store");
+  small_store_op.ir_attr.SetOffset(af::ops::Zero);
+  af::ascir_op::Output small_output_op("small_output");
+  small_output_op.ir_attr.SetIndex(0);
+  small_graph.AddNode(small_store_op);
+  small_graph.AddNode(small_output_op);
+  small_output_op.x = small_store_op.y;
+  auto small_output = small_graph.FindNode("small_output");
+  small_output->inputs[0].attr.repeats = {af::ops::One};
+  small_output->inputs[0].attr.strides = {af::ops::One};
+  small_output->inputs[0].attr.dtype = ge::DT_FLOAT16;
+
+  af::AscGraph large_graph("large_graph");
+  af::ascir_op::Store large_store_op("large_store");
+  large_store_op.ir_attr.SetOffset(af::Expression::Parse("12288"));
+  af::ascir_op::Output large_output_op("large_output");
+  large_output_op.ir_attr.SetIndex(0);
+  large_graph.AddNode(large_store_op);
+  large_graph.AddNode(large_output_op);
+  large_output_op.x = large_store_op.y;
+  auto large_output = large_graph.FindNode("large_output");
+  large_output->inputs[0].attr.repeats = {af::Expression::Parse("4096")};
+  large_output->inputs[0].attr.strides = {af::ops::One};
+  large_output->inputs[0].attr.dtype = ge::DT_FLOAT16;
+
+  ascir::ScheduledResult schedule_result;
+  schedule_result.schedule_groups.resize(1);
+  schedule_result.schedule_groups[0].impl_graphs = {small_graph, large_graph};
+
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.output_nodes.push_back(small_output);
+  fused_schedule_result.node_idx_to_scheduled_results.push_back({schedule_result});
+
+  const std::string malloc_def = this->PGOSearchTensorMallocDef(fused_schedule_result);
+  EXPECT_NE(malloc_def.find("  size_t output0_size = 2;\n"), std::string::npos);
+  EXPECT_NE(malloc_def.find("  output0_size = std::max(output0_size, static_cast<size_t>(32768));\n"),
+            std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, TestPGOSearchTensorMallocDefUsesLargestCandidateInput) {
+  af::AscGraph small_graph("small_graph");
+  af::ascir_op::Data small_input_op("small_input", small_graph);
+  small_input_op.ir_attr.SetIndex(0);
+  af::ascir_op::Load small_load_op("small_load");
+  small_load_op.ir_attr.SetOffset(af::ops::Zero);
+  small_graph.AddNode(small_load_op);
+  small_load_op.x = small_input_op.y;
+  auto small_input = small_graph.FindNode("small_input");
+  auto small_load = small_graph.FindNode("small_load");
+  small_load->outputs[0].attr.repeats = {af::ops::One};
+  small_load->outputs[0].attr.strides = {af::ops::One};
+  small_load->outputs[0].attr.dtype = ge::DT_FLOAT16;
+
+  af::AscGraph large_graph("large_graph");
+  af::ascir_op::Data large_input_op("large_input", large_graph);
+  large_input_op.ir_attr.SetIndex(0);
+  af::ascir_op::Load large_load_op("large_load");
+  large_load_op.ir_attr.SetOffset(af::Expression::Parse("12288"));
+  large_graph.AddNode(large_load_op);
+  large_load_op.x = large_input_op.y;
+  auto large_load = large_graph.FindNode("large_load");
+  large_load->outputs[0].attr.repeats = {af::Expression::Parse("4096")};
+  large_load->outputs[0].attr.strides = {af::ops::One};
+  large_load->outputs[0].attr.dtype = ge::DT_FLOAT16;
+
+  ascir::ScheduledResult schedule_result;
+  schedule_result.schedule_groups.resize(1);
+  schedule_result.schedule_groups[0].impl_graphs = {small_graph, large_graph};
+
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.input_nodes.push_back(small_input);
+  fused_schedule_result.node_idx_to_scheduled_results.push_back({schedule_result});
+
+  const std::string malloc_def = this->PGOSearchTensorMallocDef(fused_schedule_result);
+  EXPECT_NE(malloc_def.find("  size_t input0_size = 2;\n"), std::string::npos);
+  EXPECT_NE(malloc_def.find("  input0_size = std::max(input0_size, static_cast<size_t>(32768));\n"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, TestPGOSearchTensorMallocDefRejectsSymbolicCandidateSize) {
+  af::AscGraph fallback_graph("fallback_graph");
+  af::ascir_op::Store fallback_store_op("fallback_store");
+  af::ascir_op::Output fallback_output_op("fallback_output");
+  fallback_output_op.ir_attr.SetIndex(0);
+  fallback_graph.AddNode(fallback_store_op);
+  fallback_graph.AddNode(fallback_output_op);
+  fallback_output_op.x = fallback_store_op.y;
+  auto fallback_output = fallback_graph.FindNode("fallback_output");
+  fallback_output->inputs[0].attr.repeats = {af::Expression::Parse("1024")};
+  fallback_output->inputs[0].attr.strides = {af::ops::One};
+  fallback_output->inputs[0].attr.dtype = ge::DT_FLOAT16;
+
+  af::AscGraph graph("symbolic_graph");
+  af::ascir_op::Store store_op("store");
+  store_op.ir_attr.SetOffset(af::Expression::Parse("A_org_size"));
+  af::ascir_op::Output output_op("output");
+  output_op.ir_attr.SetIndex(0);
+  graph.AddNode(store_op);
+  graph.AddNode(output_op);
+  output_op.x = store_op.y;
+  auto output = graph.FindNode("output");
+  output->inputs[0].attr.repeats = {af::Expression::Parse("A_org_size")};
+  output->inputs[0].attr.strides = {af::ops::One};
+  output->inputs[0].attr.dtype = ge::DT_FLOAT16;
+
+  ascir::ScheduledResult schedule_result;
+  schedule_result.schedule_groups.resize(1);
+  schedule_result.schedule_groups[0].impl_graphs = {graph};
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.output_nodes.push_back(fallback_output);
+  fused_schedule_result.node_idx_to_scheduled_results.push_back({schedule_result});
+
+  const std::string malloc_def = this->PGOSearchTensorMallocDef(fused_schedule_result);
+  EXPECT_NE(malloc_def.find("Invalid or symbolic PGO output0 memory size"), std::string::npos);
+  EXPECT_NE(malloc_def.find("return FAILED;"), std::string::npos);
+  EXPECT_EQ(malloc_def.find("A_org_size"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, TestPGOSearchTensorMallocDefResolvesReducePhase2OutputSize) {
+  af::AscGraph fallback_graph("fallback_graph");
+  af::ascir_op::Store fallback_store_op("fallback_store");
+  af::ascir_op::Output fallback_output_op("fallback_output");
+  fallback_output_op.ir_attr.SetIndex(0);
+  fallback_graph.AddNode(fallback_store_op);
+  fallback_graph.AddNode(fallback_output_op);
+  fallback_output_op.x = fallback_store_op.y;
+  auto fallback_output = fallback_graph.FindNode("fallback_output");
+  fallback_output->inputs[0].attr.repeats = {af::Expression::Parse("24")};
+  fallback_output->inputs[0].attr.strides = {af::ops::One};
+  fallback_output->inputs[0].attr.dtype = ge::DT_FLOAT16;
+
+  af::AscGraph phase1_graph("phase1_graph");
+  af::AscGraph phase2_graph("phase2_graph");
+  const auto a_org_size = phase2_graph.CreateSizeVar("A_org_size");
+  af::ascir_op::Store phase2_store_op("phase2_store");
+  phase2_store_op.ir_attr.SetOffset(af::ops::Zero);
+  af::ascir_op::Output phase2_output_op("phase2_output");
+  phase2_output_op.ir_attr.SetIndex(0);
+  phase2_graph.AddNode(phase2_store_op);
+  phase2_graph.AddNode(phase2_output_op);
+  phase2_output_op.x = phase2_store_op.y;
+  auto phase2_output = phase2_graph.FindNode("phase2_output");
+  phase2_output->inputs[0].attr.repeats = {af::ops::One, a_org_size};
+  phase2_output->inputs[0].attr.strides = {af::ops::Zero, af::ops::One};
+  phase2_output->inputs[0].attr.dtype = ge::DT_FLOAT16;
+
+  ascir::ScheduledResult schedule_result;
+  schedule_result.schedule_groups.resize(2);
+  schedule_result.schedule_groups[0].impl_graphs = {phase1_graph};
+  schedule_result.schedule_groups[1].impl_graphs = {phase2_graph};
+  schedule_result.var_relations[1][0]["A_org_size"] = af::Expression::Parse("24");
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.output_nodes.push_back(fallback_output);
+  fused_schedule_result.node_idx_to_scheduled_results.push_back({schedule_result});
+
+  const std::string malloc_def = this->PGOSearchTensorMallocDef(fused_schedule_result);
+  EXPECT_NE(malloc_def.find("size_t output0_size = 48;"), std::string::npos);
+  EXPECT_EQ(malloc_def.find("Invalid or symbolic PGO output0 memory size"), std::string::npos);
+}
+
 TEST_F(TestCodegenTiling, TestCalculateTensorMemorySizeStrWithNoRepeatsOrStrides) {
   af::AscGraph graph("test_graph");
   auto s0 = graph.CreateSizeVar("s0");
@@ -2081,6 +2268,56 @@ TEST_F(TestCodegenTiling, TestCalculateTensorMemorySizeStrWithOnlyZeroStride) {
   std::string memory_size = this->CalculateTensorMemorySizeStr(x->outputs[0]);
   const std::string expect = std::string(af::sym::Mul(af::ops::One, af::Expression::Parse("2")).Simplify().Str().get());
   ASSERT_EQ(memory_size, expect);
+}
+
+TEST_F(TestCodegenTiling, TestCalculateTensorMemorySizeStrWithNonContiguousStrides) {
+  af::AscGraph graph("test_graph");
+  af::ascir_op::Data x_op("x", graph);
+  auto x = graph.FindNode("x");
+
+  x->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  x->outputs[0].attr.repeats = {af::Expression::Parse("1024"), af::Expression::Parse("2")};
+  x->outputs[0].attr.strides = {af::Expression::Parse("1"), af::Expression::Parse("1024")};
+
+  EXPECT_EQ(this->CalculateTensorMemorySizeStr(x->outputs[0]), "4096");
+}
+
+TEST_F(TestCodegenTiling, TestCalculateTensorMemorySizeStrRejectsRankMismatch) {
+  af::AscGraph graph("test_graph");
+  af::ascir_op::Data x_op("x", graph);
+  auto x = graph.FindNode("x");
+
+  x->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  x->outputs[0].attr.repeats = {af::Expression::Parse("16"), af::Expression::Parse("8")};
+  x->outputs[0].attr.strides = {af::Expression::Parse("8")};
+
+  EXPECT_EQ(this->CalculateTensorMemorySizeStr(x->outputs[0]), "0");
+}
+
+TEST_F(TestCodegenTiling, TestCalculateTensorMemorySizeStrRejectsNegativeStrideAndOffset) {
+  af::AscGraph graph("test_graph");
+  af::ascir_op::Data x_op("x", graph);
+  auto x = graph.FindNode("x");
+
+  x->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  x->outputs[0].attr.repeats = {af::Expression::Parse("16")};
+  x->outputs[0].attr.strides = {af::Expression::Parse("-1")};
+  EXPECT_EQ(this->CalculateTensorMemorySizeStr(x->outputs[0]), "0");
+
+  x->outputs[0].attr.strides = {af::ops::One};
+  EXPECT_EQ(this->CalculateTensorMemorySizeStr(x->outputs[0], af::Expression::Parse("-1")), "0");
+}
+
+TEST_F(TestCodegenTiling, TestCalculateTensorMemorySizeStrRejectsOverflow) {
+  af::AscGraph graph("test_graph");
+  af::ascir_op::Data x_op("x", graph);
+  auto x = graph.FindNode("x");
+
+  x->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  x->outputs[0].attr.repeats = {af::Expression::Parse("9223372036854775807")};
+  x->outputs[0].attr.strides = {af::ops::One};
+
+  EXPECT_EQ(this->CalculateTensorMemorySizeStr(x->outputs[0]), "0");
 }
 
 void CreateMatmulGraph(af::AscGraph &graph, bool is_dynamic = false) {
@@ -2692,7 +2929,7 @@ TEST_F(TestCodegenTiling, SplitHeaderGenerateForPgoShouldIncludeDirectEntryDepen
 
 TEST_F(TestCodegenTiling, SplitHeaderGenerateForInductorPgoShouldIncludeDirectEntryDependencies) {
   enable_autofuse_pgo_ = true;
-  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
   auto tiling_files = this->GenerateForInductor(fused_schedule_result);
 
   ASSERT_NE(tiling_files.find(codegen::kTilingDefAndConstIdentify), tiling_files.end());
@@ -3492,6 +3729,53 @@ TEST_F(TestCodegenTiling, GenerateForPgoShouldUseTensorArgsForProfilingSignature
   EXPECT_EQ(tiling_code.find("ProfilingBatchProcess(PgoTensorArgs *tensor_args"), std::string::npos);
   EXPECT_NE(tiling_code.find("uint64_t input1;"), std::string::npos);
   EXPECT_NE(tiling_code.find("uint64_t output1;"), std::string::npos);
+  EXPECT_NE(tiling_code.find("uint64_t tiling_addr;"), std::string::npos);
+  EXPECT_NE(tiling_code.find("g_kernel_name + \"_\""), std::string::npos);
+  EXPECT_EQ(tiling_code.find("AutofuseTilingData tiling_data;"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, TfAndInductorPgoShouldSortUint64DurationsConsistently) {
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+
+  const auto tf_source = GenerateForPgo(fused_schedule_result, "/tmp");
+  const auto inductor_source = GenInductorPgoRunner(fused_schedule_result);
+
+  EXPECT_EQ(tf_source.find("std::greater<int>()"), std::string::npos);
+  EXPECT_NE(tf_source.find("std::greater<uint64_t>()"), std::string::npos);
+  EXPECT_EQ(inductor_source.find("std::greater<int>()"), std::string::npos);
+  EXPECT_NE(inductor_source.find("std::greater<uint64_t>()"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, TfPgoGeneratedSourceContractShouldRemainStable) {
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+
+  const auto source = GenerateForPgo(fused_schedule_result, "/tmp/autofuse_pgo_source_contract");
+
+  EXPECT_EQ(source.size(), 28326U);
+  EXPECT_EQ(StableSourceHash(source), 8256262525923729169ULL);
+  EXPECT_NE(source.find("PGOGetProfilingBatch"), std::string::npos);
+  EXPECT_NE(source.find("const char *pgo_dir"), std::string::npos);
+  EXPECT_NE(source.find("PgoTilingSearch"), std::string::npos);
+  EXPECT_NE(source.find("static_pgo("), std::string::npos);
+  EXPECT_EQ(source.find("kInductorPgoRunnerAbi"), std::string::npos);
+  EXPECT_EQ(source.find("kPgoTopnMagic"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, InductorPgoRunnerGeneratedSourceContractShouldRemainStable) {
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+
+  const auto source = GenInductorPgoRunner(fused_schedule_result);
+
+  EXPECT_EQ(source.size(), 36937U);
+  EXPECT_EQ(StableSourceHash(source), 1779950591738930516ULL);
+  EXPECT_NE(source.find("PGOGetProfilingBatch"), std::string::npos);
+  EXPECT_EQ(source.find("kInductorPgoRunnerAbi"), std::string::npos);
+  EXPECT_NE(source.find("GenerateMeasuredTopnSolutions"), std::string::npos);
+  EXPECT_NE(source.find("kPgoTopnMagic"), std::string::npos);
+  EXPECT_EQ(source.find("const char *pgo_dir"), std::string::npos);
+  EXPECT_EQ(source.find("static_pgo("), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, PgoConfigShouldKeepCurrentTensorArgs) {
@@ -3831,6 +4115,504 @@ TEST_F(TestCodegenTiling, InductorEntryUsingSolverHelpersShouldIncludeSolverHead
   EXPECT_NE(entry.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
 }
 
+TEST_F(TestCodegenTiling, GenerateForInductorPgoFalseShouldKeepModeledTopn) {
+  ScopedAutofusePgoFlag pgo_flag(false);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  EXPECT_EQ(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoRunner"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoDeviceSource"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("GenerateMeasuredTopnSolutions"), std::string::npos);
+  EXPECT_NE(result.tiling.find("Topn selector helpers: default-first"), std::string::npos);
+  EXPECT_NE(result.tiling.find("EvaluateModeledPerf(raw_candidate.tiling_data)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("ParseSearchConfigs("), std::string::npos);
+  const size_t modeled_search = result.tiling.find("static int64_t GetTopnCandidateSolutions");
+  const size_t modeled_entry = result.tiling.find("extern \"C\" int64_t GenerateTopnSolutions", modeled_search);
+  ASSERT_NE(modeled_search, std::string::npos);
+  ASSERT_NE(modeled_entry, std::string::npos);
+  const std::string modeled_body = result.tiling.substr(modeled_search, modeled_entry - modeled_search);
+  EXPECT_EQ(modeled_body.find("PGOByCoreNumSearchTilingKey"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, DisabledInductorPgoShouldOverrideAttPgoEnvironment) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  codegen_func_ = att::GenTilingImplAutoFuseV3;
+  DisableInductorPgo();
+  auto fused_schedule_result = GenSingleGroupFusedScheduleResultWithApiTilingField();
+
+  const auto tiling_files = this->GenerateForInductor(fused_schedule_result);
+
+  for (const auto &[key, source] : tiling_files) {
+    EXPECT_EQ(source.find("PGOProfileReuseGroup"), std::string::npos) << key;
+    EXPECT_EQ(source.find("PGOByCoreNumSearchTilingKey"), std::string::npos) << key;
+  }
+  EXPECT_EQ(tiling_files.find(codegen::kPgoRunnerIdentify), tiling_files.end());
+}
+
+void AssertSchemeAContract(const codegen::CodegenResult &result) {
+  const std::string runner = GetSplitContent(result.tiling, "PgoRunner");
+  const std::string device_source = GetSplitContent(result.tiling, "PgoDeviceSource");
+  ASSERT_FALSE(runner.empty());
+  ASSERT_FALSE(device_source.empty());
+  EXPECT_EQ(runner.find("kInductorPgoRunnerAbi"), std::string::npos);
+  EXPECT_EQ(device_source.find("AUTOFUSE_PGO_DEVICE_SOURCE_ABI"), std::string::npos);
+  EXPECT_NE(device_source.find(result.kernel), std::string::npos);
+  EXPECT_NE(result.tiling.find("extern \"C\" int64_t GenerateMeasuredTopnSolutions("), std::string::npos);
+  EXPECT_EQ(result.tiling.find("kInductorPgoProxyAbi"), std::string::npos);
+  EXPECT_NE(result.tiling.find("return RunInductorPgoProxy(input_configs, topn, tiling_datas, workspaces, block_dims,"),
+            std::string::npos);
+  EXPECT_EQ(result.tiling.find("FallbackToInductorPgoDefaultSolution"), std::string::npos);
+  EXPECT_NE(result.tiling.find("FallbackToInductorModeledTopn"), std::string::npos);
+  EXPECT_NE(result.tiling.find("PGOByCoreNumSearchTilingKey(measured_tiling_datas"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("GetBuiltinTfPgoConfigs()"), std::string::npos);
+}
+
+void AssertSchemeAFallback(const std::string &tiling) {
+  EXPECT_NE(tiling.find("if (!ResolveInductorPgoArtifacts(artifacts)) {\n"
+                        "    return FallbackToInductorModeledTopn(input_configs, topn,"),
+            std::string::npos);
+  EXPECT_NE(tiling.find("if (!parsed) {\n"
+                        "    OP_LOGW(OP_NAME, \"Inductor PGO runner or result parsing failed, "
+                        "runner_ret=%d\", runner_ret);\n"
+                        "    return FallbackToInductorModeledTopn(input_configs, topn,"),
+            std::string::npos);
+  EXPECT_NE(tiling.find("mkdtemp(result_dir_template)"), std::string::npos);
+  EXPECT_NE(tiling.find("path = std::string(result_dir_template) + \"/result.bin\""), std::string::npos);
+  EXPECT_NE(tiling.find("rmdir(PgoParentPath(path).c_str())"), std::string::npos);
+  EXPECT_EQ(tiling.find("mkstemp(result_template)"), std::string::npos);
+  EXPECT_NE(tiling.find("raw_candidate.best_perf"), std::string::npos);
+  EXPECT_NE(tiling.find("PgoConfig::Instance().tensor_args"), std::string::npos);
+  EXPECT_NE(tiling.find("PgoConfig::Instance().stream"), std::string::npos);
+  EXPECT_NE(tiling.find("kept.modeled_perf > solution.modeled_perf"), std::string::npos);
+  EXPECT_NE(tiling.find("single_callback(PgoConfig::Instance().tensor_args"), std::string::npos);
+}
+
+void AssertSchemeASelectors(const std::string &tiling) {
+  const size_t measured_search = tiling.find("static int64_t GetTopnCandidateSolutions");
+  const size_t proxy_start = tiling.find("#include <spawn.h>", measured_search);
+  ASSERT_NE(measured_search, std::string::npos);
+  ASSERT_NE(proxy_start, std::string::npos);
+  const std::string measured_body = tiling.substr(measured_search, proxy_start - measured_search);
+  EXPECT_EQ(measured_body.find("ParseSearchConfigs("), std::string::npos);
+  EXPECT_EQ(measured_body.find("EvaluateModeledPerf(raw_candidate.tiling_data)"), std::string::npos);
+  EXPECT_EQ(measured_body.find("if (lhs.is_default != rhs.is_default)"), std::string::npos);
+  const size_t fallback_start = tiling.rfind("namespace inductor_pgo_fallback {");
+  const size_t fallback_end = tiling.find("}  // namespace inductor_pgo_fallback", fallback_start);
+  ASSERT_NE(fallback_start, std::string::npos);
+  ASSERT_NE(fallback_end, std::string::npos);
+  const std::string fallback_body = tiling.substr(fallback_start, fallback_end - fallback_start);
+  EXPECT_NE(fallback_body.find("ParseSearchConfigs("), std::string::npos);
+  EXPECT_NE(fallback_body.find("EvaluateModeledPerf(raw_candidate.tiling_data)"), std::string::npos);
+  EXPECT_NE(fallback_body.find("if (lhs.is_default != rhs.is_default)"), std::string::npos);
+  const auto append_default_pos =
+      tiling.find("response.candidate_solutions.push_back({default_tiling, default_perf, true, default_repr})");
+  const auto select_topn_pos = tiling.find("SelectTopnCandidateSolutions(response.candidate_solutions, topn)");
+  const auto export_measured_pos = tiling.find("measured_candidates->push_back(");
+  const auto truncate_pos = tiling.find("solutions.resize(static_cast<size_t>(topn))", export_measured_pos);
+  ASSERT_NE(append_default_pos, std::string::npos);
+  ASSERT_NE(select_topn_pos, std::string::npos);
+  ASSERT_NE(export_measured_pos, std::string::npos);
+  ASSERT_NE(truncate_pos, std::string::npos);
+  EXPECT_LT(append_default_pos, select_topn_pos);
+  EXPECT_LT(export_measured_pos, truncate_pos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldEmitSchemeAContract) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  AssertSchemeAContract(result);
+  AssertSchemeAFallback(result.tiling);
+  AssertSchemeASelectors(result.tiling);
+  const size_t first_unused_callback = result.tiling.find("  (void)prof_callback;\n  (void)prof_batch_callback;");
+  ASSERT_NE(first_unused_callback, std::string::npos);
+  EXPECT_NE(result.tiling.find("  (void)prof_callback;\n  (void)prof_batch_callback;", first_unused_callback + 1U),
+            std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTopnShouldPreserveDefaultCandidateWhenTopnGreaterThanOne) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  EXPECT_NE(result.tiling.find("if (topn > 1 && solutions.size() > 1U)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("const auto default_solution = std::find_if(solutions.begin(), solutions.end()"),
+            std::string::npos);
+  EXPECT_NE(result.tiling.find("std::rotate(solutions.begin() + 1, default_solution, default_solution + 1);"),
+            std::string::npos);
+  EXPECT_EQ(result.tiling.find("TORCHINDUCTOR_NPU_EXT_AUTOTUNE_TOPN"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoFailureShouldFallbackToModeledTopn) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  EXPECT_NE(result.tiling.find("namespace inductor_pgo_fallback"), std::string::npos);
+  EXPECT_NE(result.tiling.find("static int64_t GenerateModeledFallbackTopnSolutions"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("extern \"C\" int64_t GenerateModeledFallbackTopnSolutions"), std::string::npos);
+  EXPECT_NE(result.tiling.find("ResLimit modeled_limit = limit"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("const_cast<ResLimit *>(&limit)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("FallbackToInductorModeledTopn(input_configs, topn"), std::string::npos);
+  EXPECT_NE(result.tiling.find("SelectTopnCandidateSolutions(response.candidate_solutions, topn)"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoShouldValidateSidecarsOncePerProxy) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  EXPECT_NE(result.tiling.find("#include <mutex>"), std::string::npos);
+  EXPECT_NE(result.tiling.find("std::call_once(validation_once"), std::string::npos);
+  EXPECT_NE(result.tiling.find("ResolveInductorPgoArtifactsUncached"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldReuseTfAllCoreSearch) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  const size_t measured_search = result.tiling.find("static int64_t GetTopnCandidateSolutions");
+  const size_t measured_entry =
+      result.tiling.find("extern \"C\" int64_t GenerateMeasuredTopnSolutions", measured_search);
+  ASSERT_NE(measured_search, std::string::npos);
+  ASSERT_NE(measured_entry, std::string::npos);
+  const std::string measured_body = result.tiling.substr(measured_search, measured_entry - measured_search);
+  EXPECT_NE(measured_body.find("const uint32_t measured_aiv_num = std::min(limit->aiv_num, g_no_limit_res.aiv_num)"),
+            std::string::npos);
+  EXPECT_NE(measured_body.find("optiling::PGOByCoreNumSearchTilingKey(measured_tiling_datas, &cur_search_tiling, "
+                               "measured_aiv_num)"),
+            std::string::npos);
+  EXPECT_NE(measured_body.find("PgoConfig::Instance().pgo_threshold_index"), std::string::npos);
+  EXPECT_NE(measured_body.find("PgoConfig::Instance().batch_callback"), std::string::npos);
+  EXPECT_EQ(measured_body.find("aiv_num exceeds platform limit"), std::string::npos);
+  EXPECT_EQ(measured_body.find("helper_ret = optiling::PGOSearchTilingKey("), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForPgoShouldEmitSharedMeasuredCandidateNormalization) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  codegen::TilingLib tiling_lib("", "");
+  const auto tf_fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  const auto tf_files =
+      tiling_lib.Generate(tf_fused_schedule_result, {{"s0", "1"}, {"s1", "64"}}, "/tmp/autofuse_pgo_stage2", "0");
+  const auto &tf_source = tf_files.at(codegen::kTilingDefAndConstIdentify);
+  EXPECT_EQ(tf_source.find("struct PgoMeasuredSearchRequest"), std::string::npos);
+  EXPECT_EQ(tf_source.find("struct PgoMeasuredSearchResult"), std::string::npos);
+  EXPECT_NE(tf_source.find("NormalizePgoMeasuredCandidates"), std::string::npos);
+  EXPECT_NE(tf_source.find("std::vector<AutofuseTilingDataPerf> raw_search_candidates;"), std::string::npos);
+  EXPECT_NE(tf_source.find("raw_search_candidates.push_back(tiling_data_perf);"), std::string::npos);
+  EXPECT_NE(tf_source.find("NormalizePgoMeasuredCandidates(std::move(raw_search_candidates))"), std::string::npos);
+  EXPECT_EQ(tf_source.find("NormalizePgoMeasuredCandidates(std::move(tiling_data_perf_list))"), std::string::npos);
+
+  const auto inductor_fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  const auto inductor_files = tiling_lib.GenerateForInductor(inductor_fused_schedule_result);
+  const auto &inductor_source = inductor_files.at(codegen::kTilingDefAndConstIdentify);
+  EXPECT_EQ(inductor_source.find("struct PgoMeasuredSearchRequest"), std::string::npos);
+  EXPECT_EQ(inductor_source.find("struct PgoMeasuredSearchResult"), std::string::npos);
+  EXPECT_NE(inductor_source.find("NormalizePgoMeasuredCandidates"), std::string::npos);
+  EXPECT_NE(inductor_source.find("NormalizePgoMeasuredCandidates(std::move("), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorWithoutPgoShouldNotEmitSharedMeasuredSearchModel) {
+  ScopedAutofusePgoFlag pgo_flag(false);
+  codegen::TilingLib tiling_lib("", "");
+  const auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  const auto files = tiling_lib.GenerateForInductor(fused_schedule_result);
+  const auto &source = files.at(codegen::kTilingDefAndConstIdentify);
+  EXPECT_EQ(source.find("struct PgoMeasuredSearchRequest"), std::string::npos);
+  EXPECT_EQ(source.find("NormalizePgoMeasuredCandidates"), std::string::npos);
+}
+
+void AssertDlopenRunnerLoading(const std::string &runner) {
+  EXPECT_NE(runner.find("int main(int argc, char *argv[])"), std::string::npos);
+  EXPECT_NE(runner.find("\"GenerateMeasuredTopnSolutions\""), std::string::npos);
+  EXPECT_NE(runner.find("dlopen(args.tiling_file.c_str(), RTLD_NOW | RTLD_LOCAL)"), std::string::npos);
+  EXPECT_NE(runner.find("dlsym(g_pgo_tiling_handle, name)"), std::string::npos);
+  EXPECT_NE(runner.find("LoadInductorPgoSymbol(generate_measured_topn_solutions_fn, "
+                        "\"GenerateMeasuredTopnSolutions\")"),
+            std::string::npos);
+  EXPECT_NE(runner.find("LoadInductorPgoSymbol(set_topn_pgo_context_fn, \"SetTopnPgoContext\")"), std::string::npos);
+  EXPECT_NE(runner.find("LoadInductorPgoSymbol(clear_topn_pgo_context_fn, \"ClearTopnPgoContext\")"),
+            std::string::npos);
+  EXPECT_NE(runner.find("LoadInductorPgoSymbol(get_tiling_data_repr_fn, \"GetTilingDataRepr\")"), std::string::npos);
+  EXPECT_NE(runner.find("set_topn_pgo_context_fn(&g_pgo_tensor_args, g_stream"), std::string::npos);
+  EXPECT_NE(runner.find("aclrtBinaryLoadFromFile(g_kernel_o_file.c_str()"), std::string::npos);
+  EXPECT_NE(runner.find("aclrtBinaryUnLoad"), std::string::npos);
+}
+
+void AssertDlopenRunnerProfiling(const std::string &runner) {
+  EXPECT_NE(runner.find("PGOGetProfilingBatch"), std::string::npos);
+  EXPECT_EQ(runner.find("bool IsTargetPgoKernel(const msptiActivityKernel *kernel)"), std::string::npos);
+  EXPECT_EQ(runner.find("std::strcmp(kernel->name, PGO_GRAPH_NAME)"), std::string::npos);
+  EXPECT_EQ(runner.find("g_seen_correlation_ids.insert(kernel->correlationId).second"), std::string::npos);
+  EXPECT_EQ(runner.find("g_is_mix_operator ? \"KERNEL_MIX_AIV\" : \"KERNEL_AIVEC\""), std::string::npos);
+  EXPECT_NE(runner.find("void SavePgoKernel(const msptiActivityKernel *kernel)"), std::string::npos);
+  EXPECT_NE(runner.find("SavePgoKernel(kernel)"), std::string::npos);
+  EXPECT_NE(runner.find("g_profiling_map.size() != expected_records"), std::string::npos);
+  const auto batch_callback_pos = runner.find("const uint64_t expected_records = batch_size * loop");
+  const auto teardown_pos = runner.find("TearDownMspti(&subscriber)", batch_callback_pos);
+  const auto flush_pos = runner.find("FlushPgoActivities(expected_records)", batch_callback_pos);
+  ASSERT_NE(batch_callback_pos, std::string::npos);
+  ASSERT_NE(flush_pos, std::string::npos);
+  ASSERT_NE(teardown_pos, std::string::npos);
+  EXPECT_LT(teardown_pos, flush_pos);
+  const auto single_teardown_pos =
+      runner.find("const msptiResult teardown_result = TearDownMspti(&subscriber)", teardown_pos + 1U);
+  const auto single_flush_pos = runner.find("FlushPgoActivities(loop)", flush_pos + 1U);
+  ASSERT_NE(single_teardown_pos, std::string::npos);
+  ASSERT_NE(single_flush_pos, std::string::npos);
+  EXPECT_LT(single_teardown_pos, single_flush_pos);
+  EXPECT_EQ(runner.find("msptiActivityDisable(MSPTI_ACTIVITY_KIND_KERNEL)"), std::string::npos);
+  const auto teardown_func_pos = runner.find("msptiResult TearDownMspti(msptiSubscriberHandle *subscriber)");
+  const auto unsubscribe_pos = runner.find("msptiUnsubscribe(*subscriber)", teardown_func_pos);
+  const auto teardown_flush_pos = runner.find("msptiActivityFlushAll(1)", unsubscribe_pos);
+  ASSERT_NE(teardown_func_pos, std::string::npos);
+  ASSERT_NE(unsubscribe_pos, std::string::npos);
+  ASSERT_NE(teardown_flush_pos, std::string::npos);
+  EXPECT_LT(unsubscribe_pos, teardown_flush_pos);
+  EXPECT_NE(runner.find("if (g_profiling_record_count.load(std::memory_order_acquire) >= expected_records)"),
+            std::string::npos);
+  EXPECT_NE(runner.find("if (SetUpMspti(&subscriber) != MSPTI_SUCCESS)"), std::string::npos);
+  EXPECT_NE(runner.find("g_mspti_activity_error || teardown_result != MSPTI_SUCCESS"), std::string::npos);
+}
+
+void AssertDlopenRunnerProtocol(const std::string &runner) {
+  EXPECT_NE(runner.find("AUTOFUSE_PGO_TOPN_V1"), std::string::npos);
+  EXPECT_NE(runner.find("constexpr size_t kPgoTopnMagicSize = 20U"), std::string::npos);
+  EXPECT_NE(runner.find("constexpr uint32_t kPgoTopnProtocolVersion = 1U"), std::string::npos);
+  EXPECT_NE(runner.find("sizeof(AutofuseTilingData)"), std::string::npos);
+  EXPECT_NE(runner.find("std::is_trivially_copyable<AutofuseTilingData>::value"), std::string::npos);
+  EXPECT_NE(runner.find("WritePgoValue(out, tiling_hash)"), std::string::npos);
+  EXPECT_NE(runner.find("void PgoSaveTilingKey(const AutofuseTilingData &tiling_data, double best_perf"),
+            std::string::npos);
+  EXPECT_NE(runner.find("int WritePgoSearchResult(const InductorPgoRunnerArgs &args"), std::string::npos);
+  EXPECT_NE(runner.find("std::string(PGO_GRAPH_NAME) + \"_search.txt\""), std::string::npos);
+  EXPECT_NE(runner.find("std::vector<AutofuseTilingDataPerf> measured_candidates"), std::string::npos);
+  EXPECT_NE(runner.find("measured_candidates) == 0"), std::string::npos);
+  EXPECT_EQ(runner.find("GetWorkspaceSize(candidate.tiling_data)"), std::string::npos);
+  EXPECT_NE(runner.find("using InductorPgoProfilingCallback = long int (*)("), std::string::npos);
+  EXPECT_NE(runner.find("using InductorPgoProfilingBatchCallback = long int (*)("), std::string::npos);
+  const auto write_topn_pos = runner.find("WritePgoTopnResult(args.result_file");
+  const auto write_search_pos = runner.find("WritePgoSearchResult(args, measured_candidates)");
+  ASSERT_NE(write_topn_pos, std::string::npos);
+  ASSERT_NE(write_search_pos, std::string::npos);
+  EXPECT_LT(write_topn_pos, write_search_pos);
+  const auto run_end_pos = runner.find("\n}\n\nint main", write_search_pos);
+  ASSERT_NE(run_end_pos, std::string::npos);
+  const auto write_search_body = runner.substr(write_search_pos, run_end_pos - write_search_pos);
+  EXPECT_NE(write_search_body.find("DLOGW(\"Write PGO search result failed\")"), std::string::npos);
+  EXPECT_EQ(write_search_body.find("return FAILED"), std::string::npos);
+}
+
+void AssertDlopenRunnerLaunch(const std::string &runner, const std::string &kernel_name) {
+  EXPECT_NE(runner.find("struct ResLimit {"), std::string::npos);
+  EXPECT_NE(runner.find("constexpr char kInductorPgoKernelName[] = \"" + kernel_name + "\";"), std::string::npos);
+  EXPECT_NE(runner.find("aclrtBinaryGetFunction(g_pgo_bin_handle, kInductorPgoKernelName"), std::string::npos);
+  EXPECT_NE(runner.find("AutofuseTilingData tiling_data;"), std::string::npos);
+  EXPECT_NE(runner.find("g_launch_params.aiv_args.tiling_data = tiling_data;"), std::string::npos);
+  EXPECT_NE(runner.find("if (UpdateLaunchParam(tiling_data) != ACL_SUCCESS)"), std::string::npos);
+  EXPECT_NE(runner.find("if (UpdateLaunchParam(*tiling_data) != ACL_SUCCESS)"), std::string::npos);
+  EXPECT_NE(runner.find("WrapperOnlyLaunch(uint32_t workspace_size, AutofuseTilingData *tiling_data) {\n"
+                        "  (void)workspace_size;"),
+            std::string::npos);
+  EXPECT_NE(runner.find("PGOGetProfilingBatch(PgoTensorArgs *tensor_args, void* stream, uint32_t workspace_size, "
+                        "std::vector<AutofuseTilingDataPerf> *profiles) {\n"
+                        "  (void)tensor_args;\n  (void)stream;"),
+            std::string::npos);
+  EXPECT_NE(runner.find("PGOGetProfiling(PgoTensorArgs *tensor_args, void *stream, uint32_t workspace_size, "
+                        "AutofuseTilingData *tiling_data, double *outCostTime) {\n"
+                        "  (void)tensor_args;\n  (void)stream;"),
+            std::string::npos);
+  EXPECT_NE(runner.find("tiling_key < 0 || static_cast<uint64_t>(tiling_key) >= tiling_key_count"), std::string::npos);
+  EXPECT_NE(runner.find("clear_topn_pgo_context_fn()"), std::string::npos);
+  EXPECT_NE(runner.find("g_workspace = nullptr"), std::string::npos);
+  EXPECT_EQ(runner.find("g_kernel_name + \"_\""), std::string::npos);
+  EXPECT_EQ(runner.find("g_launch_params.aiv_args.tiling_addr"), std::string::npos);
+  EXPECT_EQ(runner.find("g_tiling_device_addr"), std::string::npos);
+  EXPECT_NE(runner.find("args.tiling_file = argv[5]"), std::string::npos);
+  EXPECT_NE(runner.find("args.kernel_file = argv[6]"), std::string::npos);
+  EXPECT_NE(runner.find("args.result_file = argv[7]"), std::string::npos);
+  EXPECT_EQ(runner.find("static_pgo("), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldGenerateDlopenRunner) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+  const std::string runner = GetSplitContent(result.tiling, "PgoRunner");
+  const std::string kernel_name =
+      ascgen_utils::CamelToLowerSneak(ascgen_utils::GenValidName(fused_schedule_result.fused_graph_name.GetString()));
+
+  ASSERT_FALSE(runner.empty());
+  AssertDlopenRunnerLoading(runner);
+  AssertDlopenRunnerProfiling(runner);
+  AssertDlopenRunnerProtocol(runner);
+  AssertDlopenRunnerLaunch(runner, kernel_name);
+  EXPECT_NE(result.tiling.find("extern \"C\" int64_t FindBestTilingKey"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldGenerateValidatedSpawnProxy) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  EXPECT_NE(result.tiling.find("AUTOFUSE_PGO_GENERATION"), std::string::npos);
+  EXPECT_NE(result.tiling.find("bundle_schema_version"), std::string::npos);
+  EXPECT_NE(result.tiling.find("result_protocol_version"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("runner_abi"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("proxy_abi"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("device_source_abi"), std::string::npos);
+  EXPECT_NE(result.tiling.find("aicore_binary_elf_v1"), std::string::npos);
+  EXPECT_NE(result.tiling.find("ValidateInductorPgoManifest"), std::string::npos);
+  EXPECT_NE(result.tiling.find("ComputeFileSha256"), std::string::npos);
+  EXPECT_NE(result.tiling.find("dladdr(reinterpret_cast<const void *>(&ResolveInductorPgoArtifactsUncached)"),
+            std::string::npos);
+  EXPECT_NE(result.tiling.find("artifacts.tiling_so = artifacts.generation_dir + \"/\" + base"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("artifacts.tiling_so = real_path"), std::string::npos);
+  EXPECT_NE(result.tiling.find("aclrtGetDevice(&device_id)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("posix_spawn(&pid"), std::string::npos);
+  EXPECT_NE(result.tiling.find("waitpid(pid, &status, WNOHANG)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("kill(pid, SIGKILL)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("artifacts.ld_preload"), std::string::npos);
+  EXPECT_NE(result.tiling.find("BuildInductorPgoRunnerEnv"), std::string::npos);
+  EXPECT_NE(result.tiling.find("\"LD_PRELOAD=\" + ld_preload"), std::string::npos);
+  EXPECT_NE(result.tiling.find("envp.data()"), std::string::npos);
+  EXPECT_NE(result.tiling.find("AUTOFUSE_PGO_RUNNER_TIMEOUT_SECONDS"), std::string::npos);
+  EXPECT_NE(result.tiling.find("constexpr int64_t kMaxPgoTopn = 1024"), std::string::npos);
+  EXPECT_NE(result.tiling.find("ParseInductorPgoResult"), std::string::npos);
+  EXPECT_NE(result.tiling.find("GetTilingDataRepr(&tiling_data) != repr"), std::string::npos);
+  const size_t measured_search = result.tiling.find("static int64_t GetTopnCandidateSolutions");
+  const size_t proxy_start = result.tiling.find("#include <spawn.h>", measured_search);
+  ASSERT_NE(measured_search, std::string::npos);
+  ASSERT_NE(proxy_start, std::string::npos);
+  EXPECT_EQ(result.tiling.substr(measured_search, proxy_start - measured_search)
+                .find("EvaluateModeledPerf(raw_candidate.tiling_data)"),
+            std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldExportPrivateContextAbi) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  EXPECT_NE(result.tiling.find("extern \"C\" int64_t SetTopnPgoContext("), std::string::npos);
+  EXPECT_NE(result.tiling.find("extern \"C\" void ClearTopnPgoContext()"), std::string::npos);
+  EXPECT_NE(result.tiling.find("PgoConfig::Instance().single_callback = single_callback"), std::string::npos);
+  EXPECT_NE(result.tiling.find("PgoConfig::Instance().batch_callback = batch_callback"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldRejectDynamicShape) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  EXPECT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::FAILED);
+  EXPECT_EQ(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoRunner"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldAcceptStaticMultiGroup) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto graph = ascir::ShareGraph::TailBrcTailReduceFusedGraph(3);
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), af::SUCCESS);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_FALSE(ascgen_utils::IsSingleGroup(fused_schedule_result));
+  ASSERT_TRUE(ascgen_utils::IsStaticSchedResult(fused_schedule_result));
+  ASSERT_TRUE(ascgen_utils::CanUseTilingKey(fused_schedule_result));
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+  EXPECT_FALSE(GetSplitContent(result.tiling, "PgoRunner").empty());
+  EXPECT_FALSE(GetSplitContent(result.tiling, "PgoDeviceSource").empty());
+  EXPECT_NE(result.tiling.find("graph0_tiling_key"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldAcceptReduceRCore) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto graph = ascir::ShareGraph::TailBrcTailReduceFusedGraph(3);
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), af::SUCCESS);
+  ASSERT_TRUE(ascgen_utils::IsStaticSchedResult(fused_schedule_result));
+  ASSERT_FALSE(fused_schedule_result.workspace_nodes.empty());
+  ASSERT_TRUE(ascgen_utils::CanUseTilingKey(fused_schedule_result));
+
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+  EXPECT_FALSE(GetSplitContent(result.tiling, "PgoRunner").empty());
+  EXPECT_FALSE(GetSplitContent(result.tiling, "PgoDeviceSource").empty());
+  EXPECT_NE(result.kernel.find("SyncAll();"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldAcceptGroupParallelWithoutTilingKeyMapping) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  fused_schedule_result.node_idx_to_scheduled_results[0][0].enable_group_parallel = true;
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_FALSE(ascgen_utils::CanUseTilingKey(fused_schedule_result));
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+  EXPECT_NE(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoRunner"), std::string::npos);
+  EXPECT_NE(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoDeviceSource"), std::string::npos);
+  EXPECT_NE(result.tiling.find("typedef int64_t (*FindBestTilingKeyType)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("std::fill(func_handles.begin(), func_handles.end(), func_handle)"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldRejectCvFusion) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto graph = ascir::ShareGraph::LoadMatmulElewiseBrcFusedGraph();
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), af::SUCCESS);
+  ASSERT_TRUE(ascgen_utils::IsCubeFusedScheduled(fused_schedule_result));
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  EXPECT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::FAILED);
+  EXPECT_EQ(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoRunner"), std::string::npos);
+}
+
 TEST_F(TestCodegenTiling, SingleGroupEvaluateModeledPerfShouldUsePublicGetPerf) {
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
   fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
@@ -3841,11 +4623,12 @@ TEST_F(TestCodegenTiling, SingleGroupEvaluateModeledPerfShouldUsePublicGetPerf) 
 
   const size_t perf_func_pos = tiling_impl.find("static double EvaluateModeledPerf");
   ASSERT_NE(perf_func_pos, std::string::npos);
-  const size_t perf_test_func_pos = tiling_impl.find("extern \"C\" double GetModeledPerfForTesting", perf_func_pos);
-  ASSERT_NE(perf_test_func_pos, std::string::npos);
-  const std::string perf_func = tiling_impl.substr(perf_func_pos, perf_test_func_pos - perf_func_pos);
+  const size_t topn_func_pos = tiling_impl.find("extern \"C\" int64_t GenerateTopnSolutions", perf_func_pos);
+  ASSERT_NE(topn_func_pos, std::string::npos);
+  const std::string perf_func = tiling_impl.substr(perf_func_pos, topn_func_pos - perf_func_pos);
   EXPECT_NE(perf_func.find("return optiling::GetPerf(tmp);"), std::string::npos);
   EXPECT_EQ(perf_func.find("TilingCaseImplPtr impl = GetTilingImplPtr"), std::string::npos);
+  EXPECT_EQ(tiling_impl.find("GetModeledPerfForTesting"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, CodegenGenerateForInductorCvFusionShouldKeepCubeWrapperHeaderInTilingHead) {

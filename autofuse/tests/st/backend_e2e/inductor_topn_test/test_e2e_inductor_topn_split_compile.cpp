@@ -187,8 +187,7 @@ TEST_F(TestBackendInductorTopnSplitCompile, SplitCompileChainWorks) {
   VerifySplitHostArtifacts(OUTPUT_DIR "/host_out/host");
   const std::string tiling_repr_file = OUTPUT_DIR "/tiling_repr.txt";
   ASSERT_EQ(autofuse::tests::RunHostHelper(host_bin, tiling_repr_file), 0);
-  const autofuse::tests::HostHelperOptions zero_ub_options = {kZeroUbThresholdInputConfigsJson, 1, "sorted-by-perf",
-                                                              true};
+  const autofuse::tests::HostHelperOptions zero_ub_options = {kZeroUbThresholdInputConfigsJson, 1, true};
   ASSERT_EQ(autofuse::tests::RunHostHelper(host_bin, OUTPUT_DIR "/zero_ub_threshold_tiling_repr.txt", zero_ub_options),
             0);
   std::string tiling_repr = ReadFile(tiling_repr_file);
