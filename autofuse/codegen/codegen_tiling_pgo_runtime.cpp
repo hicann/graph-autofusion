@@ -27,6 +27,9 @@ void TilingLib::GenSharedPgoRuntimeProfiling(const ascir::FusedScheduledResult &
 
 std::string TilingLib::GenerateForPgo(const ascir::FusedScheduledResult &fused_schedule_result,
                                       const std::string &pgo_dir) const {
+  if (ShouldFallbackPgo(fused_schedule_result)) {
+    return "int main() { return 0; }\n";
+  }
   std::stringstream ss;
   GenPgoHeaders(ss, false);
   GenSharedPgoRuntimeLaunch(fused_schedule_result, pgo_dir, ss, false);

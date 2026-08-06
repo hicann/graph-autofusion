@@ -121,6 +121,7 @@ class TilingLib {
   bool IsInductorPgoEnabled() const {
     return enable_autofuse_pgo_;
   }
+  bool ShouldFallbackPgo(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   void DisableInductorPgo() {
     enable_autofuse_pgo_ = false;
   }

@@ -46,7 +46,7 @@ std::pair<int, std::string> execute_command(const std::string &command) {
   return {WEXITSTATUS(pclose(pipe.release())), output};
 }
 
-bool CompileCode(const std::string &code) {
+bool CompileCode(const std::string &code, bool append_main = true) {
   std::string cmake_dir = CMAKE_BINARY_DIR;
   // 临时目录
   std::string temp_dir = cmake_dir + "/tests/ut/temp_compile_codegen_tiling";
@@ -56,11 +56,14 @@ bool CompileCode(const std::string &code) {
   std::string source_file = temp_dir + "/temp_codegen_infershape.cpp";
   // 生成 C++ 代码
   std::ofstream source_stream(source_file);
-  source_stream << code << R"(
+  source_stream << code;
+  if (append_main) {
+    source_stream << R"(
         int main() {
             return 0;
         }
     )";
+  }
   source_stream.close();
   // 头文件路径
   std::string ascend_install_path = ASCEND_INSTALL_PATH;
@@ -1119,6 +1122,23 @@ class TestCodegenTiling : public testing::Test, public codegen::TilingLib {
     return this->GenerateForInductor(fused_schedule_result);
   }
 
+  ascir::FusedScheduledResult GenTilingKeyCountResult(const std::vector<std::vector<size_t>> &result_impl_counts) {
+    auto fused_schedule_result = GenBasicFusedScheduleResult();
+    const auto graph = fused_schedule_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
+    std::vector<ascir::ScheduledResult> scheduled_results;
+    for (const auto &impl_counts : result_impl_counts) {
+      ascir::ScheduledResult scheduled_result;
+      for (const auto impl_count : impl_counts) {
+        ascir::ScheduleGroup schedule_group;
+        schedule_group.impl_graphs.assign(impl_count, graph);
+        scheduled_result.schedule_groups.emplace_back(std::move(schedule_group));
+      }
+      scheduled_results.emplace_back(std::move(scheduled_result));
+    }
+    fused_schedule_result.node_idx_to_scheduled_results = {std::move(scheduled_results)};
+    return fused_schedule_result;
+  }
+
  protected:
   TestCodegenTiling() : codegen::TilingLib("test", "test") {}
 };
@@ -1788,6 +1808,38 @@ TEST_F(TestCodegenTiling, TestGenFindBestTilingKeyFuncFor1Group) {
   ASSERT_EQ(func, expect);
 }
 
+constexpr char kExpectedMultiResultFindBestTilingKey[] = R"(extern "C" int64_t FindBestTilingKey(AutofuseTilingData &t)
+{
+  if (t.graph0_tiling_key == 0) {
+    int64_t local_tiling_key = 0;
+    if (t.graph0_result0_g0_tiling_data.tiling_key >= 1) {
+      return -1;
+    }
+    local_tiling_key = local_tiling_key * 1 + t.graph0_result0_g0_tiling_data.tiling_key;
+    return 0 + local_tiling_key;
+  }  else if (t.graph0_tiling_key == 1) {
+    int64_t local_tiling_key = 0;
+    if (t.graph0_result1_g0_tiling_data.tiling_key >= 2) {
+      return -1;
+    }
+    local_tiling_key = local_tiling_key * 2 + t.graph0_result1_g0_tiling_data.tiling_key;
+    return 1 + local_tiling_key;
+  }  else if (t.graph0_tiling_key == 2) {
+    int64_t local_tiling_key = 0;
+    if (t.graph0_result2_g0_tiling_data.tiling_key >= 1) {
+      return -1;
+    }
+    local_tiling_key = local_tiling_key * 1 + t.graph0_result2_g0_tiling_data.tiling_key;
+    if (t.graph0_result2_g1_tiling_data.tiling_key >= 2) {
+      return -1;
+    }
+    local_tiling_key = local_tiling_key * 2 + t.graph0_result2_g1_tiling_data.tiling_key;
+    return 3 + local_tiling_key;
+  }
+  return -1;
+}
+)";
+
 TEST_F(TestCodegenTiling, TestGenFindBestTilingKeyFuncForMultiResult) {
   af::AscGraph graph1("graph1");
   af::AscGraph graph2("graph2");
@@ -1821,31 +1873,101 @@ TEST_F(TestCodegenTiling, TestGenFindBestTilingKeyFuncForMultiResult) {
   const std::map<std::string, std::string> shape_info;
   auto res = this->Generate(fused_schedule_result, shape_info, "", "0");
 
-  std::string expect = R"(extern "C" int64_t FindBestTilingKey(AutofuseTilingData &t)
-{
-  if (t.graph0_tiling_key == 0) {
-    if (t.graph0_result0_g0_tiling_data.tiling_key == 0) {
-      return 0;
-    }
-  }  else if (t.graph0_tiling_key == 1) {
-    if (t.graph0_result1_g0_tiling_data.tiling_key == 0) {
-      return 1;
-    } else if (t.graph0_result1_g0_tiling_data.tiling_key == 1) {
-      return 2;
-    }
-  }  else if (t.graph0_tiling_key == 2) {
-    if (t.graph0_result2_g0_tiling_data.tiling_key == 0 && t.graph0_result2_g1_tiling_data.tiling_key == 0) {
-      return 3;
-    } else if (t.graph0_result2_g0_tiling_data.tiling_key == 0 && t.graph0_result2_g1_tiling_data.tiling_key == 1) {
-      return 4;
-    }
-  }
-  return -1;
-}
-)";
+  const std::string expect = kExpectedMultiResultFindBestTilingKey;
   auto pos = res["tiling_def_and_tiling_const"].find("extern \"C\" int64_t FindBestTilingKey(AutofuseTilingData &t)");
   auto func = res["tiling_def_and_tiling_const"].substr(pos, expect.size());
   ASSERT_EQ(func, expect);
+}
+
+TEST_F(TestCodegenTiling, TestGenFindBestTilingKeyFuncForManyGroupsShouldBeLinear) {
+  af::AscGraph graph1("graph1");
+  af::AscGraph graph2("graph2");
+  af::AscGraph graph3("graph3");
+  ascir::ScheduleGroup schedule_group;
+  schedule_group.impl_graphs = {graph1, graph2, graph3};
+
+  ascir::ScheduledResult schedule_result;
+  for (size_t i = 0; i < 8U; ++i) {
+    schedule_result.schedule_groups.push_back(schedule_group);
+  }
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.node_idx_to_scheduled_results = {{schedule_result}};
+
+  const std::map<std::string, std::string> shape_info;
+  const auto res = this->Generate(fused_schedule_result, shape_info, "", "0");
+  const auto &source = res.at("tiling_def_and_tiling_const");
+  const auto begin = source.find("extern \"C\" int64_t FindBestTilingKey(AutofuseTilingData &t)");
+  const std::string end_marker = "\n  return -1;\n}\n";
+  ASSERT_NE(begin, std::string::npos);
+  const auto end = source.find(end_marker, begin);
+  ASSERT_NE(end, std::string::npos);
+  const auto func = source.substr(begin, end + end_marker.size() - begin);
+
+  EXPECT_LT(func.size(), 4096U);
+  EXPECT_NE(func.find("int64_t local_tiling_key = 0;"), std::string::npos);
+  EXPECT_NE(func.find("if (t.graph0_result0_g0_tiling_data.tiling_key >= 3)"), std::string::npos);
+  EXPECT_NE(func.find("local_tiling_key = local_tiling_key * 3 + t.graph0_result0_g0_tiling_data.tiling_key;"),
+            std::string::npos);
+  EXPECT_NE(func.find("local_tiling_key = local_tiling_key * 3 + t.graph0_result0_g7_tiling_data.tiling_key;"),
+            std::string::npos);
+  EXPECT_NE(func.find("return 0 + local_tiling_key;"), std::string::npos);
+  EXPECT_NE(this->GenGetTilingKeyCount(fused_schedule_result).find("return 6561;"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, PgoTilingKeyCountShouldRespectLimitAndEmptyGroup) {
+  enable_autofuse_pgo_ = true;
+
+  EXPECT_FALSE(ShouldFallbackPgo(GenTilingKeyCountResult({{10U, 10U, 10U, 10U}})));
+  EXPECT_TRUE(ShouldFallbackPgo(GenTilingKeyCountResult({{10U, 10U, 10U, 11U}})));
+  EXPECT_TRUE(ShouldFallbackPgo(GenTilingKeyCountResult({{10U, 10U, 10U, 10U}, {1U}})));
+  EXPECT_FALSE(ShouldFallbackPgo(GenTilingKeyCountResult({{11U, 10U, 10U, 10U, 0U}})));
+  EXPECT_TRUE(ShouldFallbackPgo(GenTilingKeyCountResult({{10U, 10U, 10U, 10U}, {}})));
+  const auto empty_group = GenTilingKeyCountResult({{0U, 1U}});
+  EXPECT_EQ(GenFindBestTilingKeyFunc(empty_group, "AutofuseTilingData").find("local_tiling_key"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, PgoTilingKeyCountOverflowShouldFallbackTfAndPgoRunner) {
+  enable_autofuse_pgo_ = true;
+  const auto fused_schedule_result = GenTilingKeyCountResult({{10U, 10U, 10U, 11U}});
+  const auto files = Generate(fused_schedule_result, {}, "/tmp", "10");
+  const auto &entry = files.at(codegen::kTilingDefAndConstIdentify);
+
+  EXPECT_EQ(entry.find("#include \"autofuse_tiling_func_pgo.h\""), std::string::npos);
+  EXPECT_NE(entry.find("extern \"C\" int64_t FindBestTilingKey"), std::string::npos);
+  const auto pgo_source = GenerateForPgo(fused_schedule_result, "/tmp");
+  EXPECT_NE(pgo_source.find("int main()"), std::string::npos);
+  EXPECT_EQ(pgo_source.find("PGOGetProfiling"), std::string::npos);
+  EXPECT_TRUE(CompileCode(pgo_source, false));
+}
+
+TEST_F(TestCodegenTiling, PgoTilingKeyCountOverflowShouldFallbackInductor) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = GenTilingKeyCountResult({{10U, 10U, 10U, 11U}});
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+  EXPECT_EQ(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoRunner"), std::string::npos);
+  EXPECT_NE(result.tiling.find("Topn selector helpers: default-first"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, PgoTilingKeyCountShouldRespectInt64Capacity) {
+  const auto representable = GenTilingKeyCountResult({std::vector<size_t>(63U, 2U)});
+  auto unrepresentable = representable;
+  unrepresentable.node_idx_to_scheduled_results[0][0].schedule_groups.push_back(
+      representable.node_idx_to_scheduled_results[0][0].schedule_groups[0]);
+
+  const auto representable_func = GenFindBestTilingKeyFunc(representable, "AutofuseTilingData");
+  const auto unrepresentable_func = GenFindBestTilingKeyFunc(unrepresentable, "AutofuseTilingData");
+  EXPECT_NE(representable_func.find("graph0_result0_g62_tiling_data.tiling_key"), std::string::npos);
+  EXPECT_NE(GenGetTilingKeyCount(representable).find("return 9223372036854775808ULL;"), std::string::npos);
+  EXPECT_NE(GenGetTilingKeyCount(unrepresentable).find("return 18446744073709551615ULL;"), std::string::npos);
+  EXPECT_TRUE(CompileCode("#include <cstdint>\n" + GenGetTilingKeyCount(unrepresentable)));
+  EXPECT_EQ(unrepresentable_func, R"(extern "C" int64_t FindBestTilingKey(AutofuseTilingData &t)
+{
+  return -1;
+}
+)");
 }
 
 TEST_F(TestCodegenTiling, TestGenFindBestTilingKeyFuncForEnableParallel) {

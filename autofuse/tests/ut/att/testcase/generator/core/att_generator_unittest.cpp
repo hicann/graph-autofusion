@@ -446,7 +446,7 @@ TEST(GeneratorUT, ReuseGroupStateHeaderKeepsGroupNamespacesAndForwardDeclaration
   EXPECT_EQ(reuse_source.find("#include \"autofuse_tiling_func_pgo.h\""), std::string::npos);
 }
 
-TEST(GeneratorUT, ReuseGroupPgoProfileUsesFullAutofuseTilingData) {
+TEST(GeneratorUT, ReuseGroupPgoCopiesPrimaryGroupTiling) {
   TilingModelInfo primary_group{CreateModelInfo()};
   TilingModelInfo reuse_group{CreateModelInfo()};
   primary_group[0].schedule_group_ident = {0UL, 0UL, 0UL};
@@ -478,6 +478,18 @@ TEST(GeneratorUT, ReuseGroupPgoProfileUsesFullAutofuseTilingData) {
   EXPECT_NE(api_header.find("AutofuseTilingData* output_tiling_data"), std::string::npos);
   EXPECT_EQ(api_header.find("AscGraph0ScheduleResult0G1TilingData* output_tiling_data"), std::string::npos);
   EXPECT_NE(reuse_source.find("AutofuseTilingData* output_tiling_data"), std::string::npos);
+  const auto &tail_source = tiling_res.at(kTilingScheduleGroupTailIdentify);
+  EXPECT_NE(tail_source.find("RefToRef<AscGraph0ScheduleResult0G0TilingData, "
+                             "AscGraph0ScheduleResult0G1TilingData>("
+                             "tiling_data.graph0_result0_g0_tiling_data)"),
+            std::string::npos);
+  const auto pgo_by_core_num_begin = tail_source.find("bool GetScheduleResult0PGOByCoreNum");
+  const auto pgo_by_core_num_end = tail_source.find("using ScheduleResultFunctionPGOByCoreNum", pgo_by_core_num_begin);
+  ASSERT_NE(pgo_by_core_num_begin, std::string::npos);
+  ASSERT_NE(pgo_by_core_num_end, std::string::npos);
+  EXPECT_EQ(tail_source.substr(pgo_by_core_num_begin, pgo_by_core_num_end - pgo_by_core_num_begin)
+                .find("AscGraph0ScheduleResult0G1::GetTiling"),
+            std::string::npos);
 }
 
 TEST(GeneratorUT, Normal) {

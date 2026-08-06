@@ -390,6 +390,12 @@ Status Codegen::Generate(const ascir::FusedScheduledResult &fused_schedule_resul
 // inductor路径仍返回单个host_tiling字符串，通过注释marker保留拆分边界
 Status Codegen::GenerateForInductor(const ascir::FusedScheduledResult &fused_schedule_result,
                                     CodegenResult &result) const {
+  if (tiling_lib_.ShouldFallbackPgo(fused_schedule_result)) {
+    GELOGW("Tiling key count exceeds 10000, fallback to non-PGO Inductor codegen");
+    Codegen fallback(*this);
+    fallback.tiling_lib_.DisableInductorPgo();
+    return fallback.GenerateForInductor(fused_schedule_result, result);
+  }
   const auto generate_tiling_without_pgo = [&]() {
     if (!tiling_lib_.IsInductorPgoEnabled() || ascgen_utils::IsCubeFusedScheduled(fused_schedule_result) ||
         !ascgen_utils::IsStaticSchedResult(fused_schedule_result)) {

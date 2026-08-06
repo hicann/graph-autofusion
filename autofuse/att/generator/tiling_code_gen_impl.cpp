@@ -3831,30 +3831,59 @@ void TilingCodeGenImpl::GenPGOByCoreNumDoTiling(
   }
 }
 
-void TilingCodeGenImpl::GenPGOByCoreNumGetScheduleResult(
-    const size_t asc_graph_id, const size_t impl_graph_id,
-    const std::map<size_t, std::pair<std::string, std::string>> &graph_info,
-    const std::map<std::string, std::set<std::string>> &hardware_map,
-    const std::map<size_t, std::map<size_t, std::map<std::string, af::Expression>>> &var_relation) {
+void TilingCodeGenImpl::GenPGOByCoreNumFunctionHead(size_t impl_graph_id) {
   std::string func_define(kInlineStr);
   func_define.append("bool GetScheduleResult")
       .append(std::to_string(impl_graph_id) + "PGOByCoreNum")
       .append("(std::vector<" + config_.tiling_data_type_name + ">& tiling_data_list, ")
       .append(config_.tiling_data_type_name + " tiling_data")
       .append(") {");
-
   tiling_func_.AddLine(func_define);
   tiling_func_.AddLine("  std::unordered_map<int64_t, uint64_t> workspace_map{};");
-  uint32_t group_index = 0U;
   tiling_func_.AddLine("  " + config_.tiling_data_type_name + " tiling_data_tmp = tiling_data;");
   tiling_func_.AddLine("  std::vector<" + config_.tiling_data_type_name +
                        "> tiling_data_list_tmp0 = {tiling_data_tmp};");
+}
+
+bool TilingCodeGenImpl::TryGenPGOByCoreNumReuseTiling(size_t asc_graph_id, size_t impl_graph_id, size_t group_id,
+                                                      uint32_t group_index) {
+  const auto iter = std::find_if(tiling_model_info_.cbegin(), tiling_model_info_.cend(), [&](const auto &model_info) {
+    const auto &ident = model_info.schedule_group_ident;
+    return ident.asc_graph_id == asc_graph_id && ident.impl_graph_id == impl_graph_id && ident.group_id == group_id &&
+           model_info.reuse_schedule_group != nullptr && model_info.reuse_schedule_group->IsReuseGroup(ident);
+  });
+  if (iter == tiling_model_info_.cend()) {
+    return false;
+  }
+  const auto &reuse_ident = iter->reuse_schedule_group->reuse_group_ident;
+  const auto &current_ident = iter->schedule_group_ident;
+  const auto source = "tiling_data." + reuse_ident.GetItemPrefix() + "_tiling_data";
+  const auto target = current_ident.GetItemPrefix() + "_tiling_data";
+  tiling_func_.AddLine("    auto reuse_tiling_data = RefToRef<" + reuse_ident.GetGroupPrefix() + "TilingData, " +
+                       current_ident.GetGroupPrefix() + "TilingData>(" + source + ");");
+  tiling_func_.AddLine("    tiling_data." + target + " = reuse_tiling_data;");
+  tiling_func_.AddLine("    tiling_data_list_tmp" + std::to_string(group_index) + ".push_back(tiling_data);");
+  return true;
+}
+
+void TilingCodeGenImpl::GenPGOByCoreNumGetScheduleResult(
+    const size_t asc_graph_id, const size_t impl_graph_id,
+    const std::map<size_t, std::pair<std::string, std::string>> &graph_info,
+    const std::map<std::string, std::set<std::string>> &hardware_map,
+    const std::map<size_t, std::map<size_t, std::map<std::string, af::Expression>>> &var_relation) {
+  GenPGOByCoreNumFunctionHead(impl_graph_id);
+  uint32_t group_index = 0U;
 
   for (const auto &group_info : graph_info) {
     group_index++;
     tiling_func_.AddLine("  std::vector<" + config_.tiling_data_type_name + "> tiling_data_list_tmp" +
                          std::to_string(group_index) + ";");
     tiling_func_.AddLine("  for (auto &tiling_data : tiling_data_list_tmp" + std::to_string(group_index - 1) + ") {");
+    if (TryGenPGOByCoreNumReuseTiling(asc_graph_id, impl_graph_id, group_info.first, group_index)) {
+      tiling_func_.AddLine("  }");
+      tiling_func_.AddLine("");
+      continue;
+    }
     auto [input_vars_set_code, need_update_second_group_input_vars] =
         ProcessVarRelationsStatement(graph_info, var_relation, group_info.first, "    ", {"continue;"});
     std::string tiling_item_name = group_info.second.second + "_tiling_data";
