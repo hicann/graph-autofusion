@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
+#include <memory>
 #include <vector>
 #include <set>
 #include <string.h>
@@ -26,6 +27,12 @@
 #include "sk_common.h"
 #include "runtime/base.h"
 #include "dump/adump_pub.h"
+
+namespace sk {
+namespace logger {
+class LogContextGuard;
+}
+}  // namespace sk
 
 struct ExceptionRegInfo {
   uint32_t coreNum;
@@ -57,9 +64,9 @@ class SuperKernelExceptionHandler {
 
  private:
   bool IsSuperKernelException(aclrtExceptionInfo *exceptionInfo);
-  bool ExtractSkEntryArgs(aclrtExceptionInfo *exceptionInfo);
+  bool ExtractSkEntryArgs(aclrtExceptionInfo *exceptionInfo, std::unique_ptr<sk::logger::LogContextGuard> &logContext);
   bool ExtractSkDeviceEntryArgsPtr(aclrtExceptionInfo *exceptionInfo);
-  bool CopySkDeviceEntryArgsToHost();
+  bool CopySkDeviceEntryArgsToHost(std::unique_ptr<sk::logger::LogContextGuard> &logContext);
   bool ExtractSkHeaderInfo();
   bool ValidateSkHeaderOffsets();
   bool ExtractTaskQueue();
@@ -103,7 +110,8 @@ class SuperKernelExceptionHandler {
   aclError PopulateDumpInfoFields(Adx::ExceptionDumpInfo &dumpInfo, int32_t errorNodeIdx,
                                   aclrtExceptionInfo *exceptionInfo, uint32_t coreId, rtCoreType_t coreType);
 
-  aclError PrepareExceptionDump(aclrtExceptionInfo *exceptionInfo, ExceptionRegInfo &exceptionRegInfo);
+  aclError PrepareExceptionDump(aclrtExceptionInfo *exceptionInfo, ExceptionRegInfo &exceptionRegInfo,
+                                std::unique_ptr<sk::logger::LogContextGuard> &logContext);
 
   aclError PopulateSkEntryFields(Adx::ExceptionDumpInfo &dumpInfo, aclrtExceptionInfo *exceptionInfo);
   void PopulateTensorFields(Adx::ExceptionDumpInfo &dumpInfo, uint32_t coreId, rtCoreType_t coreType);

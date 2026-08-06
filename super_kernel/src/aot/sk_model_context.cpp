@@ -59,12 +59,12 @@ bool GetRtsModelId(aclmdlRI model, uint32_t &rtsModelId) {
 ModelIdentity BuildModelIdentity(aclmdlRI model, bool bumpCounter) {
   if (model == nullptr) {
     SK_DLOGE("Failed to make model identity: model is nullptr");
-    return {DEFAULT_MODEL_ID, std::string(MODEL_LABEL_PREFIX) + DEFAULT_MODEL_ID};
+    return {DEFAULT_MODEL_ID, BuildModelLabel(DEFAULT_MODEL_ID)};
   }
 
   uint32_t rtsModelId = 0U;
   if (!GetRtsModelId(model, rtsModelId)) {
-    return {DEFAULT_MODEL_ID, std::string(MODEL_LABEL_PREFIX) + DEFAULT_MODEL_ID};
+    return {DEFAULT_MODEL_ID, BuildModelLabel(DEFAULT_MODEL_ID)};
   }
 
   uint64_t callCount = 0U;
@@ -74,10 +74,14 @@ ModelIdentity BuildModelIdentity(aclmdlRI model, bool bumpCounter) {
   }
 
   std::string uniqueModelId = std::to_string(rtsModelId) + "_" + std::to_string(callCount);
-  return {uniqueModelId, std::string(MODEL_LABEL_PREFIX) + uniqueModelId};
+  return {uniqueModelId, BuildModelLabel(uniqueModelId)};
 }
 
 }  // namespace
+
+std::string BuildModelLabel(const std::string &modelId) {
+  return std::string(MODEL_LABEL_PREFIX) + (modelId.empty() ? DEFAULT_MODEL_ID : modelId);
+}
 
 std::string GetCurrentModelId() {
   const auto *context = ModelContextState::currentContext_;
@@ -92,7 +96,7 @@ std::string GetCurrentModelLabel() {
   const auto *context = ModelContextState::currentContext_;
   if (context == nullptr) {
     SK_DLOGE("Failed to get current model label: no active SkModelContext");
-    return std::string(MODEL_LABEL_PREFIX) + DEFAULT_MODEL_ID;
+    return BuildModelLabel(DEFAULT_MODEL_ID);
   }
   return context->modelLabel_;
 }

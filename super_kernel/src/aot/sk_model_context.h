@@ -32,6 +32,8 @@ std::string GetCurrentModelId();
 
 std::string GetCurrentModelLabel();
 
+std::string BuildModelLabel(const std::string &modelId);
+
 // RAII scope installed at the aclskOptimize entry. Bumps the call counter and
 // freezes the model identity once, so every downstream consumer reads one stable
 // value rather than recomputing from the mutable counter. Nested/reentrant

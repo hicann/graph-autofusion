@@ -3,13 +3,15 @@
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OR ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
 #include <gtest/gtest.h>
 #include "mockcpp/mockcpp.hpp"
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <cstring>
 #include <map>
@@ -23,6 +25,8 @@
 #include "sk_dfx_exception_handler.h"
 #include "sk_common.h"
 #include "sk_event_recorder.h"
+#include "sk_log.h"
+#include "sk_model_context.h"
 #include "runtime/kernel.h"
 #include "stub/ut_common_stubs.h"
 #include "stub/dlog_pub.h"
@@ -2597,7 +2601,9 @@ TEST_F(SkDfxExceptionHandlerTest, ExceptionDumpInfoCallBack_SuperKernelException
   headerInfo.nodeCnt = 1;
   headerInfo.dfxOffset = sizeof(SkHeaderInfo);
   headerInfo.aicQueOffset = headerInfo.dfxOffset + sizeof(SkDfxInfo);
-  headerInfo.modelIdIndexAndSkScopeId = 0;
+  const std::string modelId = "dfx_callback_route_model";
+  uint16_t modelIdIndex = SkEventRecorder::Instance().RegisterModelId(modelId);
+  headerInfo.modelIdIndexAndSkScopeId = static_cast<uint64_t>(modelIdIndex) << 32;
 
   SkDfxInfo *dfxInfo = reinterpret_cast<SkDfxInfo *>(buffer + headerInfo.dfxOffset);
   dfxInfo[0].binHdl = 0xAAAA;
@@ -2628,6 +2634,16 @@ TEST_F(SkDfxExceptionHandlerTest, ExceptionDumpInfoCallBack_SuperKernelException
   MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpy_DeviceToHost));
   MOCKER(rtGetExceptionRegInfo).stubs().will(invoke(Fake_rtGetExceptionRegInfo_SingleCore));
 
+  const std::string previousLabel = "model_dfx_callback_previous";
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = BuildModelLabel(modelId);
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+  config.modelLabel = previousLabel;
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+  sk::logger::FileLogger::SetCurrentModelLabel(previousLabel);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
   uint32_t ret = ExceptionDumpInfoCallBack(&exceptionInfo, dumpInfo, 1, &realSize, &mode);
   EXPECT_EQ(ret, ACL_SUCCESS);
   EXPECT_EQ(realSize, 1);
@@ -2641,7 +2657,17 @@ TEST_F(SkDfxExceptionHandlerTest, ExceptionDumpInfoCallBack_SuperKernelException
   EXPECT_EQ(dumpInfo[0].extraTensorNum, 1);
   EXPECT_EQ(dumpInfo[0].extraTensor[0].tensorSize, bufferSize);
   EXPECT_EQ(dumpInfo[0].extraTensor[0].tensorAddr, reinterpret_cast<int64_t *>(0x3000));
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), previousLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
 
+  std::ifstream targetLog(GetSkMetaPath(BuildModelLabel(modelId)) + "/super_kernel.log");
+  std::string targetLogContent((std::istreambuf_iterator<char>(targetLog)), std::istreambuf_iterator<char>());
+  EXPECT_NE(targetLogContent.find("Exception is in SuperKernel"), std::string::npos);
+  std::ifstream previousLog(GetSkMetaPath(previousLabel) + "/super_kernel.log");
+  std::string previousLogContent((std::istreambuf_iterator<char>(previousLog)), std::istreambuf_iterator<char>());
+  EXPECT_EQ(previousLogContent.find("Exception is in SuperKernel"), std::string::npos);
+
+  sk::logger::FileLogger::Instance().SetEnabled(false);
   g_mockDeviceBuffer = nullptr;
   g_mockDeviceBufferSize = 0;
   free(buffer);
@@ -2912,7 +2938,8 @@ TEST_F(SkDfxExceptionHandlerTest, ExtractSkEntryArgs_TotalSizeExceedsPtrLen_Retu
   MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpy_DeviceToHost));
   MOCKER(aclrtFreeHost).stubs().will(invoke(Fake_aclrtFreeHost_Success));
 
-  EXPECT_FALSE(handler->ExtractSkEntryArgs(exceptionInfo));
+  std::unique_ptr<sk::logger::LogContextGuard> logContext;
+  EXPECT_FALSE(handler->ExtractSkEntryArgs(exceptionInfo, logContext));
 
   g_mockDeviceBuffer = nullptr;
   g_mockDeviceBufferSize = 0;
@@ -2941,8 +2968,55 @@ TEST_F(SkDfxExceptionHandlerTest, ExtractSkEntryArgs_InvalidOffsetFailsValidatio
   MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpy_DeviceToHost));
   MOCKER(aclrtFreeHost).stubs().will(invoke(Fake_aclrtFreeHost_Success));
 
-  EXPECT_FALSE(handler->ExtractSkEntryArgs(exceptionInfo));
+  std::unique_ptr<sk::logger::LogContextGuard> logContext;
+  EXPECT_FALSE(handler->ExtractSkEntryArgs(exceptionInfo, logContext));
 
+  g_mockDeviceBuffer = nullptr;
+  g_mockDeviceBufferSize = 0;
+  free(buffer);
+}
+
+TEST_F(SkDfxExceptionHandlerTest, ExtractSkEntryArgs_RoutesToHeaderModelAndGuardRestoresPreviousState) {
+  constexpr size_t bufferSize = 256;
+  uint8_t *buffer = static_cast<uint8_t *>(malloc(bufferSize));
+  ASSERT_NE(buffer, nullptr);
+  memset_s(buffer, bufferSize, 0, bufferSize);
+
+  const std::string modelId = "dfx_route_model";
+  uint16_t modelIdIndex = SkEventRecorder::Instance().RegisterModelId(modelId);
+  auto *deviceArgs = reinterpret_cast<SkDeviceEntryArgs *>(buffer);
+  deviceArgs->skHeader.totalSize = bufferSize;
+  deviceArgs->skHeader.modelIdIndexAndSkScopeId = static_cast<uint64_t>(modelIdIndex) << 32;
+
+  g_mockDeviceBuffer = buffer;
+  g_mockDeviceBufferSize = bufferSize;
+
+  MOCKER(aclrtGetArgsFromExceptionInfo).stubs().will(invoke(Fake_aclrtGetArgsFromExceptionInfo_Success));
+  MOCKER(aclrtMallocHost).stubs().will(invoke(Fake_aclrtMallocHost_Success));
+  MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpy_DeviceToHost));
+  MOCKER(aclrtFreeHost).stubs().will(invoke(Fake_aclrtFreeHost_Success));
+
+  const std::string previousLabel = "model_dfx_route_previous";
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = previousLabel;
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+  sk::logger::FileLogger::SetCurrentModelLabel(previousLabel);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
+  std::unique_ptr<sk::logger::LogContextGuard> logContext;
+  aclrtExceptionInfo *exceptionInfo = reinterpret_cast<aclrtExceptionInfo *>(0x500);
+  EXPECT_TRUE(handler->ExtractSkEntryArgs(exceptionInfo, logContext));
+  ASSERT_NE(logContext, nullptr);
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), BuildModelLabel(modelId));
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+
+  handler->FreeResources();
+  logContext.reset();
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), previousLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+
+  sk::logger::FileLogger::Instance().SetEnabled(false);
   g_mockDeviceBuffer = nullptr;
   g_mockDeviceBufferSize = 0;
   free(buffer);

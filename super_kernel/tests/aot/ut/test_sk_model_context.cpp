@@ -14,6 +14,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <array>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdio>
@@ -378,6 +379,166 @@ TEST_F(TestSkModelContext, GuardedScope_PathStaysStableAcrossCalls) {
 
   EXPECT_EQ(id1, id2);
   EXPECT_EQ(path1, path2);
+}
+
+TEST_F(TestSkModelContext, BuildModelLabel_UsesCanonicalPrefixAndUnknownFallback) {
+  EXPECT_EQ(BuildModelLabel("12_3"), "model_12_3");
+  EXPECT_EQ(BuildModelLabel(""), UnknownModelLabel());
+}
+
+TEST_F(TestSkModelContext, LogContextGuard_RoutesNestedModelsAndRestoresPreviousState) {
+  const std::string originalLabel = "model_route_original";
+  const std::string outerLabel = "model_route_outer";
+  const std::string innerLabel = "model_route_inner";
+
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = originalLabel;
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+
+  const std::string originalHandle = "model_" + originalLabel;
+  sk::logger::FileLogger::SetCurrentModelLabel(originalLabel);
+  ASSERT_TRUE(sk::logger::FileHandleManager::Instance().SwitchToFile(originalHandle));
+
+  {
+    sk::logger::LogContextGuard outerContext(outerLabel);
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), outerLabel);
+    EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+
+    {
+      sk::logger::LogContextGuard innerContext(innerLabel);
+      EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), innerLabel);
+      EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+    }
+
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), outerLabel);
+    EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  }
+
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), originalHandle);
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+}
+
+TEST_F(TestSkModelContext, LogContextGuard_LoggerDisabledDoesNotChangeModelContext) {
+  const std::string originalLabel = "model_route_disabled_original";
+  sk::logger::FileLogger::SetCurrentModelLabel(originalLabel);
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
+  {
+    sk::logger::LogContextGuard logContext("model_route_disabled_target");
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+    EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  }
+
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+}
+
+TEST_F(TestSkModelContext, LogContextGuard_ConcurrentThreadsKeepModelContextsIsolated) {
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = "model_route_thread_config";
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+
+  std::atomic<uint32_t> readyCount{0U};
+  std::array<bool, 2> routeChecks{false, false};
+  std::array<bool, 2> restoreChecks{false, false};
+  std::vector<std::thread> workers;
+  workers.reserve(routeChecks.size());
+  for (size_t i = 0; i < routeChecks.size(); ++i) {
+    workers.emplace_back([i, &readyCount, &routeChecks, &restoreChecks]() {
+      const std::string previousLabel = "model_route_thread_previous_" + std::to_string(i);
+      const std::string targetLabel = "model_route_thread_target_" + std::to_string(i);
+      sk::logger::FileLogger::SetCurrentModelLabel(previousLabel);
+      sk::logger::FileHandleManager::Instance().SwitchToDefault();
+      {
+        sk::logger::LogContextGuard logContext(targetLabel);
+        readyCount.fetch_add(1U, std::memory_order_release);
+        while (readyCount.load(std::memory_order_acquire) < routeChecks.size()) {
+          std::this_thread::yield();
+        }
+        routeChecks[i] = sk::logger::FileLogger::GetCurrentModelLabel() == targetLabel &&
+                         sk::logger::FileHandleManager::Instance().GetCurrentHandle() == "default";
+      }
+      restoreChecks[i] = sk::logger::FileLogger::GetCurrentModelLabel() == previousLabel &&
+                         sk::logger::FileHandleManager::Instance().GetCurrentHandle() == "default";
+    });
+  }
+
+  for (auto &worker : workers) {
+    worker.join();
+  }
+  EXPECT_TRUE(routeChecks[0]);
+  EXPECT_TRUE(routeChecks[1]);
+  EXPECT_TRUE(restoreChecks[0]);
+  EXPECT_TRUE(restoreChecks[1]);
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+}
+
+TEST_F(TestSkModelContext, LogContextGuard_FileAndModelContextsRestoreInNestedOrder) {
+  const std::string originalLabel = "model_context_original";
+  const std::string nestedLabel = "model_context_nested";
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = originalLabel;
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+  sk::logger::FileLogger::SetCurrentModelLabel(originalLabel);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
+  auto fileContext = sk::logger::FileLogger::Instance().CreateContext("nested_context.log", originalLabel);
+  ASSERT_NE(fileContext, nullptr);
+  const std::string fileHandle = sk::logger::FileHandleManager::Instance().GetCurrentHandle();
+  EXPECT_NE(fileHandle, "default");
+
+  {
+    sk::logger::LogContextGuard modelContext(nestedLabel);
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), nestedLabel);
+    EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  }
+
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), fileHandle);
+  fileContext.reset();
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+}
+
+TEST_F(TestSkModelContext, LogContextGuard_MoveTransfersContextOwnership) {
+  const std::string originalLabel = "model_move_original";
+  const std::string targetLabel = "model_move_target";
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = originalLabel;
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+  sk::logger::FileLogger::SetCurrentModelLabel(originalLabel);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
+  {
+    sk::logger::LogContextGuard source(targetLabel);
+    sk::logger::LogContextGuard moved(std::move(source));
+    EXPECT_FALSE(source.IsActive());
+    EXPECT_TRUE(moved.IsActive());
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), targetLabel);
+  }
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+
+  {
+    sk::logger::FileLogger::Instance().SetEnabled(false);
+    sk::logger::LogContextGuard moved("model_move_inactive");
+    sk::logger::FileLogger::Instance().SetEnabled(true);
+    sk::logger::LogContextGuard source(targetLabel);
+    moved = std::move(source);
+    EXPECT_FALSE(source.IsActive());
+    EXPECT_TRUE(moved.IsActive());
+  }
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  sk::logger::FileLogger::Instance().SetEnabled(false);
 }
 
 TEST_F(TestSkModelContext, LogContextUsesExplicitModelLabel) {
