@@ -361,10 +361,12 @@ af::Status CopyImplGraphs(const std::vector<autoschedule::AutoScheduleOutput> &s
   return af::SUCCESS;
 }
 
-bool CanDoReMergeAxis(const af::AscGraph &impl_graph) {
+bool CanDoReMergeAxis(const af::AscGraph &impl_graph, ReduceTemplateType reduce_type) {
   GraphPropertiesCache cache(impl_graph);
-  // 如果包含Gather、Reduce或Cube类型节点，则不能重新合并轴
-  return !cache.HasGather() && !cache.HasReduce() && !cache.HasCube();
+  // 如果包含Gather、Cube类型节点，则不能重新合并轴
+  // RCore类型中包含Reduce的图依赖固定的二维调度轴，不能重新合并轴
+  const bool is_rcore_reduce = (reduce_type == ReduceTemplateType::kRCore) && cache.HasReduce();
+  return !is_rcore_reduce && !cache.HasGather() && !cache.HasCube();
 }
 
 void FilterComplexTilingDataScoreFuncs(std::vector<::ascir::ScheduledResult> &scheduled_results,
@@ -1063,7 +1065,7 @@ Status Optimizer::AutoScheduler([[maybe_unused]] const HintGraph &hint_graph, Sc
 
   for (auto &grouped_graph : schedule_task.grouped_graphs) {
     GE_CHK_STATUS_RET(AscGraphInfoComplete::CompleteApiInfo(grouped_graph), "CompleteApiInfo failed");
-    if (CanDoReMergeAxis(grouped_graph)) {
+    if (CanDoReMergeAxis(grouped_graph, schedule_task.reduce_type)) {
       GE_ASSERT_SUCCESS(RemoveAllZeroStrideLoopAxis(grouped_graph), "Remove All zero stride axis failed.");
       GE_ASSERT_SUCCESS(MergeContinuousAxis(grouped_graph, schedule_task.cube_type), "Merge continuous axes failed.");
     }

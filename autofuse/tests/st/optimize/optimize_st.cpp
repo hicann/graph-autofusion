@@ -913,7 +913,7 @@ TEST_F(OptimizerSt, TestPackGraph_OptimizeSuccess) {
   EXPECT_EQ(ascbc_3, nullptr);
 }
 
-TEST_F(OptimizerSt, TestPackGraph_OptimizeFailedWithReduce) {
+TEST_F(OptimizerSt, TestPackGraph_OptimizeSuccessWithReduce) {
   ComputeGraphPtr compute_graph = BuildFusedPackGraph();
   ASSERT_NE(compute_graph, nullptr);
   auto ascbc1 = compute_graph->FindNode("ascbc1");
@@ -937,7 +937,7 @@ TEST_F(OptimizerSt, TestPackGraph_OptimizeFailedWithReduce) {
   af::AttrUtils::SetStr(ascbc3->GetOpDescBarePtr(), "ascgraph", add_graph_str3);
 
   ::ascir::FusedScheduledResult fused_scheduled_result;
-  ASSERT_NE(optimizer.Optimize(compute_graph, fused_scheduled_result), 0);
+  ASSERT_EQ(optimizer.Optimize(compute_graph, fused_scheduled_result), af::SUCCESS);
 }
 
 TEST_F(OptimizerSt, TestConcatGraph_OptimizeSuccess) {
