@@ -18,18 +18,36 @@ on:
     comments: [ '^(?:\/)?compile*' ]
 
 env:
-  org_name: "cann"
+  org_name: ${{ vars.ORG_NAME }}
   repo_name: "graph-autofusion"
   MERGE_ID: ${{atomgit.event.pull_request.number}}
   TARGET_BRANCH: ${{atomgit.base_ref}}
   SOURCE_BRANCH: ${{atomgit.head_ref}}
   obs_path: "${{ vars.OBS_PATH }}/${{ env.MERGE_ID }}"
   obs_smoke_path: "${{ env.obs_path }}/presmoke/2"
+  online: ${{ vars.APPLY_LABEL }}
 
 stages:
   stage1:
     name: PreBuild
     jobs:
+      JOB_pre:
+        name: Test_pre_pipeline
+        steps:
+          - name: pre_pipeline
+            uses: cann/.gitcode/actions/pre-pipeline@master
+            with:
+              owner: ${{ env.org_name }}
+              repo: ${{ env.repo_name }}
+              pr_number: ${{ atomgit.event.pull_request.number }}
+              token: ${{ secrets.GIT_TOKEN }}
+              apply_label: ${{ vars.APPLY_LABEL }}
+          - name: associate-pr-comment
+            uses: associate-pr-comment
+            if: env.online == 'true'
+        runs-on: [dedicate-hosted, x64, small]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/ci_cann/ubuntu20.04.05_x86:k8s_v1.1006
       JOB_image:
         name: Test_image
         steps:
@@ -82,6 +100,7 @@ stages:
                 ${{ steps.process_checkout.outputs.path }}/pr_filelist_mod.txt
                 ${{ steps.process_checkout.outputs.path }}/pr_filelist_precommit.txt
                 ${{ steps.process_checkout.outputs.path }}/update_file_detail.txt
+                ${{ steps.process_checkout.outputs.path }}/gitdiff.txt
               object-prefix: ${{ env.obs_path }}/
         runs-on:
         - default
@@ -153,35 +172,11 @@ stages:
           image_version: ${{ jobs.JOB_image.outputs.Compile_Ascend_ARM_ubuntu24 }}
           arch: 'arm64'
           package_name: 'cann-graph-autofusion_linux-aarch64_ubuntu24.run'
-      JOB_staticcheck_markdown:
-        name: CodeCheck_staticcheck_markdown
+      JOB_staticcheck_md_check:
+        name: CodeCheck_staticcheck_md_check
         uses: .gitcode/workflows/staticcheck_action.yml
         with:
-          check_type: 'markdown'
-          image_version: ${{ jobs.JOB_image.outputs.staticcheck }}
-      JOB_staticcheck_codespell_check:
-        name: CodeCheck_staticcheck_codespell_check
-        uses: .gitcode/workflows/staticcheck_action.yml
-        with:
-          check_type: 'codespell_check'
-          image_version: ${{ jobs.JOB_image.outputs.staticcheck }}
-      JOB_staticcheck_tag_closed_check:
-        name: CodeCheck_staticcheck_tag_closed_check
-        uses: .gitcode/workflows/staticcheck_action.yml
-        with:
-          check_type: 'tag_closed_check'
-          image_version: ${{ jobs.JOB_image.outputs.staticcheck }}
-      JOB_staticcheck_resource_existence_check:
-        name: CodeCheck_staticcheck_resource_existence_check
-        uses: .gitcode/workflows/staticcheck_action.yml
-        with:
-          check_type: 'resource_existence_check'
-          image_version: ${{ jobs.JOB_image.outputs.staticcheck }}
-      JOB_staticcheck_link_validity_check:
-        name: CodeCheck_staticcheck_link_validity_check
-        uses: .gitcode/workflows/staticcheck_action.yml
-        with:
-          check_type: 'link_validity_check'
+          check_type: 'md_check'
           image_version: ${{ jobs.JOB_image.outputs.staticcheck }}
     pre:
     - type: auto
@@ -294,6 +289,108 @@ stages:
     - type: auto
     fail-fast: false
   stage4:
+    name: UT_report
+    jobs:
+      JOB_ut_report:
+        name: UT_report
+        steps:
+          -
+            name: Checkout
+            identifier: process_checkout
+            uses: checkout
+            with:
+              ref: ${{ atomgit.event.pull_request.merge_commit_sha }}
+              token: ${{ secrets.GIT_TOKEN }}
+          -
+            name: download
+            uses: obs-download
+            with:
+              endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+              bucket: "ascend-ci"
+              key: |
+                ${{ env.obs_path }}/pr_filelist.txt
+                ${{ env.obs_path }}/pr_filelist_mod.txt
+              path: ${{ steps.process_checkout.outputs.path }}
+          -
+            name: ut_report
+            identifier: ut-report
+            uses: cann/.gitcode/actions/ut-cov-report@master
+            with:
+              workspace: ${{ steps.process_checkout.outputs.path }}
+              cov_mode: "report"
+              ut_field: "superkernel"
+              modules: "UT_Test_superkernel"
+              source_branch: ${{ env.SOURCE_BRANCH }}
+              target_branch: ${{ env.TARGET_BRANCH }}
+              obs_path: ${{ env.obs_path }}
+              git_token: ${{ secrets.GIT_TOKEN }}
+          -
+            name: upload
+            uses: obs-upload
+            with:
+              endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+              bucket: "ascend-ci"
+              access-key: ${{ secrets.AK }}
+              secret-key: ${{ secrets.SK }}
+              artifact-path: |
+                ${{ steps.process_checkout.outputs.path }}/ut_cov_*.tar.gz
+              object-prefix: ${{ env.obs_path }}/
+        if: env.TARGET_BRANCH == 'master'
+        runs-on: [dedicate-hosted, x64, large]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/ci_cann/${{ jobs.JOB_image.outputs.UT_Test_report }}
+      JOB_st_report:
+        name: ST_report
+        steps:
+          -
+            name: Checkout
+            identifier: process_checkout
+            uses: checkout
+            with:
+              ref: ${{ atomgit.event.pull_request.merge_commit_sha }}
+              token: ${{ secrets.GIT_TOKEN }}
+          -
+            name: download
+            uses: obs-download
+            with:
+              endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+              bucket: "ascend-ci"
+              key: |
+                ${{ env.obs_path }}/pr_filelist.txt
+                ${{ env.obs_path }}/pr_filelist_mod.txt
+              path: ${{ steps.process_checkout.outputs.path }}
+          -
+            name: st_report
+            identifier: st_report
+            uses: cann/.gitcode/actions/ut-cov-report@master
+            with:
+              workspace: ${{ steps.process_checkout.outputs.path }}
+              cov_mode: "report"
+              ut_field: "superkernel"
+              modules: "ST_Test_Python_superkernel"
+              source_branch: ${{ env.SOURCE_BRANCH }}
+              target_branch: ${{ env.TARGET_BRANCH }}
+              obs_path: ${{ env.obs_path }}
+              git_token: ${{ secrets.GIT_TOKEN }}
+          -
+            name: upload
+            uses: obs-upload
+            with:
+              endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
+              bucket: "ascend-ci"
+              access-key: ${{ secrets.AK }}
+              secret-key: ${{ secrets.SK }}
+              artifact-path: |
+                ${{ steps.process_checkout.outputs.path }}/ut_cov_*.tar.gz
+              object-prefix: ${{ env.obs_path }}/
+        if: env.TARGET_BRANCH == 'master'
+        runs-on: [dedicate-hosted, x64, large]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/ci_cann/${{ jobs.JOB_image.outputs.ST_Test_report }}
+    pre:
+    - type: auto
+    fail-fast: true
+  stage5:
     name: PreSmoke
     jobs:
       A2_smoke:
@@ -382,3 +479,9 @@ stages:
     pre:
     - type: auto
     fail-fast: true
+
+post:
+  jobs:
+    job_post:
+      name: Test_post
+      uses: cann/.gitcode/.gitcode/workflows/post_action.yml@master
