@@ -253,6 +253,8 @@ class TilingCodeGenImpl {
   virtual af::Status GenPGOByCoreNumTilingForAll();
   void GenPGOByCoreNumDoTiling(const std::pair<size_t, std::pair<std::string, std::string>> &group_info,
                                const uint32_t group_index, const size_t asc_graph_id, const size_t impl_graph_id);
+  void GenPGOByCoreNumFunctionHead(size_t impl_graph_id);
+  bool TryGenPGOByCoreNumReuseTiling(size_t asc_graph_id, size_t impl_graph_id, size_t group_id, uint32_t group_index);
   void GenPGOByCoreNumGetAllSchedulesResults(const size_t asc_graph_id, const AscGraphNamepspaceMap &namespace_map);
   // 该函数用于构造tiling data的set与get内容
   virtual af::Status GenExtraParamCode(const ModelInfo &model_info, std::string &pass_code);

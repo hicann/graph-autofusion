@@ -11,7 +11,7 @@ autofuse/
 ├── ascendc                # ascendc api 定义
 ├── ascir                  # 算子注册 ascir
 ├── att                    # 自动 tiling 生成 模块
-├── autofuse               # config 配置
+├── cmake                  # cmake 脚本文件
 ├── codegen                # kernel 代码生成 模块
 ├── common                 # 通用工具方法
 ├── compiler               # 对外API 接口
@@ -31,12 +31,14 @@ autofuse/
 参考[执行构建](../docs/zh/build.md)。
 
 ## 上板验证指导
-用户如果想在昇腾设备上体验Autofuse 的功能与性能，可以先参考[快速安装](../docs/zh/quick_install.md)准备环境。无论是没有昇腾设备的开发者，还是已有昇腾设备的开发者，都可以快速搭建好环境。在此基础上，按照上一步[构建与安装](../docs/zh/build.md)，增量安装了graph-autofusion仓编译生成的cann包。
+用户如果想在昇腾设备上体验 Autofuse 的功能与性能，可以先参考[快速安装](../docs/zh/quick_install.md)准备环境。无论是没有昇腾设备的开发者，还是已有昇腾设备的开发者，都可以快速搭建好环境。在此基础上，按照上一步[构建与安装](../docs/zh/build.md)，增量安装了graph-autofusion仓编译生成的cann包。
 
-此处指导如何搭建 Pytorch 环境，创建脚本，跑通 Inductor + Autofuse场景，并可视化生成的自动融合算子，以及观察最后的kernel性能。
+AutoFuse 当前提供 PyTorch 和 TensorFlow 两种框架下的 Sample 用例，未来我们可能会支持更多框架。可根据实际使用场景参考对应文档完成环境安装和用例执行：
 
-当前自动融合支持elementwise类型+element类型，element类型+broadcast类型，element类型+reduce类型算子的融合。更多融合场景的支持（concat，gather等等）逐步开放中。
+- [PyTorch 场景用例](./examples/pytorch/README.md)
+- [TensorFlow 场景用例](./examples/tensorflow/README.md)
 
+以下以 Pytorch 场景为例，指导如何搭建 Pytorch 环境，跑通 Pytorch场景下用例，并通过profiling数据观察最后的kernel性能。
 
 ### 安装依赖
 
@@ -45,7 +47,7 @@ autofuse/
 pip3 install numpy
 pip3 install pyyaml
 pip3 install setuptools
-pip3 install torch_npu==2.8  # 通过pip 安装 torch_npu 时，会自动安装依赖的torch 版本
+pip3 install torch_npu==2.10.0  # torch_npu版本应为 2.9.0 及以上。通过pip 安装 torch_npu 时，会自动安装依赖的torch 版本。
 ```
 
 #### 其他环境依赖
@@ -61,10 +63,6 @@ sudo yum install cmake gcc
 ```bash
 sudo apt-get install cmake gcc
 ```
-
-
-### sample 用例
-autofuse 提供了丰富的 sample 用例，可以参考[Autofuse样例](./examples/pytorch/README.md)。
 
 ### 设置环境变量
 
@@ -119,13 +117,34 @@ export AUTOFUSE_DFX_FLAGS="--codegen_compile_debug=true;--debug_dir=/path-to-dum
 注意：Autofuse 后端会在设置的 dump 路径下生成每个融合算子的 dump 图。
 
 ### 结果分析 & 调测输出分析
-用户开启 TORCH_COMPILE_DEBUG 后，调试信息输出位于执行目录下的torch_compile_debug子目录，带有 autofused_ 前缀的目录为 inductor-npu-ext 相关产物，其余均为 inductor 原生产物。每一个autofused_ 前缀的目录，都表示一个融合算子的白盒结构。如果没有融合算子产生（即未发生融合，需要通过打屏的 "Fallback aten.xxxx $reason: xx原因" 信息去判断原因。具体可参考[inductor-npu-ext使用手册](https://gitcode.com/Ascend/torchair/blob/master/experimental/_inductor_npu_ext/docs/manuals.md)。
+用户开启 `TORCH_COMPILE_DEBUG` 后，调试信息会输出到当前执行目录下的 `torch_compile_debug` 子目录。其中，以 `autofused_` 为前缀的目录是 `torch_npu` AscendC 后端生成的融合算子产物，其余目录为 PyTorch Inductor 生成的原生产物。每个以 `autofused_` 为前缀的目录对应一个融合算子的白盒结构，可用于查看融合范围和代码生成结果。如果未生成以 `autofused_` 为前缀的目录，则说明当前编译过程中没有产生融合算子。此时，可以根据终端输出中的 `Fallback aten.xxxx $reason: xx原因` 信息分析未发生融合的原因。
 
-用户也可以通过profiling的相关配置，观察使能自动融合后，算子性能收益情况。对于上面的sample用例，可以注释 "model = torch.compile(model, dynamic=False, fullgraph=True)" 这一行，即可走单算子流程。然后对比profiling里，单算子场景所有算子的总耗时，与使能 Inductor+Autofuse，融合算子的总耗时。详细的Profling性能分析工具的使用方法，可参见[Profiling性能分析工具指南](https://hiascend.com/document/redirect/CannCommunityToolProfiling)。
+用户也可以通过 Profiling 相关配置，观察使能自动融合后的算子性能收益。对于上述 Sample 用例，可以注释整个 `torch.compile(...)` 代码块，使模型以非编译模式执行，作为未使能自动融合的对照场景。
+```python
+# model = torch.compile(
+#     model,
+#     dynamic=False,
+#     fullgraph=True,
+#     options={"npu_backend": "ascendc"},
+# )
+```
+分别采集未使能自动融合和使能自动融合两种场景的 Profiling 数据，并对比相同计算范围内所有相关算子的总耗时。
 
-需要注意的是，不是模型里所有的算子都能被融合，对于在 Inductor 层未被 lowering 的算子，最后仍然以单算子形式存在。融合提升比，等于 (融合后所有算子耗时-融合前所有算子耗时)/融合前所有算子耗时。更进一步的，可以观察融合算子的 aiv_mte2_time（输入搬运耗时）和 aiv_mte3_time（输出搬运耗时）的提升情况。
+详细的Profiling性能分析工具的使用方法，可参见[Profiling性能分析工具指南](https://hiascend.com/document/redirect/CannCommunityToolProfiling)。
+
+需要注意的是，不是模型里所有的算子都能被融合，对于在 Inductor 层未被 lowering 的算子，最后仍然以单算子形式存在。融合提升比，等于 (融合前所有算子耗时-融合后所有算子耗时)/融合前所有算子耗时。更进一步的，可以观察融合算子相比于单算子的 aiv_mte2_time（输入搬运耗时）和 aiv_mte3_time（输出搬运耗时）的提升情况。
 
 对于精度的分析，详细的精度调试工具的使用方法，可参见[精度调试工具指南](https://hiascend.com/document/redirect/CannCommunityToolAccucacy)。
 
 ### 复杂网络使能
-用户如果想在网络里，使能 Autofuse 功能，只需要在模型文件的开头，导入torch后面，加上 import inductor_npu_ext 即可。
+用户在网络中使能 AutoFuse 时，无需单独导入 `inductor_npu_ext`，
+只需在 `torch.compile` 中指定 AscendC 后端：
+
+```python
+model = torch.compile(
+    model,
+    dynamic=False,
+    fullgraph=True,
+    options={"npu_backend": "ascendc"},
+)
+```

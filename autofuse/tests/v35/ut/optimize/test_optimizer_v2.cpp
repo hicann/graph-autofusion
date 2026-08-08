@@ -278,6 +278,70 @@ void ExpectSoftmaxNotFused(af::AscGraph &graph) {
   EXPECT_NE(compute_graph->FindNode("graph_hint/truediv"), nullptr);
   EXPECT_NE(compute_graph->FindNode("graph_hint/exp"), nullptr);
 }
+
+af::AscGraph BuildReduceSumCrossScopeGraph(const char *name, bool with_broadcast_add, bool contiguous = true) {
+  auto rows = Sym(1024);
+  auto cols = Sym(2050);
+  auto inner = Sym(10);
+  auto row_stride = contiguous ? cols * inner : cols * (inner + One);
+  auto col_stride = contiguous ? inner : inner + One;
+
+  AscGraphBuilder builder(name);
+  builder.Loops({rows, cols, inner})
+      .Data("reduce_data", 0, {rows, cols, inner}, {row_stride, col_stride, One})
+      .Load("reduce_load", "reduce_data", {rows, cols, inner}, {row_stride, col_stride, One})
+      .Sum("reduce_sum", "reduce_load", {0});
+  if (with_broadcast_add) {
+    builder.Data("bias_data", 1, {One, cols, One}, {Zero, One, Zero})
+        .Load("bias_load", "bias_data", {One, cols, One}, {Zero, One, Zero})
+        .Broadcast("bias_broadcast", "bias_load", {2})
+        .Add("add", "reduce_sum", "bias_broadcast")
+        .Store("store", "add")
+        .Output("output", "store", 0);
+  } else {
+    builder.Store("store", "reduce_sum").Output("output", "store", 0);
+  }
+  return builder.Build();
+}
+
+size_t CountReduceGraphAxesWithSize(const ascir::ImplGraph &impl_graph, const af::Expression &expected_size) {
+  bool has_reduce = false;
+  for (const auto &node : impl_graph.GetAllNodes()) {
+    if (ScheduleUtils::IsReduce(node)) {
+      has_reduce = true;
+      break;
+    }
+  }
+  if (!has_reduce) {
+    return 0UL;
+  }
+
+  size_t count = 0UL;
+  for (const auto &axis : impl_graph.GetAllAxis()) {
+    if (af::SymbolicUtils::StaticCheckEq(axis->size, expected_size) == af::TriBool::kTrue) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+size_t CountIndependentReduceGraphAxesWithSize(const ascir::FusedScheduledResult &result,
+                                               const af::Expression &expected_size) {
+  size_t count = 0UL;
+  for (const auto &scheduled_results : result.node_idx_to_scheduled_results) {
+    for (const auto &scheduled_result : scheduled_results) {
+      if (!scheduled_result.var_relations.empty()) {
+        continue;
+      }
+      for (const auto &schedule_group : scheduled_result.schedule_groups) {
+        for (const auto &impl_graph : schedule_group.impl_graphs) {
+          count += CountReduceGraphAxesWithSize(impl_graph, expected_size);
+        }
+      }
+    }
+  }
+  return count;
+}
 }  // namespace
 
 TEST_F(TestOptimizerV2, SoftmaxPatternFusion_StableSoftmax_Success) {
@@ -3437,6 +3501,26 @@ TEST_F(TestOptimizerV2, ReduceFuseWithBrc) {
 
   ::ascir::FusedScheduledResult fused_scheduled_result;
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), af::SUCCESS);
+}
+
+TEST_F(TestOptimizerV2, ReduceSumCrossScopeBroadcastAddMergesContinuousInnerAxes) {
+  auto full_graph = BuildReduceSumCrossScopeGraph("reduce_sum_cross_scope", true);
+  auto reduce_only_graph = BuildReduceSumCrossScopeGraph("reduce_sum_only", false);
+  auto non_contiguous_graph = BuildReduceSumCrossScopeGraph("reduce_sum_non_contiguous", true, false);
+  ascir::FusedScheduledResult full_result;
+  ascir::FusedScheduledResult reduce_only_result;
+  ascir::FusedScheduledResult non_contiguous_result;
+
+  ASSERT_EQ(optimizer.Optimize(full_graph, full_result), af::SUCCESS);
+  ASSERT_EQ(optimizer.Optimize(reduce_only_graph, reduce_only_result), af::SUCCESS);
+  ASSERT_EQ(optimizer.Optimize(non_contiguous_graph, non_contiguous_result), af::SUCCESS);
+
+  const auto merged_inner_size = Sym(2050) * Sym(10);
+  const auto reduce_only_merged_axis_count =
+      CountIndependentReduceGraphAxesWithSize(reduce_only_result, merged_inner_size);
+  EXPECT_GT(reduce_only_merged_axis_count, 0UL);
+  EXPECT_EQ(CountIndependentReduceGraphAxesWithSize(full_result, merged_inner_size), reduce_only_merged_axis_count);
+  EXPECT_EQ(CountIndependentReduceGraphAxesWithSize(non_contiguous_result, merged_inner_size), 0UL);
 }
 
 TEST_F(TestOptimizerV2, BackendSpec) {

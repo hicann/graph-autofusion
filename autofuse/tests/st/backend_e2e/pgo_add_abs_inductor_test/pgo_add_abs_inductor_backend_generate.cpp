@@ -17,7 +17,9 @@
 #include <vector>
 
 #include "backend_common.h"
+#define private public
 #include "codegen.h"
+#undef private
 #include "common_utils.h"
 #include "optimize.h"
 #include "share_graph.h"
@@ -87,5 +89,40 @@ TEST_F(TestBackendPgoAddAbsInductorE2e, PgoAddAbsInductorPgoCodegen) {
   EXPECT_FALSE(result.kernel.empty());
 
   autofuse::tests::WriteCodegenResult(result, splitString(PGO_KERNEL_SRC_LIST, ':'));
+}
+
+TEST_F(TestBackendPgoAddAbsInductorE2e, PgoTilingKeyOverflowFallsBackWithoutRunner) {
+  autofuse::tests::ScopedAutofusePgoFlag pgo_flag;
+  auto graph = ascir::ShareGraph::AddAbsFusedConstGraph(3, {32, 16, 16});
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), af::SUCCESS);
+
+  auto &schedule_groups = fused_schedule_result.node_idx_to_scheduled_results[0][0].schedule_groups;
+  const auto impl_graph = schedule_groups[0].impl_graphs[0];
+  schedule_groups.clear();
+  for (const size_t impl_count : {10U, 10U, 10U, 11U}) {
+    ascir::ScheduleGroup schedule_group;
+    schedule_group.impl_graphs.assign(impl_count, impl_graph);
+    schedule_groups.emplace_back(std::move(schedule_group));
+  }
+
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+  EXPECT_EQ(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoRunner"), std::string::npos);
+  const auto tiling_files = codegen.GenerateTiling(fused_schedule_result, {}, "/tmp", "10");
+  EXPECT_EQ(tiling_files.at(codegen::kTilingDefAndConstIdentify).find("autofuse_tiling_func_pgo.h"), std::string::npos);
+  EXPECT_EQ(codegen.GeneratorPgo(fused_schedule_result, "/tmp"), "int main() { return 0; }\n");
+
+  schedule_groups.back().impl_graphs.pop_back();
+  fused_schedule_result.node_idx_to_scheduled_results[0].emplace_back();
+  EXPECT_TRUE(codegen.tiling_lib_.ShouldFallbackPgo(fused_schedule_result));
+
+  fused_schedule_result.node_idx_to_scheduled_results[0].pop_back();
+  fused_schedule_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.clear();
+  const auto empty_group_func =
+      codegen.tiling_lib_.GenFindBestTilingKeyFunc(fused_schedule_result, "AutofuseTilingData");
+  EXPECT_EQ(empty_group_func.find("local_tiling_key"), std::string::npos);
 }
 }  // namespace

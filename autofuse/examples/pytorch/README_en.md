@@ -38,7 +38,7 @@ pytorch
 
 Before running these examples, carefully read the [PyTorch Environment Installation Guide](../../../docs/env_install/pytorch/env_pytorch.md) and complete the following steps:
 
-1. Ensure that the CANN package version is `9.0.0` or later. Install the toolkit and ops packages correctly by using [CANN Quick Installation](https://www.hiascend.com/cann/download?versionId=745&ids=d802%2Ch0501%2Ch0602%2Ch0701). For more information, see the [Installation Guide](../../../docs/zh/quick_install.md).
+1. Ensure that the CANN package version is `9.0.0` or later. Install the toolkit and ops packages correctly by using [CANN Quick Installation](https://www.hiascend.com/cann/download?versionId=745&ids=d802%2Ch0501%2Ch0602%2Ch0701). For more information, see the [Installation Guide](../../../docs/en/quick_install.md).
 
 2. Ensure that the `torch_npu` version is `2.9.0` or later. You can use the [environment quick installation script](../../../scripts/env_install/pytorch/setup_torch_npu_daily.sh) to quickly install the Python environment and `torch_npu`.
 
@@ -103,6 +103,6 @@ If the operator list contains a kernel whose name starts with `autofused_`, the 
 
 ## References
 
-* [Autofuse Overview and Quick Start](../../README.md)
+* [Autofuse Overview and Quick Start](../../README_en.md)
 * [Profiling Performance Analysis Tool Guide](https://hiascend.com/document/redirect/CannCommunityToolProfiling)
 * [Accuracy Debugging Tool Guide](https://hiascend.com/document/redirect/CannCommunityToolAccucacy)

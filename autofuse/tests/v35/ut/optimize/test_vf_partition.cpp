@@ -21,11 +21,8 @@
 #include "ascir_ops_utils.h"
 #include "schedule_utils.h"
 #include "platform_context.h"
-#include "optimize/platformv2.h"
 #include "ascgraph_info_complete.h"
 #include "runtime_stub.h"
-#include "optimize.h"
-#include "asc_graph_builder.h"
 
 using namespace std;
 using namespace ascir;
@@ -956,6 +953,99 @@ TEST_F(VfPartition, vf_cascade) {
   ASSERT_EQ(partitioner.Partition(), af::SUCCESS);
 
   ::ascir::utils::DumpGraph(graph, "AfterPart");
+}
+
+void BuildTrueDivAddRsqrtGraph(af::AscGraph &graph) {
+  af::ascir_op::Data dividend("dividend", graph);
+  dividend.ir_attr.SetIndex(0);
+  dividend.y.dtype = af::DT_FLOAT;
+
+  af::ascir_op::Load load_dividend("load_dividend");
+  load_dividend.x = dividend.y;
+  load_dividend.y.dtype = af::DT_FLOAT;
+
+  af::ascir_op::Data divisor("divisor", graph);
+  divisor.ir_attr.SetIndex(1);
+  divisor.y.dtype = af::DT_FLOAT;
+
+  af::ascir_op::Load load_divisor("load_divisor");
+  load_divisor.x = divisor.y;
+  load_divisor.y.dtype = af::DT_FLOAT;
+
+  af::ascir_op::TrueDiv true_div("true_div");
+  true_div.x1 = load_dividend.y;
+  true_div.x2 = load_divisor.y;
+  true_div.y.dtype = af::DT_FLOAT;
+
+  af::ascir_op::Scalar epsilon("epsilon", graph);
+  epsilon.y.dtype = af::DT_FLOAT;
+  *epsilon.y.repeats = {af::sym::kSymbolOne, af::sym::kSymbolOne};
+  *epsilon.y.strides = {af::sym::kSymbolZero, af::sym::kSymbolZero};
+  epsilon.ir_attr.SetValue("0.00001");
+
+  af::ascir_op::Add add_epsilon("add_epsilon");
+  add_epsilon.x1 = true_div.y;
+  add_epsilon.x2 = epsilon.y;
+  add_epsilon.y.dtype = af::DT_FLOAT;
+
+  af::ascir_op::Rsqrt rsqrt("rsqrt");
+  rsqrt.x = add_epsilon.y;
+  rsqrt.y.dtype = af::DT_FLOAT;
+
+  af::ascir_op::Store store("store");
+  store.x = rsqrt.y;
+  store.y.dtype = af::DT_FLOAT;
+
+  af::ascir_op::Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  output.y.dtype = af::DT_FLOAT;
+}
+
+bool FindTrueDivAddRsqrtSubgraph(const af::AscGraph &graph, std::vector<af::AscGraph> &sub_graphs,
+                                 size_t &subgraph_index) {
+  if (graph.GetAllSubGraphs(sub_graphs) != af::SUCCESS) {
+    return false;
+  }
+  for (size_t index = 0UL; index < sub_graphs.size(); ++index) {
+    const auto &subgraph = sub_graphs[index];
+    if (subgraph.FindNode("true_div") != nullptr && subgraph.FindNode("add_epsilon") != nullptr &&
+        subgraph.FindNode("rsqrt") != nullptr) {
+      subgraph_index = index;
+      return true;
+    }
+  }
+  return false;
+}
+
+void ExpectTrueDivAddRsqrtConnections(const af::AscGraph &subgraph) {
+  const auto true_div_node = subgraph.FindNode("true_div");
+  const auto add_node = subgraph.FindNode("add_epsilon");
+  const auto rsqrt_node = subgraph.FindNode("rsqrt");
+  ASSERT_NE(true_div_node, nullptr);
+  ASSERT_NE(add_node, nullptr);
+  ASSERT_NE(rsqrt_node, nullptr);
+  EXPECT_EQ(add_node->GetInDataAnchor(0)->GetPeerOutAnchor(), true_div_node->GetOutDataAnchor(0));
+  EXPECT_EQ(rsqrt_node->GetInDataAnchor(0)->GetPeerOutAnchor(), add_node->GetOutDataAnchor(0));
+}
+
+TEST_F(VfPartition, TrueDivAddRsqrtFormsSingleVectorFunc) {
+  af::AscGraph graph("truediv_add_rsqrt_vf");
+  BuildTrueDivAddRsqrtGraph(graph);
+  SetupGraphAxes(graph, {af::Symbol(32), af::Symbol(128)});
+  ASSERT_EQ(AlignmentHandler::AlignVectorizedStrides(graph), af::SUCCESS);
+
+  VectorFuncPartitioner partitioner(graph);
+  ASSERT_EQ(partitioner.Partition(), af::SUCCESS);
+
+  std::vector<af::AscGraph> sub_graphs;
+  size_t target_subgraph_index = 0UL;
+  ASSERT_TRUE(FindTrueDivAddRsqrtSubgraph(graph, sub_graphs, target_subgraph_index));
+  const auto &target_subgraph = sub_graphs[target_subgraph_index];
+  EXPECT_EQ(graph.FindNode("true_div"), nullptr);
+  EXPECT_EQ(graph.FindNode("add_epsilon"), nullptr);
+  EXPECT_EQ(graph.FindNode("rsqrt"), nullptr);
+  ExpectTrueDivAddRsqrtConnections(target_subgraph);
 }
 
 TEST_F(VfPartition, all_zero_axis_stride) {

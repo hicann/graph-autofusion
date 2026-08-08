@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <limits>
 #include <string>
 #include <cstdlib>
 #include <set>
@@ -45,6 +46,40 @@ using namespace codegen;
 using namespace af::ops;
 using namespace ascgen_utils;
 namespace {
+constexpr uint64_t kMaxPgoTilingKeyCount = 10000U;
+constexpr uint64_t kInt64TilingKeyCapacity = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + 1U;
+
+std::string GenUint64Literal(uint64_t value) {
+  return std::to_string(value) + (value >= kInt64TilingKeyCapacity ? "ULL" : "");
+}
+
+bool TryCalcTilingKeyCount(const ascir::FusedScheduledResult &result, uint64_t limit, uint64_t &count) {
+  count = 0U;
+  for (const auto &scheduled_results : result.node_idx_to_scheduled_results) {
+    for (const auto &scheduled_result : scheduled_results) {
+      const auto &schedule_groups = scheduled_result.schedule_groups;
+      const bool has_empty_group = std::any_of(schedule_groups.begin(), schedule_groups.end(),
+                                               [](const auto &group) { return group.impl_graphs.empty(); });
+      if (has_empty_group) {
+        continue;
+      }
+      uint64_t per_result_count = 1U;
+      for (const auto &schedule_group : schedule_groups) {
+        const uint64_t impl_count = schedule_group.impl_graphs.size();
+        if (impl_count == 0U || per_result_count > (limit - count) / impl_count) {
+          return false;
+        }
+        per_result_count *= impl_count;
+      }
+      if (per_result_count > limit - count) {
+        return false;
+      }
+      count += per_result_count;
+    }
+  }
+  return true;
+}
+
 bool CheckTilingHeadersValid(const std::map<std::string, std::string> &tiling_file_name_to_content) {
   for (const auto &pair : tiling_file_name_to_content) {
     if (pair.second == INVALID_TILING) {
@@ -276,78 +311,51 @@ void AddCvDeclarationsToApiHeader(std::map<std::string, std::string> &headers) {
                       "int32_t get_g_basen_basem_align();\nvoid set_g_basen_basem_align(int32_t value);\n\n");
 }
 
-void AppendTilingKeyBranch(std::stringstream &ss, const std::vector<std::vector<std::string>> &per_group_conditions,
-                           std::vector<std::string> &current, uint32_t depth, uint32_t &tiling_key,
-                           bool &first_append) {
-  if (per_group_conditions.size() == depth) {
-    ss << (first_append ? "    if " : " else if ") << "(";
-    first_append = false;
-    for (uint32_t i = 0; i < current.size(); i++) {
-      ss << current[i];
-      if (i < (current.size() - 1)) {
-        ss << " && ";
-      }
-    }
-    ss << ") {" << std::endl;
-    ss << "      return " << tiling_key << ";" << std::endl;
-    ss << "    }";
-    tiling_key++;
-    return;
-  }
-  for (const auto &condition : per_group_conditions[depth]) {
-    current.push_back(condition);
-    AppendTilingKeyBranch(ss, per_group_conditions, current, depth + 1, tiling_key, first_append);
-    current.pop_back();
-  }
-}
-
 void GenMulGroupFindBestTilingKey(const ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss) {
-  uint32_t tiling_key = 0U;
+  uint64_t tiling_key_offset = 0U;
   for (size_t graph_id = 0; graph_id < fused_schedule_result.node_idx_to_scheduled_results.size(); graph_id++) {
-    auto scheduled_results = fused_schedule_result.node_idx_to_scheduled_results[graph_id];
+    const auto &scheduled_results = fused_schedule_result.node_idx_to_scheduled_results[graph_id];
     for (size_t i = 0; i < scheduled_results.size(); i++) {
-      auto schedule_groups = scheduled_results[i].schedule_groups;
+      const auto &schedule_groups = scheduled_results[i].schedule_groups;
       ss << (i == 0 ? "  if " : "  else if ") << "(t." << "graph" << std::to_string(graph_id)
          << "_tiling_key == " << std::to_string(i) << ") {" << std::endl;
-      std::vector<std::vector<std::string>> per_group_conditions;
-      for (size_t j = 0; j < schedule_groups.size(); j++) {
-        std::vector<std::string> conditions;
-        auto schedule_graphs = schedule_groups[j].impl_graphs;
-        for (size_t k = 0; k < schedule_graphs.size(); k++) {
-          std::string filed_name = CamelToLowerSneak("t.graph" + std::to_string(graph_id) + "_result" +
-                                                     std::to_string(i) + "_g" + std::to_string(j) + "_tiling_data");
-          auto index = std::to_string(k);
-          std::string condition;
-          condition.append(filed_name).append(".tiling_key").append(" == ").append(index);
-          conditions.emplace_back(condition);
+      const bool has_empty_group = std::any_of(schedule_groups.begin(), schedule_groups.end(),
+                                               [](const auto &group) { return group.impl_graphs.empty(); });
+      uint64_t result_tiling_key_count = 0U;
+      if (has_empty_group) {
+        ss << "    return -1;" << std::endl;
+      } else {
+        ss << "    int64_t local_tiling_key = 0;" << std::endl;
+        result_tiling_key_count = 1U;
+        for (size_t j = 0; j < schedule_groups.size(); j++) {
+          const size_t impl_count = schedule_groups[j].impl_graphs.size();
+          const std::string field_name =
+              CamelToLowerSneak("t.graph" + std::to_string(graph_id) + "_result" + std::to_string(i) + "_g" +
+                                std::to_string(j) + "_tiling_data");
+          ss << "    if (" << field_name << ".tiling_key >= " << impl_count << ") {" << std::endl;
+          ss << "      return -1;" << std::endl;
+          ss << "    }" << std::endl;
+          ss << "    local_tiling_key = local_tiling_key * " << impl_count << " + " << field_name << ".tiling_key;"
+             << std::endl;
+          result_tiling_key_count *= impl_count;
         }
-        per_group_conditions.emplace_back(std::move(conditions));
+        ss << "    return " << tiling_key_offset << " + local_tiling_key;" << std::endl;
       }
-      std::vector<std::string> current;
-      bool first_append = true;
-      AppendTilingKeyBranch(ss, per_group_conditions, current, 0, tiling_key, first_append);
-      ss << std::endl;
+      tiling_key_offset += result_tiling_key_count;
       ss << "  }";
     }
   }
   ss << std::endl;
 }
 
-size_t CalcTilingKeyCount(const ascir::FusedScheduledResult &result) {
+uint64_t CalcTilingKeyCount(const ascir::FusedScheduledResult &result) {
   if (!ascgen_utils::CanUseTilingKey(result)) {
     return 1ULL;
   }
-  size_t count = 0ULL;
-  for (const auto &scheduled_results : result.node_idx_to_scheduled_results) {
-    for (const auto &scheduled_result : scheduled_results) {
-      size_t per_result_count = 1ULL;
-      for (const auto &schedule_group : scheduled_result.schedule_groups) {
-        per_result_count *= schedule_group.impl_graphs.size();
-      }
-      count += per_result_count;
-    }
-  }
-  return count;
+  uint64_t count = 0U;
+  return TryCalcTilingKeyCount(result, std::numeric_limits<uint64_t>::max(), count)
+             ? count
+             : std::numeric_limits<uint64_t>::max();
 }
 
 bool HasWorkSpaceNode(const af::AscGraph &impl_graph) {
@@ -449,6 +457,11 @@ TilingLib::TilingLib(const std::string &lib_path, const std::string &codegen_sym
   }
 
   this->codegen_func_ = reinterpret_cast<TilingLibCodegenFunc>(func);
+}
+
+bool TilingLib::ShouldFallbackPgo(const ascir::FusedScheduledResult &fused_schedule_result) const {
+  uint64_t count = 0U;
+  return enable_autofuse_pgo_ && !TryCalcTilingKeyCount(fused_schedule_result, kMaxPgoTilingKeyCount, count);
 }
 
 std::map<std::string, std::string> TilingLib::GenerateForInductor(
@@ -561,6 +574,12 @@ std::map<std::string, std::string> TilingLib::GenerateCVFusion(const ascir::Fuse
 std::map<std::string, std::string> TilingLib::Generate(const ascir::FusedScheduledResult &fused_schedule_result,
                                                        const std::map<std::string, std::string> &shape_info,
                                                        const std::string &pgo_dir, const std::string &core_num) const {
+  if (ShouldFallbackPgo(fused_schedule_result)) {
+    GELOGW("Tiling key count exceeds 10000, fallback to non-PGO codegen");
+    TilingLib fallback(*this);
+    fallback.DisableInductorPgo();
+    return fallback.Generate(fused_schedule_result, shape_info, pgo_dir, core_num);
+  }
   if (ascgen_utils::IsCubeFusedScheduled(fused_schedule_result) &&
       !ascgen_utils::IsJustCubeFixpip(fused_schedule_result)) {
     return GenerateCVFusion(fused_schedule_result, shape_info, pgo_dir, core_num);
@@ -1016,7 +1035,7 @@ std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedSchedul
   MatMulCubeInfo cube_info;
   GE_ASSERT_SUCCESS(ExtractMatMulCubeInfoFromFusedResult(fused_schedule_result, cube_info),
                     "[Extract][MatMulCubeInfo]Failed to extract MatMul cube info from FusedScheduledResult");
-  size_t count = CalcTilingKeyCount(elemwise_schedule_result);
+  uint64_t count = CalcTilingKeyCount(elemwise_schedule_result);
   ss << "  int64_t ws_size = 0;" << std::endl;
   ss << "  int64_t cube_tiling_key = 0;" << std::endl;
   ss << "  uint32_t cube_block_dim = 0;" << std::endl;
@@ -1041,7 +1060,7 @@ std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedSchedul
   ss << "    tiling->tiling_data.set_ub_size(limit->ub_size - 256);" << std::endl;
   ss << "    double min_perf = DBL_MAX;" << std::endl;
   ss << "    size_t choice_case_id = 2U;" << std::endl;
-  ss << "    for (size_t i = 2U; i < " << count << "; i++) {" << std::endl;
+  ss << "    for (size_t i = 2U; i < " << GenUint64Literal(count) << "; i++) {" << std::endl;
   ss << "      double cur_perf;" << std::endl;
   ss << "      if (!optiling::GetTiling(tiling->tiling_data, i, &cur_perf)) {" << std::endl;
   ss << "        return -1;" << std::endl;
@@ -1818,7 +1837,10 @@ std::string TilingLib::GenFindBestTilingKeyFunc(const ascir::FusedScheduledResul
     }
     ss << "  }" << std::endl;
   } else {
-    GenMulGroupFindBestTilingKey(fused_schedule_result, ss);
+    uint64_t tiling_key_count = 0U;
+    if (TryCalcTilingKeyCount(fused_schedule_result, kInt64TilingKeyCapacity, tiling_key_count)) {
+      GenMulGroupFindBestTilingKey(fused_schedule_result, ss);
+    }
   }
   ss << "  return -1;" << std::endl;
   ss << "}" << std::endl;
@@ -1827,10 +1849,10 @@ std::string TilingLib::GenFindBestTilingKeyFunc(const ascir::FusedScheduledResul
 
 std::string TilingLib::GenGetTilingKeyCount(const ascir::FusedScheduledResult &fused_schedule_result) const {
   std::stringstream ss;
-  size_t count = CalcTilingKeyCount(fused_schedule_result);
+  uint64_t count = CalcTilingKeyCount(fused_schedule_result);
   ss << "extern \"C\" uint64_t GetTilingKeyCount()" << std::endl;
   ss << "{" << std::endl;
-  ss << "  return " << std::to_string(count) << ";" << std::endl;
+  ss << "  return " << GenUint64Literal(count) << ";" << std::endl;
   ss << "}" << std::endl;
   return ss.str();
 }

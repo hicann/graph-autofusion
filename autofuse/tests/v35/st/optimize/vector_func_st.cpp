@@ -10,6 +10,8 @@
 
 #include "gtest/gtest.h"
 
+#include "codegen.h"
+
 #include "ascendc_ir.h"
 #include "ascendc_ir_def.h"
 #include "ascir_ops.h"
@@ -18,12 +20,6 @@
 #include "platform_context.h"
 #undef private
 #include "ascir_ops_utils.h"
-#include "graph/ascendc_ir/utils/asc_graph_utils.h"
-#include "graph/utils/graph_utils.h"
-#include "attribute_group/attr_group_shape_env.h"
-#include "fused_graph/fused_graph_unfolder.h"
-#include "graph/debug/ge_attr_define.h"
-#include "util/mem_utils.h"
 #include "runtime_stub.h"
 
 using namespace std;
@@ -53,6 +49,188 @@ class VectorFuncSt : public ::testing::Test {
 }  // namespace
 
 namespace optimize {
+namespace {
+void SetTrueDivAddRsqrtTensorAttr(af::AscOpOutput &tensor, const std::vector<af::AxisId> &axes,
+                                  const af::Expression &rows, const af::Expression &columns) {
+  tensor.dtype = af::DT_FLOAT;
+  *tensor.axis = axes;
+  *tensor.repeats = {rows, columns};
+  *tensor.strides = {columns, One};
+  *tensor.vectorized_axis = axes;
+  *tensor.vectorized_strides = {columns, One};
+}
+
+void SetTrueDivAddRsqrtComputeAttr(af::AscGraph &graph, const std::vector<af::AxisId> &axes, const char *name,
+                                   af::ComputeType compute_type) {
+  auto node = graph.FindNode(name);
+  ASSERT_NE(node, nullptr);
+  node->attr.sched.axis = axes;
+  node->attr.api.compute_type = compute_type;
+  node->attr.api.type = af::ApiType::kAPITypeCompute;
+}
+
+af::AscOpOutput BuildTrueDivGraph(af::AscGraph &graph, const std::vector<af::AxisId> &axes, const af::Expression &rows,
+                                  const af::Expression &columns) {
+  af::ascir_op::Data dividend("dividend", graph);
+  dividend.ir_attr.SetIndex(0);
+  dividend.attr.api.type = af::ApiType::kAPITypeBuffer;
+  SetTrueDivAddRsqrtTensorAttr(dividend.y, axes, rows, columns);
+
+  af::ascir_op::Load load_dividend("load_dividend");
+  load_dividend.x = dividend.y;
+  SetTrueDivAddRsqrtTensorAttr(load_dividend.y, axes, rows, columns);
+  SetTrueDivAddRsqrtComputeAttr(graph, axes, "load_dividend", af::ComputeType::kComputeLoad);
+
+  af::ascir_op::Data divisor("divisor", graph);
+  divisor.ir_attr.SetIndex(1);
+  divisor.attr.api.type = af::ApiType::kAPITypeBuffer;
+  SetTrueDivAddRsqrtTensorAttr(divisor.y, axes, rows, columns);
+
+  af::ascir_op::Load load_divisor("load_divisor");
+  load_divisor.x = divisor.y;
+  SetTrueDivAddRsqrtTensorAttr(load_divisor.y, axes, rows, columns);
+  SetTrueDivAddRsqrtComputeAttr(graph, axes, "load_divisor", af::ComputeType::kComputeLoad);
+
+  af::ascir_op::TrueDiv true_div("true_div");
+  true_div.x1 = load_dividend.y;
+  true_div.x2 = load_divisor.y;
+  SetTrueDivAddRsqrtTensorAttr(true_div.y, axes, rows, columns);
+  SetTrueDivAddRsqrtComputeAttr(graph, axes, "true_div", af::ComputeType::kComputeElewise);
+  return true_div.y;
+}
+
+void BuildRsqrtGraph(af::AscGraph &graph, const std::vector<af::AxisId> &axes, const af::Expression &rows,
+                     const af::Expression &columns, const af::AscOpOutput &true_div_output) {
+  af::ascir_op::Scalar epsilon("epsilon", graph);
+  epsilon.y.dtype = af::DT_FLOAT;
+  *epsilon.y.repeats = {One, One};
+  *epsilon.y.strides = {Zero, Zero};
+  epsilon.ir_attr.SetValue("0.00001");
+
+  af::ascir_op::Add add_epsilon("add_epsilon");
+  add_epsilon.x1 = true_div_output;
+  add_epsilon.x2 = epsilon.y;
+  SetTrueDivAddRsqrtTensorAttr(add_epsilon.y, axes, rows, columns);
+  SetTrueDivAddRsqrtComputeAttr(graph, axes, "add_epsilon", af::ComputeType::kComputeElewise);
+
+  af::ascir_op::Rsqrt rsqrt("rsqrt");
+  rsqrt.x = add_epsilon.y;
+  SetTrueDivAddRsqrtTensorAttr(rsqrt.y, axes, rows, columns);
+  SetTrueDivAddRsqrtComputeAttr(graph, axes, "rsqrt", af::ComputeType::kComputeElewise);
+
+  af::ascir_op::Store store("store");
+  store.x = rsqrt.y;
+  SetTrueDivAddRsqrtTensorAttr(store.y, axes, rows, columns);
+  SetTrueDivAddRsqrtComputeAttr(graph, axes, "store", af::ComputeType::kComputeStore);
+
+  Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  output.attr.api.type = af::ApiType::kAPITypeBuffer;
+  SetTrueDivAddRsqrtTensorAttr(output.y, axes, rows, columns);
+}
+
+void BuildTrueDivAddRsqrtGraph(af::AscGraph &graph) {
+  const auto rows = graph.CreateSizeVar(32);
+  const auto columns = graph.CreateSizeVar(128);
+  const auto row_axis = graph.CreateAxis("row", rows);
+  const auto column_axis = graph.CreateAxis("column", columns);
+  const std::vector<af::AxisId> axes{row_axis.id, column_axis.id};
+  const auto true_div_output = BuildTrueDivGraph(graph, axes, rows, columns);
+  BuildRsqrtGraph(graph, axes, rows, columns, true_div_output);
+}
+
+bool HasTrueDivAddRsqrtNodes(const af::AscGraph &graph) {
+  return graph.FindNode("true_div") != nullptr && graph.FindNode("add_epsilon") != nullptr &&
+         graph.FindNode("rsqrt") != nullptr;
+}
+
+template <typename ImplGraph>
+bool HasTrueDivAddRsqrtInImplGraph(const ImplGraph &impl_graph) {
+  std::vector<af::AscGraph> subgraphs;
+  if (impl_graph.GetAllSubGraphs(subgraphs) != af::SUCCESS) {
+    return false;
+  }
+  for (const auto &subgraph : subgraphs) {
+    if (HasTrueDivAddRsqrtNodes(subgraph)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template <typename ScheduleGroup>
+bool HasTrueDivAddRsqrtInScheduleGroup(const ScheduleGroup &group) {
+  for (const auto &impl_graph : group.impl_graphs) {
+    if (HasTrueDivAddRsqrtInImplGraph(impl_graph)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template <typename ScheduledResult>
+bool HasTrueDivAddRsqrtInScheduledResult(const ScheduledResult &scheduled_result) {
+  for (const auto &group : scheduled_result.schedule_groups) {
+    if (HasTrueDivAddRsqrtInScheduleGroup(group)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool HasTrueDivAddRsqrtSubgraph(const ::ascir::FusedScheduledResult &result) {
+  for (const auto &scheduled_results : result.node_idx_to_scheduled_results) {
+    for (const auto &scheduled_result : scheduled_results) {
+      if (HasTrueDivAddRsqrtInScheduledResult(scheduled_result)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+}  // namespace
+
+TEST_F(VectorFuncSt, TrueDivAddRsqrtHostCodegen) {
+  af::AscGraph graph("truediv_add_rsqrt_host_codegen");
+  BuildTrueDivAddRsqrtGraph(graph);
+
+  ::ascir::FusedScheduledResult fused_scheduled_result;
+  ASSERT_EQ(optimizer.Optimize(graph, fused_scheduled_result), af::SUCCESS);
+  ASSERT_TRUE(HasTrueDivAddRsqrtSubgraph(fused_scheduled_result));
+
+  codegen::Codegen generator(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+  ASSERT_EQ(generator.Generate(fused_scheduled_result, result), af::SUCCESS);
+
+  const auto first_vf = result.kernel.find("__simd_vf__");
+  ASSERT_NE(first_vf, std::string::npos);
+  const auto rsqrt_marker = result.kernel.find("_rsqrt_negative_mask", first_vf);
+  ASSERT_NE(rsqrt_marker, std::string::npos);
+  const auto vf_begin = result.kernel.rfind("__simd_vf__", rsqrt_marker);
+  ASSERT_NE(vf_begin, std::string::npos);
+  const auto vf_end = result.kernel.find("\n}\n", rsqrt_marker);
+  ASSERT_NE(vf_end, std::string::npos);
+  const auto vf_body = result.kernel.substr(vf_begin, vf_end - vf_begin);
+  const auto true_div_pos = vf_body.find("AscendC::MicroAPI::Div(");
+  const auto add_pos = vf_body.find("AscendC::MicroAPI::Adds(");
+  const auto compare_pos = vf_body.find("AscendC::MicroAPI::CompareScalar<float, AscendC::CMPMODE::LT>");
+  const auto sqrt_pos = vf_body.find("AscendC::MicroAPI::Sqrt(");
+  const auto rsqrt_div_pos = vf_body.find("AscendC::MicroAPI::Div(", true_div_pos + 1U);
+  const auto select_pos = vf_body.find("AscendC::MicroAPI::Select(");
+  ASSERT_NE(true_div_pos, std::string::npos);
+  ASSERT_NE(add_pos, std::string::npos);
+  ASSERT_NE(compare_pos, std::string::npos);
+  ASSERT_NE(sqrt_pos, std::string::npos);
+  ASSERT_NE(rsqrt_div_pos, std::string::npos);
+  ASSERT_NE(select_pos, std::string::npos);
+  EXPECT_LT(true_div_pos, add_pos);
+  EXPECT_LT(add_pos, compare_pos);
+  EXPECT_LT(compare_pos, sqrt_pos);
+  EXPECT_LT(sqrt_pos, rsqrt_div_pos);
+  EXPECT_LT(rsqrt_div_pos, select_pos);
+}
+
 TEST_F(VectorFuncSt, vf_partition) {
   af::AscGraph graph("brc_abs");
   auto s0 = af::Symbol(999);
