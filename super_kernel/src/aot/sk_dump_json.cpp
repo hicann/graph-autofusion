@@ -15,7 +15,6 @@
 
 #include "sk_dump_json.h"
 #include "sk_common.h"
-#include "sk_model_context.h"
 #include "sk_graph.h"
 #include "sk_lock_detector.h"
 #include "sk_log.h"
@@ -704,7 +703,7 @@ bool DumpAllTaskQueuesToJson(const SuperKernelGraph &graph,
     return true;  // Kernel meta save is disabled, skip
   }
 
-  std::string metaDir = CreateSkMetaDirectory(graph.GetModelLabel());
+  std::string metaDir = CreateSkMetaDirectory(graph.GetModelId());
   if (metaDir.empty()) {
     SK_LOGE("Failed to create sk_meta directory for task queue JSON dump");
     return false;
@@ -715,7 +714,7 @@ bool DumpAllTaskQueuesToJson(const SuperKernelGraph &graph,
     Json rootJson;
     rootJson["version"] = "1.0";
     rootJson["description"] = "SuperKernel Task Queue Information";
-    rootJson["modelId"] = graph.GetModelIdCallCount();
+    rootJson["modelId"] = graph.GetModelId();
     rootJson["scopeCount"] = taskQueueJsons.size();
 
     Json scopesArray = Json::array();
@@ -742,8 +741,9 @@ bool DumpAllTaskQueuesToJson(const SuperKernelGraph &graph,
   }
 }
 
-bool DumpGraphJson(aclmdlRI model, const SuperKernelOptionsManager &opts, const std::string &metaDir,
-                   const std::string &filename, const std::vector<SuperKernelScopeInfo> *scopeInfos) {
+bool DumpGraphJson(aclmdlRI model, const std::string &modelId, const SuperKernelOptionsManager &opts,
+                   const std::string &metaDir, const std::string &filename,
+                   const std::vector<SuperKernelScopeInfo> *scopeInfos) {
   if (!sk::logger::FileLogger::Instance().IsEnabled()) {
     return true;  // Kernel meta save is disabled, skip
   }
@@ -754,8 +754,7 @@ bool DumpGraphJson(aclmdlRI model, const SuperKernelOptionsManager &opts, const 
   }
 
   SK_LOGI("Start creating temp graph for %s dump...", filename.c_str());
-  SuperKernelGraph tempGraph(model, opts);
-  tempGraph.CaptureCurrentModelContext();
+  SuperKernelGraph tempGraph(model, opts, modelId);
   if (!tempGraph.InitFromModelRI()) {
     SK_LOGE("Failed to init temp graph for %s dump", filename.c_str());
     return false;

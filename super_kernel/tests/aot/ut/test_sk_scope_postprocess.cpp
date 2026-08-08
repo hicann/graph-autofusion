@@ -1,6 +1,6 @@
 /**
  * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under terms and conditions of
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
@@ -21,15 +21,14 @@
 #include "sk_scope_postprocess.h"
 #include "sk_node.h"
 #include "sk_resource_manager.h"
-#include "sk_model_context.h"
 #include "stub/ut_common_stubs.h"
 
 namespace {
 class ScopedModelContext {
  public:
-  explicit ScopedModelContext(aclmdlRI model) : model_(model), modelContext_(model) {
+  explicit ScopedModelContext(aclmdlRI model) : model_(model) {
     SkResourceManager::SetCurrentModel(model_);
-    EXPECT_EQ(SkResourceManager::CallbackRegister(model_), ACL_SUCCESS);
+    EXPECT_EQ(SkResourceManager::CallbackRegister(model_, "model_scope_postprocess"), ACL_SUCCESS);
   }
 
   ~ScopedModelContext() {
@@ -39,7 +38,6 @@ class ScopedModelContext {
 
  private:
   aclmdlRI model_ = nullptr;
-  SkModelContext modelContext_;
 };
 }  // namespace
 

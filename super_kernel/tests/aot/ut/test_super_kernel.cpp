@@ -113,6 +113,15 @@ class SuperKernelApiTest : public testing::Test {
 
 }  // namespace
 
+TEST_F(SuperKernelApiTest, Optimize_InvalidModelOrGetModelIdFailure_ReturnsBeforeResourceRegistration) {
+  EXPECT_EQ(aclskOptimize(nullptr, nullptr), ACL_ERROR_INVALID_PARAM);
+  EXPECT_EQ(SkUtGetDestroyRegisterCallbackCallCount(), 0U);
+
+  SkUtSetAclmdlRIGetIdRet(ACL_ERROR_FAILURE);
+  EXPECT_EQ(aclskOptimize(model_, nullptr), ACL_ERROR_FAILURE);
+  EXPECT_EQ(SkUtGetDestroyRegisterCallbackCallCount(), 0U);
+}
+
 TEST_F(SuperKernelApiTest, Optimize_GraphUpdateFailure_ReturnsError) {
   SkUtSetModelStreamNum(1);
   SkUtSetAclmdlRIUpdateRet(ACL_ERROR_FAILURE);
@@ -142,4 +151,6 @@ TEST_F(SuperKernelApiTest, Optimize_SuccessDumpsAfterUpdateRtsJson) {
   const char *afterPath = SkUtGetDebugJsonPrintPath(1);
   ASSERT_NE(afterPath, nullptr);
   EXPECT_NE(std::string(afterPath).find("sk_mdl_updated.json"), std::string::npos);
+  EXPECT_NE(std::string(afterPath).find("/model_41120_"), std::string::npos);
+  EXPECT_EQ(std::string(afterPath).find("/model_model_"), std::string::npos);
 }

@@ -2,9 +2,9 @@
  * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for the details. You may not use this file except in compliance with the License.
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNEsS FOR A PARTICULAR PURPOSE.
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
@@ -96,13 +96,15 @@ bool DumpGraphJson(const SuperKernelGraph &graph, const SuperKernelOptionsManage
  * Only dumps when FileLogger is enabled (ASCEND_OP_COMPILE_SAVE_KERNEL_META is set).
  *
  * @param model Model RI handle
+ * @param modelId Model ID associated with the RI handle
  * @param opts SuperKernel options manager
  * @param metaDir Meta directory path
  * @param filename Filename without .json suffix (e.g., "test" or "test_2")
  * @param scopeInfos Optional processed scope infos used to add SK metadata
  * @return true if dump successful or skipped, false otherwise
  */
-bool DumpGraphJson(aclmdlRI model, const SuperKernelOptionsManager &opts, const std::string &metaDir,
-                   const std::string &filename, const std::vector<SuperKernelScopeInfo> *scopeInfos = nullptr);
+bool DumpGraphJson(aclmdlRI model, const std::string &modelId, const SuperKernelOptionsManager &opts,
+                   const std::string &metaDir, const std::string &filename,
+                   const std::vector<SuperKernelScopeInfo> *scopeInfos = nullptr);
 
 #endif  // SK_DUMP_JSON_H

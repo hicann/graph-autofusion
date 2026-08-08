@@ -15,7 +15,6 @@
 
 #include "sk_graph.h"
 #include "sk_dump_json.h"
-#include "sk_model_context.h"
 #include "sk_options_manager.h"
 #include "sk_scope_split.h"
 #include "super_kernel.h"
@@ -1003,9 +1002,7 @@ std::unique_ptr<SuperKernelBaseNode> SuperKernelNodeFactory::CreateNode(std::uni
 bool SuperKernelGraph::InitSKGraph() {
   SK_LOGI("Starting to initialize SuperKernel graph");
 
-  CaptureCurrentModelContext();
   SK_LOGI("current model id: %s", modelId.c_str());
-  SK_LOGI("current model label: %s", modelLabel.c_str());
 
   if (!InitFromModelRI()) {
     return false;
@@ -1041,13 +1038,6 @@ bool SuperKernelGraph::InitSKGraph() {
   SK_LOGI("Successfully initialized SuperKernel graph with %zu nodes and %zu streams", graphMap.size(), streams.size());
 
   return true;
-}
-
-void SuperKernelGraph::CaptureCurrentModelContext() {
-  modelId = GetCurrentModelId();
-  // The model label is frozen at the aclskOptimize entry; reuse that single
-  // value so the graph's label matches the meta-dir/event-recorder ones exactly.
-  modelLabel = GetCurrentModelLabel();
 }
 
 /**

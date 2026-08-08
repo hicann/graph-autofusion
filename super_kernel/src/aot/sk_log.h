@@ -36,6 +36,7 @@
 #include <sstream>
 #include <cstring>
 #include <chrono>
+#include <cerrno>
 #include <iomanip>
 #include <thread>
 #include <unistd.h>
@@ -100,6 +101,8 @@ typedef void *aclmdlRI;
   } while (0)
 
 // ==================== Helper Functions ====================
+constexpr mode_t SK_DIRECTORY_MODE = 0755;
+
 constexpr const char *GetFileName(const char *path) {
   const char *file = path;
   while (*path != '\0') {
@@ -112,12 +115,61 @@ constexpr const char *GetFileName(const char *path) {
 
 void ReportErrorMessageInner(const std::string &code, const char *fmt, ...);
 
-std::string GetCurrentModelLabel();
-
 template <typename... Arguments>
 void ReportErrorMessage(const char *fmt, Arguments &&...args) {
   std::string errorCode = "EZ9999";
   return ReportErrorMessageInner(errorCode, fmt, std::forward<Arguments>(args)...);
+}
+
+inline std::string SanitizePathComponent(const std::string &component) {
+  std::string result = component;
+  for (char &pathChar : result) {
+    if (pathChar == '/' || pathChar == '\\' || pathChar == ':' || pathChar == '*' || pathChar == '?' ||
+        pathChar == '"' || pathChar == '<' || pathChar == '>' || pathChar == '|') {
+      pathChar = '_';
+    }
+  }
+  return result;
+}
+
+inline std::string GetSkMetaBasePath() {
+  return "sk_meta/" + std::to_string(getpid());
+}
+
+inline std::string GetSkMetaPath(const std::string &modelId) {
+  if (modelId.empty()) {
+    return "";
+  }
+  return GetSkMetaBasePath() + "/" + SanitizePathComponent(modelId);
+}
+
+inline bool CreateDirectoryRecursive(const std::string &path) {
+  if (path.empty()) {
+    return false;
+  }
+
+  size_t pos = 0;
+  do {
+    pos = path.find('/', pos + 1);
+    std::string subPath = path.substr(0, pos);
+    if (subPath.empty()) {
+      continue;
+    }
+
+    struct stat st;
+    if (stat(subPath.c_str(), &st) != 0 && mkdir(subPath.c_str(), SK_DIRECTORY_MODE) != 0 && errno != EEXIST) {
+      return false;
+    }
+  } while (pos != std::string::npos && pos < path.size());
+  return true;
+}
+
+inline std::string CreateSkMetaDirectory(const std::string &modelId) {
+  std::string dirPath = GetSkMetaPath(modelId);
+  if (!CreateDirectoryRecursive(dirPath)) {
+    return "";
+  }
+  return dirPath;
 }
 
 // ==================== File Logger Namespace ====================
@@ -157,7 +209,7 @@ struct LoggerConfig {
   bool enabled = false;                    // Enable file logging
   LogLevel minLevel = LogLevel::INFO;      // Minimum log level
   std::string baseDir = "sk_meta";         // Base directory name
-  std::string modelLabel;                  // Current model label, e.g. model_48_1
+  std::string modelId;                     // Current model ID, e.g. model_48_1
   size_t maxFileSize = 100 * 1024 * 1024;  // Max file size: 100MB
   size_t maxLineLength = 4096;             // Max line length (for segmentation)
   bool enableTimestamp = true;             // Add timestamp
@@ -238,7 +290,7 @@ class FileHandleManager {
   void CloseFile(const std::string &name);
 
   // Initialize default file
-  bool InitializeDefault(const std::string &baseDir, pid_t pid, const std::string &modelLabel);
+  bool InitializeDefault(const std::string &modelId);
 
  private:
   class ThreadAwareMutex {
@@ -284,8 +336,8 @@ class FileHandleManager {
 // ==================== RAII Log Context Manager ====================
 class LogContextGuard {
  public:
-  // Route to a model's default log without creating a file.
-  explicit LogContextGuard(const std::string &modelLabel);
+  // Ensure and route to a model's default log file.
+  explicit LogContextGuard(const std::string &modelId);
   // Register and route to a specific log file.
   explicit LogContextGuard(const std::string &handleName, const std::string &filePath);
   ~LogContextGuard();
@@ -305,7 +357,7 @@ class LogContextGuard {
  private:
   void Restore();
 
-  std::string previousModelLabel_;
+  std::string previousModelId_;
   std::string previousHandle_;
   bool active_ = false;
 };
@@ -337,12 +389,12 @@ class FileLogger {
     }
   }
 
-  // ========== Thread-local model label management ==========
-  static void SetCurrentModelLabel(const std::string &modelLabel) {
-    currentModelLabel_ = modelLabel;
+  // ========== Thread-local model ID management ==========
+  static void SetCurrentModelId(const std::string &modelId) {
+    currentModelId_ = modelId;
   }
 
-  static const std::string &GetCurrentModelLabel();
+  static const std::string &GetCurrentModelId();
 
   // File handle management
   bool RegisterLogFile(const std::string &name, const std::string &subPath = "");
@@ -350,13 +402,13 @@ class FileLogger {
   void SwitchToDefault();
 
   // RAII context management
-  std::unique_ptr<LogContextGuard> CreateContext(const std::string &fileName, const std::string &modelLabel);
+  std::unique_ptr<LogContextGuard> CreateContext(const std::string &fileName, const std::string &modelId);
 
   // Configuration management
   void SetEnabled(bool enabled);
   bool IsEnabled() const;
   void SetMinLevel(LogLevel level);
-  void SetModelLabel(const std::string &modelLabel);
+  void SetModelId(const std::string &modelId);
   bool IsInitialized() const;
 
  private:
@@ -372,8 +424,8 @@ class FileLogger {
 
   void WriteLog(const std::string &message, const LoggerConfig &config);
 
-  // Get the effective model label. Prefer the thread-local label and fall back to config_.
-  std::string GetEffectiveModelLabel() const;
+  // Get the effective model ID. Prefer the thread-local ID and fall back to config_.
+  std::string GetEffectiveModelId() const;
   LoggerConfig GetConfigSnapshot() const;
 
  private:
@@ -386,8 +438,8 @@ class FileLogger {
   std::mutex initializationMutex_;
   mutable std::mutex mutex_;
 
-  // Thread-local model label, used to isolate concurrent aclskOptimize calls.
-  static thread_local std::string currentModelLabel_;
+  // Thread-local model ID, used to isolate concurrent aclskOptimize calls.
+  static thread_local std::string currentModelId_;
 };
 
 }  // namespace logger
@@ -434,29 +486,29 @@ class FileLogger {
   } while (0)
 
 // ==================== RAII Context Macros ====================
-#define SK_LOG_CONTEXT(fileName, modelLabel) \
-  auto _sk_log_context_guard = sk::logger::FileLogger::Instance().CreateContext(fileName, modelLabel)
+#define SK_LOG_CONTEXT(fileName, modelId) \
+  auto _sk_log_context_guard = sk::logger::FileLogger::Instance().CreateContext(fileName, modelId)
 
 #define SK_LOG_CONTEXT_SIMPLE(fileName) \
   auto _sk_log_context_guard =          \
-      sk::logger::FileLogger::Instance().CreateContext(fileName, sk::logger::FileLogger::GetCurrentModelLabel())
+      sk::logger::FileLogger::Instance().CreateContext(fileName, sk::logger::FileLogger::GetCurrentModelId())
 
 // ==================== Global Initialization Helper Functions and Macros ====================
 
 /**
- * @brief Initialize logger with the current model label
- * @param modelLabel Current model label, e.g. model_48_1
+ * @brief Initialize logger with the current model ID
+ * @param modelId Current model ID, e.g. model_48_1
  *
  * Reads environment variable ASCEND_OP_COMPILE_SAVE_KERNEL_META to enable/disable file logging.
  * - ASCEND_OP_COMPILE_SAVE_KERNEL_META=1: Enable file logging
  * - ASCEND_OP_COMPILE_SAVE_KERNEL_META=0 or unset: Disable file logging
  *
  * @example
- *   InitSkLogger(modelLabel);
+ *   InitSkLogger(modelId);
  *   // Creates directory: sk_meta/{pid}/model_305419896/
  */
-inline void InitSkLogger(const std::string &modelLabel) {
-  sk::logger::FileLogger::SetCurrentModelLabel(modelLabel);
+inline void InitSkLogger(const std::string &modelId) {
+  sk::logger::FileLogger::SetCurrentModelId(modelId);
 
   // Read environment variable
   const char *envVar = std::getenv("ASCEND_OP_COMPILE_SAVE_KERNEL_META");
@@ -483,7 +535,7 @@ inline void InitSkLogger(const std::string &modelLabel) {
   // Initialize file logger
   sk::logger::LoggerConfig config;
   config.enabled = enabled;
-  config.modelLabel = modelLabel;
+  config.modelId = modelId;
   config.minLevel = sk::logger::LogLevel::DEBUG;
   config.baseDir = "sk_meta";
 
@@ -495,12 +547,12 @@ inline void InitSkLogger(const std::string &modelLabel) {
 }
 
 // Manual initialization function
-bool InitializeSkFileLogger(bool enabled, const std::string &modelLabel = "",
+bool InitializeSkFileLogger(bool enabled, const std::string &modelId = "",
                             sk::logger::LogLevel minLevel = sk::logger::LogLevel::INFO);
 
-#define INIT_SK_FILE_LOGGER(modelLabel) InitializeSkFileLogger(true, modelLabel, sk::logger::LogLevel::DEBUG)
+#define INIT_SK_FILE_LOGGER(modelId) InitializeSkFileLogger(true, modelId, sk::logger::LogLevel::DEBUG)
 
-#define INIT_SK_FILE_LOGGER_MINIMAL(modelLabel) InitializeSkFileLogger(true, modelLabel, sk::logger::LogLevel::INFO)
+#define INIT_SK_FILE_LOGGER_MINIMAL(modelId) InitializeSkFileLogger(true, modelId, sk::logger::LogLevel::INFO)
 
 #define DISABLE_SK_FILE_LOGGER() sk::logger::FileLogger::Instance().SetEnabled(false)
 

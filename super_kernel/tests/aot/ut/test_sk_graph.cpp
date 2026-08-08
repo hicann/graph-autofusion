@@ -25,13 +25,6 @@
 
 namespace {
 
-constexpr const char *MODEL_LABEL_PREFIX = "model_";
-constexpr const char *UNKNOWN_MODEL_ID = "unknown";
-
-std::string UnknownModelLabel() {
-  return std::string(MODEL_LABEL_PREFIX) + UNKNOWN_MODEL_ID;
-}
-
 struct TestRITask {
   uint32_t taskId;
   aclmdlRITaskType type;
@@ -105,52 +98,21 @@ class SuperKernelGraphTest : public testing::Test {
   std::unique_ptr<SuperKernelGraph> graph;
 };
 
-// ==================== GetModelLabel 测试 ====================
-// 这些用例覆盖 InitSKGraph 在入口处冻结 model id / model label 的契约：进入
-// SkModelContext 后 GetCurrentModelLabel() 返回的值，应该被
-// SuperKernelGraph 对应字段如实记录下来；脱离 guard 后再调用
-// InitSKGraph 时，应该记录到默认上下文值。
+// ==================== GetModelId 测试 ====================
 
-#include "sk_model_context.h"
-#include "stub/ut_common_stubs.h"
-
-TEST_F(SuperKernelGraphTest, GetModelLabel_DefaultConstructedIsEmpty) {
-  EXPECT_TRUE(graph->GetModelIdCallCount().empty());
-  EXPECT_TRUE(graph->GetModelLabel().empty());
+TEST_F(SuperKernelGraphTest, GetModelId_DefaultConstructedIsEmpty) {
+  EXPECT_TRUE(graph->GetModelId().empty());
 }
 
-TEST_F(SuperKernelGraphTest, GetModelLabel_ReturnsManuallySetField) {
-  // private 已被 define 打开，直接验证 getter 行为
-  graph->modelId = "42_3";
-  graph->modelLabel = "model_42_3";
-  EXPECT_EQ(graph->GetModelIdCallCount(), "42_3");
-  EXPECT_EQ(graph->GetModelLabel(), "model_42_3");
+TEST_F(SuperKernelGraphTest, GetModelId_ReturnsExplicitConstructorValue) {
+  graph = std::make_unique<SuperKernelGraph>(nullptr, *opts, "model_42_3");
+  EXPECT_EQ(graph->GetModelId(), "model_42_3");
 }
 
-TEST_F(SuperKernelGraphTest, GetModelLabel_InitSKGraphCapturesActiveContextId) {
-  // 让 InitFromModelRI 在 0 stream 的“空 model”下走通，避免依赖更多 stub
-  SkUtSetModelStreamNum(0);
-
-  {
-    aclmdlRI model = reinterpret_cast<aclmdlRI>(static_cast<uintptr_t>(0xB001));
-    SkModelContext guard(model);
-    const std::string expectedModelId = GetCurrentModelId();
-    const std::string expected = GetCurrentModelLabel();
-    ASSERT_FALSE(expected.empty());
-
-    // InitSKGraph 在入口冻结 modelId/modelLabel，再做后续流程；后续流程的成败
-    // 不影响这里要校验的契约——对应字段必须在 guard 生效时被写入。
-    (void)graph->InitSKGraph();
-    EXPECT_EQ(graph->GetModelIdCallCount(), expectedModelId);
-    EXPECT_EQ(graph->GetModelLabel(), expected);
-  }
-
-  // 退出 guard 后，当前上下文恢复为默认值；新建一个 graph 再 init，应记录默认上下文值。
-  SkUtSetModelStreamNum(0);
-  auto graph2 = std::make_unique<SuperKernelGraph>(nullptr, *opts);
-  (void)graph2->InitSKGraph();
-  EXPECT_EQ(graph2->GetModelIdCallCount(), UNKNOWN_MODEL_ID);
-  EXPECT_EQ(graph2->GetModelLabel(), UnknownModelLabel());
+TEST_F(SuperKernelGraphTest, GetModelId_MoveConstructorPreservesValue) {
+  SuperKernelGraph source(nullptr, *opts, "model_77_1");
+  SuperKernelGraph target(std::move(source));
+  EXPECT_EQ(target.GetModelId(), "model_77_1");
 }
 
 // ==================== GetSortedNodeIds Empty Graph Tests ====================

@@ -43,6 +43,10 @@ static inline AclmdlRITaskInternal *RITaskToInternal(aclmdlRITask task) {
 // 获取 model id from RI handle. Returns the pointer value cast to uint32, so
 // tests can verify a deterministic id without explicit setup.
 aclError aclmdlRIGetId(aclmdlRI modelRI, uint32_t *modelId) {
+  aclError forcedRet = SkUtGetAclmdlRIGetIdRet();
+  if (forcedRet != ACL_SUCCESS) {
+    return forcedRet;
+  }
   if (modelId == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }

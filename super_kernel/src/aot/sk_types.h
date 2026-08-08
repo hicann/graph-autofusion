@@ -43,6 +43,7 @@ constexpr size_t SK_TOTAL_UB_SIZE = 256U * 1024U;
 constexpr uint16_t INVALID_SCOPE_ID = std::numeric_limits<uint16_t>::max();
 constexpr uint32_t INVALID_STREAM_ID = std::numeric_limits<uint32_t>::max();
 constexpr uint64_t INVALID_TASK_ID = std::numeric_limits<uint64_t>::max();
+constexpr char UNKNOWN_MODEL_ID[] = "model_unknown";
 
 class TaskQuePtr {
   std::unique_ptr<uint8_t[]> data_;

@@ -37,14 +37,14 @@ class SkResourceManager {
   struct ModelResourceContext {
     aclmdlRI model = nullptr;
     std::string modelId;
-    std::string modelLabel;
     std::vector<ResourceRecord> resources;
   };
 
   static SkResourceManager &GetInstance();
 
+  static aclError GenerateModelId(aclmdlRI model, std::string &modelId);
   static void SetCurrentModel(aclmdlRI model);
-  static aclError CallbackRegister(aclmdlRI model);
+  static aclError CallbackRegister(aclmdlRI model, const std::string &modelId);
   static aclError ValueMemory(void **addr, size_t bytes = kDefaultValueMemoryBytes);
 
   SkResourceManager(const SkResourceManager &) = delete;

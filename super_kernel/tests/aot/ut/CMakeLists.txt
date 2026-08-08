@@ -36,7 +36,7 @@ add_executable(super_kernel_aot_utest
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_candidate_heap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_scope_info.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_dump_json.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_model_context.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_log_context.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_common.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/stub/aclrt_stubs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/stub/ut_common_stubs.cpp
@@ -52,7 +52,6 @@ add_executable(super_kernel_aot_utest
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_task_builder.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_candidate_heap.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_log.cpp
-    ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_model_context.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/super_kernel.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_dfx_exception_handler.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_resource_manager.cpp
