@@ -90,8 +90,6 @@ const char *FusionFailReasonDetail(FusionFailReason reason) {
       return "only exists memory write nodes, mask it as unfusible";
     case FusionFailReason::DEFAULT_NODE:
       return "default node uses aicpu resources, mask it as unfusible";
-    case FusionFailReason::SIMT_OP_UNSUPPORT:
-      return "SIMT operator is not supported for SuperKernel fusion";
     case FusionFailReason::KERNEL_ATTR_GET_FAILED:
       return "Failed to get kernel attribute for SuperKernel fusion";
     case FusionFailReason::EXCEED_SCOPE_MAX:

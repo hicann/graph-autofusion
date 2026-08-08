@@ -554,8 +554,6 @@ TEST_F(SkNodeTest, FusionFailReasonStrings_CoverAllEnumNamesAndDetails) {
       {FusionFailReason::MEMORY_WAIT_NODE_ONLY, "MEMORY_WAIT_NODE_ONLY", "No memory write exists"},
       {FusionFailReason::MEMORY_WRITE_NODE_ONLY, "MEMORY_WRITE_NODE_ONLY", "only exists memory write nodes"},
       {FusionFailReason::DEFAULT_NODE, "DEFAULT_NODE", "default node uses aicpu resources"},
-      {FusionFailReason::SIMT_OP_UNSUPPORT, "SIMT_OP_UNSUPPORT",
-       "SIMT operator is not supported for SuperKernel fusion"},
       {FusionFailReason::KERNEL_ATTR_GET_FAILED, "KERNEL_ATTR_GET_FAILED",
        "Failed to get kernel attribute for SuperKernel fusion"},
       {FusionFailReason::EXCEED_SCOPE_MAX, "EXCEED_SCOPE_MAX", "Exceeded maximum scope number limit"},

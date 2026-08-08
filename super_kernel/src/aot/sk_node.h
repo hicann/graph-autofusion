@@ -70,9 +70,8 @@ enum class FusionFailReason {
   MEMORY_WAIT_NODE_ONLY,   // 12: No memory write exists, meaning the memory write is outside modelRI,
   MEMORY_WRITE_NODE_ONLY,  // 13: only exists memory write nodes, mask it as unfusible
   DEFAULT_NODE,            // 14: default node uses aicpu resources, mask it as unfusible
-  SIMT_OP_UNSUPPORT,       // 15: SIMT operator is not supported for SuperKernel fusion
-  KERNEL_ATTR_GET_FAILED,  // 16: Failed to get kernel attribute for SuperKernel fusion
-  EXCEED_SCOPE_MAX,        // 17: Exceeded maximum scope number limit for SuperKernel fusion
+  KERNEL_ATTR_GET_FAILED,  // 15: Failed to get kernel attribute for SuperKernel fusion
+  EXCEED_SCOPE_MAX,        // 16: Exceeded maximum scope number limit for SuperKernel fusion
 };
 
 // Bindmap related fail reason detail
@@ -184,8 +183,6 @@ inline const char *to_string(FusionFailReason reason) {
       return "MEMORY_WRITE_NODE_ONLY";
     case FusionFailReason::DEFAULT_NODE:
       return "DEFAULT_NODE";
-    case FusionFailReason::SIMT_OP_UNSUPPORT:
-      return "SIMT_OP_UNSUPPORT";
     case FusionFailReason::KERNEL_ATTR_GET_FAILED:
       return "KERNEL_ATTR_GET_FAILED";
     case FusionFailReason::EXCEED_SCOPE_MAX:
