@@ -1949,7 +1949,7 @@ TEST_F(TestCodegenTiling, PgoTilingKeyCountOverflowShouldFallbackTfAndPgoRunner)
   EXPECT_EQ(entry.find("#include \"autofuse_tiling_func_pgo.h\""), std::string::npos);
   EXPECT_NE(entry.find("extern \"C\" int64_t FindBestTilingKey"), std::string::npos);
   const auto pgo_source = GenerateForPgo(fused_schedule_result, "/tmp");
-  EXPECT_NE(pgo_source.find("int main()"), std::string::npos);
+  EXPECT_EQ(pgo_source, "int main() { return 1; }\n");
   EXPECT_EQ(pgo_source.find("PGOGetProfiling"), std::string::npos);
   EXPECT_TRUE(CompileCode(pgo_source, false));
 }

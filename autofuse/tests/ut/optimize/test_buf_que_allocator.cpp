@@ -11,6 +11,7 @@
 #include <ascendc_ir.h>
 #include <ascir_ops.h>
 #include <ascir_utils.h>
+#include <array>
 #include <iostream>
 
 #include "gtest/gtest.h"
@@ -23,6 +24,7 @@
 
 #define private public
 #include "buffer_allocate/buf_que_allocator.h"
+#include "buffer_allocate/mem_reuse_manager.h"
 #include "asc_graph_builder.h"
 #include "ascgraph_info_complete.h"
 #undef private
@@ -1949,6 +1951,22 @@ TEST_F(BufQueAllocatorUT, TestTensorInfoToStr) {
   info.loop_axes = {1, 2};
   std::string res = info.ToString();
   ASSERT_FALSE(res.empty());
+}
+
+TEST_F(BufQueAllocatorUT, tmp_buffer_allocation_follows_lifetime_instead_of_pointer_order) {
+  std::array<af::TmpBuffer, 2> tmp_buffers;
+  TmpBuffInfoMap tmp_buffer_infos;
+  tmp_buffer_infos[&tmp_buffers[0]].life_start = 2;
+  tmp_buffer_infos[&tmp_buffers[0]].life_end = std::numeric_limits<int64_t>::max();
+  tmp_buffer_infos[&tmp_buffers[1]].life_start = 1;
+  tmp_buffer_infos[&tmp_buffers[1]].life_end = std::numeric_limits<int64_t>::max();
+  TensorInfoMap tensor_infos;
+
+  MemReuseManager manager(tensor_infos, tmp_buffer_infos);
+  manager.AllocMemBlocks();
+
+  EXPECT_EQ(tmp_buffers[1].id, 0);
+  EXPECT_EQ(tmp_buffers[0].id, 1);
 }
 
 TEST_F(BufQueAllocatorUT, test_tmp_buff_reuse) {

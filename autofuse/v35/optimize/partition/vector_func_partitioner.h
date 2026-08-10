@@ -22,6 +22,7 @@ namespace optimize {
 class VectorFuncPartitioner {
  public:
   explicit VectorFuncPartitioner(af::AscGraph &impl_graph) : impl_graph_(impl_graph) {};
+  // VF input graph node names must be unique to keep node and boundary-anchor ordering deterministic.
   af::Status Partition();
 
  private:

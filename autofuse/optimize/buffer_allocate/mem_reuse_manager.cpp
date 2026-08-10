@@ -13,6 +13,13 @@
 namespace optimize {
 size_t kDbReuseThreshold = 2UL;
 
+static bool TensorGroupLifeLess(const TensorGroup &lhs, const TensorGroup &rhs) {
+  if (lhs.merged_life_start != rhs.merged_life_start) {
+    return lhs.merged_life_start < rhs.merged_life_start;
+  }
+  return std::make_pair(lhs.allocation_order, lhs.group_id) < std::make_pair(rhs.allocation_order, rhs.group_id);
+}
+
 bool MemReuseManager::IsLifetimeOverlap(int64_t start1, int64_t end1, int64_t start2, int64_t end2) {
   if (end1 == std::numeric_limits<int64_t>::max() || end2 == std::numeric_limits<int64_t>::max()) {
     return true;
@@ -23,16 +30,16 @@ bool MemReuseManager::IsLifetimeOverlap(int64_t start1, int64_t end1, int64_t st
 void MemReuseManager::MergeTensorByGroupId(std::vector<TensorGroup> &copy_in_groups,
                                            std::vector<TensorGroup> &copy_out_groups,
                                            std::vector<TensorGroup> &calc_groups) const {
-  using GroupKey = int64_t;
-  std::unordered_map<GroupKey, TensorGroup> temp_groups;
+  std::unordered_map<int64_t, TensorGroup> temp_groups;
   for (auto &info : tensor_attr_to_tensor_info_) {
     auto cur_tensor = &info.second;
 
-    GroupKey key = cur_tensor->group_id;
+    const auto key = cur_tensor->group_id;
     auto [it, is_new] = temp_groups.try_emplace(key);
     TensorGroup &group = it->second;
     if (is_new) {
       group.group_id = cur_tensor->group_id;
+      group.allocation_order = cur_tensor->allocation_order;
       group.grouped_tensors = {cur_tensor};
       group.merged_life_start = cur_tensor->life_start;
       group.merged_life_end = cur_tensor->life_end;
@@ -211,8 +218,7 @@ MemoryBlock *MemReuseManager::SelectBestMemoryBlock(const TensorGroup &tensor_gr
 }
 
 void MemReuseManager::AllocForTQue(MemoryType mem_type, std::vector<TensorGroup> &que_groups) {
-  std::sort(que_groups.begin(), que_groups.end(),
-            [](const TensorGroup &a, const TensorGroup &b) { return a.merged_life_start < b.merged_life_start; });
+  std::sort(que_groups.begin(), que_groups.end(), TensorGroupLifeLess);
   int64_t last_block_id = -1;
   for (const auto &tensor : que_groups) {
     // 被标记为不能复用，需要直接创建
@@ -237,8 +243,7 @@ void MemReuseManager::AllocForTQue(MemoryType mem_type, std::vector<TensorGroup>
 }
 
 void MemReuseManager::AllocForCalc(std::vector<TensorGroup> &calc_groups) {
-  std::sort(calc_groups.begin(), calc_groups.end(),
-            [](const TensorGroup &a, const TensorGroup &b) { return a.merged_life_start < b.merged_life_start; });
+  std::sort(calc_groups.begin(), calc_groups.end(), TensorGroupLifeLess);
   for (const auto &tensor_group : calc_groups) {
     // 不能复用别人的tensor，直接创建新块
     if (!tensor_group.group_is_can_reuse_others) {
@@ -311,6 +316,7 @@ void MemReuseManager::AllocTmpBuff(std::map<af::TmpBuffer *, std::vector<TensorG
     auto cur_tensor = &info.second;
     TensorGroup group;
     group.group_id = cur_tensor->group_id;
+    group.allocation_order = cur_tensor->allocation_order;
     group.grouped_tensors = {cur_tensor};
     group.merged_life_start = cur_tensor->life_start;
     group.merged_life_end = cur_tensor->life_end;
@@ -320,36 +326,36 @@ void MemReuseManager::AllocTmpBuff(std::map<af::TmpBuffer *, std::vector<TensorG
     group.group_is_reusable = cur_tensor->is_reusable;
     tmp_buff_to_groups[info.first].push_back(std::move(group));
   }
+  std::vector<std::pair<af::TmpBuffer *, const TensorGroup *>> ordered_groups;
   for (const auto &info : tmp_buff_to_groups) {
-    // 不能复用别人的tensor，直接创建新块
-    auto tmp_buff = info.first;
-    tmp_buff->mem.alloc_type = af::AllocType::kAllocTypeBuffer;
     for (const auto &group : info.second) {
-      if (group.group_id != -1) {
-        tmp_buff->id = buf_id_;
-        CreateMemBlockByType(&group, MemoryType::kLoopTmpBuff);
-        continue;
-      }
-
-      if (type_blocks_[MemoryType::kTmpBuff].empty()) {
-        tmp_buff->id = buf_id_;
-        CreateMemBlockByType(&group, MemoryType::kTmpBuff);
-        continue;
-      }
-      // 更新内存块信息
-      std::vector<MemoryBlock *> candidate_blocks;
-      FindCandidateTmpBuffBlockWithSizeCheck(group, candidate_blocks);
-      if (candidate_blocks.empty()) {
-        tmp_buff->id = buf_id_;
-        CreateMemBlockByType(&group, MemoryType::kTmpBuff);
-        continue;
-      }
-
-      tmp_buff->id = candidate_blocks[0]->id;
-      candidate_blocks[0]->tensor_groups.push_back(&group);
-      GELOGD("[MemReuse] reuse mem block with type[%d] id[%d] for group[%ld].",
-             static_cast<int>(candidate_blocks[0]->mem_type), candidate_blocks[0]->id, group.group_id);
+      ordered_groups.emplace_back(info.first, &group);
     }
   }
+  std::sort(ordered_groups.begin(), ordered_groups.end(),
+            [](const auto &lhs, const auto &rhs) { return TensorGroupLifeLess(*lhs.second, *rhs.second); });
+  for (const auto &[tmp_buff, group] : ordered_groups) {
+    AllocTmpBuffGroup(tmp_buff, *group);
+  }
+}
+
+void MemReuseManager::AllocTmpBuffGroup(af::TmpBuffer *tmp_buff, const TensorGroup &group) {
+  tmp_buff->mem.alloc_type = af::AllocType::kAllocTypeBuffer;
+  if (group.group_id != -1) {
+    tmp_buff->id = buf_id_;
+    CreateMemBlockByType(&group, MemoryType::kLoopTmpBuff);
+    return;
+  }
+  std::vector<MemoryBlock *> candidate_blocks;
+  FindCandidateTmpBuffBlockWithSizeCheck(group, candidate_blocks);
+  if (candidate_blocks.empty()) {
+    tmp_buff->id = buf_id_;
+    CreateMemBlockByType(&group, MemoryType::kTmpBuff);
+    return;
+  }
+  tmp_buff->id = candidate_blocks[0]->id;
+  candidate_blocks[0]->tensor_groups.push_back(&group);
+  GELOGD("[MemReuse] reuse mem block with type[%d] id[%d] for group[%ld].",
+         static_cast<int>(candidate_blocks[0]->mem_type), candidate_blocks[0]->id, group.group_id);
 }
 }  // namespace optimize

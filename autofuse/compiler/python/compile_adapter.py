@@ -607,8 +607,11 @@ def extract_time(line):
 
 
 def pgo_get_top_result(search_path, top_n=5):
-    with open(search_path, "r") as file:
-        lines = [line.strip() for line in file if line.strip()]
+    try:
+        with open(search_path, "r") as file:
+            lines = [line.strip() for line in file if line.strip()]
+    except OSError:
+        return None, None, None
 
     if not lines:
         return None, None, None
