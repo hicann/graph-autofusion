@@ -1615,6 +1615,7 @@ def test_link_host_target_links_multiple_host_objects(ascendc_compile_module):
     assert captured["target_file"] == "/tmp/build/kernel.so"
     assert captured["obj_files"] == ["a.o", "b.o"]
     assert captured["link_libraries"] == ascendc_compile_module.HOST_LINK_LIBRARIES
+    assert "acl_rt" in captured["link_libraries"]
 
 
 def _capture_link_host_target_link(ascendc_compile_module, args, temp_dir):

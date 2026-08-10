@@ -34,7 +34,7 @@ from asc_op_compile_base.common.platform.platform_info import get_soc_spec
 PYF_PATH = os.path.dirname(os.path.realpath(__file__))
 ASCEND_PATH = os.path.join(PYF_PATH, "..", "..", "..")
 machine = platform.machine()
-HOST_LINK_LIBRARIES = ["tiling_api", "platform", "graph_base", "register"]
+HOST_LINK_LIBRARIES = ["tiling_api", "platform", "graph_base", "register", "acl_rt"]
 CV_HOST_LINK_LIBRARIES = HOST_LINK_LIBRARIES + ["nnopbase"]
 INDUCTOR_COMPILE_TRACE_LABEL = "InductorCompile"
 HOST_COMPILE_MAX_WORKERS = 32

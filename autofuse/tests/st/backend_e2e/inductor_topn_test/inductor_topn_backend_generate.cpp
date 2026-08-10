@@ -68,4 +68,28 @@ TEST_F(TestBackendInductorTopnE2e, InductorTopnE2eCodegen) {
     FAIL() << "inductor topn codegen failed";
   }
 }
+
+TEST_F(TestBackendInductorTopnE2e, EmptyTensorInductorTilingShouldSkipPerfEvaluation) {
+  auto graph = ascir::ShareGraph::BrcInlineFusedGraph(2);
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.node_idx_to_scheduled_results.emplace_back();
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), 0);
+
+  auto &impl_graph = fused_schedule_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
+  const auto store = impl_graph.FindNode("store");
+  ASSERT_NE(store, nullptr);
+  ASSERT_FALSE(store->outputs[0].attr.axis.empty());
+  const auto owner_graph = store->GetOwnerComputeGraph();
+  ASSERT_NE(owner_graph, nullptr);
+  const auto graph_attr = owner_graph->GetAttrsGroup<af::AscGraphAttr>();
+  ASSERT_NE(graph_attr, nullptr);
+  graph_attr->axis[store->outputs[0].attr.axis[0]]->size = af::Symbol(0);
+
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  const auto tiling_files = codegen.GenerateTilingForInductor(fused_schedule_result);
+  const auto &tiling = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  EXPECT_NE(tiling.find("return DBL_MAX;"), std::string::npos);
+  EXPECT_EQ(tiling.find("optiling::GetPerf"), std::string::npos);
+}
 }  // namespace
