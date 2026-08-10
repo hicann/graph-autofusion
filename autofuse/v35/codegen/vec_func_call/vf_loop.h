@@ -14,6 +14,11 @@
 
 namespace codegen {
 
+std::string GenCvUbFuseVfFuncDimParams();
+std::string GenCvUbFuseVfCallDimParams();
+std::string GenCvUbFuseRowStride(const TPipe &tpipe, const Tensor &ub_tensor);
+std::string GenCvUbFuseAddrOffset(const TPipe &tpipe, const Tensor &ub_tensor);
+
 class VFLoop;
 struct VFLoopBody {
   LoopType type_;
@@ -37,13 +42,15 @@ class VFLoop {
   Status Generate(const TPipe &tpipe, const TensorManager &tensor_mgr, int32_t depth, std::string &result,
                   std::string &loop_size_result, int32_t &only_loop_max_depth,
                   std::vector<std::string> &loop_size_vec) const;
+  Status GenerateCvUbFuse(const TPipe &tpipe, const TensorManager &tensor_mgr, std::string &result,
+                          std::string &loop_size_result) const;
   void SetMaxDtypeSize(std::string dtype);
   void CollectMaskRegTempTensors(const TPipe &tpipe, const TensorManager &tensor_mgr,
                                  std::vector<std::string> &temp_tensors) const;
 
  private:
   ascir::AxisId axis_id_;
-  struct VFLoop *parent_;
+  VFLoop *parent_;
   std::vector<VFLoopBody> bodys_;
   std::string max_dtype_size_;
 
@@ -53,6 +60,8 @@ class VFLoop {
   Status GenerateBody(const TPipe &tpipe, const TensorManager &tensor_mgr, int32_t depth,
                       std::vector<ascir::AxisId> &current_axis, std::stringstream &ss, std::stringstream &loop_size_ss,
                       int32_t &only_loop_max_depth, std::vector<std::string> &loop_size_vec) const;
+  Status GenerateCvUbFuseBody(const TPipe &tpipe, const TensorManager &tensor_mgr,
+                              std::vector<ascir::AxisId> &current_axis, std::stringstream &ss) const;
 };
 
 }  // namespace codegen

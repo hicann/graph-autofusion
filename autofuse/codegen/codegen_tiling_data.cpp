@@ -10,6 +10,7 @@
 
 #include "codegen_tiling_data.h"
 #include <sstream>
+#include <iomanip>
 
 #include "common_utils.h"
 #include "common/ge_common/debug/log.h"

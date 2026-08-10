@@ -574,6 +574,33 @@ bool GetMaxDtypeSize(const ge::DataType input_data_type, const ge::DataType out_
   return true;
 }
 
+bool IsCVFusionStage(const ApiCallContext &context) {
+  return context.stage != ComputeStage::kDefault;
+}
+
+Status GetTensorDtypeSize(const Tensor &tensor, int64_t &dtype_size) {
+  const int32_t tensor_dtype_size = GetSizeByDataType(tensor.dtype);
+  GE_CHK_BOOL_RET_STATUS(tensor_dtype_size > 0 && tensor_dtype_size < ge::kDataTypeSizeBitOffset, af::FAILED,
+                         "get dtype size failed, tensor:%s, dtype:%d", tensor.name.c_str(),
+                         static_cast<int32_t>(tensor.dtype));
+  dtype_size = tensor_dtype_size;
+  return af::SUCCESS;
+}
+
+std::string GenBlockAlignNExpr(const Tensor &tensor, const std::string &n_expr) {
+  int64_t dtype_size = 0;
+  if (GetTensorDtypeSize(tensor, dtype_size) != af::SUCCESS || dtype_size <= 0) {
+    return n_expr;
+  }
+  const int64_t align_value = 32 / dtype_size;
+  return "((" + n_expr + " + " + std::to_string(align_value) + " - 1) / " + std::to_string(align_value) + " * " +
+         std::to_string(align_value) + ")";
+}
+
+std::string GetCVAlignedSize(const ApiCallContext &context, const Tensor &tensor, const std::string &size_expr) {
+  return IsCVFusionStage(context) ? GenBlockAlignNExpr(tensor, size_expr) : size_expr;
+}
+
 void GenerateLinkStoreEventCode(const Tensor &ub, const std::string &offset_str, std::stringstream &ss) {
   std::hash<std::string> hasher;
   [[maybe_unused]] size_t hasher_value = hasher(offset_str);

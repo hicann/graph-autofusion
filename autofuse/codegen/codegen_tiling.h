@@ -196,6 +196,16 @@ class TilingLib {
   std::string GenTilingFuncForInductor(const ::ascir::FusedScheduledResult &fused_schedule_result,
                                        const ::ascir::FusedScheduledResult &elemwise_schedule_result,
                                        const std::string func, const std::string tiling) const;
+  void GenInductorShapeDim(const ::ascir::FusedScheduledResult &elemwise_schedule_result,
+                           codegen::PgoShapeStringStream &pgo_shape_dim, std::vector<std::string> &dynamic_shape_vars,
+                           const std::string &tiling_var) const;
+  std::string GenCallCubeTilingForInductor(const ::ascir::FusedScheduledResult &fused_schedule_result,
+                                           const std::vector<std::string> &dynamic_shape_vars,
+                                           const codegen::PgoShapeStringStream &pgo_shape_dim) const;
+  void GenCallCubeTilingCacheRead(std::stringstream &ss, const std::vector<std::string> &dynamic_shape_vars) const;
+  void GenCallCubeTilingCacheWrite(std::stringstream &ss, const std::vector<std::string> &dynamic_shape_vars) const;
+  std::string GenPlainInductorTilingTail(const ::ascir::FusedScheduledResult &elemwise_schedule_result,
+                                         codegen::PgoShapeStringStream &pgo_shape_dim, const std::string &tiling) const;
   // codegen_tiling_inductor_topn.cpp: candidate protocol, selection and multi-group performance aggregation.
   std::string GenGetTopnSolutionsFuncForInductor(const ::ascir::FusedScheduledResult &fused_schedule_result,
                                                  const std::string &tiling, bool use_measured_perf = false,

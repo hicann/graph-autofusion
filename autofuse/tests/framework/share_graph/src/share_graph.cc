@@ -9713,6 +9713,17 @@ static void CreateMatmulGraphOutput(const MatmulGraphContext &context, const af:
   output_op.ir_attr.SetIndex(0);
 }
 
+static void CreateMatmulGraphOutput(const MatmulGraphContext &context, const af::AscOpOutput &input,
+                                    af::DataType dtype) {
+  af::ascir_op::Store store_op("store");
+  store_op.x = input;
+  SetFullMatmulGraphLayout(store_op, context, dtype);
+  af::ascir_op::Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = dtype;
+  output_op.ir_attr.SetIndex(0);
+}
+
 static void ConnectCompareInputs(const MatmulGraphContext &context, af::ascir_op::Eq &eq0) {
   af::ascir_op::Data data2("data2", context.graph);
   SetFullMatmulGraphLayout(data2, context, af::DT_FLOAT);
@@ -9857,6 +9868,60 @@ af::ComputeGraphPtr ShareGraph::LoadMatmulCompareScalarFusedGraph() {
   auto ascbc_node = compute_graph->FindNode("ascbc");
   af::AscGraph sub_graph("load_matmul_elewise_brc_store");
   CreateMatmulCompareScalarGraph(sub_graph);
+
+  std::string sub_graph_str;
+  af::AscGraphUtils::SerializeToReadable(sub_graph, sub_graph_str);
+  af::AttrUtils::SetStr(ascbc_node->GetOpDescBarePtr(), "ascgraph", sub_graph_str);
+  return compute_graph;
+}
+
+static void CreateMatmulToIntCastGraph(af::AscGraph &graph) {
+  const auto context = CreateMatmulGraphContext(graph);
+  af::ascir_op::MatMul matmul("matmul");
+  CreateMatmulPrefix(context, matmul);
+
+  af::ascir_op::RoundToInt round_to_int("round_to_int");
+  round_to_int.x = matmul.y;
+  SetFullMatmulGraphLayout(round_to_int, context, af::DT_INT32);
+
+  af::ascir_op::Cast cast0("cast0");
+  cast0.x = round_to_int.y;
+  SetFullMatmulGraphLayout(cast0, context, af::DT_FLOAT);
+
+  af::ascir_op::TruncToInt trunc_to_int("trunc_to_int");
+  trunc_to_int.x = cast0.y;
+  SetFullMatmulGraphLayout(trunc_to_int, context, af::DT_INT32);
+
+  af::ascir_op::Cast cast1("cast1");
+  cast1.x = trunc_to_int.y;
+  SetFullMatmulGraphLayout(cast1, context, af::DT_FLOAT);
+
+  af::ascir_op::FloorToInt floor_to_int("floor_to_int");
+  floor_to_int.x = cast1.y;
+  SetFullMatmulGraphLayout(floor_to_int, context, af::DT_INT32);
+  CreateMatmulGraphOutput(context, floor_to_int.y, af::DT_INT32);
+}
+
+af::ComputeGraphPtr ShareGraph::LoadMatmulToIntCastFusedGraph() {
+  auto builder = GraphBuilder("load_matmul_to_int_cast_store_test");
+  auto data0 = builder.AddNode("data0", "Data", 0, 1);
+  af::AttrUtils::SetInt(data0->GetOpDescBarePtr(), "_parent_node_index", 0);
+  auto data1 = builder.AddNode("data1", "Data", 0, 1);
+  af::AttrUtils::SetInt(data1->GetOpDescBarePtr(), "_parent_node_index", 1);
+
+  auto ascbc = builder.AddNode("ascbc", "AscGraph", 2, 1);
+  auto netoutput = builder.AddNode("netoutput1", af::NETOUTPUT, 1, 0);
+
+  builder.AddDataEdge(data0, 0, ascbc, 0);
+  builder.AddDataEdge(data1, 0, ascbc, 1);
+  builder.AddDataEdge(ascbc, 0, netoutput, 0);
+  ComputeGraphPtr compute_graph = builder.GetGraph();
+  if (compute_graph == nullptr) {
+    return nullptr;
+  }
+  auto ascbc_node = compute_graph->FindNode("ascbc");
+  af::AscGraph sub_graph("load_matmul_to_int_cast_store");
+  CreateMatmulToIntCastGraph(sub_graph);
 
   std::string sub_graph_str;
   af::AscGraphUtils::SerializeToReadable(sub_graph, sub_graph_str);
