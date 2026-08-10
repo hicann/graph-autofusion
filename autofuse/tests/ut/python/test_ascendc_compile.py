@@ -158,6 +158,7 @@ def test_link_pgo_executable_uses_host_runtime_and_mspti_libraries(
         "-L/mspti/lib64",
         "-Wl,-rpath,/mspti/lib64",
         "-lmspti",
+        "-lstdc++",
         "-ldl",
         "-lpthread",
     ]:
@@ -537,6 +538,22 @@ def test_main_host_pgo_failure_falls_back_to_plain_tiling(
         )
     ]
     assert os.getcwd() == original_dir
+
+
+def test_build_host_output_passes_pch_to_host_link(ascendc_compile_module, tmpdir):
+    args = _make_host_pgo_args(tmpdir, None)
+    captured = {}
+
+    def fake_link_host_target(compile_args, temp_dir, pch_path=None):
+        captured["pch_path"] = pch_path
+        return str(tmpdir.join("built_tiling.so"))
+
+    ascendc_compile_module.module.link_host_target = fake_link_host_target
+
+    result = ascendc_compile_module.build_host_output(args, "/tmp/cache/host.pch")
+
+    assert result == str(tmpdir.join("built_tiling.so"))
+    assert captured["pch_path"] == "/tmp/cache/host.pch"
 
 
 def test_main_host_pgo_without_mspti_skips_sidecars_and_copies_plain_tiling(
@@ -972,6 +989,71 @@ def _make_compile_args(host_files=None):
     )()
 
 
+def test_generate_pch_source_uses_only_stable_common_headers(
+    ascendc_compile_module, tmpdir
+):
+    host_dir = tmpdir.mkdir("host")
+    host_dir.join("autofuse_tiling_func_solver.h").write("graph-specific header")
+
+    pch_source = ascendc_compile_module.generate_pch_source(str(host_dir))
+    contents = open(pch_source, encoding="utf-8").read()
+
+    assert "autofuse_tiling_func_solver.h" not in contents
+    assert "tiling/platform/platform_ascendc.h" not in contents
+
+
+def test_single_host_file_creates_pch(ascendc_compile_module, monkeypatch, tmpdir):
+    ascendc_compile_module.module.PCH_CACHE_ROOT = str(tmpdir.mkdir("pch-cache"))
+    args = _make_compile_args("/tmp/build/host/graph_tiling_func.cpp")
+    paths = ascendc_compile_module.get_host_pch_paths(args)
+    monkeypatch.setattr(
+        ascendc_compile_module.module,
+        "prepare_host_pch_with_cleanup",
+        lambda unused_args, unused_paths: paths,
+    )
+
+    with ascendc_compile_module.host_compile_batch(args) as pch_path:
+        assert pch_path == paths[2]
+
+
+def test_host_compile_batch_falls_back_when_pch_build_fails(
+    ascendc_compile_module, monkeypatch, tmpdir
+):
+    ascendc_compile_module.module.PCH_CACHE_ROOT = str(tmpdir.mkdir("pch-cache"))
+    args = _make_compile_args(
+        [
+            "/tmp/build/host/graph_tiling_func_a.cpp",
+            "/tmp/build/host/graph_tiling_func_b.cpp",
+        ]
+    )
+
+    monkeypatch.setattr(
+        ascendc_compile_module.module,
+        "generate_pch_source",
+        lambda *unused_args: (_ for _ in ()).throw(OSError("no write access")),
+    )
+
+    with ascendc_compile_module.host_compile_batch(args) as pch_path:
+        assert pch_path is None
+
+
+def test_host_compile_batch_falls_back_when_pch_cache_root_is_file(
+    ascendc_compile_module, tmpdir
+):
+    cache_root = tmpdir.join("pch-cache")
+    cache_root.write("not a directory")
+    ascendc_compile_module.module.PCH_CACHE_ROOT = str(cache_root)
+    args = _make_compile_args(
+        [
+            "/tmp/build/host/graph_tiling_func_a.cpp",
+            "/tmp/build/host/graph_tiling_func_b.cpp",
+        ]
+    )
+
+    with ascendc_compile_module.host_compile_batch(args) as pch_path:
+        assert pch_path is None
+
+
 def test_build_host_compile_cmd_uses_bisheng_without_cmake(ascendc_compile_module):
     ascendc_compile_module.module.ASCEND_PATH = "/usr/local/Ascend/cann"
     ascendc_compile_module.module.machine = "x86_64"
@@ -987,11 +1069,117 @@ def test_build_host_compile_cmd_uses_bisheng_without_cmake(ascendc_compile_modul
     assert cmd[0] == "/usr/local/Ascend/cann/tools/bisheng_compiler/bin/bisheng"
     assert "-c" in cmd
     assert "-x" in cmd
-    assert "asc" in cmd
+    assert "c++" in cmd
+    assert "-std=c++17" in cmd
     assert "/tmp/build/host/graph_tiling_func.cpp" in cmd
     assert "/tmp/build/host/graph_tiling_func.cpp.o" in cmd
     assert "cmake" not in cmd
     assert "make" not in cmd
+
+
+def test_build_pch_command_uses_cpp17(ascendc_compile_module):
+    args = _make_compile_args("/tmp/build/host/graph_tiling_func.cpp")
+
+    cmd = ascendc_compile_module.build_pch_command(
+        args,
+        "/tmp/cache/autofuse_tiling_pch.h",
+        "/tmp/cache/autofuse_tiling_pch.h.gch",
+    )
+
+    assert "-std=c++17" in cmd
+    assert "c++-header" in cmd
+
+
+def test_compile_diagnostics_write_trace_to_default_directory(
+    ascendc_compile_module, monkeypatch, tmpdir, capsys
+):
+    trace_dir = tmpdir.mkdir("trace")
+    ascendc_compile_module.module.COMPILE_TRACE_ROOT = str(trace_dir)
+    monkeypatch.setenv("AUTOFUSE_DFX_FLAGS", "codegen_compile_debug=true")
+
+    flags = ascendc_compile_module.get_compile_diagnostic_flags("/tmp/host.o")
+
+    assert "-ftime-report=per-pass" in flags
+    trace_flag = next(flag for flag in flags if flag.startswith("-ftime-trace="))
+    assert trace_flag.startswith(f"-ftime-trace={trace_dir}/host.o.")
+    assert trace_flag.endswith(".json")
+    assert (
+        f"[CompileTrace] {trace_flag.removeprefix('-ftime-trace=')}"
+        in capsys.readouterr().out
+    )
+
+
+def test_compile_diagnostics_use_unique_trace_files(
+    ascendc_compile_module, monkeypatch, tmpdir
+):
+    trace_dir = tmpdir.mkdir("trace")
+    ascendc_compile_module.module.COMPILE_TRACE_ROOT = str(trace_dir)
+    monkeypatch.setenv("AUTOFUSE_DFX_FLAGS", "codegen_compile_debug=true")
+
+    first = ascendc_compile_module.get_compile_diagnostic_flags("/tmp/a/graph.o")
+    second = ascendc_compile_module.get_compile_diagnostic_flags("/tmp/b/graph.o")
+
+    assert first != second
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_compile_host_obj_falls_back_without_pch(
+    ascendc_compile_module, monkeypatch, cleanup_fails
+):
+    args = _make_compile_args("/tmp/build/host/graph_tiling_func.cpp")
+    calls = []
+
+    def fake_run_compile_command(cmd, stage_name):
+        calls.append(cmd)
+        if "-include-pch" in cmd:
+            raise ascendc_compile_module.CompileError("invalid PCH")
+
+    if cleanup_fails:
+        monkeypatch.setattr(
+            ascendc_compile_module.module,
+            "invalidate_host_pch",
+            lambda *unused_args: (_ for _ in ()).throw(OSError("cache unavailable")),
+        )
+    ascendc_compile_module.module.run_compile_command = fake_run_compile_command
+    pch_state = {"path": "/tmp/cache/host.pch", "lock": ascendc_compile_module.Lock()}
+
+    result = ascendc_compile_module.compile_host_obj_file(
+        args,
+        "/tmp/build",
+        "/tmp/build/host/graph_tiling_func.cpp",
+        pch_state,
+    )
+
+    assert result == "/tmp/build/host/graph_tiling_func.cpp.o"
+    assert pch_state["path"] is None
+    assert len(calls) == 2
+    assert "-include-pch" in calls[0]
+    assert "-include-pch" not in calls[1]
+
+
+def test_compile_host_obj_removes_rejected_cached_pch(ascendc_compile_module, tmpdir):
+    args = _make_compile_args("/tmp/build/host/graph_tiling_func.cpp")
+    ascendc_compile_module.module.PCH_CACHE_ROOT = str(tmpdir.mkdir("pch-cache"))
+    _, _, pch_path, _ = ascendc_compile_module.get_host_pch_paths(args)
+    os.makedirs(os.path.dirname(pch_path))
+    open(pch_path, "w", encoding="utf-8").write("invalid PCH")
+
+    def fake_run_compile_command(cmd, stage_name):
+        if "-include-pch" in cmd:
+            raise ascendc_compile_module.CompileError("invalid PCH")
+
+    ascendc_compile_module.module.run_compile_command = fake_run_compile_command
+    pch_state = {"path": pch_path, "lock": ascendc_compile_module.Lock()}
+
+    ascendc_compile_module.compile_host_obj_file(
+        args,
+        "/tmp/build",
+        "/tmp/build/host/graph_tiling_func.cpp",
+        pch_state,
+    )
+
+    assert pch_state["path"] is None
+    assert not os.path.exists(pch_path)
 
 
 def test_build_host_compile_cmd_adds_pgo_mspti_include(ascendc_compile_module):

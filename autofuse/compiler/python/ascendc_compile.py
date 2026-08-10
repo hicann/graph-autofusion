@@ -10,6 +10,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 import ctypes
+import fcntl
 import hashlib
 import json
 import os
@@ -21,7 +22,9 @@ import subprocess
 import platform
 import tempfile
 import uuid
+from contextlib import contextmanager, nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 import time
 from dataclasses import dataclass
 from functools import wraps
@@ -35,11 +38,46 @@ HOST_LINK_LIBRARIES = ["tiling_api", "platform", "graph_base", "register"]
 CV_HOST_LINK_LIBRARIES = HOST_LINK_LIBRARIES + ["nnopbase"]
 INDUCTOR_COMPILE_TRACE_LABEL = "InductorCompile"
 HOST_COMPILE_MAX_WORKERS = 32
+HOST_CPP_STANDARD = "-std=c++17"
 PGO_BUNDLE_SCHEMA_VERSION = 1
 PGO_RESULT_PROTOCOL_VERSION = 1
 PGO_KERNEL_FORMAT = "aicore_binary_elf_v1"
 if not os.path.exists(ASCEND_PATH):
     ASCEND_PATH = os.getenv("ASCEND_HOME_PATH", ASCEND_PATH)
+
+PCH_FILENAME = "autofuse_tiling_pch.h"
+PCH_OUTPUT_NAME = "autofuse_tiling_pch.h.gch"
+PCH_CACHE_ROOT = os.path.join(os.path.expanduser("~"), ".cache", "autofuse_pch_cache")
+COMPILE_TRACE_ROOT = os.path.join(
+    os.path.expanduser("~"), ".cache", "autofuse_compile_trace"
+)
+PCH_COMMON_HEADERS = [
+    "<algorithm>",
+    "<cmath>",
+    "<cstdint>",
+    "<cstring>",
+    "<functional>",
+    "<iostream>",
+    "<map>",
+    "<memory>",
+    "<sstream>",
+    "<string>",
+    "<type_traits>",
+    "<unordered_map>",
+    "<utility>",
+    "<vector>",
+]
+
+
+def get_dfx_flag(name):
+    flags = os.getenv("AUTOFUSE_DFX_FLAGS", "")
+    for flag in flags.split(";"):
+        if "=" not in flag:
+            continue
+        key, value = flag.split("=", 1)
+        if key.lstrip("-") == name:
+            return value
+    return ""
 
 
 class CompileError(Exception):
@@ -109,8 +147,35 @@ def get_soc_type(args):
         raise ValueError(f"Unsupported soc_version: {args.soc_version}")
 
 
+def get_compile_diagnostic_flags(output_file):
+    """Return opt-in Bisheng flags for compiler diagnosis.
+
+    ``codegen_compile_debug=true`` enables the per-pass timing report and a
+    compiler timeline trace.  Per-pass timing is used instead of per-pass-run
+    timing to limit diagnostic overhead and output volume.
+    """
+    if get_dfx_flag("codegen_compile_debug").lower() != "true":
+        return []
+
+    os.makedirs(COMPILE_TRACE_ROOT, exist_ok=True)
+    trace_file = os.path.join(
+        COMPILE_TRACE_ROOT,
+        f"{os.path.basename(output_file)}.{uuid.uuid4().hex}.json",
+    )
+    print(f"[CompileTrace] {trace_file}")
+    return [
+        "-ftime-report=per-pass",
+        f"-ftime-trace={trace_file}",
+    ]
+
+
 def run_compile_command(cmd: List[str], stage_name):
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    diagnostics_enabled = get_dfx_flag("codegen_compile_debug").lower() == "true"
+    result = subprocess.run(
+        cmd,
+        capture_output=not diagnostics_enabled,
+        text=True,
+    )
     if result.returncode != 0:
         error_msg = f"{stage_name} compile failed with code {result.returncode}"
         if result.stderr:
@@ -147,7 +212,7 @@ def link_pgo_executable(target_file, obj_files, mspti_link_flags):
         if option.startswith("-L") and len(option) > 2
     )
     link_command.extend(mspti_link_flags)
-    link_command.extend(["-ldl", "-lpthread"])
+    link_command.extend(["-lstdc++", "-ldl", "-lpthread"])
     run_compile_command(link_command, "LinkPgoExecutable")
     return target_file
 
@@ -344,9 +409,7 @@ def get_host_abi_compile_options(args: argparse.Namespace):
 
 
 def build_host_include_options(temp_dir):
-    return [
-        "-I",
-        f"{temp_dir}/host",
+    options = [
         "-I",
         f"{ASCEND_PATH}/include",
         "-I",
@@ -376,6 +439,9 @@ def build_host_include_options(temp_dir):
         "-I",
         f"{ASCEND_PATH}/opp/built-in/op_impl/ai_core/tbe/impl/ops_nn/ascendc/common",
     ]
+    if temp_dir is not None:
+        options[0:0] = ["-I", f"{temp_dir}/host"]
+    return options
 
 
 def build_host_base_options(args: argparse.Namespace, temp_dir):
@@ -387,6 +453,7 @@ def build_host_base_options(args: argparse.Namespace, temp_dir):
         *build_host_include_options(temp_dir),
         "-fPIC",
         f"--npu-arch={soc_version}",
+        HOST_CPP_STANDARD,
         "-O2",
         "-fno-common",
         "-Wextra",
@@ -408,34 +475,219 @@ def build_host_output_options(source_file, obj_file):
         obj_file,
         "-c",
         "-x",
-        "asc",
+        "c++",
         source_file,
     ]
 
 
-def build_host_compile_cmd(args: argparse.Namespace, temp_dir, source_file, obj_file):
+def generate_pch_source(host_dir):
+    pch_src_path = os.path.join(host_dir, PCH_FILENAME)
+    lines = ["// Auto-generated PCH source for autofuse tiling host compile"]
+    lines.append("// Stable headers shared by generated Host tiling sources")
+    for header in PCH_COMMON_HEADERS:
+        lines.append(f"#include {header}")
+    with open(pch_src_path, "w", encoding="utf-8") as file:
+        file.write("\n".join(lines) + "\n")
+    return pch_src_path
+
+
+def build_pch_command(args, pch_src_path, pch_out_path):
     compile_options, host_abi_option = get_host_abi_compile_options(args)
-    return [
+    pch_args = [
+        f"{ASCEND_PATH}/tools/bisheng_compiler/bin/bisheng",
+        "-D",
+        "kernel_EXPORTS",
+        *build_host_include_options(None),
+        "-fPIC",
+        f"--npu-arch={get_soc_type(args)}",
+        HOST_CPP_STANDARD,
+        "-O2",
+        "-fno-common",
+        "-Wextra",
+        "-Wfloat-equal",
+        "-fvisibility=default",
+        *compile_options,
+        "-D",
+        "LOG_CPP",
+        *host_abi_option,
+        "-x",
+        "c++-header",
+        pch_src_path,
+        "-o",
+        pch_out_path,
+    ]
+    return pch_args + get_compile_diagnostic_flags(pch_out_path)
+
+
+def get_host_pch_key(args):
+    compile_options, host_abi_option = get_host_abi_compile_options(args)
+    key_data = "\0".join(
+        [
+            f"{ASCEND_PATH}/tools/bisheng_compiler/bin/bisheng",
+            get_soc_type(args),
+            HOST_CPP_STANDARD,
+            *build_host_include_options(None),
+            *compile_options,
+            "-D",
+            "kernel_EXPORTS",
+            "-D",
+            "LOG_CPP",
+            *host_abi_option,
+            *PCH_COMMON_HEADERS,
+        ]
+    )
+    return hashlib.sha256(key_data.encode("utf-8")).hexdigest()
+
+
+def get_host_pch_paths(args):
+    pch_key = get_host_pch_key(args)
+    root = os.path.join(PCH_CACHE_ROOT, pch_key)
+    return (
+        root,
+        os.path.join(root, PCH_FILENAME),
+        os.path.join(root, PCH_OUTPUT_NAME),
+        os.path.join(root, ".lock"),
+    )
+
+
+def prepare_host_pch(args, paths):
+    root, pch_source, pch_output, _ = paths
+    os.makedirs(root, exist_ok=True)
+    if os.path.isfile(pch_output) and os.path.getsize(pch_output) > 0:
+        return paths
+    generate_pch_source(root)
+    with InductorCompileDuration(args, "CompileHostPCH"):
+        run_compile_command(build_pch_command(args, pch_source, pch_output), "PCH")
+    if not os.path.isfile(pch_output) or os.path.getsize(pch_output) == 0:
+        raise CompileError("PCH compiler did not produce a valid output")
+    return paths
+
+
+def cleanup_host_pch_files(paths):
+    _, pch_source, pch_output, _ = paths
+    for path in (pch_source, pch_output):
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def prepare_host_pch_with_cleanup(args, paths):
+    try:
+        # 该打点包含缓存检查和 PCH 准备；缓存命中时不会产生 CompileHostPCH。
+        with InductorCompileDuration(args, "PrepareHostPCH"):
+            return prepare_host_pch(args, paths)
+    except (CompileError, OSError, ValueError):
+        try:
+            cleanup_host_pch_files(paths)
+        except OSError:
+            pass
+        return None
+
+
+@contextmanager
+def global_pch_build(args):
+    """获取一份按编译上下文复用的只读 PCH。"""
+    try:
+        paths = get_host_pch_paths(args)
+        root, _, _, lock_path = paths
+        os.makedirs(root, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
+            # 记录等待其他 AutoFuseCompile 释放 PCH 生成锁的耗时。
+            with InductorCompileDuration(args, "WaitHostPCHLock"):
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                pch_entry = prepare_host_pch_with_cleanup(args, paths)
+            finally:
+                # 只在检查/生成 PCH 期间持有排他锁，不阻塞其他请求的 Host 编译。
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    except (OSError, ValueError):
+        pch_entry = None
+    # PCH 已经生成完成且不会在本上下文中删除，多个请求可以并行使用。
+    yield pch_entry
+
+
+def invalidate_host_pch(args, pch_path):
+    """删除已被编译器拒绝的当前上下文 PCH 缓存。"""
+    root, _, pch_output, lock_path = get_host_pch_paths(args)
+    if pch_path != pch_output:
+        return
+    os.makedirs(root, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            if os.path.exists(pch_output):
+                os.remove(pch_output)
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def host_compile_batch(args):
+    """在一批 Host 编译期间获取一份可复用的 PCH。"""
+    # global_pch_build 在全局锁保护下检查或生成缓存 PCH，随后释放锁。
+    host_files = getattr(args, "host_files", None)
+    pch_context = (
+        global_pch_build(args) if host_files is not None else nullcontext(None)
+    )
+    with pch_context as pch_entry:
+        # pch_entry 保存 PCH 的相关路径，其中第 3 个元素是 .gch 文件路径。
+        # 将该路径交给外层的 compile_host_objs()，让所有 Host 文件共享它。
+        # 如果 PCH 生成失败，返回 None，Host 编译会自动回退到普通 C++ 编译。
+        yield pch_entry[2] if pch_entry else None
+
+
+def build_host_compile_cmd(
+    args: argparse.Namespace, temp_dir, source_file, obj_file, pch_path=None
+):
+    compile_options, host_abi_option = get_host_abi_compile_options(args)
+    cmd = [
         *build_host_base_options(args, temp_dir),
         *compile_options,
         "-D",
         "LOG_CPP",
         *host_abi_option,
-        *build_host_output_options(source_file, obj_file),
     ]
+    if pch_path:
+        cmd += ["-include-pch", pch_path]
+    cmd += build_host_output_options(source_file, obj_file)
+    cmd += get_compile_diagnostic_flags(obj_file)
+    return cmd
 
 
 def get_host_obj_path(source_file, temp_dir):
     return os.path.join(temp_dir, "host", os.path.basename(source_file) + ".o")
 
 
-def compile_host_obj_file(args: argparse.Namespace, temp_dir, source_file):
+def compile_host_obj_file(
+    args: argparse.Namespace, temp_dir, source_file, pch_state=None
+):
     obj_file = get_host_obj_path(source_file, temp_dir)
-    host_compile_cmd = build_host_compile_cmd(args, temp_dir, source_file, obj_file)
+    if pch_state:
+        with pch_state["lock"]:
+            pch_path = pch_state["path"]
+    else:
+        pch_path = None
+    host_compile_cmd = build_host_compile_cmd(
+        args, temp_dir, source_file, obj_file, pch_path
+    )
     try:
         run_compile_command(host_compile_cmd, "Host")
     except CompileError as ex:
-        raise CompileError(f"Host compile failed for {source_file}: {ex}") from ex
+        if pch_path:
+            with pch_state["lock"]:
+                pch_state["path"] = None
+            try:
+                invalidate_host_pch(args, pch_path)
+            except OSError:
+                pass
+            fallback_cmd = build_host_compile_cmd(args, temp_dir, source_file, obj_file)
+            try:
+                run_compile_command(fallback_cmd, "Host")
+            except CompileError as fallback_ex:
+                raise CompileError(
+                    f"Host compile failed for {source_file}: {fallback_ex}"
+                ) from fallback_ex
+        else:
+            raise CompileError(f"Host compile failed for {source_file}: {ex}") from ex
     return obj_file
 
 
@@ -452,16 +704,19 @@ def normalize_to_list(value):
 
 
 @inductor_compile_duration("CompileHostObj")
-def compile_host_objs(args: argparse.Namespace, temp_dir):
+def compile_host_objs(args: argparse.Namespace, temp_dir, pch_path=None):
     host_files = normalize_to_list(args.host_files)
+    pch_state = {"path": pch_path, "lock": Lock()}
     if len(host_files) == 1:
-        return [compile_host_obj_file(args, temp_dir, host_files[0])]
+        return [compile_host_obj_file(args, temp_dir, host_files[0], pch_state)]
 
     obj_files = [None] * len(host_files)
     worker_count = get_host_compile_worker_count(len(host_files))
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         future_to_index = {
-            executor.submit(compile_host_obj_file, args, temp_dir, source_file): index
+            executor.submit(
+                compile_host_obj_file, args, temp_dir, source_file, pch_state
+            ): index
             for index, source_file in enumerate(host_files)
         }
         for future in as_completed(future_to_index):
@@ -524,6 +779,7 @@ def compile_device_obj(args: argparse.Namespace, temp_dir):
         "-x",
         "asc",
         f"{temp_dir}/device/{base_device_file}",
+        *get_compile_diagnostic_flags(f"{temp_dir}/device/{base_device_file}.o"),
     ]
     run_compile_command(device_compile_cmd, "Device")
     return f"{temp_dir}/device/{base_device_file}.o"
@@ -797,9 +1053,12 @@ def try_static_shape_compile(args: argparse.Namespace, temp_dir, so_path):
     return True
 
 
-def link_host_target(args, temp_dir):
+def link_host_target(args, temp_dir, pch_path=None):
     # 处理 host 编译阶段
-    host_obj_paths = compile_host_objs(args, temp_dir)
+    if pch_path is None:
+        host_obj_paths = compile_host_objs(args, temp_dir)
+    else:
+        host_obj_paths = compile_host_objs(args, temp_dir, pch_path)
     so_file = os.path.join(temp_dir, os.path.basename(args.output_file))
     link_libraries = (
         CV_HOST_LINK_LIBRARIES if is_cv_fusion_compile(args) else HOST_LINK_LIBRARIES
@@ -849,14 +1108,14 @@ def copy_so_to_output(so_file, args, src_directory):
     os.chdir(src_directory)
 
 
-def build_host_output(args):
+def build_host_output(args, pch_path=None):
     should_build_sidecars = (
         getattr(args, "pgo_runner_file", None) is not None
         and getattr(args, "pgo_mspti_config", None) is not None
     )
     if should_build_sidecars:
         args.pgo_generation = uuid.uuid4().hex
-    so_file = link_host_target(args, args.temp_dir)
+    so_file = link_host_target(args, args.temp_dir, pch_path)
     if not should_build_sidecars:
         return so_file
     try:
@@ -884,16 +1143,16 @@ def main(args):
     print("change work dir:", os.getcwd())
     try:
         if args.stage == "host":
-            so_file = build_host_output(args)
-            if so_file is None:
-                return
+            with host_compile_batch(args) as pch_path:
+                so_file = build_host_output(args, pch_path)
         elif args.stage == "device":
             so_file = link_kernel_target(args, None, args.temp_dir)
         else:  # all
-            host_obj_paths = compile_host_objs(args, args.temp_dir)
+            with host_compile_batch(args) as pch_path:
+                host_obj_paths = compile_host_objs(args, args.temp_dir, pch_path)
             so_file = link_kernel_target(args, host_obj_paths, args.temp_dir)
-
-        copy_so_to_output(so_file, args, src_directory)
+        if so_file is not None:
+            copy_so_to_output(so_file, args, src_directory)
     finally:
         os.chdir(src_directory)
 
