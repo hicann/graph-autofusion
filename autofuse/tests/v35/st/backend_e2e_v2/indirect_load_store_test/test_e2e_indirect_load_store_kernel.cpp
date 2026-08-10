@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <random>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -68,6 +69,8 @@ namespace {
 constexpr int32_t kAxis = IL_AXIS < 0 ? IL_AXIS + IL_RANK : IL_AXIS;
 #if defined(IL_DATA_BF16)
 using DataType = bfloat16_t;
+#elif defined(IL_DATA_INT16)
+using DataType = int16_t;
 #elif defined(IL_DATA_UINT32)
 using DataType = uint32_t;
 #elif defined(IL_DATA_FLOAT)
@@ -142,6 +145,11 @@ constexpr int32_t ResultCount() {
 
 void InitializeData(DataType *x, IndexType *index, DataType *addend, OutputType *expected, int32_t input_count,
                     int32_t output_count) {
+#ifdef IL_RANDOM_INPUT_INDEX
+  std::mt19937 generator(20260805U);
+  std::uniform_real_distribution<float> input_distribution(1.0F, 2.0F);
+  std::uniform_int_distribution<int64_t> index_distribution(1L, 9L);
+#endif
   std::array<int32_t, IL_RANK> input_strides{};
   input_strides.back() = 1;
   for (size_t i = input_strides.size() - 1UL; i > 0UL; --i) {
@@ -154,6 +162,8 @@ void InitializeData(DataType *x, IndexType *index, DataType *addend, OutputType 
     x[i] = static_cast<DataType>(static_cast<float>((i % 8) + 1) * 0.25F);
 #elif defined(IL_OUTPUT_POST_TYPE) && IL_OUTPUT_POST_TYPE == 1
     x[i] = static_cast<DataType>(static_cast<float>((i % 8) + 1) * 0.25F);
+#elif defined(IL_RANDOM_INPUT_INDEX)
+    x[i] = static_cast<DataType>(input_distribution(generator));
 #else
     x[i] = static_cast<DataType>(static_cast<float>((i % 29) - 14) * 0.25F);
 #endif
@@ -164,8 +174,17 @@ void InitializeData(DataType *x, IndexType *index, DataType *addend, OutputType 
 #else
     (void)addend;
 #endif
-    const int32_t index_value = (i * 3 + 1) % kInputShape[kAxis];
+    const int32_t index_value =
+#ifdef IL_RANDOM_INPUT_INDEX
+        static_cast<int32_t>(index_distribution(generator));
+#else
+        (i * 3 + 1) % kInputShape[kAxis];
+#endif
+#ifdef IL_RANDOM_INPUT_INDEX
+    index[i] = static_cast<IndexType>(index_value);
+#else
     index[i] = static_cast<IndexType>(i % 2 == 0 ? index_value : -index_value);
+#endif
     int32_t remaining = i;
     int32_t input_offset = 0;
     for (size_t dim = kIndexShape.size(); dim-- > 0UL;) {
@@ -400,20 +419,21 @@ TEST(E2EIndirectLoadStore, GeneratedKernelMatchesReference) {
   static_assert(IL_REDUCE_WITH_A);
   ASSERT_EQ(tiling_data.tiling_key, IL_TILING_KEY);
 #elif defined(IL_POST_REDUCE_SIMD)
-  ASSERT_EQ(tiling_data.tiling_key, IL_TILING_KEY);
+  ASSERT_EQ(tiling_data.graph0_tiling_key, 0U);
+  ASSERT_EQ(tiling_data.graph0_result0_g0_tiling_data.tiling_key, IL_TILING_KEY);
 #else
 #ifdef IL_EXPECT_SIMD_SELECTED
   ASSERT_EQ(tiling_data.graph0_tiling_key, 0U);
   ASSERT_EQ(tiling_data.graph0_result0_g0_tiling_data.tiling_key, IL_TILING_KEY);
 #elif defined(IL_EXPECT_SIMT_SELECTED)
-  ASSERT_EQ(tiling_data.graph0_tiling_key, 1U);
-  ASSERT_EQ(tiling_data.graph0_result1_g0_tiling_data.tiling_key, IL_TILING_KEY);
+  ASSERT_EQ(tiling_data.graph0_tiling_key, 2U);
+  ASSERT_EQ(tiling_data.graph0_result2_g0_tiling_data.tiling_key, IL_TILING_KEY);
 #else
-  ASSERT_LE(tiling_data.graph0_tiling_key, 1U);
+  ASSERT_TRUE(tiling_data.graph0_tiling_key == 0U || tiling_data.graph0_tiling_key == 2U);
   if (tiling_data.graph0_tiling_key == 0U) {
     ASSERT_EQ(tiling_data.graph0_result0_g0_tiling_data.tiling_key, IL_TILING_KEY);
   } else {
-    const auto &simt_tiling_data = tiling_data.graph0_result1_g0_tiling_data;
+    const auto &simt_tiling_data = tiling_data.graph0_result2_g0_tiling_data;
     ASSERT_EQ(simt_tiling_data.tiling_key, IL_TILING_KEY);
     ASSERT_EQ(simt_tiling_data.block_dim, 48U);
 #ifdef IL_REDUCE_LAST_AXIS
@@ -449,7 +469,7 @@ TEST(E2EIndirectLoadStore, GeneratedKernelMatchesReference) {
               reinterpret_cast<uint8_t *>(&tiling_data));
 #endif
   for (int32_t i = 0; i < result_count; ++i) {
-#if defined(IL_DATA_BF16) || defined(IL_DATA_UINT32)
+#if defined(IL_DATA_BF16) || defined(IL_DATA_INT16) || defined(IL_DATA_UINT32)
     EXPECT_EQ(static_cast<float>(output.get()[i]), static_cast<float>(expected[static_cast<size_t>(i)]))
         << "offset=" << i;
 #else

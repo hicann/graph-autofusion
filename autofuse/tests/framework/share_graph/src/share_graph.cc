@@ -8383,7 +8383,8 @@ static void AddIndirectLoadDataChain(af::AscGraph &graph, const std::vector<int6
 static void AddIndirectLoadIndexChain(af::AscGraph &graph, const std::vector<int64_t> &axes,
                                       const std::vector<af::Expression> &repeats,
                                       const std::vector<af::Expression> &strides, af::DataType index_type,
-                                      bool mixed_index_pre, af::ascir_op::IndirectLoad &indirect_load) {
+                                      bool mixed_index_pre, bool direct_index,
+                                      af::ascir_op::IndirectLoad &indirect_load) {
   af::ascir_op::Data index("index");
   graph.AddNode(index);
   index.y.dtype = index_type;
@@ -8392,6 +8393,10 @@ static void AddIndirectLoadIndexChain(af::AscGraph &graph, const std::vector<int
   graph.AddNode(index_load);
   index_load.x = index.y;
   SetIndirectLoadNodeView(index_load, axes, repeats, strides, index_type);
+  if (direct_index) {
+    indirect_load.x2 = index_load.y;
+    return;
+  }
   af::ascir_op::Abs index_abs("index_abs");
   graph.AddNode(index_abs);
   index_abs.x = index_load.y;
@@ -8642,7 +8647,8 @@ static void IndirectLoadStore_BeforeAutofuse(af::AscGraph &graph, size_t rank, i
                                              af::DataType index_type, IndirectLoadInputPreType input_pre_type,
                                              bool use_exp2, IndirectLoadOutputPostType output_post_type,
                                              const std::vector<int64_t> &input_shape,
-                                             const std::vector<int64_t> &output_shape, bool mixed_index_pre) {
+                                             const std::vector<int64_t> &output_shape, bool mixed_index_pre,
+                                             bool direct_index) {
   std::vector<int64_t> input_axes;
   std::vector<af::Expression> input_repeats;
   std::vector<af::Expression> input_strides;
@@ -8659,7 +8665,7 @@ static void IndirectLoadStore_BeforeAutofuse(af::AscGraph &graph, size_t rank, i
     AddIndirectLoadDataChain(graph, input_axes, input_repeats, input_strides, data_type, input_pre_type, indirect_load);
   }
   AddIndirectLoadIndexChain(graph, output_axes, output_repeats, output_strides, index_type, mixed_index_pre,
-                            indirect_load);
+                            direct_index, indirect_load);
   indirect_load.ir_attr.SetAxis(axis);
   const af::DataType indirect_load_type =
       input_pre_type == IndirectLoadInputPreType::kPrecisionCast ? af::DT_FLOAT : data_type;
@@ -8671,7 +8677,7 @@ static void IndirectLoadStore_BeforeAutofuse(af::AscGraph &graph, size_t rank, i
 af::ComputeGraphPtr ShareGraph::IndirectLoadStoreFusedGraph(
     size_t rank, int64_t axis, af::DataType data_type, af::DataType index_type, IndirectLoadInputPreType input_pre_type,
     bool use_exp2, IndirectLoadOutputPostType output_post_type, const std::vector<int64_t> &input_shape,
-    const std::vector<int64_t> &output_shape, bool mixed_index_pre) {
+    const std::vector<int64_t> &output_shape, bool mixed_index_pre, bool direct_index) {
   if (rank < 2UL || rank > 4UL || axis < -static_cast<int64_t>(rank) || axis >= static_cast<int64_t>(rank) ||
       (!input_shape.empty() && input_shape.size() != rank) || (!output_shape.empty() && output_shape.size() != rank)) {
     return nullptr;
@@ -8712,7 +8718,7 @@ af::ComputeGraphPtr ShareGraph::IndirectLoadStoreFusedGraph(
 
   auto sub_graph = std::make_shared<af::AscGraph>("indirect_load_store_test");
   IndirectLoadStore_BeforeAutofuse(*sub_graph, rank, axis, data_type, index_type, input_pre_type, use_exp2,
-                                   output_post_type, input_shape, output_shape, mixed_index_pre);
+                                   output_post_type, input_shape, output_shape, mixed_index_pre, direct_index);
   auto fuse_attrs = backend->GetOpDesc()->GetOrCreateAttrsGroup<af::AutoFuseAttrs>();
   if (fuse_attrs == nullptr) {
     return nullptr;

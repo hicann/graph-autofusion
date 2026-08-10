@@ -3272,7 +3272,9 @@ class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     const auto template_id = ::ascir::GetTemplateIdOrDefault(node);
-    if (template_id != ::ascir::TemplateId::kIndirectLoadSimd && template_id != ::ascir::TemplateId::kIndirectLoadSK) {
+    if (template_id != ::ascir::TemplateId::kIndirectLoadSK) {
+      // SIMD MicroAPI uses registers, while GatherApi reuses the dead index UB for uint32 offsets. SIMT accesses GM
+      // directly, so neither template needs an API-level temporary buffer.
       return {};
     }
     auto node_outputs = node.outputs;
@@ -3301,7 +3303,8 @@ class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"indirect_load_simd_reg_base.h", "indirect_load_sk_reg_base.h", "indirect_load_simt_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
-    return {"basic_api/kernel_operator_vec_gather_intf.h", "simt_api/cpp/kernel_simt_intf.h"};
+    return {"basic_api/kernel_operator_vec_gather_intf.h", "basic_api/reg_compute/kernel_reg_compute_intf.h",
+            "simt_api/cpp/kernel_simt_intf.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),

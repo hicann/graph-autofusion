@@ -56,12 +56,12 @@ struct ILTestGraph {
 // z0, z1: input axes  |  z2, z3: output/index axes
 // IndirectLoad axis=1, rank=2
 
-void BuildSimdGraph(ILTestGraph &g) {
+void BuildSimdGraph(ILTestGraph &g, af::DataType input_dtype = ge::DT_FLOAT16) {
   const af::Expression One = af::sym::kSymbolOne;
 
   Data x_data("x", g.graph);
   x_data.ir_attr.SetIndex(0);
-  x_data.y.dtype = ge::DT_FLOAT16;
+  x_data.y.dtype = input_dtype;
   x_data.attr.sched.axis = {g.z0.id, g.z1.id};
   *x_data.y.axis = {g.z0.id, g.z1.id};
   *x_data.y.repeats = {g.s0, g.s1};
@@ -78,7 +78,7 @@ void BuildSimdGraph(ILTestGraph &g) {
   Load x_load("x_load");
   g.graph.AddNode(x_load);
   x_load.x = x_data.y;
-  x_load.y.dtype = ge::DT_FLOAT16;
+  x_load.y.dtype = input_dtype;
   x_load.attr.sched.axis = {g.z0.id, g.z1.id};
   *x_load.y.axis = {g.z0.id, g.z1.id};
   *x_load.y.repeats = {g.s0, g.s1};
@@ -106,7 +106,7 @@ void BuildSimdGraph(ILTestGraph &g) {
   Store store("store");
   g.graph.AddNode(store);
   store.x = il.y;
-  store.y.dtype = ge::DT_FLOAT16;
+  store.y.dtype = input_dtype;
   store.attr.sched.axis = {g.z2.id, g.z3.id};
   *store.y.axis = {g.z2.id, g.z3.id};
   *store.y.repeats = {g.s2, g.s3};
@@ -116,7 +116,7 @@ void BuildSimdGraph(ILTestGraph &g) {
   g.graph.AddNode(y_out);
   y_out.ir_attr.SetIndex(0);
   y_out.x = store.y;
-  y_out.y.dtype = ge::DT_FLOAT16;
+  y_out.y.dtype = input_dtype;
 
   // ----- API attrs -----
   for (const char *name : {"x", "idx"}) {
@@ -208,7 +208,7 @@ void BuildSimdGraph(ILTestGraph &g) {
   idx_load_node->outputs[0].attr.que.depth = 2;
   idx_load_node->outputs[0].attr.que.buf_num = 2;
 
-  il_node->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  il_node->outputs[0].attr.dtype = input_dtype;
   il_node->outputs[0].attr.mem.tensor_id = 1;
   il_node->outputs[0].attr.mem.reuse_id = 1;
   il_node->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
@@ -662,6 +662,7 @@ void AnnotateSimdTemplate(af::AscGraph &graph) {
   auto il = graph.FindNode("indirect_load");
   ASSERT_NE(il, nullptr);
   ASSERT_EQ(::ascir::SetTemplateId(il, ::ascir::TemplateId::kIndirectLoadSimd), af::SUCCESS);
+  ASSERT_EQ(SetImplementation(il, Implementation::kDefault), af::SUCCESS);
 
   auto axes = graph.GetAllAxis();
   af::AxisId outer_id = af::kIdNone, inner_id = af::kIdNone, input_inner_id = af::kIdNone;
@@ -692,6 +693,7 @@ void AnnotateSimtTemplate(af::AscGraph &graph) {
   auto il = graph.FindNode("indirect_load");
   ASSERT_NE(il, nullptr);
   ASSERT_EQ(::ascir::SetTemplateId(il, ::ascir::TemplateId::kIndirectLoadSimt), af::SUCCESS);
+  ASSERT_EQ(SetImplementation(il, Implementation::kDefault), af::SUCCESS);
   const auto input_load = graph.FindNode("x_load");
   const auto index_load = graph.FindNode("idx_load");
   const auto store = graph.FindNode("store");
@@ -797,9 +799,9 @@ TEST(IndirectLoadApiCallTest, FactoryCreatesIndirectLoadRegApiCall) {
 
 // ==================== SIMD Init + Generate ====================
 
-TEST(IndirectLoadApiCallTest, GenerateSimdProducesIndirectLoadSimdCall) {
+void GenerateSimdCall(af::DataType input_dtype, std::string &result) {
   ILTestGraph g("simd_gen");
-  BuildSimdGraph(g);
+  BuildSimdGraph(g, input_dtype);
   AnnotateSimdTemplate(g.graph);
 
   Tiler tiler;
@@ -840,12 +842,22 @@ TEST(IndirectLoadApiCallTest, GenerateSimdProducesIndirectLoadSimdCall) {
     if (axis != nullptr) current_axis.emplace_back(axis->id);
   }
 
-  std::string result;
   auto status = call.Generate(tpipe, current_axis, input_refs, output_refs, result);
-  EXPECT_EQ(status, af::SUCCESS);
+  ASSERT_EQ(status, af::SUCCESS);
+}
+
+TEST(IndirectLoadApiCallTest, GenerateSimdProducesIndirectLoadSimdCall) {
+  std::string result;
+  GenerateSimdCall(ge::DT_FLOAT16, result);
   EXPECT_NE(result.find("// IndirectLoad SIMD"), std::string::npos);
-  EXPECT_NE(result.find("IndirectLoadSimd<"), std::string::npos);
-  EXPECT_NE(result.find("tmp_buf_0"), std::string::npos);
+  EXPECT_NE(result.find("IndirectLoadSimd<half, int32_t, 2, 1>"), std::string::npos);
+  EXPECT_EQ(result.find("tmp_buf_0"), std::string::npos);
+}
+
+TEST(IndirectLoadApiCallTest, GenerateSimdUint32InputProducesTypedCall) {
+  std::string result;
+  GenerateSimdCall(ge::DT_UINT32, result);
+  EXPECT_NE(result.find("IndirectLoadSimd<uint32_t, int32_t, 2, 1>"), std::string::npos);
 }
 
 // ==================== SIMT Init + GenerateFuncDefinition ====================

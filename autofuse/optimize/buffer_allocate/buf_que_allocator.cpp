@@ -407,7 +407,10 @@ Status BufQueAllocator::GetAndSetNodeTempBuffer(const af::AscNodePtr &node) {
 }
 
 bool BufQueAllocator::IsTensorUsedByOtherUnit(const af::AscNodePtr &node, const af::AscTensor *output) {
-  if (ScheduleUtils::IsLoad(node) || ScheduleUtils::IsGatherLikeLoad(node)) {
+  if (IsOps<Gather>(node)) {
+    return true;
+  }
+  if (ScheduleUtils::IsLoad(node) && !IsOps<IndirectLoad>(node)) {
     return true;
   }
   for (const auto &input : output->anchor.GetPeerInDataAnchorsPtr()) {

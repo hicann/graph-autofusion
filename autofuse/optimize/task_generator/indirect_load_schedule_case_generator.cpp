@@ -32,6 +32,11 @@ constexpr int64_t kIndirectLoadSimtDcacheSize = 32 * 1024;
 using NodePath = std::vector<af::AscNodePtr>;
 using NodeSet = std::unordered_set<const af::AscNode *>;
 
+struct TemplateCase {
+  ascir::TemplateId template_id;
+  ascgen_utils::indirect_load::Implementation implementation;
+};
+
 struct RewrittenGraphAnalysis {
   NodePath region;
   af::AscNodePtr input_root;
@@ -57,8 +62,9 @@ bool HasControlEdge(const af::AscNodePtr &node) {
   return node->GetInControlNodesSize() != 0UL || node->GetOutControlNodesSize() != 0UL;
 }
 
-void CollectInputRegionMembers(const af::AscNodePtr &indirect_load, size_t input_index, NodeSet &region) {
-  const af::AscNodePtr root = ascgen_utils::indirect_load::GetInputProducer(indirect_load, input_index);
+void CollectInputRegionMembers(const af::AscNodePtr &indirect_load, NodeSet &region) {
+  const af::AscNodePtr root =
+      ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kInputTensorIndex);
   NodePath pending = {root};
   for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
     const af::AscNodePtr node = pending[cursor];
@@ -782,7 +788,7 @@ af::Status AnalyzeRewrittenGraph(const af::AscGraph &graph, const af::AscNodePtr
   CollectRewrittenBoundaries(indirect_load, analysis);
   NodeSet region_set;
   if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
-    CollectInputRegionMembers(indirect_load, ascgen_utils::indirect_load::kInputTensorIndex, region_set);
+    CollectInputRegionMembers(indirect_load, region_set);
   } else if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
     CollectSimtFusedRegionMembers(indirect_load, analysis, region_set);
   } else {
@@ -956,7 +962,8 @@ af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_lo
   return FinalizeTemplate(indirect_load, template_id);
 }
 
-std::string GenerateScoreFunc() {
+std::string GenerateScoreFunc(const TemplateCase &template_case) {
+  (void)template_case;
   std::stringstream ss;
   ss << "int32_t CalcScore(AutofuseTilingData &tiling_data) {" << std::endl;
   ss << "  (void)tiling_data;" << std::endl;
@@ -977,13 +984,20 @@ Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std:
   GELOGI("[IndirectLoad] Generate schedule candidates for graph[%s], node[%s].", graph.GetName().c_str(),
          indirect_load->GetNamePtr());
   const std::string indirect_load_name = indirect_load->GetName();
-  for (ascir::TemplateId template_id : {ascir::TemplateId::kIndirectLoadSimd, ascir::TemplateId::kIndirectLoadSimt,
-                                        ascir::TemplateId::kIndirectLoadSK}) {
+  const TemplateCase cases[] = {
+      {ascir::TemplateId::kIndirectLoadSimd, ascgen_utils::indirect_load::Implementation::kDefault},
+      {ascir::TemplateId::kIndirectLoadSimd, ascgen_utils::indirect_load::Implementation::kGatherApi},
+      {ascir::TemplateId::kIndirectLoadSimt, ascgen_utils::indirect_load::Implementation::kDefault},
+      {ascir::TemplateId::kIndirectLoadSK, ascgen_utils::indirect_load::Implementation::kDefault}};
+  for (const TemplateCase &template_case : cases) {
+    const ascir::TemplateId template_id = template_case.template_id;
     ascir::ImplGraph candidate_graph(graph.GetName().c_str());
     GE_ASSERT_TRUE(candidate_graph.CopyFrom(graph), "Failed to copy graph [%s].", graph.GetName().c_str());
     const af::AscNodePtr candidate_indirect_load = candidate_graph.FindNode(indirect_load_name.c_str());
     GE_ASSERT_NOTNULL(candidate_indirect_load, "Failed to find copied IndirectLoad node[%s].",
                       indirect_load_name.c_str());
+    GE_ASSERT_SUCCESS(
+        ascgen_utils::indirect_load::SetImplementation(candidate_indirect_load, template_case.implementation));
     bool is_candidate_legal = false;
     GE_ASSERT_SUCCESS(ApplyGraphPass(candidate_graph, candidate_indirect_load, template_id, is_candidate_legal));
     if (!is_candidate_legal) {
@@ -992,9 +1006,9 @@ Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std:
       continue;
     }
     graphs.emplace_back(std::move(candidate_graph));
-    score_functions.emplace_back(GenerateScoreFunc());
-    GELOGI("[IndirectLoad] Add schedule candidate[%d] for node[%s].", static_cast<int32_t>(template_id),
-           candidate_indirect_load->GetNamePtr());
+    score_functions.emplace_back(GenerateScoreFunc(template_case));
+    GELOGI("[IndirectLoad] Add schedule candidate[%d, %d] for node[%s].", static_cast<int32_t>(template_id),
+           static_cast<int32_t>(template_case.implementation), candidate_indirect_load->GetNamePtr());
   }
   return af::SUCCESS;
 }

@@ -32,6 +32,12 @@ enum class TemplateRole : int64_t {
   kSkOp,
 };
 
+enum class Implementation : int64_t {
+  // The default SIMD implementation uses MicroAPI.
+  kDefault,
+  kGatherApi,
+};
+
 struct TemplateBehavior {
   bool excludes_tiling_group = false;
   bool skips_main_schedule_tiling = false;
@@ -76,6 +82,8 @@ af::Status SetTemplateAxes(const af::AscNodePtr &node, const TemplateAxes &axes)
 af::Status GetTemplateAxes(const af::AscNodePtr &node, TemplateAxes &axes);
 af::Status SetTemplateLogicalView(const af::AscNodePtr &node, const TemplateLogicalView &view);
 af::Status GetTemplateLogicalView(const af::AscNodePtr &node, TemplateLogicalView &view);
+af::Status SetImplementation(const af::AscNodePtr &node, Implementation implementation);
+af::Status GetImplementation(const af::AscNodePtr &node, Implementation &implementation);
 bool ShouldSkipMainScheduleTiling(const af::AscNodePtr &node);
 bool ShouldPreserveVectorizedAxis(const af::AscNodePtr &node);
 bool ShouldApplyInputInnerVectorization(const af::AscNodePtr &node);
