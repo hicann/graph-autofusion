@@ -13,6 +13,7 @@
 #include "ascir_ops.h"
 #include "ascgen_log.h"
 #include "ascir_ops_utils.h"
+#include "graph/ascendc_ir/utils/asc_graph_utils.h"
 #include "schedule_utils.h"
 #include "graph_utils.h"
 #include "common_utils.h"
@@ -738,12 +739,7 @@ Status BufQueAllocator::ShortenVecinLifetime(af::AscGraph &graph, size_t max_que
 
     auto load_out_anchor = top_cycle->node->GetOutDataAnchor(0);
     GE_ASSERT_NOTNULL(load_out_anchor);
-    for (auto &peer_in_anchor : load_out_anchor->GetPeerInDataAnchors()) {
-      GE_ASSERT_SUCCESS(af::GraphUtils::RemoveEdge(load_out_anchor, peer_in_anchor));
-      GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(ub2ub_node->GetOutDataAnchor(0), peer_in_anchor));
-    }
-    GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(load_out_anchor, ub2ub_node->GetInDataAnchor(0)));
-    ub2ub_node->attr.sched = top_cycle->node->attr.sched;
+    GE_ASSERT_SUCCESS(af::AscGraphUtils::InsertNodeAfter(load_out_anchor, ub2ub_node));
     ub2ub_node->attr.api.compute_type = af::ComputeType::kComputeElewise;
     ub2ub_node->attr.api.type = af::ApiType::kAPITypeCompute;
     ub2ub_node->attr.api.unit = af::ComputeUnit::kUnitVector;
@@ -829,10 +825,7 @@ Status BufQueAllocator::ShortenVecoutLifetime(af::AscGraph &graph, size_t max_qu
         af::AscNodePtr ub2ub_node = graph.AddNode(ub2ub);
         GE_ASSERT_NOTNULL(ub2ub_node);
 
-        GE_ASSERT_SUCCESS(af::GraphUtils::RemoveEdge(out_data_anchor, peer_in_anchor));
-        GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(ub2ub_node->GetOutDataAnchor(0), peer_in_anchor));
-        GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(out_data_anchor, ub2ub_node->GetInDataAnchor(0)));
-        ub2ub_node->attr.sched = top_cycle->node->attr.sched;
+        GE_ASSERT_SUCCESS(af::AscGraphUtils::InsertNodeAfter(out_data_anchor, {peer_in_anchor}, ub2ub_node));
         ub2ub_node->attr.api.compute_type = af::ComputeType::kComputeElewise;
         ub2ub_node->attr.api.type = af::ApiType::kAPITypeCompute;
         ub2ub_node->attr.api.unit = af::ComputeUnit::kUnitVector;

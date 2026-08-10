@@ -19,6 +19,40 @@ namespace af {
 class AscGraphUtils {
  public:
   static ComputeGraphPtr GetComputeGraph(const AscGraph &asc_graph);
+  /**
+   * 在源数据锚点和目标数据锚点之间插入节点，仅维护数据边；从源节点继承调度，并从 src 对应输出继承
+   * tensor 的 axis/repeats/strides 到插入节点指定输出。
+   * @note [Autofuse 完备适配]
+   */
+  static graphStatus InsertNodeAfter(const OutDataAnchorPtr &src, const std::vector<InDataAnchorPtr> &dsts,
+                                     const NodePtr &insert_node, const uint32_t input_index = 0U,
+                                     const uint32_t output_index = 0U);
+  /**
+   * 在源数据锚点和其全部目标数据锚点之间插入节点，属性继承语义同指定 dsts 的重载。
+   * @note [Autofuse 完备适配]
+   */
+  static graphStatus InsertNodeAfter(const OutDataAnchorPtr &src, const NodePtr &insert_node,
+                                     const uint32_t input_index = 0U, const uint32_t output_index = 0U);
+  /**
+   * 通过 insert_op 创建节点后插入源数据锚点与目标数据锚点之间，属性继承语义同 NodePtr 重载。
+   * @note [Autofuse 完备适配]
+   */
+  static NodePtr InsertNodeAfter(const OutDataAnchorPtr &src, const std::vector<InDataAnchorPtr> &dsts,
+                                 const OpDescPtr &insert_op, const uint32_t input_index = 0U,
+                                 const uint32_t output_index = 0U);
+  /**
+   * 在目标数据锚点前插入节点，仅维护数据边；从目标节点继承调度，并从原 src 对应输出继承 tensor 的
+   * axis/repeats/strides 到插入节点指定输出。
+   * @note [Autofuse 完备适配]
+   */
+  static graphStatus InsertNodeBefore(const InDataAnchorPtr &dst, const NodePtr &insert_node,
+                                      const uint32_t input_index = 0U, const uint32_t output_index = 0U);
+  /**
+   * 通过 insert_op 创建节点后插入目标数据锚点前，属性继承语义同 NodePtr 重载。
+   * @note [Autofuse 完备适配]
+   */
+  static NodePtr InsertNodeBefore(const InDataAnchorPtr &dst, const OpDescPtr &insert_op,
+                                  const uint32_t input_index = 0U, const uint32_t output_index = 0U);
   static Status FromComputeGraph(const ComputeGraphPtr &compute_graph, AscGraph &graph);
   /**
    * @param compute_graph的node对象是Node类型时候，接口内部转换为AscNode

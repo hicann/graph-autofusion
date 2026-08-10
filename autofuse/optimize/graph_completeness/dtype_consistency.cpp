@@ -12,6 +12,7 @@
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
 #include "common_utils.h"
+#include "graph/ascendc_ir/utils/asc_graph_utils.h"
 #include "graph_utils.h"
 #include "node_utils.h"
 #include "schedule_utils.h"
@@ -287,14 +288,10 @@ Status DtypeConsistency::InsertCastNode(af::AscGraph &graph, const af::AscNodePt
   Cast cast_node(cast_name.c_str());
   auto cast_node_ptr = graph.AddNode(cast_node);
   GE_ASSERT_NOTNULL(cast_node_ptr);
-  cast_node_ptr->attr.sched = dst_node->attr.sched;
   cast_node_ptr->outputs[0].attr = dst_node->inputs[input_idx].attr;
   cast_node_ptr->outputs[0].attr.dtype = target_dtype;
 
-  // Reconnect edges
-  GE_ASSERT_SUCCESS(af::GraphUtils::RemoveEdge(src_out_anchor, in_anchor));
-  GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(src_out_anchor, cast_node_ptr->GetInDataAnchor(0)));
-  GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(cast_node_ptr->GetOutDataAnchor(0), in_anchor));
+  GE_ASSERT_SUCCESS(af::AscGraphUtils::InsertNodeBefore(in_anchor, cast_node_ptr));
 
   return af::SUCCESS;
 }

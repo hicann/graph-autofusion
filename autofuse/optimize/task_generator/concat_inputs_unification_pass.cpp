@@ -11,6 +11,7 @@
 #include "optimize/task_generator/concat_inputs_unification_pass.h"
 
 #include "ascir_utils.h"
+#include "graph/ascendc_ir/utils/asc_graph_utils.h"
 #include "graph_utils.h"
 #include "schedule_utils.h"
 #include "buffer_allocate/tensor_mem_defs.h"
@@ -139,7 +140,6 @@ Status ConcatInputUnificationPass::DoOptimize(ascir::ImplGraph &graph, const af:
     af::ascir_op::Ub2ub ub2ub(ub_name.c_str());
     af::AscNodePtr ub2ub_node = graph.AddNode(ub2ub);
     GE_ASSERT_NOTNULL(ub2ub_node);
-    ub2ub_node->attr.sched = asc_node->attr.sched;
     ub2ub_node->attr.api.compute_type = af::ComputeType::kComputeElewise;
     ub2ub_node->attr.api.type = af::ApiType::kAPITypeCompute;
     ub2ub_node->attr.api.unit = af::ComputeUnit::kUnitVector;
@@ -147,9 +147,7 @@ Status ConcatInputUnificationPass::DoOptimize(ascir::ImplGraph &graph, const af:
     ub2ub_node->outputs[0].attr.buf = {};
     ub2ub_node->outputs[0].attr.que = {};
 
-    GE_ASSERT_SUCCESS(af::GraphUtils::RemoveEdge(out_anchor, in_anchor));
-    GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(ub2ub_node->GetOutDataAnchor(0), in_anchor));
-    GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(out_anchor, ub2ub_node->GetInDataAnchor(0)));
+    GE_ASSERT_SUCCESS(af::AscGraphUtils::InsertNodeAfter(out_anchor, {in_anchor}, ub2ub_node));
     GELOGD("Ub2ub node: %s added", ub2ub_node->GetNamePtr());
   }
   return af::SUCCESS;

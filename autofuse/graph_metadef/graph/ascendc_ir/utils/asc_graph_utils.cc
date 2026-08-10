@@ -17,6 +17,15 @@
 
 namespace af {
 namespace {
+graphStatus InheritAutofuseAttr(GeTensorDesc &src_tensor_desc, GeTensorDesc &insert_tensor_desc) {
+  auto src_tensor_attr = src_tensor_desc.GetOrCreateAttrsGroup<AscTensorAttr>();
+  auto insert_tensor_attr = insert_tensor_desc.GetOrCreateAttrsGroup<AscTensorAttr>();
+  insert_tensor_attr->axis = src_tensor_attr->axis;
+  insert_tensor_attr->repeats = src_tensor_attr->repeats;
+  insert_tensor_attr->strides = src_tensor_attr->strides;
+  return GRAPH_SUCCESS;
+}
+
 graphStatus EstablishAscNodeAndEdges(const ascendc_ir::proto::AscGraphDef &asc_graph_def, AscGraph &out_asc_graph) {
   auto &asc_nodes = asc_graph_def.asc_node();
   // 1. Add AscNodes to AscGraph
@@ -110,6 +119,100 @@ graphStatus EstablishAscNodeAndEdges(const ascendc_ir::proto::AscGraphDef &asc_g
   return GRAPH_SUCCESS;
 }
 }  // namespace
+
+NodePtr AscGraphUtils::InsertNodeAfter(const OutDataAnchorPtr &src, const std::vector<InDataAnchorPtr> &dsts,
+                                       const OpDescPtr &insert_op, const uint32_t input_index,
+                                       const uint32_t output_index) {
+  GE_ASSERT_NOTNULL(src);
+  const NodePtr src_node = src->GetOwnerNode();
+  GE_ASSERT_NOTNULL(src_node);
+  auto compute_graph = src_node->GetOwnerComputeGraphBarePtr();
+  GE_ASSERT_NOTNULL(compute_graph);
+  auto insert_node = compute_graph->InsertNode(src_node, insert_op);
+  GE_ASSERT_GRAPH_SUCCESS(InsertNodeAfter(src, dsts, insert_node, input_index, output_index));
+  return insert_node;
+}
+
+graphStatus AscGraphUtils::InsertNodeAfter(const OutDataAnchorPtr &src, const NodePtr &insert_node,
+                                           const uint32_t input_index, const uint32_t output_index) {
+  GE_CHECK_NOTNULL(src);
+  const auto peer_in_anchor_range = src->GetPeerInDataAnchors();
+  const std::vector<InDataAnchorPtr> peer_in_anchors(peer_in_anchor_range.begin(), peer_in_anchor_range.end());
+  return InsertNodeAfter(src, peer_in_anchors, insert_node, input_index, output_index);
+}
+
+graphStatus AscGraphUtils::InsertNodeAfter(const OutDataAnchorPtr &src, const std::vector<InDataAnchorPtr> &dsts,
+                                           const NodePtr &insert_node, const uint32_t input_index,
+                                           const uint32_t output_index) {
+  GE_CHECK_NOTNULL(src);
+  GE_CHECK_NOTNULL(insert_node);
+
+  const auto src_node = src->GetOwnerNodeBarePtr();
+  GE_CHECK_NOTNULL(src_node);
+  GE_ASSERT_TRUE(src_node->GetOwnerComputeGraph() == insert_node->GetOwnerComputeGraph(),
+                 "src:%s and insert_node:%s does not exist in the same graph.", src_node->GetName().c_str(),
+                 insert_node->GetName().c_str());
+
+  GE_ASSERT_GRAPH_SUCCESS(GraphUtils::AddEdge(src, insert_node->GetInDataAnchor(static_cast<int32_t>(input_index))));
+
+  for (auto &dst : dsts) {
+    const auto dst_node = dst->GetOwnerNodeBarePtr();
+    GELOGI("Insert node(after) %s between %s->%s.", insert_node->GetName().c_str(), src_node->GetName().c_str(),
+           dst_node->GetName().c_str());
+    GE_ASSERT_GRAPH_SUCCESS(GraphUtils::RemoveEdge(src, dst));
+    GE_ASSERT_GRAPH_SUCCESS(
+        GraphUtils::AddEdge(insert_node->GetOutDataAnchor(static_cast<int32_t>(output_index)), dst));
+  }
+  insert_node->GetOpDesc()->GetOrCreateAttrsGroup<AscNodeAttr>()->sched =
+      src_node->GetOpDesc()->GetOrCreateAttrsGroup<AscNodeAttr>()->sched;
+  auto src_tensor_desc = src_node->GetOpDesc()->MutableOutputDesc(src->GetIdx());
+  auto insert_tensor_desc = insert_node->GetOpDesc()->MutableOutputDesc(output_index);
+  GE_ASSERT_GRAPH_SUCCESS(InheritAutofuseAttr(*src_tensor_desc, *insert_tensor_desc));
+  return GRAPH_SUCCESS;
+}
+
+NodePtr AscGraphUtils::InsertNodeBefore(const InDataAnchorPtr &dst, const OpDescPtr &insert_op,
+                                        const uint32_t input_index, const uint32_t output_index) {
+  GE_ASSERT_NOTNULL(dst);
+  const auto src_node_out_anchor = dst->GetPeerOutAnchor();
+  GE_ASSERT_NOTNULL(src_node_out_anchor);
+  const auto src_node = src_node_out_anchor->GetOwnerNode();
+  GE_ASSERT_NOTNULL(src_node);
+  auto compute_graph = src_node->GetOwnerComputeGraphBarePtr();
+  GE_ASSERT_NOTNULL(compute_graph);
+  auto insert_node = compute_graph->InsertNode(src_node, insert_op);
+  GE_ASSERT_GRAPH_SUCCESS(InsertNodeBefore(dst, insert_node, input_index, output_index));
+  return insert_node;
+}
+
+graphStatus AscGraphUtils::InsertNodeBefore(const InDataAnchorPtr &dst, const NodePtr &insert_node,
+                                            const uint32_t input_index, const uint32_t output_index) {
+  GE_CHECK_NOTNULL(dst);
+  GE_CHECK_NOTNULL(insert_node);
+  const auto dst_node = dst->GetOwnerNodeBarePtr();
+  GE_CHECK_NOTNULL(dst_node);
+  GE_ASSERT_TRUE(dst_node->GetOwnerComputeGraph() == insert_node->GetOwnerComputeGraph(),
+                 "dst:%s and insert_node:%s does not exist in the same graph.", dst_node->GetName().c_str(),
+                 insert_node->GetName().c_str());
+
+  const auto src_node_out_anchor = dst->GetPeerOutAnchor();
+  GE_CHECK_NOTNULL(src_node_out_anchor);
+  const auto src_node = src_node_out_anchor->GetOwnerNodeBarePtr();
+  GE_CHECK_NOTNULL(src_node);
+  GE_ASSERT_GRAPH_SUCCESS(GraphUtils::RemoveEdge(src_node_out_anchor, dst));
+  GE_ASSERT_GRAPH_SUCCESS(
+      GraphUtils::AddEdge(src_node_out_anchor, insert_node->GetInDataAnchor(static_cast<int32_t>(input_index))));
+  GE_ASSERT_GRAPH_SUCCESS(GraphUtils::AddEdge(insert_node->GetOutDataAnchor(static_cast<int32_t>(output_index)), dst));
+  GELOGI("Insert node(before) %s between %s->%s", insert_node->GetName().c_str(), src_node->GetName().c_str(),
+         dst_node->GetName().c_str());
+  insert_node->GetOpDesc()->GetOrCreateAttrsGroup<AscNodeAttr>()->sched =
+      dst_node->GetOpDesc()->GetOrCreateAttrsGroup<AscNodeAttr>()->sched;
+  auto src_tensor_desc = src_node->GetOpDesc()->MutableOutputDesc(src_node_out_anchor->GetIdx());
+  auto insert_tensor_desc = insert_node->GetOpDesc()->MutableOutputDesc(output_index);
+  GE_ASSERT_GRAPH_SUCCESS(InheritAutofuseAttr(*src_tensor_desc, *insert_tensor_desc));
+  return GRAPH_SUCCESS;
+}
+
 ComputeGraphPtr AscGraphUtils::GetComputeGraph(const AscGraph &asc_graph) {
   return asc_graph.impl_->GetComputeGraph();
 }

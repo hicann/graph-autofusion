@@ -36,6 +36,7 @@ add_library(test_ascir_ut OBJECT
     reg_func/test_reg_func_reduce_max.cpp
     code_dumper_unittest.cc
     ascir_utils_unittest.cc
+    test_asc_graph_utils.cpp
 )
 target_include_directories(test_ascir_ut PRIVATE
     ${ASCEND_ROOT}/x86_64-linux/include

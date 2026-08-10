@@ -10,6 +10,7 @@
 
 #include "base_alignment_strategy.h"
 #include "common_utils.h"
+#include "graph/ascendc_ir/utils/asc_graph_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
 #include "indirect_load_utils.h"
 #include "platform/platform_factory.h"
@@ -345,10 +346,7 @@ af::Status BaseAlignmentStrategy::AddPadForAlignmentConflictOneNode(ascir::ImplG
     tensor_to_align_type_[&pad_node->outputs[0].attr] = {AlignmentType::kAligned};
     auto out_anchor = node->GetOutDataAnchor(static_cast<int32_t>(i));
     GE_ASSERT_NOTNULL(out_anchor);
-    for (auto &in_anchor : out_anchor->GetPeerInDataAnchors()) {
-      GE_ASSERT_SUCCESS(af::GraphUtils::ReplaceEdgeSrc(out_anchor, in_anchor, pad_node->GetOutDataAnchor(0)));
-    }
-    GE_ASSERT_SUCCESS(af::GraphUtils::AddEdge(out_anchor, pad_node->GetInDataAnchor(0)));
+    GE_ASSERT_SUCCESS(af::AscGraphUtils::InsertNodeAfter(out_anchor, pad_node));
   }
   return af::SUCCESS;
 }
