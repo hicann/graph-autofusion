@@ -59,7 +59,7 @@ The following functions are SuperKernel-specific, regular operator compilation f
 | OptionParser | Same as above |super_kernel_options.py |
 | ParserFactory | Same as above |super_kernel_options.py |
 | CodeTextAlignParser | Same as above |super_kernel_options.py |
-| EunmParser | Same as above |super_kernel_options.py |
+| EnumParser | Same as above |super_kernel_options.py |
 | BinaryParser | Same as above |super_kernel_options.py |
 | NumberParser | Same as above |super_kernel_options.py |
 | NonEmptyParser | Same as above |super_kernel_options.py |
@@ -79,7 +79,7 @@ The following functions are shared by SuperKernel and regular operators, or tigh
 | ascendc_compile_base.gen_super_kernel_compile_info | Generate SuperKernel compile info |super_kernel_compile.py|
 | ascendc_compile_base.gen_sub_super_kernel_early_start_compile_options | Process sub-kernel early-start feature compilation options |super_kernel_compile.py  |
 | ascendc_compile_base.gen_sub_super_kernel_compile_options | Process sub-kernel compilation options |super_kernel_compile.py |
-| ascendc_compile_base.split_sub_kernel_obbjs | Sub-kernel splits into four object files |super_kernel_compile.py |
+| ascendc_compile_base.split_sub_kernel_objs | Sub-kernel splits into four object files |super_kernel_compile.py |
 | ascendc_compile_base.split_kernel_arch_str | Same as above |super_kernel_compile.py |
 | ascendc_compile_base.split_kernel | Same as above |super_kernel_compile.py |
 | ascendc_compile_base.gen_super_kernel_link_obj_sequence | Get all sub-kernel binaries |super_kernel_compile.py |
