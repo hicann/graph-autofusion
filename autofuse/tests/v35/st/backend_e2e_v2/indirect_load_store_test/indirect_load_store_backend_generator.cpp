@@ -52,6 +52,8 @@ constexpr bool kExpectSimt = true;
 #endif
 #if defined(IL_DATA_BF16)
 constexpr af::DataType kDataType = af::DT_BF16;
+#elif defined(IL_DATA_INT16)
+constexpr af::DataType kDataType = af::DT_INT16;
 #elif defined(IL_DATA_UINT32)
 constexpr af::DataType kDataType = af::DT_UINT32;
 #elif defined(IL_DATA_FLOAT)
@@ -68,6 +70,18 @@ constexpr af::DataType kIndexType = af::DT_INT32;
 constexpr bool kStaticShape = true;
 #else
 constexpr bool kStaticShape = false;
+#endif
+#ifdef IL_DIRECT_INDEX
+constexpr bool kDirectIndex = true;
+#else
+constexpr bool kDirectIndex = false;
+#endif
+#ifdef IL_SELECTED_IMPLEMENTATION
+constexpr auto kSelectedImplementation =
+    static_cast<ascgen_utils::indirect_load::Implementation>(IL_SELECTED_IMPLEMENTATION);
+#else
+// The default IndirectLoad SIMD implementation uses MicroAPI.
+constexpr auto kSelectedImplementation = ascgen_utils::indirect_load::Implementation::kDefault;
 #endif
 constexpr int64_t kInputNumel = IL_X_S0 * IL_X_S1 * IL_X_S2 * IL_X_S3;
 constexpr int64_t kOutputNumel = IL_INDEX_S0 * IL_INDEX_S1 * IL_INDEX_S2 * IL_INDEX_S3;
@@ -121,15 +135,27 @@ std::string GetFunctionContaining(const std::string &kernel, const char *marker)
   if (marker_pos == std::string::npos) {
     return {};
   }
-  const size_t begin = kernel.rfind("inline __aicore__ void ", marker_pos);
+  size_t begin = kernel.rfind("inline __aicore__", marker_pos);
+  const size_t alternate_begin = kernel.rfind("__aicore__ inline", marker_pos);
+  if (begin == std::string::npos || (alternate_begin != std::string::npos && alternate_begin > begin)) {
+    begin = alternate_begin;
+  }
   EXPECT_NE(begin, std::string::npos) << marker;
   if (begin == std::string::npos) {
     return {};
   }
-  const size_t next_function = kernel.find("\ninline __aicore__ void ", marker_pos);
-  const size_t kernel_entry = kernel.find("\nextern \"C\"", marker_pos);
-  const size_t end = std::min(next_function, kernel_entry);
-  return kernel.substr(begin, end == std::string::npos ? end : end - begin);
+  const size_t body_begin = kernel.find('{', begin);
+  EXPECT_NE(body_begin, std::string::npos) << marker;
+  size_t depth = 0UL;
+  for (size_t pos = body_begin; pos < kernel.size(); ++pos) {
+    if (kernel[pos] == '{') {
+      ++depth;
+    } else if (kernel[pos] == '}' && --depth == 0UL) {
+      return kernel.substr(begin, pos - begin + 1UL);
+    }
+  }
+  ADD_FAILURE() << "Unclosed function containing " << marker;
+  return {};
 }
 
 std::vector<std::string> GetCallArguments(const std::string &function, const char *api) {
@@ -177,13 +203,15 @@ void ExpectSimdFramework(const std::string &kernel) {
   EXPECT_TRUE(
       ContainsInOrder(function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert", "CopySignExtend(",
                                  "// IndirectLoad SIMD", "IndirectLoadSimd<", "CopySignExtend("}));
+  EXPECT_TRUE(ContainsInOrder(function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert", "VfNode_0",
+                                         "// IndirectLoad SIMD"}));
   const std::vector<std::string> arguments = GetCallArguments(function, "IndirectLoadSimd<");
-  ASSERT_GT(arguments.size(), 5UL);
-  const std::string &actual_size = arguments[4UL];
+  ASSERT_GT(arguments.size(), 4UL);
+  const std::string &actual_size = arguments[3UL];
   EXPECT_NE(
       function.find("const uint32_t " + actual_size + " = (z6_actual_size - 1) * t->s7 + (z7_actual_size - 1) + 1"),
       std::string::npos);
-  EXPECT_TRUE(ContainsInOrder(arguments[5UL], {"indirect_load_outerTB", "t->s6 * t->s7", "indirect_load_outerTb",
+  EXPECT_TRUE(ContainsInOrder(arguments[4UL], {"indirect_load_outerTB", "t->s6 * t->s7", "indirect_load_outerTb",
                                                "t->s6 * t->s7", "indirect_load_outert", "t->s6 * t->s7"}));
 }
 
@@ -311,19 +339,25 @@ void ExpectDirectInputPostReduceSimd(const af::AscNodePtr &indirect_load) {
   ASSERT_NE(input_load, nullptr);
   EXPECT_EQ(input_load->GetName(), "input_load");
 
-  const af::AscNodePtr index_abs =
+  const af::AscNodePtr index_producer =
       ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kIndexTensorIndex);
-  ASSERT_NE(index_abs, nullptr);
+  ASSERT_NE(index_producer, nullptr);
   EXPECT_FALSE(kMixedIndexPre);
-  EXPECT_EQ(index_abs->GetName(), "index_abs");
-  const af::AscNodePtr index_load = ascgen_utils::indirect_load::GetInputProducer(index_abs, 0UL);
-  ASSERT_NE(index_load, nullptr);
-  EXPECT_EQ(index_load->GetName(), "index_load");
+  if (kDirectIndex) {
+    EXPECT_EQ(index_producer->GetName(), "index_load");
+  } else {
+    EXPECT_EQ(index_producer->GetName(), "index_abs");
+    const af::AscNodePtr index_load = ascgen_utils::indirect_load::GetInputProducer(index_producer, 0UL);
+    ASSERT_NE(index_load, nullptr);
+    EXPECT_EQ(index_load->GetName(), "index_load");
+  }
 
   const af::AscNodePtr reduce = ascgen_utils::indirect_load::GetPostReduceConsumer(indirect_load);
   ASSERT_NE(reduce, nullptr);
   std::vector<const char *> output_chain;
-  if (kOutputPostType == ascir::IndirectLoadOutputPostType::kExp2Sum) {
+  if (kOutputPostType == ascir::IndirectLoadOutputPostType::kSum) {
+    output_chain = {"output_sum", "store"};
+  } else if (kOutputPostType == ascir::IndirectLoadOutputPostType::kExp2Sum) {
     output_chain = {"output_exp2", "output_sum", "store"};
   } else if (kOutputPostType == ascir::IndirectLoadOutputPostType::kAbsExp2Sum) {
     output_chain = {"output_abs", "output_exp2", "output_sum", "store"};
@@ -420,11 +454,15 @@ void ExpectLoopFramework(af::AscGraph &graph, const af::AscNodePtr &indirect_loa
   const auto index_producer =
       ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kIndexTensorIndex);
   ASSERT_NE(index_producer, nullptr);
+#ifdef IL_DIRECT_INDEX
+  EXPECT_EQ(index_producer->GetName(), "index_load");
+#else
 #ifdef IL_MIXED_ELEMENTWISE
   EXPECT_EQ(index_producer->GetName(), "index_floor");
 #else
   EXPECT_EQ(index_producer->GetName(), kMixedIndexPre ? "index_floor_to_int" : "index_abs");
   ExpectMixedInputPre(indirect_load);
+#endif
 #endif
 #if IL_INPUT_PRE_TYPE == 5
   EXPECT_EQ(indirect_load->outputs()[0]->attr.dtype, af::DT_FLOAT16);
@@ -623,12 +661,27 @@ bool ValidateAndSelectRuntimeTemplate(ascir::FusedScheduledResult &result) {
         continue;
       }
       ++template_counts[template_id];
-      candidate->score_func = template_id == kSelectedTemplate ? kSelectedScore : kFallbackScore;
+      auto implementation = ascgen_utils::indirect_load::Implementation::kDefault;
+      for (ascir::ScheduleGroup &group : candidate->schedule_groups) {
+        for (af::AscGraph &graph : group.impl_graphs) {
+          const af::AscNodePtr indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(graph);
+          if (indirect_load == nullptr) {
+            continue;
+          }
+          const af::Status status = ascgen_utils::indirect_load::GetImplementation(indirect_load, implementation);
+          EXPECT_EQ(status, af::SUCCESS);
+          is_valid = is_valid && status == af::SUCCESS;
+        }
+      }
+      const bool is_selected = template_id == kSelectedTemplate && implementation == kSelectedImplementation;
+      candidate->score_func = is_selected ? kSelectedScore : kFallbackScore;
       ++candidate;
     }
   }
   for (const ascir::TemplateId template_id : kIndirectLoadTemplates) {
-    const size_t expected_count = (kExpectedTemplates & TemplateMask(template_id)) == 0U ? 0UL : 1UL;
+    const size_t expected_count = (kExpectedTemplates & TemplateMask(template_id)) == 0U
+                                      ? 0UL
+                                      : (template_id == ascir::TemplateId::kIndirectLoadSimd ? 2UL : 1UL);
     EXPECT_EQ(template_counts[template_id], expected_count)
         << "Unexpected candidate count for template " << static_cast<int64_t>(template_id) << ".";
     is_valid = is_valid && template_counts[template_id] == expected_count;
@@ -726,21 +779,50 @@ bool CheckMixedElementwiseSimtSchedule(ascir::FusedScheduledResult &result) {
 void ExpectGeneratedTemplates(const std::string &kernel) {
   constexpr std::array<const char *, 3UL> kMarkers = {"// IndirectLoad SIMD", "// IndirectLoad SIMT",
                                                       "// IndirectLoad SK"};
-  constexpr std::array<const char *, 3UL> kApis = {"IndirectLoadSimd<", "IndirectLoadSimt<", "IndirectLoadSk<"};
+  const std::array<const char *, 3UL> apis = {"IndirectLoadSimd<", "IndirectLoadSimt<", "IndirectLoadSk<"};
   for (size_t i = 0UL; i < kIndirectLoadTemplates.size(); ++i) {
     const bool is_expected = (kExpectedTemplates & TemplateMask(kIndirectLoadTemplates[i])) != 0U;
     if (is_expected) {
       EXPECT_NE(kernel.find(kMarkers[i]), std::string::npos) << kMarkers[i];
-      EXPECT_NE(kernel.find(kApis[i]), std::string::npos) << kApis[i];
+      EXPECT_NE(kernel.find(apis[i]), std::string::npos) << apis[i];
+      if (kIndirectLoadTemplates[i] == ascir::TemplateId::kIndirectLoadSimd) {
+        EXPECT_NE(kernel.find("IndirectLoadSimdGatherApi<"), std::string::npos);
+      }
     } else {
       EXPECT_EQ(kernel.find(kMarkers[i]), std::string::npos) << kMarkers[i];
-      EXPECT_EQ(kernel.find(kApis[i]), std::string::npos) << kApis[i];
+      EXPECT_EQ(kernel.find(apis[i]), std::string::npos) << apis[i];
+      if (kIndirectLoadTemplates[i] == ascir::TemplateId::kIndirectLoadSimd) {
+        EXPECT_EQ(kernel.find("IndirectLoadSimdGatherApi<"), std::string::npos);
+      }
     }
   }
 }
 
 void CheckGeneratedKernel(const std::string &kernel) {
   ExpectGeneratedTemplates(kernel);
+  if ((kExpectedTemplates & TemplateMask(ascir::TemplateId::kIndirectLoadSimd)) != 0U) {
+    const std::string gather_function = GetFunctionContaining(kernel, "IndirectLoadSimdGatherApi<");
+    EXPECT_NE(gather_function.find("IndirectLoadSimdGatherApi<"), std::string::npos);
+    EXPECT_EQ(gather_function.find("GetValue("), std::string::npos);
+    EXPECT_EQ(gather_function.find("SetValue("), std::string::npos);
+    const std::string gather_api = GetFunctionContaining(kernel, "__aicore__ inline void IndirectLoadSimdGatherApi(");
+    EXPECT_TRUE(ContainsInOrder(gather_api, {"IndirectLoadSimdBuildOffsets", "PipeBarrier<PIPE_V>", "Gather(y"}));
+    EXPECT_EQ(gather_api.find("HardEvent::V_MTE3"), std::string::npos);
+  }
+  EXPECT_EQ(kernel.find("MicroAPI::RegTensor<uint32_t> &position, const int64_t *shape"), std::string::npos);
+  EXPECT_EQ(kernel.find("const IndirectLoadSimdAddressContext &context"), std::string::npos);
+  EXPECT_EQ(kernel.find("__simd_vf__ inline static void Init(LoadState"), std::string::npos);
+  EXPECT_EQ(kernel.find("__simd_vf__ inline void IndirectLoadSimd"), std::string::npos);
+  EXPECT_NE(kernel.find("const uint16_t repeat_count"), std::string::npos);
+  EXPECT_NE(kernel.find("for (uint16_t repeat = 0U; repeat < repeat_count; ++repeat)"), std::string::npos);
+#if IL_AXIS + 1 == IL_RANK
+  EXPECT_EQ(kernel.find("if constexpr (Axis + 1 == Rank) {\n        MicroAPI::Muls(source_index"), std::string::npos);
+#endif
+#if defined(IL_DATA_FLOAT) && defined(IL_INDEX_INT64)
+  EXPECT_NE(kernel.find("if (count0 != kElementsPerLoad || count1 != kElementsPerLoad)"), std::string::npos);
+  EXPECT_NE(kernel.find("static constexpr uint32_t kElementsPerRepeat = VECTOR_REG_WIDTH / sizeof(uint32_t);"),
+            std::string::npos);
+#endif
 #ifdef IL_POST_REDUCE
 #ifdef IL_EXPECT_ONLY_SIMT
   EXPECT_EQ(kernel.find("// IndirectLoad SIMD"), std::string::npos);
@@ -936,7 +1018,7 @@ TEST_F(TestBackendIndirectLoadStoreE2e, IndirectLoadStoreCodegen) {
 #else
     auto graph = ascir::ShareGraph::IndirectLoadStoreFusedGraph(kRank, kAxis, kDataType, kIndexType, kInputPreType,
                                                                 kUseExp2, kOutputPostType, GetStaticShape(true),
-                                                                GetStaticShape(false), kMixedIndexPre);
+                                                                GetStaticShape(false), kMixedIndexPre, kDirectIndex);
 #endif
     ASSERT_NE(graph, nullptr);
     const auto shape_info = BuildShapeInfo();

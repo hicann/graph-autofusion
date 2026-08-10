@@ -43,7 +43,7 @@ void CompleteDataApiInfo(af::AscNodePtr &node) {
 
 void CompleteLoadApiInfo(af::AscNodePtr &node) {
   node->attr.api.type = af::ApiType::kAPITypeCompute;
-  node->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  node->attr.api.unit = af::ops::IsOps<IndirectLoad>(node) ? af::ComputeUnit::kUnitVector : af::ComputeUnit::kUnitMTE2;
 }
 
 void CompleteStoreApiInfo(af::AscNodePtr &node) {

@@ -144,7 +144,7 @@ struct ShareGraph {
                                                          IndirectLoadOutputPostType output_post_type,
                                                          const std::vector<int64_t> &input_shape = {},
                                                          const std::vector<int64_t> &output_shape = {},
-                                                         bool mixed_index_pre = false);
+                                                         bool mixed_index_pre = false, bool direct_index = false);
   static af::ComputeGraphPtr MatMulFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr GatherReduceStore(int64_t gather_axis, af::DataType data_type);
   static af::ComputeGraphPtr LoadWhereReduceStoreFusedGraph(size_t dims_size, bool x2_scalar, bool x3_scalar);

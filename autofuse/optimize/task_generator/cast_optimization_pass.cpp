@@ -156,26 +156,22 @@ Status CastOptimizationPass::DoOptimize(AscGraph &graph, const AscNodePtr &node,
       GELOGD("input index = %d, source dtype already matches dst_dtype, skip adding Cast", concat_in_anchor->GetIdx());
       continue;
     }
-    GE_ASSERT_SUCCESS(GraphUtils::RemoveEdge(src_out_anchor, concat_in_anchor));
     const auto it = out_anchor_to_cast_node.find(src_out_anchor.get());
     if (it != out_anchor_to_cast_node.cend()) {
+      GE_ASSERT_SUCCESS(GraphUtils::RemoveEdge(src_out_anchor, concat_in_anchor));
       GE_ASSERT_SUCCESS(GraphUtils::AddEdge(it->second->GetOutDataAnchor(0), concat_in_anchor));
       GELOGD("input index = %d, reuse existing Cast node for shared source", concat_in_anchor->GetIdx());
       continue;
     }
     ascir_op::Cast cast_op((src_node->GetName() + "_cast_optimization_pass").c_str());
     cast_op.attr = out_cast_node->attr;
-    cast_op.attr.sched = src_node->attr.sched;
     auto &src_node_output_tensor_attr = src_node->outputs[0].attr;
-    *cast_op.y.axis = src_node_output_tensor_attr.axis;
     cast_op.y.dtype = dst_dtype;
-    *cast_op.y.repeats = src_node_output_tensor_attr.repeats;
-    ::optimize::ScheduleUtils::GenerateStrides(src_node_output_tensor_attr.repeats, *cast_op.y.strides);
     const auto cast_node = graph.AddNode(cast_op);
     GE_ASSERT_NOTNULL(cast_node);
     out_anchor_to_cast_node[src_out_anchor.get()] = cast_node;
-    GE_ASSERT_SUCCESS(GraphUtils::AddEdge(src_out_anchor, cast_node->GetInDataAnchor(0)));
-    GE_ASSERT_SUCCESS(GraphUtils::AddEdge(cast_node->GetOutDataAnchor(0), concat_in_anchor));
+    GE_ASSERT_SUCCESS(AscGraphUtils::InsertNodeAfter(src_out_anchor, {concat_in_anchor}, cast_node));
+    ::optimize::ScheduleUtils::GenerateStrides(src_node_output_tensor_attr.repeats, cast_node->outputs[0].attr.strides);
     GELOGD("input index = %d, new Cast node was added", concat_in_anchor->GetIdx());
   }
   GE_ASSERT_SUCCESS(UpdateDtype(node, dst_dtype));

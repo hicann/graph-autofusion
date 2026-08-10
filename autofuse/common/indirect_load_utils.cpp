@@ -26,6 +26,7 @@ constexpr char kTemplateTileInnerAxisAttr[] = "af.internal.indirect_load.tile_in
 constexpr char kTemplateVectorizedAxesAttr[] = "af.internal.indirect_load.vectorized_axes";
 constexpr char kTemplateSyntheticOuterAttr[] = "af.internal.indirect_load.synthetic_outer";
 constexpr char kTemplateLogicalViewAttr[] = "af.internal.indirect_load.logical_view";
+constexpr char kImplementationAttr[] = "af.internal.indirect_load.implementation";
 
 bool IsValidLogicalTensorView(const LogicalTensorView &view) {
   return !view.axis_ids.empty() && view.axis_ids.size() == view.strides.size();
@@ -146,7 +147,9 @@ bool IsPostReduceInputProducer(const af::AscNodePtr &node) {
 }
 
 bool ShouldSkipTpipeTensorCollection(const af::AscNodePtr &node) {
-  return GetTemplateBehavior(node).skips_api_emit && !(IsSimtInlineTransform(node) && IsPostReduceInputProducer(node));
+  const TemplateBehavior behavior = GetTemplateBehavior(node);
+  return (behavior.skips_api_emit || behavior.skips_ub_lifecycle) &&
+         !(IsSimtInlineTransform(node) && IsPostReduceInputProducer(node));
 }
 
 af::Status InheritTemplateRoleIfIL(af::AscGraph &graph, const std::string &vf_node_name, const af::AscNodePtr &src) {
@@ -213,6 +216,27 @@ af::Status GetTemplateLogicalView(const af::AscNodePtr &node, TemplateLogicalVie
   GE_ASSERT_TRUE(IsValidLogicalTensorView(view.input) && IsValidLogicalTensorView(view.index) &&
                      IsValidLogicalTensorView(view.output),
                  "IndirectLoad logical view is missing or invalid, node = %s", node->GetNamePtr());
+  return af::SUCCESS;
+}
+
+af::Status SetImplementation(const af::AscNodePtr &node, Implementation implementation) {
+  GE_ASSERT_NOTNULL(node);
+  GE_ASSERT_TRUE(implementation == Implementation::kDefault || implementation == Implementation::kGatherApi,
+                 "IndirectLoad implementation is invalid.");
+  const auto op_desc = node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kImplementationAttr, static_cast<int64_t>(implementation)),
+                 "Set IndirectLoad implementation failed, node = %s", node->GetNamePtr());
+  return af::SUCCESS;
+}
+
+af::Status GetImplementation(const af::AscNodePtr &node, Implementation &implementation) {
+  GE_ASSERT_NOTNULL(node);
+  const auto op_desc = node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  implementation = static_cast<Implementation>(op_desc->TryGetExtAttr(kImplementationAttr, -1L));
+  GE_ASSERT_TRUE(implementation == Implementation::kDefault || implementation == Implementation::kGatherApi,
+                 "IndirectLoad implementation is missing or invalid, node = %s", node->GetNamePtr());
   return af::SUCCESS;
 }
 

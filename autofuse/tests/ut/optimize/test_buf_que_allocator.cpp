@@ -97,6 +97,27 @@ static ascir::FusedScheduledResult MakeFusedScheduledResultWithGraphs(std::vecto
   return fused_result;
 }
 
+TEST_F(BufQueAllocatorUT, ShortenVecoutLifetimeInsertsUb2ubBeforeStore) {
+  auto graph = MakeStaticLoadStoreGraph("shorten_vecout", 32);
+  ASSERT_EQ(ScheduleUtils::TopologicalSorting(graph), af::GRAPH_SUCCESS);
+
+  ASSERT_EQ(BufQueAllocator::ShortenVecoutLifetime(graph, 0), af::SUCCESS);
+
+  const auto load = graph.FindNode("load");
+  const auto ub2ub = graph.FindNode("ub_cpy_load_0");
+  const auto store = graph.FindNode("store");
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(ub2ub, nullptr);
+  ASSERT_NE(store, nullptr);
+  EXPECT_EQ(ub2ub->GetInDataAnchor(0)->GetPeerOutAnchor(), load->GetOutDataAnchor(0));
+  EXPECT_EQ(store->GetInDataAnchor(0)->GetPeerOutAnchor(), ub2ub->GetOutDataAnchor(0));
+  EXPECT_EQ(ub2ub->attr.sched.axis, load->attr.sched.axis);
+  EXPECT_EQ(ub2ub->attr.sched.loop_axis, load->attr.sched.loop_axis);
+  EXPECT_EQ(ub2ub->outputs[0].attr.axis, load->outputs[0].attr.axis);
+  EXPECT_EQ(ub2ub->outputs[0].attr.repeats, load->outputs[0].attr.repeats);
+  EXPECT_EQ(ub2ub->outputs[0].attr.strides, load->outputs[0].attr.strides);
+}
+
 static af::AscGraph MakeSimtInlineTransformGraph() {
   af::AscGraph graph("simt_inline_transform");
   const auto size = graph.CreateSizeVar(8);

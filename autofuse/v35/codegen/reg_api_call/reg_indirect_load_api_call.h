@@ -63,6 +63,7 @@ class IndirectLoadRegApiCall final : public ApiCall {
   std::string output_gm_tensor_;
   af::DataType index_dtype_{af::DT_UNDEFINED};
   af::DataType output_dtype_{af::DT_UNDEFINED};
+  ascgen_utils::indirect_load::Implementation implementation_{ascgen_utils::indirect_load::Implementation::kDefault};
 };
 }  // namespace codegen
 

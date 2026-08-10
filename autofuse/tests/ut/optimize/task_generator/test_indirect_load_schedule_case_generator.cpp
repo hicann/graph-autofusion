@@ -11,6 +11,7 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -121,7 +122,65 @@ void SetNodeView(Op &op, af::DataType dtype, const std::vector<af::AxisId> &axes
   *op.y.strides = strides;
 }
 
-af::AscGraph BuildIndirectLoadGraph(int64_t axis, bool has_input_pre_node = false) {
+template <typename Op>
+void SetVectorApi(Op &op) {
+  op.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  op.attr.api.type = af::ApiType::kAPITypeCompute;
+  op.attr.api.unit = af::ComputeUnit::kUnitVector;
+}
+
+void BuildInputPreChain(const af::AscOpOutput &input_load_output, const std::vector<af::AxisId> &axes,
+                        const std::vector<af::Expression> &repeats, const std::vector<af::Expression> &strides,
+                        bool enabled, bool full_prefix, af::ascir_op::IndirectLoad &indirect_load) {
+  if (!enabled) {
+    indirect_load.x1 = input_load_output;
+    return;
+  }
+  if (!full_prefix) {
+    af::ascir_op::Abs pre_abs("pre_abs");
+    pre_abs.x = input_load_output;
+    SetNodeView(pre_abs, af::DT_FLOAT16, axes, repeats, strides);
+    indirect_load.x1 = pre_abs.y;
+    return;
+  }
+  af::ascir_op::Relu input_relu("input_relu");
+  input_relu.x = input_load_output;
+  SetNodeView(input_relu, af::DT_FLOAT16, axes, repeats, strides);
+  af::ascir_op::Exp2 input_exp2("input_exp2");
+  input_exp2.x = input_relu.y;
+  SetNodeView(input_exp2, af::DT_FLOAT16, axes, repeats, strides);
+  indirect_load.x1 = input_exp2.y;
+}
+
+void BuildIndexPreChain(const af::AscOpOutput &index_load_output, const std::vector<af::AxisId> &axes,
+                        const std::vector<af::Expression> &repeats, const std::vector<af::Expression> &strides,
+                        bool full_prefix, af::ascir_op::IndirectLoad &indirect_load) {
+  if (!full_prefix) {
+    indirect_load.x2 = index_load_output;
+    return;
+  }
+  af::ascir_op::Abs index_abs("index_abs");
+  index_abs.x = index_load_output;
+  SetNodeView(index_abs, af::DT_INT32, axes, repeats, strides);
+  af::ascir_op::Abs index_abs2("index_abs2");
+  index_abs2.x = index_abs.y;
+  SetNodeView(index_abs2, af::DT_INT32, axes, repeats, strides);
+  af::ascir_op::Cast index_cast("index_cast_float");
+  index_cast.x = index_abs2.y;
+  SetNodeView(index_cast, af::DT_FLOAT, axes, repeats, strides);
+  af::ascir_op::Exp2 index_exp2("index_exp2");
+  index_exp2.x = index_cast.y;
+  SetNodeView(index_exp2, af::DT_FLOAT, axes, repeats, strides);
+  af::ascir_op::Log2 index_log2("index_log2");
+  index_log2.x = index_exp2.y;
+  SetNodeView(index_log2, af::DT_FLOAT, axes, repeats, strides);
+  af::ascir_op::FloorToInt index_floor_to_int("index_floor_to_int");
+  index_floor_to_int.x = index_log2.y;
+  SetNodeView(index_floor_to_int, af::DT_INT32, axes, repeats, strides);
+  indirect_load.x2 = index_floor_to_int.y;
+}
+
+af::AscGraph BuildIndirectLoadGraph(int64_t axis, bool has_input_pre_node = false, bool full_prefix = false) {
   af::AscGraph graph("indirect_load_ut_graph");
   const af::Expression s0 = graph.CreateSizeVar("s0");
   const af::Expression s1 = graph.CreateSizeVar("s1");
@@ -173,20 +232,9 @@ af::AscGraph BuildIndirectLoadGraph(int64_t axis, bool has_input_pre_node = fals
   SetNodeView(index_load, af::DT_INT32, output_axes, output_repeats, output_strides);
 
   af::ascir_op::IndirectLoad indirect_load("indirect_load");
-  if (has_input_pre_node) {
-    af::ascir_op::Abs pre_abs("pre_abs");
-    pre_abs.x = input_load.y;
-    pre_abs.y.dtype = ge::DT_FLOAT16;
-    pre_abs.attr.sched.axis = input_axes;
-    *pre_abs.y.axis = input_axes;
-    *pre_abs.y.repeats = input_repeats;
-    *pre_abs.y.strides = input_strides;
-    indirect_load.x1 = pre_abs.y;
-  } else {
-    indirect_load.x1 = input_load.y;
-  }
-
-  indirect_load.x2 = index_load.y;
+  BuildInputPreChain(input_load.y, input_axes, input_repeats, input_strides, has_input_pre_node, full_prefix,
+                     indirect_load);
+  BuildIndexPreChain(index_load.y, output_axes, output_repeats, output_strides, full_prefix, indirect_load);
   indirect_load.y.dtype = ge::DT_FLOAT16;
   indirect_load.attr.sched.axis = output_axes;
   indirect_load.ir_attr.SetAxis(axis);
@@ -327,7 +375,173 @@ af::AscGraph BuildExpandedMultiInputGraph(bool add_unary = false, int64_t output
   return graph;
 }
 
-af::AscGraph BuildPostReduceGraph(const std::string &suffix, bool reduce_outer = false) {
+enum class OutputPostTopology { kSum, kExp2Sum, kAbsExp2Sum, kCastSum, kAddSum, kBesselK0Sum, kBesselK0 };
+
+struct PostTopologyCase {
+  OutputPostTopology topology;
+  std::vector<const char *> chain;
+  bool expect_simt;
+  af::DataType post_dtype;
+  bool direct_output;
+};
+
+void ExpectNodeView(const af::AscNodePtr &node, af::DataType dtype, const std::vector<af::AxisId> &axes,
+                    const std::vector<af::Expression> &repeats, const std::vector<af::Expression> &strides);
+
+void ExpectPostTerminalGraph(af::AscGraph &graph, const PostTopologyCase &test_case, const af::AscNodePtr &producer) {
+  const auto indirect_load = graph.FindNode("indirect_load");
+  const auto store = graph.FindNode("store");
+  const auto output = graph.FindNode("output");
+  ASSERT_NE(indirect_load, nullptr);
+  ASSERT_NE(store, nullptr);
+  ASSERT_NE(output, nullptr);
+  const auto &post_view = indirect_load->outputs()[0]->attr;
+  const auto &terminal_view = store->outputs()[0]->attr;
+  const auto sum = graph.FindNode("sum");
+  if (test_case.topology == OutputPostTopology::kBesselK0) {
+    ASSERT_TRUE(test_case.direct_output);
+    ASSERT_EQ(sum, nullptr);
+    const auto store_input = ascgen_utils::indirect_load::GetInputProducer(store, 0UL);
+    ASSERT_NE(store_input, nullptr);
+    EXPECT_EQ(store_input->GetName(), producer->GetName());
+  } else {
+    ASSERT_FALSE(test_case.direct_output);
+    ASSERT_NE(sum, nullptr);
+    ExpectNodeView(sum, test_case.post_dtype, terminal_view.axis, terminal_view.repeats, terminal_view.strides);
+    const auto sum_input = ascgen_utils::indirect_load::GetInputProducer(sum, 0UL);
+    const auto store_input = ascgen_utils::indirect_load::GetInputProducer(store, 0UL);
+    ASSERT_NE(sum_input, nullptr);
+    ASSERT_NE(store_input, nullptr);
+    EXPECT_EQ(sum_input->GetName(), producer->GetName());
+    EXPECT_EQ(store_input->GetName(), sum->GetName());
+  }
+  if (test_case.topology == OutputPostTopology::kAddSum) {
+    const auto add = graph.FindNode("output_add");
+    const auto addend_load = graph.FindNode("output_addend_load");
+    ASSERT_NE(add, nullptr);
+    ASSERT_NE(addend_load, nullptr);
+    const auto addend_input = ascgen_utils::indirect_load::GetInputProducer(add, 1UL);
+    ASSERT_NE(addend_input, nullptr);
+    EXPECT_EQ(addend_input->GetName(), addend_load->GetName());
+    ExpectNodeView(addend_load, af::DT_FLOAT16, post_view.axis, post_view.repeats, post_view.strides);
+  }
+  ExpectNodeView(store, test_case.post_dtype, terminal_view.axis, terminal_view.repeats, terminal_view.strides);
+  ExpectNodeView(output, test_case.post_dtype, terminal_view.axis, terminal_view.repeats, terminal_view.strides);
+  const auto output_input = ascgen_utils::indirect_load::GetInputProducer(output, 0UL);
+  ASSERT_NE(output_input, nullptr);
+  EXPECT_EQ(output_input->GetName(), store->GetName());
+}
+
+void ExpectNodeView(const af::AscNodePtr &node, af::DataType dtype, const std::vector<af::AxisId> &axes,
+                    const std::vector<af::Expression> &repeats, const std::vector<af::Expression> &strides) {
+  ASSERT_NE(node, nullptr);
+  ASSERT_FALSE(node->outputs().empty());
+  const auto &view = node->outputs()[0]->attr;
+  EXPECT_EQ(view.dtype, dtype) << node->GetName();
+  EXPECT_EQ(view.axis, axes) << node->GetName();
+  EXPECT_EQ(view.repeats, repeats) << node->GetName();
+  EXPECT_EQ(view.strides, strides) << node->GetName();
+}
+
+void ExpectPostTopologyGraph(af::AscGraph &graph, const PostTopologyCase &test_case) {
+  const auto indirect_load = graph.FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  const auto &post_view = indirect_load->outputs()[0]->attr;
+  ExpectNodeView(indirect_load, af::DT_FLOAT16, post_view.axis, post_view.repeats, post_view.strides);
+  af::AscNodePtr producer = indirect_load;
+  for (const char *name : test_case.chain) {
+    const auto node = graph.FindNode(name);
+    ASSERT_NE(node, nullptr) << name;
+    ExpectNodeView(node, test_case.post_dtype, post_view.axis, post_view.repeats, post_view.strides);
+    const auto actual_producer = ascgen_utils::indirect_load::GetInputProducer(node, 0UL);
+    ASSERT_NE(actual_producer, nullptr) << name;
+    EXPECT_EQ(actual_producer->GetName(), producer->GetName()) << name;
+    producer = node;
+  }
+  ExpectPostTerminalGraph(graph, test_case, producer);
+}
+
+void BuildAbsExp2Chain(const af::AscOpOutput &input, const std::vector<af::AxisId> &axes,
+                       const std::vector<af::Expression> &repeats, const std::vector<af::Expression> &strides,
+                       af::ascir_op::Sum &sum) {
+  af::ascir_op::Abs abs("output_abs");
+  abs.x = input;
+  SetNodeView(abs, af::DT_FLOAT16, axes, repeats, strides);
+  SetVectorApi(abs);
+  af::ascir_op::Exp2 exp2("output_exp2");
+  exp2.x = abs.y;
+  SetNodeView(exp2, af::DT_FLOAT16, axes, repeats, strides);
+  SetVectorApi(exp2);
+  sum.x = exp2.y;
+}
+
+void BuildAddChain(af::AscGraph &graph, const af::AscOpOutput &input, const std::vector<af::AxisId> &axes,
+                   const std::vector<af::Expression> &repeats, const std::vector<af::Expression> &strides,
+                   af::ascir_op::Sum &sum) {
+  af::ascir_op::Data addend("output_addend", graph);
+  addend.ir_attr.SetIndex(2);
+  SetNodeView(addend, af::DT_FLOAT16, axes, repeats, strides);
+  af::ascir_op::Load addend_load("output_addend_load");
+  addend_load.x = addend.y;
+  SetNodeView(addend_load, af::DT_FLOAT16, axes, repeats, strides);
+  addend_load.attr.api.compute_type = af::ComputeType::kComputeLoad;
+  addend_load.attr.api.type = af::ApiType::kAPITypeCompute;
+  addend_load.attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  af::ascir_op::Add add("output_add");
+  add.x1 = input;
+  add.x2 = addend_load.y;
+  SetNodeView(add, af::DT_FLOAT16, axes, repeats, strides);
+  SetVectorApi(add);
+  sum.x = add.y;
+}
+
+void BuildOutputPostChain(af::AscGraph &graph, OutputPostTopology topology, const af::AscOpOutput &input,
+                          const std::vector<af::AxisId> &axes, const std::vector<af::Expression> &repeats,
+                          const std::vector<af::Expression> &strides, af::ascir_op::Sum &sum,
+                          af::ascir_op::Store &store, af::DataType &post_dtype, bool &direct_output) {
+  if (topology == OutputPostTopology::kAbsExp2Sum) {
+    BuildAbsExp2Chain(input, axes, repeats, strides, sum);
+    return;
+  }
+  if (topology == OutputPostTopology::kAddSum) {
+    BuildAddChain(graph, input, axes, repeats, strides, sum);
+    return;
+  }
+  if (topology == OutputPostTopology::kExp2Sum) {
+    af::ascir_op::Exp2 exp2("output_exp2");
+    exp2.x = input;
+    SetNodeView(exp2, af::DT_FLOAT16, axes, repeats, strides);
+    SetVectorApi(exp2);
+    sum.x = exp2.y;
+    return;
+  }
+  if (topology == OutputPostTopology::kCastSum) {
+    af::ascir_op::Cast cast("output_cast");
+    cast.x = input;
+    SetNodeView(cast, af::DT_FLOAT, axes, repeats, strides);
+    SetVectorApi(cast);
+    post_dtype = af::DT_FLOAT;
+    sum.x = cast.y;
+    return;
+  }
+  if (topology == OutputPostTopology::kBesselK0Sum || topology == OutputPostTopology::kBesselK0) {
+    af::ascir_op::ModifiedBesselK0 bessel("output_modified_bessel_k0");
+    bessel.x = input;
+    SetNodeView(bessel, af::DT_FLOAT16, axes, repeats, strides);
+    SetVectorApi(bessel);
+    if (topology == OutputPostTopology::kBesselK0) {
+      store.x = bessel.y;
+      direct_output = true;
+    } else {
+      sum.x = bessel.y;
+    }
+    return;
+  }
+  sum.x = input;
+}
+
+af::AscGraph BuildPostReduceGraph(const std::string &suffix, bool reduce_outer = false,
+                                  OutputPostTopology topology = OutputPostTopology::kSum) {
   af::AscGraph graph("indirect_load_post_reduce_ut_graph");
   const af::Expression s0 = graph.CreateSizeVar(2);
   const af::Expression s1 = suffix[0] == 'B' ? af::Expression(af::sym::kSymbolOne) : graph.CreateSizeVar(3);
@@ -382,24 +596,32 @@ af::AscGraph BuildPostReduceGraph(const std::string &suffix, bool reduce_outer =
   indirect_load.ir_attr.SetAxis(1);
   SetNodeView(indirect_load, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
   af::ascir_op::Sum sum("sum");
+  af::ascir_op::Store store("store");
+  af::DataType post_dtype = af::DT_FLOAT16;
+  bool direct_output = false;
   if (suffix.find('B') == std::string::npos) {
-    sum.x = indirect_load.y;
+    BuildOutputPostChain(graph, topology, indirect_load.y, output_axes, output_repeats, reduce_input_strides, sum,
+                         store, post_dtype, direct_output);
   } else {
     af::ascir_op::Abs common_zero_view("common_zero_view");
     common_zero_view.x = indirect_load.y;
     SetNodeView(common_zero_view, af::DT_FLOAT16, output_axes, output_repeats, reduce_input_strides);
-    sum.x = common_zero_view.y;
+    BuildOutputPostChain(graph, topology, common_zero_view.y, output_axes, output_repeats, reduce_input_strides, sum,
+                         store, post_dtype, direct_output);
   }
-  sum.attr.api.compute_type = af::ComputeType::kComputeReduce;
-  sum.attr.sched.axis = output_axes;
-  SetNodeView(sum, af::DT_FLOAT16, output_axes, reduce_repeats, reduce_strides);
-  af::ascir_op::Store store("store");
-  store.x = sum.y;
-  SetNodeView(store, af::DT_FLOAT16, output_axes, reduce_repeats, reduce_strides);
+  if (!direct_output) {
+    sum.attr.api.compute_type = af::ComputeType::kComputeReduce;
+    sum.attr.sched.axis = output_axes;
+    SetNodeView(sum, post_dtype, output_axes, reduce_repeats, reduce_strides);
+    store.x = sum.y;
+  }
+  const auto &store_repeats = direct_output ? output_repeats : reduce_repeats;
+  const auto &store_strides = direct_output ? output_strides : reduce_strides;
+  SetNodeView(store, post_dtype, output_axes, store_repeats, store_strides);
   af::ascir_op::Output output("output");
   output.x = store.y;
   output.ir_attr.SetIndex(0);
-  SetNodeView(output, af::DT_FLOAT16, output_axes, reduce_repeats, reduce_strides);
+  SetNodeView(output, post_dtype, output_axes, store_repeats, store_strides);
   return graph;
 }
 
@@ -456,10 +678,11 @@ std::vector<af::AscGraph> GenerateIndirectLoadCases(int64_t axis) {
   std::vector<af::AscGraph> graphs;
   std::vector<std::string> score_functions;
   EXPECT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
-  EXPECT_EQ(graphs.size(), 3UL);
-  EXPECT_EQ(score_functions.size(), 3UL);
+  EXPECT_EQ(graphs.size(), 4UL);
+  EXPECT_EQ(score_functions.size(), 4UL);
   EXPECT_EQ(score_functions[0], score_functions[1]);
   EXPECT_EQ(score_functions[1], score_functions[2]);
+  EXPECT_EQ(score_functions[2], score_functions[3]);
   return graphs;
 }
 
@@ -662,13 +885,36 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimdNormalizesNonExpandedGraph) {
   EXPECT_EQ(logical_view.output.strides.size(), 4UL);
 }
 
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimdNormalizesNegativeAxis) {
+  auto graph = BuildIndirectLoadGraph(-2);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  const auto simd_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd_iter, graphs.end());
+  const auto indirect_load = simd_iter->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateAxes axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, axes), af::SUCCESS);
+  ExpectAxisNames(*simd_iter, {axes.outer_axis}, {"indirect_load_outer"});
+  ExpectAxisNames(*simd_iter, {axes.inner_axis}, {"indirect_load_inner"});
+  ExpectAxisNames(*simd_iter, {axes.input_inner_axis}, {"indirect_load_input_inner"});
+  ExpectMergedFrom(*simd_iter, "indirect_load_input_inner", {"z2", "z3"});
+  ascgen_utils::indirect_load::TemplateLogicalView logical_view;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
+  ExpectAxisNames(*simd_iter, logical_view.input.axis_ids, {"z0", "z1", "z2", "z3"});
+  ExpectAxisNames(*simd_iter, logical_view.index.axis_ids, {"z4", "z5", "z6", "z7"});
+  ExpectAxisNames(*simd_iter, logical_view.output.axis_ids, {"z4", "z5", "z6", "z7"});
+}
+
 TEST(IndirectLoadScheduleCaseGeneratorTest, SimdRegionMetadataAndSimtRejectsMultiInputRegion) {
   auto graph = BuildExpandedMultiInputGraph(true, 2L, 16L);
   optimize::IndirectLoadScheduleCaseGenerator generator;
   std::vector<af::AscGraph> graphs;
   std::vector<std::string> score_functions;
   ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
-  ASSERT_EQ(graphs.size(), 2UL);
+  ASSERT_EQ(graphs.size(), 3UL);
   const auto simd_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
   ASSERT_NE(simd_iter, graphs.end());
   const auto simt_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
@@ -715,7 +961,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceMetadataCoversReduceAxisLa
     std::vector<af::AscGraph> graphs;
     std::vector<std::string> score_functions;
     ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS) << "layout=" << name;
-    const size_t expected_candidates = name == "ARA" ? 2UL : 3UL;
+    const size_t expected_candidates = name == "ARA" ? 2UL : 4UL;
     ASSERT_EQ(graphs.size(), expected_candidates) << "layout=" << name;
 
     const auto simd_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
@@ -823,7 +1069,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceSkipsCommonZeroStrideAxes)
         << "suffix=" << suffix;
     EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt), graphs.end())
         << "suffix=" << suffix;
-    ASSERT_EQ(graphs.size(), 3UL) << "suffix=" << suffix;
+    ASSERT_EQ(graphs.size(), 4UL) << "suffix=" << suffix;
 
     const auto simt_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
     ASSERT_NE(simt_iter, graphs.end()) << "suffix=" << suffix;
@@ -887,6 +1133,32 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceRejectsBothTemplatesForUnk
   }
 }
 
+TEST(IndirectLoadScheduleCaseGeneratorTest, OutputPostTopologySelectsEligibleTemplatesAndPreservesChain) {
+  const std::vector<PostTopologyCase> cases = {
+      {OutputPostTopology::kSum, {}, true, af::DT_FLOAT16, false},
+      {OutputPostTopology::kExp2Sum, {"output_exp2"}, false, af::DT_FLOAT16, false},
+      {OutputPostTopology::kAbsExp2Sum, {"output_abs", "output_exp2"}, false, af::DT_FLOAT16, false},
+      {OutputPostTopology::kCastSum, {"output_cast"}, false, af::DT_FLOAT, false},
+      {OutputPostTopology::kAddSum, {"output_add"}, false, af::DT_FLOAT16, false},
+      {OutputPostTopology::kBesselK0Sum, {"output_modified_bessel_k0"}, false, af::DT_FLOAT16, false},
+      {OutputPostTopology::kBesselK0, {"output_modified_bessel_k0"}, false, af::DT_FLOAT16, true},
+  };
+  for (const auto &test_case : cases) {
+    auto graph = BuildPostReduceGraph("R", false, test_case.topology);
+    ExpectPostTopologyGraph(graph, test_case);
+
+    optimize::IndirectLoadScheduleCaseGenerator generator;
+    std::vector<af::AscGraph> graphs;
+    std::vector<std::string> score_functions;
+    ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+    const auto simd_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
+    const auto simt_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
+    ASSERT_NE(simd_iter, graphs.end());
+    EXPECT_EQ(simt_iter != graphs.end(), test_case.expect_simt);
+    ExpectPostTopologyGraph(*simd_iter, test_case);
+  }
+}
+
 TEST(IndirectLoadScheduleCaseGeneratorTest, ShapeEnlargingIndirectLoadStopsSimdInputPreButNotSimt) {
   auto graph = BuildShapeEnlargingInputPreGraph();
   optimize::IndirectLoadScheduleCaseGenerator generator;
@@ -896,7 +1168,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, ShapeEnlargingIndirectLoadStopsSimdI
   const auto status = generator.Generate(graph, graphs, score_functions);
   ge::PlatformContext::GetInstance().Reset();
   ASSERT_EQ(status, af::SUCCESS);
-  ASSERT_EQ(graphs.size(), 3UL);
+  ASSERT_EQ(graphs.size(), 4UL);
 
   const auto simd_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
   ASSERT_NE(simd_iter, graphs.end());
@@ -984,6 +1256,110 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimdMovesInputPreAfterIndirectLoad) 
   ExpectAxisNames(simd_graph, pre_abs->outputs()[0]->attr.axis, {"z4", "z5", "z6", "z7"});
 }
 
+struct FullPrefixNodeCase {
+  const char *name;
+  af::DataType dtype;
+};
+
+void ExpectFullPrefixChain(af::AscGraph &graph, const std::vector<std::pair<const char *, const char *>> &edges,
+                           const std::vector<FullPrefixNodeCase> &nodes, const std::vector<af::AxisId> &axes,
+                           const std::vector<af::Expression> &repeats, const std::vector<af::Expression> &strides) {
+  for (const auto &edge : edges) {
+    const auto producer = graph.FindNode(edge.first);
+    const auto consumer = graph.FindNode(edge.second);
+    ASSERT_NE(producer, nullptr) << edge.first;
+    ASSERT_NE(consumer, nullptr) << edge.second;
+    const size_t input_index =
+        std::strcmp(edge.second, "indirect_load") == 0 && std::strcmp(edge.first, "index_floor_to_int") == 0 ? 1UL
+                                                                                                             : 0UL;
+    const auto actual_producer = ascgen_utils::indirect_load::GetInputProducer(consumer, input_index);
+    ASSERT_NE(actual_producer, nullptr) << edge.second;
+    EXPECT_EQ(actual_producer->GetName(), producer->GetName()) << edge.second;
+  }
+  for (const auto &test_case : nodes) {
+    const auto node = graph.FindNode(test_case.name);
+    ASSERT_NE(node, nullptr) << test_case.name;
+    ASSERT_FALSE(node->outputs().empty());
+    const auto &output = node->outputs()[0]->attr;
+    EXPECT_EQ(output.dtype, test_case.dtype) << test_case.name;
+    EXPECT_EQ(output.axis, axes) << test_case.name;
+    EXPECT_EQ(output.repeats, repeats) << test_case.name;
+    EXPECT_EQ(output.strides, strides) << test_case.name;
+  }
+}
+
+void ExpectFullPrefixOriginalGraph(af::AscGraph &graph,
+                                   const std::vector<std::pair<const char *, const char *>> &input_edges,
+                                   const std::vector<std::pair<const char *, const char *>> &index_edges) {
+  const auto x_output = graph.FindNode("x")->outputs()[0]->attr;
+  const auto index_output = graph.FindNode("index")->outputs()[0]->attr;
+  ExpectFullPrefixChain(graph, input_edges, {{"input_relu", af::DT_FLOAT16}, {"input_exp2", af::DT_FLOAT16}},
+                        x_output.axis, x_output.repeats, x_output.strides);
+  ExpectFullPrefixChain(graph, index_edges,
+                        {{"index_abs", af::DT_INT32},
+                         {"index_abs2", af::DT_INT32},
+                         {"index_cast_float", af::DT_FLOAT},
+                         {"index_exp2", af::DT_FLOAT},
+                         {"index_log2", af::DT_FLOAT},
+                         {"index_floor_to_int", af::DT_INT32}},
+                        index_output.axis, index_output.repeats, index_output.strides);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimdFullPrefixPreservesInputAndIndexPreMetadata) {
+  auto graph = BuildIndirectLoadGraph(2, true, true);
+  const std::vector<std::pair<const char *, const char *>> input_edges = {
+      {"input_load", "input_relu"}, {"input_relu", "input_exp2"}, {"input_exp2", "indirect_load"}};
+  const std::vector<std::pair<const char *, const char *>> index_edges = {{"index_load", "index_abs"},
+                                                                          {"index_abs", "index_abs2"},
+                                                                          {"index_abs2", "index_cast_float"},
+                                                                          {"index_cast_float", "index_exp2"},
+                                                                          {"index_exp2", "index_log2"},
+                                                                          {"index_log2", "index_floor_to_int"},
+                                                                          {"index_floor_to_int", "indirect_load"}};
+  ExpectFullPrefixOriginalGraph(graph, input_edges, index_edges);
+
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  const auto simd_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd_iter, graphs.end());
+  const auto indirect_load = simd_iter->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  const auto input_producer = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL);
+  const auto index_producer = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 1UL);
+  ASSERT_NE(input_producer, nullptr);
+  ASSERT_NE(index_producer, nullptr);
+  EXPECT_EQ(input_producer->GetName(), "input_load");
+  EXPECT_EQ(index_producer->GetName(), "index_floor_to_int");
+  const std::vector<af::AxisId> moved_axes = indirect_load->outputs()[0]->attr.axis;
+  const std::vector<af::Expression> moved_repeats = indirect_load->outputs()[0]->attr.repeats;
+  const std::vector<af::Expression> moved_strides = indirect_load->outputs()[0]->attr.strides;
+  ExpectFullPrefixChain(
+      *simd_iter, {{"input_load", "indirect_load"}, {"indirect_load", "input_relu"}, {"input_relu", "input_exp2"}},
+      {{"input_relu", af::DT_FLOAT16}, {"input_exp2", af::DT_FLOAT16}}, moved_axes, moved_repeats, moved_strides);
+  const auto index_output = graph.FindNode("index")->outputs()[0]->attr;
+  ExpectFullPrefixChain(*simd_iter, index_edges,
+                        {{"index_abs", af::DT_INT32},
+                         {"index_abs2", af::DT_INT32},
+                         {"index_cast_float", af::DT_FLOAT},
+                         {"index_exp2", af::DT_FLOAT},
+                         {"index_log2", af::DT_FLOAT},
+                         {"index_floor_to_int", af::DT_INT32}},
+                        index_output.axis, index_output.repeats, index_output.strides);
+  ascgen_utils::indirect_load::TemplateAxes axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, axes), af::SUCCESS);
+  EXPECT_NE(axes.input_inner_axis, af::kIdNone);
+  ascgen_utils::indirect_load::TemplateLogicalView logical_view;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
+  EXPECT_EQ(logical_view.input.axis_ids, graph.FindNode("x")->outputs()[0]->attr.axis);
+  EXPECT_EQ(logical_view.index.axis_ids, graph.FindNode("index")->outputs()[0]->attr.axis);
+  EXPECT_EQ(logical_view.output.axis_ids, graph.FindNode("indirect_load")->outputs()[0]->attr.axis);
+  EXPECT_EQ(logical_view.input.strides, graph.FindNode("x")->outputs()[0]->attr.strides);
+  EXPECT_EQ(logical_view.index.strides, graph.FindNode("index")->outputs()[0]->attr.strides);
+  EXPECT_EQ(logical_view.output.strides, graph.FindNode("indirect_load")->outputs()[0]->attr.strides);
+}
+
 TEST(IndirectLoadScheduleCaseGeneratorTest, SimtHandlesInputPrecisionCast) {
   auto graph = BuildIndirectLoadPrecisionCastGraph();
   optimize::IndirectLoadScheduleCaseGenerator generator;
@@ -993,7 +1369,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimtHandlesInputPrecisionCast) {
   const auto status = generator.Generate(graph, graphs, score_functions);
   ge::PlatformContext::GetInstance().Reset();
   ASSERT_EQ(status, af::SUCCESS);
-  ASSERT_EQ(graphs.size(), 3UL);
+  ASSERT_EQ(graphs.size(), 4UL);
 
   const auto simt_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
   ASSERT_NE(simt_iter, graphs.end());

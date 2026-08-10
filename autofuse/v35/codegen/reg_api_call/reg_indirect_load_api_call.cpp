@@ -305,6 +305,7 @@ Status IndirectLoadRegApiCall::ParseAttr(const ascir::NodeView &node) {
           template_id_ == ascir::TemplateId::kIndirectLoadSimt,
       "IndirectLoad node[%s] has invalid template id[%d].", node->GetNamePtr(), static_cast<int32_t>(template_id_));
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateLogicalView(node, logical_view_));
+  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetImplementation(node, implementation_));
   const int64_t rank = static_cast<int64_t>(logical_view_.input.axis_ids.size());
   GE_ASSERT_TRUE(axis >= -rank && axis < rank, "IndirectLoad axis is out of range.");
   axis_ = axis < 0L ? axis + rank : axis;
@@ -471,8 +472,6 @@ Status IndirectLoadRegApiCall::GenerateSimd(const TPipe &tpipe, const std::vecto
   const Tensor &input = inputs[ascgen_utils::indirect_load::kInputTensorIndex].get();
   const Tensor &index = inputs[ascgen_utils::indirect_load::kIndexTensorIndex].get();
   const Tensor &output = outputs[0].get();
-  const auto tmp_iter = tmp_buf_id.find(-1L);
-  GE_ASSERT_TRUE(tmp_iter != tmp_buf_id.end(), "IndirectLoad SIMD requires an API-level tmp buffer.");
 
   const size_t axis_pos = static_cast<size_t>(axis_);
   std::string input_dtype;
@@ -487,12 +486,16 @@ Status IndirectLoadRegApiCall::GenerateSimd(const TPipe &tpipe, const std::vecto
   std::stringstream ss;
   ss << "// IndirectLoad SIMD" << std::endl;
   ss << "{" << std::endl;
-  ss << "  AscendC::IndirectLoadSimd<" << input_dtype << ", " << index_dtype << ", " << input_info.sizes.size() << ", "
+  const char *api = implementation_ == ascgen_utils::indirect_load::Implementation::kGatherApi
+                        ? "IndirectLoadSimdGatherApi"
+                        : "IndirectLoadSimd";
+  ss << "  AscendC::" << api << "<" << input_dtype << ", " << index_dtype << ", " << input_info.sizes.size() << ", "
      << axis_ << ">(" << std::endl;
-  ss << "      " << input << ", " << index << ", " << output << ", " << tpipe.tmp_buf.name << "_" << tmp_iter->second
-     << ", " << output.actual_size << ", " << tpipe.tiler.Offset(current_axis, output.axis, output.axis_strides) << ", "
-     << tpipe.tiler.Size(input_info.sizes[axis_pos]) << ", " << JoinSizeExprs(index_info.sizes, tpipe) << ", "
-     << JoinSizeExprs(input_info.strides, tpipe) << ");" << std::endl;
+  ss << "      " << input << ", " << index << ", " << output << ", ";
+  ss << output.actual_size << ", " << tpipe.tiler.Offset(current_axis, output.axis, output.axis_strides) << ", "
+     << input.actual_size << ", " << tpipe.tiler.Size(input_info.sizes[axis_pos]) << ", "
+     << JoinSizeExprs(index_info.sizes, tpipe) << ", " << JoinSizeExprs(input_info.strides, tpipe);
+  ss << ");" << std::endl;
   ss << "}" << std::endl;
   result = ss.str();
   return af::SUCCESS;

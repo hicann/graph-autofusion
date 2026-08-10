@@ -116,6 +116,18 @@ export AUTOFUSE_DFX_FLAGS="--codegen_compile_debug=true;--debug_dir=/path-to-dum
 ```
 注意：Autofuse 后端会在设置的 dump 路径下生成每个融合算子的 dump 图。
 
+编译性能诊断由 `codegen_compile_debug=true` 控制。例如：
+```bash
+export AUTOFUSE_DFX_FLAGS="--codegen_compile_debug=true"
+```
+
+开启后会：
+
+- 输出每个 LLVM pass 的耗时（`-ftime-report=per-pass`）；
+- 生成编译器时间线 JSON 文件，默认保存到 `~/.cache/autofuse_compile_trace`，终端会输出 `[CompileTrace] <文件路径>`。
+
+Host 编译会复用已有 PCH，缓存未命中时尝试创建。PCH 缓存目录为 `~/.cache/autofuse_pch_cache`；PCH 缓存或创建失败时会自动回退到普通 Host 编译。
+
 ### 结果分析 & 调测输出分析
 用户开启 `TORCH_COMPILE_DEBUG` 后，调试信息会输出到当前执行目录下的 `torch_compile_debug` 子目录。其中，以 `autofused_` 为前缀的目录是 `torch_npu` AscendC 后端生成的融合算子产物，其余目录为 PyTorch Inductor 生成的原生产物。每个以 `autofused_` 为前缀的目录对应一个融合算子的白盒结构，可用于查看融合范围和代码生成结果。如果未生成以 `autofused_` 为前缀的目录，则说明当前编译过程中没有产生融合算子。此时，可以根据终端输出中的 `Fallback aten.xxxx $reason: xx原因` 信息分析未发生融合的原因。
 
