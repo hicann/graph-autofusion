@@ -760,11 +760,11 @@ REG_ASC_IR(Lt).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::LtA
                                                          DT_INT64, DT_UINT8, DT_UINT16, DT_UINT32, DT_UINT64}},
                                        {"T2", TensorType{DT_UINT8, DT_BOOL}}}});
 
-// todo:Concat DT_INT64 后面根据需要放开
-REG_ASC_IR(Concat).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::ConcatAscIrAttImplV2>(),
-                                          af::ascir::AscIrImplCreator<af::ascir::ConcatAscIrCodegenImplV2>(),
-                                          {{"T", TensorType{DT_INT8, DT_UINT8, DT_INT16, DT_UINT16, DT_INT32, DT_UINT32,
-                                                            DT_INT64, DT_UINT64, DT_BF16, DT_FLOAT16, DT_FLOAT}}}});
+REG_ASC_IR(Concat).Impl(v2_soc_versions,
+                        {af::ascir::AscIrImplCreator<af::ascir::ConcatAscIrAttImplV2>(),
+                         af::ascir::AscIrImplCreator<af::ascir::ConcatAscIrCodegenImplV2>(),
+                         {{"T", TensorType{DT_BOOL, DT_INT8, DT_UINT8, DT_INT16, DT_UINT16, DT_INT32, DT_UINT32,
+                                           DT_INT64, DT_UINT64, DT_BF16, DT_FLOAT16, DT_FLOAT}}}});
 
 REG_ASC_IR(Split)
     .Input("x", "T")

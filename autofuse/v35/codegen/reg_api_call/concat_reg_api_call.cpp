@@ -121,8 +121,8 @@ af::Status ConcatRegApiCall::GenerateDefault(const vector<std::reference_wrapper
     dtype_name = "uint16_t";
   } else {
     DefineConcatTiling(tiling, t_pipe.tiler, ss);
+    NormalizeDtype(dtype_name);
   }
-  NormalizeDtype(dtype_name);
   GenSrcAddrs(inputs, dtype_name, ss);
   if (tiling.can_use_gather) {
     GELOGD("use ConcatExtendDyn");
@@ -255,7 +255,7 @@ bool ConcatRegApiCall::IsTile() const {
 }
 
 void ConcatRegApiCall::NormalizeDtype(std::string &dtype_name) {
-  if (dtype_name == "int8_t") {
+  if ((dtype_name == "int8_t") || (dtype_name == "bool")) {
     // pack不支持int8_t类型，转为uint8_t进行计算
     dtype_name = "uint8_t";
   }
