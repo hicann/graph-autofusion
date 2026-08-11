@@ -19,7 +19,6 @@
 #include "api_call/utils/api_call_factory.h"
 #include "api_call/utils/api_call_utils.h"
 #include "codegen/expression_convert_struct.h"
-#include "reg_api_call_utils.h"
 namespace codegen {
 using namespace std;
 using namespace af::ops;
@@ -49,15 +48,13 @@ Status UnaryBitWidthChangeApiCallV2::Generate(const TPipe &tpipe, const std::vec
   SaveApiLoopAxisParams(merge_info, param);
   if (param.outer_repeats.size() == 0) {
     ss << this->api_name_ << "(" << y << "_cast[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x
-       << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, x) << "], "
-       << GetCvInputAlignedSize(this->api_call_context, x, x.actual_size.Str()) << ");" << std::endl;
+       << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, x) << "], " << x.actual_size << ");" << std::endl;
   } else {
     std::string input_inner_offset = CalcInnerOffset(tpipe, param.inputs_strides[0]);
     std::string output_inner_offset = CalcInnerOffset(tpipe, param.outputs_strides[0]);
     std::stringstream ss1;
     ss1 << this->api_name_ << "(" << y << "_cast[" << output_inner_offset << "], " << x << "[" << input_inner_offset
-        << "], " << GetCvInputAlignedSize(this->api_call_context, x, tpipe.tiler.ActualSize(param.cal_count)) << ");"
-        << std::endl;
+        << "], " << tpipe.tiler.ActualSize(param.cal_count) << ");" << std::endl;
     CreateComputeNodeOuterFor(param.outer_repeats, ss1, ss, 0);
   }
 

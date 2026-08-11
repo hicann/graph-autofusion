@@ -337,7 +337,7 @@ void TilingLib::PrepareMatMulAttrs(const MatMulCubeInfo &cube_info, std::vector<
   } else {
     attr4.name = "opImplMode";
     attr4.dtype = "int";
-    attr4.value_int = 1;
+    attr4.value_int = cube_info.enable_hf32;
   }
   attrs.push_back(attr4);
 

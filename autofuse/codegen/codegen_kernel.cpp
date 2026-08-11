@@ -1656,11 +1656,7 @@ Status TPipe::LocalTQueAlloc(std::string &result) const {
         std::string dtype_name;
         GE_CHK_STATUS_RET(Tensor::DtypeName(tensor->second.dtype, dtype_name), "Codegen get data type:%d failed",
                           static_cast<int32_t>(tensor->second.dtype));
-        std::string tensor_byte_size = tensor->second.size.Str() + " * sizeof(" + dtype_name + ")";
-        if (this->cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
-          tensor_byte_size = "KernelUtils::BlkAlign<uint8_t>(" + tensor_byte_size + ")";
-        }
-        tensor_size_max << tensor_byte_size;
+        tensor_size_max << tensor->second.size << " * sizeof(" << dtype_name << ")";
       }
     }
 

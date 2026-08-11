@@ -16,11 +16,10 @@
 #include <vector>
 #include <string>
 #include <sstream>
-#include "codegen_kernel.h"
 #include "codegen.h"
 #include "optimize.h"
 #include "share_graph.h"
-#include "../backend_codegen_common.h"
+#include "backend_common.h"
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
 #include "ascgraph_info_complete.h"
@@ -28,49 +27,6 @@
 #include "common/platform_context.h"
 #include "runtime_stub.h"
 #include "common_utils.h"
-#include "../../../../../v35/codegen/reg_api_call/reg_api_call_utils.h"
-
-namespace {
-codegen::Tensor MakeCvFusionTensor(const ascir::TensorAttr &tensor_attr) {
-  std::string dtype_name;
-  EXPECT_EQ(codegen::Tensor::DtypeName(tensor_attr.attr.dtype, dtype_name), af::SUCCESS);
-  codegen::Tensor tensor(tensor_attr, dtype_name);
-  EXPECT_EQ(tensor.Init(), af::SUCCESS);
-  return tensor;
-}
-
-struct CvFusionDataCopyTensors {
-  codegen::Tensor gm;
-  codegen::Tensor ub;
-};
-
-CvFusionDataCopyTensors MakeCvFusionDataCopyTensors() {
-  af::AscGraph graph("cv_fusion_data_copy_params");
-  af::ascir_op::Data data("data", graph);
-  af::ascir_op::Load load("load");
-  graph.AddNode(load);
-  load.x = data.y;
-
-  auto gm_node = graph.FindNode("data");
-  gm_node->outputs[0].attr.dtype = ge::DT_FLOAT16;
-  gm_node->outputs[0].attr.mem.tensor_id = 0;
-  gm_node->outputs[0].attr.mem.reuse_id = 0;
-  gm_node->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeGlobal;
-  gm_node->outputs[0].attr.mem.hardware = af::MemHardware::kMemHardwareGM;
-  gm_node->outputs[0].attr.mem.position = af::Position::kPositionGM;
-  gm_node->outputs[0].attr.opt.merge_scope = af::kIdNone;
-
-  auto ub_node = graph.FindNode("load");
-  ub_node->outputs[0].attr.dtype = ge::DT_FLOAT16;
-  ub_node->outputs[0].attr.mem.tensor_id = 1;
-  ub_node->outputs[0].attr.mem.reuse_id = 0;
-  ub_node->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeBuffer;
-  ub_node->outputs[0].attr.mem.hardware = af::MemHardware::kMemHardwareUB;
-  ub_node->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
-  ub_node->outputs[0].attr.opt.merge_scope = af::kIdNone;
-  return {MakeCvFusionTensor(gm_node->outputs[0]), MakeCvFusionTensor(ub_node->outputs[0])};
-}
-}  // namespace
 
 class TestBackendMatmulEleBrc : public testing::Test {
  protected:
@@ -123,38 +79,7 @@ TEST_F(TestBackendMatmulEleBrc, MatmulEleBrcCodegen) {
 
     // 分别生成ub和common模板的kernel和tiling
     EXPECT_EQ(codegen.Generate(shape_info, ub_schedule_result, result), 0);
-    const std::string ub_kernel = RemoveSubDirInclude(result.kernel);
-    EXPECT_NE(ub_kernel.find("uint32_t curAivM, uint32_t curAivN, uint32_t curAlignN"), std::string::npos);
-    EXPECT_NE(ub_kernel.find("uint16_t cv_m_loop_size = static_cast<uint16_t>(curAivM);"), std::string::npos);
-    EXPECT_NE(ub_kernel.find("const int64_t output_dims_8[2] = {curAivM, curAivN};"), std::string::npos);
-    EXPECT_NE(ub_kernel.find("const int64_t input_stride_8[2] = {1, 0};"), std::string::npos);
-    EXPECT_NE(ub_kernel.find("const int64_t output_stride_8[2] = {KernelUtils::BlkAlign<float>(curAivN), 1};"),
-              std::string::npos);
-    EXPECT_NE(ub_kernel.find("DataCopyNddma(local_8, global_2[offset / shapeN], output_dims_8, "
-                             "output_stride_8, input_stride_8);"),
-              std::string::npos);
-    EXPECT_NE(ub_kernel.find("const int64_t input_stride_10[2] = {0, 1};"), std::string::npos);
-    EXPECT_NE(ub_kernel.find("DataCopyNddma(local_10, global_3[offset % shapeN + batch_num * shapeN], output_dims_10, "
-                             "output_stride_10, input_stride_10);"),
-              std::string::npos);
-    EXPECT_NE(ub_kernel.find("const int64_t input_stride_11[2] = {0, 0};"), std::string::npos);
-    EXPECT_NE(ub_kernel.find("AscendC::MicroAPI::LoadAlign(vreg_0, local_9 + 0 + cv_m * "
-                             "KernelUtils::BlkAlign<float>(curAivN) + cv_n * ELEMENT_PER_VECTOR_LENGTH);"),
-              std::string::npos);
-    EXPECT_NE(ub_kernel.find("AscendC::MicroAPI::LoadAlign(vreg_1, local_7 + 0 + cv_m * curAlignN + cv_n * "
-                             "ELEMENT_PER_VECTOR_LENGTH);"),
-              std::string::npos);
-    EXPECT_NE(ub_kernel.find("AscendC::MicroAPI::LoadAlign(vreg_2, local_11 + 0 + cv_m * "
-                             "KernelUtils::BlkAlign<float>(curAivN) + cv_n * ELEMENT_PER_VECTOR_LENGTH);"),
-              std::string::npos);
-    EXPECT_NE(ub_kernel.find("AscendC::MicroAPI::StoreAlign(local_12 + 0 + cv_m * "
-                             "KernelUtils::BlkAlign<float>(curAivN) + cv_n * ELEMENT_PER_VECTOR_LENGTH"),
-              std::string::npos);
-    EXPECT_NE(ub_kernel.find("DataCopyPadExtend<float, AscendC::PaddingMode::Normal>(global_4[offset], local_12[0], "
-                             "curAivM, curAivN, (KernelUtils::BlkAlign<float>(curAivN) - curAivN), "
-                             "(shapeN - curAivN));"),
-              std::string::npos);
-    kernel_file << ub_kernel;
+    kernel_file << RemoveSubDirInclude(result.kernel);
     tiling_file << result.tiling;
     tiling_data_file << result.tiling_data;
 
@@ -204,76 +129,4 @@ TEST_F(TestBackendMatmulEleBrc, MatmulEleBrcCodegen) {
   }
 
   EXPECT_EQ(gen_success, true);
-}
-
-TEST_F(TestBackendMatmulEleBrc, MatmulToIntCastCvCodegen) {
-  auto graph = ascir::ShareGraph::LoadMatmulToIntCastFusedGraph();
-  GenerateCvBackendUbKernelWithCheck(
-      graph, "matmul_to_int_cast_test_kernel_ub.cpp", "matmul_to_int_cast_test_tiling_ub.cpp", "autofuse_tiling_data.h",
-      [](const std::string &kernel) {
-        EXPECT_NE(kernel.find("AscendC::Cast(local_5[0], local_4[0], AscendC::RoundMode::CAST_RINT, "
-                              "{ConvertToUint32(curAivM), ConvertToUint32(curAivN)}, "
-                              "{ConvertToUint32(((curAivN + 8 - 1) / 8 * 8)), ConvertToUint32(1)}, "
-                              "{ConvertToUint32(curAlignN), ConvertToUint32(1)});"),
-                  std::string::npos);
-        EXPECT_NE(kernel.find("CastExtend(local_6[0], local_5[0], "
-                              "{ConvertToUint32(curAivM), ConvertToUint32(curAivN)}, "
-                              "{ConvertToUint32(((curAivN + 8 - 1) / 8 * 8)), ConvertToUint32(1)}, "
-                              "{ConvertToUint32(((curAivN + 8 - 1) / 8 * 8)), ConvertToUint32(1)});"),
-                  std::string::npos);
-        EXPECT_NE(kernel.find("AscendC::Cast(local_7[0], local_6[0], AscendC::RoundMode::CAST_TRUNC, "
-                              "{ConvertToUint32(curAivM), ConvertToUint32(curAivN)}, "
-                              "{ConvertToUint32(((curAivN + 8 - 1) / 8 * 8)), ConvertToUint32(1)}, "
-                              "{ConvertToUint32(((curAivN + 8 - 1) / 8 * 8)), ConvertToUint32(1)});"),
-                  std::string::npos);
-        EXPECT_NE(kernel.find("AscendC::Cast(local_9[0], local_8[0], AscendC::RoundMode::CAST_FLOOR, "
-                              "{ConvertToUint32(curAivM), ConvertToUint32(curAivN)}, "
-                              "{ConvertToUint32(((curAivN + 8 - 1) / 8 * 8)), ConvertToUint32(1)}, "
-                              "{ConvertToUint32(((curAivN + 8 - 1) / 8 * 8)), ConvertToUint32(1)});"),
-                  std::string::npos);
-        EXPECT_NE(kernel.find("KernelUtils::BlkAlign<int32_t>(curAivN)"), std::string::npos);
-      });
-}
-
-TEST_F(TestBackendMatmulEleBrc, CvFusionDataCopyParamsUseDtypeAlignedFallback) {
-  codegen::Tiler tiler;
-  const CvFusionDataCopyTensors tensors = MakeCvFusionDataCopyTensors();
-  std::string dtype_name = "half";
-
-  codegen::ApiCallContext normal_context;
-  EXPECT_EQ(codegen::GetCvInputAlignedSize(normal_context, tensors.gm, "curAivN"), "curAivN");
-  codegen::ApiCallContext cv_context;
-  cv_context.stage = codegen::ComputeStage::kCVFuseStage1;
-  EXPECT_EQ(codegen::GetCvInputAlignedSize(cv_context, tensors.gm, "curAivN"), "((curAivN + 16 - 1) / 16 * 16)");
-
-  codegen::TPipe ub_fuse_tpipe("tpipe", tiler);
-  ub_fuse_tpipe.cv_fusion_type = ascir::CubeTemplateType::kUBFuse;
-  codegen::CodegenApiParam ub_fuse_api_param;
-  codegen::DmaSpecificParams ub_fuse_dma_params;
-  codegen::BuildDataCopyApiParamInCVFusion(ub_fuse_tpipe, ub_fuse_api_param, ub_fuse_dma_params, tensors.gm, tensors.ub,
-                                           dtype_name, true);
-  EXPECT_EQ(ub_fuse_api_param.template_params[0], "AscendC::PaddingMode::Normal");
-  EXPECT_EQ(ub_fuse_dma_params.data_copy_params.block_count.DebugStr(), "curAivM");
-  EXPECT_EQ(ub_fuse_dma_params.data_copy_params.block_len.DebugStr(), "curAivN");
-  EXPECT_EQ(ub_fuse_dma_params.data_copy_params.src_stride.DebugStr(), "(shapeN - curAivN)");
-  EXPECT_EQ(ub_fuse_dma_params.data_copy_params.dst_stride.DebugStr(),
-            "(KernelUtils::BlkAlign<half>(curAivN) - curAivN)");
-
-  codegen::TPipe common_tpipe("tpipe", tiler);
-  codegen::CodegenApiParam common_api_param;
-  codegen::DmaSpecificParams common_dma_params;
-  codegen::BuildDataCopyApiParamInCVFusion(common_tpipe, common_api_param, common_dma_params, tensors.gm, tensors.ub,
-                                           dtype_name, true);
-  EXPECT_EQ(common_dma_params.data_copy_params.block_len.DebugStr(), "load_block_len");
-  EXPECT_EQ(common_dma_params.data_copy_params.src_stride.DebugStr(), "load_src_stride");
-  EXPECT_EQ(common_dma_params.data_copy_params.dst_stride.DebugStr(), "load_dst_stride");
-  ASSERT_EQ(common_api_param.api_post_process.size(), 1U);
-  EXPECT_NE(common_api_param.api_post_process[0].find("AscendC::GatherMask"), std::string::npos);
-  EXPECT_NE(common_api_param.api_post_process[0].find("KernelUtils::BlkAlign<half>(curAlignN)"), std::string::npos);
-
-  codegen::CvApi2DParams cv_params;
-  cv_params.first_dim = "curAivM";
-  cv_params.last_dim = "curAivN";
-  EXPECT_EQ(codegen::GenCvUint16Dims(cv_params), "{static_cast<uint16_t>(curAivM), static_cast<uint16_t>(curAivN)}");
-  EXPECT_EQ(codegen::GenCvUint16Stride("curAlignN"), "{static_cast<uint16_t>(curAlignN), static_cast<uint16_t>(1)}");
 }

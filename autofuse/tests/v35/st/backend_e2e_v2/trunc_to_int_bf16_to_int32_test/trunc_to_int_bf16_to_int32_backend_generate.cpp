@@ -8,7 +8,18 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-#include "../backend_codegen_common.h"
+#include <fstream>
+#include <gtest/gtest.h>
+#include <exception>
+#include <filesystem>
+#include "codegen.h"
+#include "optimize.h"
+#include "share_graph.h"
+#include "backend_common.h"
+
+#include <iostream>
+#include <vector>
+#include <string>
 #include "runtime_stub.h"
 #include "common/platform_context.h"
 
@@ -27,6 +38,7 @@ class TestBackendTruncToIntBf16ToInt32E2e : public testing::Test {
 };
 
 TEST_F(TestBackendTruncToIntBf16ToInt32E2e, TruncToIntBf16ToInt32E2eCodegen) {
+  bool gen_success = true;
   std::string tilig_stub = R"(
 #define REGISTER_TILING_DEFAULT(tiling)
 #define GET_TILING_DATA(t, tiling)  AutofuseTilingData t = *(AutofuseTilingData*)tiling;
@@ -35,9 +47,32 @@ TEST_F(TestBackendTruncToIntBf16ToInt32E2e, TruncToIntBf16ToInt32E2eCodegen) {
   // shape_info 和 TruncToIntBf16ToInt32FusedGraph入参dims_size匹配（个数相同，命名规则为s开头、编号从0开始）
   std::map<std::string, std::string> shape_info({{"s0", "stub_s0"}, {"s1", "stub_s1"}, {"s2", "stub_s2"}});
   auto graph = ascir::ShareGraph::TruncToIntBf16ToInt32FusedGraph(3);
-  GenerateBackendKernelWithCheck(graph, shape_info, tilig_stub, [](const std::string &kernel) {
-    EXPECT_NE(kernel.find("AscendC::Cast(local_3[0], local_2[0], AscendC::RoundMode::CAST_TRUNC, "
-                          "local_2_actual_size);"),
-              std::string::npos);
-  });
+  std::cout << "KERNEL_SRC_LIST=" << KERNEL_SRC_LIST << std::endl;
+  std::vector<std::string> parts = splitString(KERNEL_SRC_LIST, ':');
+  std::string kernel_src_file_name = parts[0];       // trunc_to_int_bf16_to_int32_test_tiling.cpp
+  std::string tiling_src_file_name = parts[1];       // trunc_to_int_bf16_to_int32_test_kernel.cpp
+  std::string tiling_data_src_file_name = parts[2];  // autofuse_tiling_data.h
+
+  try {
+    optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+    codegen::Codegen codegen(codegen::CodegenOptions{});
+
+    std::fstream kernel_file(kernel_src_file_name, std::ios::out);
+    std::fstream tiling_file(tiling_src_file_name, std::ios::out);
+    std::fstream tiling_data_file(tiling_data_src_file_name, std::ios::out);
+
+    std::vector<::ascir::ScheduledResult> schedule_results;
+    ascir::FusedScheduledResult fused_schedule_result;
+    fused_schedule_result.node_idx_to_scheduled_results.push_back(schedule_results);
+    EXPECT_EQ(optimizer.Optimize(graph, fused_schedule_result), 0);
+    codegen::CodegenResult result;
+    EXPECT_EQ(codegen.Generate(shape_info, fused_schedule_result, result), 0);
+    kernel_file << tilig_stub << RemoveSubDirInclude(result.kernel);
+    tiling_file << result.tiling;
+    tiling_data_file << result.tiling_data;
+  } catch (...) {
+    gen_success = false;
+  }
+
+  EXPECT_EQ(gen_success, true);
 }

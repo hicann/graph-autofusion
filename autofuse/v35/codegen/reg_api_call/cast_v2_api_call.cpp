@@ -21,7 +21,6 @@
 #include "api_call/utils/api_call_utils.h"
 #include "ascir_node_param/ascir_node_param.h"
 #include "codegen/expression_convert_struct.h"
-#include "reg_api_call_utils.h"
 
 namespace codegen {
 using namespace std;
@@ -114,17 +113,6 @@ Status CastV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::Axis
   }
   GE_ASSERT_SUCCESS(FillCastNodeParams(this->node, output_dims, output_strides, input_strides));
   stringstream ss;
-  if (IsCVFusionStage(this->api_call_context)) {
-    const auto cv_params = BuildCvApi2DParams(tpipe, x, y);
-    const std::string input_tensor = x.is_constant ? ("local_blk_tensor_of_" + x.name) : x.Str();
-    ss << y.actual_size << " = " << cv_params.first_dim << " * " << cv_params.last_dim << ";" << std::endl;
-    ss << this->api_name_ << "(" << y << "[0], " << input_tensor << "[0], " << GenCvUint32Dims(cv_params) << ", "
-       << GenCvUint32Stride(cv_params.output_stride) << ", " << GenCvUint32Stride(cv_params.input_stride) << ");"
-       << std::endl;
-    result = ss.str();
-    return af::SUCCESS;
-  }
-
   size_t outer_repeats_size = param.outer_repeats.size();
   std::string scalar_local_blk_tensor_name = "local_blk_tensor_of_" + x.name;
   if (outer_repeats_size == 0U) {

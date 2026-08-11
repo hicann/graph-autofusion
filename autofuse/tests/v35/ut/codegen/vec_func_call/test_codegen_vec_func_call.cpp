@@ -47,21 +47,6 @@ void SetTwoDimVecInAttr(AscTensor &tensor, const af::Axis &z0, const af::Axis &z
   tensor.attr.mem.tensor_id = tensor_id;
 }
 
-codegen::Tensor MakeCvUbFuseTensor(af::AscGraph &graph, ge::DataType dtype, int64_t tensor_id,
-                                   const std::vector<af::Expression> &vectorized_strides,
-                                   const std::string &tensor_name) {
-  auto node = graph.FindNode("x");
-  af::AscTensor tensor = node->outputs[0];
-  tensor.attr.dtype = dtype;
-  tensor.attr.mem.tensor_id = tensor_id;
-  tensor.attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
-  tensor.attr.mem.position = af::Position::kPositionVecIn;
-  tensor.attr.vectorized_strides = vectorized_strides;
-  std::string dtype_name;
-  EXPECT_EQ(codegen::Tensor::DtypeName(dtype, dtype_name), af::SUCCESS);
-  return codegen::Tensor(tensor, dtype_name, tensor_name);
-}
-
 void InitScalarDataVfGraph(VectorFunc &vf_op, Store &store_op, Broadcast &sub_brc_op, Abs &abs_op, Store &sub_store_op,
                            Output &sub_output_op, const ScalarData &scalar_data_op, const Scalar &sub_scalar_op,
                            const af::Axis &z0, const af::Axis &z1, const af::Expression &s0, const af::Expression &s1) {
@@ -394,9 +379,6 @@ TEST(CodegenKernel, VfCall_TwoDimLoad) {
   sub_store->outputs[0].attr.mem.tensor_id = 2;
 
   auto vf = graph.FindNode("vf");
-  vf->outputs[0].attr.axis = {z0.id, z1.id};
-  vf->outputs[0].attr.repeats = {s0, s1};
-  vf->outputs[0].attr.strides = {s1, One};
   vf->outputs[0].attr.vectorized_axis = {z0.id, z1.id};
   vf->outputs[0].attr.vectorized_strides = {s1, One};
   vf->outputs[0].attr.dtype = af::DT_FLOAT;
@@ -452,62 +434,6 @@ TEST(CodegenKernel, VfCall_TwoDimLoad) {
           "VFCallvf((__local_mem__ float *)local_1[0].GetPhyAddr(), (__local_mem__ float "
           "*)local_0[0].GetPhyAddr(), t->s0 * t->s1);\n"
           "#endif\n"});
-}
-
-TEST(CodegenKernel, CvUbFuseVfCallUsesCubeBaseMNPhysicalLayout) {
-  ge::SetupRuntimeStub();
-  GTEST_SKIP() << "Manual VF graph fixture is unstable; helper-level UT validates this path.";
-}
-
-TEST(CodegenKernel, CvUbFuseVfLayoutHelperUsesPhysicalRowStride) {
-  codegen::Tiler tiler;
-  codegen::TPipe tpipe("tpipe", tiler);
-  tpipe.cv_fusion_type = ::ascir::CubeTemplateType::kUBFuse;
-  tpipe.cube_output_tensor_id = 0;
-
-  af::AscGraph graph("test_graph");
-  af::ascir_op::Data x("x", graph);
-  auto s1 = af::Symbol("s1");
-  auto cube = MakeCvUbFuseTensor(graph, af::DT_FLOAT, 0, {s1, One}, "local_0");
-  auto fp16_input = MakeCvUbFuseTensor(graph, af::DT_FLOAT16, 1, {s1, One}, "local_1");
-  auto bool_output = MakeCvUbFuseTensor(graph, af::DT_UINT8, 2, {s1, One}, "local_2");
-  auto broadcast_input = MakeCvUbFuseTensor(graph, af::DT_FLOAT16, 3, {Zero, Zero}, "local_3");
-
-  EXPECT_EQ(codegen::GenCvUbFuseVfFuncDimParams(), "uint32_t curAivM, uint32_t curAivN, uint32_t curAlignN");
-  EXPECT_EQ(codegen::GenCvUbFuseVfCallDimParams(), "curAivM, curAivN, curAlignN");
-  EXPECT_EQ(codegen::GenCvUbFuseRowStride(tpipe, cube), "curAlignN");
-  EXPECT_EQ(codegen::GenCvUbFuseRowStride(tpipe, fp16_input), "KernelUtils::BlkAlign<half>(curAivN)");
-  EXPECT_EQ(codegen::GenCvUbFuseRowStride(tpipe, bool_output), "KernelUtils::BlkAlign<uint8_t>(curAivN)");
-  EXPECT_EQ(codegen::GenCvUbFuseAddrOffset(tpipe, cube), "0 + cv_m * curAlignN + cv_n * ELEMENT_PER_VECTOR_LENGTH");
-  EXPECT_EQ(codegen::GenCvUbFuseAddrOffset(tpipe, fp16_input),
-            "0 + cv_m * KernelUtils::BlkAlign<half>(curAivN) + cv_n * ELEMENT_PER_VECTOR_LENGTH");
-  EXPECT_EQ(codegen::GenCvUbFuseAddrOffset(tpipe, bool_output),
-            "0 + cv_m * KernelUtils::BlkAlign<uint8_t>(curAivN) + cv_n * ELEMENT_PER_VECTOR_LENGTH");
-  EXPECT_EQ(codegen::GenCvUbFuseAddrOffset(tpipe, broadcast_input), "0");
-}
-
-TEST(CodegenKernel, CvUbFuseTensorSizeAssignUsesTensorDtype) {
-  codegen::Tiler tiler;
-  codegen::TPipe tpipe("tpipe", tiler);
-  tpipe.cv_fusion_type = ::ascir::CubeTemplateType::kUBFuse;
-
-  af::AscGraph graph("test_graph");
-  af::ascir_op::Data x("x", graph);
-  auto cube = MakeCvUbFuseTensor(graph, af::DT_FLOAT, 0, {One}, "local_0");
-  auto fp16_input = MakeCvUbFuseTensor(graph, af::DT_FLOAT16, 1, {One}, "local_1");
-  auto bool_output = MakeCvUbFuseTensor(graph, af::DT_UINT8, 2, {One}, "local_2");
-  cube.alloc_type = af::AllocType::kAllocTypeQueue;
-  fp16_input.alloc_type = af::AllocType::kAllocTypeQueue;
-  bool_output.alloc_type = af::AllocType::kAllocTypeQueue;
-  tpipe.tensors.emplace(cube.id, cube);
-  tpipe.tensors.emplace(fp16_input.id, fp16_input);
-  tpipe.tensors.emplace(bool_output.id, bool_output);
-
-  std::string result;
-  ASSERT_EQ(tpipe.TensorSizeAssign("float", result), af::SUCCESS);
-  EXPECT_NE(result.find("local_0_size = stage_size / sizeof(float);"), std::string::npos);
-  EXPECT_NE(result.find("local_1_size = stage_size / sizeof(float);"), std::string::npos);
-  EXPECT_NE(result.find("local_2_size = stage_size / sizeof(float);"), std::string::npos);
 }
 
 TEST(CodegenKernel, VfCall_TwoDimLoad_VFLoop) {

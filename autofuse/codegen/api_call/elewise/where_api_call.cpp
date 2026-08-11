@@ -10,14 +10,20 @@
 #include "where_api_call.h"
 
 #include <sstream>
+#include "attr_utils.h"
+#include "ascir_ops.h"
 #include "common_utils.h"
 #include "common/ge_common/debug/log.h"
+#include "graph/ascendc_ir/utils//asc_tensor_utils.h"
 #include "common/checker.h"
 #include "api_call/utils/api_call_factory.h"
 #include "api_call/utils/api_call_utils.h"
+#include "codegen/expression_convert_struct.h"
 
 namespace codegen {
 using namespace std;
+using namespace af::ops;
+using namespace af::ascir_op;
 using namespace ascgen_utils;
 
 Status WhereApiCall::PrepareInputsAndOutputs(const std::vector<std::reference_wrapper<const Tensor>> &inputs,
@@ -91,8 +97,7 @@ Status WhereApiCall::GenerateNoLoopCase(const TPipe &tpipe, const std::vector<as
     ss << x3 << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, x3) << "], ";
   }
 
-  ss << GetCVAlignedSize(this->api_call_context, y, x1.actual_size.Str()) << ", " << tpipe.tmp_buf << "_"
-     << std::to_string(id) << ");" << std::endl;
+  ss << x1.actual_size << ", " << tpipe.tmp_buf << "_" << std::to_string(id) << ");" << std::endl;
 
   return af::SUCCESS;
 }
@@ -102,9 +107,6 @@ Status WhereApiCall::GenerateBothScalarCase(const TPipe &tpipe, const ApiLoopPar
                                             const std::string &scalar_local_blk_tensor_name_x3, const int64_t id,
                                             std::stringstream &ss) const {
   stringstream ss1;
-  std::string dtype_name;
-  GE_CHK_STATUS_RET(Tensor::DtypeName(y.dtype, dtype_name), "Codegen get data type:%d failed",
-                    static_cast<int32_t>(y.dtype));
 
   size_t output_strides_size = param.outputs_strides[0].size();
   std::vector<ascir::SizeExpr> inner_output_strides(param.outputs_strides[0].begin(),
@@ -120,12 +122,11 @@ Status WhereApiCall::GenerateBothScalarCase(const TPipe &tpipe, const ApiLoopPar
   ss1 << this->api_name_ << "<true, true>(" << y << "[" << output_inner_offset << "], " << x1 << "["
       << input0_inner_offset << "], " << scalar_local_blk_tensor_name_x2 << "[0], " << scalar_local_blk_tensor_name_x3
       << "[0], " << param.outer_repeats[param.outer_repeats.size() - 1] << ", "
-      << GetCVAlignedSize(this->api_call_context, y, tpipe.tiler.ActualSize(param.cal_count)) << ", "
-      << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
+      << tpipe.tiler.ActualSize(param.cal_count) << ", " << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
       << tpipe.tiler.Size(param.input_second_to_last_stride) << ", "
-      << "ONE_BLK_SIZE / sizeof(" << dtype_name << "), "
-      << "ONE_BLK_SIZE / sizeof(" << dtype_name << "), " << tpipe.tmp_buf << "_" << std::to_string(id)
-      << ", ONE_BLK_SIZE * 2);" << std::endl;
+      << "ONE_BLK_SIZE / sizeof(float), "
+      << "ONE_BLK_SIZE / sizeof(float), " << tpipe.tmp_buf << "_" << std::to_string(id) << ", ONE_BLK_SIZE * 2);"
+      << std::endl;
 
   if (param.outer_repeats.size() == 1) {
     ss << ss1.str();
@@ -141,9 +142,6 @@ Status WhereApiCall::GenerateX2ScalarCase(const TPipe &tpipe, const ApiLoopParam
                                           const std::string &scalar_local_blk_tensor_name_x2, const int64_t id,
                                           std::stringstream &ss) const {
   stringstream ss1;
-  std::string dtype_name;
-  GE_CHK_STATUS_RET(Tensor::DtypeName(y.dtype, dtype_name), "Codegen get data type:%d failed",
-                    static_cast<int32_t>(y.dtype));
 
   size_t output_strides_size = param.outputs_strides[0].size();
   std::vector<ascir::SizeExpr> inner_output_strides(param.outputs_strides[0].begin(),
@@ -164,11 +162,10 @@ Status WhereApiCall::GenerateX2ScalarCase(const TPipe &tpipe, const ApiLoopParam
 
   ss1 << this->api_name_ << "<true, false>(" << y << "[" << output_inner_offset << "], " << x1 << "["
       << input0_inner_offset << "], " << scalar_local_blk_tensor_name_x2 << "[0], " << x3 << "[" << input2_inner_offset
-      << "], " << param.outer_repeats[param.outer_repeats.size() - 1] << ", "
-      << GetCVAlignedSize(this->api_call_context, y, tpipe.tiler.ActualSize(param.cal_count)) << ", "
-      << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
+      << "], " << param.outer_repeats[param.outer_repeats.size() - 1] << ", " << tpipe.tiler.ActualSize(param.cal_count)
+      << ", " << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
       << tpipe.tiler.Size(param.input_second_to_last_stride) << ", "
-      << "ONE_BLK_SIZE / sizeof(" << dtype_name << "), " << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
+      << "ONE_BLK_SIZE / sizeof(float), " << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
       << tpipe.tmp_buf << "_" << std::to_string(id) << ", ONE_BLK_SIZE);" << std::endl;
 
   if (param.outer_repeats.size() == 1) {
@@ -185,9 +182,6 @@ Status WhereApiCall::GenerateX3ScalarCase(const TPipe &tpipe, const ApiLoopParam
                                           const std::string &scalar_local_blk_tensor_name_x3, const int64_t id,
                                           std::stringstream &ss) const {
   stringstream ss1;
-  std::string dtype_name;
-  GE_CHK_STATUS_RET(Tensor::DtypeName(y.dtype, dtype_name), "Codegen get data type:%d failed",
-                    static_cast<int32_t>(y.dtype));
 
   size_t output_strides_size = param.outputs_strides[0].size();
   std::vector<ascir::SizeExpr> inner_output_strides(param.outputs_strides[0].begin(),
@@ -209,12 +203,11 @@ Status WhereApiCall::GenerateX3ScalarCase(const TPipe &tpipe, const ApiLoopParam
   ss1 << this->api_name_ << "<false, true>(" << y << "[" << output_inner_offset << "], " << x1 << "["
       << input0_inner_offset << "], " << x2 << "[" << input1_inner_offset << "], " << scalar_local_blk_tensor_name_x3
       << "[0], " << param.outer_repeats[param.outer_repeats.size() - 1] << ", "
-      << GetCVAlignedSize(this->api_call_context, y, tpipe.tiler.ActualSize(param.cal_count)) << ", "
-      << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
+      << tpipe.tiler.ActualSize(param.cal_count) << ", " << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
       << tpipe.tiler.Size(param.input_second_to_last_stride) << ", "
       << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
-      << "ONE_BLK_SIZE / sizeof(" << dtype_name << "), " << tpipe.tmp_buf << "_" << std::to_string(id)
-      << ", ONE_BLK_SIZE);" << std::endl;
+      << "ONE_BLK_SIZE / sizeof(float), " << tpipe.tmp_buf << "_" << std::to_string(id) << ", ONE_BLK_SIZE);"
+      << std::endl;
 
   if (param.outer_repeats.size() == 1) {
     ss << ss1.str();
@@ -229,9 +222,6 @@ Status WhereApiCall::GenerateNormalCase(const TPipe &tpipe, const ApiLoopParams 
                                         const Tensor &x2, const Tensor &x3, const Tensor &y, const int64_t id,
                                         std::stringstream &ss) const {
   stringstream ss1;
-  std::string dtype_name;
-  GE_CHK_STATUS_RET(Tensor::DtypeName(y.dtype, dtype_name), "Codegen get data type:%d failed",
-                    static_cast<int32_t>(y.dtype));
 
   size_t output_strides_size = param.outputs_strides[0].size();
   std::vector<ascir::SizeExpr> inner_output_strides(param.outputs_strides[0].begin(),
@@ -258,9 +248,8 @@ Status WhereApiCall::GenerateNormalCase(const TPipe &tpipe, const ApiLoopParams 
 
   ss1 << this->api_name_ << "<false, false>(" << y << "[" << output_inner_offset << "], " << x1 << "["
       << input0_inner_offset << "], " << x2 << "[" << input1_inner_offset << "], " << x3 << "[" << input2_inner_offset
-      << "], " << param.outer_repeats[param.outer_repeats.size() - 1] << ", "
-      << GetCVAlignedSize(this->api_call_context, y, tpipe.tiler.ActualSize(param.cal_count)) << ", "
-      << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
+      << "], " << param.outer_repeats[param.outer_repeats.size() - 1] << ", " << tpipe.tiler.ActualSize(param.cal_count)
+      << ", " << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
       << tpipe.tiler.Size(param.input_second_to_last_stride) << ", "
       << tpipe.tiler.Size(param.output_second_to_last_stride) << ", "
       << tpipe.tiler.Size(param.output_second_to_last_stride) << ", " << tpipe.tmp_buf << "_" << std::to_string(id)

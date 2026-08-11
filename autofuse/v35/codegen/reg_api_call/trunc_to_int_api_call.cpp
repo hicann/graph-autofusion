@@ -16,10 +16,8 @@
 #include "common/ge_common/debug/log.h"
 #include "graph/ascendc_ir/utils/asc_tensor_utils.h"
 #include "common/checker.h"
-#include "api_call/utils/api_call_utils.h"
 #include "api_call/utils/api_call_factory.h"
 #include "codegen/expression_convert_struct.h"
-#include "reg_api_call_utils.h"
 
 namespace codegen {
 using namespace std;
@@ -39,15 +37,6 @@ Status TruncToIntApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::
   GELOGI("TruncToInt x_dtype:%d, y.dtype:%d.", static_cast<int32_t>(x.dtype), static_cast<int32_t>(y.dtype));
 
   stringstream ss;
-
-  if (IsCVFusionStage(this->api_call_context)) {
-    const auto cv_params = BuildCvApi2DParams(tpipe, x, y);
-    ss << "AscendC::Cast(" << y << "[0], " << x << "[0], AscendC::RoundMode::CAST_TRUNC, " << GenCvUint32Dims(cv_params)
-       << ", " << GenCvUint32Stride(cv_params.output_stride) << ", " << GenCvUint32Stride(cv_params.input_stride)
-       << ");" << std::endl;
-    result = ss.str();
-    return af::SUCCESS;
-  }
 
   // 使用 AscendC::Cast 函数，设置 round 模式为 CAST_TRUNC
   ss << "AscendC::Cast(" << y << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x << "["

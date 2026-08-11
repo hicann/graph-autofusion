@@ -19,7 +19,7 @@
 #include <vector>
 #include <gtest/gtest.h>
 
-#include "backend_codegen_common.h"
+#include "backend_common.h"
 #include "codegen.h"
 #include "common/platform_context.h"
 #include "optimize.h"
@@ -42,13 +42,41 @@ class BoolBackendCodegenE2e : public testing::Test {
 };
 
 inline void GenerateBoolBackendKernel(const af::ComputeGraphPtr &graph) {
+  bool gen_success = true;
   std::string tiling_stub = R"(
 #define REGISTER_TILING_DEFAULT(tiling)
 #define GET_TILING_DATA(t, tiling)  AutofuseTilingData t = *(AutofuseTilingData*)tiling;
 )";
 
   std::map<std::string, std::string> shape_info({{"s0", "stub_s0"}, {"s1", "stub_s1"}});
-  GenerateBackendKernelWithCheck(graph, shape_info, tiling_stub, [](const std::string &) {});
+  std::cout << "KERNEL_SRC_LIST=" << KERNEL_SRC_LIST << std::endl;
+  std::vector<std::string> parts = splitString(KERNEL_SRC_LIST, ':');
+  const std::string &kernel_src_file_name = parts[0];
+  const std::string &tiling_src_file_name = parts[1];
+  const std::string &tiling_data_src_file_name = parts[2];
+
+  try {
+    optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+    codegen::Codegen codegen(codegen::CodegenOptions{});
+
+    std::fstream kernel_file(kernel_src_file_name, std::ios::out);
+    std::fstream tiling_file(tiling_src_file_name, std::ios::out);
+    std::fstream tiling_data_file(tiling_data_src_file_name, std::ios::out);
+
+    std::vector<::ascir::ScheduledResult> schedule_results;
+    ascir::FusedScheduledResult fused_schedule_result;
+    fused_schedule_result.node_idx_to_scheduled_results.push_back(schedule_results);
+    EXPECT_EQ(optimizer.Optimize(graph, fused_schedule_result), 0);
+    codegen::CodegenResult result;
+    EXPECT_EQ(codegen.Generate(shape_info, fused_schedule_result, result), 0);
+    kernel_file << tiling_stub << RemoveSubDirInclude(result.kernel);
+    tiling_file << result.tiling;
+    tiling_data_file << result.tiling_data;
+  } catch (...) {
+    gen_success = false;
+  }
+
+  EXPECT_EQ(gen_success, true);
 }
 
 #endif  // AUTOFUSE_TESTS_V35_ST_BACKEND_E2E_V2_BOOL_BACKEND_CODEGEN_COMMON_H_

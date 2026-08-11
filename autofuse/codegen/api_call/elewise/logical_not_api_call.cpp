@@ -17,7 +17,6 @@
 #include "graph/ascendc_ir/utils//asc_tensor_utils.h"
 #include "common/checker.h"
 #include "api_call/utils/api_call_factory.h"
-#include "api_call/utils/api_call_utils.h"
 #include "codegen/expression_convert_struct.h"
 
 namespace codegen {
@@ -45,8 +44,7 @@ Status LogicalNotApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::
   stringstream ss;
   ss << this->api_name_ << "(" << y << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x << "["
      << tpipe.tiler.TensorVectorizedOffset(current_axis, x) << "], local_blk_tensor_of_half_1, " << tpipe.tmp_buf << "_"
-     << std::to_string(id) << ", " << GetCVAlignedSize(this->api_call_context, y, x.actual_size.Str()) << ");"
-     << std::endl;
+     << std::to_string(id) << ", " << x.actual_size << ");" << std::endl;
   result = ss.str();
   return af::SUCCESS;
 }

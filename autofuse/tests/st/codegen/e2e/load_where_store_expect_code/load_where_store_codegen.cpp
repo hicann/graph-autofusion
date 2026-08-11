@@ -68,12 +68,7 @@ TEST_F(LoadWhereStoreTest, LoadWhereStoreCodegen) {
     InitScheduleResultsByImplGraphs(test_impl_graphs, fused_schedule_result);
     codegen::CodegenResult result;
     EXPECT_EQ(codegen.Generate(fused_schedule_result, result), 0);
-    const std::string kernel = RemoveSubDirInclude(result.kernel);
-    EXPECT_NE(kernel.find("Where<false, false>(local_6[0], local_3[0], local_4[0], local_5[0], z1t_actual_size, "
-                          "t->s2"),
-              std::string::npos);
-    EXPECT_NE(kernel.find("((8 * Ceiling((Rational(1 , 8) * t->s2))))/(1)"), std::string::npos);
-    kernel_file << tilig_stub << kernel;
+    kernel_file << tilig_stub << RemoveSubDirInclude(result.kernel);
     tiling_file << result.tiling;
     tiling_data_file << result.tiling_data;
   } catch (...) {

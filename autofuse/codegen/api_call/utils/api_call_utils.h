@@ -122,10 +122,6 @@ bool CheckAxisContinuous(const std::vector<Tensor> &inputs, const std::vector<Te
                          VectorizedAixsLoopStatus &axis_info, int64_t index);
 void SaveApiLoopAxisParams(VectorizedAxisLoopMergeStatus &merge_info, ApiLoopParams &param);
 bool GetMaxDtypeSize(const ge::DataType input_data_type, const ge::DataType out_put_data_type, std::string &dtype_size);
-bool IsCVFusionStage(const ApiCallContext &context);
-Status GetTensorDtypeSize(const Tensor &tensor, int64_t &dtype_size);
-std::string GenBlockAlignNExpr(const Tensor &tensor, const std::string &n_expr);
-std::string GetCVAlignedSize(const ApiCallContext &context, const Tensor &tensor, const std::string &size_expr);
 bool ShouldIgnoreZeroAxis(const std::vector<Tensor> &inputs, const std::vector<Tensor> &outputs, int64_t cur_index);
 bool IsInputOutputStrideAllZero(const std::vector<Tensor> &inputs, const std::vector<Tensor> &outputs,
                                 int64_t cur_index);

@@ -36,32 +36,52 @@ void AppendCvNddmaCall(std::stringstream &ss, const std::string &api_name, const
      << "output_stride_" << ub.id << ", " << "input_stride_" << ub.id << ");" << std::endl;
 }
 
-Status GenerateCvUbFuseNddma(const std::string &api_name, const Tensor &gm, const Tensor &ub, std::stringstream &ss) {
+Status GenerateInductorUbFuseNddma(const std::string &api_name, const Tensor &gm, const Tensor &ub,
+                                   std::stringstream &ss) {
   GE_ASSERT_TRUE(gm.axis_strides.size() >= 2U, "Nddma src axis-strides less than 2 is invalid in CV-Fusion case");
   auto last_index = gm.axis_strides.size() - 1U;
   auto second_to_last_index = gm.axis_strides.size() - 2U;
-  std::string dtype_name;
-  GE_CHK_STATUS_RET(Tensor::DtypeName(ub.dtype, dtype_name), "Codegen get data type:%d failed",
-                    static_cast<int32_t>(ub.dtype));
-  const std::string output_stride = "KernelUtils::BlkAlign<" + dtype_name + ">(curAivN)";
-  ss << "const int64_t output_dims_" << ub.id << "[2] = {curAivM, curAivN};" << std::endl;
+  ss << "const int64_t output_dims_" << ub.id << "[2] = {curAivM, curAlignN};" << std::endl;
   std::string gm_offset;
   if (IsZeroStride(gm, second_to_last_index) && IsZeroStride(gm, last_index)) {
     ss << "const int64_t input_stride_" << ub.id << "[2] = {0, 0};" << std::endl;
-    ss << "const int64_t output_stride_" << ub.id << "[2] = {" << output_stride << ", 1};" << std::endl;
+    ss << "const int64_t output_stride_" << ub.id << "[2] = {curAlignN, 1};" << std::endl;
     gm_offset = "batch_num";
   } else if (IsZeroStride(gm, second_to_last_index) && !IsZeroStride(gm, last_index)) {
     ss << "const int64_t input_stride_" << ub.id << "[2] = {0, 1};" << std::endl;
-    ss << "const int64_t output_stride_" << ub.id << "[2] = {" << output_stride << ", 1};" << std::endl;
+    ss << "const int64_t output_stride_" << ub.id << "[2] = {curAlignN, 1};" << std::endl;
     gm_offset = "offset % shapeN + batch_num * shapeN";
   } else if (!IsZeroStride(gm, second_to_last_index) && IsZeroStride(gm, last_index)) {
     ss << "const int64_t input_stride_" << ub.id << "[2] = {1, 0};" << std::endl;
-    ss << "const int64_t output_stride_" << ub.id << "[2] = {" << output_stride << ", 1};" << std::endl;
+    ss << "const int64_t output_stride_" << ub.id << "[2] = {curAlignN, 1};" << std::endl;
     gm_offset = "offset / shapeN";
   } else {
-    ss << "const int64_t input_stride_" << ub.id << "[2] = {shapeN, 1};" << std::endl;
-    ss << "const int64_t output_stride_" << ub.id << "[2] = {" << output_stride << ", 1};" << std::endl;
-    gm_offset = "offset";
+    ss << "const int64_t input_stride_" << ub.id << "[2] = {0, 1};" << std::endl;
+    ss << "const int64_t output_stride_" << ub.id << "[2] = {curAlignN, 1};" << std::endl;
+    gm_offset = "offset % shapeN + batch_num * shapeN";
+  }
+  AppendCvNddmaCall(ss, api_name, gm, ub, gm_offset);
+  return af::SUCCESS;
+}
+
+Status GenerateUbFuseNddma(const std::string &api_name, const Tensor &gm, const Tensor &ub, std::stringstream &ss) {
+  GE_ASSERT_TRUE(gm.axis_size.size() >= 2U, "Nddma src axis-size less than 2 is invalid in CV-Fusion case");
+  auto last_index = gm.axis_size.size() - 1U;
+  auto second_to_last_index = gm.axis_size.size() - 2U;
+  ss << "const int64_t output_dims_" << ub.id << "[2] = {curAivM, curAlignN};" << std::endl;
+  std::string gm_offset;
+  if ((gm.axis_size[second_to_last_index] == One) && (gm.axis_size[last_index] == One)) {
+    ss << "const int64_t input_stride_" << ub.id << "[2] = {0, 0};" << std::endl;
+    ss << "const int64_t output_stride_" << ub.id << "[2] = {curAlignN, 1};" << std::endl;
+    gm_offset = "batch_num";
+  } else if (gm.axis_size[second_to_last_index] == One) {
+    ss << "const int64_t input_stride_" << ub.id << "[2] = {0, 1};" << std::endl;
+    ss << "const int64_t output_stride_" << ub.id << "[2] = {curAlignN, 1};" << std::endl;
+    gm_offset = "offset % shapeN + batch_num * shapeN";
+  } else if (gm.axis_size[last_index] == One) {
+    ss << "const int64_t input_stride_" << ub.id << "[2] = {1, 0};" << std::endl;
+    ss << "const int64_t output_stride_" << ub.id << "[2] = {curAlignN, 1};" << std::endl;
+    gm_offset = "offset / shapeN";
   }
   AppendCvNddmaCall(ss, api_name, gm, ub, gm_offset);
   return af::SUCCESS;
@@ -100,8 +120,10 @@ Status NddmaApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::AxisI
   const auto &gm = inputs[0].get();
   const auto &ub = outputs[0].get();
   (void)RegisterBasicDumpParam(this->api_name_, inputs, outputs);
-  if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
-    GE_ASSERT_SUCCESS(GenerateCvUbFuseNddma(api_name_, gm, ub, ss));
+  if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse && tpipe.is_inductor) {
+    GE_ASSERT_SUCCESS(GenerateInductorUbFuseNddma(api_name_, gm, ub, ss));
+  } else if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
+    GE_ASSERT_SUCCESS(GenerateUbFuseNddma(api_name_, gm, ub, ss));
   } else {
     GE_ASSERT_SUCCESS(GenerateDefaultNddma(tpipe, current_axis, api_name_, gm, ub, offset_, ss));
   }

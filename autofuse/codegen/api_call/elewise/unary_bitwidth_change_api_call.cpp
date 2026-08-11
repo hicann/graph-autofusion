@@ -10,6 +10,11 @@
 #include "unary_bitwidth_change_api_call.h"
 
 #include <sstream>
+#include "attr_utils.h"
+#include "ascir_ops.h"
+#include "common_utils.h"
+#include "common/ge_common/debug/log.h"
+#include "graph/ascendc_ir/utils/asc_tensor_utils.h"
 #include "common/checker.h"
 #include "api_call/utils/api_call_factory.h"
 #include "api_call/utils/api_call_utils.h"
@@ -17,6 +22,9 @@
 
 namespace codegen {
 using namespace std;
+using namespace af::ops;
+using namespace af::ascir_op;
+using namespace ascgen_utils;
 
 Status UnaryBitWidthChangeApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis,
                                             const std::vector<std::reference_wrapper<const Tensor>> &inputs,
@@ -49,7 +57,7 @@ Status UnaryBitWidthChangeApiCall::Generate(const TPipe &tpipe, const std::vecto
                                  tpipe.tmp_buf.name + "_" + std::to_string(id));
     ss << this->api_name_ << "(" << y << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x << "["
        << tpipe.tiler.TensorVectorizedOffset(current_axis, x) << "], " << tpipe.tmp_buf << "_" << std::to_string(id)
-       << ", " << GetCVAlignedSize(this->api_call_context, x, x.actual_size.Str()) << ");" << std::endl;
+       << ", " << x.actual_size << ");" << std::endl;
   } else {
     (void)RegisterBasicDumpParam(this->api_name_, inputs, outputs,
                                  CombinedExprFactory::SymbolVar(tpipe.tiler.ActualSize(param.cal_count)),
@@ -58,8 +66,8 @@ Status UnaryBitWidthChangeApiCall::Generate(const TPipe &tpipe, const std::vecto
     std::string output_inner_offset = CalcInnerOffset(tpipe, param.outputs_strides[0]);
     std::stringstream ss1;
     ss1 << this->api_name_ << "(" << y << "[" << output_inner_offset << "], " << x << "[" << input_inner_offset << "], "
-        << tpipe.tmp_buf << "_" << std::to_string(id) << ", "
-        << GetCVAlignedSize(this->api_call_context, x, tpipe.tiler.ActualSize(param.cal_count)) << ");" << std::endl;
+        << tpipe.tmp_buf << "_" << std::to_string(id) << ", " << tpipe.tiler.ActualSize(param.cal_count) << ");"
+        << std::endl;
     CreateComputeNodeOuterFor(param.outer_repeats, ss1, ss, 0);
   }
 

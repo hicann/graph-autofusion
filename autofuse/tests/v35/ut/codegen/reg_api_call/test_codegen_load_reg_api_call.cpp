@@ -89,64 +89,6 @@ TEST(CodegenKernel, LoadRegApiCall_OneDimLoad) {
       std::string{"DataCopyPadExtend<float, AscendC::PaddingMode::Normal>(local_0[0], local_0[0 + 0], 1, 8, 0, 0);\n"});
 }
 
-TEST(CodegenKernel, LoadRegApiCall_CvUbFuseUsesDtypeAwareStrides) {
-  af::AscGraph graph("test_graph");
-
-  auto s0 = af::Symbol(16);
-  auto s1 = af::Symbol(7);
-  auto z0 = graph.CreateAxis("z0", s0);
-  auto z1 = graph.CreateAxis("z1", s1);
-
-  Data x_op("x", graph);
-  Load load_op("load");
-  graph.AddNode(load_op);
-
-  load_op.x = x_op.y;
-  load_op.attr.sched.axis = {z0.id, z1.id};
-  *load_op.y.axis = {z0.id, z1.id};
-  *load_op.y.repeats = {s0, s1};
-  *load_op.y.strides = {s1, One};
-
-  auto load = graph.FindNode("load");
-  load->attr.api.compute_type = af::ComputeType::kComputeLoad;
-  load->attr.api.type = af::ApiType::kAPITypeCompute;
-  load->attr.api.unit = af::ComputeUnit::kUnitMTE2;
-  load->attr.sched.loop_axis = z0.id;
-  load->outputs[0].attr.vectorized_axis = {z0.id, z1.id};
-  load->outputs[0].attr.vectorized_strides = {s1, One};
-  load->outputs[0].attr.dtype = af::DT_FLOAT16;
-  load->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
-  load->outputs[0].attr.mem.tensor_id = 0;
-  load->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
-  load->outputs[0].attr.que.id = 1;
-  load->outputs[0].attr.opt.merge_scope = af::kIdNone;
-
-  codegen::Tiler tiler;
-  codegen::TPipe tpipe("tpipe", tiler);
-  tpipe.cv_fusion_type = ascir::CubeTemplateType::kUBFuse;
-  tpipe.AddTensor(load->outputs[0]);
-
-  tiler.AddAxis(z0);
-  tiler.AddAxis(z1);
-  tiler.AddSizeVar(af::SizeVar(s0));
-  tiler.AddSizeVar(af::SizeVar(s1));
-
-  codegen::ApiTensor x1;
-  x1.id = load->outputs[0].attr.mem.tensor_id;
-
-  codegen::LoadRegApiCall call_0("DataCopyPadExtend");
-  EXPECT_EQ(call_0.Init(load), 0);
-  call_0.inputs.push_back(&x1);
-
-  std::string result;
-  call_0.Generate(tpipe, vector<af::AxisId>{}, result);
-  EXPECT_NE(result.find("DataCopyPadExtend<half, AscendC::PaddingMode::Normal>("), std::string::npos);
-  EXPECT_NE(result.find("curAivM"), std::string::npos);
-  EXPECT_NE(result.find("curAivN"), std::string::npos);
-  EXPECT_NE(result.find("KernelUtils::BlkAlign<half>(curAivN)"), std::string::npos);
-  EXPECT_NE(result.find("shapeN - curAivN"), std::string::npos);
-}
-
 TEST(CodegenKernel, NormalModeDataCopyIfDualSplitting) {
   af::AscGraph graph("test_graph");
   af::Expression Two = af::Symbol(2);

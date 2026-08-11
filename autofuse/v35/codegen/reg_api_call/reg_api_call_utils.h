@@ -60,20 +60,6 @@ struct NddmaParams {
   std::stringstream ss_input_stride;
 };
 
-struct CvApi2DParams {
-  std::string first_dim;
-  std::string last_dim;
-  std::string output_stride;
-  std::string input_stride;
-};
-
-CvApi2DParams BuildCvApi2DParams(const TPipe &tpipe, const Tensor &input, const Tensor &output);
-std::string GenCvUint32Dims(const CvApi2DParams &params);
-std::string GenCvUint32Stride(const std::string &stride);
-std::string GenCvUint16Dims(const CvApi2DParams &params);
-std::string GenCvUint16Stride(const std::string &stride);
-std::string GetCvInputAlignedSize(const ApiCallContext &context, const Tensor &input, const std::string &size_expr);
-
 void CreateEnhanceDmaCall(const TPipe &tpipe, const Tensor &input, const Tensor &output, const string &gm_offset,
                           const DataCopyParams &data_copy_param, const ascir::SizeExpr &offset, std::stringstream &ss,
                           bool copy_in);
@@ -85,9 +71,8 @@ void SetLoopModeParams(const TPipe &tpipe, const DataCopyParams &data_copy_param
                        bool copy_in);
 void SetLoopModeParamsExpr(const DataCopyParams &data_copy_param, LoopModeParamsExpr &loop_mode_param, bool copy_in);
 std::string GetPaddingMode(const TPipe &tpipe, const Tensor &ub_tensor, const DataCopyParams &data_copy_param);
-void BuildDataCopyApiParamInCVFusion(const TPipe &tpipe, CodegenApiParam &api_param,
-                                     DmaSpecificParams &dma_specific_params, const Tensor &gm, const Tensor &ub,
-                                     std::string &dtype_name, bool copy_in);
+void BuildDataCopyApiParamInCVFusion(CodegenApiParam &api_param, DmaSpecificParams &dma_specific_params,
+                                     const Tensor &gm, const Tensor &ub, std::string &dtype_name, bool copy_in);
 Status BuildDataCopyApiParamInNormal(const TPipe &tpipe, CodegenApiParam &api_param,
                                      DmaSpecificParams &dma_specific_params, const Tensor &src, const Tensor &dst,
                                      std::string &gm_offset, bool copy_in);

@@ -54,7 +54,7 @@ Status StoreRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<asci
   api_param->template_params.emplace_back(dtype_name);
   DmaSpecificParams dma_specific_params;
   if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
-    BuildDataCopyApiParamInCVFusion(tpipe, *api_param, dma_specific_params, gm, ub, dtype_name, false);
+    BuildDataCopyApiParamInCVFusion(*api_param, dma_specific_params, gm, ub, dtype_name, false);
   } else {
     std::string gm_offset = tpipe.tiler.Offset(current_axis, gm.axis, gm.axis_strides);
     gm_offset = gm_offset + " + " + tpipe.tiler.Size(offset_);

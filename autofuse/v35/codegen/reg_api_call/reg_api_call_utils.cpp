@@ -20,37 +20,6 @@ constexpr char kCompactPddingMode[] = "AscendC::PaddingMode::Compact";
 }  // namespace
 
 namespace codegen {
-CvApi2DParams BuildCvApi2DParams(const TPipe &tpipe, const Tensor &input, const Tensor &output) {
-  CvApi2DParams params;
-  params.first_dim = "curAivM";
-  params.last_dim = "curAivN";
-  params.output_stride = GenBlockAlignNExpr(output, params.last_dim);
-  const bool input_is_cube_output =
-      tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse && input.id == tpipe.cube_output_tensor_id;
-  params.input_stride = input_is_cube_output ? "curAlignN" : GenBlockAlignNExpr(input, params.last_dim);
-  return params;
-}
-
-std::string GenCvUint32Dims(const CvApi2DParams &params) {
-  return "{ConvertToUint32(" + params.first_dim + "), ConvertToUint32(" + params.last_dim + ")}";
-}
-
-std::string GenCvUint32Stride(const std::string &stride) {
-  return "{ConvertToUint32(" + stride + "), ConvertToUint32(1)}";
-}
-
-std::string GenCvUint16Dims(const CvApi2DParams &params) {
-  return "{static_cast<uint16_t>(" + params.first_dim + "), static_cast<uint16_t>(" + params.last_dim + ")}";
-}
-
-std::string GenCvUint16Stride(const std::string &stride) {
-  return "{static_cast<uint16_t>(" + stride + "), static_cast<uint16_t>(1)}";
-}
-
-std::string GetCvInputAlignedSize(const ApiCallContext &context, const Tensor &input, const std::string &size_expr) {
-  return IsCVFusionStage(context) ? GenBlockAlignNExpr(input, size_expr) : size_expr;
-}
-
 // A5场景，拷贝指令增强，可以通过loop_mode_params消掉另外两层for循环
 void SetLoopModeParams(const TPipe &tpipe, const DataCopyParams &data_copy_param, LoopModeParams &loop_mode_param,
                        bool copy_in) {
@@ -254,30 +223,19 @@ void CreateNddmaCall(const TPipe &tpipe, const Tensor &input, const Tensor &outp
   CreateOuterFor(tpipe, repeats, ss1, ss, 0UL);
 }
 
-void BuildDataCopyApiParamInCVFusion(const TPipe &tpipe, CodegenApiParam &api_param,
-                                     DmaSpecificParams &dma_specific_params, const Tensor &gm, const Tensor &ub,
-                                     std::string &dtype_name, bool copy_in) {
+void BuildDataCopyApiParamInCVFusion(CodegenApiParam &api_param, DmaSpecificParams &dma_specific_params,
+                                     const Tensor &gm, const Tensor &ub, std::string &dtype_name, bool copy_in) {
   api_param.template_params.emplace_back("AscendC::PaddingMode::Normal");
   dma_specific_params.data_copy_params.valid = true;  // 标记数据有效
   dma_specific_params.data_copy_params.block_count = CombinedExprFactory::SymbolVar("curAivM");
   if (copy_in) {
     api_param.input_params.emplace_back(gm.Str(), true, CombinedExprFactory::SymbolVar("offset"));
     api_param.output_params.emplace_back(ub.Str(), true, CombinedExprFactory::Constant(0));
-    if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
-      const auto aligned_n = "KernelUtils::BlkAlign<" + dtype_name + ">(curAivN)";
-      dma_specific_params.data_copy_params.block_len = CombinedExprFactory::SymbolVar("curAivN");
-      dma_specific_params.data_copy_params.src_stride =
-          CombinedExpression(ExprItemFactory::SymbolVar("shapeN"), ExprItemFactory::SymbolVar("curAivN"), "-");
-      dma_specific_params.data_copy_params.dst_stride =
-          CombinedExpression(ExprItemFactory::SymbolVar(aligned_n), ExprItemFactory::SymbolVar("curAivN"), "-");
-    } else {
-      dma_specific_params.data_copy_params.block_len = CombinedExprFactory::SymbolVar("load_block_len");
-      dma_specific_params.data_copy_params.src_stride = CombinedExprFactory::SymbolVar("load_src_stride");
-      dma_specific_params.data_copy_params.dst_stride = CombinedExprFactory::SymbolVar("load_dst_stride");
-    }
+    dma_specific_params.data_copy_params.block_len = CombinedExprFactory::SymbolVar("load_block_len");
+    dma_specific_params.data_copy_params.src_stride = CombinedExprFactory::SymbolVar("load_src_stride");
+    dma_specific_params.data_copy_params.dst_stride = CombinedExprFactory::SymbolVar("load_dst_stride");
     int dtype_size = GetSizeByDataType(gm.dtype);
-    if (tpipe.cv_fusion_type != ascir::CubeTemplateType::kUBFuse &&
-        (dtype_size == 1 || dtype_size == 2 || dtype_size == 4)) {
+    if (dtype_size == 1 || dtype_size == 2 || dtype_size == 4) {
       // LoadAlign仅支持字节大小为1、2、4的数据类型，否则GatherMask编译错误。
       // 超过4字节的数据类型，CV融合场景下目前一定是对齐拷入的，不需要RemovePad。
       std::stringstream ss;
@@ -297,10 +255,8 @@ void BuildDataCopyApiParamInCVFusion(const TPipe &tpipe, CodegenApiParam &api_pa
   } else {
     api_param.output_params.emplace_back(gm.Str(), true, CombinedExprFactory::SymbolVar("offset"));
     api_param.input_params.emplace_back(ub.Str(), true, CombinedExprFactory::Constant(0));
-    const auto aligned_n = "KernelUtils::BlkAlign<" + dtype_name + ">(curAivN)";
     dma_specific_params.data_copy_params.block_len = CombinedExprFactory::SymbolVar("curAivN");
-    dma_specific_params.data_copy_params.src_stride =
-        CombinedExpression(ExprItemFactory::SymbolVar(aligned_n), ExprItemFactory::SymbolVar("curAivN"), "-");
+    dma_specific_params.data_copy_params.src_stride = CombinedExprFactory::Constant(0);
     // dst_stride = shapeN - curAivN
     dma_specific_params.data_copy_params.dst_stride =
         CombinedExpression(ExprItemFactory::SymbolVar("shapeN"), ExprItemFactory::SymbolVar("curAivN"), "-");

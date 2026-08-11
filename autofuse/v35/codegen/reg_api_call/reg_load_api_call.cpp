@@ -23,6 +23,10 @@
 using namespace af::ops;
 using namespace af::ascir_op;
 
+namespace {
+constexpr size_t kDmaMaxLen = 2U;
+constexpr size_t kFourAxisNum = 4U;
+}  // namespace
 namespace codegen {
 Status LoadRegApiCall::ParseAttr(const ascir::NodeView &node) {
   (void)node->attr.ir_attr->GetAttrValue("offset", offset_);
@@ -42,7 +46,7 @@ Status LoadRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<ascir
   api_param->template_params.emplace_back(dtype_name);
   DmaSpecificParams dma_specific_params;
   if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse && !ub.is_ub_scalar) {
-    BuildDataCopyApiParamInCVFusion(tpipe, *api_param, dma_specific_params, gm, ub, dtype_name, true);
+    BuildDataCopyApiParamInCVFusion(*api_param, dma_specific_params, gm, ub, dtype_name, true);
   } else {
     std::string gm_offset = ub.is_ub_scalar ? "0" : tpipe.tiler.Offset(current_axis, ub.axis, ub.axis_strides);
     gm_offset = gm_offset + " + " + tpipe.tiler.Size(offset_);

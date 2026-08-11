@@ -1174,20 +1174,6 @@ TEST_F(TestCodegenTiling, NoWorkspaceTest) {
                         "}\n"});
 }
 
-TEST_F(TestCodegenTiling, PrepareMatMulAttrsShouldUseDefaultOpImplModeForMatMulV3) {
-  codegen::MatMulCubeInfo cube_info;
-  cube_info.is_batch = false;
-  cube_info.enable_hf32 = 0;
-
-  std::vector<codegen::AttrInfo> attrs;
-  PrepareMatMulAttrs(cube_info, attrs);
-
-  ASSERT_GT(attrs.size(), 3U);
-  EXPECT_EQ(attrs[3].name, "opImplMode");
-  EXPECT_EQ(attrs[3].dtype, "int");
-  EXPECT_EQ(attrs[3].value_int, 1);
-}
-
 TEST_F(TestCodegenTiling, SingleGroupWorkspaceSymbolTest) {
   ascir::ImplGraph graph0("test_graph0");
   auto s0 = graph0.CreateSizeVar("s0");
@@ -3174,10 +3160,11 @@ TEST_F(TestCodegenTiling, GenerateForInductorCvFusionShouldEmitCvTilingAndCubeWr
   auto tiling_files = this->GenerateForInductor(fused_schedule_result);
   ASSERT_TRUE(tiling_files.find(codegen::kTilingDefAndConstIdentify) != tiling_files.end());
   ASSERT_TRUE(tiling_files.find(codegen::kTilingApiHeaderIdentify) != tiling_files.end());
-  ASSERT_TRUE(tiling_files.find(codegen::kTilingHeadIdentify) != tiling_files.end());
   ASSERT_TRUE(tiling_files.find(codegen::kCubeKernelTilingWrapperHpp) != tiling_files.end());
   ASSERT_TRUE(tiling_files.find(codegen::kCubeKernelTilingWrapperCpp) != tiling_files.end());
   EXPECT_TRUE(tiling_files.find("TilingDataLog") == tiling_files.end());
+  EXPECT_NE(tiling_files.at(codegen::kCubeKernelTilingWrapperCpp).find("#include \"autofuse_tiling_func_log.h\""),
+            std::string::npos);
 
   const auto &tiling_impl = tiling_files.at(codegen::kTilingDefAndConstIdentify);
   const auto &api_header = tiling_files.at(codegen::kTilingApiHeaderIdentify);
@@ -3210,8 +3197,7 @@ void set_g_basen_basem_align(int32_t value) {
   EXPECT_EQ(tiling_impl.find("#include \"autofuse_cube_tiling_data.h\""), std::string::npos);
   EXPECT_NE(tiling_impl.find("#include \"cube_kernel_tiling_wrapper.h\""), std::string::npos);
   ExpectSystemHeaders(
-      tiling_impl,
-      {"algorithm", "cfloat", "cstddef", "cstdint", "cstring", "iomanip", "ostream", "sstream", "string", "vector"},
+      tiling_impl, {"algorithm", "cfloat", "cstddef", "cstdint", "cstring", "ostream", "sstream", "string", "vector"},
       {"array", "cmath", "cstdlib", "functional", "map", "memory", "unordered_map", "utility"});
 }
 
@@ -3221,11 +3207,15 @@ TEST_F(TestCodegenTiling, CubeWrapperShouldPreserveTilingDataBytes) {
   const auto matmul_tiling_header_pos = wrapper_hpp.find("#include \"arch35/mat_mul_tiling_data.h\"");
   const auto autofuse_namespace_pos = wrapper_hpp.find("namespace autofuse {");
   EXPECT_NE(wrapper_hpp.find("std::vector<uint8_t> tiling_data;"), std::string::npos);
+  EXPECT_NE(wrapper_hpp.find("#include <cmath>"), std::string::npos);
+  EXPECT_NE(wrapper_hpp.find("#include <limits>"), std::string::npos);
   ASSERT_NE(matmul_tiling_header_pos, std::string::npos);
   ASSERT_NE(autofuse_namespace_pos, std::string::npos);
   EXPECT_LT(matmul_tiling_header_pos, autofuse_namespace_pos);
-  EXPECT_NE(wrapper_cpp.find("result.tiling_data.assign"), std::string::npos);
-  EXPECT_NE(wrapper_cpp.find("raw_tiling_data->GetDataSize()"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("result.tiling_data.push_back"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("result.tiling_data = AlignTilingDataTo8Bytes"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
+  EXPECT_EQ(wrapper_cpp.find("autofuse_tiling_data_log.h"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, MultiGroupInductorShouldContainTopnMainOutputAbi) {

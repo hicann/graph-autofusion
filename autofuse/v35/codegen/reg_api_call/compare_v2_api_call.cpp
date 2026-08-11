@@ -21,7 +21,6 @@
 #include "api_call/utils/api_call_utils.h"
 #include "ascir_node_param/ascir_node_param.h"
 #include "codegen/expression_convert_struct.h"
-#include "reg_api_call_utils.h"
 
 namespace codegen {
 using namespace std;
@@ -126,7 +125,6 @@ Status CompareV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::A
   }
 
   if (x2.IsAnyScalar()) {
-    const std::string actual_size = x1.actual_size.Str();
     ub_inputs.push_back(x1);
     ub_outputs.push_back(y);
     bool status = GenerateVectorizedAxisMergeStatus(ub_inputs, ub_outputs, merge_info, tpipe);
@@ -140,22 +138,14 @@ Status CompareV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::A
     GE_ASSERT_SUCCESS(
         FillCompareNodeParams(this->node, true, outer_call_count, output_dims, output_strides, input_strides));
     std::string scalar_local_blk_tensor_name_x2 = x2.IsConstScalar() ? "local_blk_tensor_of_" + x2.name : x2.name;
+    scalar_local_blk_tensor_name_x2 = scalar_local_blk_tensor_name_x2;
     size_t outer_repeats_size = param.outer_repeats.size();
     if (outer_repeats_size == 0U) {
-      if (IsCVFusionStage(this->api_call_context)) {
-        const auto cv_params = BuildCvApi2DParams(tpipe, x1, y);
-        ss << "CompareScalarExtend<" << dtype_name << ", 2, CMPMODE::" << this->api_name_ << ">(" << y << "["
-           << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x1 << "["
-           << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], " << x2_scalar << ", "
-           << GenCvUint16Dims(cv_params) << ", " << GenCvUint16Stride(cv_params.output_stride) << ", "
-           << GenCvUint16Stride(cv_params.input_stride) << ");" << std::endl;
-      } else {
-        ss << "CompareScalarExtend<" << dtype_name << ", 1, CMPMODE::" << this->api_name_ << ">(" << y << "["
-           << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x1 << "["
-           << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], " << x2_scalar << ", "
-           << "{static_cast<uint16_t>(" << actual_size << ")}, {static_cast<uint16_t>(1)}, {static_cast<uint16_t>(1)});"
-           << std::endl;
-      }
+      ss << "CompareScalarExtend<" << dtype_name << ", 1, CMPMODE::" << this->api_name_ << ">(" << y << "["
+         << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x1 << "["
+         << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], " << x2_scalar << ", "
+         << "{static_cast<uint16_t>(" << x1.actual_size
+         << ")}, {static_cast<uint16_t>(1)}, {static_cast<uint16_t>(1)});" << std::endl;
     } else {
       std::stringstream ss1;
       size_t input0_strides_size = param.inputs_strides[0].size();
@@ -180,7 +170,6 @@ Status CompareV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::A
       CreateComputeNodeOuterForIfRequired(outer_repeats_size, param, ss1, ss);
     }
   } else {
-    const std::string actual_size = x1.actual_size.Str();
     ub_inputs.push_back(x1);
     ub_inputs.push_back(x2);
     ub_outputs.push_back(y);
@@ -196,22 +185,12 @@ Status CompareV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::A
         FillCompareNodeParams(this->node, false, outer_call_count, output_dims, output_strides, input_strides));
     size_t outer_repeats_size = param.outer_repeats.size();
     if (outer_repeats_size == 0U) {
-      if (IsCVFusionStage(this->api_call_context)) {
-        const auto cv_params = BuildCvApi2DParams(tpipe, x1, y);
-        ss << "CompareExtend<" << dtype_name << ", 2, CMPMODE::" << this->api_name_ << ">(" << y << "["
-           << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x1 << "["
-           << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], " << x2 << "["
-           << tpipe.tiler.TensorVectorizedOffset(current_axis, x2) << "], " << GenCvUint16Dims(cv_params) << ", "
-           << GenCvUint16Stride(cv_params.output_stride) << ", " << GenCvUint16Stride(cv_params.input_stride) << ");"
-           << std::endl;
-      } else {
-        ss << "CompareExtend<" << dtype_name << ", 1, CMPMODE::" << this->api_name_ << ">(" << y << "["
-           << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x1 << "["
-           << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], " << x2 << "["
-           << tpipe.tiler.TensorVectorizedOffset(current_axis, x2) << "], "
-           << "{static_cast<uint16_t>(" << actual_size << ")}, {static_cast<uint16_t>(1)}, {static_cast<uint16_t>(1)});"
-           << std::endl;
-      }
+      ss << "CompareExtend<" << dtype_name << ", 1, CMPMODE::" << this->api_name_ << ">(" << y << "["
+         << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x1 << "["
+         << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], " << x2 << "["
+         << tpipe.tiler.TensorVectorizedOffset(current_axis, x2) << "], "
+         << "{static_cast<uint16_t>(" << x1.actual_size
+         << ")}, {static_cast<uint16_t>(1)}, {static_cast<uint16_t>(1)});" << std::endl;
     } else {
       size_t input0_strides_size = param.inputs_strides[0].size();
       std::vector<ascir::SizeExpr> inner0_input_strides(param.inputs_strides[0].begin(),

@@ -114,9 +114,9 @@ void GetOuterForStride(const std::vector<std::vector<ascir::SizeExpr>> &origin_s
 }
 
 // 生成vf函数体时，用于处理vf函数入参中的main scalar
-void CreateVFCallDimAndStrideParmas(const TPipe &tpipe, const std::vector<Tensor> &inputs,
-                                    const std::vector<Tensor> &inputs_scalar, const std::vector<Tensor> &outputs,
-                                    const VectorizedAxisLoopMergeStatus &merge_info, std::stringstream &ss) {
+void CreateVFCallDimAndStrideParmas(const std::vector<Tensor> &inputs, const std::vector<Tensor> &inputs_scalar,
+                                    const std::vector<Tensor> &outputs, const VectorizedAxisLoopMergeStatus &merge_info,
+                                    std::stringstream &ss) {
   string dtype_name;
   for (const auto &output : outputs) {
     Tensor::DtypeName(output.dtype, dtype_name);
@@ -131,12 +131,6 @@ void CreateVFCallDimAndStrideParmas(const TPipe &tpipe, const std::vector<Tensor
   for (const auto &in_scalar : inputs_scalar) {
     Tensor::DtypeName(in_scalar.dtype, dtype_name);
     ss << dtype_name << " " << in_scalar << ", ";
-  }
-
-  if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
-    ss << GenCvUbFuseVfFuncDimParams() << ", ";
-    ParamPostProcess(ss);
-    return;
   }
 
   size_t dim_size = merge_info.merge_repeats_str.size();
@@ -158,12 +152,6 @@ void CreateVFCallDimAndStrideParmas(const TPipe &tpipe, const std::vector<Tensor
 // 生成函数调用入参
 void CreateDimAndStrideParmas(const TPipe &tpipe, const VectorizedAxisLoopMergeStatus &merge_info,
                               std::stringstream &ss) {
-  if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
-    ss << GenCvUbFuseVfCallDimParams() << ", ";
-    ParamPostProcess(ss);
-    return;
-  }
-
   // 生成输入dims
   size_t dim_size = merge_info.merge_repeats_str.size();
   size_t start_idx = dim_size <= kVFMaxLoop ? 0 : dim_size - kVFMaxLoop;
@@ -446,87 +434,6 @@ void GenerateTensorDefs(const TPipe &tpipe, const TensorManager &tensor_mgr, con
   }
 }
 
-void GenerateVfCallFuncHeader(const TPipe &tpipe, const std::string &vf_call_name, const std::vector<Tensor> &inputs,
-                              const std::vector<Tensor> &scalar_inputs, const std::vector<Tensor> &outputs,
-                              const VectorizedAxisLoopMergeStatus &merge_info, std::stringstream &ss) {
-  ss << "#if defined(__DAV_C310__) || (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510))"
-     << std::endl;
-  ss << "\ninline __simd_vf__ void " << vf_call_name << "(";
-  CreateVFCallDimAndStrideParmas(tpipe, inputs, scalar_inputs, outputs, merge_info, ss);
-  ss << ")" << std::endl;
-}
-
-void GenerateVfCallLoopParams(const TPipe &tpipe, const std::string &max_dtype_size, int32_t stride_depth,
-                              const VectorizedAxisLoopMergeStatus &merge_info, std::stringstream &params) {
-  if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
-    params << "  constexpr static uint32_t VECTOR_LENGTH = AscendC::GetVecLen();\n";
-    params << "  constexpr static uint32_t SIZE_OF_DTYPE = sizeof(" << max_dtype_size << ");\n";
-    params << "  constexpr static uint32_t ELEMENT_PER_VECTOR_LENGTH = VECTOR_LENGTH / SIZE_OF_DTYPE;\n";
-    params << "  uint32_t element_count = static_cast<uint32_t>(curAivN);\n";
-    params << "  uint16_t loop_times = static_cast<uint16_t>((element_count + ELEMENT_PER_VECTOR_LENGTH - 1) / "
-              "ELEMENT_PER_VECTOR_LENGTH);\n";
-    return;
-  }
-  GenerateVectorFuncParams(max_dtype_size, stride_depth, merge_info.merge_axis_ids, params);
-}
-
-void GenerateLocalMemTensorPtrs(const std::vector<Tensor> &outputs, const std::vector<Tensor> &inputs,
-                                std::stringstream &vf_body) {
-  std::string dtype_name;
-  for (const auto &output : outputs) {
-    Tensor::DtypeName(output.dtype, dtype_name);
-    vf_body << "    " << "__local_mem__ " << dtype_name << " *" << output << " = "
-            << "(__local_mem__ " << dtype_name << " *)" << output << "_addr" << ";\n";
-  }
-
-  for (const auto &input : inputs) {
-    Tensor::DtypeName(input.dtype, dtype_name);
-    vf_body << "    " << "__local_mem__ " << dtype_name << " *" << input << " = "
-            << "(__local_mem__ " << dtype_name << " *)" << input << "_addr" << ";\n";
-  }
-}
-
-void GenerateVfCallBodyPreamble(const TPipe &tpipe, const TensorManager &tensor_mgr, const VFLoop &root_loop,
-                                const std::vector<Tensor> &outputs, const std::vector<Tensor> &inputs,
-                                const std::string &max_dtype_size, std::stringstream &vf_body) {
-  GenerateLocalMemTensorPtrs(outputs, inputs, vf_body);
-  GenerateTensorDefs(tpipe, tensor_mgr, root_loop, vf_body);
-  vf_body << "\nAscendC::MicroAPI::MaskReg preg_main = AscendC::MicroAPI::CreateMask<" << max_dtype_size
-          << ", AscendC::MicroAPI::MaskPattern::ALL>();\n";
-  vf_body << "AscendC::MicroAPI::MaskReg preg_vl1 = AscendC::MicroAPI::CreateMask<" << max_dtype_size
-          << ", AscendC::MicroAPI::MaskPattern::VL1>();\n";
-}
-
-af::Status UpdateVectorFuncNodeParams(const af::AscNodePtr &node, const VectorizedAxisLoopMergeStatus &merge_info,
-                                      const std::vector<ge::Expression> &all_strides);
-
-Status GenerateVfCallLoopBody(const TPipe &tpipe, const TensorManager &tensor_mgr, const VFLoop &root_loop,
-                              int32_t stride_depth, const VectorizedAxisLoopMergeStatus &merge_info,
-                              const std::vector<Tensor> &inputs, const std::vector<Tensor> &outputs,
-                              const af::AscNodePtr &node, std::stringstream &params, std::stringstream &vf_body) {
-  std::string loop_body;
-  std::string loop_size;
-  int32_t only_loop_max_depth = -1;
-  std::vector<std::string> loop_size_vec;
-  if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
-    root_loop.GenerateCvUbFuse(tpipe, tensor_mgr, loop_body, loop_size);
-  } else {
-    root_loop.Generate(tpipe, tensor_mgr, stride_depth, loop_body, loop_size, only_loop_max_depth, loop_size_vec);
-  }
-  const bool is_double_loop = tpipe.cv_fusion_type != ascir::CubeTemplateType::kUBFuse &&
-                              stride_depth == MAX_VF_AXIS_MERGE_SIZE - 1 &&
-                              only_loop_max_depth == MAX_VF_AXIS_MERGE_SIZE - 1;
-  std::vector<ge::Expression> all_strides;
-  params << std::endl << loop_size << std::endl;
-  if (is_double_loop) {  // 假如stride_depth为1即两层循环，那实际上loop里递归了三次，分别是0、1、2，在2里单独处理call
-    GenerateStridesEqualCheck(inputs, outputs, merge_info, all_strides, params);
-    OptimizeMergeParamsAndLoopSize(loop_size_vec, params);
-    GE_ASSERT_SUCCESS(UpdateVectorFuncNodeParams(node, merge_info, all_strides));
-  }
-  vf_body << std::endl << loop_body << std::endl;
-  return af::SUCCESS;
-}
-
 af::Status UpdateVectorFuncNodeParams(const af::AscNodePtr &node, const VectorizedAxisLoopMergeStatus &merge_info,
                                       const std::vector<ge::Expression> &all_strides) {
   GE_ASSERT_NOTNULL(node);
@@ -552,8 +459,11 @@ Status VfCall::GenerateFuncDefinition(const TPipe &tpipe, const Tiler &tiler, st
   bool status = GenerateVectorizedAxisMergeStatus(this->ub_inputs_, this->ub_outputs_, merge_info, tpipe);
   GE_ASSERT_TRUE(status, "GenerateVectorizedAxisMergeStatus failed");
 
-  GenerateVfCallFuncHeader(tpipe, this->vf_call_name_, this->ub_inputs_, this->scalar_inputs_, this->ub_outputs_,
-                           merge_info, ss);
+  ss << "#if defined(__DAV_C310__) || (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510))"
+     << std::endl;
+  ss << "\ninline __simd_vf__ void " << this->vf_call_name_ << "(";
+  CreateVFCallDimAndStrideParmas(this->ub_inputs_, this->scalar_inputs_, this->ub_outputs_, merge_info, ss);
+  ss << ")" << std::endl;
 
   // func body
   std::stringstream params;
@@ -566,11 +476,44 @@ Status VfCall::GenerateFuncDefinition(const TPipe &tpipe, const Tiler &tiler, st
   //   uint32_t element_count = static_cast<uint32_t>(output_dims_0);
   //   uint16_t loop_times = static_cast<uint16_t>((element_count + ELEMENT_PER_VECTOR_LENGTH - 1) /
   //   ELEMENT_PER_VECTOR_LENGTH);
-  GenerateVfCallLoopParams(tpipe, max_dtype_size_, stride_depth, merge_info, params);
-  GenerateVfCallBodyPreamble(tpipe, tensor_mgr_, root_loop_, this->ub_outputs_, this->ub_inputs_, max_dtype_size_,
-                             vf_body);
-  GE_ASSERT_SUCCESS(GenerateVfCallLoopBody(tpipe, tensor_mgr_, root_loop_, stride_depth, merge_info, this->ub_inputs_,
-                                           this->ub_outputs_, node, params, vf_body));
+  GenerateVectorFuncParams(max_dtype_size_, stride_depth, merge_info.merge_axis_ids, params);
+
+  std::string dtype_name;
+  for (const auto &output : this->ub_outputs_) {
+    Tensor::DtypeName(output.dtype, dtype_name);
+    vf_body << "    " << "__local_mem__ " << dtype_name << " *" << output << " = "
+            << "(__local_mem__ " << dtype_name << " *)" << output << "_addr" << ";\n";
+  }
+
+  for (const auto &input : this->ub_inputs_) {
+    Tensor::DtypeName(input.dtype, dtype_name);
+    vf_body << "    " << "__local_mem__ " << dtype_name << " *" << input << " = "
+            << "(__local_mem__ " << dtype_name << " *)" << input << "_addr" << ";\n";
+  }
+
+  GenerateTensorDefs(tpipe, tensor_mgr_, root_loop_, vf_body);
+
+  // define preg_main and preg_vl1
+  vf_body << "\nAscendC::MicroAPI::MaskReg preg_main = AscendC::MicroAPI::CreateMask<" << max_dtype_size_
+          << ", AscendC::MicroAPI::MaskPattern::ALL>();\n";
+  vf_body << "AscendC::MicroAPI::MaskReg preg_vl1 = AscendC::MicroAPI::CreateMask<" << max_dtype_size_
+          << ", AscendC::MicroAPI::MaskPattern::VL1>();\n";
+
+  std::string loop_body;
+  std::string loop_size;
+  int32_t only_loop_max_depth = -1;
+  std::vector<std::string> loop_size_vec;
+  root_loop_.Generate(tpipe, tensor_mgr_, stride_depth, loop_body, loop_size, only_loop_max_depth, loop_size_vec);
+  const bool is_double_loop =
+      stride_depth == MAX_VF_AXIS_MERGE_SIZE - 1 && only_loop_max_depth == MAX_VF_AXIS_MERGE_SIZE - 1;
+  std::vector<ge::Expression> all_strides;
+  params << std::endl << loop_size << std::endl;
+  if (is_double_loop) {  // 假如stride_depth为1即两层循环，那实际上loop里递归了三次，分别是0、1、2，在2里单独处理call
+    GenerateStridesEqualCheck(this->ub_inputs_, this->ub_outputs_, merge_info, all_strides, params);
+    OptimizeMergeParamsAndLoopSize(loop_size_vec, params);
+    GE_ASSERT_SUCCESS(UpdateVectorFuncNodeParams(node, merge_info, all_strides));
+  }
+  vf_body << std::endl << loop_body << std::endl;
   GetVFCallFuncBody(params.str(), vf_body.str(), ss);
   ss << "#endif" << std::endl;
 
