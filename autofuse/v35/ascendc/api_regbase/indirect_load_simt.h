@@ -33,17 +33,29 @@ struct IndirectLoadSimtOffset {
   }
 };
 
+template <int32_t Dim, int32_t Rank>
+struct IndirectLoadSimtIndexOffset {
+  __simt_callee__ __aicore__ inline static int64_t Call(int64_t linear_index, const int64_t *shape) {
+    int64_t index_offset = linear_index % shape[Dim] * shape[2 * Rank + Dim];
+    if constexpr (Dim > 0) {
+      index_offset += IndirectLoadSimtIndexOffset<Dim - 1, Rank>::Call(linear_index / shape[Dim], shape);
+    }
+    return index_offset;
+  }
+};
+
 template <typename X, typename Y, int32_t Rank, int32_t Axis, typename FusedBody, typename Context,
           typename... ShapeArgs>
 __simt_vf__ __aicore__ LAUNCH_BOUND(kIndirectLoadSimtThreadNum) inline void IndirectLoadSimtKernel(
     __gm__ X *x, __gm__ Y *y, Context context, uint32_t actual_size, int64_t output_offset, int64_t x_axis_size,
     ShapeArgs... shape_args) {
   static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMT rank or axis is invalid.");
-  static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(2 * Rank), "IndirectLoad SIMT shape is invalid.");
+  static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(3 * Rank), "IndirectLoad SIMT shape is invalid.");
   const int64_t shape[] = {static_cast<int64_t>(shape_args)...};
   for (uint32_t i = threadIdx.x; i < actual_size; i += blockDim.x) {
     const int64_t output_index = output_offset + i;
-    const int64_t indirect_index = static_cast<int64_t>(FusedBody::Index(output_index, context));
+    const int64_t index_offset = IndirectLoadSimtIndexOffset<Rank - 1, Rank>::Call(output_index, shape);
+    const int64_t indirect_index = static_cast<int64_t>(FusedBody::Index(index_offset, context));
     if (unlikely(indirect_index < 0 || indirect_index >= x_axis_size)) {
       y[output_index] = static_cast<Y>(0);
       continue;
@@ -74,11 +86,12 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(kIndirectLoadSimtThreadNum) inline void Indi
     __gm__ X *x, __ubuf__ Y *y, Context context, uint32_t actual_size, int64_t output_offset, int64_t x_axis_size,
     ShapeArgs... shape_args) {
   static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMT rank or axis is invalid.");
-  static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(2 * Rank), "IndirectLoad SIMT shape is invalid.");
+  static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(3 * Rank), "IndirectLoad SIMT shape is invalid.");
   const int64_t shape[] = {static_cast<int64_t>(shape_args)...};
   for (uint32_t i = threadIdx.x; i < actual_size; i += blockDim.x) {
     const int64_t output_index = output_offset + i;
-    const int64_t indirect_index = static_cast<int64_t>(FusedBody::Index(output_index, context));
+    const int64_t index_offset = IndirectLoadSimtIndexOffset<Rank - 1, Rank>::Call(output_index, shape);
+    const int64_t indirect_index = static_cast<int64_t>(FusedBody::Index(index_offset, context));
     if (unlikely(indirect_index < 0 || indirect_index >= x_axis_size)) {
       y[i] = static_cast<Y>(0);
       continue;

@@ -45,6 +45,7 @@ struct IndirectLoadInfo {
   bool active = false;
   af::AscNodePtr reduce;
   af::AscNodePtr reduce_input;
+  std::vector<af::AscNodePtr> aligned_strided_path;
   ascgen_utils::indirect_load::TemplateAxes axes;
 };
 

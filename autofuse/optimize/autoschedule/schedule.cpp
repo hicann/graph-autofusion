@@ -12,6 +12,7 @@
 #include <numeric>
 #include "alignment_handler.h"
 #include "indirect_load_utils.h"
+#include "platform/common/base_alignment_strategy.h"
 #include "schedule_utils.h"
 #include "node_cache_marker.h"
 
@@ -547,28 +548,60 @@ Status ApplyIndirectLoadTemplateMerge(ascir::ImplGraph &graph, const af::AscNode
   return af::SUCCESS;
 }
 
+Status SetInputInnerVectorizedView(const af::AscNodePtr &node, const ascir::Axis &input_inner_axis,
+                                   af::AscTensorAttr &attr) {
+  GE_ASSERT_TRUE(attr.axis.size() == attr.repeats.size() && attr.axis.size() == attr.strides.size(),
+                 "IndirectLoad input-pre node[%s] has invalid tensor view.", node->GetNamePtr());
+  std::vector<ascir::AxisId> vectorized_axes;
+  if (std::find(attr.axis.begin(), attr.axis.end(), input_inner_axis.id) != attr.axis.end()) {
+    vectorized_axes.emplace_back(input_inner_axis.id);
+  } else if (input_inner_axis.type == ascir::Axis::Type::kAxisTypeMerged) {
+    for (const ascir::AxisId tensor_axis : attr.axis) {
+      if (std::find(input_inner_axis.from.begin(), input_inner_axis.from.end(), tensor_axis) !=
+          input_inner_axis.from.end()) {
+        vectorized_axes.emplace_back(tensor_axis);
+      }
+    }
+    GE_ASSERT_TRUE(vectorized_axes.size() == input_inner_axis.from.size(),
+                   "Cannot map input inner axis[%ld] to tensor axes for node[%s].", input_inner_axis.id,
+                   node->GetNamePtr());
+  }
+  GE_ASSERT_TRUE(!vectorized_axes.empty(), "Input inner axis[%ld] is not in node[%s]'s output tensor.",
+                 input_inner_axis.id, node->GetNamePtr());
+
+  attr.vectorized_axis = std::move(vectorized_axes);
+  attr.vectorized_strides.clear();
+  attr.vectorized_strides.reserve(attr.vectorized_axis.size());
+  for (const ascir::AxisId vectorized_axis : attr.vectorized_axis) {
+    const auto iter = std::find(attr.axis.begin(), attr.axis.end(), vectorized_axis);
+    GE_ASSERT_TRUE(iter != attr.axis.end(), "Vectorized axis[%ld] is not in node[%s]'s output tensor.", vectorized_axis,
+                   node->GetNamePtr());
+    attr.vectorized_strides.emplace_back(attr.strides[static_cast<size_t>(std::distance(attr.axis.begin(), iter))]);
+  }
+  return af::SUCCESS;
+}
+
 Status ApplyInputInnerVectorizedAxis(ascir::ImplGraph &graph, const af::AscNodePtr &node,
                                      ascir::AxisId input_inner_axis_id) {
   GE_ASSERT_TRUE(input_inner_axis_id != af::kIdNone, "IndirectLoad input inner axis is missing for node[%s].",
                  node->GetNamePtr());
   GE_ASSERT_TRUE(!node->outputs().empty(), "IndirectLoad input-pre node[%s] has no output.", node->GetNamePtr());
-  for (const auto &output : node->outputs()) {
-    output->attr.vectorized_axis = {input_inner_axis_id};
-    output->attr.vectorized_strides = {af::sym::kSymbolOne};
-  }
-
   const auto input_inner_axis = graph.FindAxis(input_inner_axis_id);
   GE_ASSERT_NOTNULL(input_inner_axis, "IndirectLoad input inner axis[%ld] is not found.", input_inner_axis_id);
-  if (input_inner_axis->type != ascir::Axis::Type::kAxisTypeMerged) {
-    return af::SUCCESS;
+  if (input_inner_axis->type == ascir::Axis::Type::kAxisTypeMerged) {
+    GELOGD("[IndirectLoad] Graph[%s] apply input inner vectorized axis[%ld] for node[%s].", graph.GetName().c_str(),
+           input_inner_axis_id, node->GetNamePtr());
+    GE_ASSERT_TRUE(graph.ApplySchedAxisMerge(node, input_inner_axis_id),
+                   "Failed to merge input inner schedule axis[%ld] for node[%s].", input_inner_axis_id,
+                   node->GetNamePtr());
+    GE_ASSERT_TRUE(graph.ApplyTensorAxisMerge(node, input_inner_axis_id),
+                   "Failed to merge input inner tensor axis[%ld] for node[%s].", input_inner_axis_id,
+                   node->GetNamePtr());
   }
-  GELOGD("[IndirectLoad] Graph[%s] apply input inner vectorized axis[%ld] for node[%s].", graph.GetName().c_str(),
-         input_inner_axis_id, node->GetNamePtr());
-  GE_ASSERT_TRUE(graph.ApplySchedAxisMerge(node, input_inner_axis_id),
-                 "Failed to merge input inner schedule axis[%ld] for node[%s].", input_inner_axis_id,
-                 node->GetNamePtr());
-  GE_ASSERT_TRUE(graph.ApplyTensorAxisMerge(node, input_inner_axis_id),
-                 "Failed to merge input inner tensor axis[%ld] for node[%s].", input_inner_axis_id, node->GetNamePtr());
+
+  for (const auto &output : node->outputs()) {
+    GE_ASSERT_SUCCESS(SetInputInnerVectorizedView(node, *input_inner_axis, output->attr));
+  }
   return af::SUCCESS;
 }
 
@@ -613,6 +646,14 @@ Status Scheduler::InitIndirectLoadScheduleCase() {
   const af::AscNodePtr indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(graph_);
   if (indirect_load == nullptr) {
     return af::SUCCESS;
+  }
+
+  for (const af::AscNodePtr &node : graph_.GetAllNodes()) {
+    const auto role = ascgen_utils::indirect_load::GetTemplateRole(node);
+    if (role == ascgen_utils::indirect_load::TemplateRole::kStridedUbPath ||
+        role == ascgen_utils::indirect_load::TemplateRole::kSimdInputPreStridedUbPath) {
+      indirect_load_info_.aligned_strided_path.emplace_back(node);
+    }
   }
   GE_ASSERT_NOTNULL(tiling_case_.ub_tiling_y.first);
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, indirect_load_info_.axes));
@@ -751,6 +792,14 @@ Status Scheduler::DoScheduler() {
   }
   GE_ASSERT_SUCCESS(NodeCacheMarker(graph_).MarkIfNodeNeedsCache());
   GE_ASSERT_SUCCESS(AlignmentHandler::ModifyVectorizedStrides(graph_));
+  for (const af::AscNodePtr &node : indirect_load_info_.aligned_strided_path) {
+    for (const auto &output : node->outputs()) {
+      if (!output->attr.vectorized_axis.empty()) {
+        GE_ASSERT_SUCCESS(
+            BaseAlignmentStrategy::SetVectorizedStridesForTensor(node, output->attr, AlignmentType::kAligned));
+      }
+    }
+  }
   ascir::utils::DumpGraph(graph_, "AfterDoTiling");
   return af::SUCCESS;
 }

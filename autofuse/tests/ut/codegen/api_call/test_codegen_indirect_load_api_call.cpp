@@ -681,11 +681,16 @@ void AnnotateSimdTemplate(af::AscGraph &graph) {
   const af::Expression One = af::sym::kSymbolOne;
   TemplateLogicalView view;
   view.input.axis_ids = {axes[0]->id, axes[1]->id};
+  view.input.sizes = {graph.FindAxis(axes[0]->id)->size, graph.FindAxis(axes[1]->id)->size};
   view.input.strides = {graph.FindAxis(axes[1]->id)->size, One};
   view.index.axis_ids = {axes[2]->id, axes[3]->id};
+  view.index.sizes = {graph.FindAxis(axes[2]->id)->size, graph.FindAxis(axes[3]->id)->size};
   view.index.strides = {graph.FindAxis(axes[3]->id)->size, One};
   view.output.axis_ids = {axes[2]->id, axes[3]->id};
+  view.output.sizes = {graph.FindAxis(axes[2]->id)->size, graph.FindAxis(axes[3]->id)->size};
   view.output.strides = {graph.FindAxis(axes[3]->id)->size, One};
+  ASSERT_EQ(ClassifyIndirectLoadLayout(view.input, view.input), af::SUCCESS);
+  ASSERT_EQ(ClassifyIndirectLoadLayout(view.index, view.index), af::SUCCESS);
   ASSERT_EQ(SetTemplateLogicalView(il, view), af::SUCCESS);
 }
 
@@ -724,11 +729,16 @@ void AnnotateSimtTemplate(af::AscGraph &graph) {
   const af::Expression One = af::sym::kSymbolOne;
   TemplateLogicalView view;
   view.input.axis_ids = {axes[0]->id, axes[1]->id};
+  view.input.sizes = {graph.FindAxis(axes[0]->id)->size, graph.FindAxis(axes[1]->id)->size};
   view.input.strides = {graph.FindAxis(axes[1]->id)->size, One};
   view.index.axis_ids = {axes[2]->id, axes[3]->id};
+  view.index.sizes = {graph.FindAxis(axes[2]->id)->size, graph.FindAxis(axes[3]->id)->size};
   view.index.strides = {graph.FindAxis(axes[3]->id)->size, One};
   view.output.axis_ids = {axes[2]->id, axes[3]->id};
+  view.output.sizes = {graph.FindAxis(axes[2]->id)->size, graph.FindAxis(axes[3]->id)->size};
   view.output.strides = {graph.FindAxis(axes[3]->id)->size, One};
+  ASSERT_EQ(ClassifyIndirectLoadLayout(view.input, view.input), af::SUCCESS);
+  ASSERT_EQ(ClassifyIndirectLoadLayout(view.index, view.index), af::SUCCESS);
   ASSERT_EQ(SetTemplateLogicalView(il, view), af::SUCCESS);
 }
 

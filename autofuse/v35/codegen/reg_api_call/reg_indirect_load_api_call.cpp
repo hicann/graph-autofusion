@@ -58,12 +58,50 @@ bool IsAxisDerivedFrom(const TPipe &tpipe, ascir::AxisId axis_id, ascir::AxisId 
 
 LogicalTensorInfo BuildLogicalTensorInfo(const ascgen_utils::indirect_load::LogicalTensorView &view,
                                          const TPipe &tpipe) {
+  (void)tpipe;
   LogicalTensorInfo info;
+  info.sizes = view.sizes;
   info.strides = view.strides;
-  for (ascir::AxisId axis_id : view.axis_ids) {
-    info.sizes.emplace_back(tpipe.tiler.GetAxis(axis_id).size);
-  }
   return info;
+}
+
+af::Status BuildTensorWindowInfo(const ascgen_utils::indirect_load::IndirectLoadTensorLayout &layout,
+                                 const Tensor &tensor, size_t axis_pos, const TPipe &tpipe, LogicalTensorInfo &info) {
+  GE_ASSERT_TRUE(layout.axis_ids.size() == layout.sizes.size() && layout.sizes.size() == layout.strides.size(),
+                 "IndirectLoad tensor window layout rank mismatch.");
+  GE_ASSERT_TRUE(axis_pos < layout.sizes.size(), "IndirectLoad tensor window axis is out of range.");
+  GE_ASSERT_TRUE(tensor.vectorized_axis.size() == tensor.vectorized_strides.size(),
+                 "IndirectLoad tensor vectorized axis/stride rank mismatch.");
+  info = BuildLogicalTensorInfo(layout, tpipe);
+  // Dense and zero-stride-compact layouts keep their logical row-major/alias
+  // strides after the local window is built.  A merged vectorized axis may
+  // expose a unit vectorized stride for every source axis; using it directly
+  // would collapse, for example, the [s6, s7] index axes to [1, 1].
+  if (layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
+      layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact) {
+    return af::SUCCESS;
+  }
+  af::Expression compact_stride = af::sym::kSymbolOne;
+  for (size_t index = info.sizes.size(); index > axis_pos; --index) {
+    const size_t dim = index - 1UL;
+    if (af::SymbolicUtils::StaticCheckEq(layout.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      info.strides[dim] = af::sym::kSymbolZero;
+      continue;
+    }
+    const auto vectorized_axis =
+        std::find(tensor.vectorized_axis.begin(), tensor.vectorized_axis.end(), layout.axis_ids[dim]);
+    if (vectorized_axis != tensor.vectorized_axis.end()) {
+      info.strides[dim] =
+          tensor
+              .vectorized_strides[static_cast<size_t>(std::distance(tensor.vectorized_axis.begin(), vectorized_axis))];
+    } else {
+      info.strides[dim] = compact_stride;
+    }
+    if (af::SymbolicUtils::StaticCheckEq(info.strides[dim], af::sym::kSymbolZero) != af::TriBool::kTrue) {
+      compact_stride = af::sym::Mul(info.strides[dim], info.sizes[dim]);
+    }
+  }
+  return af::SUCCESS;
 }
 
 std::string JoinSizeExprs(const std::vector<ascir::SizeExpr> &exprs, const TPipe &tpipe) {
@@ -89,23 +127,37 @@ bool FindCurrentAxisVar(const TPipe &tpipe, const std::vector<ascir::AxisId> &cu
   return false;
 }
 
-af::Status CheckDenseStrides(const LogicalTensorInfo &tensor) {
-  // Current offset generation assumes compact row-major layout. Views such as transpose, slice with gaps,
-  // broadcast stride-0, or padded layouts can be supported later by generating stride-aware offsets.
+af::Status CheckDenseStrides(const LogicalTensorInfo &tensor, const char *tensor_name) {
   af::Expression expected_stride = af::ops::One;
   for (int64_t i = static_cast<int64_t>(tensor.sizes.size()) - 1; i >= 0; --i) {
+    if (af::SymbolicUtils::StaticCheckEq(tensor.sizes[i], af::ops::One) == af::TriBool::kTrue) {
+      continue;
+    }
     GE_ASSERT_TRUE(af::SymbolicUtils::StaticCheckEq(tensor.strides[i], expected_stride) == af::TriBool::kTrue,
-                   "IndirectLoad only supports dense contiguous tensors.");
+                   "IndirectLoad %s must be dense contiguous.", tensor_name);
     expected_stride = af::sym::Mul(expected_stride, tensor.sizes[i]);
   }
   return af::SUCCESS;
 }
 
-af::Status CheckIndirectLoadDenseLayout(const LogicalTensorInfo &input_info, const LogicalTensorInfo &index_info,
-                                        const LogicalTensorInfo &output_info) {
-  GE_ASSERT_SUCCESS(CheckDenseStrides(input_info));
-  GE_ASSERT_SUCCESS(CheckDenseStrides(index_info));
-  GE_ASSERT_SUCCESS(CheckDenseStrides(output_info));
+af::Status CheckIndirectLoadShape(const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
+                                  const Tensor &output_tensor) {
+  const auto &input = logical_view.input;
+  const auto &index = logical_view.index;
+  const auto &output = logical_view.output;
+  GE_ASSERT_TRUE(input.sizes.size() == index.sizes.size(),
+                 "IndirectLoad expects input and index with the same logical rank.");
+  GE_ASSERT_TRUE(index.sizes.size() == output.sizes.size(),
+                 "IndirectLoad index and output must have the same logical rank.");
+  GE_ASSERT_TRUE(input.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported &&
+                     index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported,
+                 "IndirectLoad input or index layout is unsupported.");
+  GE_ASSERT_TRUE(input.sizes.size() == input.strides.size() && index.sizes.size() == index.strides.size(),
+                 "IndirectLoad logical sizes/strides rank mismatch.");
+  GE_ASSERT_SUCCESS(CheckDenseStrides({output.sizes, output.strides}, "output logical view"));
+  GE_ASSERT_TRUE(output_tensor.axis_size.size() == output_tensor.axis_strides.size(),
+                 "IndirectLoad output tensor sizes/strides rank mismatch.");
+  GE_ASSERT_SUCCESS(CheckDenseStrides({output_tensor.axis_size, output_tensor.axis_strides}, "output tensor"));
   return af::SUCCESS;
 }
 
@@ -306,7 +358,7 @@ Status IndirectLoadRegApiCall::ParseAttr(const ascir::NodeView &node) {
       "IndirectLoad node[%s] has invalid template id[%d].", node->GetNamePtr(), static_cast<int32_t>(template_id_));
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateLogicalView(node, logical_view_));
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetImplementation(node, implementation_));
-  const int64_t rank = static_cast<int64_t>(logical_view_.input.axis_ids.size());
+  const int64_t rank = static_cast<int64_t>(logical_view_.input.sizes.size());
   GE_ASSERT_TRUE(axis >= -rank && axis < rank, "IndirectLoad axis is out of range.");
   axis_ = axis < 0L ? axis + rank : axis;
   if (template_id_ == ascir::TemplateId::kIndirectLoadSimt) {
@@ -401,10 +453,10 @@ Status IndirectLoadRegApiCall::Generate(const TPipe &tpipe, const std::vector<as
                                         const std::vector<std::reference_wrapper<const Tensor>> &outputs,
                                         std::string &result) const {
   GE_ASSERT_TRUE(inputs.size() == 2U && outputs.size() == 1U, "IndirectLoad expects 2 inputs and 1 output.");
-  const LogicalTensorInfo input_info = BuildLogicalTensorInfo(logical_view_.input, tpipe);
-  const LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
-  const LogicalTensorInfo output_info = BuildLogicalTensorInfo(logical_view_.output, tpipe);
-  GE_ASSERT_SUCCESS(CheckIndirectLoadDenseLayout(input_info, index_info, output_info));
+  GE_ASSERT_TRUE(
+      template_id_ == ascir::TemplateId::kIndirectLoadSK || template_id_ == ascir::TemplateId::kIndirectLoadSimd,
+      "IndirectLoad tensor-based Generate only supports SK and SIMD.");
+  GE_ASSERT_SUCCESS(CheckIndirectLoadShape(logical_view_, outputs[0].get()));
   (void)RegisterBasicDumpParam(this->api_name_, inputs, outputs);
   if (template_id_ == ascir::TemplateId::kIndirectLoadSK) {
     GELOGI("[IndirectLoad] Generate SK API body for node[%s].", node_name.c_str());
@@ -438,9 +490,10 @@ Status IndirectLoadRegApiCall::GenerateSk(const TPipe &tpipe, const std::vector<
   const auto tmp_iter = tmp_buf_id.find(-1L);
   GE_ASSERT_TRUE(tmp_iter != tmp_buf_id.end(), "IndirectLoad SK requires an API-level tmp buffer.");
 
-  const LogicalTensorInfo x_info = BuildLogicalTensorInfo(logical_view_.input, tpipe);
-  const LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
   const size_t axis_pos = static_cast<size_t>(axis_);
+  const LogicalTensorInfo x_info = BuildLogicalTensorInfo(logical_view_.input, tpipe);
+  LogicalTensorInfo index_info;
+  GE_ASSERT_SUCCESS(BuildTensorWindowInfo(logical_view_.index, index, axis_pos, tpipe, index_info));
   std::string x_dtype_name;
   std::string index_dtype_name;
   GE_ASSERT_SUCCESS(Tensor::DtypeName(x.dtype, x_dtype_name));
@@ -457,7 +510,7 @@ Status IndirectLoadRegApiCall::GenerateSk(const TPipe &tpipe, const std::vector<
   ss << "      " << x << ", " << index << ", " << y << ", " << tpipe.tmp_buf.name << "_" << tmp_iter->second << ", "
      << y.actual_size << ", " << tpipe.tiler.Offset(current_axis, y.axis, y.axis_strides) << ", "
      << tpipe.tiler.Size(x_info.sizes[axis_pos]) << ", " << JoinSizeExprs(index_info.sizes, tpipe) << ", "
-     << JoinSizeExprs(x_info.strides, tpipe) << ");" << std::endl;
+     << JoinSizeExprs(x_info.strides, tpipe) << ", " << JoinSizeExprs(index_info.strides, tpipe) << ");" << std::endl;
   ss << "}" << std::endl;
   result = ss.str();
   return af::SUCCESS;
@@ -467,13 +520,22 @@ Status IndirectLoadRegApiCall::GenerateSimd(const TPipe &tpipe, const std::vecto
                                             const std::vector<std::reference_wrapper<const Tensor>> &inputs,
                                             const std::vector<std::reference_wrapper<const Tensor>> &outputs,
                                             std::string &result) const {
-  const LogicalTensorInfo input_info = BuildLogicalTensorInfo(logical_view_.input, tpipe);
-  const LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
   const Tensor &input = inputs[ascgen_utils::indirect_load::kInputTensorIndex].get();
   const Tensor &index = inputs[ascgen_utils::indirect_load::kIndexTensorIndex].get();
   const Tensor &output = outputs[0].get();
-
   const size_t axis_pos = static_cast<size_t>(axis_);
+  LogicalTensorInfo input_info;
+  LogicalTensorInfo index_info;
+  GE_ASSERT_SUCCESS(BuildTensorWindowInfo(logical_view_.input, input, axis_pos, tpipe, input_info));
+  GE_ASSERT_SUCCESS(BuildTensorWindowInfo(logical_view_.index, index, axis_pos, tpipe, index_info));
+  const bool requires_strided_api =
+      logical_view_.input.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
+      logical_view_.index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense;
+  const auto tmp_iter = tmp_buf_id.find(-1L);
+  if (requires_strided_api) {
+    GE_ASSERT_TRUE(tmp_iter != tmp_buf_id.end(), "IndirectLoad SIMD requires an API-level tmp buffer.");
+  }
+
   std::string input_dtype;
   std::string index_dtype;
   GE_ASSERT_SUCCESS(Tensor::DtypeName(input.dtype, input_dtype));
@@ -486,15 +548,22 @@ Status IndirectLoadRegApiCall::GenerateSimd(const TPipe &tpipe, const std::vecto
   std::stringstream ss;
   ss << "// IndirectLoad SIMD" << std::endl;
   ss << "{" << std::endl;
-  const char *api = implementation_ == ascgen_utils::indirect_load::Implementation::kGatherApi
+  const char *api = !requires_strided_api && implementation_ == ascgen_utils::indirect_load::Implementation::kGatherApi
                         ? "IndirectLoadSimdGatherApi"
                         : "IndirectLoadSimd";
   ss << "  AscendC::" << api << "<" << input_dtype << ", " << index_dtype << ", " << input_info.sizes.size() << ", "
      << axis_ << ">(" << std::endl;
   ss << "      " << input << ", " << index << ", " << output << ", ";
-  ss << output.actual_size << ", " << tpipe.tiler.Offset(current_axis, output.axis, output.axis_strides) << ", "
-     << input.actual_size << ", " << tpipe.tiler.Size(input_info.sizes[axis_pos]) << ", "
-     << JoinSizeExprs(index_info.sizes, tpipe) << ", " << JoinSizeExprs(input_info.strides, tpipe);
+  if (requires_strided_api) {
+    ss << tpipe.tmp_buf.name << "_" << tmp_iter->second << ", " << output.actual_size << ", "
+       << tpipe.tiler.Offset(current_axis, output.axis, output.axis_strides) << ", "
+       << JoinSizeExprs(index_info.sizes, tpipe) << ", " << JoinSizeExprs(input_info.strides, tpipe) << ", "
+       << JoinSizeExprs(index_info.strides, tpipe);
+  } else {
+    ss << output.actual_size << ", " << tpipe.tiler.Offset(current_axis, output.axis, output.axis_strides) << ", "
+       << input.actual_size << ", " << tpipe.tiler.Size(input_info.sizes[axis_pos]) << ", "
+       << JoinSizeExprs(index_info.sizes, tpipe) << ", " << JoinSizeExprs(input_info.strides, tpipe);
+  }
   ss << ");" << std::endl;
   ss << "}" << std::endl;
   result = ss.str();
@@ -505,8 +574,10 @@ Status IndirectLoadRegApiCall::GenerateSimt(const TPipe &tpipe, const std::vecto
                                             const Tensor &input, std::string &result) const {
   const LogicalTensorInfo input_info = BuildLogicalTensorInfo(logical_view_.input, tpipe);
   const LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
-  const LogicalTensorInfo output_info = BuildLogicalTensorInfo(logical_view_.output, tpipe);
-  GE_ASSERT_SUCCESS(CheckIndirectLoadDenseLayout(input_info, index_info, output_info));
+  GE_ASSERT_TRUE(logical_view_.input.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported &&
+                     logical_view_.index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported,
+                 "IndirectLoad SIMT input or index layout is unsupported.");
+  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ValidateIndirectLoadOutputLayout(logical_view_.output));
   GELOGD("[IndirectLoad] Generate SIMT body for node[%s], output_gm[%s].", node_name.c_str(),
          output_gm_tensor_.c_str());
 
@@ -546,7 +617,8 @@ Status IndirectLoadRegApiCall::GenerateSimt(const TPipe &tpipe, const std::vecto
        << "_loop_size), block_dim_offset, ";
   }
   ss << tpipe.tiler.Size(input_info.sizes[axis_]) << ", " << JoinSizeExprs(index_info.sizes, tpipe) << ", "
-     << JoinSizeExprs(input_info.strides, tpipe) << ");" << std::endl;
+     << JoinSizeExprs(input_info.strides, tpipe) << ", " << JoinSizeExprs(index_info.strides, tpipe) << ");"
+     << std::endl;
   ss << "}" << std::endl;
   result = ss.str();
   return af::SUCCESS;

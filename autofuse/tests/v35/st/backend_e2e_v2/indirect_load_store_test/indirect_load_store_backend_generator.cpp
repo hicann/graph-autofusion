@@ -24,6 +24,7 @@
 #include "ascir_ops_utils.h"
 #include "codegen.h"
 #include "common/platform_context.h"
+#include "fusion/autofuse_attrs.h"
 #include "graph/symbolizer/symbolic_utils.h"
 #include "indirect_load_utils.h"
 #include "optimize.h"
@@ -786,7 +787,11 @@ void ExpectGeneratedTemplates(const std::string &kernel) {
       EXPECT_NE(kernel.find(kMarkers[i]), std::string::npos) << kMarkers[i];
       EXPECT_NE(kernel.find(apis[i]), std::string::npos) << apis[i];
       if (kIndirectLoadTemplates[i] == ascir::TemplateId::kIndirectLoadSimd) {
+#ifdef IL_INPUT_OUTER_STRIDE
+        EXPECT_EQ(kernel.find("IndirectLoadSimdGatherApi<"), std::string::npos);
+#else
         EXPECT_NE(kernel.find("IndirectLoadSimdGatherApi<"), std::string::npos);
+#endif
       }
     } else {
       EXPECT_EQ(kernel.find(kMarkers[i]), std::string::npos) << kMarkers[i];
@@ -800,6 +805,7 @@ void ExpectGeneratedTemplates(const std::string &kernel) {
 
 void CheckGeneratedKernel(const std::string &kernel) {
   ExpectGeneratedTemplates(kernel);
+#ifndef IL_INPUT_OUTER_STRIDE
   if ((kExpectedTemplates & TemplateMask(ascir::TemplateId::kIndirectLoadSimd)) != 0U) {
     const std::string gather_function = GetFunctionContaining(kernel, "IndirectLoadSimdGatherApi<");
     EXPECT_NE(gather_function.find("IndirectLoadSimdGatherApi<"), std::string::npos);
@@ -809,6 +815,7 @@ void CheckGeneratedKernel(const std::string &kernel) {
     EXPECT_TRUE(ContainsInOrder(gather_api, {"IndirectLoadSimdBuildOffsets", "PipeBarrier<PIPE_V>", "Gather(y"}));
     EXPECT_EQ(gather_api.find("HardEvent::V_MTE3"), std::string::npos);
   }
+#endif
   EXPECT_EQ(kernel.find("MicroAPI::RegTensor<uint32_t> &position, const int64_t *shape"), std::string::npos);
   EXPECT_EQ(kernel.find("const IndirectLoadSimdAddressContext &context"), std::string::npos);
   EXPECT_EQ(kernel.find("__simd_vf__ inline static void Init(LoadState"), std::string::npos);
@@ -862,6 +869,8 @@ void CheckGeneratedKernel(const std::string &kernel) {
   return;
 #endif
 #ifdef IL_EXPECT_SK
+  EXPECT_NE(kernel.find("// IndirectLoad SK"), std::string::npos);
+  EXPECT_NE(kernel.find("IndirectLoadSk<"), std::string::npos);
   EXPECT_EQ(kernel.find("auto indirect_load_offset"), std::string::npos);
   EXPECT_EQ(kernel.find("int64_t inner = global_idx % index_inner;"), std::string::npos);
 #endif
@@ -909,6 +918,24 @@ std::map<std::string, std::string> BuildShapeInfo() {
     shape_info.emplace("s" + std::to_string(i), "stub_s" + std::to_string(i));
   }
   return shape_info;
+}
+
+void ApplyInputOuterStride(const af::ComputeGraphPtr &graph) {
+#ifdef IL_INPUT_OUTER_STRIDE
+  const auto backend = graph->FindNode("asc_backend");
+  ASSERT_NE(backend, nullptr);
+  const auto fuse_attrs = backend->GetOpDesc()->GetAttrsGroup<af::AutoFuseAttrs>();
+  ASSERT_NE(fuse_attrs, nullptr);
+  const auto &asc_graph = fuse_attrs->GetAscGraph();
+  ASSERT_NE(asc_graph, nullptr);
+  const auto input_load = asc_graph->FindNode("input_load");
+  ASSERT_NE(input_load, nullptr);
+  ASSERT_FALSE(input_load->outputs().empty());
+  ASSERT_FALSE(input_load->outputs()[0]->attr.strides.empty());
+  input_load->outputs()[0]->attr.strides[0] = af::Symbol(IL_INPUT_OUTER_STRIDE);
+#else
+  (void)graph;
+#endif
 }
 
 void OptimizeGraph(const af::ComputeGraphPtr &graph, ascir::FusedScheduledResult &fused_schedule_result) {
@@ -1021,6 +1048,7 @@ TEST_F(TestBackendIndirectLoadStoreE2e, IndirectLoadStoreCodegen) {
                                                                 GetStaticShape(false), kMixedIndexPre, kDirectIndex);
 #endif
     ASSERT_NE(graph, nullptr);
+    ASSERT_NO_FATAL_FAILURE(ApplyInputOuterStride(graph));
     const auto shape_info = BuildShapeInfo();
     ascir::FusedScheduledResult fused_schedule_result;
     ASSERT_NO_FATAL_FAILURE(OptimizeGraph(graph, fused_schedule_result));

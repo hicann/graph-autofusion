@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <set>
 #include "ascendc_ir.h"
+#include "indirect_load_utils.h"
 #include "reg_func/defalut_reg_func.h"
 #include "reg_func/default_reg_func_v2.h"
 #include "symbolizer/symbolic_utils.h"
@@ -3268,13 +3269,59 @@ class GatherAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 /*********************************************************************************/
+namespace {
+bool CalcIndirectLoadSkTmpSize(const AscNode &node, const Expression &offset_size, Expression &tmp_size) {
+  constexpr uint32_t kUbBlockAlignBytes = 32U;
+  auto inputs = node.inputs;
+  const auto &input = inputs[0].attr;
+  const auto &index = inputs[1].attr;
+  int64_t axis = 0;
+  (void)node.attr.ir_attr->GetAttrValue("axis", axis);
+  ascgen_utils::indirect_load::TemplateLogicalView logical_view;
+  const auto op_desc = node.GetOpDesc();
+  if (op_desc != nullptr) {
+    logical_view = op_desc->TryGetExtAttr(ascgen_utils::indirect_load::kTemplateLogicalViewAttr,
+                                          ascgen_utils::indirect_load::TemplateLogicalView{});
+  }
+  const bool has_logical_view = !logical_view.input.sizes.empty() &&
+                                logical_view.input.sizes.size() == logical_view.input.strides.size() &&
+                                logical_view.input.sizes.size() == logical_view.index.sizes.size();
+  const auto &input_repeats = has_logical_view ? logical_view.input.sizes : input.repeats;
+  const auto &input_strides = has_logical_view ? logical_view.input.strides : input.strides;
+  const auto &index_repeats = has_logical_view ? logical_view.index.sizes : index.repeats;
+  if (input_repeats.empty() || input_repeats.size() != input_strides.size() ||
+      input_repeats.size() != index_repeats.size()) {
+    GELOGW("[IndirectLoad] Skip invalid SK tmp layout, input rank[%zu], stride rank[%zu], index rank[%zu].",
+           input_repeats.size(), input_strides.size(), index_repeats.size());
+    return false;
+  }
+  const int64_t rank = static_cast<int64_t>(index_repeats.size());
+  if (axis < -rank || axis >= rank) {
+    GELOGW("[IndirectLoad] Skip invalid SK tmp axis[%ld], rank[%ld].", axis, rank);
+    return false;
+  }
+  const size_t axis_index = static_cast<size_t>(axis < 0L ? axis + rank : axis);
+  Expression outer_count = Symbol(1);
+  for (size_t dim = 0UL; dim < axis_index; ++dim) {
+    outer_count = outer_count * index_repeats[dim];
+  }
+  Expression input_slice_count = Symbol(1);
+  for (size_t dim = axis_index; dim < index_repeats.size(); ++dim) {
+    const Expression &repeat = dim == axis_index ? input_repeats[dim] : index_repeats[dim];
+    input_slice_count = input_slice_count + (repeat - Symbol(1)) * input_strides[dim];
+  }
+  const Expression input_size = outer_count * input_slice_count * Symbol(GetSizeByDataType(input.dtype));
+  tmp_size = af::sym::Align(input_size, kUbBlockAlignBytes) + offset_size;
+  return true;
+}
+}  // namespace
+
 class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
     const auto template_id = ::ascir::GetTemplateIdOrDefault(node);
-    if (template_id != ::ascir::TemplateId::kIndirectLoadSK) {
-      // SIMD MicroAPI uses registers, while GatherApi reuses the dead index UB for uint32 offsets. SIMT accesses GM
-      // directly, so neither template needs an API-level temporary buffer.
+    if (template_id != ::ascir::TemplateId::kIndirectLoadSimd && template_id != ::ascir::TemplateId::kIndirectLoadSK) {
+      // SIMD uses an offsets buffer, SK uses an input cache and offsets buffer, while SIMT accesses GM directly.
       return {};
     }
     auto node_outputs = node.outputs;
@@ -3283,7 +3330,12 @@ class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
     for (const auto &repeat : y.repeats) {
       offset_size = offset_size * repeat;
     }
-    TmpBufDesc desc = {af::sym::Align(offset_size, 32), -1};
+    Expression tmp_size = offset_size;
+    if (template_id == ::ascir::TemplateId::kIndirectLoadSK &&
+        !CalcIndirectLoadSkTmpSize(node, offset_size, tmp_size)) {
+      return {};
+    }
+    TmpBufDesc desc = {af::sym::Align(tmp_size, 32), -1};
     std::vector<std::unique_ptr<TmpBufDesc>> tmp_buf_descs;
     tmp_buf_descs.emplace_back(std::make_unique<TmpBufDesc>(desc));
     return tmp_buf_descs;
@@ -3300,7 +3352,8 @@ class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return false;
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"indirect_load_simd_reg_base.h", "indirect_load_sk_reg_base.h", "indirect_load_simt_reg_base.h"};
+    return {"indirect_load_simd_policy_reg_base.h", "indirect_load_simd_reg_base.h", "indirect_load_sk_reg_base.h",
+            "indirect_load_simt_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {"basic_api/kernel_operator_vec_gather_intf.h", "basic_api/reg_compute/kernel_reg_compute_intf.h",
