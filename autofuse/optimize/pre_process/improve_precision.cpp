@@ -256,27 +256,8 @@ const std::unordered_map<std::string, std::string> kTypeToGroup = {
     {af::ascir_op::Scalar::Type, af::ascir_op::Scalar::Type},
     {af::ascir_op::Store::Type, af::ascir_op::Store::Type}};
 
-bool IsSharedRoundingBoundary(const std::vector<NodePtr> &peer_in_nodes, DataType peer_output_dtype,
-                              DataType output_dtype) {
-  if (!IsHighPrecisionDataType(peer_output_dtype) || !IsLowPrecisionDataType(output_dtype)) {
-    return false;
-  }
-  bool has_store = false;
-  bool has_compute = false;
-  for (const auto &peer_in_node : peer_in_nodes) {
-    if (peer_in_node->GetType() == af::ascir_op::Store::Type) {
-      has_store = true;
-    } else {
-      has_compute = true;
-    }
-  }
-  return has_store && has_compute;
-}
-
-bool ShouldDeleteCastNode(const std::vector<NodePtr> &peer_in_nodes, DataType peer_output_dtype,
-                          DataType output_dtype) {
-  return IsFloatDataType(output_dtype) && IsFloatDataType(peer_output_dtype) &&
-         !IsSharedRoundingBoundary(peer_in_nodes, peer_output_dtype, output_dtype);
+bool ShouldDeleteCastNode(DataType peer_output_dtype, DataType output_dtype) {
+  return IsFloatDataType(output_dtype) && IsFloatDataType(peer_output_dtype);
 }
 
 bool ShouldChangeDataType(const NodePtr &node, const std::vector<NodePtr> &peer_in_nodes, DataType peer_output_dtype,
@@ -395,7 +376,7 @@ Status CastNodeProc(AscGraph &asc_graph, const NodePtr &node) {
   GE_ASSERT_SUCCESS(GetOutputTensorDesc(node, output_tensor_desc));
   const auto peer_output_dtype = peer_output_tensor_desc->GetDataType();
   const auto output_dtype = output_tensor_desc->GetDataType();
-  if (ShouldDeleteCastNode(peer_in_nodes, peer_output_dtype, output_dtype)) {
+  if (ShouldDeleteCastNode(peer_output_dtype, output_dtype)) {
     GE_ASSERT_SUCCESS(DelNode(asc_graph, node));
     return af::SUCCESS;
   }
