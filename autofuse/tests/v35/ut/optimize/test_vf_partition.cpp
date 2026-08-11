@@ -9,6 +9,7 @@
  */
 
 #include "ascendc_ir.h"
+#include "asc_graph_builder.h"
 #include "ascir_ops.h"
 #include "ascir_utils.h"
 
@@ -80,6 +81,87 @@ void SetupGraphAxes(af::AscGraph &graph, const std::vector<af::Symbol> &loops) {
     }
   }
 }
+
+af::AscGraph BuildParallelVfGraph(bool reverse_branch_order) {
+  af::testing::AscGraphBuilder builder("parallel_vf");
+  builder.Loops({16}).Data("data", 0).Load("load", "data");
+  if (reverse_branch_order) {
+    builder.Abs("branch_z", "load").Abs("branch_a", "load");
+  } else {
+    builder.Abs("branch_a", "load").Abs("branch_z", "load");
+  }
+  builder.Add("sum", "branch_a", "branch_z")
+      .Store("store_branch_a", "branch_a")
+      .Output("output_branch_a", "store_branch_a", 0)
+      .Store("store_branch_z", "branch_z")
+      .Output("output_branch_z", "store_branch_z", 1)
+      .Store("store_sum", "sum")
+      .Output("output_sum", "store_sum", 2);
+  auto graph = builder.Build();
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  for (const auto &node : graph.GetAllNodes()) {
+    if (ScheduleUtils::IsBuffer(node)) {
+      continue;
+    }
+    for (auto &output : node->outputs()) {
+      output->attr.vectorized_axis = output->attr.axis;
+      output->attr.vectorized_strides = output->attr.strides;
+    }
+  }
+  return graph;
+}
+
+std::vector<std::string> GetVfOutputConsumers(af::AscGraph &graph) {
+  EXPECT_EQ(AlignmentHandler::AlignVectorizedStrides(graph), af::SUCCESS);
+  VectorFuncPartitioner partitioner(graph);
+  EXPECT_EQ(partitioner.Partition(), af::SUCCESS);
+  for (const auto &node : graph.GetAllNodes()) {
+    if (!af::ops::IsOps<af::ascir_op::VectorFunc>(node)) {
+      continue;
+    }
+    std::vector<std::string> consumers;
+    for (const auto &output : node->GetAllOutDataAnchors()) {
+      const auto peers = output->GetPeerInDataAnchors();
+      EXPECT_EQ(peers.size(), 1UL);
+      consumers.push_back(peers.empty() ? "" : (*peers.begin())->GetOwnerNodeBarePtr()->GetName());
+    }
+    return consumers;
+  }
+  return {};
+}
+
+std::vector<std::string> GetVfSubgraphTensorOrder(const af::AscGraph &graph) {
+  std::vector<af::AscGraph> subgraphs;
+  EXPECT_EQ(graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  EXPECT_EQ(subgraphs.size(), 1UL);
+  std::vector<std::string> tensor_order;
+  if (subgraphs.empty()) {
+    return tensor_order;
+  }
+  for (const auto &node : subgraphs[0].GetAllNodes()) {
+    for (const auto &output : node->outputs()) {
+      tensor_order.push_back(node->GetName() + ":" + std::to_string(node->GetOpDescBarePtr()->GetId()) + ":" +
+                             std::to_string(output->attr.mem.tensor_id));
+    }
+  }
+  return tensor_order;
+}
+
+std::vector<std::string> GetGraphNodeOrder(const af::AscGraph &graph) {
+  std::vector<std::string> node_order;
+  for (const auto &node : graph.GetAllNodes()) {
+    node_order.push_back(node->GetName() + ":" + std::to_string(node->GetOpDescBarePtr()->GetId()));
+  }
+  return node_order;
+}
+
+std::vector<std::string> GetGraphNodeNames(const af::AscGraph &graph) {
+  std::vector<std::string> node_names;
+  for (const auto &node : graph.GetAllNodes()) {
+    node_names.push_back(node->GetName());
+  }
+  return node_names;
+}
 }  // namespace
 
 class VfPartition : public testing::Test {
@@ -142,7 +224,7 @@ TEST_F(VfPartition, brc_abs) {
   *abs01.y.strides = {s2, Zero, One};
   *abs01.y.vectorized_axis = {z0.id, z1.id, z2.id};
 
-  af::ascir_op::Abs abs02("abs01");
+  af::ascir_op::Abs abs02("abs02");
   abs02.x = abs01.y;
   abs02.attr.api.compute_type = af::ComputeType::kComputeElewise;
   abs02.attr.sched.axis = {z0.id, z1.id, z2.id};
@@ -1820,5 +1902,61 @@ TEST_F(VfPartition, topological_sort_for_vf_graph_keeps_load_before_consumer) {
   ASSERT_NE(load1_iter, node_names.end());
   ASSERT_NE(truediv_iter, node_names.end());
   EXPECT_LT(std::distance(node_names.begin(), load1_iter), std::distance(node_names.begin(), truediv_iter));
+}
+
+TEST_F(VfPartition, topological_sort_for_vf_graph_preserves_control_dependency) {
+  af::AscGraph graph("vf_sort_control_dependency");
+  af::ascir_op::Data control_src("z_src", graph);
+  af::ascir_op::Data control_dst("a_dst", graph);
+  auto src_node = graph.FindNode("z_src");
+  auto dst_node = graph.FindNode("a_dst");
+  ASSERT_NE(src_node, nullptr);
+  ASSERT_NE(dst_node, nullptr);
+  ASSERT_EQ(af::GraphUtils::AddEdge(src_node->GetOutControlAnchor(), dst_node->GetInControlAnchor()), af::SUCCESS);
+
+  VectorFuncPartitioner partitioner(graph);
+  ASSERT_EQ(partitioner.TopologicalSortingForVfGraph(graph), af::SUCCESS);
+
+  const auto node_names = GetGraphNodeNames(graph);
+  ASSERT_EQ(node_names.size(), 2UL);
+  EXPECT_EQ(node_names[0], "z_src");
+  EXPECT_EQ(node_names[1], "a_dst");
+}
+
+TEST_F(VfPartition, partition_rejects_duplicate_node_names_before_graph_mutation) {
+  af::AscGraph graph("vf_duplicate_node_names");
+  af::ascir_op::Data first("duplicate", graph);
+  af::ascir_op::Data second("duplicate", graph);
+  ASSERT_EQ(GetGraphNodeNames(graph).size(), 2UL);
+
+  VectorFuncPartitioner partitioner(graph);
+  EXPECT_NE(partitioner.Partition(), af::SUCCESS);
+  EXPECT_EQ(GetGraphNodeNames(graph).size(), 2UL);
+  std::vector<af::AscGraph> subgraphs;
+  EXPECT_EQ(graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  EXPECT_TRUE(subgraphs.empty());
+}
+
+TEST_F(VfPartition, vf_output_order_is_independent_of_parallel_node_insertion_order) {
+  auto graph = BuildParallelVfGraph(false);
+  auto reversed_graph = BuildParallelVfGraph(true);
+  const std::vector<std::string> expected = {"store_branch_a", "store_branch_z", "store_sum"};
+  const auto consumers = GetVfOutputConsumers(graph);
+  const auto reversed_consumers = GetVfOutputConsumers(reversed_graph);
+
+  ASSERT_EQ(consumers.size(), expected.size());
+  ASSERT_EQ(reversed_consumers.size(), expected.size());
+  EXPECT_EQ(consumers, expected);
+  EXPECT_EQ(reversed_consumers, expected);
+}
+
+TEST_F(VfPartition, vf_tensor_order_is_independent_of_parallel_node_insertion_order) {
+  auto graph = BuildParallelVfGraph(false);
+  auto reversed_graph = BuildParallelVfGraph(true);
+  GetVfOutputConsumers(graph);
+  GetVfOutputConsumers(reversed_graph);
+
+  EXPECT_EQ(GetGraphNodeOrder(graph), GetGraphNodeOrder(reversed_graph));
+  EXPECT_EQ(GetVfSubgraphTensorOrder(graph), GetVfSubgraphTensorOrder(reversed_graph));
 }
 }  // namespace optimize

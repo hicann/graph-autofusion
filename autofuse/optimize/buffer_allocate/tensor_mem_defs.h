@@ -24,6 +24,7 @@ enum class MemorySizeLevel : int32_t { kScalar = 0, kMedium, kLargest };
 // tensor块大小信息
 struct TensorInfo {
   int64_t group_id{-1};
+  int64_t allocation_order{-1};
   af::AscTensorAttr *output_tensor_attr{nullptr};
   int64_t life_start{-1};
   int64_t life_end{-1};
@@ -61,6 +62,7 @@ struct TensorInfo {
 // 需要绑定进行内存分配的tensor链
 struct TensorGroup {
   int64_t group_id{-1};
+  int64_t allocation_order{-1};
   std::vector<TensorInfo *> grouped_tensors;  // group中的tensor，会绑定生命周期
   std::set<int64_t> merged_loop_axes;
   int64_t merged_life_start;

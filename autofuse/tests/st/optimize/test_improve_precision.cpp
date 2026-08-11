@@ -174,6 +174,27 @@ TEST_F(TestImprovePrecisionST, Fp32ToFp16CastBeforeStore_RemovedAndAbsPromoted) 
   EXPECT_TRUE(CheckNodeOutputDtype(graph, "abs0", ge::DT_FLOAT));
 }
 
+TEST_F(TestImprovePrecisionST, Fp32ToBf16CastSharedByStoreAndCompute_Preserved) {
+  auto graph = AscGraphBuilder("st_fp32_to_bf16_shared_output")
+                   .Loops({Sym("s0")})
+                   .Data("data0", 0, ge::DT_FLOAT)
+                   .Load("load0", "data0")
+                   .Add("add0", "load0", "load0")
+                   .Cast("cast_to_bf16", "add0", ge::DT_BF16)
+                   .Store("store_bf16", "cast_to_bf16")
+                   .Output("output_bf16", "store_bf16", 0, ge::DT_BF16)
+                   .Cast("cast_to_fp32", "cast_to_bf16", ge::DT_FLOAT)
+                   .Mul("mul0", "cast_to_fp32", "cast_to_fp32")
+                   .Store("store_fp32", "mul0")
+                   .Output("output_fp32", "store_fp32", 1, ge::DT_FLOAT)
+                   .Build();
+
+  ASSERT_EQ(ImprovePrecisionForAscGraph(graph), af::SUCCESS);
+
+  EXPECT_TRUE(CheckNodeOutputDtype(graph, "cast_to_bf16", ge::DT_BF16));
+  EXPECT_TRUE(CheckNodeOutputDtype(graph, "mul0", ge::DT_FLOAT));
+}
+
 TEST_F(TestImprovePrecisionST, ScalarFp16Promoted_DownstreamAllFp32) {
   auto graph = AscGraphBuilder("st_scalar_fp16_downstream")
                    .Loops({Sym("s0")})

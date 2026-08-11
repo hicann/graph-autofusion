@@ -268,7 +268,10 @@ std::string TilingLib::GenEvaluateModeledPerfForInductor(
   std::stringstream ss;
   bool is_single_group = ascgen_utils::IsSingleGroup(fused_schedule_result);
   ss << "static double EvaluateModeledPerf(const " << tiling << " &tiling_data) {" << std::endl;
-  if (is_single_group) {
+  if (IsEmptyTensorSence(fused_schedule_result)) {
+    ss << "  (void)tiling_data;" << std::endl;
+    ss << "  return DBL_MAX;" << std::endl;
+  } else if (is_single_group) {
     ss << "  " << tiling << " tmp = tiling_data;" << std::endl;
     ss << "  return optiling::GetPerf(tmp);" << std::endl;
   } else {

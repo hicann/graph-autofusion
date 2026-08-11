@@ -113,7 +113,7 @@ TEST_F(TestBackendPgoAddAbsInductorE2e, PgoTilingKeyOverflowFallsBackWithoutRunn
   EXPECT_EQ(result.tiling.find("AUTOFUSE_SPLIT_FILE_BEGIN: PgoRunner"), std::string::npos);
   const auto tiling_files = codegen.GenerateTiling(fused_schedule_result, {}, "/tmp", "10");
   EXPECT_EQ(tiling_files.at(codegen::kTilingDefAndConstIdentify).find("autofuse_tiling_func_pgo.h"), std::string::npos);
-  EXPECT_EQ(codegen.GeneratorPgo(fused_schedule_result, "/tmp"), "int main() { return 0; }\n");
+  EXPECT_EQ(codegen.GeneratorPgo(fused_schedule_result, "/tmp"), "int main() { return 1; }\n");
 
   schedule_groups.back().impl_graphs.pop_back();
   fused_schedule_result.node_idx_to_scheduled_results[0].emplace_back();

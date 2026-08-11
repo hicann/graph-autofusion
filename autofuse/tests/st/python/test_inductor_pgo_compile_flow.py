@@ -27,6 +27,8 @@ from compile_test_utils import PYTHON_DIR, load_compile_module  # noqa: E402
 
 MODULE_NAME = "autofuse.compile_adapter"
 MODULE_PATH = os.path.join(PYTHON_DIR, "compile_adapter.py")
+ASCENDC_MODULE_NAME = "autofuse.compiler.python.ascendc_compile"
+ASCENDC_MODULE_PATH = os.path.join(PYTHON_DIR, "ascendc_compile.py")
 
 
 @pytest.fixture()
@@ -42,6 +44,30 @@ def compile_adapter_module():
         MODULE_PATH,
         extra_autofuse_attrs={"ascendc_compile": ascendc_compile_module},
         extra_modules={"autofuse.ascendc_compile": ascendc_compile_module},
+    ) as loaded_module:
+        yield loaded_module
+
+
+@pytest.fixture()
+def ascendc_compile_module():
+    platform_info_module = types.ModuleType(
+        "asc_op_compile_base.common.platform.platform_info"
+    )
+
+    def get_soc_spec(_key):
+        return ""
+
+    platform_info_module.get_soc_spec = get_soc_spec
+    extra_modules = {
+        "asc_op_compile_base": types.ModuleType("asc_op_compile_base"),
+        "asc_op_compile_base.common": types.ModuleType("asc_op_compile_base.common"),
+        "asc_op_compile_base.common.platform": types.ModuleType(
+            "asc_op_compile_base.common.platform"
+        ),
+        "asc_op_compile_base.common.platform.platform_info": platform_info_module,
+    }
+    with load_compile_module(
+        ASCENDC_MODULE_NAME, ASCENDC_MODULE_PATH, extra_modules=extra_modules
     ) as loaded_module:
         yield loaded_module
 
@@ -129,3 +155,33 @@ def test_scheme_a_host_compile_publishes_generation_bundle_last(
     assert (
         published["generation_dir"] / "tiling.so.pgo_kernel.aicore_binary_elf_v1"
     ).read_bytes() == b"kernel"
+
+
+def test_inductor_host_link_includes_acl_runtime(ascendc_compile_module, tmp_path):
+    captured = {}
+    args = types.SimpleNamespace(
+        host_files=[os.fspath(tmp_path / "host.cpp")],
+        output_file=os.fspath(tmp_path / "tiling.so"),
+        stage="host",
+        graph_name="empty_tensor_graph",
+        pgo_runner_file=None,
+    )
+
+    def fake_compile_host_objs(*_args):
+        return ["host.o"]
+
+    def fake_is_cv_fusion_compile(_args):
+        return False
+
+    ascendc_compile_module.module.compile_host_objs = fake_compile_host_objs
+    ascendc_compile_module.module.is_cv_fusion_compile = fake_is_cv_fusion_compile
+
+    def fake_link_shared(target_file, obj_files, link_libraries=None):
+        captured["link_libraries"] = link_libraries
+        return target_file
+
+    ascendc_compile_module.module.link_shared = fake_link_shared
+
+    ascendc_compile_module.link_host_target(args, os.fspath(tmp_path))
+
+    assert "acl_rt" in captured["link_libraries"]

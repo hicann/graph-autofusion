@@ -36,6 +36,7 @@ class MemReuseManager {
                                           std::vector<MemoryBlock *> &candidate_blocks);
   static void SetQueBufIdToTensorAttr(const MemoryBlock &block);
   void AllocTmpBuff(std::map<af::TmpBuffer *, std::vector<TensorGroup>> &tmp_buff_to_groups);
+  void AllocTmpBuffGroup(af::TmpBuffer *tmp_buff, const TensorGroup &group);
   void FindCandidateTmpBuffBlockWithSizeCheck(const TensorGroup &tensor_group,
                                               std::vector<MemoryBlock *> &candidate_blocks);
   // 按类型分组的内存块

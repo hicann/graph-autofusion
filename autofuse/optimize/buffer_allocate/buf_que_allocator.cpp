@@ -575,6 +575,7 @@ Status BufQueAllocator::InitTensorInfo(af::AscGraph &graph, TensorInfoMap &tenso
 }
 
 Status BufQueAllocator::InitNodeTmpBuffInfo(af::AscGraph &graph, TmpBuffInfoMap &node_attr_to_tensor_info) {
+  int64_t allocation_order = 0;
   for (const auto &node : graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node);
     if (ScheduleUtils::IsBuffer(node)) {
@@ -582,6 +583,7 @@ Status BufQueAllocator::InitNodeTmpBuffInfo(af::AscGraph &graph, TmpBuffInfoMap 
     }
     for (auto &tmp_buff : node->attr.tmp_buffers) {
       auto &tmp_buff_info = node_attr_to_tensor_info[&tmp_buff];
+      tmp_buff_info.allocation_order = allocation_order++;
       tmp_buff_info.mem_position = af::Position::kPositionVecCalc;
       tmp_buff_info.life_start = 0L;
       tmp_buff_info.life_end = std::numeric_limits<int64_t>::max();

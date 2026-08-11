@@ -30,25 +30,41 @@ constexpr int32_t kMaxBitWidthGap = 2;
 constexpr int64_t kOutLoopAxisId = -1L;
 constexpr size_t kMinVfNodesNum = 2UL;
 
-std::unordered_map<af::Node *, size_t> BuildDependencyAwareRanks(
-    const af::AscGraph &graph, const std::unordered_set<af::Node *> &outer_loop_sequences) {
-  std::vector<af::NodePtr> nodes;
-  std::unordered_map<af::Node *, size_t> indegrees;
-  std::unordered_map<af::Node *, std::vector<af::NodePtr>> out_nodes;
+af::Status ValidateUniqueNodeNames(const af::AscGraph &graph) {
+  std::unordered_set<std::string> node_names;
   for (const auto &node : graph.GetAllNodes()) {
-    nodes.push_back(node);
-    indegrees[node.get()] = 0UL;
+    GE_ASSERT_TRUE(node_names.emplace(node->GetName()).second, "VF input graph [%s] contains duplicate node name [%s].",
+                   graph.GetName().c_str(), node->GetName().c_str());
   }
+  return af::SUCCESS;
+}
 
+using NodeIndegrees = std::unordered_map<af::Node *, size_t>;
+using NodeSuccessors = std::unordered_map<af::Node *, std::vector<af::NodePtr>>;
+
+void AddGraphDependencies(const std::vector<af::NodePtr> &nodes, NodeIndegrees &indegrees, NodeSuccessors &out_nodes) {
   for (const auto &node : nodes) {
-    for (const auto &out_node : node->GetOutDataNodes()) {
-      if (indegrees.find(out_node.get()) == indegrees.end()) {
+    std::unordered_set<af::Node *> unique_out_nodes;
+    for (const auto &out_node : node->GetOutAllNodes()) {
+      if ((indegrees.find(out_node.get()) == indegrees.end()) || !unique_out_nodes.emplace(out_node.get()).second) {
         continue;
       }
       out_nodes[node.get()].push_back(out_node);
       ++indegrees[out_node.get()];
     }
   }
+}
+
+std::unordered_map<af::Node *, size_t> BuildDependencyAwareRanks(
+    const af::AscGraph &graph, const std::unordered_set<af::Node *> &outer_loop_sequences) {
+  std::vector<af::NodePtr> nodes;
+  NodeIndegrees indegrees;
+  NodeSuccessors out_nodes;
+  for (const auto &node : graph.GetAllNodes()) {
+    nodes.push_back(node);
+    indegrees[node.get()] = 0UL;
+  }
+  AddGraphDependencies(nodes, indegrees, out_nodes);
 
   const auto has_higher_priority = [&outer_loop_sequences](const af::NodePtr &node1, const af::NodePtr &node2) -> bool {
     bool is_node1_in_outer_seq = outer_loop_sequences.find(node1.get()) != outer_loop_sequences.end();
@@ -56,7 +72,8 @@ std::unordered_map<af::Node *, size_t> BuildDependencyAwareRanks(
     if (is_node1_in_outer_seq != is_node2_in_outer_seq) {
       return is_node1_in_outer_seq;
     }
-    return node1->GetOpDescBarePtr()->GetId() < node2->GetOpDescBarePtr()->GetId();
+    return std::make_pair(node1->GetName(), node1->GetOpDescBarePtr()->GetId()) <
+           std::make_pair(node2->GetName(), node2->GetOpDescBarePtr()->GetId());
   };
 
   std::vector<af::NodePtr> ready_nodes;
@@ -353,6 +370,26 @@ void AddAnchorToOrderMap(
   }
 }
 
+using BoundaryAnchorEntry = std::pair<af::OutDataAnchorPtr, std::vector<af::InDataAnchorPtr>>;
+
+void SortBoundaryAnchors(std::vector<BoundaryAnchorEntry> &anchors) {
+  const auto out_anchor_less = [](const BoundaryAnchorEntry &lhs, const BoundaryAnchorEntry &rhs) {
+    const auto *lhs_node = lhs.first->GetOwnerNodeBarePtr();
+    const auto *rhs_node = rhs.first->GetOwnerNodeBarePtr();
+    return std::make_pair(lhs_node->GetName(), lhs.first->GetIdx()) <
+           std::make_pair(rhs_node->GetName(), rhs.first->GetIdx());
+  };
+  const auto in_anchor_less = [](const af::InDataAnchorPtr &lhs, const af::InDataAnchorPtr &rhs) {
+    const auto *lhs_node = lhs->GetOwnerNodeBarePtr();
+    const auto *rhs_node = rhs->GetOwnerNodeBarePtr();
+    return std::make_pair(lhs_node->GetName(), lhs->GetIdx()) < std::make_pair(rhs_node->GetName(), rhs->GetIdx());
+  };
+  std::sort(anchors.begin(), anchors.end(), out_anchor_less);
+  for (auto &entry : anchors) {
+    std::sort(entry.second.begin(), entry.second.end(), in_anchor_less);
+  }
+}
+
 bool NeedRemovePad(const af::AscNodePtr &node) {
   // 如果是非scalar的Broadcast节点，直接插RemovePad，结束循环
   if (optimize::ScheduleUtils::IsBroadcast(node) && !optimize::ScheduleUtils::IsScalarBroadcastNode(node)) {
@@ -423,6 +460,7 @@ const std::string kNamePrefixScalar = "Scalar_";
 const std::string kNamePrefixOutput = "Output_";
 
 af::Status VectorFuncPartitioner::Partition() {
+  GE_ASSERT_SUCCESS(ValidateUniqueNodeNames(impl_graph_));
   ascir::utils::DumpGraph(impl_graph_, "BeforePartition");
   GE_ASSERT_SUCCESS(ScheduleUtils::TopologicalSorting(impl_graph_), "Failed to do topological sorting for graph[%s].",
                     impl_graph_.GetName().c_str());
@@ -960,6 +998,8 @@ af::Status VectorFuncPartitioner::BuildSubgraph(const ClusterPtr &cluster, af::A
     GE_ASSERT_SUCCESS(AddInputDataAnchors(node, load_to_peer_in_anchors));
     GE_ASSERT_SUCCESS(AddOutputDataAnchors(node, store_to_peed_in_anchors));
   }
+  SortBoundaryAnchors(load_to_peer_in_anchors);
+  SortBoundaryAnchors(store_to_peed_in_anchors);
 
   vf_op.InstanceOutputy(store_to_peed_in_anchors.size());
   std::vector<af::AscOpOutput> outputs;
@@ -1249,7 +1289,8 @@ af::Status VectorFuncPartitioner::TopologicalSortingForVfGraph(af::AscGraph &gra
     if (rank1 != ranks.end() && rank2 != ranks.end()) {
       return rank1->second < rank2->second;
     }
-    return node1->GetOpDescBarePtr()->GetId() < node2->GetOpDescBarePtr()->GetId();
+    return std::make_pair(node1->GetName(), node1->GetOpDescBarePtr()->GetId()) <
+           std::make_pair(node2->GetName(), node2->GetOpDescBarePtr()->GetId());
   };
 
   auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);

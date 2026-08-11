@@ -1056,10 +1056,11 @@ class TestCodegenTiling : public testing::Test, public codegen::TilingLib {
     attr.strides = {af::ops::One};
   }
 
-  ascir::FusedScheduledResult GenBasicFusedScheduleResult(const std::vector<af::Expression> &origin_vars = {}) {
+  ascir::FusedScheduledResult GenBasicFusedScheduleResult(const std::vector<af::Expression> &origin_vars = {},
+                                                          const af::Expression &axis_size = af::ops::Zero) {
     af::AscGraph graph("test_graph");
     auto s0 = graph.CreateSizeVar("s0");
-    auto z0 = graph.CreateAxis("z0", af::ops::Zero);
+    auto z0 = graph.CreateAxis("z0", axis_size);
 
     af::ascir_op::Data x_op("x", graph);
     x_op.ir_attr.SetIndex(0);
@@ -1613,6 +1614,21 @@ TEST_F(TestCodegenTiling, EmptyTensorKernel) {
   EXPECT_EQ(expect_str, tiling_func_content);
 }
 
+TEST_F(TestCodegenTiling, EmptyTensorInductorModeledPerfShouldNotReferenceAttTiling) {
+  auto tiling_files = this->GenTilingCodeForInductor();
+  ASSERT_TRUE(tiling_files.find(codegen::kTilingDefAndConstIdentify) != tiling_files.end());
+  const auto &tiling_impl = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  const size_t perf_func_pos = tiling_impl.find("static double EvaluateModeledPerf");
+  ASSERT_NE(perf_func_pos, std::string::npos);
+  const size_t topn_func_pos = tiling_impl.find("extern \"C\" int64_t GenerateTopnSolutions", perf_func_pos);
+  ASSERT_NE(topn_func_pos, std::string::npos);
+  const std::string perf_func = tiling_impl.substr(perf_func_pos, topn_func_pos - perf_func_pos);
+
+  EXPECT_NE(perf_func.find("return DBL_MAX;"), std::string::npos);
+  EXPECT_EQ(perf_func.find("optiling::GetPerf"), std::string::npos);
+  EXPECT_EQ(perf_func.find("AscGraph"), std::string::npos);
+}
+
 TEST_F(TestCodegenTiling, TestGenDfxInputSymbolInfo) {
   std::map<std::string, std::string> shape_info;
   shape_info["s0"] = R"([&]() -> int64_t {
@@ -1935,7 +1951,7 @@ TEST_F(TestCodegenTiling, PgoTilingKeyCountOverflowShouldFallbackTfAndPgoRunner)
   EXPECT_EQ(entry.find("#include \"autofuse_tiling_func_pgo.h\""), std::string::npos);
   EXPECT_NE(entry.find("extern \"C\" int64_t FindBestTilingKey"), std::string::npos);
   const auto pgo_source = GenerateForPgo(fused_schedule_result, "/tmp");
-  EXPECT_NE(pgo_source.find("int main()"), std::string::npos);
+  EXPECT_EQ(pgo_source, "int main() { return 1; }\n");
   EXPECT_EQ(pgo_source.find("PGOGetProfiling"), std::string::npos);
   EXPECT_TRUE(CompileCode(pgo_source, false));
 }
@@ -4736,7 +4752,7 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldRejectCvFusion) {
 }
 
 TEST_F(TestCodegenTiling, SingleGroupEvaluateModeledPerfShouldUsePublicGetPerf) {
-  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")}, af::ops::One);
   fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
   ASSERT_TRUE(ascgen_utils::IsSingleGroup(fused_schedule_result));
   auto tiling_files = this->GenerateForInductor(fused_schedule_result);

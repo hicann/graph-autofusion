@@ -123,6 +123,18 @@ def test_device_compile_does_not_add_host_default_abi(compile_adapter_module):
     temp_dir_ctx.cleanup()
 
 
+def test_pgo_get_top_result_missing_file_returns_failure(
+    compile_adapter_module, tmpdir
+):
+    missing_search = str(tmpdir.join("missing_search.txt"))
+
+    assert compile_adapter_module.pgo_get_top_result(missing_search) == (
+        None,
+        None,
+        None,
+    )
+
+
 def test_jit_compile_records_atrace_and_reports(compile_adapter_module, tmpdir, capsys):
     output_file = tmpdir.join("jit.so")
     argv = [f"--output_file={output_file}", f"--output_path={tmpdir}"]
