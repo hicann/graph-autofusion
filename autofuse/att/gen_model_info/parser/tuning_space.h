@@ -185,6 +185,7 @@ struct NodeInfo {
   ascir_param::ReduceNodeParams reduce_specific_params;
   ascir_param::CastNodeParams cast_node_params;
   ascir_param::CompareNodeParams compare_node_params;
+  ascir_param::WhereNodeParams where_node_params;
   af::ExecuteCondition exec_condition{af::ExecuteCondition::kNoCache};
   std::string DebugString() const {
     std::stringstream ss;

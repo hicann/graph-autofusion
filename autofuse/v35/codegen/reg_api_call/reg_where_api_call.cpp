@@ -16,15 +16,99 @@
 #include "common/ge_common/debug/log.h"
 #include "graph/ascendc_ir/utils/asc_tensor_utils.h"
 #include "common/checker.h"
+#include "ascir_node_param/ascir_node_param.h"
 #include "api_call/utils/api_call_factory.h"
 #include "api_call/utils/api_call_utils.h"
-#include "codegen/expression_convert_struct.h"
 
 namespace codegen {
 using namespace std;
 using namespace af::ops;
 using namespace af::ascir_op;
 using namespace ascgen_utils;
+
+namespace {
+constexpr const char *kAscirNodeParams = "AscirNodeParams";
+
+af::Status FillWhereNodeParams(const af::AscNodePtr &node, bool is_bcast_src0, bool is_bcast_src1,
+                               const ge::Expression &outer_call_count, const std::vector<ge::Expression> &output_dims,
+                               const std::vector<ge::Expression> &output_strides,
+                               const std::vector<ge::Expression> &mask_strides,
+                               const std::vector<ge::Expression> &input_strides) {
+  GE_ASSERT_NOTNULL(node);
+  auto params = ascir_param::GetAscirNodeParams(node);
+  if (params == nullptr) {
+    auto op_desc = node->GetOpDesc();
+    GE_ASSERT_NOTNULL(op_desc);
+    params = std::make_shared<ascir_param::AscirNodeParams>();
+    GE_ASSERT_TRUE(op_desc->SetExtAttr(kAscirNodeParams, params), "Node:%s SetExtAttr failed", node->GetNamePtr());
+  }
+
+  auto *where_params = std::get_if<ascir_param::WhereNodeParams>(&params->specific_params);
+  if (where_params == nullptr) {
+    params->specific_params = ascir_param::WhereNodeParams{};
+    where_params = std::get_if<ascir_param::WhereNodeParams>(&params->specific_params);
+  }
+  GE_ASSERT_NOTNULL(where_params, "Where specific params is null, node[%s].", node->GetNamePtr());
+  params->api_name = node->GetType();
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+
+  *where_params = ascir_param::WhereNodeParams{};
+  where_params->valid = true;
+  where_params->is_bcast_src0 = is_bcast_src0;
+  where_params->is_bcast_src1 = is_bcast_src1;
+  where_params->outer_call_count = outer_call_count;
+  where_params->output_dims = output_dims;
+  where_params->output_strides = output_strides;
+  where_params->mask_strides = mask_strides;
+  where_params->input_strides = input_strides;
+  return af::SUCCESS;
+}
+
+void BuildWhereLoopParams(const VectorizedAxisLoopMergeStatus &merge_info, const ApiLoopParams &param,
+                          ge::Expression &outer_call_count, std::vector<ge::Expression> &output_dims,
+                          std::vector<ge::Expression> &output_strides, std::vector<ge::Expression> &mask_strides,
+                          std::vector<ge::Expression> &input_strides) {
+  const size_t outer_repeats_size = param.outer_repeats.size();
+  if (outer_repeats_size == 0U) {
+    outer_call_count = af::ops::One;
+    output_dims.emplace_back(param.cal_count);
+    output_strides.emplace_back(af::ops::One);
+    mask_strides.emplace_back(af::ops::One);
+    input_strides.emplace_back(af::ops::One);
+    return;
+  }
+
+  outer_call_count = af::ops::One;
+  for (size_t i = 0U; i + 1U < outer_repeats_size; ++i) {
+    outer_call_count = outer_call_count * merge_info.merge_repeats[i];
+  }
+  output_dims.emplace_back(merge_info.merge_repeats[outer_repeats_size - 1U]);
+  output_dims.emplace_back(param.cal_count);
+  output_strides.emplace_back(param.output_second_to_last_stride);
+  output_strides.emplace_back(af::ops::One);
+  mask_strides.emplace_back(param.output_second_to_last_stride);
+  mask_strides.emplace_back(af::ops::One);
+  input_strides.emplace_back(param.input_second_to_last_stride);
+  input_strides.emplace_back(af::ops::One);
+}
+
+af::Status FillCurrentWhereNodeParams(const af::AscNodePtr &node, bool is_bcast_src0, bool is_bcast_src1,
+                                      const VectorizedAxisLoopMergeStatus &merge_info, const ApiLoopParams &param) {
+  std::vector<ge::Expression> output_dims;
+  std::vector<ge::Expression> output_strides;
+  std::vector<ge::Expression> mask_strides;
+  std::vector<ge::Expression> input_strides;
+  ge::Expression outer_call_count = af::ops::One;
+  BuildWhereLoopParams(merge_info, param, outer_call_count, output_dims, output_strides, mask_strides, input_strides);
+  return FillWhereNodeParams(node, is_bcast_src0, is_bcast_src1, outer_call_count, output_dims, output_strides,
+                             mask_strides, input_strides);
+}
+
+std::vector<std::string> GetWhereOuterForRepeats(const ApiLoopParams &param) {
+  const size_t outer_repeats_size = param.outer_repeats.size();
+  return {param.outer_repeats.begin(), param.outer_repeats.begin() + outer_repeats_size - 1U};
+}
+}  // namespace
 
 Status WhereRegApiCall::PrepareInputsAndOutputs(const std::vector<std::reference_wrapper<const Tensor>> &inputs,
                                                 const std::vector<std::reference_wrapper<const Tensor>> &outputs,
@@ -49,8 +133,8 @@ Status WhereRegApiCall::PrepareInputsAndOutputs(const std::vector<std::reference
 }
 
 Status WhereRegApiCall::GenerateLoopParams(const Tensor &x1, const Tensor &x2, const Tensor &x3, const Tensor &y,
-                                           const TPipe &tpipe, ApiLoopParams &param) const {
-  VectorizedAxisLoopMergeStatus merge_info;
+                                           const TPipe &tpipe, ApiLoopParams &param,
+                                           VectorizedAxisLoopMergeStatus &merge_info) const {
   std::vector<Tensor> ub_inputs;
   std::vector<Tensor> ub_outputs;
 
@@ -129,7 +213,7 @@ Status WhereRegApiCall::GenerateBothScalarCase(const TPipe &tpipe, const ApiLoop
   if (param.outer_repeats.size() == 1) {
     ss << ss1.str();
   } else {
-    CreateComputeNodeOuterFor(param.outer_repeats, ss1, ss, 0);
+    CreateComputeNodeOuterFor(GetWhereOuterForRepeats(param), ss1, ss, 0);
   }
 
   return af::SUCCESS;
@@ -173,7 +257,7 @@ Status WhereRegApiCall::GenerateX2ScalarCase(const TPipe &tpipe, const ApiLoopPa
   if (param.outer_repeats.size() == 1) {
     ss << ss1.str();
   } else {
-    CreateComputeNodeOuterFor(param.outer_repeats, ss1, ss, 0);
+    CreateComputeNodeOuterFor(GetWhereOuterForRepeats(param), ss1, ss, 0);
   }
 
   return af::SUCCESS;
@@ -217,7 +301,7 @@ Status WhereRegApiCall::GenerateX3ScalarCase(const TPipe &tpipe, const ApiLoopPa
   if (param.outer_repeats.size() == 1) {
     ss << ss1.str();
   } else {
-    CreateComputeNodeOuterFor(param.outer_repeats, ss1, ss, 0);
+    CreateComputeNodeOuterFor(GetWhereOuterForRepeats(param), ss1, ss, 0);
   }
 
   return af::SUCCESS;
@@ -266,7 +350,7 @@ Status WhereRegApiCall::GenerateNormalCase(const TPipe &tpipe, const ApiLoopPara
   if (param.outer_repeats.size() == 1) {
     ss << ss1.str();
   } else {
-    CreateComputeNodeOuterFor(param.outer_repeats, ss1, ss, 0);
+    CreateComputeNodeOuterFor(GetWhereOuterForRepeats(param), ss1, ss, 0);
   }
 
   return af::SUCCESS;
@@ -285,7 +369,8 @@ Status WhereRegApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::Ax
   (void)RegisterBasicDumpParam(this->api_name_, inputs, outputs);
 
   ApiLoopParams param;
-  GE_CHK_STATUS_RET(GenerateLoopParams(*x1, *x2, *x3, *y, tpipe, param));
+  VectorizedAxisLoopMergeStatus merge_info;
+  GE_CHK_STATUS_RET(GenerateLoopParams(*x1, *x2, *x3, *y, tpipe, param, merge_info));
 
   stringstream ss;
 
@@ -307,19 +392,25 @@ Status WhereRegApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::Ax
       x3->need_gen_get_value_of_ub_scalar ? ("(" + x3_dtype_name + ")" + x3->ub_scalar_name) : x3->Str();
 
   if (param.outer_repeats.size() == 0) {
+    GE_CHK_STATUS_RET(
+        FillCurrentWhereNodeParams(this->node, x2_is_scalar_scene, x3_is_scalar_scene, merge_info, param));
     GE_CHK_STATUS_RET(GenerateNoLoopCase(tpipe, current_axis, *x1, *x2, *x3, *y, x2_scalar, x3_scalar, ss));
   } else if (x2_is_scalar_scene && x3_is_scalar_scene) {
+    GE_CHK_STATUS_RET(FillCurrentWhereNodeParams(this->node, true, true, merge_info, param));
     std::string scalar_local_blk_tensor_name_x2 = x2->IsConstScalar() ? "local_blk_tensor_of_" + x2->name : x2->name;
     std::string scalar_local_blk_tensor_name_x3 = x3->IsConstScalar() ? "local_blk_tensor_of_" + x3->name : x3->name;
     GE_CHK_STATUS_RET(GenerateBothScalarCase(tpipe, param, *x1, *y, scalar_local_blk_tensor_name_x2,
                                              scalar_local_blk_tensor_name_x3, ss));
   } else if (x2_is_scalar_scene) {
+    GE_CHK_STATUS_RET(FillCurrentWhereNodeParams(this->node, true, false, merge_info, param));
     std::string scalar_local_blk_tensor_name_x2 = x2->IsConstScalar() ? "local_blk_tensor_of_" + x2->name : x2->name;
     GE_CHK_STATUS_RET(GenerateX2ScalarCase(tpipe, param, *x1, *x3, *y, scalar_local_blk_tensor_name_x2, ss));
   } else if (x3_is_scalar_scene) {
+    GE_CHK_STATUS_RET(FillCurrentWhereNodeParams(this->node, false, true, merge_info, param));
     std::string scalar_local_blk_tensor_name_x3 = x3->IsConstScalar() ? "local_blk_tensor_of_" + x3->name : x3->name;
     GE_CHK_STATUS_RET(GenerateX3ScalarCase(tpipe, param, *x1, *x2, *y, scalar_local_blk_tensor_name_x3, ss));
   } else {
+    GE_CHK_STATUS_RET(FillCurrentWhereNodeParams(this->node, false, false, merge_info, param));
     GE_CHK_STATUS_RET(GenerateNormalCase(tpipe, param, *x1, *x2, *x3, *y, ss));
   }
 

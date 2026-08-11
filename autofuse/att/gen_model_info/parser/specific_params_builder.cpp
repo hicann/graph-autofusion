@@ -45,6 +45,13 @@ af::Status FillCompareParams(const ascir_param::AscirNodeParams &params, NodeInf
   return af::SUCCESS;
 }
 
+af::Status FillWhereParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
+  const auto *where_params = ascir_param::GetSpecificParams<ascir_param::WhereNodeParams>(params);
+  GE_ASSERT_NOTNULL(where_params, "Where specific params is null, node[%s].", node_info.name.c_str());
+  node_info.where_node_params = *where_params;
+  return af::SUCCESS;
+}
+
 }  // namespace
 
 af::Status FillSpecificParams(const af::AscNodePtr &ge_node, NodeInfo &node_info) {
@@ -69,6 +76,9 @@ af::Status FillSpecificParams(const af::AscNodePtr &ge_node, NodeInfo &node_info
   if (node_info.node_type == kGe || node_info.node_type == kEq || node_info.node_type == kNe ||
       node_info.node_type == kGt || node_info.node_type == kLe || node_info.node_type == kLt) {
     return FillCompareParams(*params, node_info);
+  }
+  if (node_info.node_type == kWhere || node_info.node_type == kSelect) {
+    return FillWhereParams(*params, node_info);
   }
   return af::SUCCESS;
 }
