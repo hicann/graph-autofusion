@@ -27,23 +27,11 @@ namespace {
 using BroadcastGroup = std::vector<af::AscNodePtr>;
 using BroadcastGroups = std::map<af::OutDataAnchorPtr, BroadcastGroup>;
 
-bool IsExpressionVectorEqual(const std::vector<af::Expression> &lhs, const std::vector<af::Expression> &rhs) {
-  if (lhs.size() != rhs.size()) {
-    return false;
-  }
-  for (size_t i = 0UL; i < lhs.size(); ++i) {
-    if (af::SymbolicUtils::StaticCheckEq(lhs[i], rhs[i]) != af::TriBool::kTrue) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool IsTensorViewEqual(const af::AscTensorAttr &lhs, const af::AscTensorAttr &rhs) {
   return static_cast<ge::DataType>(lhs.dtype) == static_cast<ge::DataType>(rhs.dtype) && lhs.axis == rhs.axis &&
-         IsExpressionVectorEqual(lhs.repeats, rhs.repeats) && IsExpressionVectorEqual(lhs.strides, rhs.strides) &&
-         lhs.vectorized_axis == rhs.vectorized_axis &&
-         IsExpressionVectorEqual(lhs.vectorized_strides, rhs.vectorized_strides);
+         PassUtils::IsExprVectorEqual(lhs.repeats, rhs.repeats) &&
+         PassUtils::IsExprVectorEqual(lhs.strides, rhs.strides) && lhs.vectorized_axis == rhs.vectorized_axis &&
+         PassUtils::IsExprVectorEqual(lhs.vectorized_strides, rhs.vectorized_strides);
 }
 
 bool IsScalarBroadcast(const af::AscNodePtr &node) {

@@ -21,6 +21,8 @@ class PassUtils {
 
   static af::Status RelinkAllOutNodeToSrc(const af::OutDataAnchorPtr &old_src, const af::OutDataAnchorPtr &new_src);
 
+  static bool IsExprVectorEqual(const std::vector<af::Expression> &lhs, const std::vector<af::Expression> &rhs);
+
   // 创建和目标节点相同大小的brc(1)结构
   static af::AscNodePtr CreateOneScalarBrc(af::AscGraph &graph, const af::AscNodePtr &ref_node);
 };

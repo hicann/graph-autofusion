@@ -46,6 +46,7 @@
 #include "autoschedule/autoschedule.h"
 #include "base/att_const_values.h"
 #include "graph_pass/pow_equiv_substitution_pass.h"
+#include "optimize/graph_pass/softmax_pattern_fusion_pass.h"
 #include "template/nddma_template.h"
 #include "common/autofuse_backend_spec_api.h"
 #define protected public
@@ -161,6 +162,7 @@ void BuildSoftmaxMaxSubExp(const Load &load0, const Load &load1, Max &max0, Broa
   max0.x = load0.y;
   SetComputeAttr(max0, axis, af::ComputeType::kComputeReduce);
   SetTensorAttr(max0.y, axis, {One, Zero}, s0, s1);
+  *max0.y.repeats = {s0, One};
 
   broadcast0.x = max0.y;
   SetComputeAttr(broadcast0, axis, af::ComputeType::kComputeBroadcast);
@@ -182,6 +184,7 @@ void BuildSoftmaxSumDivOutput(const Exp &exp0, Sum &sum0, Broadcast &broadcast1,
   sum0.x = exp0.y;
   SetComputeAttr(sum0, axis, af::ComputeType::kComputeReduce);
   SetTensorAttr(sum0.y, axis, {One, Zero}, s0, s1);
+  *sum0.y.repeats = {s0, One};
   *sum0.y.strides = (variant == SoftmaxGraphVariant::kReduceAxisMismatch) ? std::vector<af::Expression>{Zero, One}
                                                                           : std::vector<af::Expression>{One, Zero};
 
@@ -348,7 +351,8 @@ TEST_F(TestOptimizerV2, SoftmaxPatternFusion_StableSoftmax_Success) {
   af::AscGraph graph("SoftmaxPatternFusion_StableSoftmax_Success");
   BuildStableSoftmaxGraph(graph);
 
-  Status res = optimize::autoschedule::PassRunnerHandler().RunPasses(graph);
+  optimize::SoftmaxPatternFusionPass softmax_pattern_fusion_pass;
+  Status res = softmax_pattern_fusion_pass.RunPass(graph);
   EXPECT_EQ(res, af::SUCCESS);
   auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
   ASSERT_NE(compute_graph, nullptr);

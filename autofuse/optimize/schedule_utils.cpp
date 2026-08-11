@@ -568,6 +568,24 @@ bool ScheduleUtils::IsLastAxisReduce(const ascir::ImplGraph &impl_graph) {
   return false;
 }
 
+bool ScheduleUtils::IsReduceOnTailAxis(const af::AscNodePtr &node) {
+  if (node == nullptr) {
+    return false;
+  }
+  const auto &input_repeats = node->inputs[0].attr.repeats;
+  const auto &output_repeats = node->outputs[0].attr.repeats;
+  if (input_repeats.empty() || input_repeats.size() != output_repeats.size()) {
+    return false;
+  }
+  const auto tail_index = input_repeats.size() - 1UL;
+  for (size_t i = 0UL; i < tail_index; ++i) {
+    if (af::SymbolicUtils::StaticCheckEq(input_repeats[i], output_repeats[i]) != af::TriBool::kTrue) {
+      return false;
+    }
+  }
+  return af::SymbolicUtils::StaticCheckEq(input_repeats[tail_index], output_repeats[tail_index]) != af::TriBool::kTrue;
+}
+
 bool ScheduleUtils::IsNormStruct(const ascir::ImplGraph &implGraph) {
   for (const auto &node : implGraph.GetAllNodes()) {
     auto parents = GetParentNodes(node);

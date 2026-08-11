@@ -13,6 +13,7 @@
 
 #include "optimize/platform/common/pass_runner.h"
 #include "optimize/graph_pass/broadcast_const_to_store.h"
+#include "optimize/graph_pass/duplicate_elewise_cse_pass.h"
 #include "optimize/graph_pass/scalar_to_1d_tensor.h"
 #include "optimize/graph_pass/scalar_broadcast_optimization.h"
 #include "optimize/graph_pass/expand_dims_for_all_reduce.h"
@@ -29,6 +30,7 @@ class PassRunnerV1 final : public BasePassRunner {
     this->RegisterPass<ScalarBroadcastOptimizationPass>();
     this->RegisterPass<MaskedFillInputReorderPass>();
     this->RegisterPass<ExpandDimsForAllReducePass>();
+    this->RegisterPass<DuplicateElewiseCsePass>();
   }
 };
 }  // namespace optimize

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "ascir_ops.h"
+#include "graph/ascendc_ir/ascir_registry.h"
 #include "graph/utils/graph_utils.h"
 #include "node_utils.h"
 #include "optimize/graph_pass/pass_utils.h"
@@ -87,20 +88,9 @@ bool HasOnlyConsumers(const af::AscNodePtr &node, const std::set<af::AscNodePtr>
   return true;
 }
 
-bool ExprVectorEqual(const std::vector<af::Expression> &lhs, const std::vector<af::Expression> &rhs) {
-  if (lhs.size() != rhs.size()) {
-    return false;
-  }
-  for (size_t i = 0UL; i < lhs.size(); ++i) {
-    if (af::SymbolicUtils::StaticCheckEq(lhs[i], rhs[i]) != af::TriBool::kTrue) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool HasSameTensorLayout(const af::AscTensorAttr &lhs, const af::AscTensorAttr &rhs) {
-  return lhs.axis == rhs.axis && ExprVectorEqual(lhs.repeats, rhs.repeats) && ExprVectorEqual(lhs.strides, rhs.strides);
+  return lhs.axis == rhs.axis && PassUtils::IsExprVectorEqual(lhs.repeats, rhs.repeats) &&
+         PassUtils::IsExprVectorEqual(lhs.strides, rhs.strides);
 }
 
 template <typename T>
@@ -168,8 +158,26 @@ bool HasStableSoftmaxConsumers(const SoftmaxPattern &pattern) {
          HasOnlyConsumers(pattern.sum_broadcast_node, {pattern.true_div_node});
 }
 
+bool IsSupportedDtype(const SoftmaxPattern &pattern) {
+  const auto &all = af::ascir::AscirRegistry::GetInstance().GetAll();
+  const auto it = all.find(kSoftmaxType);
+  if (it == all.end()) {
+    return false;
+  }
+  const auto &soc_to_store = it->second.GetSocToDataTypeSymbolStore();
+  const auto &store = soc_to_store.empty() ? it->second.GetDataTypeSymbolStore() : soc_to_store.begin()->second;
+  const auto &named_syms = store.GetNamedSymbols();
+  const auto sym_it = named_syms.find("T");
+  if (sym_it == named_syms.end() || sym_it->second == nullptr) {
+    return false;
+  }
+  const auto dtype = pattern.sub_node->inputs[0].attr.dtype;
+  return sym_it->second->GetTensorType().tensor_type_impl_->IsDataTypeInRange(dtype);
+}
+
 bool MatchStableSoftmax(const af::AscNodePtr &true_div_node, SoftmaxPattern &pattern) {
-  return MatchStableSoftmaxStructure(true_div_node, pattern) && HasStableSoftmaxLayout(pattern) &&
+  return MatchStableSoftmaxStructure(true_div_node, pattern) && IsSupportedDtype(pattern) &&
+         ScheduleUtils::IsReduceOnTailAxis(pattern.max_node) && HasStableSoftmaxLayout(pattern) &&
          HasStableSoftmaxConsumers(pattern);
 }
 

@@ -48,15 +48,15 @@ class ReducePartitionCaseGenerator : public FusionCaseGenerator {
                        std::vector<std::pair<af::AscNodePtr, af::AscNodePtr>> &loop_start_end);
   void FindAllPath(const af::AscNodePtr &start, const af::AscNodePtr &end, std::vector<af::AscNodePtr> &path,
                    std::vector<std::vector<af::AscNodePtr>> &all_paths);
-  static Status PartitionLoad(af::AscNodePtr &src_node, af::AscNodePtr &dst_node, ascir::ImplGraph &impl_graph);
-  static Status PartitionScalar(af::AscNodePtr &src_node, af::AscNodePtr &dst_node, ascir::ImplGraph &impl_graph);
+  static Status PartitionLoadNode(af::AscNodePtr &src_node, af::AscNodePtr &dst_node, ascir::ImplGraph &impl_graph);
+  static Status PartitionScalarNode(af::AscNodePtr &src_node, af::AscNodePtr &dst_node, ascir::ImplGraph &impl_graph);
   static bool HasReduce(const ascir::ImplGraph &impl_graph);
   static bool HasArgMaxReduce(const ScheduleTask &task);
   static bool IsGroupGraphLegal(const ascir::ImplGraph &impl_graph);
   static bool CanFullLoadReduceFuse(const ascir::ImplGraph &impl_graph);
   Status ReducePartitionMultipleCitations(ascir::ImplGraph &impl_graph);
   bool FindOutputReduce(const af::AscNodePtr &node, af::AscNodePtr &reduce_node);
-  Status PartitionReduce(af::AscNodePtr &src_node, ascir::ImplGraph &impl_graph);
+  Status PartitionReduceNode(af::AscNodePtr &src_node, ascir::ImplGraph &impl_graph);
 
   bool partition_{false};
   std::vector<af::AscNodePtr> node_order_{};

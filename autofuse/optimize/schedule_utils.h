@@ -354,6 +354,7 @@ class ScheduleUtils {
   static bool IsReduceArFullLoad(const ascir::ImplGraph &implGraph);
   static bool HasSameInput(const af::AscNodePtr &node);
   static bool IsLastAxisReduce(const ascir::ImplGraph &impl_graph);
+  static bool IsReduceOnTailAxis(const af::AscNodePtr &node);
   static bool IsScalarBroadcastNode(const ascir::NodeView &node);
   static bool IsScalarBrc(const af::AscNodePtr &node);
   static Status SwapInputIndex(const ascir::NodeView &node, const int32_t idx1, const int32_t idx2);
