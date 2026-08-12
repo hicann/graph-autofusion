@@ -184,21 +184,6 @@ TEST(GeneratorUT, DurationSplitSourcesIncludeDirectDependencies) {
   ExpectSystemHeaders(solver_source, {"chrono", "memory", "new", "string"}, {});
 }
 
-TEST(GeneratorUT, HighPerfSolverHeaderOmitsCstddefWithoutGeneralSolver) {
-  TilingModelInfo model_infos{CreateModelInfo(1U, af::ExprType::kExprConstantInteger)};
-  ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 0UL}, model_infos), af::SUCCESS);
-  TilingCodeGenConfig config;
-  config.type = TilingImplType::HIGH_PERF;
-  config.tiling_data_type_name = "OpTestTilingData";
-  std::map<std::string, std::string> tiling_res;
-  TilingCodeGenerator generator;
-
-  ASSERT_EQ(generator.GenTilingCode(op_name, model_infos, config, tiling_res), af::SUCCESS);
-  const auto &solver_header = tiling_res.at(kTilingSolverHeaderIdentify);
-  EXPECT_EQ(solver_header.find("GetTemp(size_t idx)"), std::string::npos);
-  EXPECT_EQ(solver_header.find("#include <cstddef>"), std::string::npos);
-}
-
 TEST(GeneratorUT, NormalGroupRegistersOnlyDirectStandardHeaders) {
   TilingModelInfo model_infos{CreateModelInfo()};
   ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 0UL}, model_infos), af::SUCCESS);
@@ -724,7 +709,13 @@ TEST(GeneratorUT, AxesReorderSolverHeaderRegistersOnlyDirectStandardHeaders) {
   ModelInfo model_info = CreateModelInfo();
   size_t order = 1U;
   for (const auto &arg : model_info.arg_list) {
-    arg->order = (arg->name == "tilem" || arg->name == "tilen") ? 0U : order++;
+    if (arg->name == "stepm" || arg->name == "stepn") {
+      // R2 剥离后 INNER 轴仅剩 stepm/stepn；置 bind_multicore=false + 同 order 构造 equal-order 触发条件
+      arg->bind_multicore = false;
+      arg->order = 0U;
+    } else {
+      arg->order = order++;
+    }
   }
   TilingModelInfo model_infos{model_info};
   ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 0UL}, model_infos), af::SUCCESS);

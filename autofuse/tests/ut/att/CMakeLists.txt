@@ -20,15 +20,10 @@ file(GLOB SOURCES
         # generator/preprocess
         ${TOP_DIR}/tests/ut/att/testcase/preprocess/*.cpp
         # generator/solver_pass
-        ${TOP_DIR}/tests/ut/att/testcase/solver_pass/l0_solver/*.cpp
-        ${TOP_DIR}/tests/ut/att/testcase/solver_pass/l2_solver/*.cpp
         ${TOP_DIR}/tests/ut/att/testcase/solver_pass/general_solver/*.cpp
-        ${TOP_DIR}/tests/ut/att/testcase/solver_pass/src/*.cpp
         # generator/solver_pass_gen
         ${TOP_DIR}/tests/ut/att/testcase/solver_pass_gen/axes_reorder_gen/*.cpp
         ${TOP_DIR}/tests/ut/att/testcase/solver_pass_gen/general_solver_gen/*.cpp
-        ${TOP_DIR}/tests/ut/att/testcase/solver_pass_gen/l2_solver_gen/*.cpp
-        ${TOP_DIR}/tests/ut/att/testcase/solver_pass_gen/l0_solver_gen/*.cpp
         ${TOP_DIR}/tests/ut/att/testcase/solver_pass_gen/manager/*.cpp
         # generator/core
         ${TOP_DIR}/tests/ut/att/testcase/generator/core/*.cpp
@@ -59,9 +54,6 @@ file(GLOB SOURCES
         ${TOP_DIR}/tests/ut/att/testcase/check_input/*.cpp
         ${TOP_DIR}/tests/ut/att/utils/*.cpp
     )
-
-# solver_pass/src/*.cpp 是源码镜像，从 ATT_DIR 编译，排除以避免 multiple definition
-list(FILTER SOURCES EXCLUDE REGEX "solver_pass/src/.+\\.cpp$")
 
 add_executable(att_ut
         ${SOURCES}

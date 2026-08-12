@@ -20,11 +20,7 @@ bool TestCase(std::vector<int64_t> shapes) {
   int64_t n = shapes[3];
   MMTilingData tilingData;
   tilingData.set_block_dim(20);
-  tilingData.set_l2_size(128 * 1024 * 1024);
   tilingData.set_l1_size(512 * 1024);
-  tilingData.set_l0a_size(64 * 1024);
-  tilingData.set_l0b_size(64 * 1024);
-  tilingData.set_l0c_size(128 * 1024);
   tilingData.set_m_size(m);
   tilingData.set_k_size(k);
   tilingData.set_n_size(n);
@@ -34,13 +30,8 @@ bool TestCase(std::vector<int64_t> shapes) {
 
   const auto status = GetTiling(tilingData, 1u, nullptr);
   if ((status)) {
-    std::cout << "tile_l2_m" << " = " << tilingData.get_tilem_size() << std::endl;
-    std::cout << "tile_l2_n" << " = " << tilingData.get_tilen_size() << std::endl;
     std::cout << "step_ka" << " = " << tilingData.get_stepka_size() << std::endl;
     std::cout << "step_kb" << " = " << tilingData.get_stepkb_size() << std::endl;
-    std::cout << "base_k" << " = " << tilingData.get_basek_size() << std::endl;
-    std::cout << "base_m" << " = " << tilingData.get_basem_size() << std::endl;
-    std::cout << "base_n" << " = " << tilingData.get_basen_size() << std::endl;
     return true;
   }
   std::cout << "mm tiling func execute failed." << std::endl;

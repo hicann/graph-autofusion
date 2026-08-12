@@ -9,8 +9,6 @@
  */
 #ifndef ATT_SOLVER_H_
 #define ATT_SOLVER_H_
-#include "l0_solver_code.h"
-#include "l2_solver_code.h"
 #include "general_solver_code.h"
 #include "axes_reorder_solver_code.h"
 #include "base/base_types.h"

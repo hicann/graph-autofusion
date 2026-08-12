@@ -18,16 +18,9 @@ int TestCase1(uint64_t m, uint64_t n, uint64_t k, int32_t tilingCaseId) {
   tilingData.set_k_size(k);
   tilingData.set_block_dim(20);
   tilingData.set_l1_size(512 * 1024);
-  tilingData.set_l0a_size(64 * 1024);
-  tilingData.set_l0b_size(64 * 1024);
-  tilingData.set_l0c_size(128 * 1024);
   // tilingData.z = 0;
   const auto status = GetTiling(tilingData, tilingCaseId);
   if ((status)) {
-    std::cout << "basem" << " = " << tilingData.get_basem_size() << std::endl;
-    std::cout << "basen" << " = " << tilingData.get_basen_size() << std::endl;
-    std::cout << "tilem" << " = " << tilingData.get_tilem_size() << std::endl;
-    std::cout << "tilen" << " = " << tilingData.get_tilen_size() << std::endl;
     std::cout << "stepn" << " = " << tilingData.get_stepn_size() << std::endl;
     std::cout << "stepm" << " = " << tilingData.get_stepm_size() << std::endl;
     std::cout << "stepka" << " = " << tilingData.get_stepka_size() << std::endl;

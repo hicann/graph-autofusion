@@ -17,9 +17,6 @@ int TestCase1(uint64_t m, uint64_t n, int32_t tilingCaseId) {
   tilingData.set_n_size(n);
   tilingData.set_block_dim(20);
   tilingData.set_l1_size(512 * 1024);
-  tilingData.set_l0a_size(64 * 1024);
-  tilingData.set_l0b_size(64 * 1024);
-  tilingData.set_l0c_size(128 * 1024);
   // tilingData.z = 0;
   const auto status = GetTiling(tilingData, tilingCaseId);
   if ((status)) {

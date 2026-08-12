@@ -21,10 +21,6 @@ file(GLOB SOURCES
         ${TC_DIR}/test_expr/*.cpp
         ${TC_DIR}/solver_pass_gen/axes_reorder_solver_gen/*.cpp
         ${TC_DIR}/solver_pass_gen/general_solver_gen/*.cpp
-        ${TC_DIR}/solver_pass_gen/l2_solver_gen/*.cpp
-        ${TC_DIR}/solver_pass_gen/l0_solver_gen/*.cpp
-        ${TC_DIR}/solver_pass/l0_solver/*.cpp
-        ${TC_DIR}/solver_pass/l2_solver/*.cpp
         ${TC_DIR}/solver_pass/general_solver/*.cpp
         ${TC_DIR}/solver_pass_manager/*.cpp
         ${TC_DIR}/select_model/*.cpp
