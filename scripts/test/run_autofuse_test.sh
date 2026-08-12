@@ -789,6 +789,19 @@ build_backend() {
                        indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd_e2e_v2 \
                        indirect_load_mixed_rank4_axis2_simd_e2e_v2 \
                        indirect_load_simt_elementwise_coverage_e2e_v2 \
+                       indirect_load_broadcast_elements_simd_test_e2e_v2 \
+                       indirect_load_broadcast_elements_simt_test_e2e_v2 \
+                       indirect_load_broadcast_elements_sk_test_e2e_v2 \
+                       indirect_load_stride_zero_elements_simd_test_e2e_v2 \
+                       indirect_load_stride_zero_elements_simt_test_e2e_v2 \
+                       indirect_load_stride_zero_elements_sk_test_e2e_v2 \
+                       indirect_load_rank3_axis1_input_index_gap_simd_test_e2e_v2 \
+                       indirect_load_rank3_axis1_input_index_gap_simt_test_e2e_v2 \
+                       indirect_load_rank3_axis1_input_index_gap_sk_test_e2e_v2 \
+                       indirect_load_rank3_axis1_input_index_outer_gap_simd_test_e2e_v2 \
+                       indirect_load_rank3_axis1_input_index_outer_gap_simt_test_e2e_v2 \
+                       indirect_load_rank3_axis1_input_index_outer_gap_sk_test_e2e_v2 \
+                       indirect_load_rank3_axis1_torch_gather_frontend_e2e_v2 \
                        load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \
                       gather_reduce_store_test_e2e_v2 \
                       load_where_store_test_e2e_v2 \

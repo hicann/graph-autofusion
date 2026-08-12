@@ -12,6 +12,7 @@
 #define __INDIRECT_LOAD_UTILS_H__
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,16 +21,19 @@
 namespace ascgen_utils::indirect_load {
 constexpr size_t kInputTensorIndex = 0UL;
 constexpr size_t kIndexTensorIndex = 1UL;
+constexpr char kTemplateLogicalViewAttr[] = "af.internal.indirect_load.logical_view";
 
 enum class TemplateRole : int64_t {
   kNone,
   kSimdInputPre,
+  kSimdInputPreStridedUbPath,
   kSimtInputBoundary,
   kSimtDirectGmBoundary,
   kSimtInlineTransform,
   kSimtOp,
   kSkInputBoundary,
   kSkOp,
+  kStridedUbPath,
 };
 
 enum class Implementation : int64_t {
@@ -59,12 +63,25 @@ struct TemplateAxes {
 
 struct LogicalTensorView {
   std::vector<af::AxisId> axis_ids;
+  std::vector<af::Expression> sizes;
   std::vector<af::Expression> strides;
 };
 
+enum class IndirectLoadLayoutKind : int64_t {
+  kDense = 0,
+  kZeroStrideCompact = 1,
+  kStrided = 2,
+  kUnsupported = 3,
+};
+
+struct IndirectLoadTensorLayout : LogicalTensorView {
+  IndirectLoadLayoutKind kind = IndirectLoadLayoutKind::kUnsupported;
+  std::vector<af::Expression> physical_repeats;
+};
+
 struct TemplateLogicalView {
-  LogicalTensorView input;
-  LogicalTensorView index;
+  IndirectLoadTensorLayout input;
+  IndirectLoadTensorLayout index;
   LogicalTensorView output;
 };
 
@@ -84,6 +101,8 @@ af::Status SetTemplateLogicalView(const af::AscNodePtr &node, const TemplateLogi
 af::Status GetTemplateLogicalView(const af::AscNodePtr &node, TemplateLogicalView &view);
 af::Status SetImplementation(const af::AscNodePtr &node, Implementation implementation);
 af::Status GetImplementation(const af::AscNodePtr &node, Implementation &implementation);
+af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout);
+af::Status ValidateIndirectLoadOutputLayout(const LogicalTensorView &output);
 bool ShouldSkipMainScheduleTiling(const af::AscNodePtr &node);
 bool ShouldPreserveVectorizedAxis(const af::AscNodePtr &node);
 bool ShouldApplyInputInnerVectorization(const af::AscNodePtr &node);

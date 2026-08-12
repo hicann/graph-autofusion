@@ -27,7 +27,7 @@ class WhereRegApiCall : public ApiCall {
                                  const std::vector<std::reference_wrapper<const Tensor>> &outputs, const Tensor *&x1,
                                  const Tensor *&x2, const Tensor *&x3, const Tensor *&y) const;
   Status GenerateLoopParams(const Tensor &x1, const Tensor &x2, const Tensor &x3, const Tensor &y, const TPipe &tpipe,
-                            ApiLoopParams &param) const;
+                            ApiLoopParams &param, VectorizedAxisLoopMergeStatus &merge_info) const;
   Status GenerateNoLoopCase(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis, const Tensor &x1,
                             const Tensor &x2, const Tensor &x3, const Tensor &y, const std::string &x2_scalar,
                             const std::string &x3_scalar, std::stringstream &ss) const;

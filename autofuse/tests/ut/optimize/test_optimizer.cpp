@@ -6690,7 +6690,7 @@ TEST_F(TestOptimizer, ReducePartitionLoad) {
   ::ascir::FusedScheduledResult fused_scheduled_result;
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
   EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results.size(), 1);
-  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0].size(), 1);
+  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0].size(), 2);
 }
 
 TEST_F(TestOptimizer, ReducePartition3) {
@@ -7149,7 +7149,7 @@ TEST_F(TestOptimizer, ReduceAllLoad) {
   ::ascir::FusedScheduledResult fused_scheduled_result;
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
   EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results.size(), 1);
-  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0].size(), 1);
+  EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0].size(), 2);
 }
 
 /**

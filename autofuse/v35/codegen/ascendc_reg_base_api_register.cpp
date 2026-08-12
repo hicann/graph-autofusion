@@ -246,6 +246,9 @@ Register::Register() {
   const std::string kAscendcIndirectLoadSimtRegBaseStr = {
 #include "indirect_load_simt_reg_base.h"
   };
+  const std::string kAscendcIndirectLoadSimdPolicyRegBaseStr = {
+#include "indirect_load_simd_policy_reg_base.h"
+  };
   const std::string kAscendcIndirectLoadSimdRegBaseStr = {
 #include "indirect_load_simd_reg_base.h"
   };
@@ -323,6 +326,7 @@ Register::Register() {
       {"shifted_chebyshev_polynomial_v_reg_base.h", kAscendcShiftedChebyshevPolynomialVRegBaseStr},
       {"shifted_chebyshev_polynomial_w_reg_base.h", kAscendcShiftedChebyshevPolynomialWRegBaseStr},
       {"indirect_load_simt_reg_base.h", kAscendcIndirectLoadSimtRegBaseStr},
+      {"indirect_load_simd_policy_reg_base.h", kAscendcIndirectLoadSimdPolicyRegBaseStr},
       {"indirect_load_simd_reg_base.h", kAscendcIndirectLoadSimdRegBaseStr},
       {"indirect_load_sk_reg_base.h", kAscendcIndirectLoadSkRegBaseStr},
   };

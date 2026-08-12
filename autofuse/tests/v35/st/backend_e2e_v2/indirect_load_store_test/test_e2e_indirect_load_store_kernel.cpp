@@ -143,6 +143,18 @@ constexpr int32_t ResultCount() {
 #endif
 }
 
+int32_t InputStorageCount() {
+#ifdef IL_INPUT_OUTER_STRIDE
+  int32_t inner_count = 1;
+  for (size_t dim = 1UL; dim < kInputShape.size(); ++dim) {
+    inner_count *= kInputShape[dim];
+  }
+  return (kInputShape[0] - 1) * IL_INPUT_OUTER_STRIDE + inner_count;
+#else
+  return ElementCount(kInputShape);
+#endif
+}
+
 void InitializeData(DataType *x, IndexType *index, DataType *addend, OutputType *expected, int32_t input_count,
                     int32_t output_count) {
 #ifdef IL_RANDOM_INPUT_INDEX
@@ -155,6 +167,9 @@ void InitializeData(DataType *x, IndexType *index, DataType *addend, OutputType 
   for (size_t i = input_strides.size() - 1UL; i > 0UL; --i) {
     input_strides[i - 1UL] = kInputShape[i] * input_strides[i];
   }
+#ifdef IL_INPUT_OUTER_STRIDE
+  input_strides[0] = IL_INPUT_OUTER_STRIDE;
+#endif
   for (int32_t i = 0; i < input_count; ++i) {
 #if defined(IL_DATA_UINT32)
     x[i] = static_cast<DataType>(i % 5);
@@ -380,7 +395,7 @@ TEST(E2EIndirectLoadStore, GeneratedKernelMatchesReference) {
 #ifdef IL_MIXED_ELEMENTWISE
   RunMixedElementwiseCase();
 #else
-  const int32_t input_count = ElementCount(kInputShape);
+  const int32_t input_count = InputStorageCount();
   const int32_t output_count = ElementCount(kIndexShape);
   const int32_t result_count = ResultCount();
   const auto gm_free = [](void *ptr) { AscendC::GmFree(ptr); };

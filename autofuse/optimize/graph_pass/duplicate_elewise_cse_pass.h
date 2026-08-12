@@ -8,18 +8,18 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-#ifndef OPTIMIZE_PLATFORM_V2_GRAPH_PASS_SOFTMAX_PATTERN_FUSION_PASS_H
-#define OPTIMIZE_PLATFORM_V2_GRAPH_PASS_SOFTMAX_PATTERN_FUSION_PASS_H
+#ifndef OPTIMIZE_PLATFORM_COMMON_GRAPH_PASS_DUPLICATE_ELEWISE_CSE_PASS_H
+#define OPTIMIZE_PLATFORM_COMMON_GRAPH_PASS_DUPLICATE_ELEWISE_CSE_PASS_H
 
 #include "optimize/graph_pass/base_graph_pass.h"
 
 namespace optimize {
-class SoftmaxPatternFusionPass final : public BaseGraphPass {
+class DuplicateElewiseCsePass final : public BaseGraphPass {
  public:
-  SoftmaxPatternFusionPass() = default;
+  DuplicateElewiseCsePass() = default;
+  ~DuplicateElewiseCsePass() override = default;
   Status RunPass(af::AscGraph &graph) override;
-  ~SoftmaxPatternFusionPass() override = default;
 };
 }  // namespace optimize
 
-#endif  // OPTIMIZE_PLATFORM_V2_GRAPH_PASS_SOFTMAX_PATTERN_FUSION_PASS_H
+#endif  // OPTIMIZE_PLATFORM_COMMON_GRAPH_PASS_DUPLICATE_ELEWISE_CSE_PASS_H

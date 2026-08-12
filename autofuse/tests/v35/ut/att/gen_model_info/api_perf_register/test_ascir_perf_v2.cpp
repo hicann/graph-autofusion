@@ -127,6 +127,42 @@ std::string GetComparePerfExpr(const std::string &api_name, const std::string &i
   return Str(perf_res.pipe_res[PipeType::AIV_VEC]);
 }
 
+std::string GetWhereImplPerfExpr(const std::string &data_dtype) {
+  NodeDetail node_detail;
+  node_detail.name = "WhereNode";
+  node_detail.optype = kWhere;
+  node_detail.input_dtype = {kUInt8, data_dtype, data_dtype};
+  node_detail.output_dtype = {data_dtype};
+  node_detail.input_dims = {CreateExpr(32)};
+  node_detail.output_dims = node_detail.input_dims;
+  node_detail.where_node_params.valid = true;
+  node_detail.where_node_params.output_dims = {CreateExpr(32)};
+
+  PerfOutputInfo perf_res;
+  EXPECT_EQ(att::ascendcperf_v2::WherePerf(node_detail, perf_res), af::SUCCESS);
+  return Str(perf_res.pipe_res[PipeType::AIV_VEC]);
+}
+
+std::string GetWhereComputePerfExpr(const std::string &data_dtype, const std::vector<Expr> &output_dims) {
+  NodeDetail node_detail;
+  node_detail.name = "WhereNode";
+  node_detail.optype = kWhere;
+  node_detail.input_dtype = {kUInt8, data_dtype, data_dtype};
+  node_detail.output_dtype = {data_dtype};
+  node_detail.input_dims = output_dims;
+  node_detail.output_dims = node_detail.input_dims;
+  node_detail.where_node_params.valid = true;
+  node_detail.where_node_params.output_dims = output_dims;
+
+  PerfOutputInfo perf_res;
+  EXPECT_EQ(att::ascendcperf_v2::WherePerf(node_detail, perf_res), af::SUCCESS);
+  return Str(perf_res.pipe_res[PipeType::AIV_VEC]);
+}
+
+std::string GetWhereComputePerfExpr(const std::string &data_dtype) {
+  return GetWhereComputePerfExpr(data_dtype, {CreateExpr(1), CreateExpr(32)});
+}
+
 NodeDetail MakeCastNodeDetail(const std::string &input_dtype, const std::string &output_dtype) {
   NodeDetail node_detail;
   node_detail.name = "CastNode";
@@ -2232,6 +2268,35 @@ TEST_F(UTestAscirPerfV2, TestWhereV2) {
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
   EXPECT_EQ(Str(res), "36");
+}
+
+TEST_F(UTestAscirPerfV2, TestWhereImplSkipMaskPerfForB8B16B32) {
+  EXPECT_EQ(GetWhereImplPerfExpr(kUInt8), "48");
+  EXPECT_EQ(GetWhereImplPerfExpr(kFloat16), "56");
+  EXPECT_EQ(GetWhereImplPerfExpr(kFloat32), "61");
+}
+
+TEST_F(UTestAscirPerfV2, TestWhereImplKeepsMaskPerfForB64) {
+  EXPECT_EQ(GetWhereImplPerfExpr(kInt64), "72");
+}
+
+TEST_F(UTestAscirPerfV2, TestWhereComputeSkipMaskPerfForB16B32) {
+  EXPECT_EQ(GetWhereComputePerfExpr(kFloat16), "52");
+  EXPECT_EQ(GetWhereComputePerfExpr(kFloat32), "56");
+}
+
+TEST_F(UTestAscirPerfV2, TestWhereComputeKeepsMaskPerfForB8B64) {
+  EXPECT_EQ(GetWhereComputePerfExpr(kUInt8), "50");
+  EXPECT_EQ(GetWhereComputePerfExpr(kInt64), "72");
+}
+
+TEST_F(UTestAscirPerfV2, TestWhereComputeB16B32MultipliesDim0AfterInnerCost) {
+  const auto output_dims = std::vector<Expr>{CreateExpr("where_dim0"), CreateExpr("where_dim1")};
+
+  EXPECT_EQ(GetWhereComputePerfExpr(kFloat16, output_dims),
+            "((((3 * Ceiling((Rational(1 , 128) * where_dim1))) + 4) * where_dim0) + 45)");
+  EXPECT_EQ(GetWhereComputePerfExpr(kFloat32, output_dims),
+            "((((4 * Ceiling((Rational(1 , 64) * where_dim1))) + 3) * where_dim0) + 49)");
 }
 
 TEST_F(UTestAscirPerfV2, TestSelectV2) {

@@ -95,6 +95,18 @@ af::Status PassUtils::RelinkAllOutNodeToSrc(const af::OutDataAnchorPtr &old_src,
   return af::SUCCESS;
 }
 
+bool PassUtils::IsExprVectorEqual(const std::vector<af::Expression> &lhs, const std::vector<af::Expression> &rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (size_t i = 0UL; i < lhs.size(); ++i) {
+    if (af::SymbolicUtils::StaticCheckEq(lhs[i], rhs[i]) != af::TriBool::kTrue) {
+      return false;
+    }
+  }
+  return true;
+}
+
 af::AscNodePtr PassUtils::CreateOneScalarBrc(af::AscGraph &graph, const af::AscNodePtr &ref_node) {
   std::string scalar_name = ref_node->GetName() + "_One";
   af::ascir_op::Scalar scalar_one(scalar_name.c_str(), graph);

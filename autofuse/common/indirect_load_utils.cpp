@@ -14,6 +14,7 @@
 
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
+#include "graph/symbolizer/symbolic_utils.h"
 #include "schedule_result.h"
 
 namespace ascgen_utils::indirect_load {
@@ -25,11 +26,15 @@ constexpr char kTemplateTileOuterAxisAttr[] = "af.internal.indirect_load.tile_ou
 constexpr char kTemplateTileInnerAxisAttr[] = "af.internal.indirect_load.tile_inner_axis";
 constexpr char kTemplateVectorizedAxesAttr[] = "af.internal.indirect_load.vectorized_axes";
 constexpr char kTemplateSyntheticOuterAttr[] = "af.internal.indirect_load.synthetic_outer";
-constexpr char kTemplateLogicalViewAttr[] = "af.internal.indirect_load.logical_view";
 constexpr char kImplementationAttr[] = "af.internal.indirect_load.implementation";
-
 bool IsValidLogicalTensorView(const LogicalTensorView &view) {
-  return !view.axis_ids.empty() && view.axis_ids.size() == view.strides.size();
+  return !view.axis_ids.empty() && view.axis_ids.size() == view.sizes.size() &&
+         view.axis_ids.size() == view.strides.size();
+}
+
+bool IsValidTensorLayout(const IndirectLoadTensorLayout &layout) {
+  return IsValidLogicalTensorView(layout) && layout.kind != IndirectLoadLayoutKind::kUnsupported &&
+         layout.physical_repeats.size() == layout.sizes.size();
 }
 
 TemplateAxes ReadTemplateAxes(const af::AscNodePtr &node) {
@@ -59,6 +64,7 @@ TemplateBehavior GetBehavior(TemplateRole role) {
   TemplateBehavior behavior;
   switch (role) {
     case TemplateRole::kSimdInputPre:
+    case TemplateRole::kSimdInputPreStridedUbPath:
       behavior.excludes_tiling_group = true;
       behavior.preserves_vectorized_axis = true;
       break;
@@ -86,6 +92,7 @@ TemplateBehavior GetBehavior(TemplateRole role) {
       behavior.preserves_vectorized_axis = true;
       break;
     case TemplateRole::kSkOp:
+    case TemplateRole::kStridedUbPath:
       break;
     case TemplateRole::kNone:
       break;
@@ -198,9 +205,9 @@ af::Status GetTemplateAxes(const af::AscNodePtr &node, TemplateAxes &axes) {
 
 af::Status SetTemplateLogicalView(const af::AscNodePtr &node, const TemplateLogicalView &view) {
   GE_ASSERT_NOTNULL(node);
-  GE_ASSERT_TRUE(IsValidLogicalTensorView(view.input) && IsValidLogicalTensorView(view.index) &&
-                     IsValidLogicalTensorView(view.output),
-                 "IndirectLoad logical view is invalid, node = %s", node->GetNamePtr());
+  GE_ASSERT_TRUE(
+      IsValidTensorLayout(view.input) && IsValidTensorLayout(view.index) && IsValidLogicalTensorView(view.output),
+      "IndirectLoad logical view is invalid, node = %s", node->GetNamePtr());
   auto op_desc = node->GetOpDesc();
   GE_ASSERT_NOTNULL(op_desc);
   GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateLogicalViewAttr, view), "Set IndirectLoad logical view failed, node = %s",
@@ -213,9 +220,54 @@ af::Status GetTemplateLogicalView(const af::AscNodePtr &node, TemplateLogicalVie
   auto op_desc = node->GetOpDesc();
   GE_ASSERT_NOTNULL(op_desc);
   view = op_desc->TryGetExtAttr(kTemplateLogicalViewAttr, TemplateLogicalView{});
-  GE_ASSERT_TRUE(IsValidLogicalTensorView(view.input) && IsValidLogicalTensorView(view.index) &&
-                     IsValidLogicalTensorView(view.output),
-                 "IndirectLoad logical view is missing or invalid, node = %s", node->GetNamePtr());
+  GE_ASSERT_TRUE(
+      IsValidTensorLayout(view.input) && IsValidTensorLayout(view.index) && IsValidLogicalTensorView(view.output),
+      "IndirectLoad logical view is missing or invalid, node = %s", node->GetNamePtr());
+  return af::SUCCESS;
+}
+
+af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout) {
+  GE_ASSERT_TRUE(IsValidLogicalTensorView(logical), "IndirectLoad input layout rank is invalid.");
+  static_cast<LogicalTensorView &>(layout) = logical;
+  layout.kind = IndirectLoadLayoutKind::kUnsupported;
+  layout.physical_repeats = logical.sizes;
+
+  af::Expression physical_span = af::sym::kSymbolOne;
+  bool has_zero_stride = false;
+  bool has_physical_gap = false;
+  for (size_t index = logical.sizes.size(); index > 0UL; --index) {
+    const size_t dim = index - 1UL;
+    if (af::SymbolicUtils::StaticCheckLe(logical.sizes[dim], af::sym::kSymbolZero) == af::TriBool::kTrue ||
+        af::SymbolicUtils::StaticCheckLt(logical.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      return af::SUCCESS;
+    }
+    const af::TriBool is_zero = af::SymbolicUtils::StaticCheckEq(logical.strides[dim], af::sym::kSymbolZero);
+    if (is_zero == af::TriBool::kTrue) {
+      layout.physical_repeats[dim] = af::sym::kSymbolOne;
+      has_zero_stride = true;
+      continue;
+    }
+    if (af::SymbolicUtils::StaticCheckLt(logical.strides[dim], physical_span) != af::TriBool::kFalse) {
+      return af::SUCCESS;
+    }
+    has_physical_gap =
+        has_physical_gap || af::SymbolicUtils::StaticCheckEq(logical.strides[dim], physical_span) != af::TriBool::kTrue;
+    physical_span = physical_span + (logical.sizes[dim] - af::sym::kSymbolOne) * logical.strides[dim];
+  }
+  if (has_zero_stride && has_physical_gap) {
+    return af::SUCCESS;
+  }
+  layout.kind = has_zero_stride
+                    ? IndirectLoadLayoutKind::kZeroStrideCompact
+                    : (has_physical_gap ? IndirectLoadLayoutKind::kStrided : IndirectLoadLayoutKind::kDense);
+  return af::SUCCESS;
+}
+
+af::Status ValidateIndirectLoadOutputLayout(const LogicalTensorView &output) {
+  IndirectLoadTensorLayout layout;
+  GE_ASSERT_SUCCESS(ClassifyIndirectLoadLayout(output, layout));
+  GE_ASSERT_TRUE(layout.kind == IndirectLoadLayoutKind::kDense,
+                 "IndirectLoad output must use a dense contiguous layout.");
   return af::SUCCESS;
 }
 
@@ -250,7 +302,8 @@ bool ShouldPreserveVectorizedAxis(const af::AscNodePtr &node) {
 
 bool ShouldApplyInputInnerVectorization(const af::AscNodePtr &node) {
   const TemplateRole role = GetTemplateRole(node);
-  return role == TemplateRole::kSimdInputPre || role == TemplateRole::kSkInputBoundary;
+  return role == TemplateRole::kSimdInputPre || role == TemplateRole::kSimdInputPreStridedUbPath ||
+         role == TemplateRole::kSkInputBoundary;
 }
 
 bool ShouldDisableRegularVectorFunc(const af::AscNodePtr &node) {

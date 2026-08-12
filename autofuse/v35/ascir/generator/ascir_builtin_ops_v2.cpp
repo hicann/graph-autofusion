@@ -1164,10 +1164,9 @@ REG_ASC_IR(Softmax)
     .Input("x", "T")
     .Output("y", "T")
     .ComputeType(ComputeType::kComputeReduce)
-    .Impl(v2_soc_versions,
-          {af::ascir::AscIrImplCreator<af::ascir::SoftmaxAscIrAttImplV2>(),
-           af::ascir::AscIrImplCreator<af::ascir::SoftmaxAscIrCodegenImplV2>(),
-           {{"T", TensorType{DT_INT8, DT_UINT8, DT_INT16, DT_INT32, DT_BF16, DT_FLOAT16, DT_FLOAT, DT_INT64}}}});
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::SoftmaxAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::SoftmaxAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_BF16, DT_FLOAT16, DT_FLOAT}}}});
 
 REG_ASC_IR(Sin)
     .Input("x", "T")

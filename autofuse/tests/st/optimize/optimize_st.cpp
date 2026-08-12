@@ -43,6 +43,8 @@
 #include "ascgraph_info_complete.h"
 #include "asc_graph_builder.h"
 #include "common/autofuse_backend_spec_api.h"
+#include "optimize/graph_pass/softmax_pattern_fusion_pass.h"
+#include "optimize/graph_pass/duplicate_elewise_cse_pass.h"
 
 using namespace std;
 using namespace af;
@@ -273,7 +275,7 @@ static AscGraph BuildOneNodeWithReduceAscGraph(const std::string &name, const st
   return AscGraphBuilder(name)
       .Loops({Sym("s0"), Sym("s1")})
       .Data(prefix + "sub_data0", 0, {Sym("s0"), Sym("s1")}, {Sym("s1"), af::sym::kSymbolOne})
-      .Load(prefix + "load0", prefix + "sub_data0", {Sym("s0"), af::sym::kSymbolOne})
+      .Load(prefix + "load0", prefix + "sub_data0", {Sym("s0"), Sym("s1")}, {Sym("s1"), af::sym::kSymbolOne})
       .Max(prefix + "max", prefix + "load0", {0})
       .Broadcast(prefix + "brc0", prefix + "max", {Sym("s0"), Sym("s1")})
       .Abs(prefix + "abs0", prefix + "brc0")
@@ -867,7 +869,7 @@ TEST_F(OptimizerSt, TestSoftmaxGraph_OptimizeSuccess) {
   ::ascir::FusedScheduledResult fused_scheduled_result;
   Status res = optimizer.Optimize(graph, fused_scheduled_result);
   EXPECT_EQ(res, af::SUCCESS);
-  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0].size(), 1UL);
+  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0].size(), 2UL);
 }
 
 TEST_F(OptimizerSt, TestPackGraph_OptimizeSuccess) {
@@ -4537,4 +4539,68 @@ TEST_F(OptimizerSt, transpose_reduce_eliminate) {
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), af::SUCCESS);
   // Transpose 被 eliminate，不生成额外的保留模板，只有 Reduce 的调度结果
   EXPECT_GE(fused_scheduled_result.node_idx_to_scheduled_results[0].size(), 1UL);
+}
+
+TEST_F(OptimizerSt, SoftmaxPatternFusion_StableSoftmax) {
+  auto s0 = Sym("s0");
+  auto s1 = Sym("s1");
+
+  auto graph = AscGraphBuilder("StableSoftmax")
+                   .Loops({s0, s1})
+                   .Data("data0", 0, {s0, s1}, {s1, af::sym::kSymbolOne})
+                   .Load("load0", "data0")
+                   .Max("max", "load0", {1})
+                   .Broadcast("brc_max", "max", {s0, s1})
+                   .Sub("sub", "load0", "brc_max")
+                   .Exp("exp", "sub")
+                   .Sum("sum", "exp", {1})
+                   .Broadcast("brc_sum", "sum", {s0, s1})
+                   .template Op<TrueDiv>("truediv", {"exp", "brc_sum"})
+                   .Store("store", "truediv")
+                   .Output("output", "store", 0, af::DT_FLOAT16)
+                   .Build();
+
+  optimize::SoftmaxPatternFusionPass softmax_pass;
+  EXPECT_EQ(softmax_pass.RunPass(graph), af::SUCCESS);
+
+  auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
+  ASSERT_NE(compute_graph, nullptr);
+
+  // Softmax node 应替换原有模式节点
+  auto softmax_node = compute_graph->FindNode("truediv_softmax");
+  ASSERT_NE(softmax_node, nullptr);
+  EXPECT_EQ(softmax_node->GetType(), "Softmax");
+
+  // 原有模式节点应被移除
+  EXPECT_EQ(compute_graph->FindNode("max"), nullptr);
+  EXPECT_EQ(compute_graph->FindNode("brc_max"), nullptr);
+  EXPECT_EQ(compute_graph->FindNode("sub"), nullptr);
+  EXPECT_EQ(compute_graph->FindNode("exp"), nullptr);
+  EXPECT_EQ(compute_graph->FindNode("sum"), nullptr);
+  EXPECT_EQ(compute_graph->FindNode("brc_sum"), nullptr);
+  EXPECT_EQ(compute_graph->FindNode("truediv"), nullptr);
+}
+
+TEST_F(OptimizerSt, DuplicateElewiseCse_MergeSub) {
+  auto s0 = Sym("s0");
+  auto s1 = Sym("s1");
+
+  auto graph = AscGraphBuilder("DuplicateElewiseCse")
+                   .Loops({s0, s1})
+                   .Data("data0", 0, {s0, s1}, {s1, af::sym::kSymbolOne})
+                   .Load("load0", "data0")
+                   .Abs("abs0", "load0")
+                   .Data("data1", 1, {s0, s1}, {s1, af::sym::kSymbolOne})
+                   .Load("load1", "data1")
+                   .Relu("relu0", "load1")
+                   .Sub("sub1", "abs0", "relu0")
+                   .Store("store1", "sub1")
+                   .Output("output1", "store1", 0, af::DT_FLOAT16)
+                   .Sub("sub2", "abs0", "relu0")
+                   .Store("store2", "sub2")
+                   .Output("output2", "store2", 1, af::DT_FLOAT16)
+                   .Build();
+
+  ::ascir::FusedScheduledResult fused_scheduled_result;
+  EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), af::SUCCESS);
 }

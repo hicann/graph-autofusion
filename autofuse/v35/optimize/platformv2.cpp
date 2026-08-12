@@ -99,6 +99,8 @@ Status PlatformV2::GenerateTasks(ascir::ImplGraph &optimize_graph, const Optimiz
   GE_ASSERT_SUCCESS(ReducePartitionCaseGenerator().GeneratorTask(optimize_graph, tasks, options),
                     "Failed to generate tasks for Reduce");
   if (tasks.empty()) {
+    GELOGI("Graph %s has no tasks after all generators, try RecomputationCaseGenerator.",
+           optimize_graph.GetName().c_str());
     GE_ASSERT_SUCCESS(RecomputeCaseGenerator().GeneratorTask(optimize_graph, tasks, options),
                       "Failed to generate recomputation tasks for graph[%s].", optimize_graph.GetName().c_str());
   }

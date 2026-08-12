@@ -20,12 +20,20 @@
 #include "common/platform_context.h"
 #include "graph/debug/ge_attr_define.h"
 #include "graph/ascendc_ir/utils/asc_graph_utils.h"
+#include "graph/utils/graph_utils.h"
 #include "indirect_load_utils.h"
 #include "schedule_result.h"
 #include "task_generator/indirect_load_schedule_case_generator.h"
 
 namespace {
 constexpr int64_t kSimtDcacheSize = 32 * 1024;
+
+class PlatformContextReset {
+ public:
+  ~PlatformContextReset() {
+    ge::PlatformContext::GetInstance().Reset();
+  }
+};
 
 std::vector<std::string> AxisNames(af::AscGraph &graph, const std::vector<af::AxisId> &axis_ids) {
   std::vector<std::string> names;
@@ -257,6 +265,111 @@ af::AscGraph BuildIndirectLoadGraph(int64_t axis, bool has_input_pre_node = fals
   *y.y.strides = output_strides;
 
   return graph;
+}
+
+struct BroadcastGraphView {
+  std::vector<af::AxisId> source_axes;
+  std::vector<af::AxisId> input_axes;
+  std::vector<af::AxisId> output_axes;
+  std::vector<af::Expression> source_repeats;
+  std::vector<af::Expression> input_repeats;
+  std::vector<af::Expression> output_repeats;
+};
+
+BroadcastGraphView CreateBroadcastGraphView(af::AscGraph &graph) {
+  BroadcastGraphView view;
+  const std::vector<int64_t> shape = {2L, 3L, 4L};
+  for (size_t dim = 0UL; dim < shape.size(); ++dim) {
+    const af::Expression input_size = graph.CreateSizeVar(shape[dim]);
+    const af::Expression output_size = graph.CreateSizeVar(shape[dim]);
+    view.input_repeats.emplace_back(input_size);
+    view.output_repeats.emplace_back(output_size);
+    view.input_axes.emplace_back(graph.CreateAxis(("broadcast_i" + std::to_string(dim)).c_str(), input_size).id);
+    view.output_axes.emplace_back(graph.CreateAxis(("broadcast_o" + std::to_string(dim)).c_str(), output_size).id);
+  }
+  view.source_axes = view.input_axes;
+  view.source_repeats = view.input_repeats;
+  view.source_axes[1] = graph.CreateAxis("broadcast_source", af::ops::One).id;
+  view.source_repeats[1] = af::ops::One;
+  return view;
+}
+
+void BuildBroadcastInputPreChain(const af::AscOpOutput &broadcast_output, const BroadcastGraphView &view,
+                                 const std::vector<af::Expression> &input_strides, bool with_input_element,
+                                 af::ascir_op::IndirectLoad &indirect_load) {
+  if (!with_input_element) {
+    indirect_load.x1 = broadcast_output;
+    return;
+  }
+  af::ascir_op::Abs input_abs("broadcast_input_abs");
+  input_abs.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  input_abs.x = broadcast_output;
+  SetNodeView(input_abs, af::DT_FLOAT16, view.input_axes, view.input_repeats, input_strides);
+  indirect_load.x1 = input_abs.y;
+}
+
+af::AscGraph BuildIndirectLoadBroadcastGraph(bool with_input_element = true) {
+  af::AscGraph graph("indirect_load_broadcast_ut_graph");
+  const BroadcastGraphView view = CreateBroadcastGraphView(graph);
+  const std::vector<af::Expression> source_strides = {view.source_repeats[2], view.source_repeats[2], af::ops::One};
+  const std::vector<af::Expression> input_strides = {view.input_repeats[2], af::ops::Zero, af::ops::One};
+  const std::vector<af::Expression> output_strides = {view.output_repeats[1] * view.output_repeats[2],
+                                                      view.output_repeats[2], af::ops::One};
+  const af::Expression index_axis_stride = view.output_repeats[2] * (af::ops::One + af::ops::One);
+  const std::vector<af::Expression> index_strides = {view.output_repeats[1] * index_axis_stride, index_axis_stride,
+                                                     af::ops::One};
+  af::ascir_op::Data x("broadcast_x", graph);
+  x.ir_attr.SetIndex(0);
+  SetNodeView(x, af::DT_FLOAT16, view.source_axes, view.source_repeats, source_strides);
+  af::ascir_op::Load input_load("broadcast_input_load");
+  input_load.x = x.y;
+  SetNodeView(input_load, af::DT_FLOAT16, view.source_axes, view.source_repeats, source_strides);
+  af::ascir_op::Broadcast broadcast("input_broadcast");
+  broadcast.attr.api.compute_type = af::ComputeType::kComputeBroadcast;
+  broadcast.x = input_load.y;
+  SetNodeView(broadcast, af::DT_FLOAT16, view.input_axes, view.input_repeats, input_strides);
+  af::ascir_op::Data index("broadcast_index", graph);
+  index.ir_attr.SetIndex(1);
+  SetNodeView(index, af::DT_INT32, view.output_axes, view.output_repeats, index_strides);
+  af::ascir_op::Load index_load("broadcast_index_load");
+  index_load.x = index.y;
+  SetNodeView(index_load, af::DT_INT32, view.output_axes, view.output_repeats, index_strides);
+  af::ascir_op::Abs index_abs("broadcast_index_abs");
+  index_abs.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  index_abs.x = index_load.y;
+  SetNodeView(index_abs, af::DT_INT32, view.output_axes, view.output_repeats, index_strides);
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  BuildBroadcastInputPreChain(broadcast.y, view, input_strides, with_input_element, indirect_load);
+  indirect_load.x2 = index_abs.y;
+  indirect_load.ir_attr.SetAxis(1L);
+  SetNodeView(indirect_load, af::DT_FLOAT16, view.output_axes, view.output_repeats, output_strides);
+  af::ascir_op::Store store("broadcast_store");
+  store.x = indirect_load.y;
+  SetNodeView(store, af::DT_FLOAT16, view.output_axes, view.output_repeats, output_strides);
+  af::ascir_op::Output output("broadcast_output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  SetNodeView(output, af::DT_FLOAT16, view.output_axes, view.output_repeats, output_strides);
+  return graph;
+}
+
+bool AddSideConsumer(af::AscGraph &graph, const char *producer_name) {
+  af::ascir_op::Abs side_consumer("coverage_side_consumer");
+  graph.AddNode(side_consumer);
+  const auto producer = graph.FindNode(producer_name);
+  const auto consumer = graph.FindNode("coverage_side_consumer");
+  return producer != nullptr && consumer != nullptr &&
+         af::GraphUtils::AddEdge(producer->GetOutDataAnchor(0), consumer->GetInDataAnchor(0)) == ge::GRAPH_SUCCESS;
+}
+
+void SetStridedInputPath(af::AscGraph &graph) {
+  const std::vector<af::Expression> strides = {af::Symbol(64), af::Symbol(2)};
+  for (const char *name : {"data0", "load0", "data1", "load1", "x_copy_sign"}) {
+    const auto node = graph.FindNode(name);
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->outputs().size(), 1UL);
+    node->outputs()[0]->attr.strides = strides;
+  }
 }
 
 af::AscGraph BuildIndirectLoadPrecisionCastGraph() {
@@ -723,6 +836,186 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimtSetsDcacheAndUsesUnifiedVectoriz
   EXPECT_TRUE(ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(indirect_load));
 }
 
+TEST(IndirectLoadScheduleCaseGeneratorTest, ClassifiesDenseLayout) {
+  const ascgen_utils::indirect_load::LogicalTensorView view = {
+      {0, 1, 2}, {af::Symbol(2), af::Symbol(3), af::Symbol(4)}, {af::Symbol(12), af::Symbol(4), af::Symbol(1)}};
+  ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
+  ASSERT_EQ(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, layout), af::SUCCESS);
+  EXPECT_EQ(layout.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense);
+  EXPECT_EQ(layout.physical_repeats, view.sizes);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, ClassifiesZeroStrideCompactLayout) {
+  const ascgen_utils::indirect_load::LogicalTensorView view = {
+      {0, 1, 2}, {af::Symbol(2), af::Symbol(3), af::Symbol(4)}, {af::Symbol(4), af::Symbol(0), af::Symbol(1)}};
+  ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
+  ASSERT_EQ(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, layout), af::SUCCESS);
+  EXPECT_EQ(layout.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact);
+  EXPECT_EQ(layout.physical_repeats, (std::vector<af::Expression>{af::Symbol(2), af::Symbol(1), af::Symbol(4)}));
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, ClassifiesNonOverlappingStridedLayout) {
+  const ascgen_utils::indirect_load::LogicalTensorView view = {
+      {0, 1, 2}, {af::Symbol(2), af::Symbol(3), af::Symbol(4)}, {af::Symbol(20), af::Symbol(4), af::Symbol(1)}};
+  ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
+  ASSERT_EQ(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, layout), af::SUCCESS);
+  EXPECT_EQ(layout.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kStrided);
+  EXPECT_EQ(layout.physical_repeats, view.sizes);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsOverlappingStridedLayout) {
+  const ascgen_utils::indirect_load::LogicalTensorView view = {
+      {0, 1, 2}, {af::Symbol(2), af::Symbol(3), af::Symbol(4)}, {af::Symbol(10), af::Symbol(4), af::Symbol(1)}};
+  ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
+  ASSERT_EQ(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, layout), af::SUCCESS);
+  EXPECT_EQ(layout.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsMixedZeroStrideAndPhysicalGapLayout) {
+  const ascgen_utils::indirect_load::LogicalTensorView view = {
+      {0, 1, 2}, {af::Symbol(2), af::Symbol(3), af::Symbol(4)}, {af::Symbol(8), af::Symbol(0), af::Symbol(1)}};
+  ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
+  ASSERT_EQ(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, layout), af::SUCCESS);
+  EXPECT_EQ(layout.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsInvalidLogicalLayout) {
+  ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
+  const ascgen_utils::indirect_load::LogicalTensorView rank_mismatch = {
+      {0, 1}, {af::Symbol(2)}, {af::Symbol(1), af::Symbol(1)}};
+  EXPECT_NE(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(rank_mismatch, layout), af::SUCCESS);
+
+  const ascgen_utils::indirect_load::LogicalTensorView negative_stride = {
+      {0, 1}, {af::Symbol(2), af::Symbol(3)}, {af::Symbol(-3), af::Symbol(1)}};
+  ASSERT_EQ(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(negative_stride, layout), af::SUCCESS);
+  EXPECT_EQ(layout.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastElementPathUsesPhysicalViewForAllTemplates) {
+  PlatformContextReset platform_reset;
+  ge::PlatformContext::GetInstance().Reset();
+  ge::PlatformInfo platform_info;
+  platform_info.soc_ver = "3510";
+  platform_info.ub_size = 256 * 1024;
+  platform_info.aiv_num = 48;
+  ge::PlatformContext::GetInstance().SetPlatformInfo(platform_info);
+  auto graph = BuildIndirectLoadBroadcastGraph();
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  EXPECT_EQ(graphs.size(), 4UL);
+  ASSERT_EQ(score_functions.size(), graphs.size());
+  EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd), graphs.end());
+  EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt), graphs.end());
+  EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSK), graphs.end());
+
+  for (auto &candidate : graphs) {
+    EXPECT_EQ(candidate.FindNode("input_broadcast"), nullptr);
+    const auto indirect_load = candidate.FindNode("indirect_load");
+    const auto input_abs = candidate.FindNode("broadcast_input_abs");
+    const auto index_abs = candidate.FindNode("broadcast_index_abs");
+    ASSERT_NE(indirect_load, nullptr);
+    ASSERT_NE(input_abs, nullptr);
+    ASSERT_NE(index_abs, nullptr);
+    ascgen_utils::indirect_load::TemplateLogicalView logical_view;
+    ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
+    EXPECT_EQ(logical_view.input.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact);
+    ASSERT_EQ(logical_view.input.physical_repeats.size(), 3UL);
+    EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(logical_view.input.physical_repeats[1], af::ops::One),
+              af::TriBool::kTrue);
+    if (ascir::GetTemplateIdOrDefault(*indirect_load) != ascir::TemplateId::kIndirectLoadSimt) {
+      EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(index_abs),
+                ascgen_utils::indirect_load::TemplateRole::kStridedUbPath);
+    }
+  }
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastDirectPathUsesPhysicalViewForAllTemplates) {
+  PlatformContextReset platform_reset;
+  ge::PlatformContext::GetInstance().Reset();
+  ge::PlatformInfo platform_info;
+  platform_info.soc_ver = "3510";
+  platform_info.ub_size = 256 * 1024;
+  platform_info.aiv_num = 48;
+  ge::PlatformContext::GetInstance().SetPlatformInfo(platform_info);
+  auto graph = BuildIndirectLoadBroadcastGraph(false);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  EXPECT_EQ(graphs.size(), 4UL);
+  ASSERT_EQ(score_functions.size(), graphs.size());
+  for (auto &candidate : graphs) {
+    EXPECT_EQ(candidate.FindNode("input_broadcast"), nullptr);
+    EXPECT_EQ(candidate.FindNode("broadcast_input_abs"), nullptr);
+    const auto indirect_load = candidate.FindNode("indirect_load");
+    ASSERT_NE(indirect_load, nullptr);
+    ascgen_utils::indirect_load::TemplateLogicalView logical_view;
+    ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
+    EXPECT_EQ(logical_view.input.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact);
+  }
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, CompletesMissingDataViewAfterBroadcastRewrite) {
+  auto graph = BuildIndirectLoadBroadcastGraph();
+  const auto input = graph.FindNode("broadcast_x");
+  ASSERT_NE(input, nullptr);
+  ASSERT_EQ(input->outputs().size(), 1UL);
+  input->outputs()[0]->attr.axis.clear();
+  input->outputs()[0]->attr.repeats.clear();
+  input->outputs()[0]->attr.strides.clear();
+
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  const auto simd = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, graphs.end());
+  const auto completed_input = simd->FindNode("broadcast_x");
+  const auto input_load = simd->FindNode("broadcast_input_load");
+  ASSERT_NE(completed_input, nullptr);
+  ASSERT_NE(input_load, nullptr);
+  EXPECT_EQ(completed_input->outputs()[0]->attr.axis.size(), 3UL);
+  EXPECT_EQ(completed_input->outputs()[0]->attr.repeats, input_load->outputs()[0]->attr.repeats);
+  EXPECT_EQ(completed_input->outputs()[0]->attr.strides, input_load->outputs()[0]->attr.strides);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsInvalidBroadcastAndPostElementPaths) {
+  for (const char *producer_name : {"input_broadcast", "broadcast_input_abs"}) {
+    auto graph = BuildIndirectLoadBroadcastGraph();
+    ASSERT_TRUE(AddSideConsumer(graph, producer_name));
+    optimize::IndirectLoadScheduleCaseGenerator generator;
+    std::vector<af::AscGraph> graphs;
+    std::vector<std::string> score_functions;
+    ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+    EXPECT_TRUE(graphs.empty()) << producer_name;
+    EXPECT_TRUE(score_functions.empty()) << producer_name;
+  }
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimdAcceptsStridedInputPath) {
+  auto graph = BuildExpandedMultiInputGraph(false, 2L, 16L);
+  SetStridedInputPath(graph);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  const auto simd = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, graphs.end());
+  const auto indirect_load = simd->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateLogicalView logical_view;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
+  EXPECT_EQ(logical_view.input.strides, (std::vector<af::Expression>{af::Symbol(64), af::Symbol(2)}));
+  for (const char *name : {"load0", "load1", "x_copy_sign"}) {
+    const auto node = simd->FindNode(name);
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(node),
+              ascgen_utils::indirect_load::TemplateRole::kSimdInputPreStridedUbPath);
+  }
+}
+
 TEST(IndirectLoadScheduleCaseGeneratorTest, StoresTemplateAxesWithoutOverwritingSchedAxis) {
   auto graphs = GenerateIndirectLoadCases(2);
   const auto simd_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
@@ -743,8 +1036,11 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, StoresTemplateAxesWithoutOverwriting
   ExpectAxisNames(simd_graph, logical_view.input.axis_ids, {"z0", "z1", "z2", "z3"});
   ExpectAxisNames(simd_graph, logical_view.index.axis_ids, {"z4", "z5", "z6", "z7"});
   ExpectAxisNames(simd_graph, logical_view.output.axis_ids, {"z4", "z5", "z6", "z7"});
+  EXPECT_EQ(logical_view.input.sizes.size(), 4UL);
   EXPECT_EQ(logical_view.input.strides.size(), 4UL);
+  EXPECT_EQ(logical_view.index.sizes.size(), 4UL);
   EXPECT_EQ(logical_view.index.strides.size(), 4UL);
+  EXPECT_EQ(logical_view.output.sizes.size(), 4UL);
   EXPECT_EQ(logical_view.output.strides.size(), 4UL);
 }
 
@@ -831,10 +1127,13 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratorTaskRestoresSkLogicalViewAf
   ascgen_utils::indirect_load::TemplateLogicalView logical_view;
   ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
   EXPECT_EQ(logical_view.input.axis_ids, indirect_load->inputs()[0]->attr.axis);
+  EXPECT_EQ(logical_view.input.sizes, indirect_load->inputs()[0]->attr.repeats);
   EXPECT_EQ(logical_view.input.strides, indirect_load->inputs()[0]->attr.strides);
   EXPECT_EQ(logical_view.index.axis_ids, indirect_load->inputs()[1]->attr.axis);
+  EXPECT_EQ(logical_view.index.sizes, indirect_load->inputs()[1]->attr.repeats);
   EXPECT_EQ(logical_view.index.strides, indirect_load->inputs()[1]->attr.strides);
   EXPECT_EQ(logical_view.output.axis_ids, indirect_load->outputs()[0]->attr.axis);
+  EXPECT_EQ(logical_view.output.sizes, indirect_load->outputs()[0]->attr.repeats);
   EXPECT_EQ(logical_view.output.strides, indirect_load->outputs()[0]->attr.strides);
 }
 

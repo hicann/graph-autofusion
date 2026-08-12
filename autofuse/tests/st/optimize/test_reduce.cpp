@@ -468,7 +468,7 @@ TEST_F(OptimizerReduceSt, TestReduce_PatitionNorm) {
   optimize::Optimizer optimizer(optimize::OptimizerOptions{});
   optimizer.Optimize(graph, fused_scheduled_result);
   ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results.size(), 1UL);
-  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 1UL);
+  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 2UL);
 }
 
 TEST_F(OptimizerReduceSt, TestReduce_Three_Elewise_Store) {
@@ -512,7 +512,7 @@ TEST_F(OptimizerReduceSt, TestReduce_Four_Elewise_Store_V2) {
   optimize::Optimizer optimizer(optimize::OptimizerOptions{});
   optimizer.Optimize(graph, fused_scheduled_result);
   ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results.size(), 1UL);
-  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 1UL);
+  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 2UL);
 }
 
 TEST_F(OptimizerReduceSt, TestReduce_Three_Elewise_Store_Multi_Citation) {
@@ -521,7 +521,7 @@ TEST_F(OptimizerReduceSt, TestReduce_Three_Elewise_Store_Multi_Citation) {
   optimize::Optimizer optimizer(optimize::OptimizerOptions{});
   optimizer.Optimize(graph, fused_scheduled_result);
   ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results.size(), 1UL);
-  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 1UL);
+  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 2UL);
 }
 
 TEST_F(OptimizerReduceSt, TestReduce_Four_Elewise_Store_V3) {
@@ -542,7 +542,7 @@ TEST_F(OptimizerReduceSt, TestReduce_Elewise_Store_MulReduce) {
   optimize::Optimizer optimizer(optimize::OptimizerOptions{});
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), af::SUCCESS);
   ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results.size(), 1UL);
-  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 1UL);
+  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 2UL);
 }
 
 TEST_F(OptimizerReduceSt, TestReduce_Three_Elewise_Reduce_Post_Node_Multi_Input_V1) {
@@ -563,7 +563,7 @@ TEST_F(OptimizerReduceSt, TestReduce_Three_Elewise_Reduce_Post_Node_Multi_Input_
   optimize::Optimizer optimizer(optimize::OptimizerOptions{});
   optimizer.Optimize(graph, fused_scheduled_result);
   ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results.size(), 1UL);
-  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 1UL);
+  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 2UL);
 }
 
 TEST_F(OptimizerReduceSt, TestReduce_Three_Elewise_Store_Multi_Citation_Multi_Out) {
@@ -572,6 +572,6 @@ TEST_F(OptimizerReduceSt, TestReduce_Three_Elewise_Store_Multi_Citation_Multi_Ou
   optimize::Optimizer optimizer(optimize::OptimizerOptions{});
   optimizer.Optimize(graph, fused_scheduled_result);
   ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results.size(), 1UL);
-  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 1UL);
+  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 2UL);
 }
 }  // namespace optimize

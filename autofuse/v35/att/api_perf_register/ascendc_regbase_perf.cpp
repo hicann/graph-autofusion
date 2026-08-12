@@ -1112,6 +1112,241 @@ af::Status RemovePadPerf(const NodeDetail &node_info, PerfOutputInfo &perf) {
   return af::SUCCESS;
 }
 
+namespace {
+constexpr int kWhereVfHeadCostB8 = 43;
+constexpr int kWhereVfHeadCostB16 = 45;
+constexpr int kWhereVfHeadCostB32 = 49;
+constexpr int kWhereVfHeadCostB64 = 57;
+constexpr int kWhereExtend2DRowOverheadB16 = 4;
+constexpr int kWhereExtend2DRowOverheadB32 = 3;
+constexpr int kWhereSelectOutputFactorB64 = 2;
+
+Expr GetWhereRepeatElm(const std::string &data_dtype) {
+  Expr repeat_elm = kRptSizeFloat;
+  auto it = kRptEleMap.find(data_dtype);
+  if (it != kRptEleMap.end()) {
+    repeat_elm = it->second;
+  }
+  if (data_dtype == kUInt64 || data_dtype == kInt64) {
+    repeat_elm = repeat_elm * kSymTwo;
+  }
+  return repeat_elm;
+}
+
+Expr GetWhereRepeatTime(const Expr &input_count, const Expr &one_rep_size) {
+  GE_ASSERT_TRUE(one_rep_size != af::sym::kSymbolZero, "Where one_rep_size is [%s].",
+                 af::SymbolicUtils::ToString(one_rep_size).c_str());
+  return af::sym::Ceiling(af::sym::Div(input_count, one_rep_size));
+}
+
+Expr GetWhereMaskUnPackCount(const std::string &data_dtype, const Expr &block_count) {
+  if (data_dtype == kUInt16 || data_dtype == kInt16 || data_dtype == kFloat16 || data_dtype == kBfloat16) {
+    return block_count;
+  }
+  if (data_dtype == kUInt32 || data_dtype == kInt32 || data_dtype == kFloat32 || data_dtype == kUInt64 ||
+      data_dtype == kInt64) {
+    return block_count * kSymTwo;
+  }
+  return CreateExpr(0);
+}
+
+Expr GetWhereSelectOutputFactor(const NodeDetail &node_info) {
+  if (node_info.output_dtype.empty()) {
+    return CreateExpr(1);
+  }
+  const std::string &output_dtype = node_info.output_dtype[0];
+  if (output_dtype == kUInt64 || output_dtype == kInt64) {
+    return CreateExpr(kWhereSelectOutputFactorB64);
+  }
+  return CreateExpr(1);
+}
+
+bool IsWhereB8B16B32Dtype(const std::string &data_dtype) {
+  return data_dtype == kUInt8 || data_dtype == kInt8 || data_dtype == kUInt16 || data_dtype == kInt16 ||
+         data_dtype == kFloat16 || data_dtype == kBfloat16 || data_dtype == kUInt32 || data_dtype == kInt32 ||
+         data_dtype == kFloat32;
+}
+
+bool IsWhereB16B32Dtype(const std::string &data_dtype) {
+  return data_dtype == kUInt16 || data_dtype == kInt16 || data_dtype == kFloat16 || data_dtype == kBfloat16 ||
+         data_dtype == kUInt32 || data_dtype == kInt32 || data_dtype == kFloat32;
+}
+
+bool IsWhereB16Dtype(const std::string &data_dtype) {
+  return data_dtype == kUInt16 || data_dtype == kInt16 || data_dtype == kFloat16 || data_dtype == kBfloat16;
+}
+
+bool IsWhereB32Dtype(const std::string &data_dtype) {
+  return data_dtype == kUInt32 || data_dtype == kInt32 || data_dtype == kFloat32;
+}
+
+Expr GetWhereExtend2DRowOverhead(const std::string &data_dtype) {
+  if (IsWhereB16Dtype(data_dtype)) {
+    return CreateExpr(kWhereExtend2DRowOverheadB16);
+  }
+  if (IsWhereB32Dtype(data_dtype)) {
+    return CreateExpr(kWhereExtend2DRowOverheadB32);
+  }
+  return CreateExpr(0);
+}
+
+Expr GetWhereVfHeadCost(const std::string &data_dtype) {
+  if (data_dtype == kUInt8 || data_dtype == kInt8) {
+    return CreateExpr(kWhereVfHeadCostB8);
+  }
+  if (data_dtype == kUInt16 || data_dtype == kInt16 || data_dtype == kFloat16 || data_dtype == kBfloat16) {
+    return CreateExpr(kWhereVfHeadCostB16);
+  }
+  if (data_dtype == kUInt32 || data_dtype == kInt32 || data_dtype == kFloat32) {
+    return CreateExpr(kWhereVfHeadCostB32);
+  }
+  if (data_dtype == kUInt64 || data_dtype == kInt64) {
+    return CreateExpr(kWhereVfHeadCostB64);
+  }
+  return VfPerfUtils::GetVFHeadCost();
+}
+
+std::string GetWhereDataDtype(const NodeDetail &node_info) {
+  if (!node_info.output_dtype.empty()) {
+    return node_info.output_dtype[0];
+  }
+  if (!node_info.input_dtype.empty()) {
+    return node_info.input_dtype[0];
+  }
+  return "";
+}
+
+af::Status AddLegacyWherePerf(const NodeDetail &node_info, Expr &max_latency, Expr &all_vf_instruct_cost) {
+  Expr cal_count = node_info.input_dims[kNumZero];
+  RepeatParams params = CalculateRepeatParams(node_info.input_dtype[0], cal_count);
+  Expr repeat_time = params.repeat_time;
+  Expr repeat_elm = params.repeat_elm;
+  GELOGD("cal_count is [%s], repeat_elm is [%s], repeat_time is [%s].", af::SymbolicUtils::ToString(cal_count).c_str(),
+         af::SymbolicUtils::ToString(repeat_elm).c_str(), af::SymbolicUtils::ToString(repeat_time).c_str());
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kDuplicate, node_info.input_dtype[0], max_latency,
+                                                   all_vf_instruct_cost, CreateExpr(node_info.input_dtype.size())));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kCompareScalarNE, node_info.input_dtype[0], max_latency,
+                                                   all_vf_instruct_cost, repeat_time));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kSelect, node_info.input_dtype[0], max_latency, all_vf_instruct_cost,
+                                                   repeat_time));
+  return af::SUCCESS;
+}
+
+af::Status AddWhereComputePerf(const NodeDetail &node_info, const std::string &data_dtype, const Expr &block_count,
+                               Expr &max_latency, Expr &all_vf_instruct_cost) {
+  const auto &params = node_info.where_node_params;
+  // MicroAPI::CreateMask<uint8_t>.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kPlaceholder, kUInt8, max_latency, all_vf_instruct_cost, kSymOne));
+  if (!IsWhereB16B32Dtype(data_dtype)) {
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kUpdateMask, kInt32, max_latency, all_vf_instruct_cost, block_count));
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kCompareScalarNE, kUInt8, max_latency, all_vf_instruct_cost, block_count));
+  }
+  // MicroAPI::DataCopy (mask load).
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kLoad, kUInt8, max_latency, all_vf_instruct_cost, block_count));
+  const Expr mask_unpack_count = GetWhereMaskUnPackCount(data_dtype, block_count);
+  if (mask_unpack_count != af::sym::kSymbolZero) {
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kMaskUnPack, kUInt8, max_latency, all_vf_instruct_cost, mask_unpack_count));
+  }
+  if (!params.is_bcast_src0) {
+    // MicroAPI::DataCopy (src0 load).
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kLoad, data_dtype, max_latency, all_vf_instruct_cost, block_count));
+  }
+  if (!params.is_bcast_src1) {
+    // MicroAPI::DataCopy (src1 load).
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kLoad, data_dtype, max_latency, all_vf_instruct_cost, block_count));
+  }
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kSelect, kInt32, max_latency, all_vf_instruct_cost,
+                                                   block_count * GetWhereSelectOutputFactor(node_info)));
+  // MicroAPI::DataCopy (dst store).
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kStore, kInt32, max_latency, all_vf_instruct_cost, block_count));
+
+  return af::SUCCESS;
+}
+
+af::Status AddWhereImplPerf(const NodeDetail &node_info, Expr &max_latency, Expr &all_vf_instruct_cost) {
+  const auto &params = node_info.where_node_params;
+  const std::string &data_dtype = node_info.output_dtype[0];
+  const Expr count = params.output_dims.front();
+  const Expr repeat_elm = GetWhereRepeatElm(data_dtype);
+  const Expr repeat_time = GetWhereRepeatTime(count, repeat_elm);
+  GELOGD("WhereImpl count is [%s], repeat_elm is [%s], repeat_time is [%s].",
+         af::SymbolicUtils::ToString(count).c_str(), af::SymbolicUtils::ToString(repeat_elm).c_str(),
+         af::SymbolicUtils::ToString(repeat_time).c_str());
+
+  // Reg::CreateMask<uint8_t>.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kPlaceholder, kUInt8, max_latency, all_vf_instruct_cost, kSymOne));
+  if (!IsWhereB8B16B32Dtype(data_dtype)) {
+    // Reg::UpdateMask<T, regTrait>(count).
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kUpdateMask, kInt32, max_latency, all_vf_instruct_cost, repeat_time));
+    // Reg::CompareScalar<uint8_t, CMPMODE::NE>.
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kCompareScalarNE, kUInt8, max_latency, all_vf_instruct_cost, repeat_time));
+  }
+  // Reg::LoadAlign(selReg, conditionUb + i * repeatElm).
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kLoad, kUInt8, max_latency, all_vf_instruct_cost, repeat_time));
+  const Expr mask_unpack_count = GetWhereMaskUnPackCount(data_dtype, repeat_time);
+  if (mask_unpack_count != af::sym::kSymbolZero) {
+    // Reg::MaskUnPack.
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kMaskUnPack, kUInt8, max_latency, all_vf_instruct_cost, mask_unpack_count));
+  }
+  if (!params.is_bcast_src0) {
+    // Reg::LoadAlign(src0Reg, src0Ub + i * repeatElm).
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kLoad, data_dtype, max_latency, all_vf_instruct_cost, repeat_time));
+  }
+  if (!params.is_bcast_src1) {
+    // Reg::LoadAlign(src1Reg, src1Ub + i * repeatElm).
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kLoad, data_dtype, max_latency, all_vf_instruct_cost, repeat_time));
+  }
+  // Reg::Select(dstReg, src0Reg, src1Reg, selMask).
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kSelect, kInt32, max_latency, all_vf_instruct_cost,
+                                                   repeat_time * GetWhereSelectOutputFactor(node_info)));
+  // Reg::StoreAlign(dstUb + i * repeatElm, dstReg, maskReg).
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kStore, kInt32, max_latency, all_vf_instruct_cost, repeat_time));
+  return af::SUCCESS;
+}
+
+af::Status AddWhereExtend2DPerf(const NodeDetail &node_info, Expr &max_latency, Expr &all_vf_instruct_cost) {
+  const auto &params = node_info.where_node_params;
+  const std::string &data_dtype = node_info.output_dtype[0];
+  const Expr counter_first = params.output_dims.front();
+  const Expr counter_last = params.output_dims.back();
+  const Expr repeat_elm = GetWhereRepeatElm(data_dtype);
+  const Expr repeat_time = GetWhereRepeatTime(counter_last, repeat_elm);
+  GELOGD("WhereExtend counter_first is [%s], counter_last is [%s], repeat_elm is [%s], repeat_time is [%s].",
+         af::SymbolicUtils::ToString(counter_first).c_str(), af::SymbolicUtils::ToString(counter_last).c_str(),
+         af::SymbolicUtils::ToString(repeat_elm).c_str(), af::SymbolicUtils::ToString(repeat_time).c_str());
+  if (IsWhereB16B32Dtype(data_dtype)) {
+    Expr row_max_latency = CreateExpr(0);
+    Expr row_vf_instruct_cost = CreateExpr(0);
+    GE_ASSERT_SUCCESS(AddWhereComputePerf(node_info, data_dtype, repeat_time, row_max_latency, row_vf_instruct_cost));
+    all_vf_instruct_cost =
+        all_vf_instruct_cost + (row_vf_instruct_cost + GetWhereExtend2DRowOverhead(data_dtype)) * counter_first;
+    return af::SUCCESS;
+  }
+  const Expr block_count = counter_first * repeat_time;
+  return AddWhereComputePerf(node_info, data_dtype, block_count, max_latency, all_vf_instruct_cost);
+}
+
+af::Status AddWhereExtendPerf(const NodeDetail &node_info, Expr &max_latency, Expr &all_vf_instruct_cost) {
+  const auto &params = node_info.where_node_params;
+  GE_ASSERT_TRUE(!params.output_dims.empty(), "Where output dims is empty.");
+  GE_ASSERT_TRUE(!node_info.output_dtype.empty(), "Where output dtype is empty.");
+  if (params.output_dims.size() == 1U) {
+    return AddWhereImplPerf(node_info, max_latency, all_vf_instruct_cost);
+  }
+  return AddWhereExtend2DPerf(node_info, max_latency, all_vf_instruct_cost);
+}
+}  // namespace
+
 /*
 ===========================================================================
 【功能描述】Where Regbase 版本伪代码 (忽略 Reg 与 UB 间的搬运开销)
@@ -1126,21 +1361,19 @@ af::Status RemovePadPerf(const NodeDetail &node_info, PerfOutputInfo &perf) {
 */
 af::Status WherePerf(const NodeDetail &node_info, PerfOutputInfo &perf) {
   GELOGD("Where node info is %s.", node_info.ToString().c_str());
-  Expr cal_count = node_info.input_dims[kNumZero];
-  RepeatParams params = CalculateRepeatParams(node_info.input_dtype[0], cal_count);
-  Expr repeat_time = params.repeat_time;
-  Expr repeat_elm = params.repeat_elm;
   Expr max_latency = CreateExpr(0);
   Expr all_vf_instruct_cost = CreateExpr(0);
-  GELOGD("cal_count is [%s], repeat_elm is [%s], repeat_time is [%s].", af::SymbolicUtils::ToString(cal_count).c_str(),
-         af::SymbolicUtils::ToString(repeat_elm).c_str(), af::SymbolicUtils::ToString(repeat_time).c_str());
-  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kDuplicate, node_info.input_dtype[0], max_latency,
-                                                   all_vf_instruct_cost, CreateExpr(node_info.input_dtype.size())));
-  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kCompareScalarNE, node_info.input_dtype[0], max_latency,
-                                                   all_vf_instruct_cost, repeat_time));
-  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kSelect, node_info.input_dtype[0], max_latency, all_vf_instruct_cost,
-                                                   repeat_time));
-  Expr res = VfPerfUtils::GetVFHeadCost() + max_latency + all_vf_instruct_cost;
+  if (node_info.where_node_params.valid) {
+    GE_ASSERT_SUCCESS(AddWhereExtendPerf(node_info, max_latency, all_vf_instruct_cost));
+  } else {
+    GE_ASSERT_SUCCESS(AddLegacyWherePerf(node_info, max_latency, all_vf_instruct_cost));
+  }
+  Expr res = (node_info.where_node_params.valid ? GetWhereVfHeadCost(GetWhereDataDtype(node_info))
+                                                : VfPerfUtils::GetVFHeadCost()) +
+             max_latency + all_vf_instruct_cost;
+  if (node_info.where_node_params.valid) {
+    res = res * node_info.where_node_params.outer_call_count;
+  }
   res.Simplify();
   perf.pipe_res[PipeType::AIV_VEC] = res;
   return af::SUCCESS;
