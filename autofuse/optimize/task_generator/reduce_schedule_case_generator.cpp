@@ -304,8 +304,10 @@ Status ReducePartitionCaseGenerator::GeneratorTask(ascir::HintGraph &optimize_gr
   const bool force_all_load = ShouldForceAllLoad(optimize_graph);
   GELOGI("Graph %s force AllLoad = %d, begin to generate reduce tasks.", optimize_graph.GetName().c_str(),
          static_cast<int32_t>(force_all_load));
-  GE_CHK_STATUS_RET(GeneratorGeneralTask(optimize_graph, tasks));
-  GELOGI("After GeneralTask, graph %s has %zu task(s).", optimize_graph.GetName().c_str(), tasks.size());
+  if (!force_all_load || options.graph_type != GraphType::kFusedAscBackend) {
+    GE_CHK_STATUS_RET(GeneratorGeneralTask(optimize_graph, tasks));
+    GELOGI("After GeneralTask, graph %s has %zu task(s).", optimize_graph.GetName().c_str(), tasks.size());
+  }
   if (!force_all_load) {
     GE_CHK_STATUS_RET(GeneratorRCoreTask(optimize_graph, tasks));
     GELOGI("After RCoreTask, graph %s has %zu task(s).", optimize_graph.GetName().c_str(), tasks.size());
