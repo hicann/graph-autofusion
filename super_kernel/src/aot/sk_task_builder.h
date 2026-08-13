@@ -19,7 +19,6 @@
 #include <map>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 
 // Forward declaration
 class SuperKernelGraph;
@@ -149,7 +148,7 @@ class SkTaskBuilder {
   bool aivAvailable_ = false;
 
   // Task insertion helpers, separated by task type
-  std::pair<int, int> GetPreFetchCnt(const ResolvedFunctionInfo &resolved);
+  std::pair<int, int> GetPreFetchCnt(const ResolvedFunctionInfo &resolved) const;
   bool AddSyncTask(SkTask &skTask, size_t nodeIndex, SkCoreSyncType syncType, uint8_t earlyStartConfig = 0U,
                    uint32_t skipCoreCount = 0U, SkKernelType relatedType = SkKernelType::DEFAULT);
   bool AddEventTask(SkTask &skTask, SuperKernelBaseNode *node, size_t nodeIndex, SkTaskType taskType);
@@ -219,7 +218,7 @@ class SkTaskBuilder {
   void RemoveSyncInfo(size_t sendIdx, size_t recvIdx, bool isRemoveRecv, SyncDirection dirToRemove);
 
   // Print sync metadata (debug only)
-  void PrintSyncInfo(const char *stage);
+  void PrintSyncInfo(const char *stage) const;
 
   SkHostEntryInfo GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, bool useSimtEntry = false);
   DeviceArgsPtr GenEntryArgs(const SkTask &skTaskCube, const SkTask &skTaskVec, const SkDfxInfo *dfxInfos,

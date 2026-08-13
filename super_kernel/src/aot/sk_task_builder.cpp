@@ -263,7 +263,7 @@ void DumpTaskQueDetail(const TaskQue *que, const char *name, const std::vector<S
   }
 }
 
-void DumpDeviceArgsDetail(std::string skFuncName, const SkDeviceEntryArgs *args,
+void DumpDeviceArgsDetail(const std::string &skFuncName, const SkDeviceEntryArgs *args,
                           const std::vector<SuperKernelBaseNode *> &tasks) {
   SK_LOGD("Dumping device args for function: %s", skFuncName.c_str());
   const uint8_t *base = (const uint8_t *)args;
@@ -634,7 +634,7 @@ void SkTaskBuilder::InsertSyncEvent(size_t preIdx, size_t currIdx) {
 
 // ========== Print sync metadata (debug only) ==========
 
-void SkTaskBuilder::PrintSyncInfo(const char *stage) {
+void SkTaskBuilder::PrintSyncInfo(const char *stage) const {
   SK_LOGI("%s", stage);
   SK_LOGI("[VEC LIST OP]:");
   for (size_t i = 0; i < taskSyncInfos_.size(); i++) {
@@ -1558,7 +1558,7 @@ DeviceArgsPtr SkTaskBuilder::GenEntryArgs(const SkTask &skTaskCube, const SkTask
   return args;
 }
 
-std::pair<int, int> SkTaskBuilder::GetPreFetchCnt(const ResolvedFunctionInfo &resolved) {
+std::pair<int, int> SkTaskBuilder::GetPreFetchCnt(const ResolvedFunctionInfo &resolved) const {
   std::pair<int, int> preFetchCntValue = std::make_pair(resolved.prefetchCnt[0], resolved.prefetchCnt[1]);
   auto preLoadOptions = opts.GetOption(aclskOptionType::PRELOAD_CODE);
 
