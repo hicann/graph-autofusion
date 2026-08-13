@@ -14,7 +14,6 @@
 
 namespace att {
 constexpr char kSolverGenError[] = "Solver Gen Error";
-constexpr uint32_t kMaxL0VarNum = 3u;
 inline std::string GetSmoothString(std::string str) {
   std::string ret;
   std::string target = "Ceiling";

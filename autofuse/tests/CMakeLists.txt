@@ -258,8 +258,6 @@ file(GLOB SOURCES
     ${ATT_DIR}/generator/solver_pass_gen/axes_reorder_solver/*.cpp
     ${ATT_DIR}/generator/solver_pass_gen/general_solver/*.cpp
     ${ATT_DIR}/generator/solver_pass_gen/golden_solver/*.cpp
-    ${ATT_DIR}/generator/solver_pass_gen/l0_solver/*.cpp
-    ${ATT_DIR}/generator/solver_pass_gen/l2_solver/*.cpp
     ${ATT_DIR}/generator/extra_info_gen/*.cpp
     ${ATT_DIR}/generator/generator_utils/*.cpp
     ${ATT_DIR}/generator/tiling_data_gen/*.cpp

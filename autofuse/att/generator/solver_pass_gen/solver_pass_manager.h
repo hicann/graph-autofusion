@@ -18,8 +18,6 @@
 #include "generator/solver_pass/solver.h"
 #include "generator/solver_pass_gen/axes_reorder_solver/axes_reorder_solver_gen.h"
 #include "generator/solver_pass_gen/general_solver/general_solver_gen.h"
-#include "generator/solver_pass_gen/l0_solver/l0_solver_gen.h"
-#include "generator/solver_pass_gen/l2_solver/l2_solver_gen.h"
 #include "util/base_types_printer.h"
 #include "autofuse_config/auto_fuse_config.h"
 #include "generator/solver_pass_gen/input_output_setters.h"
@@ -76,35 +74,25 @@ class SolverPassManager : public InputOutputSettersMixin<SolverPassManager>,
 
  private:
   // solver pass
-  static bool CheckArgExist(const Expr &new_arg, const std::vector<Expr> &args);
-  static std::vector<Expr> GetL0Args(ArgsManager args_manager, bool is_solved);
   static bool IsNeedSolver(std::vector<ArgsManager> args_managers, SolverType type);
   static std::string GenBaseClass(SolverType type);
 
   ExprExprMap GetInputsAlign(bool do_replace);
   ExprExprMap GetOriginalInputAlign() const;
 
-  L0TileSolverGen GenL0TileSolverGen();
-  L2TileSolverGen GenL2TileSolverGen();
   void InitSolverGen(AxesReorderSolverGen &solver_gen);
   AxesReorderSolverGen GenAxesReorderGen();
   template <typename SolverGenType>
   SolverGenType GenerateSolverGen();
 
   std::string SolverPassClassGen(SolverType type);
-  std::string L0SolverPassClassGen();
-  std::string L2SolverPassClassGen();
   std::string GeneralSolverPassClassGen();
 
   template <typename SpecificSolverGen>
   std::pair<std::string, std::string> GenerateSolverPassFunc(SpecificSolverGen solver_gen);
   std::pair<std::string, std::string> SolverPassFuncGen(SolverType type);
-  std::pair<std::string, std::string> L0SolverPassFuncGen();
-  std::pair<std::string, std::string> L2SolverPassFuncGen();
 
   std::pair<std::string, std::string> SolverDtFuncGen(SolverType type);
-  std::pair<std::string, std::string> L0SolverDtFuncGen();
-  std::pair<std::string, std::string> L2SolverDtFuncGen();
   std::pair<std::string, std::string> GeneralSolverDtFuncGen();
 
   void AddConcatInnerDims(const Expr &arg, std::vector<Expr> &concat_inner_dims);

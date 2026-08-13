@@ -20,7 +20,6 @@ bool TestCase(std::vector<int64_t> shapes) {
   tilingData.set_block_dim(48);
   tilingData.set_ub_size(240 * 1024);
   tilingData.set_btbuf_size(1 * 1024);
-  tilingData.set_l0c_size(128 * 1024);
   tilingData.set_maxTokens(maxTokens);
   tilingData.set_N1(N1);
   tilingData.set_K1(K1);
@@ -33,8 +32,6 @@ bool TestCase(std::vector<int64_t> shapes) {
   const auto status = GetTiling(tilingData, 0u);
   if ((status)) {
     std::cout << "ub_m" << " = " << tilingData.get_ub_m() << std::endl;
-    std::cout << "base_m1" << " = " << tilingData.get_base_m1() << std::endl;
-    std::cout << "base_m2" << " = " << tilingData.get_base_m2() << std::endl;
     std::cout << "base_n1" << " = " << tilingData.get_base_n1() << std::endl;
     std::cout << "base_n2" << " = " << tilingData.get_base_n2() << std::endl;
     return true;

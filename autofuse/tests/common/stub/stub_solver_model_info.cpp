@@ -13,13 +13,9 @@
 namespace {
 struct SolverExprContext {
   att::Expr expr_m;
-  att::Expr expr_tilem;
   att::Expr expr_stepm;
-  att::Expr expr_basem;
   att::Expr expr_n;
-  att::Expr expr_tilen;
   att::Expr expr_stepn;
-  att::Expr expr_basen;
   att::Expr expr_k;
 };
 
@@ -75,54 +71,42 @@ void SetAxisInner(att::AttAxisPtr &axis, const std::string &name, const att::Sym
 void BuildMArgList(att::ModelInfo &model_info, const bool is_const, const att::Expr &default_expr,
                    const uint32_t m_align, SolverExprContext &ctx) {
   ctx.expr_m = is_const ? default_expr : att::CreateExpr("m_size");
-  ctx.expr_tilem = is_const ? default_expr : att::CreateExpr("tilem_size");
   ctx.expr_stepm = is_const ? default_expr : att::CreateExpr("stepm_size");
-  ctx.expr_basem = att::CreateExpr("basem_size");
 
-  att::SymVarInfoPtr sym_m, sym_tilem, sym_stepm, sym_basem;
+  att::SymVarInfoPtr sym_m;
+  att::SymVarInfoPtr sym_stepm;
   InitSymVar(sym_m, ctx.expr_m);
   sym_m->value_range.first = 1;
   sym_m->value_range.second = 10000;
   sym_m->align = ge::Symbol(m_align);
-  InitSymVar(sym_tilem, ctx.expr_tilem, 16, {att::HardwareDef::L2});
   InitSymVar(sym_stepm, ctx.expr_stepm, 16, {att::HardwareDef::L1, att::HardwareDef::CORENUM});
-  InitSymVar(sym_basem, ctx.expr_basem, 16, {att::HardwareDef::L0A, att::HardwareDef::L0C});
 
-  att::AttAxisPtr m, tilem, stepm, basem;
+  att::AttAxisPtr m;
+  att::AttAxisPtr stepm;
   SetAxisOrigin(m, "m", sym_m);
-  SetAxisInner(tilem, "tilem", sym_tilem, false, false, m.get(), m.get());
-  SetAxisInner(stepm, "stepm", sym_stepm, true, false, m.get(), tilem.get());
-  SetAxisInner(basem, "basem", sym_basem, false, true, m.get(), stepm.get());
+  SetAxisInner(stepm, "stepm", sym_stepm, true, true, m.get(), m.get());
 
   model_info.arg_list.emplace_back(m);
-  model_info.arg_list.emplace_back(tilem);
   model_info.arg_list.emplace_back(stepm);
-  model_info.arg_list.emplace_back(basem);
 }
 
 void BuildNArgList(att::ModelInfo &model_info, const bool is_const, const att::Expr &default_expr,
                    SolverExprContext &ctx) {
   ctx.expr_n = is_const ? default_expr : att::CreateExpr("n_size");
-  ctx.expr_tilen = is_const ? default_expr : att::CreateExpr("tilen_size");
   ctx.expr_stepn = is_const ? default_expr : att::CreateExpr("stepn_size");
-  ctx.expr_basen = is_const ? default_expr : att::CreateExpr("basen_size");
 
-  att::SymVarInfoPtr sym_n, sym_tilen, sym_stepn, sym_basen;
+  att::SymVarInfoPtr sym_n;
+  att::SymVarInfoPtr sym_stepn;
   InitSymVar(sym_n, ctx.expr_n);
-  InitSymVar(sym_tilen, ctx.expr_tilen, 16, {att::HardwareDef::L2});
   InitSymVar(sym_stepn, ctx.expr_stepn, 128, {att::HardwareDef::L1, att::HardwareDef::CORENUM});
-  InitSymVar(sym_basen, ctx.expr_basen, 16, {att::HardwareDef::L0B, att::HardwareDef::L0C});
 
-  att::AttAxisPtr n, tilen, stepn, basen;
+  att::AttAxisPtr n;
+  att::AttAxisPtr stepn;
   SetAxisOrigin(n, "n", sym_n);
-  SetAxisInner(tilen, "tilen", sym_tilen, false, false, n.get(), n.get());
-  SetAxisInner(stepn, "stepn", sym_stepn, true, false, n.get(), tilen.get());
-  SetAxisInner(basen, "basen", sym_basen, false, true, n.get(), stepn.get());
+  SetAxisInner(stepn, "stepn", sym_stepn, true, true, n.get(), n.get());
 
   model_info.arg_list.emplace_back(n);
-  model_info.arg_list.emplace_back(tilen);
   model_info.arg_list.emplace_back(stepn);
-  model_info.arg_list.emplace_back(basen);
 }
 
 void BuildKArg(att::ModelInfo &model_info, SolverExprContext &ctx) {
@@ -140,33 +124,20 @@ void BuildKArg(att::ModelInfo &model_info, SolverExprContext &ctx) {
 }
 
 void FillModelInfo(att::ModelInfo &model_info, const SolverExprContext &ctx) {
-  att::Expr l0a_occupy = ctx.expr_basem * ctx.expr_k * att::CreateExpr(4);
-  att::Expr l0b_occupy = ctx.expr_k * ctx.expr_basen * att::CreateExpr(4);
-  att::Expr l0c_occupy = ctx.expr_basem * ctx.expr_basen * att::CreateExpr(4);
   att::Expr l1_occupy =
       (ctx.expr_k * ctx.expr_stepm * att::CreateExpr(4)) + (ctx.expr_k * ctx.expr_stepn * att::CreateExpr(4));
-  att::Expr l2_occupy = (ctx.expr_tilen * ctx.expr_tilem * att::CreateExpr(2)) +
-                        ((ctx.expr_tilen + ctx.expr_tilem) * ctx.expr_k * att::CreateExpr(2));
-  att::Expr core_num = ((ctx.expr_tilem / ctx.expr_stepm) * (ctx.expr_tilen / ctx.expr_stepn));
+  att::Expr core_num = ((ctx.expr_m / ctx.expr_stepm) * (ctx.expr_n / ctx.expr_stepn));
 
-  model_info.hardware_cons[att::HardwareDef::L0A] = l0a_occupy;
-  model_info.hardware_cons[att::HardwareDef::L0B] = l0b_occupy;
-  model_info.hardware_cons[att::HardwareDef::L0C] = l0c_occupy;
   model_info.hardware_cons[att::HardwareDef::L1] = l1_occupy;
-  model_info.hardware_cons[att::HardwareDef::L2] = l2_occupy;
   model_info.hardware_cons[att::HardwareDef::UB] = ctx.expr_m * att::CreateExpr(10);
   model_info.hardware_cons[att::HardwareDef::CORENUM] = core_num;
 
-  att::Expr mac = ((ctx.expr_basem * ctx.expr_basen * ctx.expr_k) / (att::CreateExpr(16) * att::CreateExpr(256)));
   att::Expr mte =
       (((ctx.expr_stepm * ctx.expr_k) / att::CreateExpr(32)) + ((ctx.expr_stepn * ctx.expr_k) / att::CreateExpr(32)));
-  model_info.objects[att::PipeType::AIC_MAC] = mac;
   model_info.objects[att::PipeType::AIC_MTE2] = mte;
   model_info.tiling_case_id = 0;
-  model_info.eq_exprs[att::kFatherToChildNoTail].push_back(std::pair(ctx.expr_stepm, ctx.expr_basem));
-  model_info.eq_exprs[att::kFatherToChildNoTail].push_back(std::pair(ctx.expr_stepn, ctx.expr_basen));
-  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_tilem - ctx.expr_stepm));
-  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_tilen - ctx.expr_stepn));
+  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_stepm - ctx.expr_m));
+  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_stepn - ctx.expr_n));
   model_info.container_exprs["Q1"] = (ctx.expr_m + ctx.expr_n);
   model_info.tensor_exprs["MATMUL_OUTPUT1"] = (ctx.expr_m + ctx.expr_n);
   model_info.output_size = 1;

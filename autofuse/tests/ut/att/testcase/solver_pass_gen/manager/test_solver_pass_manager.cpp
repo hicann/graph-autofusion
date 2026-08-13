@@ -40,31 +40,6 @@ class TestSolverPassManager : public ::testing::Test {
   }
 };
 
-TEST_F(TestSolverPassManager, TEST_CHECK_ARG_EXIST) {
-  ModelInfo modelInfo = CreateModelInfo();
-  ArgsManager args_manager(modelInfo);
-  att::SolverPassManager manager(args_manager, {0}, "TilingData");
-  std::vector<Expr> args;
-  Expr arg0 = CreateExpr("arg0");
-  Expr arg1 = CreateExpr("arg1");
-  Expr arg2 = CreateExpr("arg2");
-  args.emplace_back(arg0);
-  args.emplace_back(arg1);
-  bool case0 = manager.CheckArgExist(arg2, args);
-  EXPECT_EQ(case0, false);
-  bool case1 = manager.CheckArgExist(arg0, args);
-  EXPECT_EQ(case1, true);
-}
-
-TEST_F(TestSolverPassManager, TEST_GET_L0_ARGS) {
-  ModelInfo modelInfo = CreateModelInfo();
-  ArgsManager args_manager(modelInfo);
-  att::SolverPassManager manager(args_manager, {0}, "TilingData");
-  args_manager.Process(false);
-  auto l0_args = manager.GetL0Args(args_manager, false);
-  EXPECT_EQ(l0_args.size(), 2);
-}
-
 TEST_F(TestSolverPassManager, TEST_IS_NEED_SOLVER) {
   ModelInfo modelInfo = CreateModelInfo();
   ArgsManager args_manager(modelInfo);
@@ -72,7 +47,7 @@ TEST_F(TestSolverPassManager, TEST_IS_NEED_SOLVER) {
   std::vector<ArgsManager> args_managers;
   args_managers.emplace_back(args_manager);
   att::SolverPassManager manager(args_manager, {0}, "TilingData");
-  bool is_need = manager.IsNeedSolver(args_managers, SolverType::L0_TILE);
+  bool is_need = manager.IsNeedSolver(args_managers, SolverType::SEARCH_TILE);
   EXPECT_EQ(is_need, true);
 }
 
@@ -87,7 +62,7 @@ TEST_F(TestSolverPassManager, case0) {
   std::string base_class_head = manager.GenCommonBaseClassesHead(args_managers);
   std::string base_class_func = manager.GenCommonBaseClassesFunc(args_managers);
   EXPECT_NE(base_class_head, "");
-  EXPECT_NE(base_class_func, "");
+  EXPECT_EQ(base_class_func, "");
   std::string impl_code = res.first;
   std::string invoke_code = res.second;
   EXPECT_NE(impl_code, "");

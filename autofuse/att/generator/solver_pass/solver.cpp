@@ -12,12 +12,6 @@
 
 namespace att {
 std::string GetSolverHead(SolverType type) {
-  if (type == SolverType::L0_TILE) {
-    return L0_SOLVER_CODE_HEAD;
-  }
-  if (type == SolverType::L2_TILE) {
-    return L2_SOLVER_CODE_HEAD;
-  }
   if (type == SolverType::SEARCH_TILE) {
     return GENERAL_SOLVER_CODE;  // 全是inline,放在头文件
   }
@@ -25,12 +19,7 @@ std::string GetSolverHead(SolverType type) {
 }
 
 std::string GetSolverFunc(SolverType type) {
-  if (type == SolverType::L0_TILE) {
-    return L0_SOLVER_CODE_FUNC;
-  }
-  if (type == SolverType::L2_TILE) {
-    return L2_SOLVER_CODE_FUNC;
-  }
+  (void)type;
   return "";
 }
 

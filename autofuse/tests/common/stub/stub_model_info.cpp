@@ -15,28 +15,19 @@
 namespace {
 struct MatmulExprContext {
   att::Expr expr_m;
-  att::Expr expr_tilem;
   att::Expr expr_stepm;
-  att::Expr expr_basem;
   att::Expr expr_n;
-  att::Expr expr_tilen;
   att::Expr expr_stepn;
-  att::Expr expr_basen;
   att::Expr expr_k;
 };
 
 struct L2TileExprContext {
   att::Expr expr_corenum;
   att::Expr expr_m;
-  att::Expr expr_tilem;
-  att::Expr expr_basem;
   att::Expr expr_n;
-  att::Expr expr_tilen;
-  att::Expr expr_basen;
   att::Expr expr_k;
   att::Expr expr_stepka;
   att::Expr expr_stepkb;
-  att::Expr expr_basek;
 };
 
 void InitDefaultExpr(const ge::ExprType expr_type, att::Expr &default_expr, bool &is_const) {
@@ -91,52 +82,40 @@ void SetAxisInner(att::AttAxisPtr &axis, const std::string &name, const att::Sym
 void BuildCreateModelInfoMArgs(att::ModelInfo &model_info, const bool is_const, const att::Expr &default_expr,
                                MatmulExprContext &ctx) {
   ctx.expr_m = is_const ? default_expr : att::CreateExpr("m_size");
-  ctx.expr_tilem = is_const ? default_expr : att::CreateExpr("tilem_size");
   ctx.expr_stepm = is_const ? default_expr : att::CreateExpr("stepm_size");
-  ctx.expr_basem = att::CreateExpr("basem_size");
 
-  att::SymVarInfoPtr sym_m, sym_tilem, sym_stepm, sym_basem;
+  att::SymVarInfoPtr sym_m;
+  att::SymVarInfoPtr sym_stepm;
   InitSymVar(sym_m, ctx.expr_m);
   sym_m->value_range.first = 1;
   sym_m->value_range.second = 10000;
-  InitSymVar(sym_tilem, ctx.expr_tilem, 16, {att::HardwareDef::L2});
   InitSymVar(sym_stepm, ctx.expr_stepm, 16, {att::HardwareDef::L1, att::HardwareDef::CORENUM});
-  InitSymVar(sym_basem, ctx.expr_basem, 16, {att::HardwareDef::L0A, att::HardwareDef::L0C});
 
-  att::AttAxisPtr m, tilem, stepm, basem;
+  att::AttAxisPtr m;
+  att::AttAxisPtr stepm;
   SetAxisOrigin(m, "m", sym_m);
-  SetAxisInner(tilem, "tilem", sym_tilem, false, false, m.get(), m.get());
-  SetAxisInner(stepm, "stepm", sym_stepm, true, false, m.get(), tilem.get());
-  SetAxisInner(basem, "basem", sym_basem, false, true, m.get(), stepm.get());
+  SetAxisInner(stepm, "stepm", sym_stepm, true, true, m.get(), m.get());
 
   model_info.arg_list.emplace_back(m);
-  model_info.arg_list.emplace_back(tilem);
   model_info.arg_list.emplace_back(stepm);
-  model_info.arg_list.emplace_back(basem);
 }
 
 void BuildCreateModelInfoNArgs(att::ModelInfo &model_info, MatmulExprContext &ctx) {
   ctx.expr_n = att::CreateExpr("n_size");
-  ctx.expr_tilen = att::CreateExpr("tilen_size");
   ctx.expr_stepn = att::CreateExpr("stepn_size");
-  ctx.expr_basen = att::CreateExpr("basen_size");
 
-  att::SymVarInfoPtr sym_n, sym_tilen, sym_stepn, sym_basen;
+  att::SymVarInfoPtr sym_n;
+  att::SymVarInfoPtr sym_stepn;
   InitSymVar(sym_n, ctx.expr_n);
-  InitSymVar(sym_tilen, ctx.expr_tilen, 16, {att::HardwareDef::L2});
   InitSymVar(sym_stepn, ctx.expr_stepn, 128, {att::HardwareDef::L1, att::HardwareDef::CORENUM});
-  InitSymVar(sym_basen, ctx.expr_basen, 16, {att::HardwareDef::L0B, att::HardwareDef::L0C});
 
-  att::AttAxisPtr n, tilen, stepn, basen;
+  att::AttAxisPtr n;
+  att::AttAxisPtr stepn;
   SetAxisOrigin(n, "n", sym_n);
-  SetAxisInner(tilen, "tilen", sym_tilen, false, false, n.get(), n.get());
-  SetAxisInner(stepn, "stepn", sym_stepn, true, false, n.get(), tilen.get());
-  SetAxisInner(basen, "basen", sym_basen, false, true, n.get(), stepn.get());
+  SetAxisInner(stepn, "stepn", sym_stepn, true, true, n.get(), n.get());
 
   model_info.arg_list.emplace_back(n);
-  model_info.arg_list.emplace_back(tilen);
   model_info.arg_list.emplace_back(stepn);
-  model_info.arg_list.emplace_back(basen);
 }
 
 void BuildCreateModelInfoKArg(att::ModelInfo &model_info, MatmulExprContext &ctx) {
@@ -154,35 +133,20 @@ void BuildCreateModelInfoKArg(att::ModelInfo &model_info, MatmulExprContext &ctx
 }
 
 void FillCreateModelInfo(att::ModelInfo &model_info, const MatmulExprContext &ctx) {
-  att::Expr l0a_occupy = ctx.expr_basem * ctx.expr_k * att::CreateExpr(4);
-  att::Expr l0b_occupy = ctx.expr_k * ctx.expr_basen * att::CreateExpr(4);
-  att::Expr l0c_occupy = ctx.expr_basem * ctx.expr_basen * att::CreateExpr(4);
   att::Expr l1_occupy =
       (ctx.expr_k * ctx.expr_stepm * att::CreateExpr(4)) + (ctx.expr_k * ctx.expr_stepn * att::CreateExpr(4));
-  att::Expr l2_occupy = (ctx.expr_tilen * ctx.expr_tilem * att::CreateExpr(2)) +
-                        ((ctx.expr_tilen + ctx.expr_tilem) * ctx.expr_k * att::CreateExpr(2));
-  att::Expr core_num = (ctx.expr_tilem / ctx.expr_stepm) * (ctx.expr_tilen / ctx.expr_stepn);
+  att::Expr core_num = (ctx.expr_m / ctx.expr_stepm) * (ctx.expr_n / ctx.expr_stepn);
 
-  model_info.hardware_cons[att::HardwareDef::L0A] = l0a_occupy;
-  model_info.hardware_cons[att::HardwareDef::L0B] = l0b_occupy;
-  model_info.hardware_cons[att::HardwareDef::L0C] = l0c_occupy;
   model_info.hardware_cons[att::HardwareDef::L1] = l1_occupy;
-  model_info.hardware_cons[att::HardwareDef::L2] = l2_occupy;
   model_info.hardware_cons[att::HardwareDef::CORENUM] = core_num;
   model_info.hardware_cons[att::HardwareDef::UB] = att::CreateExpr(0L);
 
-  att::Expr mac = (ctx.expr_basem * ctx.expr_basen * ctx.expr_k) / (att::CreateExpr(16) * att::CreateExpr(256));
   att::Expr mte =
       (((ctx.expr_stepm * ctx.expr_k) / att::CreateExpr(32)) + ((ctx.expr_stepn * ctx.expr_k) / att::CreateExpr(32)));
-  model_info.objects[att::PipeType::AIC_MAC] = mac;
   model_info.objects[att::PipeType::AIC_MTE2] = mte;
   model_info.tiling_case_id = 0;
-  model_info.eq_exprs[att::kFatherToChildNoTail].push_back(std::pair(ctx.expr_stepm, ctx.expr_basem));
-  model_info.eq_exprs[att::kFatherToChildNoTail].push_back(std::pair(ctx.expr_stepn, ctx.expr_basen));
-  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_tilem - ctx.expr_m));
-  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_stepm - ctx.expr_tilem));
-  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_tilen - ctx.expr_n));
-  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_stepn - ctx.expr_tilen));
+  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_stepm - ctx.expr_m));
+  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_stepn - ctx.expr_n));
   model_info.output_size = 1;
 }
 
@@ -201,20 +165,10 @@ void BuildCoreAxis(att::ModelInfo &model_info, L2TileExprContext &ctx) {
 
 void BuildL2TileMArgs(att::ModelInfo &model_info, L2TileExprContext &ctx) {
   ctx.expr_m = att::CreateExpr("m_size");
-  ctx.expr_tilem = att::CreateExpr("tilem_size");
-  ctx.expr_basem = att::CreateExpr("basem_size");
 
   att::SymVarInfoPtr sym_m = std::make_shared<att::SymVarInfo>(ctx.expr_m);
-  att::SymVarInfoPtr sym_tilem = std::make_shared<att::SymVarInfo>(ctx.expr_tilem);
-  sym_tilem->align = ge::Symbol(16);
-  sym_tilem->related_scope = {att::HardwareDef::L2};
-  att::SymVarInfoPtr sym_basem = std::make_shared<att::SymVarInfo>(ctx.expr_basem);
-  sym_basem->align = ge::Symbol(16);
-  sym_basem->related_scope = {att::HardwareDef::L0A, att::HardwareDef::L0C, att::HardwareDef::L1};
 
   att::AttAxisPtr m = std::make_shared<att::AttAxis>();
-  att::AttAxisPtr tilem = std::make_shared<att::AttAxis>();
-  att::AttAxisPtr basem = std::make_shared<att::AttAxis>();
 
   m->name = "m";
   m->axis_pos = att::AxisPosition::ORIGIN;
@@ -223,45 +177,15 @@ void BuildL2TileMArgs(att::ModelInfo &model_info, L2TileExprContext &ctx) {
   m->is_node_innerest_dim = false;
   m->size = sym_m;
 
-  tilem->name = "tilem";
-  tilem->axis_pos = att::AxisPosition::INNER;
-  tilem->bind_multicore = false;
-  tilem->is_last = false;
-  tilem->is_node_innerest_dim = true;
-  tilem->size = sym_tilem;
-  tilem->orig_axis.push_back(m.get());
-  tilem->from_axis = {m.get()};
-
-  basem->name = "basem";
-  basem->axis_pos = att::AxisPosition::INNER;
-  basem->bind_multicore = false;
-  basem->is_last = true;
-  basem->is_node_innerest_dim = false;
-  basem->size = sym_basem;
-  basem->orig_axis.push_back(m.get());
-  basem->from_axis = {tilem.get()};
-
   model_info.arg_list.emplace_back(m);
-  model_info.arg_list.emplace_back(tilem);
-  model_info.arg_list.emplace_back(basem);
 }
 
 void BuildL2TileNArgs(att::ModelInfo &model_info, L2TileExprContext &ctx) {
   ctx.expr_n = att::CreateExpr("n_size");
-  ctx.expr_tilen = att::CreateExpr("tilen_size");
-  ctx.expr_basen = att::CreateExpr("basen_size");
 
   att::SymVarInfoPtr sym_n = std::make_shared<att::SymVarInfo>(ctx.expr_n);
-  att::SymVarInfoPtr sym_tilen = std::make_shared<att::SymVarInfo>(ctx.expr_tilen);
-  sym_tilen->align = ge::Symbol(16);
-  sym_tilen->related_scope = {att::HardwareDef::L2};
-  att::SymVarInfoPtr sym_basen = std::make_shared<att::SymVarInfo>(ctx.expr_basen);
-  sym_basen->align = ge::Symbol(16);
-  sym_basen->related_scope = {att::HardwareDef::L0B, att::HardwareDef::L0C, att::HardwareDef::L1};
 
   att::AttAxisPtr n = std::make_shared<att::AttAxis>();
-  att::AttAxisPtr tilen = std::make_shared<att::AttAxis>();
-  att::AttAxisPtr basen = std::make_shared<att::AttAxis>();
 
   n->name = "n";
   n->axis_pos = att::AxisPosition::ORIGIN;
@@ -270,112 +194,43 @@ void BuildL2TileNArgs(att::ModelInfo &model_info, L2TileExprContext &ctx) {
   n->is_node_innerest_dim = false;
   n->size = sym_n;
 
-  tilen->name = "tilen";
-  tilen->axis_pos = att::AxisPosition::INNER;
-  tilen->bind_multicore = false;
-  tilen->is_last = false;
-  tilen->is_node_innerest_dim = true;
-  tilen->size = sym_tilen;
-  tilen->orig_axis.push_back(n.get());
-  tilen->from_axis = {n.get()};
-
-  basen->name = "basen";
-  basen->axis_pos = att::AxisPosition::INNER;
-  basen->bind_multicore = false;
-  basen->is_last = true;
-  basen->is_node_innerest_dim = true;
-  basen->size = sym_basen;
-  basen->orig_axis.push_back(n.get());
-  basen->from_axis = {tilen.get()};
-
   model_info.arg_list.emplace_back(n);
-  model_info.arg_list.emplace_back(tilen);
-  model_info.arg_list.emplace_back(basen);
 }
 
 void BuildL2TileKArgs(att::ModelInfo &model_info, L2TileExprContext &ctx) {
   ctx.expr_k = att::CreateExpr("k_size");
   ctx.expr_stepka = att::CreateExpr("stepka_size");
   ctx.expr_stepkb = att::CreateExpr("stepkb_size");
-  ctx.expr_basek = att::CreateExpr("basek_size");
 
-  att::SymVarInfoPtr sym_k, sym_stepka, sym_stepkb, sym_basek;
+  att::SymVarInfoPtr sym_k;
+  att::SymVarInfoPtr sym_stepka;
+  att::SymVarInfoPtr sym_stepkb;
   InitSymVar(sym_k, ctx.expr_k);
   InitSymVar(sym_stepka, ctx.expr_stepka, 256, {att::HardwareDef::L1});
   InitSymVar(sym_stepkb, ctx.expr_stepkb, 16, {att::HardwareDef::L1});
-  InitSymVar(sym_basek, ctx.expr_basek, 16, {att::HardwareDef::L0A, att::HardwareDef::L0B});
 
-  att::AttAxisPtr k, stepka, stepkb, basek;
+  att::AttAxisPtr k;
+  att::AttAxisPtr stepka;
+  att::AttAxisPtr stepkb;
   SetAxisOrigin(k, "k", sym_k);
   SetAxisInner(stepka, "stepka", sym_stepka, false, false, k.get(), k.get());
-  SetAxisInner(stepkb, "stepkb", sym_stepkb, false, false, k.get(), stepka.get());
-  // basek is special: is_node_innerest_dim = false
-  basek = std::make_shared<att::AttAxis>();
-  basek->name = "basek";
-  basek->axis_pos = att::AxisPosition::INNER;
-  basek->bind_multicore = false;
-  basek->is_last = true;
-  basek->is_node_innerest_dim = false;
-  basek->size = sym_basek;
-  basek->orig_axis.push_back(k.get());
-  basek->from_axis = {stepkb.get()};
+  SetAxisInner(stepkb, "stepkb", sym_stepkb, false, true, k.get(), stepka.get());
 
   model_info.arg_list.emplace_back(k);
   model_info.arg_list.emplace_back(stepka);
   model_info.arg_list.emplace_back(stepkb);
-  model_info.arg_list.emplace_back(basek);
 }
 
 void FillL2TileHardwareCons(att::ModelInfo &model_info, const L2TileExprContext &ctx) {
-  att::Expr l0a_occupy = ctx.expr_basem * ctx.expr_basek * att::CreateExpr(4);
-  att::Expr l0b_occupy = ctx.expr_basek * ctx.expr_basen * att::CreateExpr(4);
-  att::Expr l0c_occupy = ctx.expr_basem * ctx.expr_basen * att::CreateExpr(4);
-  att::Expr l1_occupy =
-      (ctx.expr_stepka * ctx.expr_basem * att::CreateExpr(4)) + (ctx.expr_stepkb * ctx.expr_basen * att::CreateExpr(4));
-  att::Expr l2_occupy = (ctx.expr_tilen * ctx.expr_tilem * att::CreateExpr(2)) +
-                        ((ctx.expr_tilen + ctx.expr_tilem) * ctx.expr_k * att::CreateExpr(2));
-  model_info.hardware_cons[att::HardwareDef::L0A] = l0a_occupy;
-  model_info.hardware_cons[att::HardwareDef::L0B] = l0b_occupy;
-  model_info.hardware_cons[att::HardwareDef::L0C] = l0c_occupy;
+  att::Expr l1_occupy = ctx.expr_stepka * ctx.expr_stepkb * att::CreateExpr(4);
   model_info.hardware_cons[att::HardwareDef::L1] = l1_occupy;
-  model_info.hardware_cons[att::HardwareDef::L2] = l2_occupy;
   model_info.hardware_cons[att::HardwareDef::UB] = att::CreateExpr(0L);
 }
 
 void FillL2TileModelInfo(att::ModelInfo &model_info, const L2TileExprContext &ctx) {
   FillL2TileHardwareCons(model_info, ctx);
-  att::Expr tile_cnt = ((ctx.expr_n / ctx.expr_tilen) * (ctx.expr_m / ctx.expr_tilem));
-  att::Expr base_cnt = af::sym::Max(
-      af::sym::kSymbolOne,
-      (((ctx.expr_tilem * ctx.expr_tilen) / (ctx.expr_basem * ctx.expr_basen)) / att::CreateExpr("block_dim")));
-  att::Expr al1_cnt = (ctx.expr_k / ctx.expr_stepka);
-  att::Expr bl1_cnt = (ctx.expr_stepka / ctx.expr_stepkb);
-  att::Expr l0_cnt = (ctx.expr_stepkb / ctx.expr_basek);
-  att::Expr l1_cnt = (al1_cnt * bl1_cnt);
-  att::Expr base_fixpipe_cost = ((ctx.expr_basem * ctx.expr_basen * att::CreateExpr(4)) / att::CreateExpr(32));
-  att::Expr al1_mte2 =
-      (((ctx.expr_basem * ctx.expr_stepka * att::CreateExpr(2)) /
-        (att::CreateExpr(32) / af::sym::Max(af::sym::kSymbolOne, (att::CreateExpr(256) / ctx.expr_stepka)))) +
-       att::CreateExpr(210));
-  att::Expr bl1_mte2 =
-      (((ctx.expr_basen * ctx.expr_stepkb * att::CreateExpr(2)) /
-        (att::CreateExpr(32) / af::sym::Max(af::sym::kSymbolOne, (att::CreateExpr(256) / ctx.expr_basen)))) +
-       att::CreateExpr(210));
-  att::Expr mac = (((tile_cnt * base_cnt * l1_cnt * l0_cnt)) * (ctx.expr_basem * ctx.expr_basen * ctx.expr_k) /
-                   (att::CreateExpr(16) * att::CreateExpr(256)));
-  att::Expr mte2 = (tile_cnt * base_cnt * al1_cnt * (al1_mte2 + (bl1_cnt * bl1_mte2)));
-  att::Expr fixpipe = (tile_cnt * base_cnt * base_fixpipe_cost);
-
-  model_info.objects[att::PipeType::AIC_MAC] = mac;
-  model_info.objects[att::PipeType::AIC_MTE2] = mte2;
-  model_info.objects[att::PipeType::AIC_FIXPIPE] = fixpipe;
   model_info.tiling_case_id = 1;
   model_info.eq_exprs[att::kFatherToChildNoTail].push_back(std::pair(ctx.expr_stepka, ctx.expr_stepkb));
-  model_info.eq_exprs[att::kFatherToChildNoTail].push_back(std::pair(ctx.expr_tilen, ctx.expr_basen));
-  model_info.eq_exprs[att::kFatherToChildNoTail].push_back(std::pair(ctx.expr_tilem, ctx.expr_basem));
-  model_info.eq_exprs[att::kFatherToChildNoTail].push_back(std::pair(ctx.expr_stepkb, ctx.expr_basek));
-  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_tilem - ctx.expr_m));
-  model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_tilen - ctx.expr_n));
   model_info.leq_exprs[att::kFatherToChildLarger].push_back((ctx.expr_stepka - ctx.expr_k));
   model_info.container_exprs["Q1"] = (ctx.expr_m + ctx.expr_n);
   model_info.tensor_exprs["MATMUL_OUTPUT1"] = (ctx.expr_m + ctx.expr_n);

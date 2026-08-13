@@ -38,7 +38,7 @@ using ge::SymbolicUtils;
 
 namespace att {
 using Expr = af::Expression;
-enum SolverType : uint32_t { L0_TILE = 0, L2_TILE, SEARCH_TILE, ERROR };
+enum SolverType : uint32_t { SEARCH_TILE, ERROR };
 
 enum class HardwareDef {
   GM = 0,
