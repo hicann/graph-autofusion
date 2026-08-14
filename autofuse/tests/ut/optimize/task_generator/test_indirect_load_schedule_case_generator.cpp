@@ -353,6 +353,51 @@ af::AscGraph BuildIndirectLoadBroadcastGraph(bool with_input_element = true) {
   return graph;
 }
 
+af::AscGraph BuildIndirectLoadIndexBroadcastGraph() {
+  af::AscGraph graph("indirect_load_index_broadcast_ut_graph");
+  const af::Expression input_rows = graph.CreateSizeVar(100000);
+  const af::Expression rows = graph.CreateSizeVar(1024);
+  const af::Expression columns = graph.CreateSizeVar(1024);
+  const af::AxisId input_axis0 = graph.CreateAxis("index_broadcast_x0", input_rows).id;
+  const af::AxisId input_axis1 = graph.CreateAxis("index_broadcast_x1", columns).id;
+  const af::AxisId output_axis0 = graph.CreateAxis("index_broadcast_y0", rows).id;
+  const af::AxisId output_axis1 = graph.CreateAxis("index_broadcast_y1", columns).id;
+  const std::vector<af::AxisId> input_axes = {input_axis0, input_axis1};
+  const std::vector<af::AxisId> output_axes = {output_axis0, output_axis1};
+  const std::vector<af::Expression> input_sizes = {input_rows, columns};
+  const std::vector<af::Expression> output_sizes = {rows, columns};
+  const std::vector<af::Expression> dense_strides = {columns, af::ops::One};
+  af::ascir_op::Data input("index_broadcast_input", graph);
+  input.ir_attr.SetIndex(0);
+  SetNodeView(input, af::DT_FLOAT, input_axes, input_sizes, dense_strides);
+  af::ascir_op::Load input_load("index_broadcast_input_load");
+  input_load.x = input.y;
+  SetNodeView(input_load, af::DT_FLOAT, input_axes, input_sizes, dense_strides);
+  af::ascir_op::Data index("index_broadcast_index", graph);
+  index.ir_attr.SetIndex(1);
+  SetNodeView(index, af::DT_INT64, output_axes, {rows, af::ops::One}, {af::ops::One, af::ops::Zero});
+  af::ascir_op::Load index_load("index_broadcast_index_load");
+  index_load.x = index.y;
+  SetNodeView(index_load, af::DT_INT64, output_axes, {rows, af::ops::One}, {af::ops::One, af::ops::Zero});
+  af::ascir_op::Broadcast broadcast("index_broadcast");
+  broadcast.attr.api.compute_type = af::ComputeType::kComputeBroadcast;
+  broadcast.x = index_load.y;
+  SetNodeView(broadcast, af::DT_INT64, output_axes, output_sizes, dense_strides);
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  indirect_load.x1 = input_load.y;
+  indirect_load.x2 = broadcast.y;
+  indirect_load.ir_attr.SetAxis(0L);
+  SetNodeView(indirect_load, af::DT_FLOAT, output_axes, output_sizes, dense_strides);
+  af::ascir_op::Store store("index_broadcast_store");
+  store.x = indirect_load.y;
+  SetNodeView(store, af::DT_FLOAT, output_axes, output_sizes, dense_strides);
+  af::ascir_op::Output output("index_broadcast_output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  SetNodeView(output, af::DT_FLOAT, output_axes, output_sizes, dense_strides);
+  return graph;
+}
+
 bool AddSideConsumer(af::AscGraph &graph, const char *producer_name) {
   af::ascir_op::Abs side_consumer("coverage_side_consumer");
   graph.AddNode(side_consumer);
@@ -955,6 +1000,25 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastDirectPathUsesPhysicalViewF
     ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
     EXPECT_EQ(logical_view.input.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact);
   }
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, IndexBroadcastUsesFinalPhysicalView) {
+  auto graph = BuildIndirectLoadIndexBroadcastGraph();
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  const auto simt = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
+  ASSERT_NE(simt, graphs.end());
+  EXPECT_EQ(simt->FindNode("index_broadcast"), nullptr);
+  const auto indirect_load = simt->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateLogicalView logical_view;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
+  EXPECT_EQ(logical_view.index.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact);
+  EXPECT_EQ(logical_view.index.sizes, (std::vector<af::Expression>{af::Symbol(1024), af::Symbol(1024)}));
+  EXPECT_EQ(logical_view.index.strides, (std::vector<af::Expression>{af::ops::One, af::ops::Zero}));
+  EXPECT_EQ(logical_view.index.physical_repeats, (std::vector<af::Expression>{af::Symbol(1024), af::ops::One}));
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, CompletesMissingDataViewAfterBroadcastRewrite) {

@@ -771,9 +771,14 @@ build_backend() {
                       load_gather_split_b_t_abs_store_test_e2e_v2 \
                       load_gather_tail_split_b_t_abs_store_test_e2e_v2 \
                        load_gather_one_axis_split_b_t_abs_store_test_e2e_v2 \
-                       indirect_load_rank2_axis1_simd_e2e_v2 \
-                       indirect_load_rank2_axis1_b16_gather_e2e_v2 \
+                        indirect_load_rank2_axis1_simd_e2e_v2 \
+                        indirect_load_rank2_axisneg2_simd_e2e_v2 \
+                        indirect_load_rank2_axis1_relu_exp2_pre_simd_e2e_v2 \
+                        indirect_load_rank2_axis1_b16_gather_e2e_v2 \
                        indirect_load_rank3_axis1_float_int64_static_e2e_v2 \
+                       indirect_load_rank3_axis1_pow2_simd_e2e_v2 \
+                       indirect_load_rank3_axis1_pow2_gather_e2e_v2 \
+                       indirect_load_rank3_axis1_pow2_simt_e2e_v2 \
                        indirect_load_rank3_axis1_float_int32_gather_e2e_v2 \
                        indirect_load_rank3_axis1_float_int64_gather_exact_e2e_v2 \
                        indirect_load_rank3_axis1_float_int64_gather_e2e_v2 \
@@ -789,10 +794,11 @@ build_backend() {
                        indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd_e2e_v2 \
                        indirect_load_mixed_rank4_axis2_simd_e2e_v2 \
                        indirect_load_simt_elementwise_coverage_e2e_v2 \
-                       indirect_load_broadcast_elements_simd_test_e2e_v2 \
-                       indirect_load_broadcast_elements_simt_test_e2e_v2 \
-                       indirect_load_broadcast_elements_sk_test_e2e_v2 \
-                       indirect_load_stride_zero_elements_simd_test_e2e_v2 \
+                        indirect_load_broadcast_elements_simd_test_e2e_v2 \
+                        indirect_load_broadcast_elements_simt_test_e2e_v2 \
+                        indirect_load_broadcast_elements_sk_test_e2e_v2 \
+                        indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 \
+                        indirect_load_stride_zero_elements_simd_test_e2e_v2 \
                        indirect_load_stride_zero_elements_simt_test_e2e_v2 \
                        indirect_load_stride_zero_elements_sk_test_e2e_v2 \
                        indirect_load_rank3_axis1_input_index_gap_simd_test_e2e_v2 \

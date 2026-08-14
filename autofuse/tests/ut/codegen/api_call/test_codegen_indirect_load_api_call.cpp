@@ -50,6 +50,17 @@ struct ILTestGraph {
         z1(graph.CreateAxis("z1", s1)),
         z2(graph.CreateAxis("z2", s2)),
         z3(graph.CreateAxis("z3", s3)) {}
+
+  ILTestGraph(const char *name, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
+      : graph(name),
+        s0(af::Symbol(size0)),
+        s1(af::Symbol(size1)),
+        s2(af::Symbol(size2)),
+        s3(af::Symbol(size3)),
+        z0(graph.CreateAxis("z0", s0)),
+        z1(graph.CreateAxis("z1", s1)),
+        z2(graph.CreateAxis("z2", s2)),
+        z3(graph.CreateAxis("z3", s3)) {}
 };
 
 // ======================== SIMD graph ========================
@@ -872,8 +883,7 @@ TEST(IndirectLoadApiCallTest, GenerateSimdUint32InputProducesTypedCall) {
 
 // ==================== SIMT Init + GenerateFuncDefinition ====================
 
-TEST(IndirectLoadApiCallTest, GenerateFuncDefinitionSimtProducesBodyStruct) {
-  ILTestGraph g("simt_gen");
+void GenerateSimtFuncDefinition(ILTestGraph &g, std::string &definition) {
   BuildSimtGraph(g);
   AnnotateSimtTemplate(g.graph);
 
@@ -900,15 +910,29 @@ TEST(IndirectLoadApiCallTest, GenerateFuncDefinitionSimtProducesBodyStruct) {
 
   std::stringstream ss;
   auto status = call.GenerateFuncDefinition(tpipe, tiler, ss);
-  EXPECT_EQ(status, af::SUCCESS);
+  ASSERT_EQ(status, af::SUCCESS);
+  definition = ss.str();
+}
 
-  std::string def = ss.str();
+TEST(IndirectLoadApiCallTest, GenerateFuncDefinitionSimtProducesBodyStruct) {
+  ILTestGraph g("simt_gen");
+  std::string def;
+  GenerateSimtFuncDefinition(g, def);
+
   EXPECT_NE(def.find("struct IndirectLoadSimtContext_"), std::string::npos);
   EXPECT_NE(def.find("struct IndirectLoadSimtBody_"), std::string::npos);
   EXPECT_NE(def.find("using Context = IndirectLoadSimtContext_"), std::string::npos);
   EXPECT_NE(def.find("__simt_callee__ __aicore__ inline static"), std::string::npos);
-  EXPECT_NE(def.find(" Index(int64_t output_index, const Context &context)"), std::string::npos);
+  EXPECT_NE(def.find(" Index(uint64_t output_index, const Context &context)"), std::string::npos);
   EXPECT_NE(def.find(" Output("), std::string::npos);
+}
+
+TEST(IndirectLoadApiCallTest, GenerateFuncDefinitionUsesUint32OffsetsForStaticShapes) {
+  ILTestGraph g("simt_static_power_of_two", 2, 8, 2, 8);
+  std::string def;
+  GenerateSimtFuncDefinition(g, def);
+
+  EXPECT_NE(def.find("uint32_t output_index"), std::string::npos);
 }
 
 // ==================== SIMT post-reduce Init ====================
@@ -1011,4 +1035,54 @@ TEST_F(IndirectLoadConstructFromNodesTest, GeneratesSimtDirectGmCallOutsideBlock
   EXPECT_EQ(generated.find("AllocTensor"), std::string::npos);
   EXPECT_EQ(generated.find("EnQue"), std::string::npos);
   EXPECT_EQ(generated.find("DeQue"), std::string::npos);
+}
+
+TEST_F(IndirectLoadConstructFromNodesTest, GeneratesStaticPowerOfTwoPolicyWithUint32Offsets) {
+  ILTestGraph g("simt_static_power_of_two", 2, 8, 2, 8);
+  BuildSimtGraph(g);
+  AnnotateSimtTemplate(g.graph);
+  auto il = g.graph.FindNode("indirect_load");
+  ASSERT_NE(il, nullptr);
+  ASSERT_EQ(SetTemplateRole(il, TemplateRole::kSimtOp), af::SUCCESS);
+
+  Kernel kernel("simt_static_power_of_two");
+  std::string generated;
+  ASSERT_EQ(ParseGraphAndGenerateLoop(g, {"x", "idx"}, kernel, generated), af::SUCCESS);
+  EXPECT_NE(generated.find("IndirectLoadSimtStaticPowerOfTwoPolicy<uint32_t, 1ULL, 8ULL, 1ULL, 8ULL>"),
+            std::string::npos);
+}
+
+TEST_F(IndirectLoadConstructFromNodesTest, GeneratesStaticInnerPolicyForLastAxis) {
+  ILTestGraph g("simt_static_inner", 2, 7, 2, 7);
+  BuildSimtGraph(g);
+  AnnotateSimtTemplate(g.graph);
+  auto il = g.graph.FindNode("indirect_load");
+  ASSERT_NE(il, nullptr);
+  ASSERT_EQ(SetTemplateRole(il, TemplateRole::kSimtOp), af::SUCCESS);
+
+  Kernel kernel("simt_static_inner");
+  std::string generated;
+  ASSERT_EQ(ParseGraphAndGenerateLoop(g, {"x", "idx"}, kernel, generated), af::SUCCESS);
+  EXPECT_NE(generated.find("IndirectLoadSimtStaticInnerPolicy<uint32_t, 1ULL, 1ULL, 7ULL>"), std::string::npos);
+  EXPECT_NE(generated.find(", 7);"), std::string::npos);
+}
+
+TEST_F(IndirectLoadConstructFromNodesTest, GeneratesSimtPostReduceCallWithUbOutput) {
+  ILTestGraph g("simt_post_reduce");
+  BuildSimtPostReduceGraph(g);
+  AnnotateSimtTemplate(g.graph);
+  auto il = g.graph.FindNode("indirect_load");
+  auto output_transform = g.graph.FindNode("output_transform");
+  ASSERT_NE(il, nullptr);
+  ASSERT_NE(output_transform, nullptr);
+  ASSERT_EQ(SetTemplateRole(il, TemplateRole::kSimtOp), af::SUCCESS);
+  ASSERT_EQ(SetTemplateRole(output_transform, TemplateRole::kSimtInlineTransform), af::SUCCESS);
+
+  Kernel kernel("simt_post_reduce");
+  std::string generated;
+  ASSERT_EQ(ParseGraphAndGenerateLoop(g, {"x", "idx", "addend"}, kernel, generated), af::SUCCESS);
+  EXPECT_NE(generated.find("// IndirectLoad SIMT"), std::string::npos);
+  EXPECT_NE(generated.find("AllocTensor"), std::string::npos);
+  EXPECT_NE(generated.find("static_cast<uint32_t>"), std::string::npos);
+  EXPECT_EQ(generated.find("y_ptr"), std::string::npos);
 }

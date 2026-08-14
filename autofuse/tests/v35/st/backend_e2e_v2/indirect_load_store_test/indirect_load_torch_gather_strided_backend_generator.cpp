@@ -8,7 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-#include "../indirect_load_broadcast_test/indirect_load_backend_generator_common.h"
+#include "indirect_load_backend_generator_common.h"
 
 namespace {
 constexpr char kGraphName[] = "indirect_load_torch_gather_strided_test";
@@ -114,6 +114,11 @@ TEST_F(TestIndirectLoadTorchGatherStridedE2e, GeneratesKernelForInductorGraph) {
   }
   if (kExpectSimt || kExpectSk) {
     EXPECT_EQ(result.kernel.find("// IndirectLoad SIMD"), std::string::npos);
+  }
+  if (kExpectSimt) {
+    EXPECT_NE(result.kernel.find("IndirectLoadSimtStridedPolicy<uint32_t, 3, 1, 7ULL, 7ULL>"), std::string::npos);
+    EXPECT_EQ(result.kernel.find("x_axis_size"), std::string::npos);
+    EXPECT_EQ(result.kernel.find("indirect_index < 0"), std::string::npos);
   }
   indirect_load_test::WriteGeneratedFiles(result);
 }

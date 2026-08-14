@@ -52,216 +52,240 @@ struct IndirectLoadSimdInnerSize {
   }
 };
 
-struct IndirectLoadSimdAddressContext {
-  uint32_t output_position;
-  uint32_t input_actual_size;
-  uint32_t input_inner;
-  uint32_t index_inner;
-  uint32_t input_slice_count;
-  uint32_t output_slice_count;
-  bool inner_layout_matches;
+template <typename X>
+struct IndirectLoadSimdGatherAction {
+  template <typename ValuePolicy>
+  __simd_callee__ inline static void Commit(__ubuf__ X *x, __ubuf__ X *y, __ubuf__ uint32_t *, uint32_t input_size,
+                                            uint32_t base, MicroAPI::RegTensor<uint32_t> &source_index,
+                                            MicroAPI::MaskReg mask, uint32_t count) {
+    ValuePolicy::GatherAndStore(x, y + base, source_index, mask, mask, count, input_size);
+  }
+
+  template <typename ValuePolicy>
+  __simd_callee__ inline static void CommitPair(__ubuf__ X *x, __ubuf__ X *y, __ubuf__ uint32_t *, uint32_t input_size,
+                                                uint32_t base, MicroAPI::RegTensor<uint32_t> &index0,
+                                                MicroAPI::RegTensor<uint32_t> &index1, MicroAPI::MaskReg mask0,
+                                                MicroAPI::MaskReg mask1, uint32_t count) {
+    ValuePolicy::GatherAndStorePair(x, y + base, index0, index1, mask0, mask1, count, input_size);
+  }
 };
 
-__simd_callee__ inline void IndirectLoadSimdDivMod(MicroAPI::RegTensor<uint32_t> &quotient,
-                                                   MicroAPI::RegTensor<uint32_t> &remainder,
-                                                   MicroAPI::RegTensor<uint32_t> &value, uint32_t divisor,
-                                                   MicroAPI::MaskReg mask) {
-  MicroAPI::RegTensor<uint32_t> divisor_reg;
-  MicroAPI::RegTensor<uint32_t> product;
-  MicroAPI::Duplicate(divisor_reg, divisor, mask);
-  MicroAPI::Div(quotient, value, divisor_reg, mask);
-  MicroAPI::Mul(product, quotient, divisor_reg, mask);
-  MicroAPI::Sub(remainder, value, product, mask);
+template <typename X>
+struct IndirectLoadSimdOffsetAction {
+  template <typename ValuePolicy>
+  __simd_callee__ inline static void Commit(__ubuf__ X *, __ubuf__ X *, __ubuf__ uint32_t *offsets, uint32_t,
+                                            uint32_t base, MicroAPI::RegTensor<uint32_t> &source_index,
+                                            MicroAPI::MaskReg mask, uint32_t) {
+    IndirectLoadSimdStoreByteOffsets<X>(offsets + base, source_index, mask);
+  }
+
+  template <typename ValuePolicy>
+  __simd_callee__ inline static void CommitPair(__ubuf__ X *, __ubuf__ X *, __ubuf__ uint32_t *offsets, uint32_t,
+                                                uint32_t base, MicroAPI::RegTensor<uint32_t> &index0,
+                                                MicroAPI::RegTensor<uint32_t> &index1, MicroAPI::MaskReg mask0,
+                                                MicroAPI::MaskReg mask1, uint32_t count) {
+    constexpr uint32_t elements_per_reg = VECTOR_REG_WIDTH / sizeof(uint32_t);
+    IndirectLoadSimdStoreByteOffsets<X>(offsets + base, index0, mask0);
+    if (count > elements_per_reg) {
+      IndirectLoadSimdStoreByteOffsets<X>(offsets + base + elements_per_reg, index1, mask1);
+    }
+  }
+};
+
+template <typename X, typename Index>
+struct IndirectLoadSimdArgs {
+  __ubuf__ X *x;
+  __ubuf__ Index *index;
+  __ubuf__ X *y;
+  __ubuf__ uint32_t *offsets;
+  uint32_t actual_size;
+};
+
+template <IndirectLoadSimdAddressMode Mode, typename X, typename Index, int32_t Rank, int32_t Axis, typename Action,
+          typename... ShapeArgs>
+__simd_callee__ inline void IndirectLoadSimdRunRepeat(IndirectLoadSimdArgs<X, Index> &args,
+                                                      typename IndirectLoadSimdIndexPolicy<Index>::LoadState &state,
+                                                      uint32_t base, uint32_t count, MicroAPI::MaskReg mask,
+                                                      MicroAPI::RegTensor<uint32_t> &input_inner,
+                                                      MicroAPI::RegTensor<uint32_t> &address_invariant,
+                                                      const IndirectLoadSimdAddressContext &context,
+                                                      ShapeArgs... shape_args) {
+  using Traits = IndirectLoadSimdModeTraits<Mode, X, Index, Rank, Axis>;
+  using IndexPolicy = typename Traits::IndexPolicy;
+  using ValuePolicy = typename Traits::ValuePolicy;
+  MicroAPI::RegTensor<uint32_t> source_index;
+  IndexPolicy::Load(source_index, state, count);
+  IndirectLoadSimdApplyAddress<Mode, Rank, Axis>(source_index, base, context, input_inner, address_invariant, mask,
+                                                 shape_args...);
+  Action::template Commit<ValuePolicy>(args.x, args.y, args.offsets, context.input_actual_size, base, source_index,
+                                       mask, count);
 }
 
-template <size_t Index, typename First, typename... Rest>
-__simd_callee__ inline uint32_t IndirectLoadSimdShapeValue(First first, Rest... rest) {
-  static_assert(Index < sizeof...(Rest) + 1UL, "IndirectLoad SIMD shape index is invalid.");
-  if constexpr (Index == 0UL) {
-    return static_cast<uint32_t>(first);
-  } else {
-    return IndirectLoadSimdShapeValue<Index - 1UL>(rest...);
-  }
+template <typename X, typename Index, typename Action>
+__simd_callee__ inline void IndirectLoadSimdRunPair(IndirectLoadSimdArgs<X, Index> &args,
+                                                    typename IndirectLoadSimdIndexPolicy<Index>::LoadState &state,
+                                                    uint32_t base, uint32_t count,
+                                                    const IndirectLoadSimdAddressContext &context) {
+  using Traits = IndirectLoadSimdRegTraits<X, Index, 1, 0>;
+  using IndexPolicy = typename Traits::IndexPolicy;
+  using ValuePolicy = typename Traits::ValuePolicy;
+  MicroAPI::RegTensor<uint32_t> index0, index1;
+  MicroAPI::MaskReg mask0, mask1;
+  IndexPolicy::LoadPair(index0, index1, mask0, mask1, state, count);
+  Action::template CommitPair<ValuePolicy>(args.x, args.y, args.offsets, context.input_actual_size, base, index0,
+                                           index1, mask0, mask1, count);
 }
 
-template <int32_t Dim, int32_t Axis, int32_t Rank, typename... ShapeArgs>
-__simd_callee__ inline void IndirectLoadSimdAddInnerOffset(MicroAPI::RegTensor<uint32_t> &source_index,
-                                                           MicroAPI::RegTensor<uint32_t> &position,
-                                                           MicroAPI::MaskReg mask, ShapeArgs... shape_args) {
-  MicroAPI::RegTensor<uint32_t> quotient;
-  MicroAPI::RegTensor<uint32_t> remainder;
-  MicroAPI::RegTensor<uint32_t> input_offset;
-  IndirectLoadSimdDivMod(quotient, remainder, position,
-                         IndirectLoadSimdShapeValue<static_cast<size_t>(Dim)>(shape_args...), mask);
-  MicroAPI::Muls(input_offset, remainder, IndirectLoadSimdShapeValue<static_cast<size_t>(Rank + Dim)>(shape_args...),
-                 mask);
-  MicroAPI::Add(source_index, source_index, input_offset, mask);
-  if constexpr (Dim > Axis + 1) {
-    IndirectLoadSimdAddInnerOffset<Dim - 1, Axis, Rank>(source_index, quotient, mask, shape_args...);
-  }
-}
-
-template <int32_t Rank, int32_t Axis, typename... ShapeArgs>
-__simd_callee__ inline void IndirectLoadSimdApplyAddress(MicroAPI::RegTensor<uint32_t> &source_index,
-                                                         uint32_t repeat_base, uint32_t output_position,
-                                                         uint32_t input_inner, uint32_t index_inner,
-                                                         uint32_t input_slice_count, uint32_t output_slice_count,
-                                                         bool inner_layout_matches, MicroAPI::MaskReg lane_mask,
-                                                         ShapeArgs... shape_args) {
-  if constexpr (Axis + 1 == Rank) {
-    (void)source_index;
-    (void)repeat_base;
-    (void)output_position;
-    (void)input_inner;
-    (void)index_inner;
-    (void)input_slice_count;
-    (void)output_slice_count;
-    (void)inner_layout_matches;
-    (void)lane_mask;
-    return;
-  }
-  MicroAPI::RegTensor<int32_t> signed_position;
-  auto &position = (MicroAPI::RegTensor<uint32_t> &)signed_position;
-  MicroAPI::RegTensor<uint32_t> outer;
-  MicroAPI::RegTensor<uint32_t> divisor;
-  MicroAPI::RegTensor<uint32_t> outer_offset;
-  MicroAPI::Arange(signed_position, 0);
-  MicroAPI::Adds(position, position, output_position + repeat_base, lane_mask);
-  MicroAPI::Duplicate(divisor, output_slice_count, lane_mask);
-  MicroAPI::Div(outer, position, divisor, lane_mask);
-  MicroAPI::Muls(source_index, source_index, input_inner, lane_mask);
-  MicroAPI::Muls(outer_offset, outer, input_slice_count, lane_mask);
-  MicroAPI::Add(source_index, source_index, outer_offset, lane_mask);
-  if (index_inner != 1U) {
-    if (inner_layout_matches) {
-      MicroAPI::RegTensor<uint32_t> quotient;
-      MicroAPI::RegTensor<uint32_t> inner_offset;
-      IndirectLoadSimdDivMod(quotient, inner_offset, position, index_inner, lane_mask);
-      MicroAPI::Add(source_index, source_index, inner_offset, lane_mask);
+template <IndirectLoadSimdAddressMode Mode, typename X, typename Index, int32_t Rank, int32_t Axis, typename Action,
+          typename... ShapeArgs>
+__aicore__ inline void IndirectLoadSimdRunMode(IndirectLoadSimdArgs<X, Index> &args,
+                                               const IndirectLoadSimdAddressContext &context, ShapeArgs... shape_args) {
+  using Traits = IndirectLoadSimdModeTraits<Mode, X, Index, Rank, Axis>;
+  using IndexPolicy = typename Traits::IndexPolicy;
+  constexpr uint32_t elements_per_repeat = Traits::kElementsPerRepeat;
+  const uint16_t full_repeats = static_cast<uint16_t>(args.actual_size / elements_per_repeat);
+  const uint32_t tail_count = args.actual_size % elements_per_repeat;
+  __VEC_SCOPE__ {
+    typename IndexPolicy::LoadState state;
+    IndexPolicy::Init(state, args.index);
+    if constexpr (sizeof(X) == sizeof(uint16_t) && Mode == IndirectLoadSimdAddressMode::kDirect) {
+      for (uint16_t repeat = 0U; repeat < full_repeats; ++repeat) {
+        const uint32_t base = static_cast<uint32_t>(repeat) * elements_per_repeat;
+        IndirectLoadSimdRunPair<X, Index, Action>(args, state, base, elements_per_repeat, context);
+      }
+      if (tail_count != 0U) {
+        IndirectLoadSimdRunPair<X, Index, Action>(args, state, full_repeats * elements_per_repeat, tail_count, context);
+      }
     } else {
-      IndirectLoadSimdAddInnerOffset<Rank - 1, Axis, Rank>(source_index, position, lane_mask, shape_args...);
+      MicroAPI::MaskReg full_mask = MicroAPI::CreateMask<uint32_t, MicroAPI::MaskPattern::ALL>();
+      MicroAPI::RegTensor<uint32_t> input_inner;
+      MicroAPI::RegTensor<uint32_t> address_invariant;
+      IndirectLoadSimdInitInvariants<Mode>(input_inner, address_invariant, context, full_mask);
+      for (uint16_t repeat = 0U; repeat < full_repeats; ++repeat) {
+        const uint32_t base = static_cast<uint32_t>(repeat) * elements_per_repeat;
+        IndirectLoadSimdRunRepeat<Mode, X, Index, Rank, Axis, Action>(
+            args, state, base, elements_per_repeat, full_mask, input_inner, address_invariant, context, shape_args...);
+      }
+      if (tail_count != 0U) {
+        uint32_t mask_count = tail_count;
+        MicroAPI::MaskReg tail_mask = MicroAPI::UpdateMask<uint32_t>(mask_count);
+        IndirectLoadSimdRunRepeat<Mode, X, Index, Rank, Axis, Action>(args, state, full_repeats * elements_per_repeat,
+                                                                      tail_count, tail_mask, input_inner,
+                                                                      address_invariant, context, shape_args...);
+      }
     }
   }
 }
 
-template <typename X, typename Index, int32_t Rank, int32_t Axis>
-struct IndirectLoadSimdRegTraits {
-  using IndexPolicy = IndirectLoadSimdIndexPolicy<Index>;
-  using ValuePolicy = IndirectLoadSimdValuePolicy<X>;
-  static constexpr bool kSupported =
-      IndexPolicy::kSupported && ValuePolicy::kSupported && Rank > 0 && Axis >= 0 && Axis < Rank;
-  static constexpr uint32_t kElementsPerRepeat =
-      sizeof(X) == sizeof(uint16_t) ? VECTOR_REG_WIDTH / sizeof(uint16_t) : IndexPolicy::kElementsPerRepeat;
+template <typename X, typename Index, typename Action>
+__aicore__ inline void IndirectLoadSimdRunReuse(IndirectLoadSimdArgs<X, Index> &args,
+                                                const IndirectLoadSimdAddressContext &context) {
+  using Traits = IndirectLoadSimdRegTraits<X, Index, 1, 0>;
+  using IndexPolicy = typename Traits::IndexPolicy;
+  using ValuePolicy = typename Traits::ValuePolicy;
+  constexpr uint32_t elements_per_repeat = VECTOR_REG_WIDTH / sizeof(uint32_t);
+  const uint16_t full_repeats = static_cast<uint16_t>(args.actual_size / elements_per_repeat);
+  const uint32_t tail_count = args.actual_size % elements_per_repeat;
+  __VEC_SCOPE__ {
+    typename IndexPolicy::LoadState state;
+    IndexPolicy::Init(state, args.index);
+    MicroAPI::RegTensor<uint32_t> inner_offset;
+    MicroAPI::RegTensor<uint32_t> input_inner;
+    MicroAPI::MaskReg full_mask = MicroAPI::CreateMask<uint32_t, MicroAPI::MaskPattern::ALL>();
+    IndirectLoadSimdInitInnerOffset(inner_offset, context, full_mask);
+    MicroAPI::Duplicate(input_inner, context.input_inner, full_mask);
+    for (uint16_t repeat = 0U; repeat < full_repeats; ++repeat) {
+      const uint32_t base = repeat * elements_per_repeat;
+      MicroAPI::RegTensor<uint32_t> source_index;
+      IndexPolicy::Load(source_index, state, elements_per_repeat);
+      MicroAPI::Mul(source_index, source_index, input_inner, full_mask);
+      MicroAPI::Add(source_index, source_index, inner_offset, full_mask);
+      Action::template Commit<ValuePolicy>(args.x, args.y, args.offsets, context.input_actual_size, base, source_index,
+                                           full_mask, elements_per_repeat);
+    }
+    if (tail_count != 0U) {
+      const uint32_t base = full_repeats * elements_per_repeat;
+      uint32_t mask_count = tail_count;
+      MicroAPI::MaskReg tail_mask = MicroAPI::UpdateMask<uint32_t>(mask_count);
+      MicroAPI::RegTensor<uint32_t> source_index;
+      IndexPolicy::Load(source_index, state, tail_count);
+      MicroAPI::Mul(source_index, source_index, input_inner, tail_mask);
+      MicroAPI::Add(source_index, source_index, inner_offset, tail_mask);
+      Action::template Commit<ValuePolicy>(args.x, args.y, args.offsets, context.input_actual_size, base, source_index,
+                                           tail_mask, tail_count);
+    }
+  }
+}
+
+template <typename X, typename Index, int32_t Rank, int32_t Axis, typename Action>
+struct IndirectLoadSimdDispatchPolicy {
+  using Args = IndirectLoadSimdArgs<X, Index>;
+
+  __aicore__ inline static void RunReuse(Args &args, const IndirectLoadSimdAddressContext &context) {
+    IndirectLoadSimdRunReuse<X, Index, Action>(args, context);
+  }
+
+  template <IndirectLoadSimdAddressMode Mode, typename... ShapeArgs>
+  __aicore__ inline static void RunMode(Args &args, const IndirectLoadSimdAddressContext &context,
+                                        ShapeArgs... shape_args) {
+    IndirectLoadSimdRunMode<Mode, X, Index, Rank, Axis, Action>(args, context, shape_args...);
+  }
 };
+
+template <int32_t Rank, int32_t Axis, typename DispatchPolicy, typename... ShapeArgs>
+__aicore__ inline void IndirectLoadSimdDispatch(typename DispatchPolicy::Args &args,
+                                                const IndirectLoadSimdAddressContext &context,
+                                                ShapeArgs... shape_args) {
+  constexpr uint32_t reuse_elements = VECTOR_REG_WIDTH / sizeof(uint32_t);
+  if constexpr (Axis + 1 == Rank) {
+    DispatchPolicy::template RunMode<IndirectLoadSimdAddressMode::kDirect>(args, context, shape_args...);
+    return;
+  }
+  if (!context.inner_layout_matches) {
+    DispatchPolicy::template RunMode<IndirectLoadSimdAddressMode::kStrided>(args, context, shape_args...);
+    return;
+  }
+  if (IndirectLoadSimdIsPowerOfTwo(context.index_inner)) {
+    if (args.actual_size > reuse_elements && (reuse_elements & (context.index_inner - 1U)) == 0U) {
+      DispatchPolicy::RunReuse(args, context);
+    } else {
+      DispatchPolicy::template RunMode<IndirectLoadSimdAddressMode::kDensePow2>(args, context, shape_args...);
+    }
+    return;
+  }
+  DispatchPolicy::template RunMode<IndirectLoadSimdAddressMode::kDenseGeneric>(args, context, shape_args...);
+}
 
 template <typename X, typename Index, int32_t Rank, int32_t Axis, typename... ShapeArgs>
 __aicore__ inline void IndirectLoadSimdRegGather(__ubuf__ X *x, __ubuf__ Index *index, __ubuf__ X *y,
-                                                 uint32_t actual_size,
-                                                 const IndirectLoadSimdAddressContext &address_context,
+                                                 uint32_t actual_size, const IndirectLoadSimdAddressContext &context,
                                                  ShapeArgs... shape_args) {
-  using Traits = IndirectLoadSimdRegTraits<X, Index, Rank, Axis>;
-  static_assert(Traits::kSupported, "IndirectLoad SIMD register Gather specialization is not implemented.");
-  using IndexPolicy = typename Traits::IndexPolicy;
-  using ValuePolicy = typename Traits::ValuePolicy;
-  constexpr uint32_t elements_per_repeat = Traits::kElementsPerRepeat;
-  const uint16_t repeat_count = static_cast<uint16_t>((actual_size + elements_per_repeat - 1U) / elements_per_repeat);
-  uint32_t remaining = actual_size;
-  __VEC_SCOPE__ {
-    typename IndexPolicy::LoadState index_load_state;
-    IndexPolicy::Init(index_load_state, index);
-    for (uint16_t repeat = 0U; repeat < repeat_count; ++repeat) {
-      const uint32_t element_count = remaining > elements_per_repeat ? elements_per_repeat : remaining;
-      if constexpr (sizeof(X) == sizeof(uint16_t)) {
-        MicroAPI::RegTensor<uint32_t> source_index0;
-        MicroAPI::RegTensor<uint32_t> source_index1;
-        MicroAPI::MaskReg lane_mask0;
-        MicroAPI::MaskReg lane_mask1;
-        IndexPolicy::LoadPair(source_index0, source_index1, lane_mask0, lane_mask1, index_load_state, element_count);
-        IndirectLoadSimdApplyAddress<Rank, Axis>(
-            source_index0, repeat * elements_per_repeat, address_context.output_position, address_context.input_inner,
-            address_context.index_inner, address_context.input_slice_count, address_context.output_slice_count,
-            address_context.inner_layout_matches, lane_mask0, shape_args...);
-        IndirectLoadSimdApplyAddress<Rank, Axis>(
-            source_index1, repeat * elements_per_repeat + VECTOR_REG_WIDTH / sizeof(uint32_t),
-            address_context.output_position, address_context.input_inner, address_context.index_inner,
-            address_context.input_slice_count, address_context.output_slice_count, address_context.inner_layout_matches,
-            lane_mask1, shape_args...);
-        ValuePolicy::GatherAndStorePair(x, y + repeat * elements_per_repeat, source_index0, source_index1, lane_mask0,
-                                        lane_mask1, element_count, address_context.input_actual_size);
-      } else {
-        MicroAPI::RegTensor<uint32_t> source_index;
-        uint32_t mask_count = element_count;
-        MicroAPI::MaskReg lane_mask = MicroAPI::UpdateMask<uint32_t>(mask_count);
-        MicroAPI::MaskReg valid_mask;
-        IndexPolicy::Load(source_index, valid_mask, index_load_state, element_count, lane_mask);
-        IndirectLoadSimdApplyAddress<Rank, Axis>(
-            source_index, repeat * elements_per_repeat, address_context.output_position, address_context.input_inner,
-            address_context.index_inner, address_context.input_slice_count, address_context.output_slice_count,
-            address_context.inner_layout_matches, lane_mask, shape_args...);
-        ValuePolicy::GatherAndStore(x, y + repeat * elements_per_repeat, source_index, lane_mask, valid_mask,
-                                    element_count, address_context.input_actual_size);
-      }
-      remaining -= element_count;
-    }
-  }
-}
-
-template <typename X>
-__simd_callee__ inline void IndirectLoadSimdStoreByteOffsets(__ubuf__ uint32_t *offsets,
-                                                             MicroAPI::RegTensor<uint32_t> &source_index,
-                                                             MicroAPI::MaskReg mask) {
-  MicroAPI::Muls(source_index, source_index, static_cast<uint32_t>(sizeof(X)), mask);
-  MicroAPI::DataCopy(offsets, source_index, mask);
+  static_assert(IndirectLoadSimdRegTraits<X, Index, Rank, Axis>::kSupported,
+                "IndirectLoad SIMD register Gather specialization is not implemented.");
+  IndirectLoadSimdArgs<X, Index> args{x, index, y, nullptr, actual_size};
+  using Policy = IndirectLoadSimdDispatchPolicy<X, Index, Rank, Axis, IndirectLoadSimdGatherAction<X>>;
+  IndirectLoadSimdDispatch<Rank, Axis, Policy>(args, context, shape_args...);
 }
 
 template <typename X, typename Index, int32_t Rank, int32_t Axis, typename... ShapeArgs>
 __aicore__ inline void IndirectLoadSimdBuildOffsets(__ubuf__ Index *index, __ubuf__ uint32_t *offsets,
-                                                    uint32_t actual_size,
-                                                    const IndirectLoadSimdAddressContext &address_context,
+                                                    uint32_t actual_size, const IndirectLoadSimdAddressContext &context,
                                                     ShapeArgs... shape_args) {
-  using Traits = IndirectLoadSimdRegTraits<X, Index, Rank, Axis>;
-  using IndexPolicy = typename Traits::IndexPolicy;
-  constexpr uint32_t elements_per_repeat = Traits::kElementsPerRepeat;
-  const uint16_t repeat_count = static_cast<uint16_t>((actual_size + elements_per_repeat - 1U) / elements_per_repeat);
-  uint32_t remaining = actual_size;
-  __VEC_SCOPE__ {
-    typename IndexPolicy::LoadState state;
-    if constexpr (sizeof(Index) != sizeof(uint32_t)) {
-      IndexPolicy::Init(state, index);
-    }
-    for (uint16_t repeat = 0U; repeat < repeat_count; ++repeat) {
-      const uint32_t count = remaining > elements_per_repeat ? elements_per_repeat : remaining;
-      const uint32_t base = repeat * elements_per_repeat;
-      if constexpr (sizeof(Index) == sizeof(uint32_t)) {
-        IndexPolicy::Init(state, index + base);
-      }
-      MicroAPI::RegTensor<uint32_t> index0, index1;
-      MicroAPI::MaskReg mask0, mask1;
-      IndexPolicy::LoadPair(index0, index1, mask0, mask1, state, count);
-      IndirectLoadSimdApplyAddress<Rank, Axis>(index0, base, address_context.output_position,
-                                               address_context.input_inner, address_context.index_inner,
-                                               address_context.input_slice_count, address_context.output_slice_count,
-                                               address_context.inner_layout_matches, mask0, shape_args...);
-      IndirectLoadSimdStoreByteOffsets<X>(offsets + base, index0, mask0);
-      constexpr uint32_t elements_per_offset_reg = VECTOR_REG_WIDTH / sizeof(uint32_t);
-      if (count > elements_per_offset_reg) {
-        const uint32_t second_base = base + elements_per_offset_reg;
-        IndirectLoadSimdApplyAddress<Rank, Axis>(index1, second_base, address_context.output_position,
-                                                 address_context.input_inner, address_context.index_inner,
-                                                 address_context.input_slice_count, address_context.output_slice_count,
-                                                 address_context.inner_layout_matches, mask1, shape_args...);
-        IndirectLoadSimdStoreByteOffsets<X>(offsets + second_base, index1, mask1);
-      }
-      remaining -= count;
-    }
-  }
+  IndirectLoadSimdArgs<X, Index> args{nullptr, index, nullptr, offsets, actual_size};
+  using Policy = IndirectLoadSimdDispatchPolicy<X, Index, Rank, Axis, IndirectLoadSimdOffsetAction<X>>;
+  IndirectLoadSimdDispatch<Rank, Axis, Policy>(args, context, shape_args...);
 }
 
-template <int32_t Rank, int32_t Axis>
+template <int32_t Rank, int32_t Axis, typename... ShapeArgs>
 __aicore__ inline IndirectLoadSimdAddressContext InitIndirectLoadSimdAddressContext(int64_t output_offset,
                                                                                     uint32_t input_actual_size,
                                                                                     int64_t input_axis,
-                                                                                    const int64_t *shape) {
+                                                                                    ShapeArgs... shape_args) {
+  (void)input_axis;
+  if constexpr (Axis + 1 == Rank) {
+    return {0U, input_actual_size, 1U, 1U, true};
+  }
+  const int64_t shape[] = {static_cast<int64_t>(shape_args)...};
   uint32_t index_inner = 1U;
   uint32_t expected_input_stride = 1U;
   bool inner_layout_matches = true;
@@ -271,15 +295,9 @@ __aicore__ inline IndirectLoadSimdAddressContext InitIndirectLoadSimdAddressCont
     index_inner *= static_cast<uint32_t>(shape[dim]);
   }
   const uint32_t input_inner = static_cast<uint32_t>(shape[Rank + Axis]);
-  const uint32_t input_slice = static_cast<uint32_t>(input_axis) * input_inner;
   const uint32_t output_slice = static_cast<uint32_t>(shape[Axis]) * index_inner;
-  return {static_cast<uint32_t>(output_offset % static_cast<int64_t>(output_slice)),
-          input_actual_size,
-          input_inner,
-          index_inner,
-          input_slice,
-          output_slice,
-          inner_layout_matches};
+  return {static_cast<uint32_t>(output_offset % static_cast<int64_t>(output_slice)), input_actual_size, input_inner,
+          index_inner, inner_layout_matches};
 }
 
 template <typename X, typename Index, int32_t Rank, int32_t Axis, typename... ShapeArgs>
@@ -289,12 +307,11 @@ __aicore__ inline void IndirectLoadSimdDenseImpl(const LocalTensor<X> &x, const 
                                                  ShapeArgs... shape_args) {
   static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMD rank or axis is invalid.");
   static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(2 * Rank), "IndirectLoad SIMD shape is invalid.");
-  const int64_t shape[] = {static_cast<int64_t>(shape_args)...};
   __ubuf__ X *x_address = (__ubuf__ X *)x.GetPhyAddr();
   __ubuf__ Index *index_address = (__ubuf__ Index *)index.GetPhyAddr();
   __ubuf__ X *y_address = (__ubuf__ X *)y.GetPhyAddr();
-  const Internal::IndirectLoadSimdAddressContext context =
-      Internal::InitIndirectLoadSimdAddressContext<Rank, Axis>(output_offset, input_actual_size, input_axis, shape);
+  const Internal::IndirectLoadSimdAddressContext context = Internal::InitIndirectLoadSimdAddressContext<Rank, Axis>(
+      output_offset, input_actual_size, input_axis, shape_args...);
   Internal::IndirectLoadSimdRegGather<X, Index, Rank, Axis>(x_address, index_address, y_address, actual_size, context,
                                                             shape_args...);
 }
@@ -374,12 +391,11 @@ __aicore__ inline void IndirectLoadSimdGatherApi(const LocalTensor<X> &x, const 
                                                  ShapeArgs... shape_args) {
   static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMD rank or axis is invalid.");
   static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(2 * Rank), "IndirectLoad SIMD shape is invalid.");
-  const int64_t shape[] = {static_cast<int64_t>(shape_args)...};
   // Gather consumes uint32 byte offsets, so reuse the dead index UB instead of allocating another buffer.
   __ubuf__ Index *index_address = (__ubuf__ Index *)index.GetPhyAddr();
   __ubuf__ uint32_t *offset_address = (__ubuf__ uint32_t *)index.GetPhyAddr();
-  const Internal::IndirectLoadSimdAddressContext context =
-      Internal::InitIndirectLoadSimdAddressContext<Rank, Axis>(output_offset, input_actual_size, input_axis, shape);
+  const Internal::IndirectLoadSimdAddressContext context = Internal::InitIndirectLoadSimdAddressContext<Rank, Axis>(
+      output_offset, input_actual_size, input_axis, shape_args...);
   Internal::IndirectLoadSimdBuildOffsets<X, Index, Rank, Axis>(index_address, offset_address, actual_size, context,
                                                                shape_args...);
   PipeBarrier<PIPE_V>();

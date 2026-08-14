@@ -116,6 +116,40 @@ void SetPhysicalWindowLayout(const af::AscTensorAttr &physical_attr, af::AscTens
   attr.vectorized_strides = physical_attr.vectorized_strides;
 }
 
+af::Status GetBroadcastPhysicalAttr(const af::AscNodePtr &broadcast, const char *template_name,
+                                    af::AscTensorAttr &physical_attr) {
+  const af::AscNodePtr producer = ascgen_utils::indirect_load::GetInputProducer(broadcast, 0UL);
+  GE_ASSERT_TRUE(producer != nullptr && !producer->outputs().empty(),
+                 "IndirectLoad %s Broadcast node[%s] source is invalid.", template_name, broadcast->GetNamePtr());
+  physical_attr = producer->outputs()[0]->attr;
+  return af::SUCCESS;
+}
+
+af::Status BuildFinalTensorView(const af::AscTensorAttr &logical_attr, const NodePath &path, const char *template_name,
+                                ascgen_utils::indirect_load::LogicalTensorView &view) {
+  view = {logical_attr.axis, logical_attr.repeats, logical_attr.strides};
+  const auto broadcast_iter = std::find_if(path.begin(), path.end(), [](const af::AscNodePtr &node) {
+    return af::ops::IsOps<af::ascir_op::Broadcast>(node);
+  });
+  if (broadcast_iter == path.end()) {
+    return af::SUCCESS;
+  }
+  const af::AscNodePtr broadcast = *broadcast_iter;
+  af::AscTensorAttr physical_attr;
+  GE_ASSERT_SUCCESS(GetBroadcastPhysicalAttr(broadcast, template_name, physical_attr));
+  GE_ASSERT_TRUE(
+      physical_attr.repeats.size() == view.sizes.size() && physical_attr.strides.size() == view.strides.size(),
+      "IndirectLoad %s Broadcast source layout rank mismatch.", template_name);
+  view.strides = physical_attr.strides;
+  for (size_t dim = 0UL; dim < view.sizes.size(); ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(physical_attr.repeats[dim], af::sym::kSymbolOne) == af::TriBool::kTrue &&
+        af::SymbolicUtils::StaticCheckEq(view.sizes[dim], af::sym::kSymbolOne) != af::TriBool::kTrue) {
+      view.strides[dim] = af::sym::kSymbolZero;
+    }
+  }
+  return af::SUCCESS;
+}
+
 af::Status InlineBroadcastPath(NodePath &path, const char *template_name) {
   const auto broadcast_iter = std::find_if(path.begin(), path.end(), [](const af::AscNodePtr &node) {
     return af::ops::IsOps<af::ascir_op::Broadcast>(node);
@@ -124,10 +158,8 @@ af::Status InlineBroadcastPath(NodePath &path, const char *template_name) {
     return af::SUCCESS;
   }
   const af::AscNodePtr broadcast = *broadcast_iter;
-  const af::AscNodePtr producer = ascgen_utils::indirect_load::GetInputProducer(broadcast, 0UL);
-  GE_ASSERT_TRUE(producer != nullptr && !producer->outputs().empty(),
-                 "IndirectLoad %s Broadcast node[%s] source is invalid.", template_name, broadcast->GetNamePtr());
-  const af::AscTensorAttr physical_attr = producer->outputs()[0]->attr;
+  af::AscTensorAttr physical_attr;
+  GE_ASSERT_SUCCESS(GetBroadcastPhysicalAttr(broadcast, template_name, physical_attr));
   for (auto iter = path.begin(); iter != broadcast_iter; ++iter) {
     const af::AscNodePtr &node = *iter;
     node->attr.sched.axis = physical_attr.axis;
@@ -148,7 +180,8 @@ af::Status InlineBroadcastPath(NodePath &path, const char *template_name) {
 
 af::Status InlineBroadcastPrePaths(IndirectLoadGraphPaths &paths, const char *template_name) {
   GE_ASSERT_SUCCESS(InlineBroadcastPath(paths.input, template_name));
-  return InlineBroadcastPath(paths.index, template_name);
+  GE_ASSERT_SUCCESS(InlineBroadcastPath(paths.index, template_name));
+  return af::SUCCESS;
 }
 
 af::Status ApplyPhysicalExecutionView(const NodePath &path,
@@ -933,19 +966,18 @@ af::Status CompleteInputDataTensorAttrs(const RewrittenGraphAnalysis &analysis) 
   return af::SUCCESS;
 }
 
-af::Status RecordTemplateLogicalView(const af::AscNodePtr &indirect_load, bool &is_candidate_legal) {
+af::Status RecordTemplateLogicalView(const af::AscNodePtr &indirect_load, const IndirectLoadGraphPaths &paths,
+                                     const char *template_name, bool &is_candidate_legal,
+                                     ascgen_utils::indirect_load::TemplateLogicalView &view) {
   GE_ASSERT_TRUE(indirect_load->inputs.Size() == 2UL && indirect_load->outputs().size() == 1UL,
                  "IndirectLoad expects 2 inputs and 1 output.");
   const auto inputs = indirect_load->inputs();
-  ascgen_utils::indirect_load::TemplateLogicalView view;
-  const ascgen_utils::indirect_load::LogicalTensorView input_view{
-      inputs[ascgen_utils::indirect_load::kInputTensorIndex]->attr.axis,
-      inputs[ascgen_utils::indirect_load::kInputTensorIndex]->attr.repeats,
-      inputs[ascgen_utils::indirect_load::kInputTensorIndex]->attr.strides};
-  const ascgen_utils::indirect_load::LogicalTensorView index_view{
-      inputs[ascgen_utils::indirect_load::kIndexTensorIndex]->attr.axis,
-      inputs[ascgen_utils::indirect_load::kIndexTensorIndex]->attr.repeats,
-      inputs[ascgen_utils::indirect_load::kIndexTensorIndex]->attr.strides};
+  ascgen_utils::indirect_load::LogicalTensorView input_view;
+  GE_ASSERT_SUCCESS(BuildFinalTensorView(inputs[ascgen_utils::indirect_load::kInputTensorIndex]->attr, paths.input,
+                                         template_name, input_view));
+  ascgen_utils::indirect_load::LogicalTensorView index_view;
+  GE_ASSERT_SUCCESS(BuildFinalTensorView(inputs[ascgen_utils::indirect_load::kIndexTensorIndex]->attr, paths.index,
+                                         template_name, index_view));
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(input_view, view.input));
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(index_view, view.index));
   view.output.axis_ids = indirect_load->outputs().front()->attr.axis;
@@ -984,12 +1016,11 @@ af::Status PreparePhysicalViews(const af::AscNodePtr &indirect_load, const char 
   if (!is_candidate_legal) {
     return af::SUCCESS;
   }
-  GE_ASSERT_SUCCESS(RecordTemplateLogicalView(indirect_load, is_candidate_legal));
+  GE_ASSERT_SUCCESS(RecordTemplateLogicalView(indirect_load, paths, template_name, is_candidate_legal, logical_view));
   if (!is_candidate_legal) {
     return af::SUCCESS;
   }
   GE_ASSERT_SUCCESS(InlineBroadcastPrePaths(paths, template_name));
-  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view));
   return ApplyPhysicalExecutionViews(paths, logical_view);
 }
 

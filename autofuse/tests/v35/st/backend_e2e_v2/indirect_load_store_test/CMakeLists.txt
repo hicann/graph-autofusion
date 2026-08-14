@@ -55,10 +55,6 @@ function(mark_indirect_load_large_simt test_name)
     target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_EXPECT_SIMT_MULTI_ROUND)
 endfunction()
 
-function(mark_indirect_load_input_pre_vf test_name expected)
-    target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_EXPECT_INPUT_PRE_VF=${expected})
-endfunction()
-
 function(mark_indirect_load_mixed_index_pre test_name)
     target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_MIXED_INDEX_PRE)
     target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_MIXED_INDEX_PRE)
@@ -73,17 +69,15 @@ function(mark_indirect_load_output_post test_name output_post_type expect_simt)
         IL_EXPECT_SIMT=${expect_simt})
 endfunction()
 
-function(mark_indirect_load_forced_simd_reduce test_name output_post_type)
-    mark_indirect_load_static_shape(${test_name})
-    mark_indirect_load_mixed_index_pre(${test_name})
-    mark_indirect_load_output_post(${test_name} ${output_post_type} 1)
-    target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_POST_REDUCE IL_EXPECT_SIMD_SELECTED ${ARGN})
-    target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_POST_REDUCE IL_EXPECT_SIMD_SELECTED ${ARGN})
-endfunction()
-
 function(mark_indirect_load_simt_selected test_name)
     target_compile_definitions(${test_name}_codegen_v2 PRIVATE IL_EXPECT_SIMT_SELECTED)
     target_compile_definitions(${test_name}_e2e_v2 PRIVATE IL_EXPECT_SIMT_SELECTED)
+endfunction()
+
+function(mark_indirect_load_simt_codegen test_name policy offset_bits)
+    target_compile_definitions(${test_name}_codegen_v2 PRIVATE
+        IL_EXPECT_SIMT_POLICY=${policy}
+        IL_EXPECT_SIMT_OFFSET_BITS=${offset_bits})
 endfunction()
 
 function(mark_indirect_load_implementation test_name implementation)
@@ -141,6 +135,13 @@ endfunction()
 add_indirect_load_e2e_case(indirect_load_rank2_axis1_simd 2 1 1 1 0 0 3 5 8 1 1 4 6 1 1)
 mark_indirect_load_static_shape(indirect_load_rank2_axis1_simd)
 
+add_indirect_load_e2e_case(indirect_load_rank2_axis1_half_int64_simd 2 1 1 1 0 0 3 5 160 1 1 4 137 1 1)
+mark_indirect_load_static_shape(indirect_load_rank2_axis1_half_int64_simd)
+target_compile_definitions(indirect_load_rank2_axis1_half_int64_simd_codegen_v2 PRIVATE
+    IL_INDEX_INT64 IL_FUNCTIONAL_ONLY)
+target_compile_definitions(indirect_load_rank2_axis1_half_int64_simd_e2e_v2 PRIVATE
+    IL_INDEX_INT64)
+
 add_indirect_load_e2e_case(indirect_load_rank2_axis1_b16_gather 2 1 1 1 1 0 3 5 8 1 1 4 6 1 1)
 mark_indirect_load_static_shape(indirect_load_rank2_axis1_b16_gather)
 mark_indirect_load_implementation(indirect_load_rank2_axis1_b16_gather 1)
@@ -151,6 +152,30 @@ target_compile_definitions(indirect_load_rank3_axis1_float_int64_static_codegen_
     IL_DATA_FLOAT IL_INDEX_INT64 IL_OUTPUT_POST_TYPE=2 IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
 target_compile_definitions(indirect_load_rank3_axis1_float_int64_static_e2e_v2 PRIVATE
     IL_DATA_FLOAT IL_INDEX_INT64 IL_OUTPUT_POST_TYPE=2 IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
+
+add_indirect_load_e2e_case(indirect_load_rank3_axis1_pow2_simd 3 1 0 0 0 0 3 4 64 32 1 4 64 32 1)
+mark_indirect_load_static_shape(indirect_load_rank3_axis1_pow2_simd)
+target_compile_definitions(indirect_load_rank3_axis1_pow2_simd_codegen_v2 PRIVATE
+    IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX IL_EXPECT_MICRO_SIMD)
+target_compile_definitions(indirect_load_rank3_axis1_pow2_simd_e2e_v2 PRIVATE
+    IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
+
+add_indirect_load_e2e_case(indirect_load_rank3_axis1_pow2_gather 3 1 0 0 1 0 3 4 64 32 1 4 64 32 1)
+mark_indirect_load_static_shape(indirect_load_rank3_axis1_pow2_gather)
+mark_indirect_load_implementation(indirect_load_rank3_axis1_pow2_gather 1)
+target_compile_definitions(indirect_load_rank3_axis1_pow2_gather_codegen_v2 PRIVATE
+    IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
+target_compile_definitions(indirect_load_rank3_axis1_pow2_gather_e2e_v2 PRIVATE
+    IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
+
+add_indirect_load_e2e_case(indirect_load_rank3_axis1_pow2_simt 3 1 0 0 2 1 3 4 64 32 1 4 64 32 1)
+mark_indirect_load_static_shape(indirect_load_rank3_axis1_pow2_simt)
+mark_indirect_load_simt_selected(indirect_load_rank3_axis1_pow2_simt)
+mark_indirect_load_simt_codegen(indirect_load_rank3_axis1_pow2_simt StaticPowerOfTwo 32)
+target_compile_definitions(indirect_load_rank3_axis1_pow2_simt_codegen_v2 PRIVATE
+    IL_DATA_FLOAT IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
+target_compile_definitions(indirect_load_rank3_axis1_pow2_simt_e2e_v2 PRIVATE
+    IL_DATA_FLOAT IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
 
 add_indirect_load_e2e_case(indirect_load_rank3_axis1_float_int32_gather 3 1 0 0 1 0 7 16 32 10 1 16 32 10 1)
 mark_indirect_load_static_shape(indirect_load_rank3_axis1_float_int32_gather)
@@ -208,6 +233,7 @@ mark_indirect_load_input_outer_stride(indirect_load_rank3_axis1_torch_gather_fro
 
 add_indirect_load_e2e_case(indirect_load_rank2_axis1_large_simt 2 1 1 0 2 1 3 2 64 1 1 2 32771 1 1)
 mark_indirect_load_large_simt(indirect_load_rank2_axis1_large_simt)
+mark_indirect_load_simt_codegen(indirect_load_rank2_axis1_large_simt Recursive 64)
 
 add_indirect_load_e2e_case(indirect_load_rank2_axis1_bf16_int64_simt 2 1 0 0 2 1 3 5 8 1 1 4 6 1 1)
 mark_indirect_load_output_post(indirect_load_rank2_axis1_bf16_int64_simt 2 1)
@@ -225,6 +251,7 @@ mark_indirect_load_output_post(indirect_load_rank4_axis1_add_sum_simt 10 1)
 target_compile_definitions(indirect_load_rank4_axis1_add_sum_simt_codegen_v2 PRIVATE IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_ADD)
 target_compile_definitions(indirect_load_rank4_axis1_add_sum_simt_e2e_v2 PRIVATE IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_ADD)
 mark_indirect_load_simt_selected(indirect_load_rank4_axis1_add_sum_simt)
+mark_indirect_load_simt_codegen(indirect_load_rank4_axis1_add_sum_simt StructuredMagic 32)
 
 add_indirect_load_e2e_case(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt 4 1 3 0 0 1 2 8 13 3 8 8 17 3 8)
 mark_indirect_load_static_shape(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt)
@@ -256,3 +283,7 @@ target_include_directories(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_s
 add_indirect_load_mixed_e2e_case(indirect_load_mixed_rank4_axis2_simd 4 2 0 0 1 FALSE 3 4 16 7 2 3 17 5)
 add_indirect_load_mixed_e2e_case(indirect_load_simt_elementwise_coverage 3 1 1 1 3 FALSE 3 16 7 1 2 11 5 1)
 mark_indirect_load_simt_elementwise_coverage(indirect_load_simt_elementwise_coverage)
+mark_indirect_load_simt_codegen(indirect_load_simt_elementwise_coverage Recursive 64)
+
+include(indirect_load_broadcast_cases.cmake)
+include(indirect_load_torch_gather_strided_cases.cmake)
