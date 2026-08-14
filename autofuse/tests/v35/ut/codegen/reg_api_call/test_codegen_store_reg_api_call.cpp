@@ -140,6 +140,110 @@ TEST(CodegenKernel, StoreRegApiCall_TwoStoreOneOutput) {
                                 "z0_t_size, 1, (16 - 1), 0);\n"});
 }
 
+namespace {
+void BuildStoreCvUbFuseGraph(af::AscGraph &graph, const af::Expression &s0, const af::Expression &s1,
+                             const af::Axis &z0, const af::Axis &z1) {
+  Data x_op("x", graph);
+  Load load_op("load");
+  af::ascir_op::Store store_op("store");
+  graph.AddNode(load_op);
+  graph.AddNode(store_op);
+
+  const std::vector<af::AxisId> axes = {z0.id, z1.id};
+  const std::vector<af::Expression> repeats = {s0, s1};
+  const std::vector<af::Expression> strides = {s1, One};
+  load_op.x = x_op.y;
+  load_op.attr.sched.axis = axes;
+  *load_op.y.axis = axes;
+  *load_op.y.repeats = repeats;
+  *load_op.y.strides = strides;
+  store_op.x = load_op.y;
+  store_op.ir_attr.SetOffset(af::Symbol(0));
+  *store_op.y.axis = axes;
+  *store_op.y.repeats = repeats;
+  *store_op.y.strides = strides;
+}
+
+void InitStoreCvUbFuseAttrs(af::AscGraph &graph, const af::Expression &s1, const af::Axis &z0, const af::Axis &z1) {
+  auto load = graph.FindNode("load");
+  load->attr.api.compute_type = af::ComputeType::kComputeLoad;
+  load->attr.api.type = af::ApiType::kAPITypeCompute;
+  load->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  load->attr.sched.loop_axis = z0.id;
+  auto &load_attr = load->outputs[0].attr;
+  load_attr.vectorized_axis = {z0.id, z1.id};
+  load_attr.vectorized_strides = {s1, One};
+  load_attr.dtype = af::DT_FLOAT16;
+  load_attr.mem.position = af::Position::kPositionVecIn;
+  load_attr.mem.tensor_id = 0;
+  load_attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  load_attr.que.id = 1;
+  load_attr.opt.merge_scope = af::kIdNone;
+
+  auto store = graph.FindNode("store");
+  store->attr.api.compute_type = af::ComputeType::kComputeElewise;
+  store->attr.api.type = af::ApiType::kAPITypeCompute;
+  store->attr.api.unit = af::ComputeUnit::kUnitVector;
+  store->attr.sched.loop_axis = z0.id;
+  auto &store_attr = store->outputs[0].attr;
+  store_attr.vectorized_axis = {z0.id, z1.id};
+  store_attr.vectorized_strides = {s1, One};
+  store_attr.dtype = af::DT_FLOAT16;
+  store_attr.mem.position = af::Position::kPositionVecOut;
+  store_attr.mem.tensor_id = 1;
+  store_attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  store_attr.que.id = 2;
+  store_attr.opt.merge_scope = af::kIdNone;
+}
+
+void InitStoreCvUbFuseTpipe(codegen::TPipe &tpipe, codegen::Tiler &tiler, const af::AscGraph &graph,
+                            const af::AscNodePtr &load, const af::AscNodePtr &store, const af::Expression &s0,
+                            const af::Expression &s1, const af::Axis &z0, const af::Axis &z1) {
+  tpipe.cv_fusion_type = ascir::CubeTemplateType::kUBFuse;
+  tpipe.CollectQues(graph);
+  tpipe.AddTensor(load->outputs[0]);
+  tpipe.AddTensor(store->outputs[0]);
+
+  tiler.AddAxis(z0);
+  tiler.AddAxis(z1);
+  tiler.AddSizeVar(af::SizeVar(s0));
+  tiler.AddSizeVar(af::SizeVar(s1));
+}
+}  // namespace
+
+TEST(CodegenKernel, StoreRegApiCall_CvUbFuseUsesDtypeAwareStrides) {
+  af::AscGraph graph("test_graph");
+
+  auto s0 = af::Symbol(16);
+  auto s1 = af::Symbol(7);
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  BuildStoreCvUbFuseGraph(graph, s0, s1, z0, z1);
+  InitStoreCvUbFuseAttrs(graph, s1, z0, z1);
+
+  auto load = graph.FindNode("load");
+  auto store = graph.FindNode("store");
+
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  InitStoreCvUbFuseTpipe(tpipe, tiler, graph, load, store, s0, s1, z0, z1);
+
+  codegen::ApiTensor x1;
+  x1.id = load->outputs[0].attr.mem.tensor_id;
+
+  codegen::StoreRegApiCall call_0("DataCopyPadExtend");
+  EXPECT_EQ(call_0.Init(store), 0);
+  call_0.inputs.push_back(&x1);
+
+  std::string result;
+  call_0.Generate(tpipe, vector<af::AxisId>{}, result);
+  EXPECT_NE(result.find("DataCopyPadExtend<half, AscendC::PaddingMode::Normal>("), std::string::npos);
+  EXPECT_NE(result.find("curAivM"), std::string::npos);
+  EXPECT_NE(result.find("curAivN"), std::string::npos);
+  EXPECT_NE(result.find("KernelUtils::BlkAlign<half>(curAivN)"), std::string::npos);
+  EXPECT_NE(result.find("shapeN - curAivN"), std::string::npos);
+}
+
 TEST(CodegenKernel, StoreRegApiCall_NeetMte3SyncMte2) {
   af::AscGraph graph("test_graph");
 

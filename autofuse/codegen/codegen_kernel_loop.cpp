@@ -115,6 +115,14 @@ Status AddSkippedApiEmitProcessCall(const ascir::NodeView &node, Loop *current_l
   }
   return af::SUCCESS;
 }
+std::string GetQueueSliceByteSize(const TPipe &tpipe, const Tensor &tensor) {
+  auto size = af::GetSizeByDataType(tensor.dtype);
+  std::string byte_size = tensor.size.name + " * " + std::to_string(size);
+  if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
+    byte_size = "KernelUtils::BlkAlign<uint8_t>(" + byte_size + ")";
+  }
+  return byte_size;
+}
 
 Status MoveToNodeLoop(const ascir::NodeView &node, std::vector<ascir::AxisId> &current_axis, Loop *&current_loop) {
   if (node->attr.api.unit == af::ComputeUnit::kUnitNone) {
@@ -613,7 +621,7 @@ Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<as
       std::string call;
       std::string cache_guard;
 
-      if (this->axis_id != af::kIdNone) {
+      if (this->axis_id != af::kIdNone && this->compute_stage == ComputeStage::kDefault) {
         auto axis = tiler.GetAxis(this->axis_id);
         const bool is_enable_cache = axis.is_split_b && body.call->enable_cache;
         const bool is_double_tile = IsReduceDoubleTile(tiler, tpipe, this->is_graph_has_reduce_node) &&
@@ -779,7 +787,9 @@ Status Loop::GenerateLoop(const Tiler &tiler, const TPipe &tpipe, std::vector<as
     if (tpipe.cv_fusion_type != ascir::CubeTemplateType::kUBFuse) {
       ss << tiler.CalcFromAxis(axis.id);
     }
-    GenerateEnCacheCondition(tiler, tpipe, axis, ss);
+    if (this->compute_stage == ComputeStage::kDefault) {
+      GenerateEnCacheCondition(tiler, tpipe, axis, ss);
+    }
     if (tpipe.cv_fusion_type != ascir::CubeTemplateType::kUBFuse) {
       std::set<ascir::AxisId> vectorized_axis;
       for (const auto &tensor : tpipe.tensors) {
@@ -1241,8 +1251,7 @@ af::Status DefineShareOffsets(const TPipe &tpipe, const ApiTensor &out, const Te
     }
     auto prev_tensor = tpipe.GetTensor(order_to_tensor[i - 1]->id);
     GE_ASSERT_NOTNULL(prev_tensor, "Check[Param] tensor_ptr is nullptr");
-    auto size = af::GetSizeByDataType(prev_tensor->dtype);
-    auto var_size = prev_var_name + " + " + prev_tensor->size.name + " * " + std::to_string(size);
+    auto var_size = prev_var_name + " + " + GetQueueSliceByteSize(tpipe, *prev_tensor);
     const auto &cur_var_name = t.que_share_offset.name + "_part_" + std::to_string(i);
     decltype(t.que_share_offset) offset_var(cur_var_name);
     ss << offset_var.DefineConst(std::move(var_size)) << std::endl;
@@ -1275,8 +1284,7 @@ BoolType ApiCall::AllocShareOutputs(const TPipe &tpipe, const ApiTensor &out, co
         auto tensor_ptr = tpipe.GetTensor(out.share_prev->id);
         GE_CHK_BOOL_RET_SPECIAL_STATUS(tensor_ptr == nullptr, BoolType::FAILED, "Check[Param] tensor_ptr is nullptr");
         auto prev_tensor = *tensor_ptr;
-        auto size = af::GetSizeByDataType(prev_tensor.dtype);
-        relative_offset = t.que_share_offset.name + " + " + prev_tensor.size.name + " * " + std::to_string(size);
+        relative_offset = t.que_share_offset.name + " + " + GetQueueSliceByteSize(tpipe, prev_tensor);
         ss << t.que_share_offset.Assign(relative_offset);
         ss << std::endl;
       }

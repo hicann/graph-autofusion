@@ -22,7 +22,15 @@ using namespace af::ascir_op;
 namespace codegen {
 
 namespace {
+bool IsStrideZero(const ascir::SizeExpr &stride) {
+  return af::SymbolicUtils::StaticCheckEq(stride.Simplify(), af::sym::kSymbolZero) == af::TriBool::kTrue;
+}
+
 std::string GetUbAddrOffset(const TPipe &tpipe, const MicroApiTensor *&reg_tensor, const Tensor *&ub_tensor) {
+  if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
+    return GenCvUbFuseAddrOffset(tpipe, *ub_tensor);
+  }
+
   std::stringstream offset_expr;
   offset_expr << "0";
   for (size_t i = 0; i < reg_tensor->vectorized_strides_.size(); i++) {
@@ -63,7 +71,69 @@ void GetUbStorePreg(const Tensor *&ub_tensor, std::string &preg_name) {
   }
   preg_name = "preg_vl1";
 }
+
+void GenerateMicroApiCall(const TPipe &tpipe, const TensorManager &tensor_mgr, const VFLoopBody &body,
+                          const std::string &max_dtype_size, std::string &preg_name, std::stringstream &ss) {
+  std::string ub_offset = "";
+  if (body.call_->GetMicroApiName() == "Load") {
+    const MicroApiTensor *reg_tensor_ptr = tensor_mgr.GetTensor(body.call_->GetOutputTensorIdByIndex(0));
+    const Tensor *ub_tensor_ptr = tpipe.GetTensor(body.call_->GetInputTensorIdByIndex(0));
+    ub_offset = GetUbAddrOffset(tpipe, reg_tensor_ptr, ub_tensor_ptr);
+  } else if (body.call_->GetMicroApiName() == "Store") {
+    const Tensor *ub_tensor_ptr = tpipe.GetTensor(body.call_->GetOutputTensorIdByIndex(0));
+    const MicroApiTensor *reg_tensor_ptr = tensor_mgr.GetTensor(body.call_->GetOutputTensorIdByIndex(1));
+    ub_offset = GetUbAddrOffset(tpipe, reg_tensor_ptr, ub_tensor_ptr);
+    GetUbStorePreg(ub_tensor_ptr, preg_name);
+  }
+
+  std::string micro_api_call_str;
+  CallParam param = {preg_name, ub_offset, max_dtype_size};
+  body.call_->Generate(tensor_mgr, tpipe, param, micro_api_call_str);
+  ss << micro_api_call_str;
+}
 }  // namespace
+
+std::string GenCvUbFuseVfFuncDimParams() {
+  return "uint32_t curAivM, uint32_t curAivN, uint32_t curAlignN";
+}
+
+std::string GenCvUbFuseVfCallDimParams() {
+  return "curAivM, curAivN, curAlignN";
+}
+
+std::string GenCvUbFuseRowStride(const TPipe &tpipe, const Tensor &ub_tensor) {
+  if (ub_tensor.id == tpipe.cube_output_tensor_id) {
+    return "curAlignN";
+  }
+  std::string dtype_name;
+  if (Tensor::DtypeName(ub_tensor.dtype, dtype_name) != af::SUCCESS) {
+    return "curAivN";
+  }
+  return "KernelUtils::BlkAlign<" + dtype_name + ">(curAivN)";
+}
+
+std::string GenCvUbFuseAddrOffset(const TPipe &tpipe, const Tensor &ub_tensor) {
+  bool enable_m_offset = true;
+  bool enable_n_offset = true;
+  const auto &strides = ub_tensor.vectorized_strides;
+  if (strides.size() >= 2U) {
+    enable_m_offset = !IsStrideZero(strides[strides.size() - 2U]);
+    enable_n_offset = !IsStrideZero(strides[strides.size() - 1U]);
+  } else if (strides.size() == 1U && IsStrideZero(strides[0])) {
+    enable_m_offset = false;
+    enable_n_offset = false;
+  }
+
+  std::stringstream offset_expr;
+  offset_expr << "0";
+  if (enable_m_offset) {
+    offset_expr << " + cv_m * " << GenCvUbFuseRowStride(tpipe, ub_tensor);
+  }
+  if (enable_n_offset) {
+    offset_expr << " + cv_n * ELEMENT_PER_VECTOR_LENGTH";
+  }
+  return offset_expr.str();
+}
 
 VFLoop::VFLoop(const ascir::AxisId axis) {
   axis_id_ = axis;
@@ -208,6 +278,28 @@ Status VFLoop::Generate(const TPipe &tpipe, const TensorManager &tensor_mgr, int
   return af::SUCCESS;
 }
 
+Status VFLoop::GenerateCvUbFuse(const TPipe &tpipe, const TensorManager &tensor_mgr, std::string &result,
+                                std::string &loop_size_result) const {
+  std::stringstream ss;
+  std::stringstream loop_size_ss;
+  loop_size_ss << "  uint16_t cv_m_loop_size = static_cast<uint16_t>(curAivM);\n";
+  loop_size_ss << "  uint16_t cv_n_loop_size = loop_times;\n";
+
+  ss << "for (uint16_t cv_m = 0; cv_m < cv_m_loop_size; cv_m++) {" << std::endl;
+  ss << "  AscendC::MicroAPI::MaskReg preg_0;" << std::endl;
+  ss << "  for (uint16_t cv_n = 0; cv_n < cv_n_loop_size; cv_n++) {" << std::endl;
+  ss << "    uint32_t sreg_0 = curAivN - cv_n * ELEMENT_PER_VECTOR_LENGTH;" << std::endl;
+  ss << "    preg_0 = AscendC::MicroAPI::UpdateMask<" << this->max_dtype_size_ << ">(sreg_0);\n";
+  std::vector<ascir::AxisId> current_axis = {af::kIdNone};
+  GE_CHK_STATUS_RET(GenerateCvUbFuseBody(tpipe, tensor_mgr, current_axis, ss), "Generate CV UBFuse body failed");
+  ss << "  }" << std::endl;
+  ss << "}" << std::endl;
+
+  result = ss.str();
+  loop_size_result = loop_size_ss.str();
+  return af::SUCCESS;
+}
+
 Status VFLoop::GenerateLoop(const TPipe &tpipe, const TensorManager &tensor_mgr, int32_t depth,
                             std::vector<ascir::AxisId> &current_axis, std::stringstream &ss,
                             std::stringstream &loop_size_ss, int32_t &only_loop_max_depth,
@@ -264,26 +356,30 @@ Status VFLoop::GenerateBody(const TPipe &tpipe, const TensorManager &tensor_mgr,
         continue;
       }
       std::string preg_name = GetOriginPregName(current_axis, depth);
-      std::string ub_offset = "";
-      if (body.call_->GetMicroApiName() == "Load") {
-        const MicroApiTensor *reg_tensor_ptr = tensor_mgr.GetTensor(body.call_->GetOutputTensorIdByIndex(0));
-        const Tensor *ub_tensor_ptr = tpipe.GetTensor(body.call_->GetInputTensorIdByIndex(0));
-        ub_offset = GetUbAddrOffset(tpipe, reg_tensor_ptr, ub_tensor_ptr);
-      } else if (body.call_->GetMicroApiName() == "Store") {
-        const Tensor *ub_tensor_ptr = tpipe.GetTensor(body.call_->GetOutputTensorIdByIndex(0));
-        const MicroApiTensor *reg_tensor_ptr = tensor_mgr.GetTensor(body.call_->GetOutputTensorIdByIndex(1));
-        ub_offset = GetUbAddrOffset(tpipe, reg_tensor_ptr, ub_tensor_ptr);
-        GetUbStorePreg(ub_tensor_ptr, preg_name);
-      }
-      std::string micro_api_call_str;
-      CallParam param = {preg_name, ub_offset, this->max_dtype_size_};
-      body.call_->Generate(tensor_mgr, tpipe, param, micro_api_call_str);
-      ss << micro_api_call_str;
+      GenerateMicroApiCall(tpipe, tensor_mgr, body, this->max_dtype_size_, preg_name, ss);
       has_call = true;
     }
   }
   if (has_loop && !has_call) {
     only_loop_max_depth = std::max(only_loop_max_depth, static_cast<int32_t>(current_axis.size()));
+  }
+  return af::SUCCESS;
+}
+
+Status VFLoop::GenerateCvUbFuseBody(const TPipe &tpipe, const TensorManager &tensor_mgr,
+                                    std::vector<ascir::AxisId> &current_axis, std::stringstream &ss) const {
+  for (const auto &body : this->bodys_) {
+    if (body.type_ == LoopType::LOOP) {
+      GE_CHK_STATUS_RET(body.loop_->GenerateCvUbFuseBody(tpipe, tensor_mgr, current_axis, ss),
+                        "Generate CV UBFuse loop body failed");
+      continue;
+    }
+    if (body.type_ != LoopType::CALL || body.call_->unit == ge::ComputeUnit::kUnitNone) {
+      continue;
+    }
+
+    std::string preg_name = GetOriginPregName(current_axis, 0);
+    GenerateMicroApiCall(tpipe, tensor_mgr, body, this->max_dtype_size_, preg_name, ss);
   }
   return af::SUCCESS;
 }

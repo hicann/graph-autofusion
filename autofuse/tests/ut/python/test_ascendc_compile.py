@@ -12,7 +12,10 @@
 import hashlib
 import json
 import os
+import time
 import types
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -82,6 +85,43 @@ def _make_pgo_bundle(module, artifacts, output_file, generation, ld_preload=""):
     return module.PgoBundle(*artifacts, output_file, generation, ld_preload=ld_preload)
 
 
+@dataclass
+class CopySoToOutputCase:
+    src_file: object
+    dst_file: object
+    output_dir: object
+    wrapper_file: object
+    src_directory: str
+    args: object
+
+
+def _make_copy_so_to_output_case(tmpdir, wrapper_in_output_dir=False):
+    src_file = tmpdir.join("source.so")
+    src_file.write("kernel")
+    output_dir = tmpdir.mkdir("kernel_meta")
+    if wrapper_in_output_dir:
+        wrapper_dir = output_dir.mkdir("cv_tiling_wrapper_cache")
+    else:
+        wrapper_dir = tmpdir.mkdir("cache")
+    wrapper_file = wrapper_dir.join("libautofuse_cv_tiling_wrapper_abc.so")
+    wrapper_file.write("wrapper")
+    dst_file = output_dir.join("target.so")
+    src_directory = os.getcwd()
+    args = type(
+        "Args",
+        (),
+        {
+            "output_file": str(dst_file),
+            "shared_cv_wrapper_so": str(wrapper_file),
+            "stage": "host",
+            "graph_name": "graph",
+        },
+    )()
+    return CopySoToOutputCase(
+        src_file, dst_file, output_dir, wrapper_file, src_directory, args
+    )
+
+
 def test_link_shared_adds_requested_libraries(ascendc_compile_module):
     captured = {}
 
@@ -117,6 +157,23 @@ def test_link_shared_skips_libraries_by_default(ascendc_compile_module):
     ascendc_compile_module.link_shared("kernel.so", ["device.o"])
 
     assert "-lgraph_base" not in captured["cmd"]
+
+
+def test_link_shared_appends_extra_link_options(ascendc_compile_module):
+    captured = {}
+
+    def fake_run_compile_command(cmd, stage_name):
+        captured["cmd"] = cmd
+
+    ascendc_compile_module.module.run_compile_command = fake_run_compile_command
+
+    ascendc_compile_module.link_shared(
+        "kernel.so",
+        ["host.o"],
+        extra_link_options=["-Wl,-rpath,$ORIGIN/cv_tiling_wrapper_cache"],
+    )
+
+    assert "-Wl,-rpath,$ORIGIN/cv_tiling_wrapper_cache" in captured["cmd"]
 
 
 def test_link_pgo_executable_uses_host_runtime_and_mspti_libraries(
@@ -709,6 +766,33 @@ def test_copy_so_to_output_records_stage(ascendc_compile_module, tmpdir):
     assert dst_file.read() == "binary"
 
 
+def test_copy_so_to_output_copies_shared_cv_wrapper_next_to_output(
+    ascendc_compile_module, tmpdir
+):
+    case = _make_copy_so_to_output_case(tmpdir)
+    ascendc_compile_module.copy_so_to_output(
+        str(case.src_file), case.args, case.src_directory
+    )
+
+    copied_wrapper = case.output_dir.join(
+        "cv_tiling_wrapper_cache", "libautofuse_cv_tiling_wrapper_abc.so"
+    )
+    assert case.dst_file.read() == "kernel"
+    assert copied_wrapper.read() == "wrapper"
+
+
+def test_copy_so_to_output_keeps_existing_shared_cv_wrapper_in_output_dir(
+    ascendc_compile_module, tmpdir
+):
+    case = _make_copy_so_to_output_case(tmpdir, wrapper_in_output_dir=True)
+    ascendc_compile_module.copy_so_to_output(
+        str(case.src_file), case.args, case.src_directory
+    )
+
+    assert case.dst_file.read() == "kernel"
+    assert case.wrapper_file.read() == "wrapper"
+
+
 def test_static_shape_kernel_proc_removes_tiling_data_from_launch(
     ascendc_compile_module, tmpdir
 ):
@@ -1182,6 +1266,67 @@ def test_compile_host_obj_removes_rejected_cached_pch(ascendc_compile_module, tm
     assert not os.path.exists(pch_path)
 
 
+def test_build_host_compile_cmd_includes_pkg_inc_roots(ascendc_compile_module):
+    ascendc_compile_module.module.ASCEND_PATH = "/usr/local/Ascend/cann"
+    ascendc_compile_module.module.machine = "x86_64"
+
+    include_options = ascendc_compile_module.build_host_include_options("/tmp/build")
+
+    assert "/usr/local/Ascend/cann/pkg_inc" in include_options
+    assert "/usr/local/Ascend/cann/x86_64-linux/pkg_inc" in include_options
+
+
+def test_build_host_include_options_prefers_machine_pkg_inc_base(
+    ascendc_compile_module,
+):
+    ascendc_compile_module.module.ASCEND_PATH = "/usr/local/Ascend/cann"
+    ascendc_compile_module.module.machine = "x86_64"
+
+    include_options = ascendc_compile_module.build_host_include_options("/tmp/build")
+
+    machine_base = include_options.index(
+        "/usr/local/Ascend/cann/x86_64-linux/pkg_inc/base"
+    )
+    generic_base = include_options.index("/usr/local/Ascend/cann/pkg_inc/base")
+    assert machine_base < generic_base
+
+
+def _assert_compile_host_objs_skips_shared_cv_wrapper_source(
+    ascendc_compile_module, tmpdir, monkeypatch, source_case
+):
+    graph_file_name, wrapper_file_name, wrapper_content = source_case
+    host_dir = tmpdir.mkdir("host")
+    graph_file = host_dir.join(graph_file_name)
+    wrapper_file = host_dir.join(wrapper_file_name)
+    graph_file.write("CVAutofuseTilingData graph tiling")
+    wrapper_file.write(wrapper_content)
+    args = _make_compile_args([str(graph_file), str(wrapper_file)])
+    compiled_sources = []
+
+    def fake_compile_host_obj_file(compile_args, temp_dir, source_file, pch_state=None):
+        compiled_sources.append(source_file)
+        return source_file + ".o"
+
+    def fake_ensure_shared_cv_wrapper_so(compile_args, temp_dir, source_file):
+        assert source_file == str(wrapper_file)
+        return "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so"
+
+    ascendc_compile_module.module.compile_host_obj_file = fake_compile_host_obj_file
+    ascendc_compile_module.module.ensure_shared_cv_wrapper_so = (
+        fake_ensure_shared_cv_wrapper_so
+    )
+    monkeypatch.setattr(ascendc_compile_module.os, "cpu_count", lambda: 2)
+
+    result = ascendc_compile_module.compile_host_objs(args, str(tmpdir))
+
+    assert result == [str(graph_file) + ".o"]
+    assert compiled_sources == [str(graph_file)]
+    assert (
+        args.shared_cv_wrapper_so
+        == "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so"
+    )
+
+
 def test_build_host_compile_cmd_adds_pgo_mspti_include(ascendc_compile_module):
     args = _make_compile_args("/tmp/build/host/graph_tiling_func_PgoRunner.cpp")
     args.pgo_mspti_dir = "/usr/local/Ascend/cann/tools/mspti"
@@ -1244,6 +1389,224 @@ def test_compile_host_objs_compiles_multiple_files(ascendc_compile_module, monke
     assert all("cmake" not in cmd and "make" not in cmd for cmd in compile_cmds)
 
 
+def test_get_shared_cv_wrapper_cache_dir_prefers_run_dir_env(
+    ascendc_compile_module, tmpdir, monkeypatch
+):
+    run_dir = tmpdir.mkdir("run")
+    monkeypatch.setenv("RUN_DIR", str(run_dir))
+    args = _make_compile_args()
+    args.output_file = None
+
+    result = ascendc_compile_module.get_shared_cv_wrapper_cache_dir(args, "")
+
+    assert result == os.path.join(str(run_dir), "cv_tiling_wrapper_cache")
+
+
+def test_get_shared_cv_wrapper_cache_dir_uses_inductor_cache_without_run_dir(
+    ascendc_compile_module, tmpdir, monkeypatch
+):
+    cache_dir = tmpdir.mkdir("inductor_cache")
+    monkeypatch.delenv("RUN_DIR", raising=False)
+    monkeypatch.setenv("TORCHINDUCTOR_NPU_EXT_CACHE_DIR", str(cache_dir))
+    args = _make_compile_args()
+    args.output_file = None
+
+    result = ascendc_compile_module.get_shared_cv_wrapper_cache_dir(args, "")
+
+    assert result == os.path.join(str(cache_dir), "cv_tiling_wrapper_cache")
+
+
+def test_get_shared_cv_wrapper_cache_dir_prefers_output_file_dir(
+    ascendc_compile_module, tmpdir, monkeypatch
+):
+    output_dir = tmpdir.mkdir("kernel_meta")
+    output_file = output_dir.join("kernel.so")
+    run_dir = tmpdir.mkdir("run")
+    cache_dir = tmpdir.mkdir("inductor_cache")
+    monkeypatch.setenv("RUN_DIR", str(run_dir))
+    monkeypatch.setenv("TORCHINDUCTOR_NPU_EXT_CACHE_DIR", str(cache_dir))
+    args = _make_compile_args()
+    args.output_file = str(output_file)
+
+    result = ascendc_compile_module.get_shared_cv_wrapper_cache_dir(args, "")
+
+    assert result == os.path.join(str(output_dir), "cv_tiling_wrapper_cache")
+
+
+def test_get_shared_cv_wrapper_cache_dir_prefers_temp_dir(
+    ascendc_compile_module, tmpdir, monkeypatch
+):
+    temp_dir = tmpdir.mkdir("temp")
+    output_dir = tmpdir.mkdir("kernel_meta")
+    output_file = output_dir.join("kernel.so")
+    run_dir = tmpdir.mkdir("run")
+    cache_dir = tmpdir.mkdir("inductor_cache")
+    monkeypatch.setenv("RUN_DIR", str(run_dir))
+    monkeypatch.setenv("TORCHINDUCTOR_NPU_EXT_CACHE_DIR", str(cache_dir))
+    args = _make_compile_args()
+    args.output_file = str(output_file)
+
+    result = ascendc_compile_module.get_shared_cv_wrapper_cache_dir(args, str(temp_dir))
+
+    assert result == os.path.join(str(temp_dir), "cv_tiling_wrapper_cache")
+
+
+def test_compile_host_objs_skips_shared_cv_wrapper_source(
+    ascendc_compile_module, tmpdir, monkeypatch
+):
+    _assert_compile_host_objs_skips_shared_cv_wrapper_source(
+        ascendc_compile_module,
+        tmpdir,
+        monkeypatch,
+        (
+            "graph_tiling_func.cpp",
+            "cube_kernel_tiling_wrapper.cpp",
+            "CVAutofuseTilingData wrapper tiling",
+        ),
+    )
+
+
+def test_compile_host_objs_skips_split_shared_cv_wrapper_source(
+    ascendc_compile_module, tmpdir, monkeypatch
+):
+    _assert_compile_host_objs_skips_shared_cv_wrapper_source(
+        ascendc_compile_module,
+        tmpdir,
+        monkeypatch,
+        (
+            "autofused_tiling_func_tiling_def_and_tiling_const.cpp",
+            "autofused_tiling_func_BCubeKernelTilingWrapperCpp.cpp",
+            "AutofuseDoCubeMatMulTiling wrapper tiling",
+        ),
+    )
+
+
+def test_ensure_shared_cv_wrapper_so_reuses_existing_so(
+    ascendc_compile_module, tmpdir, monkeypatch
+):
+    run_dir = tmpdir.mkdir("run")
+    host_dir = tmpdir.mkdir("host")
+    wrapper_file = host_dir.join("cube_kernel_tiling_wrapper.cpp")
+    wrapper_file.write("CVAutofuseTilingData wrapper tiling")
+    args = _make_compile_args([str(wrapper_file)])
+    monkeypatch.setenv("RUN_DIR", str(run_dir))
+    so_path = ascendc_compile_module.get_shared_cv_wrapper_so_path(
+        args, str(tmpdir), str(wrapper_file)
+    )
+    os.makedirs(os.path.dirname(so_path), exist_ok=True)
+    with open(so_path, "w") as f:
+        f.write("cached")
+
+    def fail_compile(*_args, **_kwargs):
+        pytest.fail("cached wrapper so should not be recompiled")
+
+    ascendc_compile_module.module.compile_host_obj_file = fail_compile
+    ascendc_compile_module.module.link_shared = fail_compile
+
+    result = ascendc_compile_module.ensure_shared_cv_wrapper_so(
+        args, str(tmpdir), str(wrapper_file)
+    )
+
+    assert result == so_path
+
+
+def test_ensure_shared_cv_wrapper_so_serializes_concurrent_first_compile(
+    ascendc_compile_module, tmpdir, monkeypatch
+):
+    run_dir = tmpdir.mkdir("run")
+    host_dir = tmpdir.mkdir("host")
+    wrapper_file = host_dir.join("cube_kernel_tiling_wrapper.cpp")
+    wrapper_file.write("CVAutofuseTilingData wrapper tiling")
+    args = _make_compile_args([str(wrapper_file)])
+    args.output_file = str(tmpdir.mkdir("kernel_meta").join("kernel.so"))
+    monkeypatch.setenv("RUN_DIR", str(run_dir))
+    compile_calls = []
+
+    def fake_compile_host_obj_file(compile_args, temp_dir, source_file):
+        compile_calls.append(source_file)
+        time.sleep(0.05)
+        return source_file + ".o"
+
+    def fake_link_shared(
+        target_file, obj_files, link_libraries=None, extra_link_options=None
+    ):
+        with open(target_file, "w") as f:
+            f.write("linked")
+        return target_file
+
+    ascendc_compile_module.module.compile_host_obj_file = fake_compile_host_obj_file
+    ascendc_compile_module.module.link_shared = fake_link_shared
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                ascendc_compile_module.ensure_shared_cv_wrapper_so,
+                args,
+                str(tmpdir),
+                str(wrapper_file),
+            )
+            for _ in range(2)
+        ]
+        results = [future.result() for future in futures]
+
+    assert results[0] == results[1]
+    assert os.path.exists(results[0])
+    assert compile_calls == [str(wrapper_file)]
+
+
+def test_ensure_shared_cv_wrapper_so_sets_soname(
+    ascendc_compile_module, tmpdir, monkeypatch
+):
+    output_dir = tmpdir.mkdir("kernel_meta")
+    host_dir = tmpdir.mkdir("host")
+    wrapper_file = host_dir.join("cube_kernel_tiling_wrapper.cpp")
+    wrapper_file.write("CVAutofuseTilingData wrapper tiling")
+    args = _make_compile_args([str(wrapper_file)])
+    args.output_file = str(output_dir.join("kernel.so"))
+    monkeypatch.delenv("RUN_DIR", raising=False)
+    monkeypatch.delenv("TORCHINDUCTOR_NPU_EXT_CACHE_DIR", raising=False)
+    captured = {}
+
+    def fake_compile_host_obj_file(compile_args, temp_dir, source_file):
+        return source_file + ".o"
+
+    def fake_link_shared(
+        target_file, obj_files, link_libraries=None, extra_link_options=None
+    ):
+        captured["target_file"] = target_file
+        captured["extra_link_options"] = extra_link_options
+        with open(target_file, "w") as f:
+            f.write("linked")
+        return target_file
+
+    ascendc_compile_module.module.compile_host_obj_file = fake_compile_host_obj_file
+    ascendc_compile_module.module.link_shared = fake_link_shared
+
+    so_path = ascendc_compile_module.ensure_shared_cv_wrapper_so(
+        args, str(tmpdir), str(wrapper_file)
+    )
+
+    assert captured["extra_link_options"] == [
+        f"-Wl,-soname,{os.path.basename(so_path)}"
+    ]
+
+
+def test_clean_before_modify_keeps_shared_cv_wrapper_cache(
+    ascendc_compile_module, tmpdir
+):
+    tmpdir.mkdir("host")
+    tmpdir.mkdir("device")
+    cache_dir = tmpdir.mkdir("cv_tiling_wrapper_cache")
+    cache_file = cache_dir.join("libautofuse_cv_tiling_wrapper.so")
+    cache_file.write("cached")
+    tmpdir.mkdir("stale")
+
+    ascendc_compile_module.clean_before_modify(str(tmpdir))
+
+    assert os.path.exists(str(cache_file))
+    assert not os.path.exists(os.path.join(str(tmpdir), "stale"))
+
+
 def test_get_host_compile_worker_count_uses_32_worker_limit(
     ascendc_compile_module, monkeypatch
 ):
@@ -1299,6 +1662,29 @@ def test_compile_host_obj_rejects_multiple_sources_without_compile(
     assert "expects exactly one host source" in str(exc_info.value)
 
 
+def _capture_build_device_so_link(
+    ascendc_compile_module, args, host_obj_path, temp_dir
+):
+    captured = {}
+
+    def fake_compile_device_obj(compile_args, temp_dir):
+        return "/tmp/build/device/kernel.cpp.o"
+
+    ascendc_compile_module.module.compile_device_obj = fake_compile_device_obj
+
+    def fake_link_shared(
+        target_file, obj_files, link_libraries=None, extra_link_options=None
+    ):
+        captured["obj_files"] = obj_files
+        captured["link_libraries"] = link_libraries
+        captured["extra_link_options"] = extra_link_options
+        return target_file
+
+    ascendc_compile_module.module.link_shared = fake_link_shared
+    ascendc_compile_module.build_device_so(args, host_obj_path, temp_dir)
+    return captured
+
+
 def test_build_device_so_links_all_host_objects(ascendc_compile_module):
     captured = {}
     args = _make_compile_args()
@@ -1308,10 +1694,13 @@ def test_build_device_so_links_all_host_objects(ascendc_compile_module):
 
     ascendc_compile_module.module.compile_device_obj = fake_compile_device_obj
 
-    def fake_link_shared(target_file, obj_files, link_libraries=None):
+    def fake_link_shared(
+        target_file, obj_files, link_libraries=None, extra_link_options=None
+    ):
         captured["target_file"] = target_file
         captured["obj_files"] = obj_files
         captured["link_libraries"] = link_libraries
+        captured["extra_link_options"] = extra_link_options
         return target_file
 
     ascendc_compile_module.module.link_shared = fake_link_shared
@@ -1320,6 +1709,51 @@ def test_build_device_so_links_all_host_objects(ascendc_compile_module):
 
     assert result == "/tmp/build/kernel.so"
     assert captured["obj_files"] == ["a.o", "b.o", "/tmp/build/device/kernel.cpp.o"]
+    assert captured["link_libraries"] == ascendc_compile_module.HOST_LINK_LIBRARIES
+
+
+def test_build_device_so_links_shared_cv_wrapper_so_for_cv_compile(
+    ascendc_compile_module, tmpdir
+):
+    device_dir = tmpdir.mkdir("device")
+    device_file = device_dir.join("kernel.cpp")
+    device_file.write("CVAutofuseTilingData device tiling")
+    args = _make_compile_args()
+    args.device_files = str(device_file)
+    args.shared_cv_wrapper_so = (
+        "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so"
+    )
+    captured = _capture_build_device_so_link(
+        ascendc_compile_module, args, ["graph.o"], "/tmp/build"
+    )
+
+    assert captured["obj_files"] == [
+        "graph.o",
+        "/tmp/build/device/kernel.cpp.o",
+        "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so",
+    ]
+    assert captured["link_libraries"] == ascendc_compile_module.CV_HOST_LINK_LIBRARIES
+    assert captured["extra_link_options"] == [
+        ascendc_compile_module.CV_WRAPPER_RPATH_OPTION
+    ]
+
+
+def test_build_device_so_ignores_shared_cv_wrapper_so_for_non_cv_compile(
+    ascendc_compile_module, tmpdir
+):
+    device_dir = tmpdir.mkdir("device")
+    device_file = device_dir.join("kernel.cpp")
+    device_file.write("regular device tiling")
+    args = _make_compile_args()
+    args.device_files = str(device_file)
+    args.shared_cv_wrapper_so = (
+        "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so"
+    )
+    captured = _capture_build_device_so_link(
+        ascendc_compile_module, args, ["graph.o"], str(tmpdir)
+    )
+
+    assert captured["obj_files"] == ["graph.o", "/tmp/build/device/kernel.cpp.o"]
     assert captured["link_libraries"] == ascendc_compile_module.HOST_LINK_LIBRARIES
 
 
@@ -1337,10 +1771,13 @@ def test_link_host_target_links_multiple_host_objects(ascendc_compile_module):
 
     ascendc_compile_module.module.compile_host_objs = fake_compile_host_objs
 
-    def fake_link_shared(target_file, obj_files, link_libraries=None):
+    def fake_link_shared(
+        target_file, obj_files, link_libraries=None, extra_link_options=None
+    ):
         captured["target_file"] = target_file
         captured["obj_files"] = obj_files
         captured["link_libraries"] = link_libraries
+        captured["extra_link_options"] = extra_link_options
         return target_file
 
     ascendc_compile_module.module.link_shared = fake_link_shared
@@ -1354,23 +1791,73 @@ def test_link_host_target_links_multiple_host_objects(ascendc_compile_module):
     assert "acl_rt" in captured["link_libraries"]
 
 
-def test_link_host_target_adds_acl_runtime_for_pgo_proxy(ascendc_compile_module):
+def _capture_link_host_target_link(ascendc_compile_module, args, temp_dir):
     captured = {}
-    args = _make_compile_args(["/tmp/build/host/graph_tiling_func.cpp"])
-    args.pgo_runner_file = "/tmp/build/host/graph_tiling_func_PgoRunner.cpp"
 
-    def fake_compile_host_objs(*_):
-        return ["host.o"]
+    def fake_compile_host_objs(compile_args, temp_dir):
+        return ["graph.o"]
 
     ascendc_compile_module.module.compile_host_objs = fake_compile_host_objs
 
-    def fake_link_shared(target_file, obj_files, link_libraries=None):
+    def fake_link_shared(
+        target_file, obj_files, link_libraries=None, extra_link_options=None
+    ):
+        captured["obj_files"] = obj_files
         captured["link_libraries"] = link_libraries
+        captured["extra_link_options"] = extra_link_options
         return target_file
 
     ascendc_compile_module.module.link_shared = fake_link_shared
+    ascendc_compile_module.link_host_target(args, temp_dir)
+    return captured
 
-    ascendc_compile_module.link_host_target(args, "/tmp/build")
+
+def test_link_host_target_links_shared_cv_wrapper_so_for_cv_compile(
+    ascendc_compile_module, tmpdir
+):
+    host_dir = tmpdir.mkdir("host")
+    host_file = host_dir.join("graph_tiling_func.cpp")
+    host_file.write("CVAutofuseTilingData graph tiling")
+    args = _make_compile_args([str(host_file)])
+    args.shared_cv_wrapper_so = (
+        "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so"
+    )
+    captured = _capture_link_host_target_link(
+        ascendc_compile_module, args, "/tmp/build"
+    )
+
+    assert captured["obj_files"] == [
+        "graph.o",
+        "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so",
+    ]
+    assert captured["link_libraries"] == ascendc_compile_module.CV_HOST_LINK_LIBRARIES
+    assert captured["extra_link_options"] == [
+        ascendc_compile_module.CV_WRAPPER_RPATH_OPTION
+    ]
+
+
+def test_link_host_target_ignores_shared_cv_wrapper_so_for_non_cv_compile(
+    ascendc_compile_module, tmpdir
+):
+    host_dir = tmpdir.mkdir("host")
+    host_file = host_dir.join("graph_tiling_func.cpp")
+    host_file.write("regular graph tiling")
+    args = _make_compile_args([str(host_file)])
+    args.shared_cv_wrapper_so = (
+        "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so"
+    )
+    captured = _capture_link_host_target_link(ascendc_compile_module, args, str(tmpdir))
+
+    assert captured["obj_files"] == ["graph.o"]
+    assert captured["link_libraries"] == ascendc_compile_module.HOST_LINK_LIBRARIES
+
+
+def test_link_host_target_adds_acl_runtime_for_pgo_proxy(ascendc_compile_module):
+    args = _make_compile_args(["/tmp/build/host/graph_tiling_func.cpp"])
+    args.pgo_runner_file = "/tmp/build/host/graph_tiling_func_PgoRunner.cpp"
+    captured = _capture_link_host_target_link(
+        ascendc_compile_module, args, "/tmp/build"
+    )
 
     assert captured["link_libraries"] == ascendc_compile_module.HOST_LINK_LIBRARIES + [
         "ascendcl",

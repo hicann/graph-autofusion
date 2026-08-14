@@ -10,20 +10,13 @@
 #include "unary_api_tmp_call.h"
 
 #include <sstream>
-#include "attr_utils.h"
-#include "ascir_ops.h"
-#include "common_utils.h"
-#include "common/ge_common/debug/log.h"
-#include "graph/ascendc_ir/utils/asc_tensor_utils.h"
 #include "common/checker.h"
 #include "api_call/utils/api_call_factory.h"
+#include "api_call/utils/api_call_utils.h"
 #include "codegen/expression_convert_struct.h"
 
 namespace codegen {
 using namespace std;
-using namespace af::ops;
-using namespace af::ascir_op;
-using namespace ascgen_utils;
 
 Status UnaryApiTmpCall::Generate(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis,
                                  const std::vector<std::reference_wrapper<const Tensor>> &inputs,
@@ -45,7 +38,7 @@ Status UnaryApiTmpCall::Generate(const TPipe &tpipe, const std::vector<ascir::Ax
   stringstream ss;
   ss << this->api_name_ << "(" << y << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x << "["
      << tpipe.tiler.TensorVectorizedOffset(current_axis, x) << "], " << tpipe.tmp_buf << "_" << std::to_string(id)
-     << ", " << x.actual_size << ");" << std::endl;
+     << ", " << GetCVAlignedSize(this->api_call_context, y, x.actual_size.Str()) << ");" << std::endl;
   result = ss.str();
   return af::SUCCESS;
 }

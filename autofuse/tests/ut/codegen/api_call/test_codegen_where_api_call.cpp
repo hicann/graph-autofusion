@@ -921,7 +921,7 @@ TEST(WhereApiCallTest, WhereApiCall_Scaler_x2x3_throwfor) {
   std::cout << result << std::endl;
   EXPECT_EQ(result, std::string{"Where<true, true>(local_3[0], local_0[0], local_blk_tensor_of_local_1[0], "
                                 "local_blk_tensor_of_local_2[0], t->s1, t->s2, t->s2, (2 * t->s2), ONE_BLK_SIZE / "
-                                "sizeof(float), ONE_BLK_SIZE / sizeof(float), tmp_buf_0, ONE_BLK_SIZE * 2);\n"});
+                                "sizeof(int16_t), ONE_BLK_SIZE / sizeof(int16_t), tmp_buf_0, ONE_BLK_SIZE * 2);\n"});
 }
 
 TEST(WhereApiCallTest, WhereApiCall_Scaler_x2_throwfor) {
@@ -1064,7 +1064,7 @@ TEST(WhereApiCallTest, WhereApiCall_Scaler_x2_throwfor) {
   std::cout << result << std::endl;
   EXPECT_EQ(result,
             std::string{"Where<true, false>(local_3[0], local_0[0], local_blk_tensor_of_local_1[0], local_2[0], t->s1, "
-                        "t->s2, t->s2, t->s2, ONE_BLK_SIZE / sizeof(float), t->s2, tmp_buf_0, ONE_BLK_SIZE);\n"});
+                        "t->s2, t->s2, t->s2, ONE_BLK_SIZE / sizeof(int16_t), t->s2, tmp_buf_0, ONE_BLK_SIZE);\n"});
 }
 
 TEST(WhereApiCallTest, WhereApiCall_Scaler_x3_throwfor) {
@@ -1207,7 +1207,7 @@ TEST(WhereApiCallTest, WhereApiCall_Scaler_x3_throwfor) {
   std::cout << result << std::endl;
   EXPECT_EQ(result,
             std::string{"Where<false, true>(local_3[0], local_0[0], local_1[0], local_blk_tensor_of_local_2[0], t->s1, "
-                        "t->s2, t->s2, t->s2, t->s2, ONE_BLK_SIZE / sizeof(float), tmp_buf_0, ONE_BLK_SIZE);\n"});
+                        "t->s2, t->s2, t->s2, t->s2, ONE_BLK_SIZE / sizeof(int16_t), tmp_buf_0, ONE_BLK_SIZE);\n"});
 }
 
 TEST(WhereApiCallTest, WhereApiCall_throwfor) {
