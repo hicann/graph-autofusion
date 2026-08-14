@@ -29,6 +29,7 @@ std::vector<std::unique_ptr<TmpBufDesc>> CalcIgammaTmpSizeV2(const AscNode &node
 std::vector<std::unique_ptr<TmpBufDesc>> CalcIgammacTmpSizeV2(const AscNode &node);
 std::vector<std::unique_ptr<TmpBufDesc>> CalcLgammaTmpSizeV2(const AscNode &node);
 std::vector<std::unique_ptr<TmpBufDesc>> CalcVoidTmpSizeV2(const AscNode &node);
+std::vector<std::unique_ptr<TmpBufDesc>> CalcPolygammaTmpSizeV2(const AscNode &node);
 std::vector<std::unique_ptr<TmpBufDesc>> GetCompareSizeV2([[maybe_unused]] const AscNode &node);
 std::vector<std::unique_ptr<TmpBufDesc>> CalcSinTmpSizeV2(const AscNode &node);
 std::vector<std::unique_ptr<TmpBufDesc>> CalcAsinTmpSizeV2(const AscNode &node);

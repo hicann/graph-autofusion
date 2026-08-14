@@ -6768,10 +6768,11 @@ af::ComputeGraphPtr ShareGraph::LoadErfinvStoreFusedGraph(size_t dims_size) {
                                             CreateLoadErfinvStoreAscGraph);
 }
 
-/**
- *         data0
+/*
+ * Diagram for bessel_j0_store_test:
+ *        data0
  *           |
- *         load0
+ *         load
  *           |
  *       BesselJ0
  *           |
@@ -6824,6 +6825,30 @@ static void CreateUnarySpecialStoreAscGraph(af::AscGraph &graph, size_t dims_siz
   y.ir_attr.SetIndex(0);
 
   ConstructVVAscGraphAxisInfo(graph, dims_size);
+}
+
+static void CreateI1eStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  CreateUnarySpecialStoreAscGraph<af::ascir_op::I1e>(graph, dims_size, "i1e");
+}
+
+af::ComputeGraphPtr ShareGraph::I1eStoreFusedGraph(size_t dims_size) {
+  return CreateOneInputAscGraphComputeGraph("i1e_store_test", "i1e_store", dims_size, CreateI1eStoreAscGraph);
+}
+
+static void CreateI0eStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  CreateUnarySpecialStoreAscGraph<af::ascir_op::I0e>(graph, dims_size, "i0e");
+}
+
+af::ComputeGraphPtr ShareGraph::I0eStoreFusedGraph(size_t dims_size) {
+  return CreateOneInputAscGraphComputeGraph("i0e_store_test", "i0e_store", dims_size, CreateI0eStoreAscGraph);
+}
+
+static void CreateI0StoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  CreateUnarySpecialStoreAscGraph<af::ascir_op::I0>(graph, dims_size, "i0");
+}
+
+af::ComputeGraphPtr ShareGraph::I0StoreFusedGraph(size_t dims_size) {
+  return CreateOneInputAscGraphComputeGraph("i0_store_test", "i0_store", dims_size, CreateI0StoreAscGraph);
 }
 
 static void CreateBesselJ1StoreAscGraph(af::AscGraph &graph, size_t dims_size) {
@@ -6892,8 +6917,17 @@ static void CreateNdtriStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
   CreateUnarySpecialStoreAscGraph<af::ascir_op::Ndtri>(graph, dims_size, "ndtri");
 }
 
+static void CreateLogNdtrStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  CreateUnarySpecialStoreAscGraph<af::ascir_op::LogNdtr>(graph, dims_size, "log_ndtr");
+}
+
 af::ComputeGraphPtr ShareGraph::NdtriStoreFusedGraph(size_t dims_size) {
   return CreateOneInputAscGraphComputeGraph("ndtri_store_test", "ndtri_store", dims_size, CreateNdtriStoreAscGraph);
+}
+
+af::ComputeGraphPtr ShareGraph::LogNdtrStoreFusedGraph(size_t dims_size) {
+  return CreateOneInputAscGraphComputeGraph("log_ndtr_store_test", "log_ndtr_store", dims_size,
+                                            CreateLogNdtrStoreAscGraph);
 }
 
 template <typename Op>
@@ -6926,8 +6960,51 @@ static void CreateZetaStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
   CreateBinarySpecialStoreAscGraph<af::ascir_op::Zeta>(graph, dims_size, "zeta");
 }
 
+static void CreateNextAfterStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  CreateBinarySpecialStoreAscGraph<af::ascir_op::NextAfter>(graph, dims_size, "next_after");
+}
+
+static void CreatePolyGammaStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  af::ascir_op::Data x("data0", graph);
+  x.ir_attr.SetIndex(0);
+
+  af::ascir_op::Data n("data1", graph);
+  n.ir_attr.SetIndex(1);
+  n.y.dtype = af::DT_INT32;
+
+  af::ascir_op::Load load_x("load0");
+  load_x.x = x.y;
+
+  af::ascir_op::Load load_n("load1");
+  load_n.x = n.y;
+  load_n.y.dtype = af::DT_INT32;
+
+  af::ascir_op::PolyGamma op("poly_gamma");
+  op.x = load_x.y;
+  op.n = load_n.y;
+
+  af::ascir_op::Store store("store");
+  store.x = op.y;
+
+  af::ascir_op::Output y("output");
+  y.x = store.y;
+  y.ir_attr.SetIndex(0);
+
+  ConstructVVAscGraphAxisInfo(graph, dims_size);
+}
+
 af::ComputeGraphPtr ShareGraph::ZetaStoreFusedGraph(size_t dims_size) {
   return CreateTwoInputAscGraphComputeGraph("zeta_store_test", "zeta_store", dims_size, CreateZetaStoreAscGraph);
+}
+
+af::ComputeGraphPtr ShareGraph::NextAfterStoreFusedGraph(size_t dims_size) {
+  return CreateTwoInputAscGraphComputeGraph("next_after_store_test", "next_after_store", dims_size,
+                                            CreateNextAfterStoreAscGraph);
+}
+
+af::ComputeGraphPtr ShareGraph::PolyGammaStoreFusedGraph(size_t dims_size) {
+  return CreateTwoInputAscGraphComputeGraph("poly_gamma_store_test", "poly_gamma_store", dims_size,
+                                            CreatePolyGammaStoreAscGraph);
 }
 
 /**
@@ -7127,6 +7204,200 @@ af::ComputeGraphPtr ShareGraph::ShiftedChebyshevPolynomialWStoreFusedGraph(size_
   return CreateOneInputAscGraphComputeGraph("shifted_chebyshev_polynomial_w_store_test",
                                             "shifted_chebyshev_polynomial_w_store", dims_size,
                                             CreateShiftedChebyshevPolynomialWStoreAscGraph);
+}
+
+static void CreateChebyshevPolynomialTStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  af::ascir_op::Data x("data0", graph);
+  x.ir_attr.SetIndex(0);
+
+  af::ascir_op::Load load("load0");
+  load.x = x.y;
+
+  af::ascir_op::ChebyshevPolynomialT op("chebyshev_polynomial_t");
+  op.x = load.y;
+  op.ir_attr.SetN(3);
+
+  af::ascir_op::Store store("store");
+  store.x = op.y;
+
+  af::ascir_op::Output y("output");
+  y.x = store.y;
+  y.ir_attr.SetIndex(0);
+
+  ConstructVVAscGraphAxisInfo(graph, dims_size);
+}
+
+af::ComputeGraphPtr ShareGraph::ChebyshevPolynomialTStoreFusedGraph(size_t dims_size) {
+  return CreateOneInputAscGraphComputeGraph("chebyshev_polynomial_t_store_test", "chebyshev_polynomial_t_store",
+                                            dims_size, CreateChebyshevPolynomialTStoreAscGraph);
+}
+
+static void CreateChebyshevPolynomialUStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  af::ascir_op::Data x("data0", graph);
+  x.ir_attr.SetIndex(0);
+
+  af::ascir_op::Load load("load0");
+  load.x = x.y;
+
+  af::ascir_op::ChebyshevPolynomialU op("chebyshev_polynomial_u");
+  op.x = load.y;
+  op.ir_attr.SetN(3);
+
+  af::ascir_op::Store store("store");
+  store.x = op.y;
+
+  af::ascir_op::Output y("output");
+  y.x = store.y;
+  y.ir_attr.SetIndex(0);
+
+  ConstructVVAscGraphAxisInfo(graph, dims_size);
+}
+
+af::ComputeGraphPtr ShareGraph::ChebyshevPolynomialUStoreFusedGraph(size_t dims_size) {
+  return CreateOneInputAscGraphComputeGraph("chebyshev_polynomial_u_store_test", "chebyshev_polynomial_u_store",
+                                            dims_size, CreateChebyshevPolynomialUStoreAscGraph);
+}
+
+static void CreateChebyshevPolynomialVStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  af::ascir_op::Data x("data0", graph);
+  x.ir_attr.SetIndex(0);
+
+  af::ascir_op::Load load("load0");
+  load.x = x.y;
+
+  af::ascir_op::ChebyshevPolynomialV op("chebyshev_polynomial_v");
+  op.x = load.y;
+  op.ir_attr.SetN(3);
+
+  af::ascir_op::Store store("store");
+  store.x = op.y;
+
+  af::ascir_op::Output y("output");
+  y.x = store.y;
+  y.ir_attr.SetIndex(0);
+
+  ConstructVVAscGraphAxisInfo(graph, dims_size);
+}
+
+af::ComputeGraphPtr ShareGraph::ChebyshevPolynomialVStoreFusedGraph(size_t dims_size) {
+  return CreateOneInputAscGraphComputeGraph("chebyshev_polynomial_v_store_test", "chebyshev_polynomial_v_store",
+                                            dims_size, CreateChebyshevPolynomialVStoreAscGraph);
+}
+
+static void CreateChebyshevPolynomialWStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  af::ascir_op::Data x("data0", graph);
+  x.ir_attr.SetIndex(0);
+
+  af::ascir_op::Load load("load0");
+  load.x = x.y;
+
+  af::ascir_op::ChebyshevPolynomialW op("chebyshev_polynomial_w");
+  op.x = load.y;
+  op.ir_attr.SetN(3);
+
+  af::ascir_op::Store store("store");
+  store.x = op.y;
+
+  af::ascir_op::Output y("output");
+  y.x = store.y;
+  y.ir_attr.SetIndex(0);
+
+  ConstructVVAscGraphAxisInfo(graph, dims_size);
+}
+
+af::ComputeGraphPtr ShareGraph::ChebyshevPolynomialWStoreFusedGraph(size_t dims_size) {
+  return CreateOneInputAscGraphComputeGraph("chebyshev_polynomial_w_store_test", "chebyshev_polynomial_w_store",
+                                            dims_size, CreateChebyshevPolynomialWStoreAscGraph);
+}
+
+/**
+ *      data0    data1
+ *        |        |
+ *      load0    load1
+ *         \      /
+ *   HermitePolynomialH
+ *          |
+ *        store
+ *          |
+ *       output0
+ */
+static void CreateHermitePolynomialHStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  af::ascir_op::Data x("data0", graph);
+  x.ir_attr.SetIndex(0);
+
+  af::ascir_op::Data n("data1", graph);
+  n.ir_attr.SetIndex(1);
+  n.y.dtype = af::DT_INT32;
+
+  af::ascir_op::Load load_x("load0");
+  load_x.x = x.y;
+
+  af::ascir_op::Load load_n("load1");
+  load_n.x = n.y;
+  load_n.y.dtype = af::DT_INT32;
+
+  af::ascir_op::HermitePolynomialH op("hermite_polynomial_h");
+  op.x = load_x.y;
+  op.n = load_n.y;
+
+  af::ascir_op::Store store("store");
+  store.x = op.y;
+
+  af::ascir_op::Output y("output");
+  y.x = store.y;
+  y.ir_attr.SetIndex(0);
+
+  ConstructVVAscGraphAxisInfo(graph, dims_size);
+}
+
+af::ComputeGraphPtr ShareGraph::HermitePolynomialHStoreFusedGraph(size_t dims_size) {
+  return CreateTwoInputAscGraphComputeGraph("hermite_polynomial_h_store_test", "hermite_polynomial_h_store", dims_size,
+                                            CreateHermitePolynomialHStoreAscGraph);
+}
+
+/**
+ *      data0    data1
+ *        |        |
+ *      load0    load1
+ *         \      /
+ *   HermitePolynomialHe
+ *          |
+ *        store
+ *          |
+ *       output0
+ */
+static void CreateHermitePolynomialHeStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  af::ascir_op::Data x("data0", graph);
+  x.ir_attr.SetIndex(0);
+
+  af::ascir_op::Data n("data1", graph);
+  n.ir_attr.SetIndex(1);
+  n.y.dtype = af::DT_INT32;
+
+  af::ascir_op::Load load_x("load0");
+  load_x.x = x.y;
+
+  af::ascir_op::Load load_n("load1");
+  load_n.x = n.y;
+  load_n.y.dtype = af::DT_INT32;
+
+  af::ascir_op::HermitePolynomialHe op("hermite_polynomial_he");
+  op.x = load_x.y;
+  op.n = load_n.y;
+
+  af::ascir_op::Store store("store");
+  store.x = op.y;
+
+  af::ascir_op::Output y("output");
+  y.x = store.y;
+  y.ir_attr.SetIndex(0);
+
+  ConstructVVAscGraphAxisInfo(graph, dims_size);
+}
+
+af::ComputeGraphPtr ShareGraph::HermitePolynomialHeStoreFusedGraph(size_t dims_size) {
+  return CreateTwoInputAscGraphComputeGraph("hermite_polynomial_he_store_test", "hermite_polynomial_he_store",
+                                            dims_size, CreateHermitePolynomialHeStoreAscGraph);
 }
 
 /**

@@ -783,6 +783,12 @@ ApiPerfRegister<ApiPerf> modified_bessel_k0_api_perf_v2(ApiPerfRegisterV2(kModif
 ApiPerfRegister<ApiPerf> modified_bessel_k1_api_perf_v2(ApiPerfRegisterV2(kModifiedBesselK1, GetPerfFunc(kUnitVector),
                                                                           nullptr, &perf_param_table_v2,
                                                                           &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> i0_api_perf_v2(ApiPerfRegisterV2(kI0, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2,
+                                                          &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> i0e_api_perf_v2(ApiPerfRegisterV2(kI0e, GetPerfFunc(kUnitVector), nullptr,
+                                                           &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> i1e_api_perf_v2(ApiPerfRegisterV2(kI1e, GetPerfFunc(kUnitVector), nullptr,
+                                                           &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> bessel_j0_api_perf_v2(ApiPerfRegisterV2(kBesselJ0, GetPerfFunc(kUnitVector), nullptr,
                                                                  &perf_param_table_v2,
                                                                  &tiling_schedule_config_table_v2));
@@ -816,6 +822,14 @@ ApiPerfRegister<ApiPerf> ndtr_api_perf_v2(ApiPerfRegisterV2(kNdtr, GetPerfFunc(k
                                                             &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> ndtri_api_perf_v2(ApiPerfRegisterV2(kNdtri, GetPerfFunc(kUnitVector), nullptr,
                                                              &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> logndtr_api_perf_v2(ApiPerfRegisterV2(kLogNdtr, GetPerfFunc(kUnitVector), nullptr,
+                                                               &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> nextafter_api_perf_v2(ApiPerfRegisterV2(kNextAfter, GetPerfFunc(kUnitVector), nullptr,
+                                                                 &perf_param_table_v2,
+                                                                 &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> polygamma_api_perf_v2(ApiPerfRegisterV2(kPolyGamma, GetPerfFunc(kUnitVector), nullptr,
+                                                                 &perf_param_table_v2,
+                                                                 &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> signbit_api_perf_v2(ApiPerfRegisterV2(kSignBit, GetPerfFunc(kUnitVector), nullptr,
                                                                &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> frexp_api_perf_v2(ApiPerfRegisterV2(kFrexp, GetPerfFunc(kUnitVector), nullptr,
@@ -832,6 +846,18 @@ ApiPerfRegister<ApiPerf> shifted_chebyshev_polynomial_v_api_perf_v2(
 ApiPerfRegister<ApiPerf> shifted_chebyshev_polynomial_w_api_perf_v2(
     ApiPerfRegisterV2(kShiftedChebyshevPolynomialW, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2,
                       &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> chebyshev_polynomial_t_api_perf_v2(ApiPerfRegisterV2(
+    kChebyshevPolynomialT, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> chebyshev_polynomial_u_api_perf_v2(ApiPerfRegisterV2(
+    kChebyshevPolynomialU, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> chebyshev_polynomial_v_api_perf_v2(ApiPerfRegisterV2(
+    kChebyshevPolynomialV, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> chebyshev_polynomial_w_api_perf_v2(ApiPerfRegisterV2(
+    kChebyshevPolynomialW, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> hermite_polynomial_h_api_perf_v2(ApiPerfRegisterV2(
+    kHermitePolynomialH, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> hermite_polynomial_he_api_perf_v2(ApiPerfRegisterV2(
+    kHermitePolynomialHe, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> laguerre_polynomial_l_api_perf_v2(ApiPerfRegisterV2(
     kLaguerrePolynomialL, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> legendre_polynomial_p_api_perf_v2(ApiPerfRegisterV2(

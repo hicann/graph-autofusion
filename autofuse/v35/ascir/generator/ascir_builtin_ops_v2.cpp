@@ -168,6 +168,30 @@ REG_ASC_IR(ModifiedBesselK1)
                             af::ascir::AscIrImplCreator<af::ascir::ModifiedBesselK1AscIrCodegenImplV2>(),
                             {{"T", TensorType{DT_FLOAT}}}});
 
+REG_ASC_IR(I0)
+    .Input("x", "T")
+    .Output("y", "T")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::I0AscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::I0AscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(I0e)
+    .Input("x", "T")
+    .Output("y", "T")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::I0eAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::I0eAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(I1e)
+    .Input("x", "T")
+    .Output("y", "T")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::I1eAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::I1eAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}}});
+
 REG_ASC_IR(BesselJ0)
     .Input("x", "T")
     .Output("y", "T")
@@ -239,6 +263,32 @@ REG_ASC_IR(Ndtri)
     .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::NdtriAscIrAttImplV2>(),
                             af::ascir::AscIrImplCreator<af::ascir::NdtriAscIrCodegenImplV2>(),
                             {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(LogNdtr)
+    .Input("x", "T")
+    .Output("y", "T")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::LogNdtrAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::LogNdtrAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(NextAfter)
+    .Input("x1", "T")
+    .Input("x2", "T")
+    .Output("y", "T")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::NextAfterAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::NextAfterAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(PolyGamma)
+    .Input("x", "T")
+    .Input("n", "U")
+    .Output("y", "T")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::PolyGammaAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::PolyGammaAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}, {"U", TensorType{DT_INT32}}}});
 
 REG_ASC_IR(SignBit)
     .Input("x", "T")
@@ -319,6 +369,60 @@ REG_ASC_IR(ShiftedChebyshevPolynomialW)
     .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::ShiftedChebyshevPolynomialWAscIrAttImplV2>(),
                             af::ascir::AscIrImplCreator<af::ascir::ShiftedChebyshevPolynomialWAscIrCodegenImplV2>(),
                             {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(ChebyshevPolynomialT)
+    .Input("x", "T")
+    .Output("y", "T")
+    .Attr<int64_t>("n")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::ChebyshevPolynomialTAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::ChebyshevPolynomialTAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(ChebyshevPolynomialU)
+    .Input("x", "T")
+    .Output("y", "T")
+    .Attr<int64_t>("n")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::ChebyshevPolynomialUAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::ChebyshevPolynomialUAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(ChebyshevPolynomialV)
+    .Input("x", "T")
+    .Output("y", "T")
+    .Attr<int64_t>("n")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::ChebyshevPolynomialVAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::ChebyshevPolynomialVAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(ChebyshevPolynomialW)
+    .Input("x", "T")
+    .Output("y", "T")
+    .Attr<int64_t>("n")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::ChebyshevPolynomialWAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::ChebyshevPolynomialWAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(HermitePolynomialH)
+    .Input("x", "T")
+    .Input("n", "U")
+    .Output("y", "T")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::HermitePolynomialHAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::HermitePolynomialHAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}, {"U", TensorType{DT_INT32}}}});
+
+REG_ASC_IR(HermitePolynomialHe)
+    .Input("x", "T")
+    .Input("n", "U")
+    .Output("y", "T")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::HermitePolynomialHeAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::HermitePolynomialHeAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_FLOAT}}, {"U", TensorType{DT_INT32}}}});
 
 REG_ASC_IR(LaguerrePolynomialL)
     .Input("x", "T")

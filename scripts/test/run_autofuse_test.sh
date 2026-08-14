@@ -865,6 +865,9 @@ build_backend() {
                       copysign_bf16_test_e2e_v2 \
                       erfcx_test_e2e_v2 \
                       expm_test_e2e_v2 \
+                      i0_store_test_e2e_v2 \
+                      i0e_store_test_e2e_v2 \
+                      i1e_store_test_e2e_v2 \
                       bessel_j0_store_test_e2e_v2 \
                       bessel_j1_store_test_e2e_v2 \
                       bessel_y0_store_test_e2e_v2 \
@@ -874,13 +877,22 @@ build_backend() {
                       spherical_bessel_j0_store_test_e2e_v2 \
                       ndtr_store_test_e2e_v2 \
                       ndtri_store_test_e2e_v2 \
+                      log_ndtr_store_test_e2e_v2 \
+                      next_after_store_test_e2e_v2 \
+                      poly_gamma_store_test_e2e_v2 \
                       zeta_store_test_e2e_v2 \
                       signbit_store_test_e2e_v2 \
                       frexp_store_test_e2e_v2 \
                       shifted_chebyshev_polynomial_t_store_test_e2e_v2 \
                       shifted_chebyshev_polynomial_u_store_test_e2e_v2 \
                       shifted_chebyshev_polynomial_v_store_test_e2e_v2 \
-                      shifted_chebyshev_polynomial_w_store_test_e2e_v2"
+                      shifted_chebyshev_polynomial_w_store_test_e2e_v2 \
+                      chebyshev_polynomial_t_store_test_e2e_v2 \
+                      chebyshev_polynomial_u_store_test_e2e_v2 \
+                      chebyshev_polynomial_v_store_test_e2e_v2 \
+                      chebyshev_polynomial_w_store_test_e2e_v2 \
+                      hermite_polynomial_h_store_test_e2e_v2 \
+                      hermite_polynomial_he_store_test_e2e_v2"
   fi
   MAKE_TARGET_LIST_CODEGEN=$(echo "${MAKE_TARGET_LIST}" | sed 's/e2e/codegen/g')
   CTEST_BACKEND_TEST1_REGEX=$(build_backend_test_regex ${MAKE_TARGET_LIST_CODEGEN})

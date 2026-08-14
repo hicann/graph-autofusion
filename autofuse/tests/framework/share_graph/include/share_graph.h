@@ -96,6 +96,9 @@ struct ShareGraph {
   static af::ComputeGraphPtr LegendrePolynomialPStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr LoadAiryAiStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr LoadErfinvStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr I0StoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr I0eStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr I1eStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr BesselJ0StoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr BesselJ1StoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr BesselY0StoreFusedGraph(size_t dims_size);
@@ -105,6 +108,9 @@ struct ShareGraph {
   static af::ComputeGraphPtr SphericalBesselJ0StoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr NdtrStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr NdtriStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr LogNdtrStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr NextAfterStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr PolyGammaStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr ZetaStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr SignBitStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr FrexpStoreFusedGraph(size_t dims_size);
@@ -112,6 +118,12 @@ struct ShareGraph {
   static af::ComputeGraphPtr ShiftedChebyshevPolynomialUStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr ShiftedChebyshevPolynomialVStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr ShiftedChebyshevPolynomialWStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr ChebyshevPolynomialTStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr ChebyshevPolynomialUStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr ChebyshevPolynomialVStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr ChebyshevPolynomialWStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr HermitePolynomialHStoreFusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr HermitePolynomialHeStoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr RemainderInt32StoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr FloorDivInt32StoreFusedGraph(size_t dims_size);
   static af::ComputeGraphPtr LoadTanhBf16FusedGraph(size_t dims_size);

@@ -174,6 +174,15 @@ Register::Register() {
   const std::string kAscendcBesselJUtilsRegBaseStr = {
 #include "bessel_j_utils_reg_base.h"
   };
+  const std::string kAscendcI0RegBaseStr = {
+#include "i0_reg_base.h"
+  };
+  const std::string kAscendcI0eRegBaseStr = {
+#include "i0e_reg_base.h"
+  };
+  const std::string kAscendcI1eRegBaseStr = {
+#include "i1e_reg_base.h"
+  };
   const std::string kAscendcBesselJ0RegBaseStr = {
 #include "bessel_j0_reg_base.h"
   };
@@ -222,6 +231,15 @@ Register::Register() {
   const std::string kAscendcNdtriRegBaseStr = {
 #include "ndtri_reg_base.h"
   };
+  const std::string kAscendcLogNdtrRegBaseStr = {
+#include "log_ndtr_reg_base.h"
+  };
+  const std::string kAscendcNextAfterRegBaseStr = {
+#include "next_after_reg_base.h"
+  };
+  const std::string kAscendcPolyGammaRegBaseStr = {
+#include "polygamma_reg_base.h"
+  };
   const std::string kAscendcSignBitRegBaseStr = {
 #include "signbit_reg_base.h"
   };
@@ -242,6 +260,27 @@ Register::Register() {
   };
   const std::string kAscendcShiftedChebyshevPolynomialWRegBaseStr = {
 #include "shifted_chebyshev_polynomial_w_reg_base.h"
+  };
+  const std::string kAscendcChebyshevPolynomialUtilsRegBaseStr = {
+#include "chebyshev_polynomial_utils_reg_base.h"
+  };
+  const std::string kAscendcChebyshevPolynomialTRegBaseStr = {
+#include "chebyshev_polynomial_t_reg_base.h"
+  };
+  const std::string kAscendcChebyshevPolynomialURegBaseStr = {
+#include "chebyshev_polynomial_u_reg_base.h"
+  };
+  const std::string kAscendcChebyshevPolynomialVRegBaseStr = {
+#include "chebyshev_polynomial_v_reg_base.h"
+  };
+  const std::string kAscendcChebyshevPolynomialWRegBaseStr = {
+#include "chebyshev_polynomial_w_reg_base.h"
+  };
+  const std::string kAscendcHermitePolynomialHRegBaseStr = {
+#include "hermite_polynomial_h_reg_base.h"
+  };
+  const std::string kAscendcHermitePolynomialHeRegBaseStr = {
+#include "hermite_polynomial_he_reg_base.h"
   };
   const std::string kAscendcIndirectLoadSimtRegBaseStr = {
 #include "indirect_load_simt_reg_base.h"
@@ -301,6 +340,9 @@ Register::Register() {
       {"legendre_polynomial_p_reg_base.h", kAscendcLegendrePolynomialPRegBaseStr},
       {"airy_ai_reg_base.h", kAscendcAiryAiRegBaseStr},
       {"erfinv_reg_base.h", kAscendcErfinvRegBaseStr},
+      {"i0_reg_base.h", kAscendcI0RegBaseStr},
+      {"i0e_reg_base.h", kAscendcI0eRegBaseStr},
+      {"i1e_reg_base.h", kAscendcI1eRegBaseStr},
       {"bessel_j_utils_reg_base.h", kAscendcBesselJUtilsRegBaseStr},
       {"bessel_j0_reg_base.h", kAscendcBesselJ0RegBaseStr},
       {"bessel_j1_reg_base.h", kAscendcBesselJ1RegBaseStr},
@@ -318,6 +360,9 @@ Register::Register() {
       {"zeta_reg_base.h", kAscendcZetaRegBaseStr},
       {"ndtr_reg_base.h", kAscendcNdtrRegBaseStr},
       {"ndtri_reg_base.h", kAscendcNdtriRegBaseStr},
+      {"log_ndtr_reg_base.h", kAscendcLogNdtrRegBaseStr},
+      {"next_after_reg_base.h", kAscendcNextAfterRegBaseStr},
+      {"polygamma_reg_base.h", kAscendcPolyGammaRegBaseStr},
       {"signbit_reg_base.h", kAscendcSignBitRegBaseStr},
       {"frexp_reg_base.h", kAscendcFrexpRegBaseStr},
       {"shifted_chebyshev_polynomial_utils_reg_base.h", kAscendcShiftedChebyshevPolynomialUtilsRegBaseStr},
@@ -325,6 +370,13 @@ Register::Register() {
       {"shifted_chebyshev_polynomial_u_reg_base.h", kAscendcShiftedChebyshevPolynomialURegBaseStr},
       {"shifted_chebyshev_polynomial_v_reg_base.h", kAscendcShiftedChebyshevPolynomialVRegBaseStr},
       {"shifted_chebyshev_polynomial_w_reg_base.h", kAscendcShiftedChebyshevPolynomialWRegBaseStr},
+      {"chebyshev_polynomial_utils_reg_base.h", kAscendcChebyshevPolynomialUtilsRegBaseStr},
+      {"chebyshev_polynomial_t_reg_base.h", kAscendcChebyshevPolynomialTRegBaseStr},
+      {"chebyshev_polynomial_u_reg_base.h", kAscendcChebyshevPolynomialURegBaseStr},
+      {"chebyshev_polynomial_v_reg_base.h", kAscendcChebyshevPolynomialVRegBaseStr},
+      {"chebyshev_polynomial_w_reg_base.h", kAscendcChebyshevPolynomialWRegBaseStr},
+      {"hermite_polynomial_h_reg_base.h", kAscendcHermitePolynomialHRegBaseStr},
+      {"hermite_polynomial_he_reg_base.h", kAscendcHermitePolynomialHeRegBaseStr},
       {"indirect_load_simt_reg_base.h", kAscendcIndirectLoadSimtRegBaseStr},
       {"indirect_load_simd_policy_reg_base.h", kAscendcIndirectLoadSimdPolicyRegBaseStr},
       {"indirect_load_simd_reg_base.h", kAscendcIndirectLoadSimdRegBaseStr},

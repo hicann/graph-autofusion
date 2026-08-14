@@ -759,6 +759,84 @@ class ModifiedBesselK1AscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
+class I0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "UnaryApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "I0Extend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "j0";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"i0_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
+                      node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class I0eAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "UnaryApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "I0eExtend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "j0";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"i0e_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
+                      node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class I1eAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "UnaryApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "I1eExtend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "j1";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"i1e_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
+                      node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
 class BesselJ0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
@@ -975,6 +1053,83 @@ class NdtriAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"ndtri_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
+                      node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class LogNdtrAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "UnaryApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "LogNdtrExtend";
+  }
+  [[nodiscard]] std::string GetSimtScalarApiName() const override {
+    return "Normcdf";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"log_ndtr_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
+                      node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class NextAfterAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "BinaryApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "NextAfterExtend";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"next_after_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
+                      node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class PolyGammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcPolygammaTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "BinaryApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "PolyGammaExtend";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"zeta_reg_base.h", "polygamma_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "adv_api/math/lgamma.h",
+    };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
@@ -1218,6 +1373,144 @@ class ShiftedChebyshevPolynomialWAscIrCodegenImplV2 : public AscIrCodegenV2 {
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class ChebyshevPolynomialTAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "UnaryTemplateAttrApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "ChebyshevPolynomialTExtend";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_t_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
+                      node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class ChebyshevPolynomialUAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "UnaryTemplateAttrApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "ChebyshevPolynomialUExtend";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_u_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
+                      node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class ChebyshevPolynomialVAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "UnaryTemplateAttrApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "ChebyshevPolynomialVExtend";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_v_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
+                      node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class ChebyshevPolynomialWAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "UnaryTemplateAttrApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "ChebyshevPolynomialWExtend";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_w_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
+                      node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class HermitePolynomialHAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "BinaryApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "HermitePolynomialHExtend";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"hermite_polynomial_h_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node, {true, {0}}),
+                      "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
+    return true;
+  }
+};
+
+class HermitePolynomialHeAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "BinaryApiTmpCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "HermitePolynomialHeExtend";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"hermite_polynomial_he_reg_base.h"};
+  }
+  [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+                   node.GetNamePtr());
+    GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node, {true, {0}}),
+                      "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
     return true;
   }
 };

@@ -277,6 +277,15 @@ __aicore__ inline void PolyGammaExtend(const LocalTensor<T> &dstTensor, const Lo
   }
 }
 
+template <typename T, typename U>
+__aicore__ inline void PolyGammaExtend(const AscendC::LocalTensor<T> &dst, const AscendC::LocalTensor<T> &src,
+                                       const AscendC::LocalTensor<U> &n,
+                                       const AscendC::LocalTensor<uint8_t> &sharedTmpBuffer, const uint32_t calCount) {
+  static_assert(SupportType<U, int32_t>(), "PolyGamma order only supports int32_t");
+  auto tmpBuffer = sharedTmpBuffer.ReinterpretCast<T>();
+  PolyGammaExtend(dst, src, n.GetValue(0), tmpBuffer, calCount);
+}
+
 }  // namespace AscendC
 
 #endif  // __ASCENDC_API_REGBASE_POLYGAMMA_H__
