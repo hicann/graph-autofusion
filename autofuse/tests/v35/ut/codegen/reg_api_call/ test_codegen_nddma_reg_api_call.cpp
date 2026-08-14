@@ -101,6 +101,58 @@ TEST(CodegenKernel, NddmaApiCall_ThreeDimTensor) {
                         "DataCopyNddma(local_0, local_0[0 + 0], output_dims_0, output_stride_0, input_stride_0);\n"});
 }
 
+TEST(CodegenKernel, NddmaApiCall_OneDimTensorUsesDefaultDescriptorMapping) {
+  af::AscGraph graph("test_graph");
+  auto outer_size = af::Symbol(16);
+  auto vector_size = af::Symbol(64);
+  auto outer = graph.CreateAxis("outer", outer_size);
+  auto vector = graph.CreateAxis("vector", vector_size);
+
+  Data data0("data0", graph);
+  Nddma nddma_op("nddma");
+  graph.AddNode(nddma_op);
+  nddma_op.x = data0.y;
+  nddma_op.attr.sched.axis = {outer.id, vector.id};
+  *nddma_op.y.axis = {outer.id, vector.id};
+  *nddma_op.y.repeats = {outer_size, vector_size};
+  *nddma_op.y.strides = {vector_size, One};
+
+  auto nddma = graph.FindNode("nddma");
+  nddma->attr.api.compute_type = af::ComputeType::kComputeLoad;
+  nddma->attr.api.type = af::ApiType::kAPITypeCompute;
+  nddma->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  nddma->attr.sched.loop_axis = outer.id;
+  nddma->outputs[0].attr.vectorized_axis = {vector.id};
+  nddma->outputs[0].attr.vectorized_strides = {One};
+  nddma->outputs[0].attr.dtype = ge::DT_FLOAT;
+  nddma->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
+  nddma->outputs[0].attr.mem.tensor_id = 0;
+  nddma->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  nddma->outputs[0].attr.que.id = 1;
+
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  tpipe.AddTensor(nddma->outputs[0]);
+  tiler.AddAxis(outer);
+  tiler.AddAxis(vector);
+  tiler.AddSizeVar(af::SizeVar(outer_size));
+  tiler.AddSizeVar(af::SizeVar(vector_size));
+
+  codegen::ApiTensor x;
+  x.id = nddma->outputs[0].attr.mem.tensor_id;
+  codegen::NddmaApiCall call("DataCopyNddma");
+  ASSERT_EQ(call.Init(nddma), af::SUCCESS);
+  call.inputs.push_back(&x);
+
+  std::string result;
+  ASSERT_EQ(call.Generate(tpipe, {}, result), af::SUCCESS);
+  EXPECT_EQ(result,
+            "const int64_t output_dims_0[5] = {1, 1, 1, 1, 64};\n"
+            "const int64_t output_stride_0[5] = {1, 1, 1, 1, 1};\n"
+            "const int64_t input_stride_0[5] = {1, 1, 1, 1, 1};\n"
+            "DataCopyNddma(local_0, local_0[0 + 0], output_dims_0, output_stride_0, input_stride_0);\n");
+}
+
 TEST(CodegenKernel, NddmaApiCall_CvInductorUsesUbAxisStrides) {
   af::AscGraph graph("test_graph");
 

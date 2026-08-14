@@ -20,6 +20,7 @@
 #include "ascir/generator/v2_ascir_att_impl.h"
 #include "graph_construct_utils.h"
 #include "api_perf_register/utils/api_perf_utils.h"
+#include "../../../att/gen_model_info/api_perf_register/nddma_test_utils.h"
 
 using namespace att;
 using namespace af::sym;
@@ -383,6 +384,35 @@ TEST_F(STestAscirPerfV2, TestNddmaApiForType) {
   EXPECT_EQ(
       Str(res.Replace(ret)),
       "((1904 * z0z1t_size * z6t_size / (((6.3899998664856 / (block_dim)) + 7.6100001335144))) + 418.978912353516)");
+}
+
+TEST_F(STestAscirPerfV2, TestNddma1DModelHandlesStaticAndDynamicShapes) {
+  auto nddma = ApiPerfFactory::Instance().Create("NddmaV2");
+  ASSERT_NE(nddma, nullptr);
+  const auto perf = nddma->GetPerfFunc();
+  NodeInfo node;
+  node.node_ptr = GraphConstructUtils::ConstructSingleOp("Nddma", 1, 1);
+  node.node_ptr->outputs[0].attr.vectorized_axis = {0};
+
+  const auto static_shape = Make1DNddmaShape("int8", 1, CreateExpr(256), CreateExpr(1), CreateExpr(1));
+  const std::vector<TensorShapeInfo> static_shapes = {static_shape};
+  PerfOutputInfo static_perf;
+  ASSERT_EQ(perf(static_shapes, static_shapes, node, static_perf), af::SUCCESS);
+  EXPECT_NE(Str(static_perf.pipe_res[PipeType::AIV_MTE2]).find("nddma_1d_multicore"), std::string::npos);
+
+  const auto dynamic_shape =
+      Make1DNddmaShape("float32", 4, CreateExpr("n"), CreateExpr("input_stride"), CreateExpr("output_stride"));
+  const std::vector<TensorShapeInfo> dynamic_shapes = {dynamic_shape};
+  PerfOutputInfo dynamic_perf;
+  ASSERT_EQ(perf(dynamic_shapes, dynamic_shapes, node, dynamic_perf), af::SUCCESS);
+  const auto replacement = ConcursiveReplaceVars(dynamic_perf.ternary_ops);
+  const auto cycles = Str(dynamic_perf.pipe_res[PipeType::AIV_MTE2].Replace(replacement));
+  EXPECT_NE(cycles.find("TernaryOp"), std::string::npos);
+  EXPECT_NE(cycles.find("input_stride"), std::string::npos);
+  EXPECT_NE(cycles.find("output_stride"), std::string::npos);
+  EXPECT_NE(cycles.find("Max"), std::string::npos);
+  EXPECT_NE(cycles.find("Min"), std::string::npos);
+  EXPECT_NE(cycles.find("n"), std::string::npos);
 }
 
 TEST_F(STestAscirPerfV2, TestMicroApiPerfTableSize) {

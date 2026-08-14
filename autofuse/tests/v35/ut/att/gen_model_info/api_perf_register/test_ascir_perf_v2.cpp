@@ -10,6 +10,7 @@
 
 #include <iostream>
 #include <memory>
+#include <numeric>
 #include "gtest/gtest.h"
 #include "graph/ascendc_ir/ascir_registry.h"
 #include "ascir_node_param/ascir_node_param.h"
@@ -25,6 +26,8 @@
 #include "graph_construct_utils.h"
 #include "parser/specific_params_builder.h"
 #include "tests/ut/common/ascir_reduce_test_helpers.h"
+#include "tests/depends/slog/src/slog_stub.h"
+#include "../../../../att/gen_model_info/api_perf_register/nddma_test_utils.h"
 
 using namespace att;
 using namespace af::sym;
@@ -198,7 +201,6 @@ TEST_F(UTestAscirPerfV2, CastSameBitCallCountUsesOuterDim) {
   EXPECT_EQ(Str(perf.pipe_res[PipeType::AIV_VEC]).find("cast_call_count"), std::string::npos);
   EXPECT_NE(Str(perf.pipe_res[PipeType::AIV_VEC]).find("cast_outer"), std::string::npos);
 }
-
 TEST_F(UTestAscirPerfV2, FillSpecificParamsStoresSharedReduceParamsOnAscNode) {
   using ascir_reduce_test_helpers::BuildReduceNodeInfo;
   using ascir_reduce_test_helpers::ReduceTestEnv;
@@ -610,6 +612,83 @@ TEST_F(UTestAscirPerfV2, TestNddmaApiForType) {
   EXPECT_EQ(
       Str(res.Replace(ret)),
       "((1904 * z0z1t_size * z6t_size / (((6.3899998664856 / (block_dim)) + 7.6100001335144))) + 418.978912353516)");
+}
+
+TEST_F(UTestAscirPerfV2, TestNddma1DModelSupportsFourDtypeSizes) {
+  struct DtypeCase {
+    const char *dtype;
+    int32_t dtype_size;
+  };
+  const std::vector<DtypeCase> cases = {{"int8", 1}, {"float16", 2}, {"float32", 4}, {"int64", 8}};
+  auto nddma = ApiPerfFactory::Instance().Create("NddmaV2");
+  ASSERT_NE(nddma, nullptr);
+  const auto perf = nddma->GetPerfFunc();
+  NodeInfo node;
+  node.node_ptr = GraphConstructUtils::ConstructSingleOp("Nddma", 1, 1);
+  node.node_ptr->outputs[0].attr.vectorized_axis = {0};
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.dtype);
+    const auto shape =
+        Make1DNddmaShape(test_case.dtype, test_case.dtype_size, CreateExpr(256), CreateExpr(4), CreateExpr(2));
+    const std::vector<TensorShapeInfo> shapes = {shape};
+    PerfOutputInfo perf_res;
+    ASSERT_EQ(perf(shapes, shapes, node, perf_res), af::SUCCESS);
+    EXPECT_NE(Str(perf_res.pipe_res[PipeType::AIV_MTE2]).find("nddma_1d_multicore"), std::string::npos);
+    EXPECT_EQ(perf_res.ternary_ops.size(), 1U);
+  }
+}
+
+TEST_F(UTestAscirPerfV2, TestNddmaRaw2DTo5DKeepLegacyOutputAfterMerge) {
+  auto nddma = ApiPerfFactory::Instance().Create("NddmaV2");
+  ASSERT_NE(nddma, nullptr);
+  NodeInfo node;
+  node.node_ptr = GraphConstructUtils::ConstructSingleOp("Nddma", 1, 1);
+  for (size_t rank = 2U; rank <= 5U; ++rank) {
+    SCOPED_TRACE(rank);
+    TensorShapeInfo shape;
+    shape.data_type = "int64";
+    shape.data_type_size = 8;
+    shape.dims.assign(rank - 2U, CreateExpr(1));
+    shape.dims.insert(shape.dims.end(), {CreateExpr(4), CreateExpr(64)});
+    shape.repeats = shape.dims;
+    shape.gm_strides.assign(rank - 2U, CreateExpr(256));
+    shape.gm_strides.insert(shape.gm_strides.end(), {CreateExpr(64), CreateExpr(1)});
+    shape.strides = shape.gm_strides;
+    node.node_ptr->outputs[0].attr.vectorized_axis.resize(rank);
+    std::iota(node.node_ptr->outputs[0].attr.vectorized_axis.begin(),
+              node.node_ptr->outputs[0].attr.vectorized_axis.end(), 0);
+    const std::vector<TensorShapeInfo> shapes = {shape};
+    PerfOutputInfo perf_res;
+
+    ASSERT_EQ(nddma->GetPerfFunc()(shapes, shapes, node, perf_res), af::SUCCESS);
+    const auto cycles = Str(perf_res.pipe_res[PipeType::AIV_MTE2]);
+    EXPECT_EQ(cycles.find("nddma_1d_multicore"), std::string::npos);
+    EXPECT_EQ(cycles, "((2048 / (((6.3899998664856 / (block_dim)) + 7.6100001335144))) + 418.978912353516)");
+  }
+}
+
+TEST_F(UTestAscirPerfV2, TestNddma1DModelFallsBackForCvUbFusion) {
+  const auto shape = Make1DNddmaShape("int8", 1, CreateExpr(256), CreateExpr(1), CreateExpr(1));
+  const std::vector<TensorShapeInfo> shapes = {shape};
+  PerfOutputInfo perf_res;
+  auto nddma = ApiPerfFactory::Instance().Create("NddmaV2");
+  ASSERT_NE(nddma, nullptr);
+  NodeInfo node;
+  node.node_ptr = GraphConstructUtils::ConstructSingleOp("Nddma", 1, 1);
+  node.node_ptr->outputs[0].attr.vectorized_axis = {0};
+  node.is_cv_ub_fusion = true;
+  auto *slog = ge::SlogStub::GetInstance();
+  const int32_t old_level = slog->GetLevel();
+  slog->SetLevel(DLOG_WARN);
+
+  testing::internal::CaptureStdout();
+  const auto status = nddma->GetPerfFunc()(shapes, shapes, node, perf_res);
+  const std::string output = testing::internal::GetCapturedStdout();
+  slog->SetLevel(old_level);
+  ASSERT_EQ(status, af::SUCCESS);
+  EXPECT_EQ(Str(perf_res.pipe_res[PipeType::AIV_MTE2]).find("nddma_1d_multicore"), std::string::npos);
+  EXPECT_NE(output.find("fallback_reason=codegen_mismatch"), std::string::npos);
 }
 
 TEST_F(UTestAscirPerfV2, TestNddmaApiSmallBlockLen) {
