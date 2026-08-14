@@ -164,42 +164,53 @@ class TestRegbaseApiTranspose : public testing::Test {
   }
 
   template <typename T, typename U>
-  static void InvokeKernelTest(TensorTransposeInputParam<T, U> &param) {
+  static void PrepareTransposeBuffers(TensorTransposeInputParam<T, U> &param, TPipe &tpipe,
+                                      TBuf<TPosition::VECCALC> &x_buf, TBuf<TPosition::VECCALC> &y_buf,
+                                      TBuf<TPosition::VECCALC> &idx_buf) {
+    tpipe.InitBuffer(x_buf, sizeof(T) * param.size);
+    tpipe.InitBuffer(y_buf, sizeof(T) * param.size);
+    tpipe.InitBuffer(idx_buf, sizeof(U) * param.size);
+  }
+
+  template <typename T, typename U, typename Kernel>
+  static void RunTransposeKernel(TensorTransposeInputParam<T, U> &param, Kernel kernel) {
     TPipe tpipe;
     TBuf<TPosition::VECCALC> x_buf;
     TBuf<TPosition::VECCALC> y_buf;
     TBuf<TPosition::VECCALC> idx_buf;
-
-    tpipe.InitBuffer(x_buf, sizeof(T) * param.size);
-    tpipe.InitBuffer(y_buf, sizeof(T) * param.size);
-    tpipe.InitBuffer(idx_buf, sizeof(U) * param.size);
+    PrepareTransposeBuffers(param, tpipe, x_buf, y_buf, idx_buf);
 
     LocalTensor<T> l_x = x_buf.Get<T>();
     LocalTensor<T> l_y = y_buf.Get<T>();
     LocalTensor<U> l_idx = idx_buf.Get<U>();
-
     GmToUb(l_x, param.x, param.size);
     GmToUb(l_idx, param.idx, param.size);
-
     LocalTensor<uint8_t> tmp_buf = l_idx.template ReinterpretCast<uint8_t>();
-
-    if (param.dst_dims.size() == 1) {
-      TransposeExtend<1, 1, T>(l_y, l_x, tmp_buf, {param.dst_dims[0]}, {param.src_strides[0]}, {param.dst_strides[0]});
-    } else if (param.dst_dims.size() == 2) {
-      TransposeExtend<2, 2, T>(l_y, l_x, tmp_buf, {param.dst_dims[0], param.dst_dims[1]},
-                               {param.src_strides[0], param.src_strides[1]},
-                               {param.dst_strides[0], param.dst_strides[1]});
-    } else if (param.dst_dims.size() == 3) {
-      TransposeExtend<2, 3, T>(l_y, l_x, tmp_buf, {param.dst_dims[0], param.dst_dims[1], param.dst_dims[2]},
-                               {param.src_strides[0], param.src_strides[1], param.src_strides[2]},
-                               {param.dst_strides[0], param.dst_strides[1], param.dst_strides[2]});
-    } else if (param.dst_dims.size() == 4) {
-      TransposeExtend<2, 4, T>(
-          l_y, l_x, tmp_buf, {param.dst_dims[0], param.dst_dims[1], param.dst_dims[2], param.dst_dims[3]},
-          {param.src_strides[0], param.src_strides[1], param.src_strides[2], param.src_strides[3]},
-          {param.dst_strides[0], param.dst_strides[1], param.dst_strides[2], param.dst_strides[3]});
-    }
+    kernel(l_y, l_x, tmp_buf);
     UbToGm(param.y, l_y, param.size);
+  }
+
+  template <typename T, typename U>
+  static void InvokeKernelTest(TensorTransposeInputParam<T, U> &param) {
+    RunTransposeKernel(param, [&param](auto &l_y, auto &l_x, auto &tmp_buf) {
+      if (param.dst_dims.size() == 1) {
+        TransposeExtend<1, 1, T>(l_y, l_x, tmp_buf, {param.dst_dims[0]}, {param.src_strides[0]},
+                                 {param.dst_strides[0]});
+      } else if (param.dst_dims.size() == 2) {
+        TransposeExtend<2, 2, T>(l_y, l_x, tmp_buf, {param.dst_dims[0], param.dst_dims[1]},
+                                 {param.src_strides[0], param.src_strides[1]},
+                                 {param.dst_strides[0], param.dst_strides[1]});
+      } else if (param.dst_dims.size() == 3) {
+        TransposeExtend<2, 3, T>(l_y, l_x, tmp_buf, {param.dst_dims[0], param.dst_dims[1], param.dst_dims[2]},
+                                 {param.src_strides[0], param.src_strides[1], param.src_strides[2]},
+                                 {param.dst_strides[0], param.dst_strides[1], param.dst_strides[2]});
+      } else if (param.dst_dims.size() == 4) {
+        TransposeExtend<2, 4, T>(
+            l_y, l_x, tmp_buf, {param.dst_dims[0], param.dst_dims[1], param.dst_dims[2], param.dst_dims[3]},
+            {param.src_strides[0], param.src_strides[1], param.src_strides[2], param.src_strides[3]},
+            {param.dst_strides[0], param.dst_strides[1], param.dst_strides[2], param.dst_strides[3]});
+      }
+    });
   }
 
   template <typename T, typename U>
@@ -222,6 +233,38 @@ class TestRegbaseApiTranspose : public testing::Test {
     uint32_t diff_count = Valid(param.y, param.y_exp, param.size);
     EXPECT_EQ(diff_count, 0);
     // 释放内存
+    AscendC::GmFree(param.x);
+    AscendC::GmFree(param.y);
+    AscendC::GmFree(param.idx);
+    AscendC::GmFree(param.y_exp);
+  }
+
+  template <typename T, typename U, uint8_t inner_dim, uint8_t dim>
+  static void TransposeTestByStride(const U (&output_dims)[dim], const U (&input_strides)[dim],
+                                    const U (&output_strides)[dim]) {
+    TensorTransposeInputParam<T, U> param{};
+    param.dst_dims.assign(output_dims, output_dims + dim);
+    param.src_strides.assign(input_strides, input_strides + dim);
+    param.dst_strides.assign(output_strides, output_strides + dim);
+    param.size = 1;
+    for (const U output_dim : param.dst_dims) {
+      param.size *= output_dim;
+    }
+    CreateTransposeTensor(param);
+
+    auto kernel = [&param, &output_dims, &input_strides, &output_strides] {
+      RunTransposeKernel(param, [&](auto &l_y, auto &l_x, auto &tmp_buf) {
+        TransposeExtend<inner_dim, dim, T>(l_y, l_x, tmp_buf, output_dims, input_strides, output_strides);
+      });
+    };
+
+    AscendC::SetKernelMode(KernelMode::AIV_MODE);
+    ICPU_RUN_KF(kernel, 1);
+
+    uint32_t diff_count = Valid(param.y, param.y_exp, param.size);
+    EXPECT_EQ(diff_count, 0);
+    AscendC::GmFree(param.x);
+    AscendC::GmFree(param.y);
     FreeIndexTensor(param);
   }
 };
@@ -236,4 +279,11 @@ TEST_F(TestRegbaseApiTranspose, Transpose_Test) {
   TransposeTest<float, int32_t>({{5, 8}, {1, 0}});
   TransposeTest<float, int32_t>({{5, 8, 4}, {2, 1, 0}});
   TransposeTest<float, int32_t>({{5, 8, 4, 3}, {3, 2, 1, 0}});
+}
+
+TEST_F(TestRegbaseApiTranspose, Transpose_Test_By_Stride) {
+  TransposeTestByStride<float, int32_t, 1, 1>({8}, {1}, {1});
+  TransposeTestByStride<float, int32_t, 2, 2>({8, 5}, {1, 8}, {5, 1});
+  TransposeTestByStride<float, int32_t, 2, 3>({4, 8, 5}, {1, 4, 32}, {40, 5, 1});
+  TransposeTestByStride<float, int32_t, 2, 4>({3, 4, 8, 5}, {1, 3, 12, 96}, {160, 40, 5, 1});
 }

@@ -1053,12 +1053,11 @@ Status ApiCall::PreProcess(const TPipe &tpipe, const std::vector<ascir::AxisId> 
                   [](const std::reference_wrapper<const Tensor> &t) { return t.get().is_ub_scalar; });
   bool is_any_output_need_two_loop =
       std::any_of(outputs.begin(), outputs.end(), [](const std::reference_wrapper<const Tensor> &t) {
-        return t.get().alloc_type == af::AllocType::kAllocTypeQueue && t.get().que_buf_num_value == 2 &&
-               t.get().need_gen_get_value_of_ub_scalar;
+        return t.get().alloc_type == af::AllocType::kAllocTypeQueue && t.get().que_buf_num_value == 2;
       });
   if (is_all_outputs_ub_scalar && !current_axis.empty()) {
     const auto loop_axis = tpipe.tiler.GetAxis(current_axis.back());
-    // 如果当前节点输出tensor是ub_scalar，且ub的queue buffer num是2，且需要生成ub_scalar的get value代码
+    // 如果当前节点输出tensor是ub_scalar，且ub的queue buffer num是2
     // 则代表存在一个输出节点的输出tensor不是ub_scalar，此时下一个节点的计算不在if (loop_axis < 1)的逻辑包含中
     // 而下一个节点依赖当前节点的输出tensor，因此需要改成if (loop_axis < 2)，保证DOUBLE_BUFFER流程中两个buffer都被计算
     if (is_any_output_need_two_loop) {
