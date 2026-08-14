@@ -3109,7 +3109,7 @@ class TrueDivAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] std::string GetMicroApiCallName() const override {
-    return "MicroApiCall";
+    return "MicroDivApiCall";
   }
 
   [[nodiscard]] std::string GetMicroApiName() const override {
