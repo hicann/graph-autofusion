@@ -26,12 +26,12 @@ void SaveApiLoopAxisStatus(const std::vector<Tensor> &inputs, const std::vector<
                            const Tensor &base_tensor, int64_t vec_cur_idx, VectorizedAixsLoopStatus &axis_info,
                            VectorizedAxisLoopMergeStatus &merge_info, const TPipe &tpipe) {
   std::stringstream ss;
-  auto axis_pos = base_tensor.vectorized_axis_pos[vec_cur_idx];
+  const auto axis_pos = base_tensor.vectorized_axis_pos[vec_cur_idx];
   GetOneAxisSize(tpipe, base_tensor, vec_cur_idx, ss);
   merge_info.merge_repeats_str.emplace_back(ss.str());
   merge_info.merge_repeats.emplace_back(base_tensor.axis_size[axis_pos]);
 
-  std::vector<ascir::AxisId> merge_axis = {base_tensor.axis[axis_pos]};
+  const std::vector<ascir::AxisId> merge_axis = {base_tensor.axis[axis_pos]};
   merge_info.merge_axis_ids.emplace_back(merge_axis);
 
   for (size_t i = 0; i < inputs.size(); i++) {
@@ -58,7 +58,7 @@ const Tensor &GetBaseTensor(const std::vector<Tensor> &inputs, const std::vector
   }
 
   for (size_t i = 0UL; i < outputs.size(); i++) {
-    bool is_all_zero = std::all_of(
+    const bool is_all_zero = std::all_of(
         outputs[i].vectorized_strides.begin(), outputs[i].vectorized_strides.end(), [](const ascir::SizeExpr &stride) {
           return af::SymbolicUtils::StaticCheckEq(stride.Simplify(), af::sym::kSymbolZero) == af::TriBool::kTrue;
         });
@@ -70,9 +70,9 @@ const Tensor &GetBaseTensor(const std::vector<Tensor> &inputs, const std::vector
 }
 }  // namespace
 static void SetDataCopyParams(const MergeInfo &merge_info, DataCopyParams &param, bool multi_axis_copy = false) {
-  auto merge_repeats = merge_info.merge_repeats;
-  auto merge_gm_strides = merge_info.merge_gm_strides;
-  auto merge_ub_strides = merge_info.merge_ub_strides;
+  const auto &merge_repeats = merge_info.merge_repeats;
+  const auto &merge_gm_strides = merge_info.merge_gm_strides;
+  const auto &merge_ub_strides = merge_info.merge_ub_strides;
   param.repeats.assign(merge_repeats.begin(), merge_repeats.end());
   param.gm_strides.assign(merge_gm_strides.begin(), merge_gm_strides.end());
   param.ub_strides.assign(merge_ub_strides.begin(), merge_ub_strides.end());
@@ -127,15 +127,15 @@ bool CalculateDmaParams(const TPipe &tpipe, const Tensor &gm_tensor, const Tenso
   size_t vec_axis_pos = ub_tensor.vectorized_axis.size() - 1;
   bool has_non_zero_axis = false;
   for (vec_axis_pos = ub_tensor.vectorized_axis.size(); vec_axis_pos-- > 0UL;) {
-    auto pos = std::find(gm_tensor.axis.begin(), gm_tensor.axis.end(), ub_tensor.vectorized_axis[vec_axis_pos]);
+    const auto pos = std::find(gm_tensor.axis.begin(), gm_tensor.axis.end(), ub_tensor.vectorized_axis[vec_axis_pos]);
     GE_ASSERT_TRUE((pos != gm_tensor.axis.end()), "Codegen vectorized axis[%zu] not found", vec_axis_pos);
-    auto axis_pos = std::distance(gm_tensor.axis.begin(), pos);
+    const auto axis_pos = std::distance(gm_tensor.axis.begin(), pos);
     // 如果当前轴gm和ub上对应的stride均为0，如果前序轴的stride不为1，则保留当前轴
-    bool ignore_zero_axis = has_non_zero_axis || vec_axis_pos == 0UL ||
-                            af::SymbolicUtils::StaticCheckEq(ub_tensor.vectorized_strides[vec_axis_pos - 1],
-                                                             af::ops::One) == af::TriBool::kTrue ||
-                            af::SymbolicUtils::StaticCheckEq(ub_tensor.vectorized_strides[vec_axis_pos - 1],
-                                                             af::ops::Zero) == af::TriBool::kTrue;
+    const bool ignore_zero_axis = has_non_zero_axis || vec_axis_pos == 0UL ||
+                                  af::SymbolicUtils::StaticCheckEq(ub_tensor.vectorized_strides[vec_axis_pos - 1],
+                                                                   af::ops::One) == af::TriBool::kTrue ||
+                                  af::SymbolicUtils::StaticCheckEq(ub_tensor.vectorized_strides[vec_axis_pos - 1],
+                                                                   af::ops::Zero) == af::TriBool::kTrue;
     if (af::SymbolicUtils::StaticCheckEq(gm_tensor.axis_strides[axis_pos], af::ops::Zero) == af::TriBool::kTrue &&
         af::SymbolicUtils::StaticCheckEq(ub_tensor.vectorized_strides[vec_axis_pos], af::ops::Zero) ==
             af::TriBool::kTrue &&
@@ -170,7 +170,7 @@ bool CalculateDmaParams(const TPipe &tpipe, const Tensor &gm_tensor, const Tenso
 
 void SetDmaParams(const TPipe &tpipe, const DataCopyParams &data_copy_param, DmaParams &dma_param, bool copy_in,
                   bool need_swap) {
-  size_t total_len = data_copy_param.repeats.size();
+  const size_t total_len = data_copy_param.repeats.size();
   if (total_len <= kDmaMaxLen && need_swap) {
     GELOGI("Can't swap data copy outer_for.");
     return;
@@ -572,6 +572,33 @@ bool GetMaxDtypeSize(const ge::DataType input_data_type, const ge::DataType out_
   }
   dtype_size = std::to_string(max_dtype_size);
   return true;
+}
+
+bool IsCVFusionStage(const ApiCallContext &context) {
+  return context.stage != ComputeStage::kDefault;
+}
+
+Status GetTensorDtypeSize(const Tensor &tensor, int64_t &dtype_size) {
+  const int32_t tensor_dtype_size = GetSizeByDataType(tensor.dtype);
+  GE_CHK_BOOL_RET_STATUS(tensor_dtype_size > 0 && tensor_dtype_size < ge::kDataTypeSizeBitOffset, af::FAILED,
+                         "get dtype size failed, tensor:%s, dtype:%d", tensor.name.c_str(),
+                         static_cast<int32_t>(tensor.dtype));
+  dtype_size = tensor_dtype_size;
+  return af::SUCCESS;
+}
+
+std::string GenBlockAlignNExpr(const Tensor &tensor, const std::string &n_expr) {
+  int64_t dtype_size = 0;
+  if (GetTensorDtypeSize(tensor, dtype_size) != af::SUCCESS || dtype_size <= 0) {
+    return n_expr;
+  }
+  const int64_t align_value = 32 / dtype_size;
+  return "((" + n_expr + " + " + std::to_string(align_value) + " - 1) / " + std::to_string(align_value) + " * " +
+         std::to_string(align_value) + ")";
+}
+
+std::string GetCVAlignedSize(const ApiCallContext &context, const Tensor &tensor, const std::string &size_expr) {
+  return IsCVFusionStage(context) ? GenBlockAlignNExpr(tensor, size_expr) : size_expr;
 }
 
 void GenerateLinkStoreEventCode(const Tensor &ub, const std::string &offset_str, std::stringstream &ss) {

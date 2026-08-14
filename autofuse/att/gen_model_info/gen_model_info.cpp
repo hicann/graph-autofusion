@@ -170,8 +170,9 @@ af::Status RefreshCommonUbExprContext(const af::AscGraph &graph, ModelInfo &mode
 }
 }  // namespace
 
-af::Status GenerateModelInfo(const af::AscGraph &graph, ModelInfo &model_info, TuningSpacePtr &tuning_space,
-                             const uint32_t tiling_case_id) {
+static af::Status GenerateSingleModelInfoWithContext(const af::AscGraph &graph, ModelInfo &model_info,
+                                                     TuningSpacePtr &tuning_space, const uint32_t tiling_case_id,
+                                                     bool is_cv_ub_fusion) {
   GELOGI("[DFX]Begin to generate model info for graph %s of tiling case id %u", graph.GetName().c_str(),
          tiling_case_id);
   DURATION_GUARD(DurationType::DURATION_GEN_MODEL_INFO);
@@ -180,6 +181,9 @@ af::Status GenerateModelInfo(const af::AscGraph &graph, ModelInfo &model_info, T
   GE_ASSERT_NOTNULL(tuning_space, "Create tuning space failed.");
   att::AscendGraphParser ascend_graph_parser(tuning_space);
   GE_ASSERT_SUCCESS(ascend_graph_parser.GraphParser(graph), "Get tuning space failed.");
+  for (auto &node_info : tuning_space->node_infos) {
+    node_info.is_cv_ub_fusion = is_cv_ub_fusion;
+  }
   // step2: get basic expr constraint
   att::GenerateTilingExpr tiling_expr(tuning_space);
   GE_ASSERT_SUCCESS(tiling_expr.Generate(model_info), "Get basic expr constraint failed.");
@@ -202,6 +206,11 @@ af::Status GenerateModelInfo(const af::AscGraph &graph, ModelInfo &model_info, T
   }
   GELOGI("[DFX]End to generate model info for graph %s of tiling case id %u", graph.GetName().c_str(), tiling_case_id);
   return af::SUCCESS;
+}
+
+af::Status GenerateModelInfo(const af::AscGraph &graph, ModelInfo &model_info, TuningSpacePtr &tuning_space,
+                             const uint32_t tiling_case_id) {
+  return GenerateSingleModelInfoWithContext(graph, model_info, tuning_space, tiling_case_id, false);
 }
 
 af::Status CheckKeyValid(const std::vector<af::AscGraph> &graph_list) {
@@ -399,6 +408,19 @@ inline bool IsAxesReorderAlgorithm() {
   return true;
 }
 
+struct ModelGenerationContext {
+  // 一次 schedule result 内所有 tiling case 共享的内部上下文，避免为 Codegen 路径门禁扩展公开
+  // GenerateModelInfo 接口。
+  bool enable_gather_reduce_penalty{false};
+  // kUBFuse 生成专用的固定 2D NDDMA 描述，不使用默认 DataCopyParams 描述。
+  bool is_cv_ub_fusion{false};
+};
+
+static af::Status GenerateModelInfoWithContext(const std::vector<af::AscGraph> &graph_list,
+                                               std::vector<ModelInfo> &model_info_list,
+                                               const std::map<std::string, std::string> &options,
+                                               bool enable_group_parallel, const ModelGenerationContext &context);
+
 af::Status GenerateModelInfo(const std::vector<af::AscGraph> &graph_list, std::vector<ModelInfo> &model_info_list,
                              const std::map<std::string, std::string> &options, bool enable_group_parallel) {
   return GenerateModelInfo(graph_list, model_info_list, options, enable_group_parallel, false);
@@ -407,6 +429,14 @@ af::Status GenerateModelInfo(const std::vector<af::AscGraph> &graph_list, std::v
 af::Status GenerateModelInfo(const std::vector<af::AscGraph> &graph_list, std::vector<ModelInfo> &model_info_list,
                              const std::map<std::string, std::string> &options, bool enable_group_parallel,
                              bool enable_gather_reduce_penalty) {
+  return GenerateModelInfoWithContext(graph_list, model_info_list, options, enable_group_parallel,
+                                      {enable_gather_reduce_penalty, false});
+}
+
+static af::Status GenerateModelInfoWithContext(const std::vector<af::AscGraph> &graph_list,
+                                               std::vector<ModelInfo> &model_info_list,
+                                               const std::map<std::string, std::string> &options,
+                                               bool enable_group_parallel, const ModelGenerationContext &context) {
   GE_ASSERT_SUCCESS(CheckKeyValid(graph_list));
   uint32_t tiling_key = 0U;
   for (auto &graph : graph_list) {
@@ -418,14 +448,16 @@ af::Status GenerateModelInfo(const std::vector<af::AscGraph> &graph_list, std::v
     std::vector<AttAxisPtr> tiling_R_arg_list;
     TuningSpacePtr tuning_space = af::MakeShared<TuningSpace>();
     GE_ASSERT_NOTNULL(tuning_space, "Make tuning space failed.");
-    if (enable_gather_reduce_penalty) {
+    if (context.enable_gather_reduce_penalty) {
       tuning_space->penalty_cache_line_size = kGatherReducePenaltyCacheLineSize;
     }
     GELOGD("[DFX] GatherReducePenalty config: graph=%s, enabled=%d, penalty_cache_line_size=%u",
-           graph.GetName().c_str(), enable_gather_reduce_penalty, tuning_space->penalty_cache_line_size);
+           graph.GetName().c_str(), context.enable_gather_reduce_penalty, tuning_space->penalty_cache_line_size);
     tuning_space->cache_line_config = &model_info.cache_line_config;
     GetThreadLocalContext().SetOption(options);
-    GE_ASSERT_SUCCESS(GenerateModelInfo(graph, model_info, tuning_space, tiling_key), "General model info failed.");
+    GE_ASSERT_SUCCESS(
+        GenerateSingleModelInfoWithContext(graph, model_info, tuning_space, tiling_key, context.is_cv_ub_fusion),
+        "General model info failed.");
     if (IsAxesReorderAlgorithm()) {
       ArgListReorder arg_list_reorder(tuning_space);
       GE_ASSERT_SUCCESS(
@@ -510,8 +542,13 @@ af::Status ProcessAndSetScheduleGroupInfo(const std::vector<std::vector<af::AscG
         "[DFX] GatherReducePenalty context: asc_graph_id=%zu, impl_graph_id=%zu, group_id=%zu, group_count=%zu, "
         "enabled=%d",
         asc_graph_id, impl_graph_id, schedule_group_id, schedule_groups.size(), enable_gather_reduce_penalty);
-    GE_ASSERT_SUCCESS(GenerateModelInfo(schedule_groups[schedule_group_id], model_info_list, options,
-                                        out_schedule_groups.enable_group_parallel, enable_gather_reduce_penalty),
+    const auto &schedule_result = schedule_results.node_idx_to_scheduled_results[asc_graph_id][impl_graph_id];
+    // ATT 必须与 Codegen 使用相同的 schedule result 路径，否则 raw 1D 节点会按 1D 模型评分，
+    // 但 Codegen 最终生成 kUBFuse 固定 2D 描述。
+    const bool is_cv_ub_fusion = schedule_result.cube_type == ascir::CubeTemplateType::kUBFuse;
+    const ModelGenerationContext context{enable_gather_reduce_penalty, is_cv_ub_fusion};
+    GE_ASSERT_SUCCESS(GenerateModelInfoWithContext(schedule_groups[schedule_group_id], model_info_list, options,
+                                                   out_schedule_groups.enable_group_parallel, context),
                       "Get model info failed, impl graph id = %ld, group id = %ld.", impl_graph_id, schedule_group_id);
     for (auto &model_info : model_info_list) {
       model_info.schedule_group_ident.asc_graph_id = asc_graph_id;

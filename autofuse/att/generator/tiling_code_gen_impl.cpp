@@ -3963,16 +3963,8 @@ void TilingCodeGenImpl::GenFillOtherGroupsGetTiling(
     tiling_func_.AddLine("        continue;");
     tiling_func_.AddLine("      }");
   };
-  if (config_.is_inductor_scene) {
-    for (const auto &group_iter : graph_info) {
-      if (group_iter.first != group_info.first) {
-        emit_get_tiling(group_iter);
-      }
-    }
-  } else {
-    for (auto group_iter = std::next(current_group_iter); group_iter != graph_info.end(); ++group_iter) {
-      emit_get_tiling(*group_iter);
-    }
+  for (auto group_iter = std::next(current_group_iter); group_iter != graph_info.end(); ++group_iter) {
+    emit_get_tiling(*group_iter);
   }
 }
 

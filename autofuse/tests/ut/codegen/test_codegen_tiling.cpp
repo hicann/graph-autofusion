@@ -1174,6 +1174,20 @@ TEST_F(TestCodegenTiling, NoWorkspaceTest) {
                         "}\n"});
 }
 
+TEST_F(TestCodegenTiling, PrepareMatMulAttrsShouldUseDefaultOpImplModeForMatMulV3) {
+  codegen::MatMulCubeInfo cube_info;
+  cube_info.is_batch = false;
+  cube_info.enable_hf32 = 0;
+
+  std::vector<codegen::AttrInfo> attrs;
+  PrepareMatMulAttrs(cube_info, attrs);
+
+  ASSERT_GT(attrs.size(), 3U);
+  EXPECT_EQ(attrs[3].name, "opImplMode");
+  EXPECT_EQ(attrs[3].dtype, "int");
+  EXPECT_EQ(attrs[3].value_int, 0);
+}
+
 TEST_F(TestCodegenTiling, SingleGroupWorkspaceSymbolTest) {
   ascir::ImplGraph graph0("test_graph0");
   auto s0 = graph0.CreateSizeVar("s0");
@@ -3160,11 +3174,10 @@ TEST_F(TestCodegenTiling, GenerateForInductorCvFusionShouldEmitCvTilingAndCubeWr
   auto tiling_files = this->GenerateForInductor(fused_schedule_result);
   ASSERT_TRUE(tiling_files.find(codegen::kTilingDefAndConstIdentify) != tiling_files.end());
   ASSERT_TRUE(tiling_files.find(codegen::kTilingApiHeaderIdentify) != tiling_files.end());
+  ASSERT_TRUE(tiling_files.find(codegen::kTilingHeadIdentify) != tiling_files.end());
   ASSERT_TRUE(tiling_files.find(codegen::kCubeKernelTilingWrapperHpp) != tiling_files.end());
   ASSERT_TRUE(tiling_files.find(codegen::kCubeKernelTilingWrapperCpp) != tiling_files.end());
   EXPECT_TRUE(tiling_files.find("TilingDataLog") == tiling_files.end());
-  EXPECT_NE(tiling_files.at(codegen::kCubeKernelTilingWrapperCpp).find("#include \"autofuse_tiling_func_log.h\""),
-            std::string::npos);
 
   const auto &tiling_impl = tiling_files.at(codegen::kTilingDefAndConstIdentify);
   const auto &api_header = tiling_files.at(codegen::kTilingApiHeaderIdentify);
@@ -3189,6 +3202,8 @@ void set_g_basen_basem_align(int32_t value) {
   EXPECT_NE(tiling_impl.find("CallCubeTiling"), std::string::npos);
   EXPECT_NE(tiling_impl.find("AutofuseTiling("), std::string::npos);
   EXPECT_NE(tiling_impl.find("GenConstTilingData"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("autofuse_has_bias"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("autofuse_has_offset_w"), std::string::npos);
   EXPECT_EQ(tiling_impl.find("GenerateTopnSolutions"), std::string::npos);
   EXPECT_EQ(tiling_impl.find("GetModeledPerfForTesting"), std::string::npos);
   EXPECT_EQ(tiling_impl.find("AscirCompileAndLaunch"), std::string::npos);
@@ -3197,7 +3212,8 @@ void set_g_basen_basem_align(int32_t value) {
   EXPECT_EQ(tiling_impl.find("#include \"autofuse_cube_tiling_data.h\""), std::string::npos);
   EXPECT_NE(tiling_impl.find("#include \"cube_kernel_tiling_wrapper.h\""), std::string::npos);
   ExpectSystemHeaders(
-      tiling_impl, {"algorithm", "cfloat", "cstddef", "cstdint", "cstring", "ostream", "sstream", "string", "vector"},
+      tiling_impl,
+      {"algorithm", "cfloat", "cstddef", "cstdint", "cstring", "iomanip", "ostream", "sstream", "string", "vector"},
       {"array", "cmath", "cstdlib", "functional", "map", "memory", "unordered_map", "utility"});
 }
 
@@ -3207,15 +3223,31 @@ TEST_F(TestCodegenTiling, CubeWrapperShouldPreserveTilingDataBytes) {
   const auto matmul_tiling_header_pos = wrapper_hpp.find("#include \"arch35/mat_mul_tiling_data.h\"");
   const auto autofuse_namespace_pos = wrapper_hpp.find("namespace autofuse {");
   EXPECT_NE(wrapper_hpp.find("std::vector<uint8_t> tiling_data;"), std::string::npos);
-  EXPECT_NE(wrapper_hpp.find("#include <cmath>"), std::string::npos);
-  EXPECT_NE(wrapper_hpp.find("#include <limits>"), std::string::npos);
   ASSERT_NE(matmul_tiling_header_pos, std::string::npos);
   ASSERT_NE(autofuse_namespace_pos, std::string::npos);
   EXPECT_LT(matmul_tiling_header_pos, autofuse_namespace_pos);
-  EXPECT_NE(wrapper_cpp.find("result.tiling_data.push_back"), std::string::npos);
-  EXPECT_NE(wrapper_cpp.find("result.tiling_data = AlignTilingDataTo8Bytes"), std::string::npos);
-  EXPECT_NE(wrapper_cpp.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
-  EXPECT_EQ(wrapper_cpp.find("autofuse_tiling_data_log.h"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("result.tiling_data.assign"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("raw_tiling_data->GetDataSize()"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, CubeWrapperShouldSupportBiasAndOffsetInputs) {
+  const auto &wrapper_cpp = kCubeKernelTilingWrapperCppValue;
+  EXPECT_NE(wrapper_cpp.find("MakeMatMulInputInstanceNum(request.matmul_attrs.has_bias"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("key.input2_shape = GetRuntimeShape(request.inputs[2]);"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("key.input3_shape = GetRuntimeShape(request.inputs[3]);"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("key.input_num = request.inputs.size();"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("inputs->size() >= 2 && inputs->size() <= 4"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("has_bias = AttrAsBool(attr);"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("has_offset_w = AttrAsBool(attr);"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("if (attrs.has_offset_w && input_index < inputs.size())"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("BuildMatMulInputSlots(request.inputs, request.matmul_attrs)"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("if (input == nullptr)"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("input2_dtype = inputs[2U].dtype;"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("input3_format = inputs[3U].format;"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("input_tensors_storage.reserve(input_slots.size());"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("for (const auto *input : input_slots)"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("DtypeToGeDataType(input.dtype) == ge::DT_UNDEFINED"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("ge::Format input_format = FormatToGeFormat(input->format);"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, MultiGroupInductorShouldContainTopnMainOutputAbi) {
@@ -4391,6 +4423,29 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoTopnShouldPreserveDefaultCandida
   EXPECT_NE(result.tiling.find("std::rotate(solutions.begin() + 1, default_solution, default_solution + 1);"),
             std::string::npos);
   EXPECT_EQ(result.tiling.find("TORCHINDUCTOR_NPU_EXT_AUTOTUNE_TOPN"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorPgoShouldExcludeCandidatesNotFasterThanDefault) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  const auto deduplicate_pos = result.tiling.find("DeduplicateCandidateSolutions(solutions);");
+  const auto filter_pos = result.tiling.find("FilterMeasuredCandidatesByDefault(solutions);");
+  const auto export_pos = result.tiling.find("measured_candidates->push_back(");
+  const auto truncate_pos = result.tiling.find("solutions.resize(static_cast<size_t>(topn))", export_pos);
+  ASSERT_NE(deduplicate_pos, std::string::npos);
+  ASSERT_NE(export_pos, std::string::npos);
+  ASSERT_NE(filter_pos, std::string::npos);
+  ASSERT_NE(truncate_pos, std::string::npos);
+  EXPECT_LT(deduplicate_pos, filter_pos);
+  EXPECT_LT(filter_pos, export_pos);
+  EXPECT_LT(export_pos, truncate_pos);
+  EXPECT_NE(result.tiling.find("!solution.is_default && !(solution.modeled_perf < default_perf)"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, GenerateForInductorPgoFailureShouldFallbackToModeledTopn) {

@@ -23,6 +23,12 @@ using namespace af::ops;
 using namespace af::ascir_op;
 
 namespace codegen {
+namespace {
+void BuildIsNanCvStageGraph(af::AscGraph &graph, const af::Expression &s0, const af::Expression &s1, const af::Axis &z0,
+                            const af::Axis &z1);
+void InitIsNanCvStageAttrs(af::AscGraph &graph, ge::DataType output_dtype, const af::Axis &z0, const af::Axis &z1);
+}  // namespace
+
 TEST(CodegenKernel, UnaryApicallIsNan) {
   af::AscGraph graph("test_graph");
 
@@ -30,50 +36,11 @@ TEST(CodegenKernel, UnaryApicallIsNan) {
   auto s1 = graph.CreateSizeVar("s1");
   auto z0 = graph.CreateAxis("z0", s0);
   auto z1 = graph.CreateAxis("z1", s1);
-
-  Data x_op("x", graph);
-  Load load_op("load");
-  Isnan rsqrt_op("IsNan");
-  graph.AddNode(rsqrt_op);
-
-  load_op.x = x_op.y;
-  load_op.attr.sched.axis = {z0.id, z1.id};
-  *load_op.y.axis = {z0.id, z1.id};
-  *load_op.y.repeats = {s0, s1};
-  *load_op.y.strides = {s1, One};
-  rsqrt_op.x = load_op.y;
-  *rsqrt_op.y.axis = {z0.id, z1.id};
-  *rsqrt_op.y.repeats = {s0, s1};
-  *rsqrt_op.y.strides = {s1, One};
+  BuildIsNanCvStageGraph(graph, s0, s1, z0, z1);
+  InitIsNanCvStageAttrs(graph, af::DT_INT16, z0, z1);
 
   auto load = graph.FindNode("load");
-  load->attr.api.compute_type = af::ComputeType::kComputeLoad;
-  load->attr.api.type = af::ApiType::kAPITypeCompute;
-  load->attr.api.unit = af::ComputeUnit::kUnitMTE2;
-  load->attr.sched.loop_axis = z0.id;
-  load->outputs[0].attr.vectorized_axis = {z1.id};
-  load->outputs[0].attr.vectorized_strides = {One};
-  load->outputs[0].attr.dtype = af::DT_FLOAT;
-  load->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
-  load->outputs[0].attr.mem.tensor_id = 0;
-  load->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
-  load->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
-  load->outputs[0].attr.que.id = 1;
-  load->outputs[0].attr.opt.merge_scope = af::kIdNone;
-
   auto rsqrt = graph.FindNode("IsNan");
-  rsqrt->attr.api.compute_type = af::ComputeType::kComputeElewise;
-  rsqrt->attr.api.type = af::ApiType::kAPITypeCompute;
-  rsqrt->attr.api.unit = af::ComputeUnit::kUnitVector;
-  rsqrt->attr.sched.loop_axis = z0.id;
-  rsqrt->outputs[0].attr.vectorized_axis = {z1.id};
-  rsqrt->outputs[0].attr.vectorized_strides = {One};
-  rsqrt->outputs[0].attr.dtype = af::DT_INT16;
-  rsqrt->outputs[0].attr.mem.position = af::Position::kPositionVecOut;
-  rsqrt->outputs[0].attr.mem.tensor_id = 1;
-  rsqrt->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
-  rsqrt->outputs[0].attr.que.id = 2;
-  rsqrt->outputs[0].attr.opt.merge_scope = af::kIdNone;
 
   codegen::Tiler tiler;
   codegen::TPipe tpipe("tpipe", tiler);
@@ -98,6 +65,133 @@ TEST(CodegenKernel, UnaryApicallIsNan) {
   EXPECT_EQ(result, std::string{"LocalTensor<bool> local_1_cast = local_1.template ReinterpretCast<bool>();\n"
                                 "IsNan(local_1_cast[0], local_0[0], local_0_actual_size);\n"});
   delete call;
+}
+
+namespace {
+void BuildIsNanCvStageGraph(af::AscGraph &graph, const af::Expression &s0, const af::Expression &s1, const af::Axis &z0,
+                            const af::Axis &z1) {
+  Data x_op("x", graph);
+  Load load_op("load");
+  Isnan rsqrt_op("IsNan");
+  graph.AddNode(rsqrt_op);
+
+  load_op.x = x_op.y;
+  load_op.attr.sched.axis = {z0.id, z1.id};
+  *load_op.y.axis = {z0.id, z1.id};
+  *load_op.y.repeats = {s0, s1};
+  *load_op.y.strides = {s1, One};
+  rsqrt_op.x = load_op.y;
+  *rsqrt_op.y.axis = {z0.id, z1.id};
+  *rsqrt_op.y.repeats = {s0, s1};
+  *rsqrt_op.y.strides = {s1, One};
+}
+
+void InitIsNanCvStageAttrs(af::AscGraph &graph, ge::DataType output_dtype, const af::Axis &z0, const af::Axis &z1) {
+  auto load = graph.FindNode("load");
+  load->attr.api.compute_type = af::ComputeType::kComputeLoad;
+  load->attr.api.type = af::ApiType::kAPITypeCompute;
+  load->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  load->attr.sched.loop_axis = z0.id;
+  auto &load_attr = load->outputs[0].attr;
+  load_attr.vectorized_axis = {z1.id};
+  load_attr.vectorized_strides = {One};
+  load_attr.dtype = af::DT_FLOAT;
+  load_attr.mem.position = af::Position::kPositionVecIn;
+  load_attr.mem.tensor_id = 0;
+  load_attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  load_attr.que.id = 1;
+  load_attr.opt.merge_scope = af::kIdNone;
+
+  auto rsqrt = graph.FindNode("IsNan");
+  rsqrt->attr.api.compute_type = af::ComputeType::kComputeElewise;
+  rsqrt->attr.api.type = af::ApiType::kAPITypeCompute;
+  rsqrt->attr.api.unit = af::ComputeUnit::kUnitVector;
+  rsqrt->attr.sched.loop_axis = z0.id;
+  auto &rsqrt_attr = rsqrt->outputs[0].attr;
+  rsqrt_attr.vectorized_axis = {z1.id};
+  rsqrt_attr.vectorized_strides = {One};
+  rsqrt_attr.dtype = output_dtype;
+  rsqrt_attr.mem.position = af::Position::kPositionVecOut;
+  rsqrt_attr.mem.tensor_id = 1;
+  rsqrt_attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  rsqrt_attr.que.id = 2;
+  rsqrt_attr.opt.merge_scope = af::kIdNone;
+}
+
+void InitIsNanCvStageTpipe(codegen::TPipe &tpipe, codegen::Tiler &tiler, const af::AscNodePtr &load,
+                           const af::AscNodePtr &isnan, const af::Expression &s0, const af::Expression &s1,
+                           const af::Axis &z0, const af::Axis &z1) {
+  tpipe.cv_fusion_type = ascir::CubeTemplateType::kUBFuse;
+  tpipe.is_inductor = false;
+  tpipe.AddTensor(load->outputs[0]);
+  tpipe.AddTensor(isnan->outputs[0]);
+
+  tiler.AddAxis(z0);
+  tiler.AddAxis(z1);
+  tiler.AddSizeVar(af::SizeVar(s0));
+  tiler.AddSizeVar(af::SizeVar(s1));
+}
+}  // namespace
+
+TEST(CodegenKernel, UnaryApicallIsNanCVStage) {
+  af::AscGraph graph("test_graph");
+
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  BuildIsNanCvStageGraph(graph, s0, s1, z0, z1);
+  InitIsNanCvStageAttrs(graph, af::DT_INT16, z0, z1);
+
+  auto load = graph.FindNode("load");
+  auto rsqrt = graph.FindNode("IsNan");
+
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  InitIsNanCvStageTpipe(tpipe, tiler, load, rsqrt, s0, s1, z0, z1);
+
+  codegen::ApiTensor x1;
+  x1.id = load->outputs[0].attr.mem.tensor_id;
+  codegen::UnaryBitWidthChangeApiCallV2 call_0("IsNan");
+  EXPECT_EQ(call_0.Init(rsqrt), 0);
+  call_0.api_call_context.stage = codegen::ComputeStage::kCVFuseStage1;
+  call_0.inputs.push_back(&x1);
+
+  std::string result;
+  call_0.Generate(tpipe, vector<af::AxisId>{}, result);
+  EXPECT_EQ(result, std::string{"LocalTensor<bool> local_1_cast = local_1.template ReinterpretCast<bool>();\n"
+                                "IsNan(local_1_cast[0], local_0[0], ((local_0_actual_size + 8 - 1) / 8 * 8));\n"});
+}
+
+TEST(CodegenKernel, UnaryApicallIsNanCvStageUsesInputDtypeAlignedCount) {
+  af::AscGraph graph("test_graph");
+
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+
+  BuildIsNanCvStageGraph(graph, s0, s1, z0, z1);
+  InitIsNanCvStageAttrs(graph, af::DT_UINT8, z0, z1);
+
+  auto load = graph.FindNode("load");
+  auto isnan = graph.FindNode("IsNan");
+
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  InitIsNanCvStageTpipe(tpipe, tiler, load, isnan, s0, s1, z0, z1);
+
+  codegen::ApiTensor x1;
+  x1.id = load->outputs[0].attr.mem.tensor_id;
+  codegen::UnaryBitWidthChangeApiCallV2 call("IsNan");
+  EXPECT_EQ(call.Init(isnan), 0);
+  call.api_call_context.stage = codegen::ComputeStage::kCVFuseStage1;
+  call.inputs.push_back(&x1);
+
+  std::string result;
+  EXPECT_EQ(call.Generate(tpipe, vector<af::AxisId>{}, result), 0);
+  EXPECT_EQ(result, std::string{"LocalTensor<bool> local_1_cast = local_1.template ReinterpretCast<bool>();\n"
+                                "IsNan(local_1_cast[0], local_0[0], ((local_0_actual_size + 8 - 1) / 8 * 8));\n"});
 }
 
 TEST(CodegenKernel, UnaryApicallIsNanThrowingFor) {

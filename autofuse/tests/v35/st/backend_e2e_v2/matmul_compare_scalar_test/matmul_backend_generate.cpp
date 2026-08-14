@@ -84,7 +84,14 @@ TEST_F(TestBackendMatmulEqScalar, MatmulEqScalarCodegen) {
 
     // 分别生成ub和common模板的kernel和tiling
     EXPECT_EQ(codegen.Generate(shape_info, ub_schedule_result, result), 0);
-    kernel_file << RemoveSubDirInclude(result.kernel);
+    const std::string ub_kernel = RemoveSubDirInclude(result.kernel);
+    EXPECT_NE(ub_kernel.find("CompareScalarExtend<float, 2, CMPMODE::EQ>"), std::string::npos);
+    EXPECT_NE(ub_kernel.find("{static_cast<uint16_t>(curAivM), static_cast<uint16_t>(curAivN)}"), std::string::npos);
+    EXPECT_NE(ub_kernel.find("{static_cast<uint16_t>(((curAivN + 32 - 1) / 32 * 32)), static_cast<uint16_t>(1)}"),
+              std::string::npos);
+    EXPECT_NE(ub_kernel.find("{static_cast<uint16_t>(((curAivN + 8 - 1) / 8 * 8)), static_cast<uint16_t>(1)}"),
+              std::string::npos);
+    kernel_file << ub_kernel;
     tiling_file << result.tiling;
     tiling_data_file << result.tiling_data;
 

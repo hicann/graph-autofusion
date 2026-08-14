@@ -14,802 +14,19 @@ inline const std::string kCubeKernelTilingWrapperHppValue = R"(
 #ifndef CUBE_KERNEL_TILING_WRAPPER_H
 #define CUBE_KERNEL_TILING_WRAPPER_H
 
-#include <string>
-#include <vector>
-#include <map>
-#include <utility>
-#include <cstdint>
-#include <memory>
-#include <sstream>
-#include <stdexcept>
 #include <cstddef>
-#include <cstring>
-#include <cmath>
-#include <iomanip>
-#include <algorithm>
-#include <limits>
-#include "acl/acl.h"
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "graph/types.h"
 #include "arch35/mat_mul_tiling_data.h"
-#include "platform/platform_info.h"
 
 namespace ge {
 namespace autofuse {
-
-namespace json_internal {
-
-enum class Type {
-    null,
-    boolean,
-    number_integer,
-    number_float,
-    string,
-    array,
-    object
-};
-
-class Json {
-public:
-    Json() : type_(Type::null) {}
-    Json(bool value) : type_(Type::boolean), bool_value_(value) {}
-    Json(int value) : type_(Type::number_integer), int_value_(value) {}
-    Json(int64_t value) : type_(Type::number_integer), int_value_(value) {}
-    Json(double value) : type_(Type::number_float), float_value_(value) {}
-    Json(const char* value) : type_(Type::string), string_value_(new std::string(value)) {}
-    Json(const std::string& value) : type_(Type::string), string_value_(new std::string(value)) {}
-    Json(const std::vector<int64_t>& value) : type_(Type::array), array_value_(new std::vector<Json>()) {
-        for (const auto& v : value) {
-            array_value_->push_back(Json(v));
-        }
-    }
-    Json(const std::vector<double>& value) : type_(Type::array), array_value_(new std::vector<Json>()) {
-        for (const auto& v : value) {
-            array_value_->push_back(Json(v));
-        }
-    }
-    Json(const std::vector<std::string>& value) : type_(Type::array), array_value_(new std::vector<Json>()) {
-        for (const auto& v : value) {
-            array_value_->push_back(Json(v));
-        }
-    }
-
-    Json(const Json& other) : type_(other.type_) {
-        CopyValue(other);
-    }
-
-    Json(Json&& other) noexcept : type_(other.type_) {
-        MoveValue(std::move(other));
-        other.type_ = Type::null;
-    }
-
-    Json& operator=(const Json& other) {
-        if (this != &other) {
-            Clear();
-            type_ = other.type_;
-            CopyValue(other);
-        }
-        return *this;
-    }
-
-    Json& operator=(Json&& other) noexcept {
-        if (this != &other) {
-            Clear();
-            type_ = other.type_;
-            MoveValue(std::move(other));
-            other.type_ = Type::null;
-        }
-        return *this;
-    }
-
-    ~Json() {
-        Clear();
-    }
-
-    Type type() const { return type_; }
-    bool is_null() const { return type_ == Type::null; }
-    bool is_boolean() const { return type_ == Type::boolean; }
-    bool is_number() const { return type_ == Type::number_integer || type_ == Type::number_float; }
-    bool is_string() const { return type_ == Type::string; }
-    bool is_array() const { return type_ == Type::array; }
-    bool is_object() const { return type_ == Type::object; }
-
-    bool get_bool() const {
-        if (type_ != Type::boolean) throw std::runtime_error("Json is not a boolean");
-        return bool_value_;
-    }
-
-    int64_t get_int64() const {
-        if (type_ == Type::number_integer) return int_value_;
-        if (type_ == Type::number_float) return static_cast<int64_t>(float_value_);
-        throw std::runtime_error("Json is not a number");
-    }
-
-    int get_int() const {
-        return static_cast<int>(get_int64());
-    }
-
-    double get_double() const {
-        if (type_ == Type::number_float) return float_value_;
-        if (type_ == Type::number_integer) return static_cast<double>(int_value_);
-        throw std::runtime_error("Json is not a number");
-    }
-
-    std::string get_string() const {
-        if (type_ != Type::string) throw std::runtime_error("Json is not a string");
-        return *string_value_;
-    }
-
-    std::vector<int64_t> get_int64_array() const {
-        if (type_ != Type::array) throw std::runtime_error("Json is not an array");
-        std::vector<int64_t> result;
-        for (const auto& item : *array_value_) {
-            result.push_back(item.get_int64());
-        }
-        return result;
-    }
-
-    std::vector<double> get_double_array() const {
-        if (type_ != Type::array) throw std::runtime_error("Json is not an array");
-        std::vector<double> result;
-        for (const auto& item : *array_value_) {
-            result.push_back(item.get_double());
-        }
-        return result;
-    }
-
-    std::vector<std::string> get_string_array() const {
-        if (type_ != Type::array) throw std::runtime_error("Json is not an array");
-        std::vector<std::string> result;
-        for (const auto& item : *array_value_) {
-            result.push_back(item.get_string());
-        }
-        return result;
-    }
-
-    Json& operator[](const std::string& key) {
-        if (type_ == Type::null) {
-            type_ = Type::object;
-            object_value_ = new std::map<std::string, Json>();
-        }
-        if (type_ != Type::object) throw std::runtime_error("Json is not an object");
-        return (*object_value_)[key];
-    }
-
-    const Json& operator[](const std::string& key) const {
-        if (type_ != Type::object) throw std::runtime_error("Json is not an object");
-        static const Json null_json;
-        auto it = object_value_->find(key);
-        if (it == object_value_->end()) return null_json;
-        return it->second;
-    }
-
-    Json& operator[](size_t index) {
-        if (type_ != Type::array) throw std::runtime_error("Json is not an array");
-        if (index >= array_value_->size()) throw std::runtime_error("Array index out of bounds");
-        return (*array_value_)[index];
-    }
-
-    const Json& operator[](size_t index) const {
-        if (type_ != Type::array) throw std::runtime_error("Json is not an array");
-        if (index >= array_value_->size()) throw std::runtime_error("Array index out of bounds");
-        return (*array_value_)[index];
-    }
-
-    bool contains(const std::string& key) const {
-        if (type_ != Type::object) return false;
-        return object_value_->find(key) != object_value_->end();
-    }
-
-    void push_back(const Json& value) {
-        if (type_ == Type::null) {
-            type_ = Type::array;
-            array_value_ = new std::vector<Json>();
-        }
-        if (type_ != Type::array) throw std::runtime_error("Json is not an array");
-        array_value_->push_back(value);
-    }
-
-    void push_back(Json&& value) {
-        if (type_ == Type::null) {
-            type_ = Type::array;
-            array_value_ = new std::vector<Json>();
-        }
-        if (type_ != Type::array) throw std::runtime_error("Json is not an array");
-        array_value_->push_back(std::move(value));
-    }
-
-    size_t size() const {
-        if (type_ == Type::array) return array_value_->size();
-        if (type_ == Type::object) return object_value_->size();
-        return 0;
-    }
-
-    std::string dump(int indent = -1) const {
-        std::ostringstream oss;
-        Dump(oss, indent, 0);
-        return oss.str();
-    }
-
-    static Json parse(const std::string& str) {
-        Parser parser(str);
-        return parser.Parse();
-    }
-
-    static Json array() {
-        Json j;
-        j.type_ = Type::array;
-        j.array_value_ = new std::vector<Json>();
-        return j;
-    }
-
-    static Json object() {
-        Json j;
-        j.type_ = Type::object;
-        j.object_value_ = new std::map<std::string, Json>();
-        return j;
-    }
-
-private:
-    Type type_;
-
-    union {
-        bool bool_value_;
-        int64_t int_value_;
-        double float_value_;
-        std::string* string_value_;
-        std::vector<Json>* array_value_;
-        std::map<std::string, Json>* object_value_;
-    };
-
-    void Clear() {
-        switch (type_) {
-            case Type::string:
-                delete string_value_;
-                break;
-            case Type::array:
-                delete array_value_;
-                break;
-            case Type::object:
-                delete object_value_;
-                break;
-            default:
-                break;
-        }
-    }
-
-    void CopyValue(const Json& other) {
-        switch (other.type_) {
-            case Type::null:
-                break;
-            case Type::boolean:
-                bool_value_ = other.bool_value_;
-                break;
-            case Type::number_integer:
-                int_value_ = other.int_value_;
-                break;
-            case Type::number_float:
-                float_value_ = other.float_value_;
-                break;
-            case Type::string:
-                string_value_ = new std::string(*other.string_value_);
-                break;
-            case Type::array:
-                array_value_ = new std::vector<Json>(*other.array_value_);
-                break;
-            case Type::object:
-                object_value_ = new std::map<std::string, Json>(*other.object_value_);
-                break;
-        }
-    }
-
-    void MoveValue(Json&& other) {
-        switch (other.type_) {
-            case Type::null:
-                break;
-            case Type::boolean:
-                bool_value_ = other.bool_value_;
-                break;
-            case Type::number_integer:
-                int_value_ = other.int_value_;
-                break;
-            case Type::number_float:
-                float_value_ = other.float_value_;
-                break;
-            case Type::string:
-                string_value_ = other.string_value_;
-                other.string_value_ = nullptr;
-                break;
-            case Type::array:
-                array_value_ = other.array_value_;
-                other.array_value_ = nullptr;
-                break;
-            case Type::object:
-                object_value_ = other.object_value_;
-                other.object_value_ = nullptr;
-                break;
-        }
-    }
-
-    void Dump(std::ostringstream& oss, int indent, int level) const {
-        std::string indent_str;
-        if (indent > 0) {
-            indent_str = std::string(level * indent, ' ');
-        }
-
-        switch (type_) {
-            case Type::null:
-                oss << "null";
-                break;
-            case Type::boolean:
-                oss << (bool_value_ ? "true" : "false");
-                break;
-            case Type::number_integer:
-                oss << int_value_;
-                break;
-            case Type::number_float:
-                oss << float_value_;
-                break;
-            case Type::string:
-                oss << "\"" << EscapeString(*string_value_) << "\"";
-                break;
-            case Type::array:
-                oss << "[";
-                if (indent > 0 && !array_value_->empty()) {
-                    oss << "\n";
-                }
-                for (size_t i = 0; i < array_value_->size(); ++i) {
-                    if (indent > 0) {
-                        oss << indent_str << std::string(indent, ' ');
-                    }
-                    (*array_value_)[i].Dump(oss, indent, level + 1);
-                    if (i < array_value_->size() - 1) {
-                        oss << ",";
-                    }
-                    if (indent > 0) {
-                        oss << "\n";
-                    }
-                }
-                if (indent > 0 && !array_value_->empty()) {
-                    oss << indent_str;
-                }
-                oss << "]";
-                break;
-            case Type::object:
-                oss << "{";
-                if (indent > 0 && !object_value_->empty()) {
-                    oss << "\n";
-                }
-                auto it = object_value_->begin();
-                for (size_t i = 0; i < object_value_->size(); ++i, ++it) {
-                    if (indent > 0) {
-                        oss << indent_str << std::string(indent, ' ');
-                    }
-                    oss << "\"" << it->first << "\":";
-                    if (indent > 0) {
-                        oss << " ";
-                    }
-                    it->second.Dump(oss, indent, level + 1);
-                    if (i < object_value_->size() - 1) {
-                        oss << ",";
-                    }
-                    if (indent > 0) {
-                        oss << "\n";
-                    }
-                }
-                if (indent > 0 && !object_value_->empty()) {
-                    oss << indent_str;
-                }
-                oss << "}";
-                break;
-        }
-    }
-
-    static std::string EscapeString(const std::string& str) {
-        std::string result;
-        for (char c : str) {
-            switch (c) {
-                case '"': result += "\\\""; break;
-                case '\\': result += "\\\\"; break;
-                case '\b': result += "\\b"; break;
-                case '\f': result += "\\f"; break;
-                case '\n': result += "\\n"; break;
-                case '\r': result += "\\r"; break;
-                case '\t': result += "\\t"; break;
-                default:
-                    if (static_cast<unsigned char>(c) < 0x20) {
-                        char buf[7];
-                        snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
-                        result += buf;
-                    } else {
-                        result += c;
-                    }
-                    break;
-            }
-        }
-        return result;
-    }
-
-    class Parser {
-    public:
-        Parser(const std::string& str) : str_(str), pos_(0) {
-            SkipWhitespace();
-        }
-
-        Json Parse() {
-            if (pos_ >= str_.size()) {
-                throw std::runtime_error("Empty JSON string");
-            }
-            return ParseValue();
-        }
-
-    private:
-        const std::string& str_;
-        size_t pos_;
-
-        void SkipWhitespace() {
-            while (pos_ < str_.size() && (str_[pos_] == ' ' || str_[pos_] == '\t' ||
-                                          str_[pos_] == '\n' || str_[pos_] == '\r')) {
-                ++pos_;
-            }
-        }
-
-        char Peek() const {
-            if (pos_ >= str_.size()) return '\0';
-            return str_[pos_];
-        }
-
-        char Consume() {
-            if (pos_ >= str_.size()) return '\0';
-            return str_[pos_++];
-        }
-
-        Json ParseValue() {
-            SkipWhitespace();
-            char c = Peek();
-
-            if (c == 'n') return ParseNull();
-            if (c == 't' || c == 'f') return ParseBoolean();
-            if (c == '"') return ParseString();
-            if (c == '[') return ParseArray();
-            if (c == '{') return ParseObject();
-            if (c == '-' || (c >= '0' && c <= '9')) return ParseNumber();
-
-            throw std::runtime_error(std::string("Unexpected character: ") + c);
-        }
-
-        Json ParseNull() {
-            if (str_.substr(pos_, 4) == "null") {
-                pos_ += 4;
-                return Json();
-            }
-            throw std::runtime_error("Expected 'null'");
-        }
-
-        Json ParseBoolean() {
-            if (str_.substr(pos_, 4) == "true") {
-                pos_ += 4;
-                return Json(true);
-            }
-            if (str_.substr(pos_, 5) == "false") {
-                pos_ += 5;
-                return Json(false);
-            }
-            throw std::runtime_error("Expected 'true' or 'false'");
-        }
-
-        Json ParseNumber() {
-            size_t start = pos_;
-            if (Peek() == '-') Consume();
-
-            while (pos_ < str_.size() && (str_[pos_] >= '0' && str_[pos_] <= '9')) {
-                ++pos_;
-            }
-
-            bool is_float = false;
-            if (pos_ < str_.size() && str_[pos_] == '.') {
-                is_float = true;
-                ++pos_;
-                while (pos_ < str_.size() && (str_[pos_] >= '0' && str_[pos_] <= '9')) {
-                    ++pos_;
-                }
-            }
-
-            if (pos_ < str_.size() && (str_[pos_] == 'e' || str_[pos_] == 'E')) {
-                is_float = true;
-                ++pos_;
-                if (pos_ < str_.size() && (str_[pos_] == '+' || str_[pos_] == '-')) {
-                    ++pos_;
-                }
-                while (pos_ < str_.size() && (str_[pos_] >= '0' && str_[pos_] <= '9')) {
-                    ++pos_;
-                }
-            }
-
-            std::string num_str = str_.substr(start, pos_ - start);
-            if (is_float) {
-                return Json(std::stod(num_str));
-            } else {
-                return Json(static_cast<int64_t>(std::stoll(num_str)));
-            }
-        }
-
-        Json ParseString() {
-            if (Consume() != '"') {
-                throw std::runtime_error("Expected '\"'");
-            }
-
-            std::string result;
-            while (pos_ < str_.size() && str_[pos_] != '"') {
-                if (str_[pos_] == '\\') {
-                    ++pos_;
-                    if (pos_ >= str_.size()) {
-                        throw std::runtime_error("Unexpected end of string");
-                    }
-                    switch (str_[pos_]) {
-                        case '"': result += '"'; break;
-                        case '\\': result += '\\'; break;
-                        case '/': result += '/'; break;
-                        case 'b': result += '\b'; break;
-                        case 'f': result += '\f'; break;
-                        case 'n': result += '\n'; break;
-                        case 'r': result += '\r'; break;
-                        case 't': result += '\t'; break;
-                        case 'u': {
-                            if (pos_ + 4 >= str_.size()) {
-                                throw std::runtime_error("Invalid unicode escape");
-                            }
-                            std::string hex_str = str_.substr(pos_ + 1, 4);
-                            unsigned int codepoint = std::stoul(hex_str, nullptr, 16);
-                            if (codepoint < 0x80) {
-                                result += static_cast<char>(codepoint);
-                            } else if (codepoint < 0x800) {
-                                result += static_cast<char>(0xC0 | (codepoint >> 6));
-                                result += static_cast<char>(0x80 | (codepoint & 0x3F));
-                            } else {
-                                result += static_cast<char>(0xE0 | (codepoint >> 12));
-                                result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
-                                result += static_cast<char>(0x80 | (codepoint & 0x3F));
-                            }
-                            pos_ += 4;
-                            break;
-                        }
-                        default:
-                            throw std::runtime_error("Invalid escape sequence");
-                    }
-                } else {
-                    result += str_[pos_];
-                }
-                ++pos_;
-            }
-
-            if (pos_ >= str_.size() || Consume() != '"') {
-                throw std::runtime_error("Unterminated string");
-            }
-
-            return Json(result);
-        }
-
-        Json ParseArray() {
-            if (Consume() != '[') {
-                throw std::runtime_error("Expected '['");
-            }
-
-            Json result = Json::array();
-            SkipWhitespace();
-
-            if (Peek() == ']') {
-                Consume();
-                return result;
-            }
-
-            while (true) {
-                result.push_back(ParseValue());
-                SkipWhitespace();
-
-                if (Peek() == ']') {
-                    Consume();
-                    return result;
-                }
-
-                if (Peek() == ',') {
-                    Consume();
-                } else {
-                    throw std::runtime_error("Expected ',' or ']' in array");
-                }
-            }
-        }
-
-        Json ParseObject() {
-            if (Consume() != '{') {
-                throw std::runtime_error("Expected '{'");
-            }
-
-            Json result = Json::object();
-            SkipWhitespace();
-
-            if (Peek() == '}') {
-                Consume();
-                return result;
-            }
-
-            while (true) {
-                SkipWhitespace();
-                Json key = ParseString();
-                SkipWhitespace();
-
-                if (Consume() != ':') {
-                    throw std::runtime_error("Expected ':' after key");
-                }
-
-                Json value = ParseValue();
-                result[key.get_string()] = std::move(value);
-                SkipWhitespace();
-
-                if (Peek() == '}') {
-                    Consume();
-                    return result;
-                }
-
-                if (Peek() == ',') {
-                    Consume();
-                } else {
-                    throw std::runtime_error("Expected ',' or '}' in object");
-                }
-            }
-        }
-    };
-};
-
-} // namespace json_internal
-
-namespace crypto {
-
-class SHA1 {
-public:
-    static constexpr size_t DIGEST_LENGTH = 20;
-
-    static std::string Hash(const std::string& input) {
-        SHA1 sha1;
-        sha1.Update(reinterpret_cast<const uint8_t*>(input.c_str()), input.length());
-        uint8_t digest[DIGEST_LENGTH];
-        sha1.Final(digest);
-        return DigestToHex(digest);
-    }
-
-private:
-    SHA1() {
-        Reset();
-    }
-
-    void Reset() {
-        m_digest[0] = 0x67452301;
-        m_digest[1] = 0xEFCDAB89;
-        m_digest[2] = 0x98BADCFE;
-        m_digest[3] = 0x10325476;
-        m_digest[4] = 0xC3D2E1F0;
-        m_block_len = 0;
-        m_total_len = 0;
-    }
-
-    void Update(const uint8_t* data, size_t len) {
-        while (len) {
-            size_t copy_len = std::min(len, 64 - m_block_len);
-            std::memcpy(m_block + m_block_len, data, copy_len);
-
-            m_block_len += copy_len;
-            m_total_len += copy_len;
-            data += copy_len;
-            len -= copy_len;
-
-            if (m_block_len == 64) {
-                ProcessBlock(m_block);
-                m_block_len = 0;
-            }
-        }
-    }
-
-    void Final(uint8_t* digest) {
-        uint64_t total_bits = m_total_len * 8;
-
-        m_block[m_block_len++] = 0x80;
-        if (m_block_len > 56) {
-            while (m_block_len < 64) {
-                m_block[m_block_len++] = 0;
-            }
-            ProcessBlock(m_block);
-            m_block_len = 0;
-        }
-
-        while (m_block_len < 56) {
-            m_block[m_block_len++] = 0;
-        }
-
-        for (int i = 7; i >= 0; --i) {
-            m_block[m_block_len++] = static_cast<uint8_t>((total_bits >> (i * 8)) & 0xFF);
-        }
-
-        ProcessBlock(m_block);
-
-        for (int i = 0; i < 5; ++i) {
-            digest[i * 4 + 0] = static_cast<uint8_t>((m_digest[i] >> 24) & 0xFF);
-            digest[i * 4 + 1] = static_cast<uint8_t>((m_digest[i] >> 16) & 0xFF);
-            digest[i * 4 + 2] = static_cast<uint8_t>((m_digest[i] >> 8) & 0xFF);
-            digest[i * 4 + 3] = static_cast<uint8_t>(m_digest[i] & 0xFF);
-        }
-    }
-
-    void ProcessBlock(const uint8_t* block) {
-        uint32_t w[80];
-
-        for (int i = 0; i < 16; ++i) {
-            w[i] = (block[i * 4 + 0] << 24) | (block[i * 4 + 1] << 16) |
-                   (block[i * 4 + 2] << 8) | block[i * 4 + 3];
-        }
-
-        for (int i = 16; i < 80; ++i) {
-            uint32_t temp = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16];
-            w[i] = ROTL(temp, 1);
-        }
-
-        uint32_t a = m_digest[0];
-        uint32_t b = m_digest[1];
-        uint32_t c = m_digest[2];
-        uint32_t d = m_digest[3];
-        uint32_t e = m_digest[4];
-
-        for (int i = 0; i < 80; ++i) {
-            uint32_t f, k;
-
-            if (i < 20) {
-                f = (b & c) | ((~b) & d);
-                k = 0x5A827999;
-            } else if (i < 40) {
-                f = b ^ c ^ d;
-                k = 0x6ED9EBA1;
-            } else if (i < 60) {
-                f = (b & c) | (b & d) | (c & d);
-                k = 0x8F1BBCDC;
-            } else {
-                f = b ^ c ^ d;
-                k = 0xCA62C1D6;
-            }
-
-            uint32_t temp = ROTL(a, 5) + f + e + k + w[i];
-            e = d;
-            d = c;
-            c = ROTL(b, 30);
-            b = a;
-            a = temp;
-        }
-
-        m_digest[0] += a;
-        m_digest[1] += b;
-        m_digest[2] += c;
-        m_digest[3] += d;
-        m_digest[4] += e;
-    }
-
-    static uint32_t ROTL(uint32_t x, uint32_t n) {
-        return (x << n) | (x >> (32 - n));
-    }
-
-    static std::string DigestToHex(const uint8_t* digest) {
-        std::ostringstream oss;
-        oss << std::hex << std::setfill('0');
-        for (size_t i = 0; i < DIGEST_LENGTH; ++i) {
-            oss << std::setw(2) << static_cast<int>(digest[i]);
-        }
-        return oss.str();
-    }
-
-    uint32_t m_digest[5];
-    uint8_t m_block[64];
-    size_t m_block_len;
-    uint64_t m_total_len;
-};
-
-} // namespace crypto
-
-using Json = json_internal::Json;
 
 struct TensorInfo {
     std::string param_name;
@@ -862,6 +79,13 @@ struct TilingResult {
     MatMulV3BasicTilingData matmul_basic_tiling_data;
 };
 
+extern "C" bool AutofuseDoCubeMatMulTiling(const CompileInfo* compile_info,
+                                           const std::vector<TensorInfo>* inputs,
+                                           const std::vector<TensorInfo>* outputs,
+                                           const std::vector<AttrInfo>* attrs,
+                                           bool is_batch,
+                                           TilingResult* result);
+
 class CubeKernelTilingWrapper {
 public:
     CubeKernelTilingWrapper();
@@ -874,38 +98,12 @@ public:
                                 bool is_batch = false);
 
     static void BuildMatMulArgs(const std::vector<TensorInfo>& args_list,
-                               int input_num,
-                               bool transpose_a,
-                               bool transpose_b,
-                               std::vector<TensorInfo>& origin_inputs,
-                               std::vector<TensorInfo>& origin_outputs,
-                               std::vector<TensorInfo>& inputs);
-
-    static std::string GenerateCompileInfoHash(const std::string& compile_info_info);
-
-    static void ChangeParamNameToName(std::vector<TensorInfo>& inputs);
-    static void InputsPreProcess(std::vector<TensorInfo>& inputs);
-    static void AttrsPreProcess(std::vector<AttrInfo>& attrs);
-    static std::vector<uint8_t> AlignTilingDataTo8Bytes(const std::vector<uint8_t>& tiling_data, const std::string& soc_version);
-
-private:
-    static std::string SerializeToJson(const CompileInfo& compile_info);
-    static std::string SerializeToJson(const std::vector<TensorInfo>& tensors);
-    static std::string SerializeToJson(const std::vector<AttrInfo>& attrs);
-    static std::string SerializeToJson(const std::map<std::string, std::string>& extra_params);
-
-    static bool ParseTilingResult(const std::string& json_str, TilingResult& result);
-
-    char* CallDoOpTilingForCompile(const char* op_type,
-                                           const char* compile_info,
-                                           const char* compile_info_hash,
-                                           const char* inputs,
-                                           const char* outputs,
-                                           const char* attrs,
-                                           char* buf,
-                                           size_t buf_size,
-                                           uint64_t* timer,
-                                           const char* extra_params);
+                                int input_num,
+                                bool transpose_a,
+                                bool transpose_b,
+                                std::vector<TensorInfo>& origin_inputs,
+                                std::vector<TensorInfo>& origin_outputs,
+                                std::vector<TensorInfo>& inputs);
 };
 
 } // namespace autofuse
@@ -916,413 +114,1052 @@ private:
 
 inline const std::string kCubeKernelTilingWrapperCppValue = R"(
 #include "autofuse_tiling_func_log.h"
-#include <sstream>
-#include <iomanip>
-#include <dlfcn.h>
-#include <iostream>
+#include "registry/op_impl_space_registry_v2.h"
+
+#include "context_builder/op_tiling_context_builder.h"
+#include "context_builder/op_tiling_parse_context_builder.h"
+#include "exe_graph/runtime/continuous_vector.h"
+#include "exe_graph/runtime/storage_format.h"
+#include "exe_graph/runtime/storage_shape.h"
+#include "exe_graph/runtime/tensor.h"
+#include "platform/platform_info.h"
+#include "platform/platform_infos_def.h"
+#include "register/op_impl_kernel_registry.h"
+
+#include <algorithm>
+#include <array>
 #include <cstdlib>
-#include <unistd.h>
 #include <cstring>
-#include <cmath>
 #include <limits>
-
-using json = ge::autofuse::Json;
-using SHA1 = ge::autofuse::crypto::SHA1;
-
-#ifndef DEFAULT_ASCEND_OPP_PATH
-#define DEFAULT_ASCEND_OPP_PATH "/usr/local/Ascend/cann/opp"
-#endif
-
-extern "C" const char *DoOpTilingForCompile(const char *optype,
-                                            const char *compile_info,
-                                            const char *compile_info_hash,
-                                            const char *inputs,
-                                            const char *outputs,
-                                            const char *attrs,
-                                            char *run_info_json,
-                                            size_t run_info_len,
-                                            uint64_t *elapse,
-                                            const char *extra_info);
+#include <map>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
 namespace ge {
 namespace autofuse {
+
+namespace {
+constexpr size_t kMaxTilingDataSize = 64 * 1024;
+constexpr size_t kWorkspaceCapacity = 4096;
+const std::vector<uint32_t> kSingleOutputInstanceNum = {1U};
+
+struct OpHostFuncs {
+  gert::OpImplRegisterV2::TilingKernelFunc tiling = nullptr;
+  gert::OpImplRegisterV2::KernelFunc tiling_parse = nullptr;
+  gert::OpImplRegisterV2::CompileInfoCreatorFunc compile_info_creator = nullptr;
+  size_t max_tiling_data_size = 0UL;
+};
+
+struct CachedOpHostFuncs {
+  OpHostFuncs funcs;
+  bool loaded = false;
+  std::once_flag once;
+};
+
+struct OpHostSchema {
+  const char *op_type;
+};
+
+struct MatMulAttrs {
+  bool transpose_x1 = false;
+  bool transpose_x2 = false;
+  int64_t offset_x = 0;
+  int64_t op_impl_mode = 0;
+  bool enable_hf32 = false;
+  bool has_bias = false;
+  bool has_offset_w = false;
+  bool has_optional_input_markers = false;
+};
+
+struct RuntimeTilingKey {
+  std::string soc_version;
+  std::string device_id;
+  std::string op_type;
+  std::string dtype;
+  std::string format;
+  std::vector<int64_t> input0_shape;
+  std::vector<int64_t> input1_shape;
+  std::vector<int64_t> input2_shape;
+  std::vector<int64_t> input3_shape;
+  std::string input2_dtype;
+  std::string input3_dtype;
+  std::string input2_format;
+  std::string input3_format;
+  std::vector<int64_t> output_shape;
+  bool is_batch = false;
+  size_t input_num = 0U;
+  bool has_bias = false;
+  bool has_offset_w = false;
+  bool transpose_x1 = false;
+  bool transpose_x2 = false;
+  int64_t offset_x = 0;
+  int64_t op_impl_mode = 0;
+  bool enable_hf32 = false;
+  int64_t aicore_num = 0;
+  int64_t aiv_num = 0;
+
+  bool operator<(const RuntimeTilingKey &other) const {
+    return std::tie(soc_version, device_id, op_type, dtype, format, input0_shape, input1_shape, input2_shape,
+                    input3_shape, input2_dtype, input3_dtype, input2_format, input3_format, output_shape, is_batch,
+                    input_num, has_bias, has_offset_w, transpose_x1, transpose_x2, offset_x, op_impl_mode, enable_hf32,
+                    aicore_num, aiv_num) <
+           std::tie(other.soc_version, other.device_id, other.op_type, other.dtype, other.format, other.input0_shape,
+                    other.input1_shape, other.input2_shape, other.input3_shape, other.input2_dtype, other.input3_dtype,
+                    other.input2_format, other.input3_format, other.output_shape, other.is_batch, other.input_num,
+                    other.has_bias, other.has_offset_w, other.transpose_x1, other.transpose_x2, other.offset_x,
+                    other.op_impl_mode, other.enable_hf32, other.aicore_num, other.aiv_num);
+  }
+};
+
+struct CompileState;
+
+struct CompileStateKey {
+  std::string soc_version;
+  std::string device_id;
+  std::string dtype;
+  std::string format;
+  std::string input2_dtype;
+  std::string input3_dtype;
+  std::string input2_format;
+  std::string input3_format;
+  bool is_batch = false;
+  size_t input_num = 0U;
+  bool has_bias = false;
+  bool has_offset_w = false;
+  bool transpose_x1 = false;
+  bool transpose_x2 = false;
+  int64_t offset_x = 0;
+  int64_t op_impl_mode = 0;
+  bool enable_hf32 = false;
+  int64_t aicore_num = 0;
+  int64_t aiv_num = 0;
+
+  bool operator<(const CompileStateKey &other) const {
+    return std::tie(soc_version, device_id, dtype, format, input2_dtype, input3_dtype, input2_format, input3_format,
+                    is_batch, input_num, transpose_x1, transpose_x2, offset_x, op_impl_mode, enable_hf32, aicore_num,
+                    aiv_num, has_bias, has_offset_w) <
+           std::tie(other.soc_version, other.device_id, other.dtype, other.format, other.input2_dtype,
+                    other.input3_dtype, other.input2_format, other.input3_format, other.is_batch, other.input_num,
+                    other.transpose_x1, other.transpose_x2, other.offset_x, other.op_impl_mode, other.enable_hf32,
+                    other.aicore_num, other.aiv_num, other.has_bias, other.has_offset_w);
+  }
+};
+
+struct CompileState {
+  std::string compile_json;
+  fe::PlatFormInfos platform_info;
+  void *compile_info_ptr = nullptr;
+};
+
+struct TilingRequest {
+  const CompileInfo &compile_info;
+  const std::vector<TensorInfo> &inputs;
+  const std::vector<TensorInfo> &outputs;
+  bool is_batch = false;
+  const OpHostSchema &schema;
+  MatMulAttrs matmul_attrs;
+  ge::DataType data_type = ge::DT_UNDEFINED;
+  ge::Format format = ge::FORMAT_RESERVED;
+};
+
+struct TilingScratch {
+  std::unique_ptr<uint8_t[]> tiling_data_holder;
+  std::unique_ptr<uint8_t[]> workspace_holder;
+  size_t tiling_data_capacity = 0UL;
+  std::vector<gert::Tensor *> input_tensors;
+  std::vector<gert::Tensor *> output_tensors;
+
+  bool EnsureCapacity(size_t required_tiling_data_capacity, std::string &error_msg, const char *op_type) {
+    if (tiling_data_holder == nullptr || required_tiling_data_capacity > tiling_data_capacity) {
+      auto new_tiling_data_holder = gert::TilingData::CreateCap(required_tiling_data_capacity);
+      if (new_tiling_data_holder == nullptr) {
+        error_msg = std::string(op_type) + " tiling data allocation failed";
+        return false;
+      }
+      tiling_data_holder = std::move(new_tiling_data_holder);
+      tiling_data_capacity = required_tiling_data_capacity;
+    }
+    if (workspace_holder == nullptr) {
+      workspace_holder = gert::ContinuousVector::Create<size_t>(kWorkspaceCapacity);
+      if (workspace_holder == nullptr) {
+        error_msg = std::string(op_type) + " workspace allocation failed";
+        return false;
+      }
+    }
+    input_tensors.reserve(4U);
+    output_tensors.reserve(1U);
+    return true;
+  }
+
+  gert::TilingData *MutableTilingData() const {
+    return reinterpret_cast<gert::TilingData *>(tiling_data_holder.get());
+  }
+
+  gert::ContinuousVector *MutableWorkspace() const {
+    return reinterpret_cast<gert::ContinuousVector *>(workspace_holder.get());
+  }
+};
+
+TilingScratch &GetTilingScratch() {
+  thread_local TilingScratch scratch;
+  return scratch;
+}
+
+CachedOpHostFuncs &GetMatMulFuncsCache() {
+  static auto *cache = new CachedOpHostFuncs();
+  return *cache;
+}
+
+CachedOpHostFuncs &GetBatchMatMulFuncsCache() {
+  static auto *cache = new CachedOpHostFuncs();
+  return *cache;
+}
+
+std::mutex &GetCompileStateMutex() {
+  static auto *mutex = new std::mutex();
+  return *mutex;
+}
+
+std::map<CompileStateKey, std::shared_ptr<const CompileState>> &GetCompileStateCache() {
+  static auto cache = std::make_shared<std::map<CompileStateKey, std::shared_ptr<const CompileState>>>();
+  return *cache;
+}
+
+std::mutex &GetTilingResultCacheMutex() {
+  static auto *mutex = new std::mutex();
+  return *mutex;
+}
+
+std::map<RuntimeTilingKey, TilingResult> &GetTilingResultCache() {
+  static auto *cache = new std::map<RuntimeTilingKey, TilingResult>();
+  return *cache;
+}
+
+const OpHostSchema &GetOpHostSchema(bool is_batch) {
+  static const OpHostSchema kMatMulV3Schema{"MatMulV3"};
+  static const OpHostSchema kBatchMatMulV3Schema{"BatchMatMulV3"};
+  return is_batch ? kBatchMatMulV3Schema : kMatMulV3Schema;
+}
+
+ge::DataType DtypeToGeDataType(const std::string &dtype) {
+  if (dtype == "float" || dtype == "float32" || dtype == "DT_FLOAT" || dtype == "torch.float32") {
+    return ge::DT_FLOAT;
+  }
+  if (dtype == "float16" || dtype == "half" || dtype == "DT_FLOAT16" || dtype == "torch.float16") {
+    return ge::DT_FLOAT16;
+  }
+  if (dtype == "bfloat16" || dtype == "bf16" || dtype == "DT_BF16" || dtype == "torch.bfloat16") {
+    return ge::DT_BF16;
+  }
+  return ge::DT_UNDEFINED;
+}
+
+ge::Format FormatToGeFormat(const std::string &format) {
+  if (format.empty() || format == "ND" || format == "FORMAT_ND" || format == "ACL_FORMAT_ND") {
+    return ge::FORMAT_ND;
+  }
+  return ge::FORMAT_RESERVED;
+}
+
+bool AttrAsBool(const AttrInfo &attr) {
+  if (attr.dtype == "bool") {
+    return attr.value_bool;
+  }
+  if (attr.dtype == "int" || attr.dtype == "int32" || attr.dtype == "int64") {
+    return attr.value_int != 0;
+  }
+  return false;
+}
+
+int64_t AttrAsInt(const AttrInfo &attr) {
+  if (attr.dtype == "bool") {
+    return attr.value_bool ? 1 : 0;
+  }
+  if (attr.dtype == "int" || attr.dtype == "int32" || attr.dtype == "int64") {
+    return attr.value_int;
+  }
+  return 0;
+}
+
+MatMulAttrs ReadMatMulAttrs(const std::vector<AttrInfo> &attrs, bool is_batch) {
+  MatMulAttrs result;
+  const char *transpose_x1_name = is_batch ? "adj_x1" : "transpose_x1";
+  const char *transpose_x2_name = is_batch ? "adj_x2" : "transpose_x2";
+  for (const auto &attr : attrs) {
+    if (attr.name == transpose_x1_name) {
+      result.transpose_x1 = AttrAsBool(attr);
+    } else if (attr.name == transpose_x2_name) {
+      result.transpose_x2 = AttrAsBool(attr);
+    } else if (attr.name == "offset_x") {
+      result.offset_x = AttrAsInt(attr);
+    } else if (attr.name == "opImplMode") {
+      result.op_impl_mode = AttrAsInt(attr);
+    } else if (attr.name == "enable_hf32") {
+      result.enable_hf32 = AttrAsBool(attr);
+    } else if (attr.name == "autofuse_has_bias") {
+      result.has_bias = AttrAsBool(attr);
+      result.has_optional_input_markers = true;
+    } else if (attr.name == "autofuse_has_offset_w") {
+      result.has_offset_w = AttrAsBool(attr);
+      result.has_optional_input_markers = true;
+    }
+  }
+  result.enable_hf32 = result.enable_hf32 || result.op_impl_mode != 0;
+  return result;
+}
+
+bool LoadOpHostFuncs(const char *op_type, OpHostFuncs &funcs) {
+  auto registry = gert::DefaultOpImplSpaceRegistryV2::GetInstance().GetSpaceRegistry();
+  if (registry == nullptr) {
+    return false;
+  }
+  const auto *op_impl = registry->GetOpImpl(op_type);
+  if (op_impl == nullptr) {
+    return false;
+  }
+  funcs.tiling = op_impl->tiling;
+  funcs.tiling_parse = op_impl->tiling_parse;
+  funcs.compile_info_creator = op_impl->compile_info_creator;
+  funcs.max_tiling_data_size = op_impl->max_tiling_data_size;
+  return funcs.tiling != nullptr && funcs.tiling_parse != nullptr && funcs.compile_info_creator != nullptr;
+}
+
+const CachedOpHostFuncs &GetOpHostFuncs(bool is_batch, const char *op_type) {
+  CachedOpHostFuncs &cache = is_batch ? GetBatchMatMulFuncsCache() : GetMatMulFuncsCache();
+  std::call_once(cache.once, [&cache, op_type]() { cache.loaded = LoadOpHostFuncs(op_type, cache.funcs); });
+  return cache;
+}
+
+bool ParseUint32(const std::string &value, uint32_t &result) {
+  if (value.empty()) {
+    return false;
+  }
+  char *end = nullptr;
+  const unsigned long parsed = std::strtoul(value.c_str(), &end, 10);
+  if (end == value.c_str() || *end != '\0' || parsed > std::numeric_limits<uint32_t>::max()) {
+    return false;
+  }
+  result = static_cast<uint32_t>(parsed);
+  return true;
+}
+
+bool ParseUint64(const std::string &value, uint64_t &result) {
+  if (value.empty()) {
+    return false;
+  }
+  char *end = nullptr;
+  const unsigned long long parsed = std::strtoull(value.c_str(), &end, 10);
+  if (end == value.c_str() || *end != '\0') {
+    return false;
+  }
+  result = static_cast<uint64_t>(parsed);
+  return true;
+}
+
+uint32_t GetCompileDeviceId(const CompileInfo &compile_info) {
+  uint32_t device_id = 0;
+  (void)ParseUint32(compile_info.device_id, device_id);
+  return device_id;
+}
+
+std::string GetPlatformString(fe::PlatFormInfos &platform_info, const std::string &label, const std::string &key,
+                              const std::string &fallback = "") {
+  std::string value;
+  if (platform_info.GetPlatformResWithLock(label, key, value) && !value.empty()) {
+    return value;
+  }
+  return fallback;
+}
+
+uint64_t GetPlatformUint64(fe::PlatFormInfos &platform_info, const std::string &label, const std::string &key,
+                           uint64_t fallback = 0U) {
+  uint64_t value = 0U;
+  if (ParseUint64(GetPlatformString(platform_info, label, key), value)) {
+    return value;
+  }
+  return fallback;
+}
+
+uint64_t GetLocalMemSize(fe::PlatFormInfos &platform_info, fe::LocalMemType mem_type, const std::string &label,
+                         const std::string &key) {
+  uint64_t size = 0U;
+  platform_info.GetLocalMemSize(mem_type, size);
+  if (size != 0U) {
+    return size;
+  }
+  return GetPlatformUint64(platform_info, label, key);
+}
+
+uint32_t GetPlatformCoreNum(fe::PlatFormInfos &platform_info, const std::string &core_type,
+                            const std::string &soc_info_key) {
+  uint32_t core_num = platform_info.GetCoreNumByType(core_type);
+  if (core_num != 0U) {
+    return core_num;
+  }
+  return static_cast<uint32_t>(GetPlatformUint64(platform_info, "SoCInfo", soc_info_key));
+}
+
+void UpdatePlatformCoreNum(const CompileInfo &compile_info, fe::PlatFormInfos &platform_info) {
+  uint32_t aic_num = compile_info.aicore_num > 0 ? static_cast<uint32_t>(compile_info.aicore_num)
+                                                 : GetPlatformCoreNum(platform_info, "AiCore", "cube_core_cnt");
+  uint32_t aiv_num = compile_info.aiv_num > 0 ? static_cast<uint32_t>(compile_info.aiv_num)
+                                              : GetPlatformCoreNum(platform_info, "VectorCore", "vector_core_cnt");
+  std::map<std::string, std::string> soc_info;
+  if (platform_info.GetPlatformResWithLock("SoCInfo", soc_info)) {
+    if (aic_num != 0U) {
+      soc_info["cube_core_cnt"] = std::to_string(aic_num);
+      soc_info["ai_core_cnt"] = std::to_string(aic_num);
+    }
+    if (aiv_num != 0U) {
+      soc_info["vector_core_cnt"] = std::to_string(aiv_num);
+    }
+    platform_info.SetPlatformResWithLock("SoCInfo", soc_info);
+  }
+  platform_info.SetCoreNumByCoreType("AiCore");
+}
+
+bool FillRuntimePlatformInfo(const CompileInfo &compile_info, fe::PlatFormInfos &platform_info) {
+  if (fe::PlatformInfoManager::GeInstance().GetRuntimePlatformInfosByDevice(GetCompileDeviceId(compile_info),
+                                                                            platform_info, true) != 0U) {
+    return false;
+  }
+  UpdatePlatformCoreNum(compile_info, platform_info);
+  return true;
+}
+
+std::string JsonEscape(const std::string &value) {
+  std::string escaped;
+  escaped.reserve(value.size());
+  for (const char ch : value) {
+    if (ch == '\\' || ch == '"') {
+      escaped.push_back('\\');
+    }
+    escaped.push_back(ch);
+  }
+  return escaped;
+}
+
+const char *BoolLiteral(bool value) {
+  return value ? "true" : "false";
+}
+
+bool HasIntrinsic(fe::PlatFormInfos &platform_info, const std::string &intrinsic_name) {
+  std::map<std::string, std::string> intrinsic_res;
+  if (platform_info.GetPlatformResWithLock("AICoreintrinsicDtypeMap", intrinsic_res) &&
+      intrinsic_res.find(intrinsic_name) != intrinsic_res.end()) {
+    return true;
+  }
+  auto intrinsic_map = platform_info.GetAICoreIntrinsicDtype();
+  return intrinsic_map.find(intrinsic_name) != intrinsic_map.end();
+}
+
+std::string MakeCubeCompileJson(const CompileInfo &compile_info, fe::PlatFormInfos &platform_info, bool is_batch,
+                                bool transpose_x1, bool transpose_x2, int64_t offset_x, int64_t op_impl_mode,
+                                bool enable_hf32) {
+  const std::string soc_version =
+      GetPlatformString(platform_info, "version", "Short_SoC_version", compile_info.soc_version);
+  const uint32_t core_num = GetPlatformCoreNum(platform_info, "AiCore", "cube_core_cnt");
+  const uint32_t vector_core_num = GetPlatformCoreNum(platform_info, "VectorCore", "vector_core_cnt");
+  const uint64_t bt_size = GetPlatformUint64(platform_info, "AICoreSpec", "bt_size");
+  const uint64_t ub_size = GetLocalMemSize(platform_info, fe::LocalMemType::UB, "AICoreSpec", "ub_size");
+  const uint64_t l2_size = GetLocalMemSize(platform_info, fe::LocalMemType::L2, "SoCInfo", "l2_size");
+  const uint64_t l1_size = GetLocalMemSize(platform_info, fe::LocalMemType::L1, "AICoreSpec", "l1_size");
+  const uint64_t l0a_size = GetLocalMemSize(platform_info, fe::LocalMemType::L0_A, "AICoreSpec", "l0_a_size");
+  const uint64_t l0b_size = GetLocalMemSize(platform_info, fe::LocalMemType::L0_B, "AICoreSpec", "l0_b_size");
+  const uint64_t l0c_size = GetLocalMemSize(platform_info, fe::LocalMemType::L0_C, "AICoreSpec", "l0_c_size");
+  const std::string load3d_constraints =
+      GetPlatformString(platform_info, "AICoreSpec", "load3d_constraints", "unknown");
+  std::ostringstream ss;
+  ss << "{\"_pattern\":\"MatMul\",\"attrs\":{";
+  ss << "\"transpose_a\":" << BoolLiteral(transpose_x1) << ",";
+  ss << "\"transpose_b\":" << BoolLiteral(transpose_x2) << ",";
+  ss << "\"offset_x\":" << offset_x << ",";
+  ss << (is_batch ? "\"enable_hf32\":" : "\"opImplMode\":") << (is_batch ? (enable_hf32 ? 1 : 0) : op_impl_mode);
+  ss << "},\"binary_attrs\":{\"bias_flag\":false,\"nd_flag\":true,\"split_k_flag\":false,";
+  ss << "\"zero_flag\":false,\"weight_nz\":false,\"l2_size\":" << l2_size << "},\"binary_mode_flag\":true,";
+  ss << "\"block_dim\":{\"CORE_NUM\":" << core_num << ",\"vector_core_cnt\":" << vector_core_num << "},";
+  ss << "\"corerect_range_flag\":null,\"dynamic_mode\":\"dynamic_mkn\",\"fused_double_operand_num\":0,";
+  ss << "\"hardware_info\":{\"BT_SIZE\":" << bt_size << ",\"load3d_constraints\":\"" << JsonEscape(load3d_constraints)
+     << "\",";
+  ss << "\"Intrinsic_fix_pipe_l0c2out\":" << BoolLiteral(HasIntrinsic(platform_info, "Intrinsic_fix_pipe_l0c2out"))
+     << ",";
+  ss << "\"Intrinsic_data_move_l12ub\":" << BoolLiteral(HasIntrinsic(platform_info, "Intrinsic_data_move_l12ub"))
+     << ",";
+  ss << "\"Intrinsic_data_move_l0c2ub\":" << BoolLiteral(HasIntrinsic(platform_info, "Intrinsic_data_move_l0c2ub"))
+     << ",";
+  ss << "\"Intrinsic_data_move_out2l1_nd2nz\":"
+     << BoolLiteral(HasIntrinsic(platform_info, "Intrinsic_data_move_out2l1_nd2nz")) << ",";
+  ss << "\"Intrinsic_data_move_l12bt\":" << BoolLiteral(HasIntrinsic(platform_info, "Intrinsic_data_move_l12bt"))
+     << ",";
+  ss << "\"UB_SIZE\":" << ub_size << ",\"L2_SIZE\":" << l2_size << ",\"L1_SIZE\":" << l1_size << ",";
+  ss << "\"L0A_SIZE\":" << l0a_size << ",\"L0B_SIZE\":" << l0b_size << ",\"L0C_SIZE\":" << l0c_size << ",";
+  ss << "\"CORE_NUM\":" << core_num << ",\"vector_core_cnt\":" << vector_core_num << ",";
+  ss << "\"socVersion\":\"" << JsonEscape(soc_version) << "\"},\"format_a\":\"ND\",\"format_b\":\"ND\",";
+  ss << "\"repo_range\":{},\"repo_seeds\":{}}";
+  return ss.str();
+}
+
+std::vector<uint32_t> MakeMatMulInputInstanceNum(bool has_bias, bool has_offset_w) {
+  return {1U, 1U, has_bias ? 1U : 0U, has_offset_w ? 1U : 0U};
+}
+
+std::vector<const TensorInfo *> BuildMatMulInputSlots(const std::vector<TensorInfo> &inputs, const MatMulAttrs &attrs) {
+  std::vector<const TensorInfo *> slots = {&inputs[0], &inputs[1], nullptr, nullptr};
+  size_t input_index = 2U;
+  if (attrs.has_bias && input_index < inputs.size()) {
+    slots[2U] = &inputs[input_index++];
+  }
+  if (attrs.has_offset_w && input_index < inputs.size()) {
+    slots[3U] = &inputs[input_index++];
+  }
+  return slots;
+}
+
+std::unique_ptr<CompileState> BuildCompileState(const CompileInfo &compile_info, const OpHostSchema &schema,
+                                                 const OpHostFuncs &funcs, bool is_batch, ge::DataType data_type,
+                                                 ge::Format format, const MatMulAttrs &attrs,
+                                                 const std::vector<TensorInfo> &inputs, std::string &error_msg) {
+  auto state = std::make_unique<CompileState>();
+  if (!FillRuntimePlatformInfo(compile_info, state->platform_info)) {
+    error_msg = std::string(schema.op_type) + " platform info setup failed";
+    return nullptr;
+  }
+  state->compile_info_ptr = funcs.compile_info_creator();
+  if (state->compile_info_ptr == nullptr) {
+    error_msg = std::string(schema.op_type) + " compile info creation failed";
+    return nullptr;
+  }
+  state->compile_json = MakeCubeCompileJson(compile_info, state->platform_info, is_batch, attrs.transpose_x1,
+                                            attrs.transpose_x2, attrs.offset_x, attrs.op_impl_mode, attrs.enable_hf32);
+  gert::OpTilingParseContextBuilder parse_builder;
+  const auto input_slots = BuildMatMulInputSlots(inputs, attrs);
+  auto parse_holder = parse_builder.OpType(schema.op_type)
+                          .OpName(schema.op_type)
+                          .IOInstanceNum(MakeMatMulInputInstanceNum(attrs.has_bias, attrs.has_offset_w),
+                                         kSingleOutputInstanceNum)
+                          .InputTensorDesc(0, data_type, format, format)
+                          .InputTensorDesc(1, data_type, format, format)
+                          .InputTensorDesc(2, input_slots[2U] == nullptr ? data_type : DtypeToGeDataType(input_slots[2U]->dtype),
+                                           input_slots[2U] == nullptr ? format : FormatToGeFormat(input_slots[2U]->format),
+                                           input_slots[2U] == nullptr ? format : FormatToGeFormat(input_slots[2U]->format))
+                          .InputTensorDesc(3,
+                                           input_slots[3U] == nullptr ? ge::DT_INT8 : DtypeToGeDataType(input_slots[3U]->dtype),
+                                           input_slots[3U] == nullptr ? format : FormatToGeFormat(input_slots[3U]->format),
+                                           input_slots[3U] == nullptr ? format : FormatToGeFormat(input_slots[3U]->format))
+                          .OutputTensorDesc(0, data_type, format, format)
+                          .CompiledJson(state->compile_json.c_str())
+                          .CompiledInfo(state->compile_info_ptr)
+                          .PlatformInfo(const_cast<fe::PlatFormInfos *>(&state->platform_info))
+                          .Build();
+  auto *parse_ctx = reinterpret_cast<gert::KernelContext *>(parse_holder.GetContext());
+  const auto parse_ret = parse_ctx == nullptr ? ge::GRAPH_FAILED : funcs.tiling_parse(parse_ctx);
+  if (parse_ctx == nullptr || parse_ret != ge::GRAPH_SUCCESS) {
+    error_msg = std::string(schema.op_type) + " tiling parse failed";
+    return nullptr;
+  }
+  return state;
+}
+
+CompileStateKey MakeCompileStateKey(const CompileInfo &compile_info, bool is_batch, size_t input_num,
+                                     const std::vector<TensorInfo> &inputs, const std::string &dtype,
+                                     const std::string &format, const MatMulAttrs &attrs) {
+  std::string input2_dtype;
+  std::string input3_dtype;
+  std::string input2_format;
+  std::string input3_format;
+  if (inputs.size() > 2U) {
+    input2_dtype = inputs[2U].dtype;
+    input2_format = inputs[2U].format;
+  }
+  if (inputs.size() > 3U) {
+    input3_dtype = inputs[3U].dtype;
+    input3_format = inputs[3U].format;
+  }
+  return CompileStateKey{compile_info.soc_version,
+                         compile_info.device_id,
+                          dtype,
+                          format,
+                          input2_dtype,
+                          input3_dtype,
+                          input2_format,
+                          input3_format,
+                          is_batch,
+                          input_num,
+                          attrs.has_bias,
+                          attrs.has_offset_w,
+                          attrs.transpose_x1,
+                         attrs.transpose_x2,
+                         attrs.offset_x,
+                         attrs.op_impl_mode,
+                         attrs.enable_hf32,
+                         compile_info.aicore_num,
+                         compile_info.aiv_num};
+}
+
+std::shared_ptr<const CompileState> GetCompileState(const CompileInfo &compile_info, const OpHostSchema &schema,
+                                                    const OpHostFuncs &funcs, bool is_batch, ge::DataType data_type,
+                                                    ge::Format format, const MatMulAttrs &attrs,
+                                                    const std::string &dtype, const std::string &format_name,
+                                                    const std::vector<TensorInfo> &inputs,
+                                                    std::string &error_msg) {
+  const CompileStateKey key = MakeCompileStateKey(compile_info, is_batch, inputs.size(), inputs, dtype, format_name,
+                                                  attrs);
+  {
+    std::lock_guard<std::mutex> lock(GetCompileStateMutex());
+    auto &cache = GetCompileStateCache();
+    const auto it = cache.find(key);
+    if (it != cache.end() && it->second != nullptr) {
+      return it->second;
+    }
+  }
+
+  auto state = BuildCompileState(compile_info, schema, funcs, is_batch, data_type, format, attrs, inputs, error_msg);
+  if (state == nullptr) {
+    return nullptr;
+  }
+
+  auto cached_state = std::shared_ptr<const CompileState>(std::move(state));
+  std::lock_guard<std::mutex> lock(GetCompileStateMutex());
+  auto &cache_state = GetCompileStateCache()[key];
+  if (cache_state == nullptr) {
+    cache_state = std::move(cached_state);
+  }
+  return cache_state;
+}
+
+void FillShape(gert::Shape &shape, const std::vector<int64_t> &dims) {
+  shape.SetScalar();
+  for (const auto dim : dims) {
+    shape.AppendDim(dim);
+  }
+}
+
+std::vector<int64_t> GetRuntimeShape(const TensorInfo &tensor) {
+  return tensor.shape.empty() ? tensor.ori_shape : tensor.shape;
+}
+
+TilingRequest MakeTilingRequest(const CompileInfo &compile_info, const std::vector<TensorInfo> &inputs,
+                                const std::vector<TensorInfo> &outputs, const std::vector<AttrInfo> &attrs,
+                                bool is_batch) {
+  const auto &schema = GetOpHostSchema(is_batch);
+  MatMulAttrs matmul_attrs = ReadMatMulAttrs(attrs, is_batch);
+  return TilingRequest{compile_info, inputs, outputs, is_batch, schema, matmul_attrs,
+                       DtypeToGeDataType(inputs[0].dtype), FormatToGeFormat(inputs[0].format)};
+}
+
+RuntimeTilingKey MakeRuntimeTilingKey(const TilingRequest &request) {
+  RuntimeTilingKey key;
+  key.soc_version = request.compile_info.soc_version;
+  key.device_id = request.compile_info.device_id;
+  key.op_type = request.schema.op_type == nullptr ? std::string() : request.schema.op_type;
+  key.input_num = request.inputs.size();
+  key.has_bias = request.matmul_attrs.has_bias;
+  key.has_offset_w = request.matmul_attrs.has_offset_w;
+  if (!request.inputs.empty()) {
+    key.dtype = request.inputs[0].dtype;
+    key.format = request.inputs[0].format;
+    key.input0_shape = GetRuntimeShape(request.inputs[0]);
+  }
+  if (request.inputs.size() > 1) {
+    key.input1_shape = GetRuntimeShape(request.inputs[1]);
+  }
+  if (request.inputs.size() > 2) {
+    key.input2_shape = GetRuntimeShape(request.inputs[2]);
+    key.input2_dtype = request.inputs[2].dtype;
+    key.input2_format = request.inputs[2].format;
+  }
+  if (request.inputs.size() > 3) {
+    key.input3_shape = GetRuntimeShape(request.inputs[3]);
+    key.input3_dtype = request.inputs[3].dtype;
+    key.input3_format = request.inputs[3].format;
+  }
+  if (!request.outputs.empty()) {
+    key.output_shape = GetRuntimeShape(request.outputs[0]);
+  }
+  key.is_batch = request.is_batch;
+  key.transpose_x1 = request.matmul_attrs.transpose_x1;
+  key.transpose_x2 = request.matmul_attrs.transpose_x2;
+  key.offset_x = request.matmul_attrs.offset_x;
+  key.op_impl_mode = request.matmul_attrs.op_impl_mode;
+  key.enable_hf32 = request.matmul_attrs.enable_hf32;
+  key.aicore_num = request.compile_info.aicore_num;
+  key.aiv_num = request.compile_info.aiv_num;
+  return key;
+}
+
+bool TryGetCachedTilingResult(const RuntimeTilingKey &key, TilingResult *result) {
+  if (result == nullptr) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(GetTilingResultCacheMutex());
+  const auto &cache = GetTilingResultCache();
+  const auto it = cache.find(key);
+  if (it == cache.end() || !it->second.success) {
+    return false;
+  }
+  *result = it->second;
+  return true;
+}
+
+void CacheTilingResult(const RuntimeTilingKey &key, const TilingResult &result) {
+  if (!result.success) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(GetTilingResultCacheMutex());
+  GetTilingResultCache()[key] = result;
+}
+
+gert::StorageShape MakeStorageShape(const TensorInfo &tensor) {
+  gert::StorageShape storage_shape;
+  const auto runtime_shape = GetRuntimeShape(tensor);
+  FillShape(storage_shape.MutableOriginShape(), tensor.ori_shape.empty() ? runtime_shape : tensor.ori_shape);
+  FillShape(storage_shape.MutableStorageShape(), runtime_shape);
+  return storage_shape;
+}
+
+bool ValidateTilingRequest(const CompileInfo *compile_info, const std::vector<TensorInfo> *inputs,
+                           const std::vector<TensorInfo> *outputs, const std::vector<AttrInfo> *attrs,
+                           TilingResult *result) {
+  return compile_info != nullptr && inputs != nullptr && outputs != nullptr && attrs != nullptr && result != nullptr &&
+         inputs->size() >= 2 && inputs->size() <= 4 && !outputs->empty();
+}
+
+bool IsSupportedTilingTensorDesc(const std::vector<TensorInfo> &inputs, const std::vector<TensorInfo> &outputs,
+                                 ge::DataType data_type, ge::Format format) {
+  if (data_type == ge::DT_UNDEFINED || format == ge::FORMAT_RESERVED || DtypeToGeDataType(outputs[0].dtype) != data_type ||
+      FormatToGeFormat(outputs[0].format) != format) {
+    return false;
+  }
+  for (const auto &input : inputs) {
+    if (DtypeToGeDataType(input.dtype) == ge::DT_UNDEFINED || FormatToGeFormat(input.format) == ge::FORMAT_RESERVED) {
+      return false;
+    }
+  }
+  return DtypeToGeDataType(inputs[1].dtype) == data_type && FormatToGeFormat(inputs[1].format) == format;
+}
+
+bool IsOptionalInputSlotsValid(const TilingRequest &request) {
+  const size_t expected_input_num = 2U + (request.matmul_attrs.has_bias ? 1U : 0U) +
+                                    (request.matmul_attrs.has_offset_w ? 1U : 0U);
+  return request.inputs.size() == expected_input_num;
+}
+
+template <typename TilingContext>
+void FillTilingResultFromContext(TilingContext *tiling_ctx, TilingResult &result) {
+  auto *raw_tiling_data = tiling_ctx->GetRawTilingData();
+  const size_t tiling_data_len = raw_tiling_data->GetDataSize();
+  result.tiling_data.assign(reinterpret_cast<const uint8_t *>(raw_tiling_data->GetData()),
+                            reinterpret_cast<const uint8_t *>(raw_tiling_data->GetData()) + tiling_data_len);
+  result.tiling_key = static_cast<int64_t>(tiling_ctx->GetTilingKey());
+  result.block_dim = static_cast<int64_t>(tiling_ctx->GetBlockDim());
+  const size_t workspace_num = tiling_ctx->GetWorkspaceNum();
+  auto *workspace_sizes = workspace_num > 0 ? tiling_ctx->GetWorkspaceSizes(workspace_num) : nullptr;
+  result.workspace_size = workspace_sizes == nullptr ? 0 : static_cast<int64_t>(workspace_sizes[0]);
+  result.success = true;
+}
+
+uint32_t PositiveOrDefault(int64_t value, uint32_t default_value) {
+  return value > 0 ? static_cast<uint32_t>(value) : default_value;
+}
+
+template <typename T>
+bool CopyExactTilingData(const TilingResult &result, const size_t tiling_data_len, T &tiling_data) {
+  if (tiling_data_len != sizeof(T)) {
+    return false;
+  }
+  std::memcpy(&tiling_data, result.tiling_data.data(), sizeof(T));
+  return true;
+}
+
+void FillMetaFromBasicTiling(TilingResult &result, const MatMulV3BasicTilingData &tiling_data) {
+  result.matmul_basic_tiling_data = tiling_data;
+  result.cube_used_core_num = std::max(tiling_data.usedCoreNum, 1U);
+  result.cube_base_m = std::max(tiling_data.baseM, 1U);
+  result.cube_base_n = std::max(tiling_data.baseN, 1U);
+}
+
+void FillMetaFromBatchBasicTiling(TilingResult &result, const BatchMatMulV3BasicTilingData &tiling_data) {
+  result.batch_matmul_tiling_data = tiling_data;
+  FillMetaFromBasicTiling(result, tiling_data.matMulTilingData);
+}
+
+void FillMetaFromTCubeTiling(TilingResult &result, const TCubeTiling &tiling_data) {
+  result.cube_used_core_num = PositiveOrDefault(tiling_data.usedCoreNum, 1U);
+  result.cube_base_m = PositiveOrDefault(tiling_data.baseM, 1U);
+  result.cube_base_n = PositiveOrDefault(tiling_data.baseN, 1U);
+}
+
+void FillBatchTilingMeta(TilingResult &result, const size_t tiling_data_len) {
+  BatchMatMulV3BasicTilingData batch_basic_tiling_data = {};
+  if (CopyExactTilingData(result, tiling_data_len, batch_basic_tiling_data)) {
+    FillMetaFromBatchBasicTiling(result, batch_basic_tiling_data);
+    return;
+  }
+  BatchMatMulV3TilingData batch_tiling_data = {};
+  if (CopyExactTilingData(result, tiling_data_len, batch_tiling_data)) {
+    FillMetaFromTCubeTiling(result, batch_tiling_data.matMulTilingData.tCubeTiling);
+    return;
+  }
+  BatchMatMulV3IterBatchBasicTilingData iter_batch_tiling_data = {};
+  if (CopyExactTilingData(result, tiling_data_len, iter_batch_tiling_data)) {
+    result.cube_base_m = std::max(iter_batch_tiling_data.baseM, 1U);
+    result.cube_base_n = std::max(iter_batch_tiling_data.baseN, 1U);
+    return;
+  }
+  BatchMatMulToMulBasicTilingData batch_to_mul_tiling_data = {};
+  if (CopyExactTilingData(result, tiling_data_len, batch_to_mul_tiling_data)) {
+    result.cube_used_core_num = std::max(batch_to_mul_tiling_data.usedCoreNum, 1U);
+    return;
+  }
+  BatchMatMulV3MergeBatchBasicTilingData merge_batch_tiling_data = {};
+  (void)CopyExactTilingData(result, tiling_data_len, merge_batch_tiling_data);
+}
+
+void FillMatMulTilingMeta(TilingResult &result, const size_t tiling_data_len) {
+  MatMulV3BasicTilingData basic_tiling_data = {};
+  if (CopyExactTilingData(result, tiling_data_len, basic_tiling_data)) {
+    FillMetaFromBasicTiling(result, basic_tiling_data);
+    return;
+  }
+  MatMulV3TilingDataCopy tiling_data_copy = {};
+  if (CopyExactTilingData(result, tiling_data_len, tiling_data_copy)) {
+    FillMetaFromTCubeTiling(result, tiling_data_copy.matMulTilingData.tCubeTiling);
+    return;
+  }
+  MatMulV3TilingData tiling_data = {};
+  if (CopyExactTilingData(result, tiling_data_len, tiling_data)) {
+    FillMetaFromTCubeTiling(result, tiling_data.tCubeTiling);
+    return;
+  }
+  MatMulToMulBasicTilingData to_mul_tiling_data = {};
+  if (CopyExactTilingData(result, tiling_data_len, to_mul_tiling_data)) {
+    result.cube_used_core_num = std::max(to_mul_tiling_data.usedCoreNum, 1U);
+    if (to_mul_tiling_data.baseMN > 0) {
+      result.cube_base_m = 1U;
+      result.cube_base_n = to_mul_tiling_data.baseMN;
+    }
+    return;
+  }
+  MatMulV3KEqZeroBasicTilingData k_eq_zero_tiling_data = {};
+  (void)CopyExactTilingData(result, tiling_data_len, k_eq_zero_tiling_data);
+}
+
+void FillTilingMeta(TilingResult &result, bool is_batch) {
+  const size_t tiling_data_len = result.tiling_data.size();
+  if (is_batch) {
+    FillBatchTilingMeta(result, tiling_data_len);
+    return;
+  }
+  FillMatMulTilingMeta(result, tiling_data_len);
+}
+
+template <typename RunTiling>
+bool BuildTilingContext(const TilingRequest &request, const CompileState &compile_state, gert::TilingData *tiling_data,
+                        gert::ContinuousVector *workspace, const std::vector<gert::Tensor *> &input_tensors,
+                        const std::vector<gert::Tensor *> &output_tensors, RunTiling run_tiling) {
+  gert::OpTilingContextBuilder tiling_builder;
+  auto tiling_holder =
+      request.is_batch ? tiling_builder.OpType(request.schema.op_type)
+                              .OpName(request.schema.op_type)
+                              .IOInstanceNum(MakeMatMulInputInstanceNum(request.matmul_attrs.has_bias,
+                                                                        request.matmul_attrs.has_offset_w),
+                                             kSingleOutputInstanceNum)
+                             .AppendAttr(request.matmul_attrs.transpose_x1)
+                             .AppendAttr(request.matmul_attrs.transpose_x2)
+                             .AppendAttr(request.matmul_attrs.offset_x)
+                             .AppendAttr(request.matmul_attrs.enable_hf32)
+                             .CompileInfo(compile_state.compile_info_ptr)
+                             .PlatformInfo(const_cast<fe::PlatFormInfos *>(&compile_state.platform_info))
+                             .TilingData(tiling_data)
+                             .Workspace(workspace)
+                             .InputTensors(input_tensors)
+                             .OutputTensors(output_tensors)
+                             .Build()
+                        : tiling_builder.OpType(request.schema.op_type)
+                              .OpName(request.schema.op_type)
+                              .IOInstanceNum(MakeMatMulInputInstanceNum(request.matmul_attrs.has_bias,
+                                                                        request.matmul_attrs.has_offset_w),
+                                             kSingleOutputInstanceNum)
+                             .AppendAttr(request.matmul_attrs.transpose_x1)
+                             .AppendAttr(request.matmul_attrs.transpose_x2)
+                             .AppendAttr(request.matmul_attrs.offset_x)
+                             .AppendAttr(request.matmul_attrs.op_impl_mode)
+                             .CompileInfo(compile_state.compile_info_ptr)
+                             .PlatformInfo(const_cast<fe::PlatFormInfos *>(&compile_state.platform_info))
+                             .TilingData(tiling_data)
+                             .Workspace(workspace)
+                             .InputTensors(input_tensors)
+                             .OutputTensors(output_tensors)
+                             .Build();
+  return run_tiling(tiling_holder.GetContext());
+}
+
+bool RunSharedCubeTiling(const TilingRequest &request, TilingResult &result) {
+  const RuntimeTilingKey runtime_key = MakeRuntimeTilingKey(request);
+  if (TryGetCachedTilingResult(runtime_key, &result)) {
+    return true;
+  }
+
+  const char *op_type = request.schema.op_type;
+  const auto &cached_funcs = GetOpHostFuncs(request.is_batch, op_type);
+  if (!cached_funcs.loaded) {
+    result.error_msg = std::string(op_type) + " shared op_host registry lookup failed";
+    return false;
+  }
+
+  const auto &funcs = cached_funcs.funcs;
+  auto compile_state = GetCompileState(request.compile_info, request.schema, funcs, request.is_batch, request.data_type,
+                                        request.format, request.matmul_attrs, request.inputs[0].dtype,
+                                        request.inputs[0].format, request.inputs, result.error_msg);
+  if (compile_state == nullptr) {
+    return false;
+  }
+
+  const size_t tiling_data_capacity = std::max(funcs.max_tiling_data_size, kMaxTilingDataSize);
+  auto &scratch = GetTilingScratch();
+  if (!scratch.EnsureCapacity(tiling_data_capacity, result.error_msg, op_type)) {
+    return false;
+  }
+  auto *tiling_data = scratch.MutableTilingData();
+  auto *workspace = scratch.MutableWorkspace();
+  tiling_data->SetDataSize(0UL);
+  (void)workspace->SetSize(0UL);
+
+  gert::StorageFormat storage_format(request.format, request.format, {});
+  std::vector<gert::Tensor> input_tensors_storage;
+  const auto input_slots = BuildMatMulInputSlots(request.inputs, request.matmul_attrs);
+  input_tensors_storage.reserve(input_slots.size());
+  scratch.input_tensors.clear();
+  for (const auto *input : input_slots) {
+    if (input == nullptr) {
+      continue;
+    }
+    ge::Format input_format = FormatToGeFormat(input->format);
+    gert::StorageFormat input_storage_format(input_format, input_format, {});
+    input_tensors_storage.emplace_back(MakeStorageShape(*input), input_storage_format, DtypeToGeDataType(input->dtype));
+    scratch.input_tensors.push_back(&input_tensors_storage.back());
+  }
+  std::array<gert::Tensor, 1> output_tensors_storage = {
+      gert::Tensor(MakeStorageShape(request.outputs[0]), storage_format, request.data_type)};
+  scratch.output_tensors.clear();
+  scratch.output_tensors.push_back(&output_tensors_storage[0]);
+
+  const bool tiling_ok = BuildTilingContext(
+      request, *compile_state, tiling_data, workspace, scratch.input_tensors, scratch.output_tensors,
+      [&](auto *tiling_ctx) {
+        if (tiling_ctx == nullptr) {
+          result.error_msg = std::string(op_type) + " shared tiling context build failed";
+          return false;
+        }
+        if (funcs.tiling(tiling_ctx) != ge::GRAPH_SUCCESS) {
+          result.error_msg = std::string(op_type) + " shared tiling call failed";
+          return false;
+        }
+        if (tiling_ctx->GetRawTilingData() == nullptr || tiling_ctx->GetRawTilingData()->GetDataSize() == 0) {
+          result.error_msg = std::string(op_type) + " shared tiling returned empty data";
+          return false;
+        }
+        FillTilingResultFromContext(tiling_ctx, result);
+        return true;
+      });
+  if (!tiling_ok) {
+    return false;
+  }
+  CacheTilingResult(runtime_key, result);
+  return true;
+}
+
+}  // namespace
+
+extern "C" bool AutofuseDoCubeMatMulTiling(const ge::autofuse::CompileInfo *compile_info,
+                                           const std::vector<ge::autofuse::TensorInfo> *inputs,
+                                           const std::vector<ge::autofuse::TensorInfo> *outputs,
+                                           const std::vector<ge::autofuse::AttrInfo> *attrs, bool is_batch,
+                                           ge::autofuse::TilingResult *result) {
+  using namespace ge::autofuse;
+  if (!ValidateTilingRequest(compile_info, inputs, outputs, attrs, result)) {
+    return false;
+  }
+  const TilingRequest request = MakeTilingRequest(*compile_info, *inputs, *outputs, *attrs, is_batch);
+  if (!IsOptionalInputSlotsValid(request)) {
+    return false;
+  }
+  if (!IsSupportedTilingTensorDesc(*inputs, *outputs, request.data_type, request.format)) {
+    return false;
+  }
+  return RunSharedCubeTiling(request, *result);
+}
 
 CubeKernelTilingWrapper::CubeKernelTilingWrapper() {}
 
 CubeKernelTilingWrapper::~CubeKernelTilingWrapper() {}
 
-void CubeKernelTilingWrapper::BuildMatMulArgs(const std::vector<TensorInfo>& args_list,
-                                               int input_num,
-                                               bool transpose_a,
-                                               bool transpose_b,
-                                               std::vector<TensorInfo>& origin_inputs,
-                                               std::vector<TensorInfo>& origin_outputs,
-                                               std::vector<TensorInfo>& inputs) {
-    origin_inputs.clear();
-    origin_outputs.clear();
-    inputs.clear();
+void CubeKernelTilingWrapper::BuildMatMulArgs(const std::vector<TensorInfo> &args_list, int input_num,
+                                              bool transpose_a, bool transpose_b,
+                                              std::vector<TensorInfo> &origin_inputs,
+                                              std::vector<TensorInfo> &origin_outputs,
+                                              std::vector<TensorInfo> &inputs) {
+  origin_inputs.clear();
+  origin_outputs.clear();
+  inputs.clear();
 
-    int64_t m = 0;
-    int64_t n = 0;
-    std::vector<int64_t> write_shape;
+  int64_t m = 0;
+  int64_t n = 0;
+  std::vector<int64_t> write_shape;
 
-    for (int i = 0; i < input_num && i < static_cast<int>(args_list.size()); ++i) {
-        TensorInfo input = args_list[i];
-        input.param_name = "input" + std::to_string(i);
-        input.ori_shape = input.shape;
+  for (int i = 0; i < input_num && i < static_cast<int>(args_list.size()); ++i) {
+    TensorInfo input = args_list[i];
+    input.param_name = "input" + std::to_string(i);
+    input.ori_shape = input.shape;
 
-        origin_inputs.push_back(input);
-        inputs.push_back(input);
+    origin_inputs.push_back(input);
+    inputs.push_back(input);
 
-        if (i == 0) {
-            write_shape = input.shape;
-            if (transpose_a) {
-                m = input.shape[input.shape.size() - 1];
-            } else {
-                m = input.shape[input.shape.size() - 2];
-            }
-        } else if (i == 1) {
-            if (transpose_b) {
-                n = input.shape[input.shape.size() - 2];
-            } else {
-                n = input.shape[input.shape.size() - 1];
-            }
-        }
+    if (i == 0) {
+      write_shape = input.shape;
+      m = transpose_a ? input.shape[input.shape.size() - 1] : input.shape[input.shape.size() - 2];
+    } else if (i == 1) {
+      n = transpose_b ? input.shape[input.shape.size() - 2] : input.shape[input.shape.size() - 1];
     }
+  }
 
-    if (args_list.size() >= 2) {
-        TensorInfo output = args_list[args_list.size() - 2];
-        output.param_name = "output0";
-        if (!write_shape.empty()) {
-            write_shape[write_shape.size() - 1] = n;
-            write_shape[write_shape.size() - 2] = m;
-            output.shape = write_shape;
-            output.ori_shape = write_shape;
-        }
-        if (!inputs.empty()) {
-            output.dtype = inputs.back().dtype;
-        }
-        origin_outputs.push_back(output);
+  if (args_list.size() >= 2) {
+    TensorInfo output = args_list[args_list.size() - 2];
+    output.param_name = "output0";
+    if (!write_shape.empty()) {
+      write_shape[write_shape.size() - 1] = n;
+      write_shape[write_shape.size() - 2] = m;
+      output.shape = write_shape;
+      output.ori_shape = write_shape;
     }
+    if (!inputs.empty()) {
+      output.dtype = inputs.back().dtype;
+    }
+    origin_outputs.push_back(output);
+  }
 }
 
-std::string CubeKernelTilingWrapper::SerializeToJson(const CompileInfo& compile_info) {
-    json j;
-    j["soc_version"] = compile_info.soc_version;
-    j["core_type"] = compile_info.core_type;
-    j["device_id"] = compile_info.device_id;
-    j["op_kernel_lib"] = compile_info.op_kernel_lib;
-    j["op_impl_mode"] = compile_info.op_impl_mode;
-    j["aicore_num"] = compile_info.aicore_num;
-    j["aiv_num"] = compile_info.aiv_num;
-
-    if (!compile_info.extra_info.empty()) {
-        json extra;
-        for (const auto& pair : compile_info.extra_info) {
-            extra[pair.first] = pair.second;
-        }
-        j["extra_info"] = extra;
+TilingResult CubeKernelTilingWrapper::DoMatMulTiling(const CompileInfo &compile_info,
+                                                     const std::vector<TensorInfo> &inputs,
+                                                     const std::vector<TensorInfo> &outputs,
+                                                     const std::vector<AttrInfo> &attrs, bool is_batch) {
+  TilingResult result;
+  if (AutofuseDoCubeMatMulTiling(&compile_info, &inputs, &outputs, &attrs, is_batch, &result)) {
+    FillTilingMeta(result, is_batch);
+  } else {
+    result.success = false;
+    if (result.error_msg.empty()) {
+      result.error_msg = "codegen shared MatMulV3 tiling failed";
     }
-
-    return j.dump();
+  }
+  return result;
 }
 
-std::string CubeKernelTilingWrapper::SerializeToJson(const std::vector<TensorInfo>& tensors) {
-    json j = json::array();
-    for (const auto& tensor : tensors) {
-        json t;
-        t["param_name"] = tensor.param_name;
-        t["shape"] = tensor.shape;
-        t["ori_shape"] = tensor.ori_shape;
-        t["dtype"] = tensor.dtype;
-        t["format"] = tensor.format;
-        t["name"] = tensor.name;
-        t["range_start"] = tensor.range_start;
-        t["range_end"] = tensor.range_end;
-        j.push_back(t);
-    }
-    return j.dump();
-}
-
-std::string CubeKernelTilingWrapper::SerializeToJson(const std::vector<AttrInfo>& attrs) {
-    json j = json::array();
-    for (const auto& attr : attrs) {
-        json a;
-        a["name"] = attr.name;
-        a["dtype"] = attr.dtype;
-
-        if (attr.is_list) {
-            if (attr.dtype == "list_int" || attr.dtype == "list_int32") {
-                a["value"] = attr.value_list_int;
-            } else if (attr.dtype == "list_float" || attr.dtype == "list_float32") {
-                a["value"] = attr.value_list_float;
-            } else if (attr.dtype == "list_str") {
-                a["value"] = attr.value_list_str;
-            }
-        } else {
-            if (attr.dtype == "bool") {
-                a["value"] = attr.value_bool;
-            } else if (attr.dtype == "int" || attr.dtype == "int32" || attr.dtype == "int64") {
-                a["value"] = attr.value_int;
-            } else if (attr.dtype == "float" || attr.dtype == "float32" || attr.dtype == "float64") {
-                a["value"] = attr.value_float;
-            } else {
-                a["value"] = attr.value_str;
-            }
-        }
-        j.push_back(a);
-    }
-    return j.dump();
-}
-
-std::string CubeKernelTilingWrapper::SerializeToJson(const std::map<std::string, std::string>& extra_params) {
-    json j;
-    for (const auto& pair : extra_params) {
-        j[pair.first] = pair.second;
-    }
-    return j.dump();
-}
-
-std::string CubeKernelTilingWrapper::GenerateCompileInfoHash(const std::string& compile_info_json) {
-    return SHA1::Hash(compile_info_json);
-}
-
-void CubeKernelTilingWrapper::ChangeParamNameToName(std::vector<TensorInfo>& inputs) {
-    for (auto& input : inputs) {
-        if (input.name.empty() && !input.param_name.empty()) {
-            input.name = input.param_name;
-        }
-    }
-}
-
-void CubeKernelTilingWrapper::InputsPreProcess(std::vector<TensorInfo>& inputs) {
-    for (auto& input : inputs) {
-        if (input.range_start != 0 || input.range_end != 0) {
-            if (input.range_start == std::numeric_limits<int64_t>::min() ||
-                input.range_start == std::numeric_limits<int64_t>::max()) {
-                input.range_start = 0;
-            }
-            if (input.range_end == std::numeric_limits<int64_t>::min() ||
-                input.range_end == std::numeric_limits<int64_t>::max()) {
-                input.range_end = 0;
-            }
-        }
-    }
-}
-
-void CubeKernelTilingWrapper::AttrsPreProcess(std::vector<AttrInfo>& attrs) {
-    for (auto& attr : attrs) {
-        if (attr.dtype == "float" || attr.dtype == "float32" || attr.dtype == "float64") {
-            if (!attr.is_list) {
-                if (std::isinf(attr.value_float)) {
-                    if (attr.value_float > 0) {
-                        attr.value_str = "float(1.0 / 0.0) ";
-                    } else {
-                        attr.value_str = "float(-1.0 / 0.0) ";
-                    }
-                } else if (std::isnan(attr.value_float)) {
-                    attr.value_str = "float(0.0 / 0.0) ";
-                }
-            } else {
-                for (auto& val : attr.value_list_float) {
-                    if (std::isinf(val)) {
-                        if (val > 0) {
-                            val = std::numeric_limits<double>::max();
-                        } else {
-                            val = std::numeric_limits<double>::min();
-                        }
-                    } else if (std::isnan(val)) {
-                        val = 0.0;
-                    }
-                }
-            }
-        } else if (attr.dtype == "list_float" || attr.dtype == "list_float32") {
-            for (auto& val : attr.value_list_float) {
-                if (std::isinf(val)) {
-                    if (val > 0) {
-                        val = std::numeric_limits<double>::max();
-                    } else {
-                        val = std::numeric_limits<double>::min();
-                    }
-                } else if (std::isnan(val)) {
-                    val = 0.0;
-                }
-            }
-        }
-    }
-}
-
-std::vector<uint8_t> CubeKernelTilingWrapper::AlignTilingDataTo8Bytes(const std::vector<uint8_t>& tiling_data, const std::string& soc_version) {
-    size_t original_size = tiling_data.size();
-    std::vector<uint8_t> aligned_data = tiling_data;
-
-    if (soc_version == "Ascend310P") {
-        return aligned_data;
-    }
-
-    size_t aligned_size = ((original_size + 7) / 8) * 8;
-    size_t padding_size = aligned_size - original_size;
-
-    aligned_data.resize(aligned_size, 0);
-
-    return aligned_data;
-}
-
-bool CubeKernelTilingWrapper::ParseTilingResult(const std::string& json_str, TilingResult& result) {
-    try {
-        json j = json::parse(json_str);
-
-        if (j.contains("ret_code") && j["ret_code"].get_int64() != 0) {
-            result.success = false;
-            if (j.contains("error_messages") && j["error_messages"].is_array()) {
-                for (size_t i = 0; i < j["error_messages"].size(); ++i) {
-                    const auto& err = j["error_messages"][i];
-                    if (err.contains("errormsg")) {
-                        result.error_msg += err["errormsg"].get_string() + "; ";
-                    }
-                }
-            }
-            return false;
-        }
-        result.success = true;
-        return true;
-    } catch (const std::exception& e) {
-        result.success = false;
-        result.error_msg = std::string("Parse JSON failed: ") + e.what();
-        return false;
-    }
-}
-
-char* CubeKernelTilingWrapper::CallDoOpTilingForCompile(const char* op_type,
-                                                        const char* compile_info,
-                                                        const char* compile_info_hash,
-                                                        const char* inputs,
-                                                        const char* outputs,
-                                                        const char* attrs,
-                                                        char* buf,
-                                                        size_t buf_size,
-                                                        uint64_t* timer,
-                                                        const char* extra_params) {
-    fe::PlatFormInfos platform_infos;
-    fe::OptionalInfos q;
-    const char* soc_name = aclrtGetSocName();
-    std::string soc_ver = soc_name ? soc_name : "";
-    q.Init();
-    q.SetSocVersion(soc_ver);
-    fe::PlatformInfoManager::Instance().SetOptionalCompilationInfo(q); // 这两个SetOptionalCompilationInfo都得有
-    fe::PlatformInfoManager::GeInstance().SetOptionalCompilationInfo(q); // 否则获取soc version失败tiling计算出错
-    fe::PlatformInfoManager::GeInstance().InitRuntimePlatformInfos(soc_ver);
-    int32_t device_id = 0;
-    aclrtGetDevice(&device_id);
-    if (fe::PlatformInfoManager::GeInstance().GetRuntimePlatformInfosByDevice(device_id, platform_infos) != 0) {
-        OP_LOGE(OP_NAME, "GetRuntimePlatformInfosByDevice failed");
-        return nullptr;
-    }
-    OP_LOGI(OP_NAME, "Calling DoOpTilingForCompile...");
-    const char* result = DoOpTilingForCompile(op_type, compile_info, compile_info_hash,
-                        inputs, outputs, attrs, buf, buf_size, timer, extra_params);
-    OP_LOGI(OP_NAME, "DoOpTilingForCompile returned");
-
-    return const_cast<char*>(result);
-}
-
-TilingResult CubeKernelTilingWrapper::DoMatMulTiling(const CompileInfo& compile_info,
-                                                       const std::vector<TensorInfo>& inputs,
-                                                       const std::vector<TensorInfo>& outputs,
-                                                       const std::vector<AttrInfo>& attrs,
-                                                       bool is_batch) {
-    TilingResult result;
-
-    std::vector<TensorInfo> processed_inputs = inputs;
-    std::vector<AttrInfo> processed_attrs = attrs;
-
-    ChangeParamNameToName(processed_inputs);
-    InputsPreProcess(processed_inputs);
-    AttrsPreProcess(processed_attrs);
-
-    std::string compile_info_json = SerializeToJson(compile_info);
-    std::string inputs_json = SerializeToJson(processed_inputs);
-    std::string outputs_json = SerializeToJson(outputs);
-    std::string attrs_json = SerializeToJson(processed_attrs);
-
-    std::string compile_info_hash = GenerateCompileInfoHash(compile_info_json);
-
-    json extra_params;
-    extra_params["op_name"] = is_batch ? "BatchMatMulV3" : "MatMulV3";
-    extra_params["deterministic"] = false;
-    std::string extra_params_json = extra_params.dump();
-
-    std::string op_type = is_batch ? "BatchMatMulV3" : "MatMulV3";
-
-    const size_t buf_size = 1024 * 64;
-    std::vector<char> buf(buf_size, 0);
-
-    char* ret = CallDoOpTilingForCompile(op_type.c_str(),
-                                           compile_info_json.c_str(),
-                                           compile_info_hash.c_str(),
-                                           inputs_json.c_str(),
-                                           outputs_json.c_str(),
-                                           attrs_json.c_str(),
-                                           buf.data(),
-                                           buf_size,
-                                           nullptr,
-                                           extra_params_json.c_str());
-
-    if (ret == nullptr) {
-        result.success = false;
-        result.error_msg = "DoOpTilingForCompile returned nullptr";
-        return (result);
-    }
-
-    std::string ret_json(ret);
-    ParseTilingResult(ret_json, result);
-
-    if (result.success) {
-        std::string buf_json(buf.data());
-        json j = json::parse(buf_json);
-        if (j.contains("tiling_data")) {
-            std::string hex_str = j["tiling_data"].get_string();
-            result.tiling_data.clear();
-            for (size_t i = 0; i < hex_str.length(); i += 2) {
-                std::string byte_str = hex_str.substr(i, 2);
-                result.tiling_data.push_back(static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16)));
-            }
-
-            result.tiling_data = AlignTilingDataTo8Bytes(result.tiling_data, compile_info.soc_version);
-
-            if (result.tiling_data.size() >= sizeof(MatMulV3BasicTilingData)) {
-                memcpy(&result.matmul_basic_tiling_data, result.tiling_data.data(), sizeof(MatMulV3BasicTilingData));
-                result.cube_used_core_num = std::max(result.matmul_basic_tiling_data.usedCoreNum, 1U);
-                result.cube_base_m = std::max(result.matmul_basic_tiling_data.baseM, 1U);
-                result.cube_base_n = std::max(result.matmul_basic_tiling_data.baseN, 1U);
-            }
-            if (result.tiling_data.size() >= sizeof(BatchMatMulV3BasicTilingData)) {
-                memcpy(&result.batch_matmul_tiling_data, result.tiling_data.data(), sizeof(BatchMatMulV3BasicTilingData));
-                if (is_batch) {
-                    result.cube_used_core_num = std::max(result.batch_matmul_tiling_data.matMulTilingData.usedCoreNum, 1U);
-                    result.cube_base_m = std::max(result.batch_matmul_tiling_data.matMulTilingData.baseM, 1U);
-                    result.cube_base_n = std::max(result.batch_matmul_tiling_data.matMulTilingData.baseN, 1U);
-                }
-            }
-        }
-        if (j.contains("tiling_key")) {
-            result.tiling_key = j["tiling_key"].get_int64();
-        }
-        if (j.contains("block_dim")) {
-            result.block_dim = j["block_dim"].get_int64();
-        }
-        if (j.contains("workspaces")) {
-            result.workspace_size = j["workspaces"][0].get_int64();
-        }
-        if (j.contains("clear_atomic")) {
-            result.atomic_flag = j["clear_atomic"].get_bool();
-        }
-    }
-
-    return result;
-}
-
-} // namespace autofuse
-} // namespace ge
+}  // namespace autofuse
+}  // namespace ge
 
 )";

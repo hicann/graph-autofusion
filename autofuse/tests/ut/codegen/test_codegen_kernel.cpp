@@ -1151,6 +1151,42 @@ TEST(CodegenKernel, TPipe_TensorSizeCalc_AllocFromQue) {
                   "const uint32_t local_1_que_buf_num = 4;\n"});
 }
 
+TEST(CodegenKernel, TPipe_TensorSizeAssignForCvUbFuseShouldUseCubeOutputElementCount) {
+  af::AscGraph graph("test");
+  af::ascir_op::Data x("x", graph);
+  af::ascir_op::Data y("y", graph);
+
+  auto int8_node = graph.FindNode("x");
+  af::AscTensor int8_tensor = int8_node->outputs[0];
+  int8_tensor.attr.dtype = ge::DT_INT8;
+  int8_tensor.attr.mem.tensor_id = 1;
+  int8_tensor.attr.mem.alloc_type = af::AllocType::kAllocTypeBuffer;
+  int8_tensor.attr.mem.position = af::Position::kPositionVecCalc;
+  int8_tensor.attr.opt.merge_scope = af::kIdNone;
+  int8_tensor.attr.buf.id = 1;
+
+  auto int64_node = graph.FindNode("y");
+  af::AscTensor int64_tensor = int64_node->outputs[0];
+  int64_tensor.attr.dtype = ge::DT_INT64;
+  int64_tensor.attr.mem.tensor_id = 2;
+  int64_tensor.attr.mem.alloc_type = af::AllocType::kAllocTypeBuffer;
+  int64_tensor.attr.mem.position = af::Position::kPositionVecCalc;
+  int64_tensor.attr.opt.merge_scope = af::kIdNone;
+  int64_tensor.attr.buf.id = 2;
+
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  tpipe.cv_fusion_type = ::ascir::CubeTemplateType::kUBFuse;
+  ASSERT_EQ(tpipe.AddTensor(int8_tensor), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(int64_tensor), af::SUCCESS);
+
+  std::string result;
+  ASSERT_EQ(tpipe.TensorSizeAssign("float", result), af::SUCCESS);
+  EXPECT_EQ(result, std::string{"local_1_size = stage_size / sizeof(float);\n"
+                                "local_2_size = stage_size / sizeof(float);\n"
+                                "\n"});
+}
+
 TEST(CodegenKernel, TPipe_MergeScopeSizeCalc) {
   af::SizeVar s0(af::Symbol("s0"));
   af::SizeVar s1(af::Symbol("s1"));
@@ -1490,6 +1526,50 @@ TEST(CodegenKernel, TPipe_LocalTQueAlloc) {
                                 "tpipe.InitBuffer(q1, q1_buf_num, t->q1_size);\n"});
 }
 
+TEST(CodegenKernel, TPipe_LocalTQueAllocForCvUbFuseShouldAlignSharedTensorSlices) {
+  af::AscGraph graph("test");
+  af::ascir_op::Data x("x", graph);
+  af::ascir_op::Data y("y", graph);
+
+  auto int8_node = graph.FindNode("x");
+  af::AscTensor int8_tensor = int8_node->outputs[0];
+  int8_tensor.attr.dtype = ge::DT_INT8;
+  int8_tensor.attr.mem.tensor_id = 1;
+  int8_tensor.attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  int8_tensor.attr.mem.position = af::Position::kPositionVecIn;
+  int8_tensor.attr.mem.reuse_id = 1;
+  int8_tensor.attr.opt.merge_scope = af::kIdNone;
+  int8_tensor.attr.que.id = 1;
+  int8_tensor.attr.que.buf_num = 1;
+
+  auto int64_node = graph.FindNode("y");
+  af::AscTensor int64_tensor = int64_node->outputs[0];
+  int64_tensor.attr.dtype = ge::DT_INT64;
+  int64_tensor.attr.mem.tensor_id = 2;
+  int64_tensor.attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  int64_tensor.attr.mem.position = af::Position::kPositionVecIn;
+  int64_tensor.attr.mem.reuse_id = 1;
+  int64_tensor.attr.opt.merge_scope = af::kIdNone;
+  int64_tensor.attr.que.id = 1;
+  int64_tensor.attr.que.buf_num = 1;
+
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  tpipe.cv_fusion_type = ::ascir::CubeTemplateType::kUBFuse;
+  tpipe.CollectQues(graph);
+  ASSERT_EQ(tpipe.AddTensor(int8_tensor), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(int64_tensor), af::SUCCESS);
+
+  std::string result;
+  ASSERT_EQ(tpipe.LocalTQueAlloc(result), af::SUCCESS);
+  EXPECT_EQ(result, std::string{"const uint32_t q1_size = KernelUtils::Max(local_1_size * sizeof(int8_t), "
+                                "local_2_size * sizeof(int64_t), "
+                                "KernelUtils::BlkAlign<uint8_t>(local_1_size * sizeof(int8_t)) + "
+                                "KernelUtils::BlkAlign<uint8_t>(local_2_size * sizeof(int64_t)));\n"
+                                "const uint32_t q1_buf_num = KernelUtils::Max(1);\n"
+                                "tpipe.InitBuffer(q1, q1_buf_num, KernelUtils::BlkAlign<uint8_t>(q1_size));\n"});
+}
+
 TEST(CodegenKernel, ApiCall_Generate) {
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
@@ -1534,6 +1614,7 @@ class CodegenKernel_CallSync : public ::testing::Test {
   af::AscGraph graph;
   af::AscNodePtr x;
   int tensor_id = 0;
+  bool cv_ub_fuse_mode = false;
 
   CodegenKernel_CallSync() : graph("test_graph"), x(nullptr) {
     Data x_op("x", graph);
@@ -1707,6 +1788,9 @@ class CodegenKernel_CallSync : public ::testing::Test {
   std::string Generate() {
     codegen::Tiler tiler;
     codegen::TPipe tpipe("tpipe", tiler);
+    if (cv_ub_fuse_mode) {
+      tpipe.cv_fusion_type = ::ascir::CubeTemplateType::kUBFuse;
+    }
     tpipe.CollectQues(graph);
 
     codegen::Loop loop(af::kIdNone);
@@ -2285,6 +2369,30 @@ TEST_F(CodegenKernel_CallSync, AllocLoad1_ShareLoad2Enq_DeqVec) {
                                     "q1.FreeTensor(q1_buf);\n\n"});
 }
 
+TEST_F(CodegenKernel_CallSync, CvUbFuseSharedQueueOffsetShouldUseBlockAlignedSliceSize) {
+  cv_ub_fuse_mode = true;
+  auto load1 = Load("load1", x);
+  load1->outputs[0].attr.dtype = ge::DT_INT8;
+  auto load2 = LoadForShare("load2", x, load1);
+  load2->outputs[0].attr.dtype = ge::DT_INT64;
+  auto vec = Vec("vec", {load1, load2}, false);
+
+  EXPECT_EQ(Generate(), std::string{"uint32_t q1_reuse1_offset = 0;\n"
+                                    "q1_buf = q1.AllocTensor<uint8_t>();\n"
+                                    "local_1_actual_size = 1;\n"
+                                    "local_1 = q1_buf[q1_reuse1_offset].template ReinterpretCast<int8_t>();\n"
+                                    "load1();\n\n"
+                                    "q1_reuse1_offset = q1_reuse1_offset + "
+                                    "KernelUtils::BlkAlign<uint8_t>(local_1_size * 1);\n"
+                                    "local_2_actual_size = 1;\n"
+                                    "local_2 = q1_buf[q1_reuse1_offset].template ReinterpretCast<int64_t>();\n"
+                                    "load2();\n"
+                                    "q1.EnQue(q1_buf);\n\n"
+                                    "q1_buf = q1.DeQue<uint8_t>();\n"
+                                    "vec();\n"
+                                    "q1.FreeTensor(q1_buf);\n\n"});
+}
+
 /*
  *    load1  load2
  *       \    /
@@ -2452,6 +2560,12 @@ TEST(CodegenKernel, StageGenerate_WillNotDuplicatAllocTensorInSameStage) {
   GTEST_SKIP();
 }
 
+namespace {
+void BuildCompareApiCallCvStageGraph(af::AscGraph &graph, const af::Expression &s0, const af::Expression &s1,
+                                     const af::Axis &z0, const af::Axis &z1);
+void InitCompareApiCallCvStageAttrs(af::AscGraph &graph, const af::Axis &z0, const af::Axis &z1);
+}  // namespace
+
 // 测试compare api不外抛for循环的场景
 TEST(CodegenKernel, CompareApiCallNotThrowingFor) {
   af::AscGraph graph("test_graph");
@@ -2460,81 +2574,12 @@ TEST(CodegenKernel, CompareApiCallNotThrowingFor) {
   auto s1 = graph.CreateSizeVar("s1");
   auto z0 = graph.CreateAxis("z0", s0);
   auto z1 = graph.CreateAxis("z1", s1);
-
-  Data x_op("x", graph);
-  Data x_op2("x2", graph);
-  Load load_op("load");
-  Load load_op2("load2");
-  af::ascir_op::Gt gt_op("gt");
-  graph.AddNode(load_op);
-  graph.AddNode(load_op2);
-  graph.AddNode(gt_op);
-
-  load_op.x = x_op.y;
-  load_op.attr.sched.axis = {z0.id, z1.id};
-  *load_op.y.axis = {z0.id, z1.id};
-  *load_op.y.repeats = {s0, s1};
-  *load_op.y.strides = {s1, One};
-
-  load_op2.x = x_op2.y;
-  load_op2.attr.sched.axis = {z0.id, z1.id};
-  *load_op2.y.axis = {z0.id, z1.id};
-  *load_op2.y.repeats = {s0, s1};
-  *load_op2.y.strides = {s1, One};
-
-  gt_op.x1 = load_op.y;
-  gt_op.x2 = load_op2.y;
-  *gt_op.y.axis = {z0.id, z1.id};
-  *gt_op.y.repeats = {s0, s1};
-  *gt_op.y.strides = {s1, One};
+  BuildCompareApiCallCvStageGraph(graph, s0, s1, z0, z1);
+  InitCompareApiCallCvStageAttrs(graph, z0, z1);
 
   auto load = graph.FindNode("load");
-  load->attr.api.compute_type = af::ComputeType::kComputeLoad;
-  load->attr.api.type = af::ApiType::kAPITypeCompute;
-  load->attr.api.unit = af::ComputeUnit::kUnitMTE2;
-  load->attr.sched.loop_axis = z0.id;
-
   auto load2 = graph.FindNode("load2");
-  load2->attr.api.compute_type = af::ComputeType::kComputeLoad;
-  load2->attr.api.type = af::ApiType::kAPITypeCompute;
-  load2->attr.api.unit = af::ComputeUnit::kUnitMTE2;
-  load2->attr.sched.loop_axis = z0.id;
-
-  auto size = ge::GetSizeByDataType(ge::DT_FLOAT16);
-  load->outputs[0].attr.vectorized_axis = {z1.id};
-  load->outputs[0].attr.vectorized_strides = {One};
-  load->outputs[0].attr.dtype = ge::DT_FLOAT;
-  load->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
-  load->outputs[0].attr.mem.tensor_id = 0;
-  load->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
-  load->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
-  load->outputs[0].attr.que.id = 1;
-  load->outputs[0].attr.opt.merge_scope = af::kIdNone;
-
-  load2->outputs[0].attr.vectorized_axis = {z1.id};
-  load2->outputs[0].attr.vectorized_strides = {One};
-  load2->outputs[0].attr.dtype = ge::DT_FLOAT;
-  load2->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
-  load2->outputs[0].attr.mem.tensor_id = 1;
-  load2->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
-  load2->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
-  load2->outputs[0].attr.que.id = 1;
-  load2->outputs[0].attr.opt.merge_scope = af::kIdNone;
-
   auto gt = graph.FindNode("gt");
-  gt->attr.api.compute_type = af::ComputeType::kComputeElewise;
-  gt->attr.api.type = af::ApiType::kAPITypeCompute;
-  gt->attr.api.unit = af::ComputeUnit::kUnitVector;
-  gt->attr.sched.loop_axis = z0.id;
-  gt->attr.tmp_buffers = {{{af::Symbol(8192), -1}, af::MemAttr(), 0}};
-  gt->outputs[0].attr.vectorized_axis = {z1.id};
-  gt->outputs[0].attr.vectorized_strides = {One};
-  gt->outputs[0].attr.dtype = ge::DT_INT16;
-  gt->outputs[0].attr.mem.position = af::Position::kPositionVecOut;
-  gt->outputs[0].attr.mem.tensor_id = 3;
-  gt->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
-  gt->outputs[0].attr.que.id = 2;
-  gt->outputs[0].attr.opt.merge_scope = af::kIdNone;
 
   codegen::Tiler tiler;
   codegen::TPipe tpipe("tpipe", tiler);
@@ -2565,6 +2610,129 @@ TEST(CodegenKernel, CompareApiCallNotThrowingFor) {
   EXPECT_EQ(
       result,
       std::string{"CompareExtend(local_3[0], local_0[0], local_1[0], CMPMODE::GT, local_0_actual_size, tmp_buf_0);\n"});
+}
+
+namespace {
+void BuildCompareApiCallCvStageGraph(af::AscGraph &graph, const af::Expression &s0, const af::Expression &s1,
+                                     const af::Axis &z0, const af::Axis &z1) {
+  Data x_op("x", graph);
+  Data x_op2("x2", graph);
+  Load load_op("load");
+  Load load_op2("load2");
+  af::ascir_op::Gt gt_op("gt");
+  graph.AddNode(load_op);
+  graph.AddNode(load_op2);
+  graph.AddNode(gt_op);
+
+  load_op.x = x_op.y;
+  load_op.attr.sched.axis = {z0.id, z1.id};
+  *load_op.y.axis = {z0.id, z1.id};
+  *load_op.y.repeats = {s0, s1};
+  *load_op.y.strides = {s1, One};
+
+  load_op2.x = x_op2.y;
+  load_op2.attr.sched.axis = {z0.id, z1.id};
+  *load_op2.y.axis = {z0.id, z1.id};
+  *load_op2.y.repeats = {s0, s1};
+  *load_op2.y.strides = {s1, One};
+
+  gt_op.x1 = load_op.y;
+  gt_op.x2 = load_op2.y;
+  *gt_op.y.axis = {z0.id, z1.id};
+  *gt_op.y.repeats = {s0, s1};
+  *gt_op.y.strides = {s1, One};
+}
+
+void InitCompareApiCallCvStageAttrs(af::AscGraph &graph, const af::Axis &z0, const af::Axis &z1) {
+  auto load = graph.FindNode("load");
+  load->attr.api.compute_type = af::ComputeType::kComputeLoad;
+  load->attr.api.type = af::ApiType::kAPITypeCompute;
+  load->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  load->attr.sched.loop_axis = z0.id;
+
+  auto load2 = graph.FindNode("load2");
+  load2->attr.api.compute_type = af::ComputeType::kComputeLoad;
+  load2->attr.api.type = af::ApiType::kAPITypeCompute;
+  load2->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  load2->attr.sched.loop_axis = z0.id;
+
+  load->outputs[0].attr.vectorized_axis = {z1.id};
+  load->outputs[0].attr.vectorized_strides = {One};
+  load->outputs[0].attr.dtype = ge::DT_FLOAT;
+  load->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
+  load->outputs[0].attr.mem.tensor_id = 0;
+  load->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  load->outputs[0].attr.que.id = 1;
+  load->outputs[0].attr.opt.merge_scope = af::kIdNone;
+
+  load2->outputs[0].attr.vectorized_axis = {z1.id};
+  load2->outputs[0].attr.vectorized_strides = {One};
+  load2->outputs[0].attr.dtype = ge::DT_FLOAT;
+  load2->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
+  load2->outputs[0].attr.mem.tensor_id = 1;
+  load2->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  load2->outputs[0].attr.que.id = 1;
+  load2->outputs[0].attr.opt.merge_scope = af::kIdNone;
+
+  auto gt = graph.FindNode("gt");
+  gt->attr.api.compute_type = af::ComputeType::kComputeElewise;
+  gt->attr.api.type = af::ApiType::kAPITypeCompute;
+  gt->attr.api.unit = af::ComputeUnit::kUnitVector;
+  gt->attr.sched.loop_axis = z0.id;
+  gt->attr.tmp_buffers = {{{af::Symbol(8192), -1}, af::MemAttr(), 0}};
+  gt->outputs[0].attr.vectorized_axis = {z1.id};
+  gt->outputs[0].attr.vectorized_strides = {One};
+  gt->outputs[0].attr.dtype = ge::DT_INT16;
+  gt->outputs[0].attr.mem.position = af::Position::kPositionVecOut;
+  gt->outputs[0].attr.mem.tensor_id = 3;
+  gt->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  gt->outputs[0].attr.que.id = 2;
+  gt->outputs[0].attr.opt.merge_scope = af::kIdNone;
+}
+}  // namespace
+
+TEST(CodegenKernel, CompareApiCallCvStageAlignsActualSize) {
+  af::AscGraph graph("test_graph");
+
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  BuildCompareApiCallCvStageGraph(graph, s0, s1, z0, z1);
+  InitCompareApiCallCvStageAttrs(graph, z0, z1);
+
+  auto load = graph.FindNode("load");
+  auto load2 = graph.FindNode("load2");
+  auto gt = graph.FindNode("gt");
+
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  tpipe.CollectQues(graph);
+  tpipe.AddTensor(load->outputs[0]);
+  tpipe.AddTensor(load2->outputs[0]);
+  tpipe.AddTensor(gt->outputs[0]);
+
+  tiler.AddAxis(z0);
+  tiler.AddAxis(z1);
+  tiler.AddSizeVar(af::SizeVar(s0));
+  tiler.AddSizeVar(af::SizeVar(s1));
+  std::vector<af::AxisId> current_axis;
+  current_axis.push_back(z0.id);
+
+  codegen::ApiTensor x1;
+  codegen::ApiTensor x2;
+  x1.id = load->outputs[0].attr.mem.tensor_id;
+  x2.id = load2->outputs[0].attr.mem.tensor_id;
+  codegen::CompareApiCall call("GT");
+  EXPECT_EQ(call.Init(gt), 0);
+  call.api_call_context.stage = codegen::ComputeStage::kCVFuseStage1;
+  call.inputs.push_back(&x1);
+  call.inputs.push_back(&x2);
+
+  std::string result;
+  call.Generate(tpipe, current_axis, result);
+  EXPECT_EQ(result, std::string{"CompareExtend(local_3[0], local_0[0], local_1[0], CMPMODE::GT, ((local_0_actual_size "
+                                "+ 8 - 1) / 8 * 8), tmp_buf_0);\n"});
 }
 
 // 测试compare api需要外抛for循环的场景
@@ -6021,6 +6189,47 @@ TEST(CodegenKernel, ReduceDoubleTileUsesReduceSpecificCacheCondition) {
   EXPECT_EQ(cached_call->enable_cache_with_condition, "dis_enable_cache_r");
   EXPECT_EQ(cached_call->exec_condition, af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis);
   delete cached_call;
+}
+
+TEST(CodegenKernel, BroadcastInlineInCvStage_NoBlockDimCacheCondition) {
+  af::SizeVar s0(af::Symbol("s0"));
+  af::SizeVar s1(af::Symbol("s1"));
+
+  af::Axis z0{.id = 0, .name = "z0", .size = s0.expr};
+  af::Axis z1{.id = 1, .name = "z1", .size = s1.expr};
+
+  codegen::Tiler tiler;
+  tiler.AddSizeVar(af::SizeVar(s0));
+  tiler.AddSizeVar(af::SizeVar(s1));
+  tiler.AddAxis(z0);
+  tiler.AddAxis(z1);
+
+  for (auto &[id, cur_axis] : tiler.axis_map) {
+    (void)id;
+    cur_axis.is_split_b = true;
+  }
+
+  codegen::Loop loop1(z0.id);
+  codegen::Loop loop2(z1.id);
+  loop1.AddLoop(&loop2);
+
+  auto call1 = new MockApiCall("call1");
+  auto call2 = new MockApiCall("call2");
+  call1->enable_cache = true;
+  call1->exec_condition = af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis;
+  call1->unit = af::ComputeUnit::kUnitVector;
+  call1->api_call_context.stage = codegen::ComputeStage::kCVFuseStage1;
+  call2->enable_cache = true;
+  call2->exec_condition = af::ExecuteCondition::kCacheBlockSplitOriginBroadcastAxis;
+  call2->unit = af::ComputeUnit::kUnitVector;
+  call2->api_call_context.stage = codegen::ComputeStage::kCVFuseStage1;
+
+  loop2.AddCall(call1);
+  loop2.AddCall(call2);
+  codegen::TPipe tpipe("t", tiler);
+  std::string result;
+  EXPECT_EQ(loop1.Generate(tiler, tpipe, result, codegen::ComputeStage::kCVFuseStage1), af::SUCCESS);
+  EXPECT_EQ(result.find("block_dim"), std::string::npos);
 }
 
 TEST(CodegenKernel, CalculateVectorizedAixsMergeStatus) {

@@ -8,6 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include "perf_param_v2.h"
+#include "nddma_model.h"
 #include "v35/att/api_perf_register/ascir_reduce_api_perf_v2.h"
 #include "v35/att/api_perf_register/ascendc_regbase_perf.h"
 #include "api_perf_register/api_perf_factory.h"
@@ -18,6 +19,48 @@ constexpr int32_t kMaxDmaLen = 4;
 constexpr int32_t kMaxNddmaLen = 5;
 PerfParamTableV2 perf_param_table_v2;
 TilingScheduleConfigTableV2 tiling_schedule_config_table_v2;
+
+std::vector<int64_t> GetNddmaVectorizedAxis(const af::AscNodePtr &node) {
+  if (node == nullptr || node->outputs().empty()) {
+    return {};
+  }
+  return node->outputs[0].attr.vectorized_axis;
+}
+
+af::Status TryNewNddmaModel(const TensorShapeInfo &shape_info, const NodeInfo &node, NodeDetail &node_detail,
+                            PerfOutputInfo &perf_res, bool &selected) {
+  selected = false;
+  NddmaDescriptorInfo descriptor;
+  NddmaModelResult result;
+  // kUBFuse Codegen 分支生成 {curAivM, curAlignN} 和固定 2D stride，与下方 raw 描述不等价；
+  // 在专用 2D 模型接入前保守回退 legacy ATT 模型。
+  if (node.is_cv_ub_fusion) {
+    result.raw_rank = shape_info.repeats.size();
+    result.fallback_reason = NddmaFallbackReason::kCodegenMismatch;
+    LogNddmaFallback(node_detail.name, shape_info.data_type, nullptr, result);
+    return af::SUCCESS;
+  }
+  const auto build_reason = BuildNddmaDescriptor(shape_info, GetNddmaVectorizedAxis(node.node_ptr), descriptor);
+  if (build_reason != NddmaFallbackReason::kNone) {
+    result.raw_rank = shape_info.repeats.size();
+    result.fallback_reason = build_reason;
+    LogNddmaFallback(node_detail.name, shape_info.data_type, nullptr, result);
+    return af::SUCCESS;
+  }
+  node_detail.nddma_descriptor = descriptor;
+  GE_ASSERT_SUCCESS(EvaluateNddmaModel(descriptor, shape_info.data_type, CreateExpr("block_dim"), result));
+  if (!result.selected) {
+    LogNddmaFallback(node_detail.name, shape_info.data_type, &descriptor, result);
+    return af::SUCCESS;
+  }
+  perf_res.pipe_res[PipeType::AIV_MTE2] = result.cycles;
+  perf_res.ternary_ops.insert(result.ternary_ops.begin(), result.ternary_ops.end());
+  selected = true;
+  GELOGD("[ATT NDDMA] selected: node=%s, model=%s, raw_rank=%zu, effective_rank=%zu", node_detail.name.c_str(),
+         result.model_name.c_str(), result.raw_rank, result.effective_rank);
+  return af::SUCCESS;
+}
+
 ApiPerfRegister<ApiPerf> ApiPerfRegisterV2(const std::string &api_name, Perf perf_func, MicroPerfFunc micro_perf_func,
                                            const PerfParamTable *perf_param,
                                            const TilingScheduleConfigTable *tiling_schedule_config_table) {
@@ -81,13 +124,18 @@ af::Status NddmaApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_s
   GE_ASSERT_TRUE(!input_shapes.empty());
   GE_ASSERT_TRUE(!output_shapes.empty());
   std::string node_name = node_ptr != nullptr ? node_ptr->GetName() : "NddmaNode";
-  auto merged_output_shapes = output_shapes[0];
-  GE_ASSERT_SUCCESS(MergeTensorContinuousDims(node_ptr, GetNodeOutTensorName(node_ptr, 0), merged_output_shapes));
   NodeDetail dma_info;
   dma_info.name = node_name;
   dma_info.optype = node_ptr->GetType();
-  dma_info.input_dtype = {merged_output_shapes.data_type};
-  dma_info.output_dtype = {merged_output_shapes.data_type};
+  dma_info.input_dtype = {output_shapes[0].data_type};
+  dma_info.output_dtype = {output_shapes[0].data_type};
+  bool selected = false;
+  GE_ASSERT_SUCCESS(TryNewNddmaModel(output_shapes[0], node, dma_info, perf_res, selected));
+  if (selected) {
+    return af::SUCCESS;
+  }
+  auto merged_output_shapes = output_shapes[0];
+  GE_ASSERT_SUCCESS(MergeTensorContinuousDims(node_ptr, GetNodeOutTensorName(node_ptr, 0), merged_output_shapes));
   GE_ASSERT_SUCCESS(SetDims(merged_output_shapes, dma_info));
   GE_ASSERT_SUCCESS(GetDmaPerf(merged_output_shapes, dma_info, perf_res, kMaxNddmaLen, false));
   return af::SUCCESS;
@@ -783,6 +831,12 @@ ApiPerfRegister<ApiPerf> modified_bessel_k0_api_perf_v2(ApiPerfRegisterV2(kModif
 ApiPerfRegister<ApiPerf> modified_bessel_k1_api_perf_v2(ApiPerfRegisterV2(kModifiedBesselK1, GetPerfFunc(kUnitVector),
                                                                           nullptr, &perf_param_table_v2,
                                                                           &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> i0_api_perf_v2(ApiPerfRegisterV2(kI0, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2,
+                                                          &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> i0e_api_perf_v2(ApiPerfRegisterV2(kI0e, GetPerfFunc(kUnitVector), nullptr,
+                                                           &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> i1e_api_perf_v2(ApiPerfRegisterV2(kI1e, GetPerfFunc(kUnitVector), nullptr,
+                                                           &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> bessel_j0_api_perf_v2(ApiPerfRegisterV2(kBesselJ0, GetPerfFunc(kUnitVector), nullptr,
                                                                  &perf_param_table_v2,
                                                                  &tiling_schedule_config_table_v2));
@@ -816,6 +870,14 @@ ApiPerfRegister<ApiPerf> ndtr_api_perf_v2(ApiPerfRegisterV2(kNdtr, GetPerfFunc(k
                                                             &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> ndtri_api_perf_v2(ApiPerfRegisterV2(kNdtri, GetPerfFunc(kUnitVector), nullptr,
                                                              &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> logndtr_api_perf_v2(ApiPerfRegisterV2(kLogNdtr, GetPerfFunc(kUnitVector), nullptr,
+                                                               &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> nextafter_api_perf_v2(ApiPerfRegisterV2(kNextAfter, GetPerfFunc(kUnitVector), nullptr,
+                                                                 &perf_param_table_v2,
+                                                                 &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> polygamma_api_perf_v2(ApiPerfRegisterV2(kPolyGamma, GetPerfFunc(kUnitVector), nullptr,
+                                                                 &perf_param_table_v2,
+                                                                 &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> signbit_api_perf_v2(ApiPerfRegisterV2(kSignBit, GetPerfFunc(kUnitVector), nullptr,
                                                                &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> frexp_api_perf_v2(ApiPerfRegisterV2(kFrexp, GetPerfFunc(kUnitVector), nullptr,
@@ -832,6 +894,18 @@ ApiPerfRegister<ApiPerf> shifted_chebyshev_polynomial_v_api_perf_v2(
 ApiPerfRegister<ApiPerf> shifted_chebyshev_polynomial_w_api_perf_v2(
     ApiPerfRegisterV2(kShiftedChebyshevPolynomialW, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2,
                       &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> chebyshev_polynomial_t_api_perf_v2(ApiPerfRegisterV2(
+    kChebyshevPolynomialT, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> chebyshev_polynomial_u_api_perf_v2(ApiPerfRegisterV2(
+    kChebyshevPolynomialU, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> chebyshev_polynomial_v_api_perf_v2(ApiPerfRegisterV2(
+    kChebyshevPolynomialV, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> chebyshev_polynomial_w_api_perf_v2(ApiPerfRegisterV2(
+    kChebyshevPolynomialW, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> hermite_polynomial_h_api_perf_v2(ApiPerfRegisterV2(
+    kHermitePolynomialH, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> hermite_polynomial_he_api_perf_v2(ApiPerfRegisterV2(
+    kHermitePolynomialHe, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> laguerre_polynomial_l_api_perf_v2(ApiPerfRegisterV2(
     kLaguerrePolynomialL, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> legendre_polynomial_p_api_perf_v2(ApiPerfRegisterV2(

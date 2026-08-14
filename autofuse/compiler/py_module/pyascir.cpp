@@ -1215,6 +1215,14 @@ DEFINE_IR_ATTR_ACCESSORS(ShiftedChebyshevPolynomialV, AscShiftedChebyshevPolynom
                          PyLong_Check, PyLong_FromLong, PyLong_AsLong, SetN, GetN)
 DEFINE_IR_ATTR_ACCESSORS(ShiftedChebyshevPolynomialW, AscShiftedChebyshevPolynomialWIrAttrDef, kNAttr, int64_t,
                          PyLong_Check, PyLong_FromLong, PyLong_AsLong, SetN, GetN)
+DEFINE_IR_ATTR_ACCESSORS(ChebyshevPolynomialT, AscChebyshevPolynomialTIrAttrDef, kNAttr, int64_t, PyLong_Check,
+                         PyLong_FromLong, PyLong_AsLong, SetN, GetN)
+DEFINE_IR_ATTR_ACCESSORS(ChebyshevPolynomialU, AscChebyshevPolynomialUIrAttrDef, kNAttr, int64_t, PyLong_Check,
+                         PyLong_FromLong, PyLong_AsLong, SetN, GetN)
+DEFINE_IR_ATTR_ACCESSORS(ChebyshevPolynomialV, AscChebyshevPolynomialVIrAttrDef, kNAttr, int64_t, PyLong_Check,
+                         PyLong_FromLong, PyLong_AsLong, SetN, GetN)
+DEFINE_IR_ATTR_ACCESSORS(ChebyshevPolynomialW, AscChebyshevPolynomialWIrAttrDef, kNAttr, int64_t, PyLong_Check,
+                         PyLong_FromLong, PyLong_AsLong, SetN, GetN)
 DEFINE_IR_ATTR_ACCESSORS(
     Unsupported, AscUnsupportedIrAttrDef, kErrorMsgAttr, std::string, PyUnicode_Check,
     [](const std::string &str) { return PyUnicode_FromString(str.c_str()); }, PyUnicode_AsUTF8, SetError_msg,
@@ -1313,6 +1321,10 @@ const std::map<std::string, typename IrAttr<OpType>::handler> IrAttr<OpType>::at
     {"ShiftedChebyshevPolynomialU", AutoRegAttrHandle<af::ascir_op::ShiftedChebyshevPolynomialU, kNAttr>::RegHandle},
     {"ShiftedChebyshevPolynomialV", AutoRegAttrHandle<af::ascir_op::ShiftedChebyshevPolynomialV, kNAttr>::RegHandle},
     {"ShiftedChebyshevPolynomialW", AutoRegAttrHandle<af::ascir_op::ShiftedChebyshevPolynomialW, kNAttr>::RegHandle},
+    {"ChebyshevPolynomialT", AutoRegAttrHandle<af::ascir_op::ChebyshevPolynomialT, kNAttr>::RegHandle},
+    {"ChebyshevPolynomialU", AutoRegAttrHandle<af::ascir_op::ChebyshevPolynomialU, kNAttr>::RegHandle},
+    {"ChebyshevPolynomialV", AutoRegAttrHandle<af::ascir_op::ChebyshevPolynomialV, kNAttr>::RegHandle},
+    {"ChebyshevPolynomialW", AutoRegAttrHandle<af::ascir_op::ChebyshevPolynomialW, kNAttr>::RegHandle},
     {"Unsupported", AutoRegAttrHandle<af::ascir_op::Unsupported, kErrorMsgAttr>::RegHandle},
 };
 PyTypeObject &OpsOperatorTypeObject::GetPyType() {

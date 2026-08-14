@@ -33,11 +33,10 @@ struct IndirectLoadSimdIndexPolicy<int32_t> {
     MicroAPI::DataCopyUnAlignPre(state.unalign, state.address);
   }
 
-  __simd_callee__ inline static void Load(MicroAPI::RegTensor<uint32_t> &index, MicroAPI::MaskReg &valid_mask,
-                                          LoadState &state, uint32_t element_count, MicroAPI::MaskReg lane_mask) {
+  __simd_callee__ inline static void Load(MicroAPI::RegTensor<uint32_t> &index, LoadState &state,
+                                          uint32_t element_count) {
     MicroAPI::DataCopyUnAlign<uint32_t, MicroAPI::PostLiteral::POST_MODE_UPDATE>(index, state.unalign, state.address,
                                                                                  element_count);
-    valid_mask = lane_mask;
   }
 
   __simd_callee__ inline static void LoadPair(MicroAPI::RegTensor<uint32_t> &index0,
@@ -72,10 +71,9 @@ struct IndirectLoadSimdIndexPolicy<int64_t> {
     MicroAPI::DataCopyUnAlignPre(state.unalign, state.address);
   }
 
-  __simd_callee__ inline static void Load(MicroAPI::RegTensor<uint32_t> &index, MicroAPI::MaskReg &valid_mask,
-                                          LoadState &state, uint32_t element_count, MicroAPI::MaskReg lane_mask) {
+  __simd_callee__ inline static void Load(MicroAPI::RegTensor<uint32_t> &index, LoadState &state,
+                                          uint32_t element_count) {
     LoadHalf(index, state, element_count);
-    valid_mask = lane_mask;
   }
 
   __simd_callee__ inline static void LoadPair(MicroAPI::RegTensor<uint32_t> &index0,
@@ -267,6 +265,156 @@ struct IndirectLoadSimdValuePolicy<X, sizeof(uint16_t)> {
     MicroAPI::MaskAnd(window_mask, lower_mask, upper_mask, lane_mask);
   }
 };
+
+struct IndirectLoadSimdAddressContext {
+  uint32_t output_position;
+  uint32_t input_actual_size;
+  uint32_t input_inner;
+  uint32_t index_inner;
+  bool inner_layout_matches;
+};
+
+enum class IndirectLoadSimdAddressMode : uint8_t {
+  kDirect,
+  kDensePow2,
+  kDenseGeneric,
+  kStrided,
+};
+
+__aicore__ inline bool IndirectLoadSimdIsPowerOfTwo(uint32_t value) {
+  return value != 0U && (value & (value - 1U)) == 0U;
+}
+
+__simd_callee__ inline void IndirectLoadSimdMod(MicroAPI::RegTensor<uint32_t> &remainder,
+                                                MicroAPI::RegTensor<uint32_t> &value,
+                                                MicroAPI::RegTensor<uint32_t> &divisor, MicroAPI::MaskReg mask) {
+  MicroAPI::RegTensor<uint32_t> quotient;
+  MicroAPI::RegTensor<uint32_t> product;
+  MicroAPI::Div(quotient, value, divisor, mask);
+  MicroAPI::Mul(product, quotient, divisor, mask);
+  MicroAPI::Sub(remainder, value, product, mask);
+}
+
+__simd_callee__ inline void IndirectLoadSimdDivMod(MicroAPI::RegTensor<uint32_t> &quotient,
+                                                   MicroAPI::RegTensor<uint32_t> &remainder,
+                                                   MicroAPI::RegTensor<uint32_t> &value, uint32_t divisor,
+                                                   MicroAPI::MaskReg mask) {
+  MicroAPI::RegTensor<uint32_t> divisor_reg;
+  MicroAPI::RegTensor<uint32_t> product;
+  MicroAPI::Duplicate(divisor_reg, divisor, mask);
+  MicroAPI::Div(quotient, value, divisor_reg, mask);
+  MicroAPI::Mul(product, quotient, divisor_reg, mask);
+  MicroAPI::Sub(remainder, value, product, mask);
+}
+
+template <size_t Index, typename First, typename... Rest>
+__simd_callee__ inline uint32_t IndirectLoadSimdShapeValue(First first, Rest... rest) {
+  static_assert(Index < sizeof...(Rest) + 1UL, "IndirectLoad SIMD shape index is invalid.");
+  if constexpr (Index == 0UL) {
+    return static_cast<uint32_t>(first);
+  } else {
+    return IndirectLoadSimdShapeValue<Index - 1UL>(rest...);
+  }
+}
+
+template <int32_t Dim, int32_t Axis, int32_t Rank, typename... ShapeArgs>
+__simd_callee__ inline void IndirectLoadSimdAddInnerOffset(MicroAPI::RegTensor<uint32_t> &source_index,
+                                                           MicroAPI::RegTensor<uint32_t> &position,
+                                                           MicroAPI::MaskReg mask, ShapeArgs... shape_args) {
+  MicroAPI::RegTensor<uint32_t> quotient;
+  MicroAPI::RegTensor<uint32_t> remainder;
+  MicroAPI::RegTensor<uint32_t> input_offset;
+  IndirectLoadSimdDivMod(quotient, remainder, position,
+                         IndirectLoadSimdShapeValue<static_cast<size_t>(Dim)>(shape_args...), mask);
+  MicroAPI::Muls(input_offset, remainder, IndirectLoadSimdShapeValue<static_cast<size_t>(Rank + Dim)>(shape_args...),
+                 mask);
+  MicroAPI::Add(source_index, source_index, input_offset, mask);
+  if constexpr (Dim > Axis + 1) {
+    IndirectLoadSimdAddInnerOffset<Dim - 1, Axis, Rank>(source_index, quotient, mask, shape_args...);
+  }
+}
+
+template <IndirectLoadSimdAddressMode Mode, int32_t Rank, int32_t Axis, typename... ShapeArgs>
+__simd_callee__ inline void IndirectLoadSimdApplyAddress(MicroAPI::RegTensor<uint32_t> &source_index,
+                                                         uint32_t repeat_base,
+                                                         const IndirectLoadSimdAddressContext &context,
+                                                         MicroAPI::RegTensor<uint32_t> &input_inner,
+                                                         MicroAPI::RegTensor<uint32_t> &address_invariant,
+                                                         MicroAPI::MaskReg lane_mask, ShapeArgs... shape_args) {
+  if constexpr (Mode == IndirectLoadSimdAddressMode::kDirect) {
+    return;
+  }
+  MicroAPI::RegTensor<int32_t> signed_position;
+  auto &position = (MicroAPI::RegTensor<uint32_t> &)signed_position;
+  MicroAPI::Arange(signed_position, 0);
+  MicroAPI::Adds(position, position, context.output_position + repeat_base, lane_mask);
+  MicroAPI::Mul(source_index, source_index, input_inner, lane_mask);
+  if constexpr (Mode == IndirectLoadSimdAddressMode::kStrided) {
+    IndirectLoadSimdAddInnerOffset<Rank - 1, Axis, Rank>(source_index, position, lane_mask, shape_args...);
+    return;
+  }
+  if constexpr (Mode == IndirectLoadSimdAddressMode::kDensePow2) {
+    MicroAPI::And(position, position, address_invariant, lane_mask);
+    MicroAPI::Add(source_index, source_index, position, lane_mask);
+  } else {
+    MicroAPI::RegTensor<uint32_t> inner_offset;
+    IndirectLoadSimdMod(inner_offset, position, address_invariant, lane_mask);
+    MicroAPI::Add(source_index, source_index, inner_offset, lane_mask);
+  }
+}
+
+template <IndirectLoadSimdAddressMode Mode>
+__simd_callee__ inline void IndirectLoadSimdInitInvariants(MicroAPI::RegTensor<uint32_t> &input_inner,
+                                                           MicroAPI::RegTensor<uint32_t> &address_invariant,
+                                                           const IndirectLoadSimdAddressContext &context,
+                                                           MicroAPI::MaskReg mask) {
+  if constexpr (Mode != IndirectLoadSimdAddressMode::kDirect) {
+    MicroAPI::Duplicate(input_inner, context.input_inner, mask);
+  }
+  if constexpr (Mode == IndirectLoadSimdAddressMode::kDensePow2) {
+    MicroAPI::Duplicate(address_invariant, context.index_inner - 1U, mask);
+  } else if constexpr (Mode == IndirectLoadSimdAddressMode::kDenseGeneric) {
+    MicroAPI::Duplicate(address_invariant, context.index_inner, mask);
+  }
+}
+
+template <typename X, typename Index, int32_t Rank, int32_t Axis>
+struct IndirectLoadSimdRegTraits {
+  using IndexPolicy = IndirectLoadSimdIndexPolicy<Index>;
+  using ValuePolicy = IndirectLoadSimdValuePolicy<X>;
+  static constexpr bool kSupported =
+      IndexPolicy::kSupported && ValuePolicy::kSupported && Rank > 0 && Axis >= 0 && Axis < Rank;
+  static constexpr uint32_t kElementsPerRepeat =
+      sizeof(X) == sizeof(uint16_t) ? VECTOR_REG_WIDTH / sizeof(uint16_t) : IndexPolicy::kElementsPerRepeat;
+};
+
+template <IndirectLoadSimdAddressMode Mode, typename X, typename Index, int32_t Rank, int32_t Axis>
+struct IndirectLoadSimdModeTraits : IndirectLoadSimdRegTraits<X, Index, Rank, Axis> {
+  static constexpr uint32_t kElementsPerRepeat =
+      sizeof(X) == sizeof(uint16_t) && Mode != IndirectLoadSimdAddressMode::kDirect
+          ? VECTOR_REG_WIDTH / sizeof(uint32_t)
+          : IndirectLoadSimdRegTraits<X, Index, Rank, Axis>::kElementsPerRepeat;
+};
+
+__simd_callee__ inline void IndirectLoadSimdInitInnerOffset(MicroAPI::RegTensor<uint32_t> &inner_offset,
+                                                            const IndirectLoadSimdAddressContext &context,
+                                                            MicroAPI::MaskReg mask) {
+  MicroAPI::RegTensor<int32_t> signed_position;
+  auto &position = (MicroAPI::RegTensor<uint32_t> &)signed_position;
+  MicroAPI::RegTensor<uint32_t> inner_mask;
+  MicroAPI::Arange(signed_position, 0);
+  MicroAPI::Adds(position, position, context.output_position, mask);
+  MicroAPI::Duplicate(inner_mask, context.index_inner - 1U, mask);
+  MicroAPI::And(inner_offset, position, inner_mask, mask);
+}
+
+template <typename X>
+__simd_callee__ inline void IndirectLoadSimdStoreByteOffsets(__ubuf__ uint32_t *offsets,
+                                                             MicroAPI::RegTensor<uint32_t> &source_index,
+                                                             MicroAPI::MaskReg mask) {
+  MicroAPI::Muls(source_index, source_index, static_cast<uint32_t>(sizeof(X)), mask);
+  MicroAPI::DataCopy(offsets, source_index, mask);
+}
 }  // namespace Internal
 }  // namespace AscendC
 

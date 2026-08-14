@@ -158,6 +158,8 @@ Status TilingLib::ExtractMatMulCubeInfoFromImplGraph(const af::AscGraph &impl_gr
     cube_info.transpose_x2 = (mm_attr_data.transpose_x2 != 0) || (mm_attr_data.adj_x2 != 0);
     cube_info.offset_x = mm_attr_data.offset_x;
     cube_info.is_batch = mm_attr_data.is_batch;
+    cube_info.has_bias = mm_attr_data.is_bias;
+    cube_info.has_offset_w = mm_attr_data.is_offset_w;
     cube_info.has_relu = (mm_attr_data.has_relu != 0);
     cube_info.enable_hf32 = mm_attr_data.enable_hf32;
     cube_info.matmul_node = node;
@@ -346,6 +348,18 @@ void TilingLib::PrepareMatMulAttrs(const MatMulCubeInfo &cube_info, std::vector<
   attr5.dtype = "int";
   attr5.value_int = kAscendcOpParaSize;
   attrs.push_back(attr5);
+
+  AttrInfo attr6;
+  attr6.name = "autofuse_has_bias";
+  attr6.dtype = "bool";
+  attr6.value_bool = cube_info.has_bias;
+  attrs.push_back(attr6);
+
+  AttrInfo attr7;
+  attr7.name = "autofuse_has_offset_w";
+  attr7.dtype = "bool";
+  attr7.value_bool = cube_info.has_offset_w;
+  attrs.push_back(attr7);
 }
 
 void TilingLib::GenerateTensorListCode(std::stringstream &code_ss, const std::vector<TensorInfo> &inputs,

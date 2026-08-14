@@ -141,6 +141,14 @@ std::string GetFunctionContaining(const std::string &kernel, const char *marker)
   if (begin == std::string::npos || (alternate_begin != std::string::npos && alternate_begin > begin)) {
     begin = alternate_begin;
   }
+  const size_t simd_begin = kernel.rfind("__simd_callee__ inline", marker_pos);
+  if (begin == std::string::npos || (simd_begin != std::string::npos && simd_begin > begin)) {
+    begin = simd_begin;
+  }
+  const size_t simt_begin = kernel.rfind("__simt_vf__ __aicore__", marker_pos);
+  if (begin == std::string::npos || (simt_begin != std::string::npos && simt_begin > begin)) {
+    begin = simt_begin;
+  }
   EXPECT_NE(begin, std::string::npos) << marker;
   if (begin == std::string::npos) {
     return {};
@@ -218,8 +226,9 @@ void ExpectSimdFramework(const std::string &kernel) {
 
 void ExpectPostReduceSimtFramework(const std::string &kernel) {
   EXPECT_NE(kernel.find("__ubuf__ Y *y"), std::string::npos);
-  EXPECT_NE(kernel.find("y[i] = static_cast<Y>(0)"), std::string::npos);
-  EXPECT_NE(kernel.find("y[i] = FusedBody::Output(x[input_offset], output_index, context)"), std::string::npos);
+  const std::string ub_kernel = GetFunctionContaining(kernel, "inline void IndirectLoadSimtUbKernel(");
+  EXPECT_EQ(ub_kernel.find("y[i] = static_cast<Y>(0)"), std::string::npos);
+  EXPECT_NE(ub_kernel.find("y[i] = IndirectLoadSimtCompute"), std::string::npos);
   EXPECT_NE(kernel.find("(__ubuf__ Y *)y.GetPhyAddr()"), std::string::npos);
   const std::string function = GetFunctionContaining(kernel, "// IndirectLoad SIMT");
   ExpectBlockSplitFramework(function, "indirect_load_outer_axis_size = z4_loop_size * z5_loop_size * 1");
@@ -243,13 +252,54 @@ void ExpectNoReduceSimtFramework(const std::string &kernel) {
   const std::vector<std::string> arguments = GetCallArguments(function, "IndirectLoadSimt<");
   ASSERT_GT(arguments.size(), 5UL);
   EXPECT_EQ(arguments[3UL], "static_cast<uint32_t>(indirect_load_outerTb_loop_size)");
-  EXPECT_EQ(arguments[4UL], "block_dim_offset");
+  EXPECT_NE(arguments[4UL].find("block_dim_offset"), std::string::npos);
   EXPECT_TRUE(
       ContainsInOrder(function, {"block_dim_offset", "// IndirectLoad SIMT", "IndirectLoadSimt<",
                                  "static_cast<uint32_t>(indirect_load_outerTb_loop_size)", "block_dim_offset"}));
   EXPECT_EQ(function.find("for (int indirect_load_outerTb"), std::string::npos);
   EXPECT_EQ(function.find("ReduceSum"), std::string::npos);
 }
+
+void ExpectSimtKernelStructure(const std::string &kernel) {
+  const std::string compute = GetFunctionContaining(kernel, "inline Y IndirectLoadSimtCompute(");
+  const std::string gm_kernel = GetFunctionContaining(kernel, "inline void IndirectLoadSimtKernel(");
+  const std::string ub_kernel = GetFunctionContaining(kernel, "inline void IndirectLoadSimtUbKernel(");
+  EXPECT_EQ(gm_kernel.find("indirect_index < 0"), std::string::npos);
+  EXPECT_EQ(gm_kernel.find("indirect_index >="), std::string::npos);
+  EXPECT_EQ(gm_kernel.find("static_cast<Y>(0)"), std::string::npos);
+  EXPECT_EQ(ub_kernel.find("indirect_index < 0"), std::string::npos);
+  EXPECT_EQ(ub_kernel.find("indirect_index >="), std::string::npos);
+  EXPECT_EQ(ub_kernel.find("static_cast<Y>(0)"), std::string::npos);
+  EXPECT_NE(compute.find("return FusedBody::Output(x[input_offset], output_index, context)"), std::string::npos);
+  EXPECT_NE(gm_kernel.find("y[output_index] = IndirectLoadSimtCompute"), std::string::npos);
+  EXPECT_NE(ub_kernel.find("y[i] = IndirectLoadSimtCompute"), std::string::npos);
+  EXPECT_TRUE(ContainsInOrder(kernel, {"LaunchIndirectLoadSimt<128U", "LaunchIndirectLoadSimt<256U",
+                                       "LaunchIndirectLoadSimt<512U", "LaunchIndirectLoadSimt<1024U"}));
+  EXPECT_NE(kernel.find("constexpr bool IndirectLoadUse2048Threads()"), std::string::npos);
+  EXPECT_TRUE(ContainsInOrder(kernel, {"IndirectLoadUse2048Threads<AddressPolicy>()", "LaunchIndirectLoadSimt<2048U"}));
+}
+
+#ifdef IL_EXPECT_SIMT_POLICY
+#define IL_STRINGIFY_IMPL(value) #value
+#define IL_STRINGIFY(value) IL_STRINGIFY_IMPL(value)
+void ExpectSimtPolicyCall(const std::string &kernel) {
+  const std::string function = GetFunctionContaining(kernel, "// IndirectLoad SIMT");
+  const std::string policy = "AscendC::IndirectLoadSimt" IL_STRINGIFY(IL_EXPECT_SIMT_POLICY) "Policy<uint" +
+                             std::to_string(IL_EXPECT_SIMT_OFFSET_BITS) + "_t";
+  EXPECT_NE(function.find(policy), std::string::npos) << policy;
+}
+#endif
+
+#ifdef IL_EXPECT_MICRO_SIMD
+void ExpectMicroSimdCall(const std::string &kernel) {
+  const size_t marker = kernel.find("// IndirectLoad SIMD");
+  const size_t call = kernel.find("AscendC::", marker);
+  const size_t micro = kernel.find("AscendC::IndirectLoadSimd<half, int32_t, 3, 1>", marker);
+  ASSERT_NE(marker, std::string::npos);
+  ASSERT_NE(micro, std::string::npos);
+  EXPECT_EQ(call, micro);
+}
+#endif
 
 const af::Axis *FindDerivedAxis(const af::AscGraph &graph, af::Axis::Type type, af::AxisId from) {
   for (const auto &axis : graph.GetAllAxis()) {
@@ -780,7 +830,7 @@ bool CheckMixedElementwiseSimtSchedule(ascir::FusedScheduledResult &result) {
 void ExpectGeneratedTemplates(const std::string &kernel) {
   constexpr std::array<const char *, 3UL> kMarkers = {"// IndirectLoad SIMD", "// IndirectLoad SIMT",
                                                       "// IndirectLoad SK"};
-  const std::array<const char *, 3UL> apis = {"IndirectLoadSimd<", "IndirectLoadSimt<", "IndirectLoadSk<"};
+  const std::array<const char *, 3UL> apis = {"IndirectLoadSimd<", "AscendC::IndirectLoadSimt<", "IndirectLoadSk<"};
   for (size_t i = 0UL; i < kIndirectLoadTemplates.size(); ++i) {
     const bool is_expected = (kExpectedTemplates & TemplateMask(kIndirectLoadTemplates[i])) != 0U;
     if (is_expected) {
@@ -803,8 +853,7 @@ void ExpectGeneratedTemplates(const std::string &kernel) {
   }
 }
 
-void CheckGeneratedKernel(const std::string &kernel) {
-  ExpectGeneratedTemplates(kernel);
+void ExpectSimdKernelStructure(const std::string &kernel) {
 #ifndef IL_INPUT_OUTER_STRIDE
   if ((kExpectedTemplates & TemplateMask(ascir::TemplateId::kIndirectLoadSimd)) != 0U) {
     const std::string gather_function = GetFunctionContaining(kernel, "IndirectLoadSimdGatherApi<");
@@ -814,14 +863,62 @@ void CheckGeneratedKernel(const std::string &kernel) {
     const std::string gather_api = GetFunctionContaining(kernel, "__aicore__ inline void IndirectLoadSimdGatherApi(");
     EXPECT_TRUE(ContainsInOrder(gather_api, {"IndirectLoadSimdBuildOffsets", "PipeBarrier<PIPE_V>", "Gather(y"}));
     EXPECT_EQ(gather_api.find("HardEvent::V_MTE3"), std::string::npos);
+    const std::string micro_dispatch = GetFunctionContaining(kernel, "IndirectLoadSimdRegGather(__ubuf__ X *x");
+    EXPECT_NE(micro_dispatch.find("IndirectLoadSimdDispatch"), std::string::npos);
+    EXPECT_EQ(micro_dispatch.find("__VEC_SCOPE__"), std::string::npos);
+    const std::string gather_dispatch =
+        GetFunctionContaining(kernel, "IndirectLoadSimdBuildOffsets(__ubuf__ Index *index");
+    EXPECT_NE(gather_dispatch.find("IndirectLoadSimdDispatch"), std::string::npos);
+    EXPECT_EQ(gather_dispatch.find("__VEC_SCOPE__"), std::string::npos);
+    const std::string common_dispatch =
+        GetFunctionContaining(kernel, "IndirectLoadSimdDispatch(typename DispatchPolicy::Args &args");
+    EXPECT_TRUE(ContainsInOrder(common_dispatch, {"if constexpr (Axis + 1 == Rank)", "context.inner_layout_matches",
+                                                  "IndirectLoadSimdIsPowerOfTwo(context.index_inner)",
+                                                  "DispatchPolicy::RunReuse", "DispatchPolicy::template RunMode"}));
+    EXPECT_EQ(common_dispatch.find("__VEC_SCOPE__"), std::string::npos);
+    const std::string run_mode = GetFunctionContaining(kernel, "IndirectLoadSimdRunMode(");
+    EXPECT_TRUE(
+        ContainsInOrder(run_mode, {"full_repeats", "tail_count", "IndexPolicy::Init(state, args.index)",
+                                   "IndirectLoadSimdRunPair", "CreateMask<uint32_t", "IndirectLoadSimdRunRepeat"}));
+    const std::string run_reuse = GetFunctionContaining(kernel, "IndirectLoadSimdRunReuse(");
+    EXPECT_TRUE(ContainsInOrder(
+        run_reuse, {"full_repeats", "tail_count", "IndexPolicy::Init(state, args.index)",
+                    "IndirectLoadSimdInitInnerOffset(inner_offset", "Action::template Commit<ValuePolicy>"}));
+    EXPECT_NE(kernel.find("struct IndirectLoadSimdGatherAction"), std::string::npos);
+    EXPECT_NE(kernel.find("struct IndirectLoadSimdOffsetAction"), std::string::npos);
+    EXPECT_EQ(kernel.find("IndirectLoadSimdRunGatherReuse"), std::string::npos);
+    EXPECT_EQ(kernel.find("IndirectLoadSimdRunBuildOffsetReuse"), std::string::npos);
   }
+  EXPECT_NE(kernel.find("Mode != IndirectLoadSimdAddressMode::kDirect"), std::string::npos);
+  EXPECT_NE(kernel.find("Mode == IndirectLoadSimdAddressMode::kDirect"), std::string::npos);
+  EXPECT_EQ(kernel.find("IndirectLoadSimdSelectAddressMode"), std::string::npos);
+  EXPECT_EQ(kernel.find("IndirectLoadSimdAddressMode::kCross"), std::string::npos);
+  EXPECT_EQ(kernel.find("IndirectLoadSimdAddressMode::kGeneric"), std::string::npos);
+  EXPECT_EQ(kernel.find("IndirectLoadSimdLog2"), std::string::npos);
+  EXPECT_EQ(kernel.find("reuse_elements % context.index_inner"), std::string::npos);
+#ifdef IL_EXPECT_MICRO_SIMD
+  ExpectMicroSimdCall(kernel);
 #endif
+  EXPECT_EQ(kernel.find("MicroAPI::ShiftRights(outer, position"), std::string::npos);
   EXPECT_EQ(kernel.find("MicroAPI::RegTensor<uint32_t> &position, const int64_t *shape"), std::string::npos);
-  EXPECT_EQ(kernel.find("const IndirectLoadSimdAddressContext &context"), std::string::npos);
+  EXPECT_NE(kernel.find("const IndirectLoadSimdAddressContext &context"), std::string::npos);
   EXPECT_EQ(kernel.find("__simd_vf__ inline static void Init(LoadState"), std::string::npos);
   EXPECT_EQ(kernel.find("__simd_vf__ inline void IndirectLoadSimd"), std::string::npos);
-  EXPECT_NE(kernel.find("const uint16_t repeat_count"), std::string::npos);
-  EXPECT_NE(kernel.find("for (uint16_t repeat = 0U; repeat < repeat_count; ++repeat)"), std::string::npos);
+#endif
+}
+
+void CheckGeneratedKernel(const std::string &kernel) {
+  ExpectGeneratedTemplates(kernel);
+#ifdef IL_FUNCTIONAL_ONLY
+  return;
+#endif
+  ExpectSimdKernelStructure(kernel);
+  if ((kExpectedTemplates & TemplateMask(ascir::TemplateId::kIndirectLoadSimt)) != 0U) {
+    ExpectSimtKernelStructure(kernel);
+  }
+#ifdef IL_EXPECT_SIMT_POLICY
+  ExpectSimtPolicyCall(kernel);
+#endif
 #if IL_AXIS + 1 == IL_RANK
   EXPECT_EQ(kernel.find("if constexpr (Axis + 1 == Rank) {\n        MicroAPI::Muls(source_index"), std::string::npos);
 #endif

@@ -212,7 +212,7 @@ TEST_F(VectorFuncSt, TrueDivAddRsqrtHostCodegen) {
   const auto vf_end = result.kernel.find("\n}\n", rsqrt_marker);
   ASSERT_NE(vf_end, std::string::npos);
   const auto vf_body = result.kernel.substr(vf_begin, vf_end - vf_begin);
-  const auto true_div_pos = vf_body.find("AscendC::MicroAPI::Div(");
+  const auto true_div_pos = vf_body.find("AscendC::MicroAPI::Div<float, &high_precision_div_mode>(");
   const auto add_pos = vf_body.find("AscendC::MicroAPI::Adds(");
   const auto compare_pos = vf_body.find("AscendC::MicroAPI::CompareScalar<float, AscendC::CMPMODE::LT>");
   const auto sqrt_pos = vf_body.find("AscendC::MicroAPI::Sqrt(");

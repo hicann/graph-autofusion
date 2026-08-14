@@ -12,12 +12,22 @@
 #define API_PERF_REGISTER_API_PERF_H_
 
 #include <functional>
+#include <optional>
 #include <utility>
 #include "ascir_node_param/ascir_node_param.h"
 #include "base/perf_breakdown.h"
 #include "perf_param.h"
 
 namespace att {
+// legacy 连续轴合并前的原始 DataCopyNddma 描述。所有向量均按 vectorized_axis 排列，dim 和 stride 的单位
+// 分别为元素个数和元素；input_strides 对应 GM stride，output_strides 对应 UB vectorized stride。
+struct NddmaDescriptorInfo {
+  std::vector<Expr> output_dims;
+  std::vector<Expr> input_strides;
+  std::vector<Expr> output_strides;
+  std::vector<int64_t> vectorized_axis;
+};
+
 struct NodeDetail {
   std::string name;
   std::string optype;
@@ -33,6 +43,7 @@ struct NodeDetail {
   ascir_param::WhereNodeParams where_node_params;
   int32_t block_count_idx{0};                      // 用于 LoadStoreStrideV2Func，表示发生非连续的轴索引
   std::map<Expr, TernaryOp, ExprCmp> ternary_ops;  // 动态shape表达式
+  std::optional<NddmaDescriptorInfo> nddma_descriptor;
 
   std::string ToString() const {
     std::string res = name + "[" + optype + "]";

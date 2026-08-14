@@ -15,10 +15,38 @@
 
 #include "indirect_load_kernel_test_common.h"
 
+#if IL_AIC_REPRO
+extern "C" __global__ __aicore__ void indirect_load_aic_repro(GM_ADDR input, GM_ADDR index, GM_ADDR output,
+                                                              GM_ADDR workspace, GM_ADDR tiling);
+#else
 extern "C" __global__ __aicore__ void indirect_load_broadcast_test(GM_ADDR x, GM_ADDR index, GM_ADDR y,
                                                                    GM_ADDR workspace, GM_ADDR tiling);
+#endif
 
 namespace {
+#if IL_AIC_REPRO
+using DataType = float;
+using IndexType = int64_t;
+constexpr int32_t kInputRows = 100000;
+constexpr int32_t kRows = 1024;
+constexpr int32_t kColumns = 1024;
+
+void InitializeAicReproData(DataType *input, IndexType *index, DataType *expected) {
+  for (int32_t row = 0; row < kInputRows; ++row) {
+    for (int32_t column = 0; column < kColumns; ++column) {
+      input[static_cast<int64_t>(row) * kColumns + column] =
+          static_cast<DataType>((row % 97) * 0.25F + (column % 31) * 0.03125F);
+    }
+  }
+  for (int32_t row = 0; row < kRows; ++row) {
+    index[row] = static_cast<IndexType>((static_cast<int64_t>(row) * 97 + 13) % kInputRows);
+    for (int32_t column = 0; column < kColumns; ++column) {
+      const int64_t output_offset = static_cast<int64_t>(row) * kColumns + column;
+      expected[output_offset] = input[index[row] * kColumns + column];
+    }
+  }
+}
+#else
 using DataType = half;
 using IndexType = int64_t;
 constexpr std::array<int32_t, 4> kOutputShape = {4, 5, 4, 16};
@@ -110,9 +138,29 @@ void InitializeData(DataType *x, IndexType *index, DataType *expected) {
     expected[i] = static_cast<DataType>(value);
   }
 }
+#endif
 }  // namespace
 
 TEST(E2EIndirectLoadBroadcast, GeneratedKernelMatchesReference) {
+#if IL_AIC_REPRO
+  constexpr int64_t input_count = static_cast<int64_t>(kInputRows) * kColumns;
+  constexpr int64_t index_count = kRows;
+  constexpr int64_t output_count = static_cast<int64_t>(kRows) * kColumns;
+  indirect_load_test::KernelData<DataType, IndexType> buffers(input_count, index_count, output_count);
+  ASSERT_TRUE(buffers.IsValid());
+  InitializeAicReproData(buffers.input.get(), buffers.index.get(), buffers.expected.data());
+  std::fill_n(buffers.output.get(), output_count, 0.0F);
+  indirect_load_test::KernelTiling tiling;
+  ASSERT_TRUE(tiling.IsValid());
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_aic_repro, tiling.data.block_dim, reinterpret_cast<uint8_t *>(buffers.input.get()),
+              reinterpret_cast<uint8_t *>(buffers.index.get()), reinterpret_cast<uint8_t *>(buffers.output.get()),
+              tiling.workspace.get(), reinterpret_cast<uint8_t *>(&tiling.data));
+  for (int64_t i = 0; i < output_count; ++i) {
+    EXPECT_FLOAT_EQ(buffers.output.get()[i], buffers.expected[static_cast<size_t>(i)]) << "offset=" << i;
+  }
+#else
   const int32_t input_count = ElementCount(kInputShape);
   const int32_t index_count = ElementCount(kIndexShape);
   const int32_t output_count = ElementCount(kOutputShape);
@@ -132,4 +180,5 @@ TEST(E2EIndirectLoadBroadcast, GeneratedKernelMatchesReference) {
                 static_cast<float>(buffers.expected[static_cast<size_t>(i)]), 0.0625F)
         << "offset=" << i;
   }
+#endif
 }

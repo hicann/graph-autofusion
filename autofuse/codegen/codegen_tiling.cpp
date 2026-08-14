@@ -100,7 +100,7 @@ void RequireEntrySystemHeaders(autofuse::SourceDependencies &dependencies, bool 
                                bool is_multi_group) {
   if (is_inductor && is_cv) {
     RequireSystemHeaders(dependencies, {"algorithm", "cfloat", "cstddef", "cstdint", "cstring", "ostream", "sstream",
-                                        "string", "vector"});
+                                        "iomanip", "string", "vector"});
   } else if (is_inductor) {
     RequireSystemHeaders(dependencies, {"algorithm", "cfloat", "cmath", "cstddef", "cstdint", "map", "ostream",
                                         "sstream", "string", "unordered_map", "vector"});
@@ -1127,6 +1127,114 @@ std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedSchedul
   return ss.str();
 }
 
+void TilingLib::GenInductorShapeDim(const ascir::FusedScheduledResult &elemwise_schedule_result,
+                                    codegen::PgoShapeStringStream &pgo_shape_dim,
+                                    std::vector<std::string> &dynamic_shape_vars, const std::string &tiling_var) const {
+  for (auto vars : elemwise_schedule_result.origin_vars) {
+    if (!(vars.IsConstExpr())) {
+      std::string var_define = std::string(vars.Str().get());
+      dynamic_shape_vars.push_back(var_define);
+      pgo_shape_dim.shape_dim_def << "uint32_t " << var_define << ", ";
+      pgo_shape_dim.shape_dim_use << var_define << ", ";
+      TilingSetShapeDim(pgo_shape_dim.tiling_set_shape_dim, var_define, elemwise_schedule_result, tiling_var);
+    }
+  }
+}
+
+std::string TilingLib::GenCallCubeTilingForInductor(const ascir::FusedScheduledResult &fused_schedule_result,
+                                                    const std::vector<std::string> &dynamic_shape_vars,
+                                                    const codegen::PgoShapeStringStream &pgo_shape_dim) const {
+  std::stringstream ss;
+  MatMulCubeInfo cube_info;
+  GE_ASSERT_SUCCESS(ExtractMatMulCubeInfoFromFusedResult(fused_schedule_result, cube_info),
+                    "[Extract][MatMulCubeInfo]Failed to extract MatMul cube info from FusedScheduledResult");
+  ss << "using namespace ge::autofuse;" << std::endl;
+  AppendCvBaseAlignHelperDefs(ss);
+  AppendCvSafetyMixModeHelperDefs(ss, cube_info.is_batch);
+
+  // 在CallCubeTiling函数之前定义全局变量（用于静态shape常量生成）
+  ss << "// Global variable to store tiling bytes for const generation in static shape\n";
+  ss << "std::vector<uint8_t> g_matmul_tiling_bytes;\n\n";
+  ss << "extern \"C\" void CallCubeTiling(" << pgo_shape_dim.shape_dim_def.str()
+     << "int64_t &ws_size, uint32_t &cube_block_dim, int64_t &tiling_key, uint32_t &basem, uint32_t "
+        "&basen, CVAutofuseTilingData *tiling_data) {"
+     << std::endl;
+  GenCallCubeTilingCacheRead(ss, dynamic_shape_vars);
+  ss << ProcessCubeKernelTilingFromFusedResult(fused_schedule_result) << std::endl;
+  GenCallCubeTilingCacheWrite(ss, dynamic_shape_vars);
+  ss << "}" << std::endl;
+  return ss.str();
+}
+
+void TilingLib::GenCallCubeTilingCacheRead(std::stringstream &ss,
+                                           const std::vector<std::string> &dynamic_shape_vars) const {
+  ss << "static bool g_cube_tiling_cache_valid = false;\n";
+  for (const auto &var_name : dynamic_shape_vars) {
+    ss << "static uint32_t g_cube_tiling_cache_" << var_name << " = 0;\n";
+  }
+  ss << "static int64_t g_cube_tiling_cache_ws_size = 0;\n";
+  ss << "static uint32_t g_cube_tiling_cache_block_dim = 0;\n";
+  ss << "static int64_t g_cube_tiling_cache_tiling_key = 0;\n";
+  ss << "static uint32_t g_cube_tiling_cache_basem = 0;\n";
+  ss << "static uint32_t g_cube_tiling_cache_basen = 0;\n";
+  ss << "static uint8_t g_cube_tiling_cache_bytes[sizeof(tiling_data->matmul_tiling_data)] = {};\n";
+  ss << "static size_t g_cube_tiling_cache_bytes_size = 0;\n";
+  ss << "if (g_cube_tiling_cache_valid";
+  for (const auto &var_name : dynamic_shape_vars) {
+    ss << " && g_cube_tiling_cache_" << var_name << " == " << var_name;
+  }
+  ss << ") {\n";
+  ss << "  ws_size = g_cube_tiling_cache_ws_size;\n";
+  ss << "  cube_block_dim = g_cube_tiling_cache_block_dim;\n";
+  ss << "  tiling_key = g_cube_tiling_cache_tiling_key;\n";
+  ss << "  basem = g_cube_tiling_cache_basem;\n";
+  ss << "  basen = g_cube_tiling_cache_basen;\n";
+  ss << "  std::memcpy(tiling_data->matmul_tiling_data, g_cube_tiling_cache_bytes, "
+        "g_cube_tiling_cache_bytes_size);\n";
+  ss << "  return;\n";
+  ss << "}\n";
+}
+
+void TilingLib::GenCallCubeTilingCacheWrite(std::stringstream &ss,
+                                            const std::vector<std::string> &dynamic_shape_vars) const {
+  ss << "g_cube_tiling_cache_valid = true;\n";
+  for (const auto &var_name : dynamic_shape_vars) {
+    ss << "g_cube_tiling_cache_" << var_name << " = " << var_name << ";\n";
+  }
+  ss << "g_cube_tiling_cache_ws_size = ws_size;\n";
+  ss << "g_cube_tiling_cache_block_dim = cube_block_dim;\n";
+  ss << "g_cube_tiling_cache_tiling_key = tiling_key;\n";
+  ss << "g_cube_tiling_cache_basem = basem;\n";
+  ss << "g_cube_tiling_cache_basen = basen;\n";
+  ss << "std::memcpy(g_cube_tiling_cache_bytes, tiling_data->matmul_tiling_data, copy_size);\n";
+  ss << "g_cube_tiling_cache_bytes_size = copy_size;\n";
+}
+
+std::string TilingLib::GenPlainInductorTilingTail(const ascir::FusedScheduledResult &elemwise_schedule_result,
+                                                  codegen::PgoShapeStringStream &pgo_shape_dim,
+                                                  const std::string &tiling) const {
+  std::stringstream ss;
+  ss << "  tiling->set_block_dim(limit->aiv_num);" << std::endl;
+  ss << "  tiling->set_ub_size(limit->ub_size - 256);" << std::endl;
+  ss << "  if (!optiling::GetTiling(*tiling, -1, nullptr)) {return -1;}" << std::endl;
+  ss << "  *blockDim = tiling->get_block_dim();" << std::endl;  // Only consider 48 for now
+  ss << "  using namespace optiling;" << std::endl;
+  ss << "  *workspaceSize = GetWorkspaceSize(*tiling);" << std::endl;
+  ss << std::endl;
+  ss << "  return 0;" << std::endl;
+  ss << "}" << std::endl;
+  if (enable_autofuse_pgo_) {
+    // PGOGetTilingKey
+    ss << GenPGOGetTilingKey(tiling);
+    // AutofuseTilingWithConfig
+    ss << GenPgoTilingFunc(elemwise_schedule_result, tiling, pgo_shape_dim, true);
+  } else {
+    // 生成 AutofuseTilingWithConfig 函数
+    ss << GenPgoAutofuseTiling(elemwise_schedule_result, pgo_shape_dim, tiling, true);
+  }
+  return ss.str();
+}
+
 std::string TilingLib::GenTilingFuncForInductor(const ascir::FusedScheduledResult &fused_schedule_result,
                                                 const ::ascir::FusedScheduledResult &elemwise_schedule_result,
                                                 const std::string func, const std::string tiling) const {
@@ -1137,72 +1245,11 @@ std::string TilingLib::GenTilingFuncForInductor(const ascir::FusedScheduledResul
   if (ascgen_utils::IsCubeFusedScheduled(fused_schedule_result)) {
     tiling_var = "tiling->tiling_data.";
   }
-  for (auto vars : elemwise_schedule_result.origin_vars) {
-    if (!(vars.IsConstExpr())) {
-      std::string var_define = std::string(vars.Str().get());
-      dynamic_shape_vars.push_back(var_define);
-      pgo_shape_dim.shape_dim_def << "uint32_t " << var_define << ", ";
-      pgo_shape_dim.shape_dim_use << var_define << ", ";
-      TilingSetShapeDim(pgo_shape_dim.tiling_set_shape_dim, var_define, elemwise_schedule_result, tiling_var);
-    }
-  }
+  GenInductorShapeDim(elemwise_schedule_result, pgo_shape_dim, dynamic_shape_vars, tiling_var);
 
   ss << GenGetResLimitStru();
   if (ascgen_utils::IsCubeFusedScheduled(fused_schedule_result)) {
-    MatMulCubeInfo cube_info;
-    GE_ASSERT_SUCCESS(ExtractMatMulCubeInfoFromFusedResult(fused_schedule_result, cube_info),
-                      "[Extract][MatMulCubeInfo]Failed to extract MatMul cube info from FusedScheduledResult");
-    std::stringstream call_cube_tiling;
-    call_cube_tiling << "using namespace ge::autofuse;" << std::endl;
-    AppendCvBaseAlignHelperDefs(call_cube_tiling);
-    AppendCvSafetyMixModeHelperDefs(call_cube_tiling, cube_info.is_batch);
-
-    // 在CallCubeTiling函数之前定义全局变量（用于静态shape常量生成）
-    call_cube_tiling << "// Global variable to store tiling bytes for const generation in static shape\n";
-    call_cube_tiling << "std::vector<uint8_t> g_matmul_tiling_bytes;\n\n";
-
-    call_cube_tiling << "extern \"C\" void CallCubeTiling(" << pgo_shape_dim.shape_dim_def.str()
-                     << "int64_t &ws_size, uint32_t &cube_block_dim, int64_t &tiling_key, uint32_t &basem, uint32_t "
-                        "&basen, CVAutofuseTilingData *tiling_data) {"
-                     << std::endl;
-    call_cube_tiling << "static bool g_cube_tiling_cache_valid = false;\n";
-    for (const auto &var_name : dynamic_shape_vars) {
-      call_cube_tiling << "static uint32_t g_cube_tiling_cache_" << var_name << " = 0;\n";
-    }
-    call_cube_tiling << "static int64_t g_cube_tiling_cache_ws_size = 0;\n";
-    call_cube_tiling << "static uint32_t g_cube_tiling_cache_block_dim = 0;\n";
-    call_cube_tiling << "static int64_t g_cube_tiling_cache_tiling_key = 0;\n";
-    call_cube_tiling << "static uint32_t g_cube_tiling_cache_basem = 0;\n";
-    call_cube_tiling << "static uint32_t g_cube_tiling_cache_basen = 0;\n";
-    call_cube_tiling << "static uint8_t g_cube_tiling_cache_bytes[sizeof(tiling_data->matmul_tiling_data)] = {};\n";
-    call_cube_tiling << "if (g_cube_tiling_cache_valid";
-    for (const auto &var_name : dynamic_shape_vars) {
-      call_cube_tiling << " && g_cube_tiling_cache_" << var_name << " == " << var_name;
-    }
-    call_cube_tiling << ") {\n";
-    call_cube_tiling << "  ws_size = g_cube_tiling_cache_ws_size;\n";
-    call_cube_tiling << "  cube_block_dim = g_cube_tiling_cache_block_dim;\n";
-    call_cube_tiling << "  tiling_key = g_cube_tiling_cache_tiling_key;\n";
-    call_cube_tiling << "  basem = g_cube_tiling_cache_basem;\n";
-    call_cube_tiling << "  basen = g_cube_tiling_cache_basen;\n";
-    call_cube_tiling << "  std::memcpy(tiling_data->matmul_tiling_data, g_cube_tiling_cache_bytes, "
-                        "sizeof(tiling_data->matmul_tiling_data));\n";
-    call_cube_tiling << "  return;\n";
-    call_cube_tiling << "}\n";
-    call_cube_tiling << ProcessCubeKernelTilingFromFusedResult(fused_schedule_result) << std::endl;
-    call_cube_tiling << "g_cube_tiling_cache_valid = true;\n";
-    for (const auto &var_name : dynamic_shape_vars) {
-      call_cube_tiling << "g_cube_tiling_cache_" << var_name << " = " << var_name << ";\n";
-    }
-    call_cube_tiling << "g_cube_tiling_cache_ws_size = ws_size;\n";
-    call_cube_tiling << "g_cube_tiling_cache_block_dim = cube_block_dim;\n";
-    call_cube_tiling << "g_cube_tiling_cache_tiling_key = tiling_key;\n";
-    call_cube_tiling << "g_cube_tiling_cache_basem = basem;\n";
-    call_cube_tiling << "g_cube_tiling_cache_basen = basen;\n";
-    call_cube_tiling << "std::memcpy(g_cube_tiling_cache_bytes, tiling_data->matmul_tiling_data, "
-                        "sizeof(tiling_data->matmul_tiling_data));\n";
-    call_cube_tiling << "}" << std::endl;
-    ss << call_cube_tiling.str();
+    ss << GenCallCubeTilingForInductor(fused_schedule_result, dynamic_shape_vars, pgo_shape_dim);
   }
 
   // AutofuseTiling
@@ -1226,25 +1273,7 @@ std::string TilingLib::GenTilingFuncForInductor(const ascir::FusedScheduledResul
     return ss.str() + GenCubeFusionTilingBodyInductor(fused_schedule_result, elemwise_schedule_result,
                                                       pgo_shape_dim.shape_dim_use.str());
   }
-  ss << "  tiling->set_block_dim(limit->aiv_num);" << std::endl;
-  ss << "  tiling->set_ub_size(limit->ub_size - 256);" << std::endl;
-  ss << "  if (!optiling::GetTiling(*tiling, -1, nullptr)) {return -1;}" << std::endl;
-  ss << "  *blockDim = tiling->get_block_dim();" << std::endl;  // Only consider 48 for now
-  ss << "  using namespace optiling;" << std::endl;
-  ss << "  *workspaceSize = GetWorkspaceSize(*tiling);" << std::endl;
-  ss << std::endl;
-
-  ss << "  return 0;" << std::endl;
-  ss << "}" << std::endl;
-  if (enable_autofuse_pgo_) {
-    // PGOGetTilingKey
-    ss << GenPGOGetTilingKey(tiling);
-    // AutofuseTilingWithConfig
-    ss << GenPgoTilingFunc(elemwise_schedule_result, tiling, pgo_shape_dim, true);
-  } else {
-    // 生成 AutofuseTilingWithConfig 函数
-    ss << GenPgoAutofuseTiling(elemwise_schedule_result, pgo_shape_dim, tiling, true);
-  }
+  ss << GenPlainInductorTilingTail(elemwise_schedule_result, pgo_shape_dim, tiling);
   return ss.str();
 }
 
@@ -1645,6 +1674,7 @@ namespace gert {
   int vector_core_num = std::atoi(core_num.c_str());
   GetTilingParse(tiling_parse_def, vector_core_num);
   ss << tiling_parse_def << std::endl;
+  const std::string graph_name = CamelToLowerSneak(fused_schedule_result.fused_graph_name.GetString());
   if (ascgen_utils::IsCubeFusedScheduled(fused_schedule_result) && IsStaticSchedResult(fused_schedule_result)) {
     ss << extern_c << " ge::graphStatus TilingFunc(gert::TilingSymbolEvalContext *context)" << std::endl;
     ss << "{" << std::endl;

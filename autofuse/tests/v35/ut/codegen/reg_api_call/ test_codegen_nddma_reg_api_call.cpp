@@ -101,6 +101,58 @@ TEST(CodegenKernel, NddmaApiCall_ThreeDimTensor) {
                         "DataCopyNddma(local_0, local_0[0 + 0], output_dims_0, output_stride_0, input_stride_0);\n"});
 }
 
+TEST(CodegenKernel, NddmaApiCall_OneDimTensorUsesDefaultDescriptorMapping) {
+  af::AscGraph graph("test_graph");
+  auto outer_size = af::Symbol(16);
+  auto vector_size = af::Symbol(64);
+  auto outer = graph.CreateAxis("outer", outer_size);
+  auto vector = graph.CreateAxis("vector", vector_size);
+
+  Data data0("data0", graph);
+  Nddma nddma_op("nddma");
+  graph.AddNode(nddma_op);
+  nddma_op.x = data0.y;
+  nddma_op.attr.sched.axis = {outer.id, vector.id};
+  *nddma_op.y.axis = {outer.id, vector.id};
+  *nddma_op.y.repeats = {outer_size, vector_size};
+  *nddma_op.y.strides = {vector_size, One};
+
+  auto nddma = graph.FindNode("nddma");
+  nddma->attr.api.compute_type = af::ComputeType::kComputeLoad;
+  nddma->attr.api.type = af::ApiType::kAPITypeCompute;
+  nddma->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  nddma->attr.sched.loop_axis = outer.id;
+  nddma->outputs[0].attr.vectorized_axis = {vector.id};
+  nddma->outputs[0].attr.vectorized_strides = {One};
+  nddma->outputs[0].attr.dtype = ge::DT_FLOAT;
+  nddma->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
+  nddma->outputs[0].attr.mem.tensor_id = 0;
+  nddma->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  nddma->outputs[0].attr.que.id = 1;
+
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  tpipe.AddTensor(nddma->outputs[0]);
+  tiler.AddAxis(outer);
+  tiler.AddAxis(vector);
+  tiler.AddSizeVar(af::SizeVar(outer_size));
+  tiler.AddSizeVar(af::SizeVar(vector_size));
+
+  codegen::ApiTensor x;
+  x.id = nddma->outputs[0].attr.mem.tensor_id;
+  codegen::NddmaApiCall call("DataCopyNddma");
+  ASSERT_EQ(call.Init(nddma), af::SUCCESS);
+  call.inputs.push_back(&x);
+
+  std::string result;
+  ASSERT_EQ(call.Generate(tpipe, {}, result), af::SUCCESS);
+  EXPECT_EQ(result,
+            "const int64_t output_dims_0[5] = {1, 1, 1, 1, 64};\n"
+            "const int64_t output_stride_0[5] = {1, 1, 1, 1, 1};\n"
+            "const int64_t input_stride_0[5] = {1, 1, 1, 1, 1};\n"
+            "DataCopyNddma(local_0, local_0[0 + 0], output_dims_0, output_stride_0, input_stride_0);\n");
+}
+
 TEST(CodegenKernel, NddmaApiCall_CvInductorUsesUbAxisStrides) {
   af::AscGraph graph("test_graph");
 
@@ -147,10 +199,64 @@ TEST(CodegenKernel, NddmaApiCall_CvInductorUsesUbAxisStrides) {
   std::string result;
   call_0.Generate(tpipe, vector<af::AxisId>{}, result);
   EXPECT_EQ(result,
-            std::string{"const int64_t output_dims_0[2] = {curAivM, curAlignN};\nconst int64_t input_stride_0[2] = "
-                        "{1, 0};\nconst int64_t output_stride_0[2] = {curAlignN, 1};\n"
+            std::string{"const int64_t output_dims_0[2] = {curAivM, curAivN};\nconst int64_t input_stride_0[2] = "
+                        "{1, 0};\nconst int64_t output_stride_0[2] = {KernelUtils::BlkAlign<float>(curAivN), "
+                        "1};\n"
                         "DataCopyNddma(local_0, local_0[offset / shapeN], output_dims_0, output_stride_0, "
                         "input_stride_0);\n"});
+}
+
+TEST(CodegenKernel, NddmaApiCall_CvUbFuseUsesDtypeAlignedUbStrides) {
+  af::AscGraph graph("test_graph");
+
+  auto m = af::Symbol(16);
+  auto n = af::Symbol(32);
+  auto z_m = graph.CreateAxis("z_m", m);
+  auto z_n = graph.CreateAxis("z_n", n);
+
+  Data data0("data0", graph);
+  Nddma nddma_op("nddma");
+  graph.AddNode(nddma_op);
+  nddma_op.x = data0.y;
+  nddma_op.attr.sched.axis = {z_m.id, z_n.id};
+  *nddma_op.y.axis = {z_m.id, z_n.id};
+  *nddma_op.y.repeats = {m, n};
+  *nddma_op.y.strides = {One, One};
+
+  auto nddma = graph.FindNode("nddma");
+  nddma->attr.api.compute_type = af::ComputeType::kComputeLoad;
+  nddma->attr.api.type = af::ApiType::kAPITypeCompute;
+  nddma->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  nddma->outputs[0].attr.vectorized_axis = {z_m.id, z_n.id};
+  nddma->outputs[0].attr.vectorized_strides = {One, One};
+  nddma->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  nddma->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
+  nddma->outputs[0].attr.mem.tensor_id = 0;
+  nddma->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  nddma->outputs[0].attr.que.id = 1;
+  nddma->outputs[0].attr.opt.merge_scope = af::kIdNone;
+
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  tpipe.cv_fusion_type = ascir::CubeTemplateType::kUBFuse;
+  tpipe.is_inductor = false;
+  tpipe.AddTensor(nddma->outputs[0]);
+
+  codegen::ApiTensor x;
+  x.id = nddma->outputs[0].attr.mem.tensor_id;
+
+  codegen::NddmaApiCall call_0("DataCopyNddma");
+  EXPECT_EQ(call_0.Init(nddma), 0);
+  call_0.inputs.push_back(&x);
+
+  std::string result;
+  call_0.Generate(tpipe, vector<af::AxisId>{}, result);
+  EXPECT_EQ(result,
+            std::string{"const int64_t output_dims_0[2] = {curAivM, curAivN};\nconst int64_t input_stride_0[2] = "
+                        "{shapeN, 1};\nconst int64_t output_stride_0[2] = {KernelUtils::BlkAlign<half>(curAivN), "
+                        "1};\n"
+                        "DataCopyNddma(local_0, local_0[offset], output_dims_0, "
+                        "output_stride_0, input_stride_0);\n"});
 }
 
 TEST(CodegenKernel, NddmaApiCall_SevenDimTensor) {

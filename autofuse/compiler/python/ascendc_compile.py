@@ -39,6 +39,11 @@ CV_HOST_LINK_LIBRARIES = HOST_LINK_LIBRARIES + ["nnopbase"]
 INDUCTOR_COMPILE_TRACE_LABEL = "InductorCompile"
 HOST_COMPILE_MAX_WORKERS = 32
 HOST_CPP_STANDARD = "-std=c++17"
+CV_WRAPPER_SOURCE_NAME = "cube_kernel_tiling_wrapper.cpp"
+CV_WRAPPER_SPLIT_KEY = "BCubeKernelTilingWrapperCpp"
+CV_WRAPPER_CACHE_DIR_NAME = "cv_tiling_wrapper_cache"
+CV_WRAPPER_SO_BASENAME = "libautofuse_cv_tiling_wrapper"
+CV_WRAPPER_RPATH_OPTION = f"-Wl,-rpath,$ORIGIN/{CV_WRAPPER_CACHE_DIR_NAME}"
 PGO_BUNDLE_SCHEMA_VERSION = 1
 PGO_RESULT_PROTOCOL_VERSION = 1
 PGO_KERNEL_FORMAT = "aicore_binary_elf_v1"
@@ -185,16 +190,127 @@ def run_compile_command(cmd: List[str], stage_name):
         print(f"[{stage_name}] {result.stdout}")
 
 
-def link_shared(target_file, obj_files, link_libraries=None):
+def link_shared(target_file, obj_files, link_libraries=None, extra_link_options=None):
     link_command = [f"{ASCEND_PATH}/tools/bisheng_compiler/bin/bisheng"]
     link_command.extend(obj_files)
     link_command.extend(["-fPIC", "--shared", "-o", target_file])
+    if extra_link_options:
+        link_command.extend(extra_link_options)
     if link_libraries:
         link_command.extend(["-L", f"{ASCEND_PATH}/lib64"])
         link_command.extend(["-L", f"{ASCEND_PATH}/{machine}-linux/lib64"])
         link_command.extend([f"-l{link_library}" for link_library in link_libraries])
     run_compile_command(link_command, "LinkObj")
     return target_file
+
+
+def is_cv_wrapper_source(source_file):
+    base_name = os.path.basename(source_file)
+    return base_name == CV_WRAPPER_SOURCE_NAME or base_name.endswith(
+        f"_tiling_func_{CV_WRAPPER_SPLIT_KEY}.cpp"
+    )
+
+
+def get_shared_cv_wrapper_cache_dir(args: argparse.Namespace, temp_dir):
+    output_file = getattr(args, "output_file", None)
+    output_file_dir = (
+        os.path.dirname(os.path.realpath(output_file)) if output_file else None
+    )
+    cache_root = (
+        temp_dir
+        or output_file_dir
+        or os.getenv("RUN_DIR")
+        or os.getenv("TORCHINDUCTOR_NPU_EXT_CACHE_DIR")
+    )
+    return os.path.join(os.path.realpath(cache_root), CV_WRAPPER_CACHE_DIR_NAME)
+
+
+def read_file_bytes(file_path):
+    with open(file_path, "rb") as f:
+        return f.read()
+
+
+def get_shared_cv_wrapper_so_path(args: argparse.Namespace, temp_dir, source_file):
+    digest = hashlib.sha256()
+    digest.update(read_file_bytes(source_file))
+    digest.update(str(ASCEND_PATH).encode("utf-8"))
+    digest.update(str(machine).encode("utf-8"))
+    digest.update(str(getattr(args, "soc_version", "")).encode("utf-8"))
+    digest.update(str(getattr(args, "compile_options", "")).encode("utf-8"))
+    digest.update(str(getattr(args, "stage", "")).encode("utf-8"))
+    so_name = f"{CV_WRAPPER_SO_BASENAME}_{digest.hexdigest()[:16]}.so"
+    return os.path.join(get_shared_cv_wrapper_cache_dir(args, temp_dir), so_name)
+
+
+def get_shared_cv_wrapper_soname_options(so_path):
+    return [f"-Wl,-soname,{os.path.basename(so_path)}"]
+
+
+def get_shared_cv_wrapper_rpath_options(args: argparse.Namespace):
+    return (
+        [CV_WRAPPER_RPATH_OPTION]
+        if getattr(args, "shared_cv_wrapper_so", None)
+        else None
+    )
+
+
+def build_shared_cv_wrapper_so(
+    args: argparse.Namespace, temp_dir, source_file, so_path
+):
+    tmp_so_path = f"{so_path}.{os.getpid()}.{time.time_ns()}.tmp"
+    try:
+        wrapper_obj = compile_host_obj_file(args, temp_dir, source_file)
+        link_shared(
+            tmp_so_path,
+            [wrapper_obj],
+            link_libraries=CV_HOST_LINK_LIBRARIES,
+            extra_link_options=get_shared_cv_wrapper_soname_options(so_path),
+        )
+        os.replace(tmp_so_path, so_path)
+    finally:
+        if os.path.exists(tmp_so_path):
+            os.remove(tmp_so_path)
+
+
+def ensure_shared_cv_wrapper_so(args: argparse.Namespace, temp_dir, source_file):
+    so_path = get_shared_cv_wrapper_so_path(args, temp_dir, source_file)
+    if os.path.exists(so_path):
+        return so_path
+    os.makedirs(os.path.dirname(so_path), exist_ok=True)
+    lock_path = f"{so_path}.lock"
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            if os.path.exists(so_path):
+                return so_path
+            build_shared_cv_wrapper_so(args, temp_dir, source_file, so_path)
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+    return so_path
+
+
+def append_shared_cv_wrapper_so(args: argparse.Namespace, obj_files):
+    shared_cv_wrapper_so = getattr(args, "shared_cv_wrapper_so", None)
+    if shared_cv_wrapper_so and is_cv_fusion_compile(args):
+        return obj_files + [shared_cv_wrapper_so]
+    return obj_files
+
+
+def prepare_shared_cv_wrapper(args: argparse.Namespace, temp_dir, host_files):
+    if not is_cv_fusion_compile(args):
+        return host_files
+    regular_host_files = []
+    wrapper_sources = []
+    for source_file in host_files:
+        if is_cv_wrapper_source(source_file):
+            wrapper_sources.append(source_file)
+        else:
+            regular_host_files.append(source_file)
+    if wrapper_sources:
+        args.shared_cv_wrapper_so = ensure_shared_cv_wrapper_so(
+            args, temp_dir, wrapper_sources[0]
+        )
+    return regular_host_files
 
 
 def link_pgo_executable(target_file, obj_files, mspti_link_flags):
@@ -413,13 +529,17 @@ def build_host_include_options(temp_dir):
         "-I",
         f"{ASCEND_PATH}/include",
         "-I",
+        f"{ASCEND_PATH}/{machine}-linux/pkg_inc",
+        "-I",
+        f"{ASCEND_PATH}/{machine}-linux/pkg_inc/base",
+        "-I",
+        f"{ASCEND_PATH}/pkg_inc",
+        "-I",
         f"{ASCEND_PATH}/pkg_inc/base",
         "-I",
         f"{ASCEND_PATH}/include/base",
         "-I",
         f"{ASCEND_PATH}/include/experiment",
-        "-I",
-        f"{ASCEND_PATH}/{machine}-linux/pkg_inc/base",
         "-I",
         f"{ASCEND_PATH}/{machine}-linux/include",
         "-I",
@@ -705,7 +825,11 @@ def normalize_to_list(value):
 
 @inductor_compile_duration("CompileHostObj")
 def compile_host_objs(args: argparse.Namespace, temp_dir, pch_path=None):
-    host_files = normalize_to_list(args.host_files)
+    host_files = prepare_shared_cv_wrapper(
+        args, temp_dir, normalize_to_list(args.host_files)
+    )
+    if not host_files:
+        return []
     pch_state = {"path": pch_path, "lock": Lock()}
     if len(host_files) == 1:
         return [compile_host_obj_file(args, temp_dir, host_files[0], pch_state)]
@@ -793,18 +917,24 @@ def build_device_so(args: argparse.Namespace, host_obj_path, temp_dir):
     host_obj_paths = normalize_to_list(host_obj_path)
     if host_obj_paths:
         obj_files = host_obj_paths + obj_files
+    obj_files = append_shared_cv_wrapper_so(args, obj_files)
     link_libraries = (
         CV_HOST_LINK_LIBRARIES
         if host_obj_paths and is_cv_fusion_compile(args)
         else (HOST_LINK_LIBRARIES if host_obj_paths else None)
     )
     with InductorCompileDuration(args, "LinkDeviceSo"):
-        return link_shared(target_file, obj_files, link_libraries=link_libraries)
+        return link_shared(
+            target_file,
+            obj_files,
+            link_libraries=link_libraries,
+            extra_link_options=get_shared_cv_wrapper_rpath_options(args),
+        )
 
 
 def clean_before_modify(temp_dir):
     src_directory = os.getcwd()
-    keep_dirs = {"host", "device"}
+    keep_dirs = {"host", "device", CV_WRAPPER_CACHE_DIR_NAME}
     for entry in os.listdir(temp_dir):
         entry_path = os.path.join(temp_dir, entry)
         if os.path.isfile(entry_path):
@@ -1056,9 +1186,13 @@ def try_static_shape_compile(args: argparse.Namespace, temp_dir, so_path):
 def link_host_target(args, temp_dir, pch_path=None):
     # 处理 host 编译阶段
     if pch_path is None:
-        host_obj_paths = compile_host_objs(args, temp_dir)
+        host_obj_paths = append_shared_cv_wrapper_so(
+            args, compile_host_objs(args, temp_dir)
+        )
     else:
-        host_obj_paths = compile_host_objs(args, temp_dir, pch_path)
+        host_obj_paths = append_shared_cv_wrapper_so(
+            args, compile_host_objs(args, temp_dir, pch_path)
+        )
     so_file = os.path.join(temp_dir, os.path.basename(args.output_file))
     link_libraries = (
         CV_HOST_LINK_LIBRARIES if is_cv_fusion_compile(args) else HOST_LINK_LIBRARIES
@@ -1066,7 +1200,12 @@ def link_host_target(args, temp_dir, pch_path=None):
     if getattr(args, "pgo_runner_file", None) is not None:
         link_libraries = link_libraries + ["ascendcl", "runtime"]
     with InductorCompileDuration(args, "LinkHostSo"):
-        link_shared(so_file, host_obj_paths, link_libraries=link_libraries)
+        link_shared(
+            so_file,
+            host_obj_paths,
+            link_libraries=link_libraries,
+            extra_link_options=get_shared_cv_wrapper_rpath_options(args),
+        )
     return so_file
 
 
@@ -1104,6 +1243,15 @@ def copy_so_to_output(so_file, args, src_directory):
         os.makedirs(dst_dir_path)
 
     shutil.copy(so_file, dst_file)
+    shared_cv_wrapper_so = getattr(args, "shared_cv_wrapper_so", None)
+    if shared_cv_wrapper_so:
+        wrapper_dst_dir = os.path.join(dst_dir_path, CV_WRAPPER_CACHE_DIR_NAME)
+        os.makedirs(wrapper_dst_dir, exist_ok=True)
+        wrapper_dst_file = os.path.join(
+            wrapper_dst_dir, os.path.basename(shared_cv_wrapper_so)
+        )
+        if os.path.realpath(shared_cv_wrapper_so) != os.path.realpath(wrapper_dst_file):
+            shutil.copy(shared_cv_wrapper_so, wrapper_dst_file)
     print(f"copy file {so_file} to {dst_file}")
     os.chdir(src_directory)
 

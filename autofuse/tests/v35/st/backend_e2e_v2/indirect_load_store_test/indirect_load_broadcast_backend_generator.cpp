@@ -22,6 +22,9 @@
 #ifndef IL_INDEX_BROADCAST
 #define IL_INDEX_BROADCAST 0
 #endif
+#ifndef IL_AIC_REPRO
+#define IL_AIC_REPRO 0
+#endif
 
 namespace {
 constexpr int64_t kOutputS0 = 4;
@@ -38,6 +41,7 @@ constexpr uint32_t kBroadcastAxesMask = IL_BROADCAST_AXES_MASK;
 constexpr bool kClearBroadcastSourceView = IL_CLEAR_BROADCAST_SOURCE_VIEW;
 constexpr bool kExpectSimt = IL_EXPECT_SIMT;
 constexpr bool kExpectSk = IL_EXPECT_SK;
+constexpr bool kAicRepro = IL_AIC_REPRO;
 
 using indirect_load_test::SetView;
 
@@ -234,6 +238,60 @@ af::ComputeGraphPtr CreateGraph() {
       indirect_load_test::CreateSubGraph(CreateGraphView(), BuildInputPath, BuildIndexPath, BuildOutputPath), "output");
 }
 
+af::ComputeGraphPtr CreateAicReproGraph() {
+  auto graph = std::make_shared<af::AscGraph>("indirect_load_aic_repro");
+  const af::Expression input_s0 = graph->CreateSizeVar(100000);
+  const af::Expression output_s0 = graph->CreateSizeVar(1024);
+  const af::Expression s1 = graph->CreateSizeVar(1024);
+  const af::Expression one = af::ops::One;
+  const af::AxisId input_axis0 = graph->CreateAxis("x0", input_s0).id;
+  const af::AxisId input_axis1 = graph->CreateAxis("x1", s1).id;
+  const af::AxisId output_axis0 = graph->CreateAxis("y0", output_s0).id;
+  const af::AxisId output_axis1 = graph->CreateAxis("y1", s1).id;
+
+  af::ascir_op::Data input("input");
+  af::ascir_op::Load input_load("input_load");
+  graph->AddNode(input);
+  graph->AddNode(input_load);
+  input.ir_attr.SetIndex(0);
+  input_load.x = input.y;
+  SetView(input, {input_axis0, input_axis1}, {input_s0, s1}, {s1, one}, af::DT_FLOAT);
+  SetView(input_load, {input_axis0, input_axis1}, {input_s0, s1}, {s1, one}, af::DT_FLOAT);
+
+  af::ascir_op::Data index("index");
+  af::ascir_op::Load index_load("index_load");
+  af::ascir_op::Broadcast index_broadcast("index_broadcast");
+  graph->AddNode(index);
+  graph->AddNode(index_load);
+  graph->AddNode(index_broadcast);
+  index.ir_attr.SetIndex(1);
+  index_load.x = index.y;
+  index_broadcast.x = index_load.y;
+  index_broadcast.attr.api.compute_type = af::ComputeType::kComputeBroadcast;
+  SetView(index, {output_axis0, output_axis1}, {output_s0, one}, {one, af::ops::Zero}, af::DT_INT64);
+  SetView(index_load, {output_axis0, output_axis1}, {output_s0, one}, {one, af::ops::Zero}, af::DT_INT64);
+  SetView(index_broadcast, {output_axis0, output_axis1}, {output_s0, s1}, {s1, one}, af::DT_INT64);
+
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  af::ascir_op::Store store("store");
+  af::ascir_op::Output output("output");
+  graph->AddNode(indirect_load);
+  graph->AddNode(store);
+  graph->AddNode(output);
+  indirect_load.x1 = input_load.y;
+  indirect_load.x2 = index_broadcast.y;
+  indirect_load.ir_attr.SetAxis(0);
+  SetView(indirect_load, {output_axis0, output_axis1}, {output_s0, s1}, {s1, one}, af::DT_FLOAT);
+  store.x = indirect_load.y;
+  SetView(store, {output_axis0, output_axis1}, {output_s0, s1}, {s1, one}, af::DT_FLOAT);
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  SetView(output, {output_axis0, output_axis1}, {output_s0, s1}, {s1, one}, af::DT_FLOAT);
+
+  indirect_load_test::BackendGraph backend("indirect_load_aic_repro", "data0", "data1", af::DT_FLOAT);
+  return backend.Finalize(graph, "output");
+}
+
 void CheckSkKernel(const std::string &kernel) {
   EXPECT_NE(kernel.find("// IndirectLoad SK"), std::string::npos);
   EXPECT_EQ(kernel.find("// IndirectLoad SIMD"), std::string::npos);
@@ -290,8 +348,22 @@ void CheckGeneratedKernel(const std::string &kernel, ascir::TemplateId template_
 using TestBackendIndirectLoadBroadcastE2e = indirect_load_test::PrecisionBackendE2e;
 
 TEST_F(TestBackendIndirectLoadBroadcastE2e, IndirectLoadBroadcastCodegen) {
-  const auto graph = CreateGraph();
+  const auto graph = kAicRepro ? CreateAicReproGraph() : CreateGraph();
   ASSERT_NE(graph, nullptr);
+  if (kAicRepro) {
+    ascir::FusedScheduledResult scheduled_result;
+    optimize::Optimizer optimizer(optimize::OptimizerOptions{.graph_type = optimize::GraphType::kFusedAscBackend});
+    ASSERT_EQ(optimizer.Optimize(graph, scheduled_result), af::SUCCESS);
+    ASSERT_TRUE(indirect_load_test::HasTemplate(scheduled_result, ascir::TemplateId::kIndirectLoadSimt));
+    codegen::Codegen codegen(codegen::CodegenOptions{});
+    codegen::CodegenResult result;
+    ASSERT_EQ(codegen.Generate({}, scheduled_result, result), af::SUCCESS);
+    EXPECT_NE(result.kernel.find("// IndirectLoad SIMT"), std::string::npos);
+    EXPECT_NE(result.kernel.find("IndirectLoadSimtStridedPolicy<uint32_t, 2, 0, 3ULL, 1ULL>"), std::string::npos);
+    EXPECT_NE(result.kernel.find(", 1024, 1024, 1024, 1, 1, 0);"), std::string::npos);
+    indirect_load_test::WriteGeneratedFiles(result);
+    return;
+  }
   const std::map<std::string, std::string> shape_info = {{"s0", "stub_s0"}, {"s1", "stub_s1"}, {"s2", "stub_s2"},
                                                          {"s3", "stub_s3"}, {"s4", "stub_s4"}, {"s5", "stub_s5"},
                                                          {"s6", "stub_s6"}, {"s7", "stub_s7"}};

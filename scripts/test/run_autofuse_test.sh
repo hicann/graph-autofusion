@@ -771,9 +771,14 @@ build_backend() {
                       load_gather_split_b_t_abs_store_test_e2e_v2 \
                       load_gather_tail_split_b_t_abs_store_test_e2e_v2 \
                        load_gather_one_axis_split_b_t_abs_store_test_e2e_v2 \
-                       indirect_load_rank2_axis1_simd_e2e_v2 \
-                       indirect_load_rank2_axis1_b16_gather_e2e_v2 \
+                        indirect_load_rank2_axis1_simd_e2e_v2 \
+                        indirect_load_rank2_axisneg2_simd_e2e_v2 \
+                        indirect_load_rank2_axis1_relu_exp2_pre_simd_e2e_v2 \
+                        indirect_load_rank2_axis1_b16_gather_e2e_v2 \
                        indirect_load_rank3_axis1_float_int64_static_e2e_v2 \
+                       indirect_load_rank3_axis1_pow2_simd_e2e_v2 \
+                       indirect_load_rank3_axis1_pow2_gather_e2e_v2 \
+                       indirect_load_rank3_axis1_pow2_simt_e2e_v2 \
                        indirect_load_rank3_axis1_float_int32_gather_e2e_v2 \
                        indirect_load_rank3_axis1_float_int64_gather_exact_e2e_v2 \
                        indirect_load_rank3_axis1_float_int64_gather_e2e_v2 \
@@ -789,10 +794,11 @@ build_backend() {
                        indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd_e2e_v2 \
                        indirect_load_mixed_rank4_axis2_simd_e2e_v2 \
                        indirect_load_simt_elementwise_coverage_e2e_v2 \
-                       indirect_load_broadcast_elements_simd_test_e2e_v2 \
-                       indirect_load_broadcast_elements_simt_test_e2e_v2 \
-                       indirect_load_broadcast_elements_sk_test_e2e_v2 \
-                       indirect_load_stride_zero_elements_simd_test_e2e_v2 \
+                        indirect_load_broadcast_elements_simd_test_e2e_v2 \
+                        indirect_load_broadcast_elements_simt_test_e2e_v2 \
+                        indirect_load_broadcast_elements_sk_test_e2e_v2 \
+                        indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 \
+                        indirect_load_stride_zero_elements_simd_test_e2e_v2 \
                        indirect_load_stride_zero_elements_simt_test_e2e_v2 \
                        indirect_load_stride_zero_elements_sk_test_e2e_v2 \
                        indirect_load_rank3_axis1_input_index_gap_simd_test_e2e_v2 \
@@ -865,6 +871,9 @@ build_backend() {
                       copysign_bf16_test_e2e_v2 \
                       erfcx_test_e2e_v2 \
                       expm_test_e2e_v2 \
+                      i0_store_test_e2e_v2 \
+                      i0e_store_test_e2e_v2 \
+                      i1e_store_test_e2e_v2 \
                       bessel_j0_store_test_e2e_v2 \
                       bessel_j1_store_test_e2e_v2 \
                       bessel_y0_store_test_e2e_v2 \
@@ -874,13 +883,22 @@ build_backend() {
                       spherical_bessel_j0_store_test_e2e_v2 \
                       ndtr_store_test_e2e_v2 \
                       ndtri_store_test_e2e_v2 \
+                      log_ndtr_store_test_e2e_v2 \
+                      next_after_store_test_e2e_v2 \
+                      poly_gamma_store_test_e2e_v2 \
                       zeta_store_test_e2e_v2 \
                       signbit_store_test_e2e_v2 \
                       frexp_store_test_e2e_v2 \
                       shifted_chebyshev_polynomial_t_store_test_e2e_v2 \
                       shifted_chebyshev_polynomial_u_store_test_e2e_v2 \
                       shifted_chebyshev_polynomial_v_store_test_e2e_v2 \
-                      shifted_chebyshev_polynomial_w_store_test_e2e_v2"
+                      shifted_chebyshev_polynomial_w_store_test_e2e_v2 \
+                      chebyshev_polynomial_t_store_test_e2e_v2 \
+                      chebyshev_polynomial_u_store_test_e2e_v2 \
+                      chebyshev_polynomial_v_store_test_e2e_v2 \
+                      chebyshev_polynomial_w_store_test_e2e_v2 \
+                      hermite_polynomial_h_store_test_e2e_v2 \
+                      hermite_polynomial_he_store_test_e2e_v2"
   fi
   MAKE_TARGET_LIST_CODEGEN=$(echo "${MAKE_TARGET_LIST}" | sed 's/e2e/codegen/g')
   CTEST_BACKEND_TEST1_REGEX=$(build_backend_test_regex ${MAKE_TARGET_LIST_CODEGEN})

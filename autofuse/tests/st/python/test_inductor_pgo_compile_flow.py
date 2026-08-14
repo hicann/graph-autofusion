@@ -176,7 +176,9 @@ def test_inductor_host_link_includes_acl_runtime(ascendc_compile_module, tmp_pat
     ascendc_compile_module.module.compile_host_objs = fake_compile_host_objs
     ascendc_compile_module.module.is_cv_fusion_compile = fake_is_cv_fusion_compile
 
-    def fake_link_shared(target_file, obj_files, link_libraries=None):
+    def fake_link_shared(
+        target_file, obj_files, link_libraries=None, extra_link_options=None
+    ):
         captured["link_libraries"] = link_libraries
         return target_file
 

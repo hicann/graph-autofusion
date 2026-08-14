@@ -68,7 +68,11 @@ TEST_F(LoadLogicalNotStoreTest, LoadLogicalNotStoreCodegen) {
     InitScheduleResultsByImplGraphs(test_impl_graphs, fused_schedule_result);
     codegen::CodegenResult result;
     EXPECT_EQ(codegen.Generate(fused_schedule_result, result), 0);
-    kernel_file << tilig_stub << RemoveSubDirInclude(result.kernel);
+    const std::string kernel = RemoveSubDirInclude(result.kernel);
+    EXPECT_NE(kernel.find("LogicalNot(local_4[0], local_2[0], local_blk_tensor_of_half_1, tmp_buf_0, "
+                          "local_2_actual_size);"),
+              std::string::npos);
+    kernel_file << tilig_stub << kernel;
     tiling_file << result.tiling;
     tiling_data_file << result.tiling_data;
   } catch (...) {

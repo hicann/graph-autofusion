@@ -431,6 +431,7 @@ af::Status GetDMAActualPerf(const NodeDetail &node_info, const Expr &swap_outer_
   cur_node.block_count_idx = node_info.block_count_idx;
   cur_node.repeats = node_info.repeats;
   cur_node.ternary_ops = node_info.ternary_ops;
+  cur_node.nddma_descriptor = node_info.nddma_descriptor;
   GE_ASSERT_SUCCESS(SetDims(dims, cur_node));
   std::string registered_key_name;
   GE_ASSERT_SUCCESS(GetApiRegisterVerName(registered_key_name));

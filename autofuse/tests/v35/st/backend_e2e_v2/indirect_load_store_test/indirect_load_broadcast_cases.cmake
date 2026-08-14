@@ -42,6 +42,9 @@ endfunction()
 add_indirect_load_broadcast_test(indirect_load_broadcast_elements_simd_test simd 2 2 3 0 1)
 add_indirect_load_broadcast_test(indirect_load_broadcast_elements_simt_test simt 2 2 3 0 0)
 add_indirect_load_broadcast_test(indirect_load_broadcast_elements_sk_test sk 2 2 3 0 0)
+add_indirect_load_broadcast_test(indirect_load_broadcast_index_physical_view_simt_test simt 2 2 3 0 0)
+target_compile_definitions(indirect_load_broadcast_index_physical_view_simt_test_codegen_v2 PRIVATE IL_AIC_REPRO=1)
+target_compile_definitions(indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 PRIVATE IL_AIC_REPRO=1)
 
 function(add_indirect_load_stride_zero_test test_name template input_zero_stride_mask index_zero_stride_mask
          input_element_count index_element_count)

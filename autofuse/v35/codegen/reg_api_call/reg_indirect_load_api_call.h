@@ -46,6 +46,8 @@ class IndirectLoadRegApiCall final : public ApiCall {
   Status GenerateSimd(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis,
                       const std::vector<std::reference_wrapper<const Tensor>> &inputs,
                       const std::vector<std::reference_wrapper<const Tensor>> &outputs, std::string &result) const;
+  Status GenerateSimtInvocation(const TPipe &tpipe, const std::string &input_dtype, const std::string &output_dtype,
+                                const std::string &outer_tb_var, std::stringstream &ss) const;
   Status GenerateSimt(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis, const Tensor &input,
                       std::string &result) const;
 

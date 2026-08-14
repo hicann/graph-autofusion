@@ -193,6 +193,7 @@ std::string GenBinarySearchFunctions();
 std::string GenEqualOrderSolverFunctions(bool enable_equal_order_tiling);
 std::string GenLocalBufferTilingFunctions(bool enable_equal_order_tiling);
 std::string GenMainSolverFunctions(bool enable_equal_order_tiling);
+// The Reduce balance switch is aggregated across all models that share this solver definition.
 std::string GetAxesSolverSolverHead(bool enable_equal_order_tiling = false);
 std::string GetAxesSolverSolverFunc(bool enable_equal_order_tiling = false);
 std::string GetAxesSolverPgoSolverHead(int64_t pgo_step_max);

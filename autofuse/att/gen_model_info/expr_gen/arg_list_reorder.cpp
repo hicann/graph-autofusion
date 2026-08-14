@@ -228,6 +228,113 @@ bool ArgListReorder::GetReduceAxisDataTypeSize(const NodeInfo &node, const SubAx
   return false;
 }
 
+const SubAxis *ArgListReorder::FindReduceTileAxis(const std::set<std::string> &reduce_axis_ori_axes_set) const {
+  const SubAxis *reduce_axis = nullptr;
+  for (const auto &axis : tuning_space_->sub_axes) {
+    if ((axis->axis_type != AxisPosition::INNER) || axis->is_bind_multi_core ||
+        !IsReduceOrigAxis(axis.get(), reduce_axis_ori_axes_set)) {
+      continue;
+    }
+    if (reduce_axis != nullptr) {
+      GELOGI("[ATT][ReduceTailBalance] Multiple Reduce tile axes found, keep the original order.");
+      return nullptr;
+    }
+    reduce_axis = axis.get();
+  }
+  return reduce_axis;
+}
+
+bool ArgListReorder::IsReduceInputTensor(const TensorPtr &tensor, const SubAxis *reduce_axis,
+                                         const std::set<std::string> &reduce_axis_ori_axes_set) const {
+  if ((tensor == nullptr) || (tensor->data_type_size == 0U)) {
+    return false;
+  }
+  return std::any_of(tensor->dim_info.begin(), tensor->dim_info.end(), [&](const SubAxis *dim) {
+    return IsSameOrRelatedAxis(dim, reduce_axis) || IsReduceOrigAxis(dim, reduce_axis_ori_axes_set);
+  });
+}
+
+bool ArgListReorder::CollectReduceTailAxis(const TensorPtr &tensor, const SubAxis *reduce_axis,
+                                           const std::set<std::string> &reduce_axis_ori_axes_set,
+                                           const SubAxis *&tail_axis, uint32_t &data_type_size) const {
+  if (!IsReduceInputTensor(tensor, reduce_axis, reduce_axis_ori_axes_set)) {
+    return true;
+  }
+  for (const auto *dim : tensor->dim_info) {
+    if ((dim == nullptr) || !dim->is_node_innerest_dim || IsSameOrRelatedAxis(dim, reduce_axis)) {
+      continue;
+    }
+    if ((tail_axis != nullptr) && !IsSameOrRelatedAxis(tail_axis, dim)) {
+      GELOGI("[ATT][ReduceTailBalance] Multiple tail tile axes found, keep the original order.");
+      return false;
+    }
+    if ((data_type_size != 0U) && (data_type_size != tensor->data_type_size)) {
+      GELOGI("[ATT][ReduceTailBalance] Inconsistent input dtype sizes found, keep the original order.");
+      return false;
+    }
+    tail_axis = dim;
+    data_type_size = tensor->data_type_size;
+  }
+  return true;
+}
+
+bool ArgListReorder::IsReduceTailTileAxis(const SubAxis *tail_axis) const {
+  if (tail_axis == nullptr) {
+    return false;
+  }
+  return std::any_of(tuning_space_->sub_axes.begin(), tuning_space_->sub_axes.end(), [&](const SubAxisPtr &axis) {
+    return (axis->name == tail_axis->name) && (axis->axis_type == AxisPosition::INNER) && !axis->is_bind_multi_core;
+  });
+}
+
+bool ArgListReorder::TryGetReduceTailTileInfo(const NodeInfo &node,
+                                              const std::set<std::string> &reduce_axis_ori_axes_set,
+                                              ReduceTailTileInfo &tile_info) const {
+  const SubAxis *reduce_axis = FindReduceTileAxis(reduce_axis_ori_axes_set);
+  if (reduce_axis == nullptr) {
+    return false;
+  }
+  const SubAxis *tail_axis = nullptr;
+  uint32_t data_type_size = 0U;
+  for (const auto &tensor : node.inputs) {
+    if (!CollectReduceTailAxis(tensor, reduce_axis, reduce_axis_ori_axes_set, tail_axis, data_type_size)) {
+      return false;
+    }
+  }
+  if ((tail_axis == nullptr) || (data_type_size == 0U) || !IsReduceTailTileAxis(tail_axis)) {
+    return false;
+  }
+
+  tile_info.reduce_axis_name = reduce_axis->name;
+  tile_info.tail_axis_name = tail_axis->name;
+  tile_info.reduce_repeat = GetOriginalAxisRepeat(reduce_axis);
+  tile_info.tail_repeat = GetOriginalAxisRepeat(tail_axis);
+  tile_info.data_type_size = data_type_size;
+  return true;
+}
+
+ArgListReorder::ReduceTailTilePolicy ArgListReorder::ClassifyReduceTailTilePolicy(
+    const ReduceTailTileInfo &tile_info) const {
+  uint64_t reduce_bytes = 0UL;
+  uint64_t tail_bytes = 0UL;
+  if (!GetExprBytes(tile_info.reduce_repeat, tile_info.data_type_size, reduce_bytes) ||
+      !GetExprBytes(tile_info.tail_repeat, tile_info.data_type_size, tail_bytes)) {
+    return ReduceTailTilePolicy::kFallback;
+  }
+  const uint32_t vector_len_size = GetVectorLenSize();
+  const uint32_t cache_line_size = GetCacheLineSize();
+  if ((vector_len_size == 0U) || (cache_line_size == 0U)) {
+    return ReduceTailTilePolicy::kFallback;
+  }
+  if ((reduce_bytes > vector_len_size) && (tail_bytes < cache_line_size)) {
+    return ReduceTailTilePolicy::kPreferTail;
+  }
+  if ((reduce_bytes < vector_len_size) && (tail_bytes > cache_line_size)) {
+    return ReduceTailTilePolicy::kKeepDefault;
+  }
+  return ReduceTailTilePolicy::kEqual;
+}
+
 bool ArgListReorder::IsReduceAxisBlockSplit(const std::vector<SubAxisPtr> &all_axes,
                                             const std::set<std::string> &reduce_axis_ori_axes_set) const {
   for (const auto &axis : all_axes) {
@@ -316,6 +423,29 @@ void ArgListReorder::RecordReduceTileTemplateSelection(const NodeInfo &node,
   if (!IsReduceAxisTileSplit(reduce_axis_ori_axes_set)) {
     return;
   }
+  ReduceTailTileInfo tile_info;
+  if (TryGetReduceTailTileInfo(node, reduce_axis_ori_axes_set, tile_info)) {
+    const ReduceTailTilePolicy policy = ClassifyReduceTailTilePolicy(tile_info);
+    if (policy == ReduceTailTilePolicy::kEqual) {
+      equal_order_reduce_tail_axes_.insert(tile_info.reduce_axis_name);
+      equal_order_reduce_tail_axes_.insert(tile_info.tail_axis_name);
+      GELOGI("[ATT][ReduceTailBalance] Set Reduce axis [%s] and tail axis [%s] to equal order.",
+             tile_info.reduce_axis_name.c_str(), tile_info.tail_axis_name.c_str());
+      return;
+    }
+    if (policy == ReduceTailTilePolicy::kPreferTail) {
+      prefer_reduce_tile_ = true;
+      GELOGI("[ATT][ReduceTailBalance] Prefer tail axis [%s] before Reduce axis [%s].",
+             tile_info.tail_axis_name.c_str(), tile_info.reduce_axis_name.c_str());
+      return;
+    }
+    if (policy == ReduceTailTilePolicy::kKeepDefault) {
+      GELOGI("[ATT][ReduceTailBalance] Keep existing Reduce-first order for axis [%s] and tail axis [%s].",
+             tile_info.reduce_axis_name.c_str(), tile_info.tail_axis_name.c_str());
+      return;
+    }
+  }
+
   RuntimeReorderRule runtime_rule;
   if (!HasSmallTailLargeReduceTile(node, reduce_axis_ori_axes_set, runtime_rule)) {
     GELOGI(
@@ -514,25 +644,63 @@ af::Status ArgListReorder::BuildArgListPriorityGraph(const vector<AttAxisPtr> &a
   return ApplyPriorityRules(tiling_R, CategorizeAxesByProperty(arg_list));
 }
 
-void ArgListReorder::MakeSureLoadStoreInnerestSameOrder(const std::vector<AttAxisPtr> &arg_list) const {
-  // 处理Load/Store的同等切分优先级
+void ArgListReorder::SetAxesSameOrder(const std::vector<AttAxisPtr> &arg_list,
+                                      const std::set<std::string> &axis_names) const {
   size_t min_order = SIZE_MAX;
   std::vector<AttAxisPtr> args_to_make_same_order;
-  std::string args_name;
   for (const auto &arg : arg_list) {
-    const bool is_load_store = (load_store_inner_most_dims_.find(arg->name) != load_store_inner_most_dims_.cend());
-    GELOGD("[DFX]arg name %s, axis_pos %d, order %d, bind_multicore %d, is_load_store %d", arg->name.c_str(),
-           arg->axis_pos, arg->order, arg->bind_multicore, is_load_store);
-    if (is_load_store && (!arg->bind_multicore && (arg->axis_pos == AxisPosition::INNER))) {
+    const bool is_target = axis_names.find(arg->name) != axis_names.end();
+    GELOGD("[DFX]arg name %s, axis_pos %d, order %d, bind_multicore %d, is_equal_order_target %d", arg->name.c_str(),
+           arg->axis_pos, arg->order, arg->bind_multicore, is_target);
+    if (is_target && !arg->bind_multicore && (arg->axis_pos == AxisPosition::INNER)) {
       args_to_make_same_order.emplace_back(arg);
-      if (min_order > arg->order) {
-        min_order = arg->order;
-      }
+      min_order = std::min(min_order, arg->order);
     }
   }
   for (auto &arg : args_to_make_same_order) {
     GELOGD("[DFX]Set arg %s order to %zu", arg->name.c_str(), min_order);
     arg->order = min_order;
+  }
+}
+
+void ArgListReorder::MakeSureLoadStoreInnerestSameOrder(const std::vector<AttAxisPtr> &arg_list) const {
+  // 处理 Load/Store 与 Reduce/tail 的同等切分优先级。
+  constexpr size_t kReduceTailAxisCount = 2U;
+  if (equal_order_reduce_tail_axes_.size() != kReduceTailAxisCount) {
+    SetAxesSameOrder(arg_list, load_store_inner_most_dims_);
+    return;
+  }
+  size_t reduce_tail_axis_count = 0U;
+  for (const auto &arg : arg_list) {
+    if ((equal_order_reduce_tail_axes_.find(arg->name) != equal_order_reduce_tail_axes_.end()) &&
+        AttUtils::IsTileSplitAxis(arg)) {
+      ++reduce_tail_axis_count;
+    }
+  }
+  if (reduce_tail_axis_count != kReduceTailAxisCount) {
+    GELOGI("[ATT][ReduceTailBalance] Reduce/tail tile axes are incomplete, keep the original order.");
+    SetAxesSameOrder(arg_list, load_store_inner_most_dims_);
+    return;
+  }
+
+  const bool overlaps_load_store = std::any_of(
+      equal_order_reduce_tail_axes_.begin(), equal_order_reduce_tail_axes_.end(), [&](const std::string &name) {
+        return load_store_inner_most_dims_.find(name) != load_store_inner_most_dims_.end();
+      });
+  if (overlaps_load_store) {
+    std::set<std::string> combined_axes = load_store_inner_most_dims_;
+    combined_axes.insert(equal_order_reduce_tail_axes_.begin(), equal_order_reduce_tail_axes_.end());
+    if (combined_axes.size() > kReduceTailAxisCount) {
+      GELOGI(
+          "[ATT][ReduceTailBalance] Combined equal-order group has more than two axes, keep Transpose equal-order "
+          "tiling and skip Reduce R/tail balance.");
+      SetAxesSameOrder(arg_list, load_store_inner_most_dims_);
+      return;
+    }
+    SetAxesSameOrder(arg_list, combined_axes);
+  } else {
+    SetAxesSameOrder(arg_list, load_store_inner_most_dims_);
+    SetAxesSameOrder(arg_list, equal_order_reduce_tail_axes_);
   }
 }
 

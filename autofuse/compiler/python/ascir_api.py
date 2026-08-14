@@ -937,6 +937,47 @@ def SphericalBesselJ0(
     )
 
 
+def LogNdtr(
+    owner_graph: ascir.HintGraph,
+    x: ascir.OpsOperatorOutput,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    return _common_in_1_out_1_normal_op(
+        "LogNdtr", owner_graph, x, axis=axis, size=size, stride=stride
+    )
+
+
+def NextAfter(
+    owner_graph: ascir.HintGraph,
+    x1: ascir.OpsOperatorOutput,
+    x2: ascir.OpsOperatorOutput,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    return _common_in_2_out_1_normal_op(
+        "NextAfter", owner_graph, x1, x2, axis=axis, size=size, stride=stride
+    )
+
+
+def PolyGamma(
+    owner_graph: ascir.HintGraph,
+    x1: ascir.OpsOperatorOutput,
+    x2: ascir.OpsOperatorOutput,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    return _common_in_2_out_1_normal_op(
+        "PolyGamma", owner_graph, x1, x2, axis=axis, size=size, stride=stride
+    )
+
+
 def SignBit(
     owner_graph: ascir.HintGraph,
     x: ascir.OpsOperatorOutput,
@@ -1074,6 +1115,128 @@ def ShiftedChebyshevPolynomialW(
         size=size,
         stride=stride,
     )
+
+
+def ChebyshevPolynomialT(
+    owner_graph: ascir.HintGraph,
+    x: ascir.OpsOperatorOutput,
+    n: int,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    return _shifted_chebyshev_polynomial_op(
+        "ChebyshevPolynomialT",
+        owner_graph,
+        x,
+        n,
+        axis=axis,
+        size=size,
+        stride=stride,
+    )
+
+
+def ChebyshevPolynomialU(
+    owner_graph: ascir.HintGraph,
+    x: ascir.OpsOperatorOutput,
+    n: int,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    return _shifted_chebyshev_polynomial_op(
+        "ChebyshevPolynomialU",
+        owner_graph,
+        x,
+        n,
+        axis=axis,
+        size=size,
+        stride=stride,
+    )
+
+
+def ChebyshevPolynomialV(
+    owner_graph: ascir.HintGraph,
+    x: ascir.OpsOperatorOutput,
+    n: int,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    return _shifted_chebyshev_polynomial_op(
+        "ChebyshevPolynomialV",
+        owner_graph,
+        x,
+        n,
+        axis=axis,
+        size=size,
+        stride=stride,
+    )
+
+
+def ChebyshevPolynomialW(
+    owner_graph: ascir.HintGraph,
+    x: ascir.OpsOperatorOutput,
+    n: int,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    return _shifted_chebyshev_polynomial_op(
+        "ChebyshevPolynomialW",
+        owner_graph,
+        x,
+        n,
+        axis=axis,
+        size=size,
+        stride=stride,
+    )
+
+
+def HermitePolynomialH(
+    owner_graph: ascir.HintGraph,
+    x: ascir.OpsOperatorOutput,
+    n: ascir.OpsOperatorOutput,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    name = _generate_op_name(owner_graph, "hermite_polynomial_h")
+    op_instance = ascir.ops.HermitePolynomialH(name)
+    meta = _get_metadata(owner_graph)
+    meta.ops.append(op_instance)
+    op_instance.attr.sched.axis = axis
+    op_instance.x = x
+    op_instance.n = n
+    _infer_or_set_view(op_instance.y, axis, size, stride)
+    op_instance.infer_dtype()
+    return op_instance.y
+
+
+def HermitePolynomialHe(
+    owner_graph: ascir.HintGraph,
+    x: ascir.OpsOperatorOutput,
+    n: ascir.OpsOperatorOutput,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    name = _generate_op_name(owner_graph, "hermite_polynomial_he")
+    op_instance = ascir.ops.HermitePolynomialHe(name)
+    meta = _get_metadata(owner_graph)
+    meta.ops.append(op_instance)
+    op_instance.attr.sched.axis = axis
+    op_instance.x = x
+    op_instance.n = n
+    _infer_or_set_view(op_instance.y, axis, size, stride)
+    op_instance.infer_dtype()
+    return op_instance.y
 
 
 def LaguerrePolynomialL(
@@ -2069,4 +2232,43 @@ def IsFinite(
 ) -> ascir.OpsOperatorOutput:
     return _common_in_1_out_1_normal_op(
         "IsFinite", owner_graph, x, axis=axis, size=size, stride=stride
+    )
+
+
+def I0(
+    owner_graph: ascir.HintGraph,
+    x: ascir.OpsOperatorOutput,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    return _common_in_1_out_1_normal_op(
+        "I0", owner_graph, x, axis=axis, size=size, stride=stride
+    )
+
+
+def I0e(
+    owner_graph: ascir.HintGraph,
+    x: ascir.OpsOperatorOutput,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    return _common_in_1_out_1_normal_op(
+        "I0e", owner_graph, x, axis=axis, size=size, stride=stride
+    )
+
+
+def I1e(
+    owner_graph: ascir.HintGraph,
+    x: ascir.OpsOperatorOutput,
+    *,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    return _common_in_1_out_1_normal_op(
+        "I1e", owner_graph, x, axis=axis, size=size, stride=stride
     )

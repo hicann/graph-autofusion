@@ -154,6 +154,9 @@ PyMODINIT_FUNC PyInit_pyautofuse(void);
   OP(TruncToInt)                  \
   OP(TruncDiv)                    \
   OP(Xor)                         \
+  OP(I0)                          \
+  OP(I0e)                         \
+  OP(I1e)                         \
   OP(BesselJ0)                    \
   OP(BesselJ1)                    \
   OP(BesselY0)                    \
@@ -163,6 +166,9 @@ PyMODINIT_FUNC PyInit_pyautofuse(void);
   OP(SphericalBesselJ0)           \
   OP(Ndtr)                        \
   OP(Ndtri)                       \
+  OP(LogNdtr)                     \
+  OP(NextAfter)                   \
+  OP(PolyGamma)                   \
   OP(SignBit)                     \
   OP(Frexp)                       \
   OP(Igamma)                      \
@@ -172,5 +178,11 @@ PyMODINIT_FUNC PyInit_pyautofuse(void);
   OP(ShiftedChebyshevPolynomialU) \
   OP(ShiftedChebyshevPolynomialV) \
   OP(ShiftedChebyshevPolynomialW) \
+  OP(ChebyshevPolynomialT)        \
+  OP(ChebyshevPolynomialU)        \
+  OP(ChebyshevPolynomialV)        \
+  OP(ChebyshevPolynomialW)        \
+  OP(HermitePolynomialH)          \
+  OP(HermitePolynomialHe)         \
   OP(Unsupported)
 #endif

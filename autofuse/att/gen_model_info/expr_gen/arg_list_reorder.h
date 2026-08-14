@@ -178,6 +178,15 @@ class ArgListReorder {
  private:
   // 轴属性枚举
   enum class AxisProperty : uint8_t { kReduce, kBroadcast };
+  enum class ReduceTailTilePolicy : uint8_t { kFallback, kEqual, kPreferTail, kKeepDefault };
+
+  struct ReduceTailTileInfo {
+    std::string reduce_axis_name;
+    std::string tail_axis_name;
+    Expr reduce_repeat;
+    Expr tail_repeat;
+    uint32_t data_type_size{0U};
+  };
 
   // 轴分类结果结构体
   struct AxisCategories {
@@ -205,6 +214,7 @@ class ArgListReorder {
   bool prefer_reduce_tile_ = false;
   bool has_dynamic_reduce_tile_reorder_ = false;
   RuntimeReorderRule dynamic_reduce_tile_reorder_rule_;
+  std::set<std::string> equal_order_reduce_tail_axes_;
 
   // 成员函数保持原名
   bool CheckReduce(const SubAxis *dim, const Expr &repeat, const Expr &stride,
@@ -223,6 +233,16 @@ class ArgListReorder {
   uint32_t GetVectorLenSize() const;
   bool GetReduceAxisDataTypeSize(const NodeInfo &node, const SubAxis *axis,
                                  const std::set<std::string> &reduce_axis_ori_axes_set, uint32_t &data_type_size) const;
+  const SubAxis *FindReduceTileAxis(const std::set<std::string> &reduce_axis_ori_axes_set) const;
+  bool IsReduceInputTensor(const TensorPtr &tensor, const SubAxis *reduce_axis,
+                           const std::set<std::string> &reduce_axis_ori_axes_set) const;
+  bool CollectReduceTailAxis(const TensorPtr &tensor, const SubAxis *reduce_axis,
+                             const std::set<std::string> &reduce_axis_ori_axes_set, const SubAxis *&tail_axis,
+                             uint32_t &data_type_size) const;
+  bool IsReduceTailTileAxis(const SubAxis *tail_axis) const;
+  bool TryGetReduceTailTileInfo(const NodeInfo &node, const std::set<std::string> &reduce_axis_ori_axes_set,
+                                ReduceTailTileInfo &tile_info) const;
+  ReduceTailTilePolicy ClassifyReduceTailTilePolicy(const ReduceTailTileInfo &tile_info) const;
   bool TryBuildReduceTileRuntimeReorderRule(const NodeInfo &node, const std::set<std::string> &reduce_axis_ori_axes_set,
                                             RuntimeReorderRule &rule) const;
   bool HasSmallTailLargeReduceTile(const NodeInfo &node, const std::set<std::string> &reduce_axis_ori_axes_set,
@@ -238,6 +258,7 @@ class ArgListReorder {
   bool SetRuntimePreferredOrder(const std::vector<AttAxisPtr> &canonical_arg_list,
                                 const std::vector<AttAxisPtr> &source_arg_list,
                                 const std::vector<size_t> &preferred_topo_order, RuntimeReorderRule &rule) const;
+  void SetAxesSameOrder(const std::vector<AttAxisPtr> &arg_list, const std::set<std::string> &axis_names) const;
   void MakeSureLoadStoreInnerestSameOrder(const std::vector<AttAxisPtr> &arg_list) const;
   bool HandleProperty(const SubAxis *dim, att::ArgListReorder::AxisProperty property, bool is_reduce,
                       bool is_broadcast);
