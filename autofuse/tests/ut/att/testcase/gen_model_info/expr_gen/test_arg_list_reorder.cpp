@@ -9,6 +9,7 @@
  */
 
 #include <iostream>
+#include <limits>
 #include "gtest/gtest.h"
 #include "gen_model_info/api_perf_register/v1/perf_param_v1.h"
 #include "v35/att/api_perf_register/perf_param_v2.h"
@@ -102,6 +103,11 @@ size_t GetArgIndex(const std::vector<AttAxisPtr> &arg_list, const std::string &n
     }
   }
   return arg_list.size();
+}
+
+size_t GetArgOrder(const std::vector<AttAxisPtr> &arg_list, const std::string &name) {
+  const size_t index = GetArgIndex(arg_list, name);
+  return index < arg_list.size() ? arg_list[index]->order : SIZE_MAX;
 }
 
 SymInfoPtr MakeAxisSize(const Expr &expr) {
@@ -536,6 +542,85 @@ TEST_F(TestArgListReorder, reorder_single_template_for_reduce_tile_small_tail_la
   EXPECT_LT(GetArgIndex(test_case.model_info.arg_list, "tail"), GetArgIndex(test_case.model_info.arg_list, "reduce"));
 }
 
+TEST_F(TestArgListReorder, set_same_order_for_reduce_tile_large_reduce_large_tail) {
+  auto test_case = BuildReduceTailSortCase(af::Symbol(256), af::Symbol(80), 128U, 256U, false);
+  ArgListReorder arg_list_reorder(test_case.tuning_space);
+  std::vector<AttAxisPtr> tiling_R_arg_list;
+  EXPECT_EQ(arg_list_reorder.SortArgList(test_case.model_info.arg_list, tiling_R_arg_list), af::SUCCESS);
+  EXPECT_TRUE(tiling_R_arg_list.empty());
+  EXPECT_EQ(GetArgOrder(test_case.model_info.arg_list, "reduce"), GetArgOrder(test_case.model_info.arg_list, "tail"));
+  const auto &reduce_axis = test_case.model_info.arg_list[GetArgIndex(test_case.model_info.arg_list, "reduce")];
+  const auto &tail_axis = test_case.model_info.arg_list[GetArgIndex(test_case.model_info.arg_list, "tail")];
+}
+
+TEST_F(TestArgListReorder, set_same_order_for_reduce_tile_small_reduce_small_tail) {
+  auto test_case = BuildReduceTailSortCase(af::Symbol(64), af::Symbol(32), 128U, 256U, false);
+  ArgListReorder arg_list_reorder(test_case.tuning_space);
+  std::vector<AttAxisPtr> tiling_R_arg_list;
+  EXPECT_EQ(arg_list_reorder.SortArgList(test_case.model_info.arg_list, tiling_R_arg_list), af::SUCCESS);
+  EXPECT_TRUE(tiling_R_arg_list.empty());
+  EXPECT_EQ(GetArgOrder(test_case.model_info.arg_list, "reduce"), GetArgOrder(test_case.model_info.arg_list, "tail"));
+}
+
+TEST_F(TestArgListReorder, keep_reduce_first_for_reduce_tile_small_reduce_large_tail) {
+  auto test_case = BuildReduceTailSortCase(af::Symbol(64), af::Symbol(80), 128U, 256U, false);
+  ArgListReorder arg_list_reorder(test_case.tuning_space);
+  std::vector<AttAxisPtr> tiling_R_arg_list;
+  EXPECT_EQ(arg_list_reorder.SortArgList(test_case.model_info.arg_list, tiling_R_arg_list), af::SUCCESS);
+  EXPECT_TRUE(tiling_R_arg_list.empty());
+  EXPECT_LT(GetArgIndex(test_case.model_info.arg_list, "reduce"), GetArgIndex(test_case.model_info.arg_list, "tail"));
+  EXPECT_NE(GetArgOrder(test_case.model_info.arg_list, "reduce"), GetArgOrder(test_case.model_info.arg_list, "tail"));
+}
+
+TEST_F(TestArgListReorder, set_same_order_for_reduce_tile_threshold_boundaries) {
+  const std::vector<std::pair<uint64_t, uint64_t>> shapes = {{128UL, 64UL}, {129UL, 64UL}, {128UL, 65UL}};
+  for (const auto &[reduce_size, tail_size] : shapes) {
+    auto test_case = BuildReduceTailSortCase(af::Symbol(reduce_size), af::Symbol(tail_size), 128U, 256U, false);
+    ArgListReorder arg_list_reorder(test_case.tuning_space);
+    std::vector<AttAxisPtr> tiling_R_arg_list;
+    EXPECT_EQ(arg_list_reorder.SortArgList(test_case.model_info.arg_list, tiling_R_arg_list), af::SUCCESS);
+    EXPECT_EQ(GetArgOrder(test_case.model_info.arg_list, "reduce"), GetArgOrder(test_case.model_info.arg_list, "tail"));
+  }
+}
+
+TEST_F(TestArgListReorder, skip_reduce_balance_when_combined_equal_order_group_has_more_than_two_axes) {
+  auto reduce_axis = MakeAttAxis("reduce");
+  auto tail_axis = MakeAttAxis("tail");
+  auto transpose_axis = MakeAttAxis("transpose");
+  InitAttAxis(reduce_axis, "reduce", af::Symbol(256));
+  InitAttAxis(tail_axis, "tail", af::Symbol(80));
+  InitAttAxis(transpose_axis, "transpose", af::Symbol(64));
+  reduce_axis->order = 3U;
+  tail_axis->order = 4U;
+  transpose_axis->order = 5U;
+  std::vector<AttAxisPtr> arg_list{reduce_axis, tail_axis, transpose_axis};
+
+  ArgListReorder arg_list_reorder(std::make_shared<TuningSpace>());
+  arg_list_reorder.equal_order_reduce_tail_axes_ = {"reduce", "tail"};
+  arg_list_reorder.load_store_inner_most_dims_ = {"tail", "transpose"};
+  arg_list_reorder.MakeSureLoadStoreInnerestSameOrder(arg_list);
+
+  EXPECT_EQ(tail_axis->order, transpose_axis->order);
+  EXPECT_NE(reduce_axis->order, tail_axis->order);
+}
+
+TEST_F(TestArgListReorder, fallback_for_invalid_reduce_tail_balance_inputs) {
+  auto test_case = BuildReduceTailSortCase(af::Symbol(128), af::Symbol(64), 128U, 256U, false);
+  ArgListReorder arg_list_reorder(test_case.tuning_space);
+  ArgListReorder::ReduceTailTileInfo tile_info;
+  tile_info.reduce_repeat = CreateExpr("reduce_size");
+  tile_info.tail_repeat = af::Symbol(64);
+  tile_info.data_type_size = kTensorDataTypeSize;
+  EXPECT_EQ(arg_list_reorder.ClassifyReduceTailTilePolicy(tile_info), ArgListReorder::ReduceTailTilePolicy::kFallback);
+
+  tile_info.reduce_repeat = af::Symbol(std::numeric_limits<uint64_t>::max());
+  EXPECT_EQ(arg_list_reorder.ClassifyReduceTailTilePolicy(tile_info), ArgListReorder::ReduceTailTilePolicy::kFallback);
+
+  tile_info.reduce_repeat = af::Symbol(128);
+  tile_info.data_type_size = 0U;
+  EXPECT_EQ(arg_list_reorder.ClassifyReduceTailTilePolicy(tile_info), ArgListReorder::ReduceTailTilePolicy::kFallback);
+}
+
 TEST_F(TestArgListReorder, keep_default_single_template_for_reduce_tile_without_threshold_match) {
   auto tail_not_small_case = BuildReduceTailSortCase(af::Symbol(512), af::Symbol(48), 64U, 512U, false);
   ArgListReorder tail_not_small_reorder(tail_not_small_case.tuning_space);
@@ -544,8 +629,8 @@ TEST_F(TestArgListReorder, keep_default_single_template_for_reduce_tile_without_
       tail_not_small_reorder.SortArgList(tail_not_small_case.model_info.arg_list, tail_not_small_tiling_R_arg_list),
       af::SUCCESS);
   EXPECT_TRUE(tail_not_small_tiling_R_arg_list.empty());
-  EXPECT_LT(GetArgIndex(tail_not_small_case.model_info.arg_list, "reduce"),
-            GetArgIndex(tail_not_small_case.model_info.arg_list, "tail"));
+  EXPECT_EQ(GetArgOrder(tail_not_small_case.model_info.arg_list, "reduce"),
+            GetArgOrder(tail_not_small_case.model_info.arg_list, "tail"));
 
   auto reduce_not_large_case = BuildReduceTailSortCase(af::Symbol(256), af::Symbol(16), 64U, 1024U, false);
   ArgListReorder reduce_not_large_reorder(reduce_not_large_case.tuning_space);
@@ -554,8 +639,8 @@ TEST_F(TestArgListReorder, keep_default_single_template_for_reduce_tile_without_
                                                  reduce_not_large_tiling_R_arg_list),
             af::SUCCESS);
   EXPECT_TRUE(reduce_not_large_tiling_R_arg_list.empty());
-  EXPECT_LT(GetArgIndex(reduce_not_large_case.model_info.arg_list, "reduce"),
-            GetArgIndex(reduce_not_large_case.model_info.arg_list, "tail"));
+  EXPECT_EQ(GetArgOrder(reduce_not_large_case.model_info.arg_list, "reduce"),
+            GetArgOrder(reduce_not_large_case.model_info.arg_list, "tail"));
 
   auto origin_threshold_not_match_case =
       BuildReduceTailSortCaseWithOriginalAxes(af::Symbol(512), af::Symbol(16), af::Symbol(64), af::Symbol(80));

@@ -410,6 +410,15 @@ TEST_F(TestAxesReorderSolverGen, GenEqualOrderAndAxisOrderRemainCanonical) {
   EXPECT_NE(init_code.find("axis1.order = 3UL"), std::string::npos);
 }
 
+TEST_F(TestAxesReorderSolverGen, GenTransposeEqualOrderDoesNotGenerateReduceTailBalance) {
+  const std::string solver_head = GetAxesSolverSolverHead(true);
+  const std::string solver_func = GetAxesSolverSolverFunc(true);
+  EXPECT_EQ(solver_head.find("BalanceReduceTailAxes"), std::string::npos);
+  EXPECT_EQ(solver_head.find("enable_reduce_tail_balance"), std::string::npos);
+  EXPECT_EQ(solver_func.find("BalanceReduceTailAxes"), std::string::npos);
+  EXPECT_NE(solver_func.find("IdentifyEqualPriorityAxes"), std::string::npos);
+}
+
 TEST_F(TestAxesReorderSolverGen, GenPGOEnumeratesOrderedAxesAndStoresCanonicalCandidates) {
   const std::string code = GenPgoSolverGenerateAllTilingData();
   EXPECT_NE(code.find("tilingDataVar = input_.ordered_local_buffer_vars[index]"), std::string::npos);
