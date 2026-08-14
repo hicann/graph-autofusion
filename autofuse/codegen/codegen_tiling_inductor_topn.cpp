@@ -829,6 +829,22 @@ std::string TilingLib::GenTopnSelectorHelpersForInductor() const {
   return ss.str();
 }
 
+namespace {
+void GenMeasuredCandidateDefaultFilter(std::stringstream &ss) {
+  ss << R"(
+inline void FilterMeasuredCandidatesByDefault(std::vector<CandidateSolution> &solutions) {
+  const auto default_solution = std::find_if(solutions.begin(), solutions.end(),
+      [](const CandidateSolution &solution) { return solution.is_default; });
+  if (default_solution == solutions.end()) { return; }
+  const double default_perf = default_solution->modeled_perf;
+  solutions.erase(std::remove_if(solutions.begin(), solutions.end(), [default_perf](const CandidateSolution &solution) {
+    return !solution.is_default && !(solution.modeled_perf < default_perf);
+  }), solutions.end());
+}
+)" << std::endl;
+}
+}  // namespace
+
 std::string TilingLib::GenMeasuredTopnSelectorHelpersForInductor() const {
   std::stringstream ss;
   ss << "// Topn selector helpers: measured best first, default fallback second." << std::endl;
@@ -841,10 +857,12 @@ std::string TilingLib::GenMeasuredTopnSelectorHelpersForInductor() const {
   ss << "}" << std::endl;
   ss << std::endl;
   GenDeduplicateMeasuredCandidateSolutions(ss);
+  GenMeasuredCandidateDefaultFilter(ss);
   ss << "inline void SelectTopnCandidateSolutions(std::vector<CandidateSolution> &solutions, int64_t topn) {"
      << std::endl;
   ss << "  DeduplicateCandidateSolutions(solutions);" << std::endl;
   ss << "  std::sort(solutions.begin(), solutions.end(), CompareCandidateSolution);" << std::endl;
+  ss << "  FilterMeasuredCandidatesByDefault(solutions);" << std::endl;
   ss << "  auto *measured_candidates = PgoConfig::Instance().measured_candidates;" << std::endl;
   ss << "  if (measured_candidates != nullptr) {" << std::endl;
   ss << "    measured_candidates->clear();" << std::endl;

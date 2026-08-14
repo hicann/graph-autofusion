@@ -4393,6 +4393,29 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoTopnShouldPreserveDefaultCandida
   EXPECT_EQ(result.tiling.find("TORCHINDUCTOR_NPU_EXT_AUTOTUNE_TOPN"), std::string::npos);
 }
 
+TEST_F(TestCodegenTiling, GenerateForInductorPgoShouldExcludeCandidatesNotFasterThanDefault) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  const auto deduplicate_pos = result.tiling.find("DeduplicateCandidateSolutions(solutions);");
+  const auto filter_pos = result.tiling.find("FilterMeasuredCandidatesByDefault(solutions);");
+  const auto export_pos = result.tiling.find("measured_candidates->push_back(");
+  const auto truncate_pos = result.tiling.find("solutions.resize(static_cast<size_t>(topn))", export_pos);
+  ASSERT_NE(deduplicate_pos, std::string::npos);
+  ASSERT_NE(export_pos, std::string::npos);
+  ASSERT_NE(filter_pos, std::string::npos);
+  ASSERT_NE(truncate_pos, std::string::npos);
+  EXPECT_LT(deduplicate_pos, filter_pos);
+  EXPECT_LT(filter_pos, export_pos);
+  EXPECT_LT(export_pos, truncate_pos);
+  EXPECT_NE(result.tiling.find("!solution.is_default && !(solution.modeled_perf < default_perf)"), std::string::npos);
+}
+
 TEST_F(TestCodegenTiling, GenerateForInductorPgoFailureShouldFallbackToModeledTopn) {
   ScopedAutofusePgoFlag pgo_flag(true);
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});

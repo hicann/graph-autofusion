@@ -1199,6 +1199,32 @@ TEST(GeneratorUT, GenPGOGetScheduleResultSetsCurrentGroupVarRelationsBeforeSearc
   EXPECT_LT(set_pos, search_pos);
 }
 
+TEST(GeneratorUT, InductorPgoOnlyFillsGroupsAfterCurrentGroup) {
+  TilingCodeGenConfig config;
+  config.tiling_data_type_name = "AutofuseTilingData";
+  config.is_inductor_scene = true;
+  TilingModelInfo tiling_model_info{CreateModelInfo()};
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", config, tiling_model_info, score_funcs, false);
+  const std::map<size_t, std::pair<std::string, std::string>> graph_info = {
+      {0U, {"ScheduleResult0", "group0"}},
+      {1U, {"ScheduleResult1", "group1"}},
+      {2U, {"ScheduleResult2", "group2"}},
+  };
+  const std::map<std::string, std::set<std::string>> hardware_map = {
+      {"group0", {"block_dim"}},
+      {"group1", {"block_dim"}},
+      {"group2", {"block_dim"}},
+  };
+
+  gen_impl.GenFillOtherGroupsGetTiling(0U, 0U, graph_info, *graph_info.find(1U), hardware_map);
+  const std::string source = gen_impl.tiling_func_.GetOutputStr();
+
+  EXPECT_EQ(source.find("ScheduleResult0::GetTiling"), std::string::npos);
+  EXPECT_EQ(source.find("ScheduleResult1::GetTiling"), std::string::npos);
+  EXPECT_NE(source.find("ScheduleResult2::GetTiling"), std::string::npos);
+}
+
 TEST(GeneratorUT, GenPGOGetScheduleResultGuardsInvalidVarRelationBeforeSet) {
   TilingCodeGenConfig config;
   config.tiling_data_type_name = "AutofuseTilingData";
