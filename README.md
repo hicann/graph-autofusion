@@ -26,22 +26,29 @@ Graph-autofusion 是一个面向昇腾（Ascend）芯片的轻量级、解耦式
 ## 🔍目录结构
 
 ```text
-├── autofuse                       # Autofuse 组件，Autofuse 源代码、测试、文档均在该子目录中
-├── build.sh                       # 一键式项目工程编译脚本
-├── cmake                          # 项目工程编译目录
-├── CMakeLists.txt                 # 项目 CMakeLists
-├── docs                           # 项目整体文档
-│  ├── zh                          # 中文文档
-│  │  ├── build.md                 # 一键式构建脚本文档
-│  │  └── ...                      # 其他中文文档
-│  ├── en                          # 英文文档
-│  │  ├── build.md                 # 一键式构建脚本文档
-│  │  └── ...                      # 其他英文文档
-├── super_kernel                   # SuperKernel 组件，SuperKernel 源代码、测试、文档均在该子目录中
-├── ...                            # 未来规划的组件
-├── README.md                      # graph-autofusion项目整体功能介绍
-├── scripts                        # 脚本路径
-   └── package
+graph-autofusion/
+├── autofuse                                  # Autofuse 组件，Autofuse 源代码、测试、文档均在该子目录中
+├── build.sh                                  # 一键式项目工程编译脚本
+├── cmake                                     # 项目工程编译目录
+├── CMakeLists.txt                            # 项目 CMakeLists
+├── docs                                      # 项目整体文档
+│   ├── zh                                    # 中文文档
+│   │   ├── build.md                          # 一键式构建脚本文档
+│   │   └── ...                               # 其他中文文档
+│   └── en                                    # 英文文档
+│       ├── build.md                          # 一键式构建脚本文档
+│       └── ...                               # 其他英文文档
+├── scripts                                   # 构建、环境安装和测试脚本
+│   ├── env_install                           # 环境安装脚本
+│   ├── package                               # 打包脚本
+│   ├── test                                  # 测试脚本
+│   ├── check_env.sh                          # 环境检查脚本
+│   ├── init_env.sh                           # 环境初始化脚本
+│   ├── oat_check.sh                          # OAT 合规性检查脚本
+│   └── support_multiple_versions_of_lcov.sh  # 多版本 lcov 兼容脚本
+├── super_kernel                              # SuperKernel 组件，SuperKernel 源代码、测试、文档均在该子目录中
+├── README.md                                 # graph-autofusion 项目整体功能介绍
+└── README_en.md                              # graph-autofusion 项目英文介绍
 ```
 
 ## 📝相关信息
@@ -49,4 +56,3 @@ Graph-autofusion 是一个面向昇腾（Ascend）芯片的轻量级、解耦式
 - [贡献指南](CONTRIBUTING.md)
 - [安全声明](SECURITY.md)
 - [许可证](LICENSE)
-

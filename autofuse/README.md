@@ -20,10 +20,13 @@ autofuse/
 ├── inc                    # 供 GE 调用接口
 ├── optimize               # 调度切分 模块
 ├── scripts                # 脚本路径
+├── tests                  # 测试用例与测试框架
+├── tools                  # 调试与分析工具
 ├── v35                    # 昇腾950 芯片相关优化
 ├── CMakeLists.txt         # CMake 配置文件
 ├── blacklist.txt          # 工程配置文件
-├── README.md
+├── README.md              # 中文说明文档
+└── README_en.md           # 英文说明文档
 ```
 
 ## 构建与安装

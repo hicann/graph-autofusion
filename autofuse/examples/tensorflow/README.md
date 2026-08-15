@@ -19,6 +19,8 @@
 
 运行本用例前，需依次完成以下步骤：
 
+> 以下命令均在 graph-autofusion 仓库根目录执行。
+
 1. 通过 [安装指导](../../../docs/zh/quick_install.md) 正确安装 toolkit 和 ops 包，并配置环境变量
 2. 通过 [环境编译部署](../../../docs/env_install/tensorflow/env_tf.md) 搭建 TensorFlow 环境（x86_64 可直接 pip 安装，aarch64 需源码编译）
 3. 也可使用一键配置脚本自动搭建环境（**仅 x86_64 架构可用**）：
@@ -30,9 +32,9 @@
    脚本完成后激活环境：
 
    ```bash
-   source scripts/env_install/env/activate_tf1.sh    # TF 1.15
+   source scripts/env_install/tensorflow/env/activate_tf1.sh    # TF 1.15
    # 或
-   source scripts/env_install/env/activate_tf2.sh    # TF 2.6.5
+   source scripts/env_install/tensorflow/env/activate_tf2.sh    # TF 2.6.5
    ```
 
    > **aarch64 架构不支持此脚本**：aarch64 请按 [aarch64 架构 TF 源码编译](../../../docs/env_install/tensorflow/build_tf_aarch64.md) 手动编译。
@@ -57,18 +59,16 @@ export AUTOFUSE_FLAGS="--enable_autofuse=true"
 ## 执行用例
 
 ```bash
-cd af_tf_eleandele
-
 # TF 1.15 环境
-python3 test_abs_relu_exp.py --mode tf1
+python3 autofuse/examples/tensorflow/af_tf_eleandele/test_abs_relu_exp.py --mode tf1
 
 # TF 2.6.5 环境（兼容模式）
-python3 test_abs_relu_exp.py --mode tf2-compat
+python3 autofuse/examples/tensorflow/af_tf_eleandele/test_abs_relu_exp.py --mode tf2-compat
 ```
 
 ## 预期执行结果
 
-脚本执行 100 步推理，无报错即表示融合算子执行成功。可通过 Dump 图或 Profiling 进一步验证融合效果。
+脚本执行 100 步推理，无报错表示用例执行成功；是否发生融合，需要通过 Dump 图或 Profiling 进一步确认。
 
 ## 参考
 

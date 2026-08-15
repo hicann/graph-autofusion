@@ -56,16 +56,23 @@
 super_kernel/
 ├── docs                   # 文档介绍
 ├── examples               # 示例脚本或 Notebook，演示典型用法
+├── include                # SuperKernel 对外头文件
+├── kernel                 # 设备侧 Kernel 实现
 ├── scripts                # 脚本路径
-├── src                    # 业务代码入口，后续根据功能划分模块
-│   └── superkernel        # SuperKernel 业务代码
+├── src                    # SuperKernel 业务代码
+│   ├── aot                # AOT 编译与优化实现
+│   └── jit                # JIT 编译实现
 ├── tests                  # 测试工程目录
+│   ├── aot                # AOT 测试
+│   ├── fixtures           # 共享测试数据与夹具
 │   ├── st                 # System Test
 │   ├── ut                 # Unit Test
-│   └── utils              # 通用校验与工具函数
+│   ├── utils              # 通用校验与工具函数
+│   └── conftest.py        # pytest 公共配置
 ├── CMakeLists.txt         # CMake 配置文件
 ├── pyproject.toml         # 项目元信息与打包配置
-├── README.md
+├── README.md              # 中文说明文档
+├── README_en.md           # 英文说明文档
 └── requirements-dev.txt   # python 依赖配置文件
 ```
 

@@ -25,22 +25,29 @@ Component features:
 ## 🔍Directory Structure
 
 ```text
-├── autofuse                       # Autofuse component. Autofuse source code, tests, and documentation are in this subdirectory.
-├── build.sh                       # One-click project build script
-├── cmake                          # Project build directory
-├── CMakeLists.txt                 # Project CMakeLists
-├── docs                           # Project overall documentation
-│  ├── zh                          # Chinese documentation
-│  │  ├── build.md                 # One-click build script documentation
-│  │  └── ...                      # Other Chinese documentation
-│  ├── en                          # English documentation
-│  │  ├── build.md                 # One-click build script documentation
-│  │  └── ...                      # Other English documentation
-├── super_kernel                   # SuperKernel component. SuperKernel source code, tests, and documentation are in this subdirectory.
-├── ...                            # Planned future components
-├── README.md                      # graph-autofusion project overall functionality introduction
-├── scripts                        # Script path
-   └── package
+graph-autofusion/
+├── autofuse                                  # Autofuse component. Autofuse source code, tests, and documentation are in this subdirectory.
+├── build.sh                                  # One-click project build script
+├── cmake                                     # Project build directory
+├── CMakeLists.txt                            # Project CMakeLists
+├── docs                                      # Project documentation
+│   ├── zh                                    # Chinese documentation
+│   │   ├── build.md                          # One-click build script documentation
+│   │   └── ...                               # Other Chinese documentation
+│   └── en                                    # English documentation
+│       ├── build.md                          # One-click build script documentation
+│       └── ...                               # Other English documentation
+├── scripts                                   # Build, environment installation, and test scripts
+│   ├── env_install                           # Environment installation scripts
+│   ├── package                               # Packaging scripts
+│   ├── test                                  # Test scripts
+│   ├── check_env.sh                          # Environment check script
+│   ├── init_env.sh                           # Environment initialization script
+│   ├── oat_check.sh                          # OAT compliance check script
+│   └── support_multiple_versions_of_lcov.sh  # Multi-version lcov compatibility script
+├── super_kernel                              # SuperKernel component. SuperKernel source code, tests, and documentation are in this subdirectory.
+├── README.md                                 # Chinese graph-autofusion project introduction
+└── README_en.md                              # English graph-autofusion project introduction
 ```
 
 ## 📝Related Information

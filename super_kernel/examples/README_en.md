@@ -6,12 +6,13 @@ Use super_kernel to complete operator fusion.
 
 ## Directory Structure
 ```text
-├── super_kernel_base             # basic functionality sample
-│  └── superkernel_scope.py       # complete operator fusion through super_kernel
-└── super_kernel_profiling        # profiling demonstration sample
-  └── superkernel_compare.py      # compare data using super_kernel vs not using super_kernel
-└── super_kernel_runtime_ascendc_only        # minimal super_kernel sample
-   └── superkernel_runtime_ascendc_basic.py  # compile super_kernel through ascendc for operator fusion, execute using runtime environment
+examples/
+├── super_kernel_base							# basic functionality sample
+│   └── superkernel_scope.py					# complete operator fusion through super_kernel
+├── super_kernel_profiling						# profiling demonstration sample
+│   └── superkernel_compare.py					# compare data using super_kernel vs not using super_kernel
+└── super_kernel_runtime_ascendc_only			# minimal super_kernel sample
+    └── superkernel_runtime_ascendc_basic.py	# compile super_kernel through ascendc for operator fusion, execute using runtime environment
 ```
 
 ## Prerequisites

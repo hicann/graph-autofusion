@@ -13,18 +13,20 @@ autofuse 融合 `abs + relu + exp` 三个 elementwise 算子。脚本通过 `--m
 
 ## 执行命令
 
+以下命令均在 graph-autofusion 仓库根目录执行。
+
 ```bash
 # TF 1.15 环境
-source scripts/env_install/env/activate_tf1.sh
-python3 test_abs_relu_exp.py --mode tf1
+source scripts/env_install/tensorflow/env/activate_tf1.sh
+python3 autofuse/examples/tensorflow/af_tf_eleandele/test_abs_relu_exp.py --mode tf1
 
 # TF 2.6.5 环境（兼容模式）
-source scripts/env_install/env/activate_tf2.sh
-python3 test_abs_relu_exp.py --mode tf2-compat
+source scripts/env_install/tensorflow/env/activate_tf2.sh
+python3 autofuse/examples/tensorflow/af_tf_eleandele/test_abs_relu_exp.py --mode tf2-compat
 ```
 
 ## 预期执行结果
 
 脚本构造 `abs → relu → exp` 计算图，在 NPU 上执行 100 步推理，无报错即表示融合成功。三个算子被融合为一个 `AscBackend` 类型的融合算子 `autofuse_pointwise_0_Abs_Relu_Exp`，在 NPU 上以单个 kernel 执行。
 
-如需查看融合效果，可开启 profiling（脚本已内置 profiling 配置），执行完成后在 `./profiling` 目录下查看 `PROF_*/mindstudio_profiler_output/op_summary_*.csv`，此时仅有算子名为 `autofuse_pointwise_0_Abs_Relu_Exp` 的 kernel，表示三个算子已融合为一个融合算子。
+如需查看融合效果，可开启 profiling（脚本已内置 profiling 配置），执行完成后在仓库根目录的 `./profiling` 目录下查看 `PROF_*/mindstudio_profiler_output/op_summary_*.csv`，此时 Profiling 中存在 autofuse_pointwise_0_Abs_Relu_Exp，且不再出现独立的 Abs、Relu、Exp Kernel，表示三个算子已融合为一个融合算子。
