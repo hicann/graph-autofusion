@@ -428,7 +428,9 @@ TEST(E2EIndirectLoadStore, GeneratedKernelMatchesReference) {
   uint32_t block_dim = 48U;
   RunTiling(tiling_data, workspace_size, block_dim);
 #ifdef IL_POST_REDUCE
-#ifdef IL_EXPECT_ONLY_SIMT
+#ifdef IL_REDUCE_BEFORE_AXIS
+  ASSERT_EQ(tiling_data.tiling_key, IL_TILING_KEY);
+#elif defined(IL_EXPECT_ONLY_SIMT) || defined(IL_EXPECT_SIMT_ONLY)
   static_assert(IL_RANK == 4 && kAxis == 1);
   static_assert(IL_INPUT_PRE_TYPE == 3);
   static_assert(IL_REDUCE_WITH_A);

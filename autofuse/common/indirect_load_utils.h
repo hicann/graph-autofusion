@@ -27,6 +27,7 @@ enum class TemplateRole : int64_t {
   kNone,
   kSimdInputPre,
   kSimdInputPreStridedUbPath,
+  kSimdIndexPre,
   kSimtInputBoundary,
   kSimtDirectGmBoundary,
   kSimtInlineTransform,
@@ -55,6 +56,7 @@ struct TemplateAxes {
   af::AxisId outer_axis = af::kIdNone;
   af::AxisId inner_axis = af::kIdNone;
   af::AxisId input_inner_axis = af::kIdNone;
+  af::AxisId index_inner_axis = af::kIdNone;
   af::AxisId tile_outer_axis = af::kIdNone;
   af::AxisId tile_inner_axis = af::kIdNone;
   std::vector<af::AxisId> vectorized_axes;

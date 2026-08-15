@@ -308,7 +308,8 @@ void BuildBroadcastInputPreChain(const af::AscOpOutput &broadcast_output, const 
   indirect_load.x1 = input_abs.y;
 }
 
-af::AscGraph BuildIndirectLoadBroadcastGraph(bool with_input_element = true) {
+af::AscGraph BuildIndirectLoadBroadcastGraph(bool with_input_element = true, bool with_index_broadcast = false,
+                                             int64_t axis = 1L) {
   af::AscGraph graph("indirect_load_broadcast_ut_graph");
   const BroadcastGraphView view = CreateBroadcastGraphView(graph);
   const std::vector<af::Expression> source_strides = {view.source_repeats[2], view.source_repeats[2], af::ops::One};
@@ -328,20 +329,34 @@ af::AscGraph BuildIndirectLoadBroadcastGraph(bool with_input_element = true) {
   broadcast.attr.api.compute_type = af::ComputeType::kComputeBroadcast;
   broadcast.x = input_load.y;
   SetNodeView(broadcast, af::DT_FLOAT16, view.input_axes, view.input_repeats, input_strides);
+  auto index_source_repeats = view.output_repeats;
+  auto index_source_strides = index_strides;
+  if (with_index_broadcast) {
+    index_source_repeats[0] = af::ops::One;
+    index_source_strides = {view.output_repeats[1] * view.output_repeats[2], view.output_repeats[2], af::ops::One};
+  }
   af::ascir_op::Data index("broadcast_index", graph);
   index.ir_attr.SetIndex(1);
-  SetNodeView(index, af::DT_INT32, view.output_axes, view.output_repeats, index_strides);
+  SetNodeView(index, af::DT_INT32, view.output_axes, index_source_repeats, index_source_strides);
   af::ascir_op::Load index_load("broadcast_index_load");
   index_load.x = index.y;
-  SetNodeView(index_load, af::DT_INT32, view.output_axes, view.output_repeats, index_strides);
+  SetNodeView(index_load, af::DT_INT32, view.output_axes, index_source_repeats, index_source_strides);
   af::ascir_op::Abs index_abs("broadcast_index_abs");
   index_abs.attr.api.compute_type = af::ComputeType::kComputeElewise;
   index_abs.x = index_load.y;
-  SetNodeView(index_abs, af::DT_INT32, view.output_axes, view.output_repeats, index_strides);
+  SetNodeView(index_abs, af::DT_INT32, view.output_axes, index_source_repeats, index_source_strides);
   af::ascir_op::IndirectLoad indirect_load("indirect_load");
   BuildBroadcastInputPreChain(broadcast.y, view, input_strides, with_input_element, indirect_load);
-  indirect_load.x2 = index_abs.y;
-  indirect_load.ir_attr.SetAxis(1L);
+  if (with_index_broadcast) {
+    af::ascir_op::Broadcast index_broadcast("index_outer_broadcast");
+    index_broadcast.attr.api.compute_type = af::ComputeType::kComputeBroadcast;
+    index_broadcast.x = index_abs.y;
+    SetNodeView(index_broadcast, af::DT_INT32, view.output_axes, view.output_repeats, output_strides);
+    indirect_load.x2 = index_broadcast.y;
+  } else {
+    indirect_load.x2 = index_abs.y;
+  }
+  indirect_load.ir_attr.SetAxis(axis);
   SetNodeView(indirect_load, af::DT_FLOAT16, view.output_axes, view.output_repeats, output_strides);
   af::ascir_op::Store store("broadcast_store");
   store.x = indirect_load.y;
@@ -936,7 +951,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsInvalidLogicalLayout) {
   EXPECT_EQ(layout.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported);
 }
 
-TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastElementPathUsesPhysicalViewForAllTemplates) {
+TEST(IndirectLoadScheduleCaseGeneratorTest, KeepsBroadcastElementPathForGeneralInline) {
   PlatformContextReset platform_reset;
   ge::PlatformContext::GetInstance().Reset();
   ge::PlatformInfo platform_info;
@@ -949,31 +964,67 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastElementPathUsesPhysicalView
   std::vector<af::AscGraph> graphs;
   std::vector<std::string> score_functions;
   ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
-  EXPECT_EQ(graphs.size(), 4UL);
   ASSERT_EQ(score_functions.size(), graphs.size());
-  EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd), graphs.end());
-  EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt), graphs.end());
-  EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSK), graphs.end());
+  const auto simd = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, graphs.end());
+  EXPECT_NE(simd->FindNode("input_broadcast"), nullptr);
+  EXPECT_NE(simd->FindNode("broadcast_input_abs"), nullptr);
+  const auto indirect_load = simd->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateLogicalView logical_view;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
+  EXPECT_EQ(logical_view.input.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact);
 
-  for (auto &candidate : graphs) {
-    EXPECT_EQ(candidate.FindNode("input_broadcast"), nullptr);
-    const auto indirect_load = candidate.FindNode("indirect_load");
-    const auto input_abs = candidate.FindNode("broadcast_input_abs");
-    const auto index_abs = candidate.FindNode("broadcast_index_abs");
-    ASSERT_NE(indirect_load, nullptr);
-    ASSERT_NE(input_abs, nullptr);
-    ASSERT_NE(index_abs, nullptr);
-    ascgen_utils::indirect_load::TemplateLogicalView logical_view;
-    ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
-    EXPECT_EQ(logical_view.input.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact);
-    ASSERT_EQ(logical_view.input.physical_repeats.size(), 3UL);
-    EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(logical_view.input.physical_repeats[1], af::ops::One),
-              af::TriBool::kTrue);
-    if (ascir::GetTemplateIdOrDefault(*indirect_load) != ascir::TemplateId::kIndirectLoadSimt) {
-      EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(index_abs),
-                ascgen_utils::indirect_load::TemplateRole::kStridedUbPath);
-    }
+  for (const ascir::TemplateId template_id :
+       {ascir::TemplateId::kIndirectLoadSimt, ascir::TemplateId::kIndirectLoadSK}) {
+    const auto candidate = FindGeneratedGraphByTemplate(graphs, template_id);
+    ASSERT_NE(candidate, graphs.end());
+    EXPECT_EQ(candidate->FindNode("input_broadcast"), nullptr);
   }
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsOuterInputBroadcastForSimd) {
+  auto graph = BuildIndirectLoadBroadcastGraph(false, false, 2L);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+
+  EXPECT_EQ(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd), graphs.end());
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsDirectOuterIndexBroadcastForSimd) {
+  auto graph = BuildIndirectLoadBroadcastGraph(false, true, 2L);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+
+  EXPECT_EQ(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd), graphs.end());
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimtRewritesInputBroadcastAndSetsTemplateMetadata) {
+  PlatformContextReset platform_reset;
+  ge::PlatformContext::GetInstance().Reset();
+  ge::PlatformInfo platform_info;
+  platform_info.soc_ver = "3510";
+  platform_info.ub_size = 256 * 1024;
+  platform_info.aiv_num = 48;
+  ge::PlatformContext::GetInstance().SetPlatformInfo(platform_info);
+  auto graph = BuildIndirectLoadBroadcastGraph();
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+
+  const auto simt = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
+  ASSERT_NE(simt, graphs.end());
+  EXPECT_EQ(simt->FindNode("input_broadcast"), nullptr);
+  const auto indirect_load = simt->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  EXPECT_EQ(ascir::GetDcacheSize(*indirect_load), kSimtDcacheSize);
+  EXPECT_TRUE(indirect_load->outputs()[0]->attr.vectorized_axis.empty());
+  EXPECT_TRUE(indirect_load->outputs()[0]->attr.vectorized_strides.empty());
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastDirectPathUsesPhysicalViewForAllTemplates) {
@@ -1000,6 +1051,29 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastDirectPathUsesPhysicalViewF
     ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
     EXPECT_EQ(logical_view.input.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact);
   }
+
+  auto inner_graph = BuildIndirectLoadBroadcastGraph(false, false, 0L);
+  std::vector<af::AscGraph> inner_graphs;
+  std::vector<std::string> inner_score_functions;
+  ASSERT_EQ(generator.Generate(inner_graph, inner_graphs, inner_score_functions), af::SUCCESS);
+  const auto inner_simd = FindGeneratedGraphByTemplate(inner_graphs, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(inner_simd, inner_graphs.end());
+  EXPECT_EQ(inner_simd->FindNode("input_broadcast"), nullptr);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimdDirectBroadcastUsesUnserializedTileSplit) {
+  auto graph = BuildIndirectLoadBroadcastGraph(false, false, 1L);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  const auto simd = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, graphs.end());
+  const auto indirect_load = simd->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::TemplateAxes axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, axes), af::SUCCESS);
+  ExpectFixedTileSplit(*simd, axes.outer_axis);
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, IndexBroadcastUsesFinalPhysicalView) {
@@ -1022,7 +1096,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, IndexBroadcastUsesFinalPhysicalView)
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, CompletesMissingDataViewAfterBroadcastRewrite) {
-  auto graph = BuildIndirectLoadBroadcastGraph();
+  auto graph = BuildIndirectLoadBroadcastGraph(false);
   const auto input = graph.FindNode("broadcast_x");
   ASSERT_NE(input, nullptr);
   ASSERT_EQ(input->outputs().size(), 1UL);
@@ -1045,7 +1119,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, CompletesMissingDataViewAfterBroadca
   EXPECT_EQ(completed_input->outputs()[0]->attr.strides, input_load->outputs()[0]->attr.strides);
 }
 
-TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsInvalidBroadcastAndPostElementPaths) {
+TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsBranchedBroadcastPaths) {
   for (const char *producer_name : {"input_broadcast", "broadcast_input_abs"}) {
     auto graph = BuildIndirectLoadBroadcastGraph();
     ASSERT_TRUE(AddSideConsumer(graph, producer_name));

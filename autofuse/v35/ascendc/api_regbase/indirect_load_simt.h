@@ -207,6 +207,29 @@ struct IndirectLoadSimtStridedPolicy {
 
   __simt_callee__ __aicore__ inline Internal::IndirectLoadSimtAddress<OffsetT> GetAddress(OffsetT output_index) const {
     Internal::IndirectLoadSimtAddress<OffsetT> address{0U, 0U};
+    if constexpr (Rank == 3 && Axis == 1 && IndexStrideMask == 2U) {
+      const OffsetT axis_and_inner = Simt::UintDiv(output_index, magic[2], shift[2]);
+      const OffsetT inner = output_index - axis_and_inner * shape[2];
+      const OffsetT outer = Simt::UintDiv(axis_and_inner, magic[1], shift[1]);
+      const OffsetT axis = axis_and_inner - outer * shape[1];
+      if constexpr ((InputStrideMask & 1U) != 0U) {
+        address.input_base += outer * shape[3];
+      }
+      if constexpr ((InputStrideMask & 4U) != 0U) {
+        address.input_base += inner * shape[5];
+      }
+      address.index_offset = axis * shape[7];
+      return address;
+    }
+    if constexpr (Rank == 2 && Axis == 0 && IndexStrideMask == 1U) {
+      const OffsetT row = Simt::UintDiv(output_index, magic[1], shift[1]);
+      const OffsetT column = output_index - row * shape[1];
+      address.index_offset = row * shape[2 * Rank];
+      if constexpr ((InputStrideMask & 2U) != 0U) {
+        address.input_base += column * shape[Rank + 1];
+      }
+      return address;
+    }
     Internal::IndirectLoadSimtAddressDecoder<Rank - 1, OffsetT, IndirectLoadSimtStridedPolicy>::Call(output_index,
                                                                                                      *this, address);
     return address;

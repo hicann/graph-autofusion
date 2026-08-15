@@ -321,6 +321,18 @@ class BroadcastAscIrCodegenImplV2 : public AscIrCodegenV2 {
     });
   }
 
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    return HasSimtArity(node, 1UL) && GetSimtInputDtype(node) == GetSimtOutputDtype(node);
+  }
+
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
+                                                       const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    GE_ASSERT_TRUE(inputs.size() == 1UL, "SIMT Broadcast expects one input, got %zu", inputs.size());
+    expr = inputs[0];
+    return ge::GRAPH_SUCCESS;
+  }
+
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/pad/broadcast.h",
@@ -3567,7 +3579,6 @@ bool CalcIndirectLoadSkTmpSize(const AscNode &node, const Expression &offset_siz
   constexpr uint32_t kUbBlockAlignBytes = 32U;
   auto inputs = node.inputs;
   const auto &input = inputs[0].attr;
-  const auto &index = inputs[1].attr;
   int64_t axis = 0;
   (void)node.attr.ir_attr->GetAttrValue("axis", axis);
   ascgen_utils::indirect_load::TemplateLogicalView logical_view;
@@ -3579,9 +3590,10 @@ bool CalcIndirectLoadSkTmpSize(const AscNode &node, const Expression &offset_siz
   const bool has_logical_view = !logical_view.input.sizes.empty() &&
                                 logical_view.input.sizes.size() == logical_view.input.strides.size() &&
                                 logical_view.input.sizes.size() == logical_view.index.sizes.size();
-  const auto &input_repeats = has_logical_view ? logical_view.input.sizes : input.repeats;
-  const auto &input_strides = has_logical_view ? logical_view.input.strides : input.strides;
-  const auto &index_repeats = has_logical_view ? logical_view.index.sizes : index.repeats;
+  GE_ASSERT_TRUE(has_logical_view, "IndirectLoad SK logical view is missing.");
+  const auto &input_repeats = logical_view.input.sizes;
+  const auto &input_strides = logical_view.input.strides;
+  const auto &index_repeats = logical_view.index.sizes;
   if (input_repeats.empty() || input_repeats.size() != input_strides.size() ||
       input_repeats.size() != index_repeats.size()) {
     GELOGW("[IndirectLoad] Skip invalid SK tmp layout, input rank[%zu], stride rank[%zu], index rank[%zu].",

@@ -22,13 +22,20 @@
 
 #include <algorithm>
 #include <set>
-#include <sstream>
 #include <unordered_set>
 #include <vector>
 
 namespace optimize {
 namespace {
 constexpr int64_t kIndirectLoadSimtDcacheSize = 32 * 1024;
+constexpr char kSimdTemplateName[] = "SIMD";
+constexpr char kSimtTemplateName[] = "SIMT";
+constexpr char kSkTemplateName[] = "SK";
+constexpr char kInputInnerAxisName[] = "indirect_load_input_inner";
+constexpr char kIndexInnerAxisName[] = "indirect_load_index_inner";
+constexpr char kSingleOuterAxisName[] = "indirect_load_single_outer";
+constexpr char kOuterAxisName[] = "indirect_load_outer";
+constexpr char kInnerAxisName[] = "indirect_load_inner";
 using NodePath = std::vector<af::AscNodePtr>;
 using NodeSet = std::unordered_set<const af::AscNode *>;
 
@@ -39,20 +46,46 @@ struct TemplateCase {
 
 struct RewrittenGraphAnalysis {
   NodePath region;
+  NodePath index_region;
   NodePath input_path;
   NodePath index_path;
   af::AscNodePtr input_root;
+  af::AscNodePtr index_root;
   af::AscNodePtr input_load;
   af::AscNodePtr index_load;
   af::AscNodePtr output_store;
   af::AscNodePtr post_reduce;
   bool align_input_path = false;
   bool align_index_path = false;
+  bool index_inner_from_output = false;
 };
 
 struct IndirectLoadGraphPaths {
   NodePath input;
   NodePath index;
+};
+
+enum class BroadcastAction : uint8_t { kNone, kInline };
+
+struct TemplatePolicy {
+  const char *name;
+  bool allow_non_direct_broadcast;
+  bool reject_direct_outer_broadcast;
+};
+
+struct InputPathPlan {
+  NodePath path;
+  BroadcastAction broadcast_action = BroadcastAction::kNone;
+  ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
+  bool legal = true;
+  bool index_inner_from_output = false;
+};
+
+struct PhysicalViewPreparation {
+  InputPathPlan input;
+  InputPathPlan index;
+  ascgen_utils::indirect_load::TemplateLogicalView logical_view;
+  bool legal = true;
 };
 
 enum class ReduceAxisKind : uint8_t { kRetained, kReduced, kIgnored };
@@ -71,10 +104,12 @@ bool HasControlEdge(const af::AscNodePtr &node) {
   return node->GetInControlNodesSize() != 0UL || node->GetOutControlNodesSize() != 0UL;
 }
 
+bool IsBroadcastNode(const af::AscNodePtr &node) {
+  return af::ops::IsOps<af::ascir_op::Broadcast>(node);
+}
+
 af::Status ValidateBroadcastPath(const NodePath &path, const char *template_name, bool &is_candidate_legal) {
-  const auto broadcast_iter = std::find_if(path.begin(), path.end(), [](const af::AscNodePtr &node) {
-    return af::ops::IsOps<af::ascir_op::Broadcast>(node);
-  });
+  const auto broadcast_iter = std::find_if(path.begin(), path.end(), IsBroadcastNode);
   if (broadcast_iter == path.end()) {
     return af::SUCCESS;
   }
@@ -90,8 +125,6 @@ af::Status ValidateBroadcastPath(const NodePath &path, const char *template_name
     const af::AscNodePtr &element = *iter;
     if (element->inputs.Size() != 1UL || element->outputs().size() != 1UL || element->GetOutDataNodesSize() != 1UL ||
         HasControlEdge(element) || !ScheduleUtils::IsElewise(element)) {
-      GELOGW("[IndirectLoad] Skip %s candidate because Broadcast post element node[%s] is invalid.", template_name,
-             element->GetNamePtr());
       is_candidate_legal = false;
       return af::SUCCESS;
     }
@@ -99,75 +132,33 @@ af::Status ValidateBroadcastPath(const NodePath &path, const char *template_name
   return af::SUCCESS;
 }
 
-af::Status ValidateBroadcastPrePaths(const IndirectLoadGraphPaths &paths, const char *template_name,
-                                     bool &is_candidate_legal) {
-  GE_ASSERT_SUCCESS(ValidateBroadcastPath(paths.input, template_name, is_candidate_legal));
-  if (!is_candidate_legal) {
-    return af::SUCCESS;
-  }
-  return ValidateBroadcastPath(paths.index, template_name, is_candidate_legal);
-}
-
-void SetPhysicalWindowLayout(const af::AscTensorAttr &physical_attr, af::AscTensorAttr &attr) {
-  attr.axis = physical_attr.axis;
-  attr.repeats = physical_attr.repeats;
-  attr.strides = physical_attr.strides;
-  attr.vectorized_axis = physical_attr.vectorized_axis;
-  attr.vectorized_strides = physical_attr.vectorized_strides;
-}
-
 af::Status GetBroadcastPhysicalAttr(const af::AscNodePtr &broadcast, const char *template_name,
                                     af::AscTensorAttr &physical_attr) {
-  const af::AscNodePtr producer = ascgen_utils::indirect_load::GetInputProducer(broadcast, 0UL);
-  GE_ASSERT_TRUE(producer != nullptr && !producer->outputs().empty(),
-                 "IndirectLoad %s Broadcast node[%s] source is invalid.", template_name, broadcast->GetNamePtr());
-  physical_attr = producer->outputs()[0]->attr;
+  const auto input_anchor = broadcast->GetInDataAnchor(0UL);
+  GE_ASSERT_NOTNULL(input_anchor, "IndirectLoad %s Broadcast node[%s] input anchor is invalid.", template_name,
+                    broadcast->GetNamePtr());
+  const auto peer_out_anchor = input_anchor->GetPeerOutAnchor();
+  GE_ASSERT_NOTNULL(peer_out_anchor, "IndirectLoad %s Broadcast node[%s] source anchor is invalid.", template_name,
+                    broadcast->GetNamePtr());
+  const auto producer = std::dynamic_pointer_cast<af::AscNode>(peer_out_anchor->GetOwnerNode());
+  GE_ASSERT_NOTNULL(producer, "IndirectLoad %s Broadcast node[%s] source is invalid.", template_name,
+                    broadcast->GetNamePtr());
+  const size_t output_idx = static_cast<size_t>(peer_out_anchor->GetIdx());
+  GE_ASSERT_TRUE(output_idx < producer->outputs().size(),
+                 "IndirectLoad %s Broadcast node[%s] source output index is out of range.", template_name,
+                 broadcast->GetNamePtr());
+  GE_ASSERT_NOTNULL(producer->outputs()[output_idx], "IndirectLoad %s Broadcast node[%s] source output is null.",
+                    template_name, broadcast->GetNamePtr());
+  physical_attr = producer->outputs()[output_idx]->attr;
   return af::SUCCESS;
 }
 
-af::Status BuildFinalTensorView(const af::AscTensorAttr &logical_attr, const NodePath &path, const char *template_name,
-                                ascgen_utils::indirect_load::LogicalTensorView &view) {
-  view = {logical_attr.axis, logical_attr.repeats, logical_attr.strides};
-  const auto broadcast_iter = std::find_if(path.begin(), path.end(), [](const af::AscNodePtr &node) {
-    return af::ops::IsOps<af::ascir_op::Broadcast>(node);
-  });
-  if (broadcast_iter == path.end()) {
+af::Status InlineBroadcastPath(NodePath &path, const char *template_name, bool allow_non_direct_broadcast) {
+  const auto broadcast_iter = std::find_if(path.begin(), path.end(), IsBroadcastNode);
+  if (broadcast_iter == path.end() || (!allow_non_direct_broadcast && broadcast_iter != path.begin())) {
     return af::SUCCESS;
   }
   const af::AscNodePtr broadcast = *broadcast_iter;
-  af::AscTensorAttr physical_attr;
-  GE_ASSERT_SUCCESS(GetBroadcastPhysicalAttr(broadcast, template_name, physical_attr));
-  GE_ASSERT_TRUE(
-      physical_attr.repeats.size() == view.sizes.size() && physical_attr.strides.size() == view.strides.size(),
-      "IndirectLoad %s Broadcast source layout rank mismatch.", template_name);
-  view.strides = physical_attr.strides;
-  for (size_t dim = 0UL; dim < view.sizes.size(); ++dim) {
-    if (af::SymbolicUtils::StaticCheckEq(physical_attr.repeats[dim], af::sym::kSymbolOne) == af::TriBool::kTrue &&
-        af::SymbolicUtils::StaticCheckEq(view.sizes[dim], af::sym::kSymbolOne) != af::TriBool::kTrue) {
-      view.strides[dim] = af::sym::kSymbolZero;
-    }
-  }
-  return af::SUCCESS;
-}
-
-af::Status InlineBroadcastPath(NodePath &path, const char *template_name) {
-  const auto broadcast_iter = std::find_if(path.begin(), path.end(), [](const af::AscNodePtr &node) {
-    return af::ops::IsOps<af::ascir_op::Broadcast>(node);
-  });
-  if (broadcast_iter == path.end()) {
-    return af::SUCCESS;
-  }
-  const af::AscNodePtr broadcast = *broadcast_iter;
-  af::AscTensorAttr physical_attr;
-  GE_ASSERT_SUCCESS(GetBroadcastPhysicalAttr(broadcast, template_name, physical_attr));
-  for (auto iter = path.begin(); iter != broadcast_iter; ++iter) {
-    const af::AscNodePtr &node = *iter;
-    node->attr.sched.axis = physical_attr.axis;
-    for (const auto &output : node->outputs()) {
-      GE_ASSERT_NOTNULL(output);
-      SetPhysicalWindowLayout(physical_attr, output->attr);
-    }
-  }
   const auto owner_graph = broadcast->GetOwnerComputeGraph();
   GE_ASSERT_NOTNULL(owner_graph);
   GE_ASSERT_GRAPH_SUCCESS(af::GraphUtils::IsolateNodeOneIO(broadcast));
@@ -178,9 +169,61 @@ af::Status InlineBroadcastPath(NodePath &path, const char *template_name) {
   return af::SUCCESS;
 }
 
-af::Status InlineBroadcastPrePaths(IndirectLoadGraphPaths &paths, const char *template_name) {
-  GE_ASSERT_SUCCESS(InlineBroadcastPath(paths.input, template_name));
-  GE_ASSERT_SUCCESS(InlineBroadcastPath(paths.index, template_name));
+af::Status InlineSimtScalarBroadcasts(af::AscGraph &graph, const NodePath &region) {
+  bool changed = false;
+  for (const af::AscNodePtr &node : region) {
+    if (!af::ops::IsOps<af::ascir_op::Broadcast>(node) || node->inputs.Size() != 1UL || node->outputs().size() != 1UL ||
+        node->GetOutDataNodesSize() != 1UL || HasControlEdge(node)) {
+      continue;
+    }
+    const af::AscNodePtr producer = ascgen_utils::indirect_load::GetInputProducer(node, 0UL);
+    if (producer == nullptr || !af::ops::IsOps<af::ascir_op::Scalar>(producer)) {
+      continue;
+    }
+    const auto owner_graph = node->GetOwnerComputeGraph();
+    GE_ASSERT_NOTNULL(owner_graph);
+    GE_ASSERT_GRAPH_SUCCESS(af::GraphUtils::IsolateNodeOneIO(node));
+    GE_ASSERT_GRAPH_SUCCESS(af::GraphUtils::RemoveNodeWithoutRelink(owner_graph, node));
+    changed = true;
+  }
+  return changed ? ScheduleUtils::TopologicalSorting(graph) : af::SUCCESS;
+}
+
+bool HasMixedInnerBroadcast(const af::AscTensorAttr &logical_attr, const af::AscTensorAttr &physical_attr,
+                            size_t axis_index) {
+  bool has_broadcast_axis = false;
+  bool has_regular_axis = false;
+  for (size_t dim = axis_index; dim < logical_attr.repeats.size(); ++dim) {
+    const bool is_broadcast =
+        af::SymbolicUtils::StaticCheckEq(physical_attr.repeats[dim], af::sym::kSymbolOne) == af::TriBool::kTrue &&
+        af::SymbolicUtils::StaticCheckEq(logical_attr.repeats[dim], af::sym::kSymbolOne) != af::TriBool::kTrue;
+    has_broadcast_axis = has_broadcast_axis || is_broadcast;
+    has_regular_axis = has_regular_axis || !is_broadcast;
+  }
+  return has_broadcast_axis && has_regular_axis;
+}
+
+af::Status HasDirectOuterBroadcast(const af::AscTensorAttr &logical_attr, const NodePath &path, size_t axis_index,
+                                   bool &result) {
+  result = false;
+  if (path.empty() || !af::ops::IsOps<af::ascir_op::Broadcast>(path.front())) {
+    return af::SUCCESS;
+  }
+  const auto producer = ascgen_utils::indirect_load::GetInputProducer(path.front(), 0UL);
+  if (producer == nullptr || producer->inputs.Size() != 1UL) {
+    return af::SUCCESS;
+  }
+  af::AscTensorAttr physical_attr;
+  GE_ASSERT_SUCCESS(GetBroadcastPhysicalAttr(path.front(), kSimdTemplateName, physical_attr));
+  GE_ASSERT_TRUE(physical_attr.repeats.size() == logical_attr.repeats.size(),
+                 "IndirectLoad SIMD Broadcast source and logical ranks do not match.");
+  for (size_t dim = 0UL; dim < axis_index; ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(physical_attr.repeats[dim], af::sym::kSymbolOne) == af::TriBool::kTrue &&
+        af::SymbolicUtils::StaticCheckEq(logical_attr.repeats[dim], af::sym::kSymbolOne) != af::TriBool::kTrue) {
+      result = !HasMixedInnerBroadcast(logical_attr, physical_attr, axis_index);
+      return af::SUCCESS;
+    }
+  }
   return af::SUCCESS;
 }
 
@@ -193,6 +236,9 @@ af::Status ApplyPhysicalExecutionView(const NodePath &path,
       layout.axis_ids.size() == layout.physical_repeats.size() && layout.axis_ids.size() == layout.strides.size(),
       "IndirectLoad physical execution view rank mismatch.");
   for (const af::AscNodePtr &node : path) {
+    if (IsInputRegionBoundary(node)) {
+      continue;
+    }
     if (node->attr.sched.axis.size() == layout.axis_ids.size()) {
       node->attr.sched.axis = layout.axis_ids;
     }
@@ -208,12 +254,6 @@ af::Status ApplyPhysicalExecutionView(const NodePath &path,
     }
   }
   return af::SUCCESS;
-}
-
-af::Status ApplyPhysicalExecutionViews(const IndirectLoadGraphPaths &paths,
-                                       const ascgen_utils::indirect_load::TemplateLogicalView &view) {
-  GE_ASSERT_SUCCESS(ApplyPhysicalExecutionView(paths.input, view.input));
-  return ApplyPhysicalExecutionView(paths.index, view.index);
 }
 
 bool NeedsAlignedUbWindow(const ascgen_utils::indirect_load::IndirectLoadTensorLayout &layout, size_t axis_index) {
@@ -255,7 +295,7 @@ void CollectInputRegionMembers(const af::AscNodePtr &indirect_load, size_t input
     if (!region.emplace(node.get()).second) {
       continue;
     }
-    if (af::ops::IsOps<af::ascir_op::Load>(node) || IsInputRegionBoundary(node)) {
+    if (af::ops::IsOps<af::ascir_op::Load>(node)) {
       continue;
     }
     for (size_t i = 0UL; i < node->inputs.Size(); ++i) {
@@ -271,10 +311,10 @@ bool CollectSimtBackwardRegion(const NodePath &roots, const af::AscNodePtr &indi
   NodePath pending = roots;
   for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
     const af::AscNodePtr node = pending[cursor];
-    if (node == indirect_load || !region.emplace(node.get()).second) {
+    if (node == indirect_load || IsInputRegionBoundary(node)) {
       continue;
     }
-    if (af::ops::IsOps<af::ascir_op::Load>(node)) {
+    if (!region.emplace(node.get()).second || af::ops::IsOps<af::ascir_op::Load>(node)) {
       continue;
     }
     if (node->inputs.Size() == 0UL) {
@@ -422,6 +462,26 @@ af::Status ValidateSimdPostReduceLayout(const af::AscNodePtr &indirect_load, con
   return af::SUCCESS;
 }
 
+bool HasBroadcastMultiInputNode(const af::AscNodePtr &node, NodeSet &visited) {
+  if (node == nullptr || !visited.emplace(node.get()).second) {
+    return false;
+  }
+  if (node->inputs.Size() > 1UL) {
+    for (size_t input_idx = 0UL; input_idx < node->inputs.Size(); ++input_idx) {
+      const auto producer = ascgen_utils::indirect_load::GetInputProducer(node, input_idx);
+      if (producer != nullptr && af::ops::IsOps<af::ascir_op::Broadcast>(producer)) {
+        return true;
+      }
+    }
+  }
+  for (size_t input_idx = 0UL; input_idx < node->inputs.Size(); ++input_idx) {
+    if (HasBroadcastMultiInputNode(ascgen_utils::indirect_load::GetInputProducer(node, input_idx), visited)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool IsSkTemplateCandidateLegal(const af::AscNodePtr &indirect_load) {
   if (indirect_load == nullptr || indirect_load->GetOutDataNodesSize() != 1UL) {
     return false;
@@ -431,6 +491,16 @@ bool IsSkTemplateCandidateLegal(const af::AscNodePtr &indirect_load) {
     if (input_anchor == nullptr || input_anchor->GetPeerOutAnchor() == nullptr) {
       return false;
     }
+  }
+  NodeSet visited;
+  for (size_t input_idx = 0UL; input_idx < 2UL; ++input_idx) {
+    if (HasBroadcastMultiInputNode(ascgen_utils::indirect_load::GetInputProducer(indirect_load, input_idx), visited)) {
+      return false;
+    }
+  }
+  const auto output_consumer = ascgen_utils::indirect_load::GetOnlyOutputConsumer(indirect_load);
+  if (HasBroadcastMultiInputNode(output_consumer, visited)) {
+    return false;
   }
   return true;
 }
@@ -500,15 +570,16 @@ af::Status MergeAxesForTemplate(af::AscGraph &graph, const std::vector<af::AxisI
   return af::SUCCESS;
 }
 
-af::Status CreateFixedTileSplit(af::AscGraph &graph, af::AxisId axis_id, af::AxisId &outer_id, af::AxisId &inner_id) {
+af::Status CreateFixedTileSplit(af::AscGraph &graph, af::AxisId axis_id, bool serialize_outer, af::AxisId &outer_id,
+                                af::AxisId &inner_id) {
   const auto *axis = graph.FindAxis(axis_id);
   GE_ASSERT_NOTNULL(axis, "IndirectLoad fixed tile axis %ld is not found.", axis_id);
+  const af::Expression outer_size = serialize_outer ? af::sym::kSymbolOne : axis->size;
+  const af::Expression inner_size = serialize_outer ? axis->size : af::sym::kSymbolOne;
   outer_id =
-      graph.CreateAxis(axis->name + "T", ascir::Axis::Type::kAxisTypeTileOuter, axis->size, {axis_id}, af::kIdNone).id;
+      graph.CreateAxis(axis->name + "T", ascir::Axis::Type::kAxisTypeTileOuter, outer_size, {axis_id}, af::kIdNone).id;
   inner_id =
-      graph
-          .CreateAxis(axis->name + "t", ascir::Axis::Type::kAxisTypeTileInner, af::sym::kSymbolOne, {axis_id}, outer_id)
-          .id;
+      graph.CreateAxis(axis->name + "t", ascir::Axis::Type::kAxisTypeTileInner, inner_size, {axis_id}, outer_id).id;
   auto *outer_axis = graph.FindAxis(outer_id);
   GE_ASSERT_NOTNULL(outer_axis, "IndirectLoad fixed tile outer axis %ld is not found.", outer_id);
   outer_axis->split_pair_other_id = inner_id;
@@ -660,13 +731,13 @@ af::Status BuildSkPartitionOrder(const ascir::ImplGraph &graph, const af::AscNod
   return af::SUCCESS;
 }
 
-af::Status BuildSimdInputInnerAxis(af::AscGraph &graph, const af::AscNodePtr &input_producer, size_t axis_index,
-                                   ascir::AxisId &input_inner_axis) {
+af::Status BuildSimdInnerAxis(af::AscGraph &graph, const af::AscNodePtr &input_producer, size_t axis_index,
+                              const char *name, ascir::AxisId &input_inner_axis) {
   GE_ASSERT_TRUE(!input_producer->outputs().empty(), "IndirectLoad SIMD input tensor producer has no output.");
   const auto input_axes = input_producer->outputs()[0]->attr.axis;
   GE_ASSERT_TRUE(axis_index < input_axes.size(), "IndirectLoad SIMD input axis index is out of range.");
   std::vector<ascir::AxisId> input_inner_axes(input_axes.begin() + static_cast<int64_t>(axis_index), input_axes.end());
-  GE_ASSERT_SUCCESS(MergeAxesForTemplate(graph, input_inner_axes, "indirect_load_input_inner", input_inner_axis));
+  GE_ASSERT_SUCCESS(MergeAxesForTemplate(graph, input_inner_axes, name, input_inner_axis));
   return af::SUCCESS;
 }
 
@@ -675,7 +746,7 @@ af::Status BuildSkInputInnerAxis(af::AscGraph &graph, const af::AscNodePtr &indi
   const auto input_boundary = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL);
   GE_ASSERT_TRUE(input_boundary != nullptr && af::ops::IsOps<af::ascir_op::Load>(input_boundary),
                  "IndirectLoad SK input boundary must be a Load node, node[%s].", indirect_load->GetNamePtr());
-  return BuildSimdInputInnerAxis(graph, input_boundary, axis_index, input_inner_axis);
+  return BuildSimdInnerAxis(graph, input_boundary, axis_index, kInputInnerAxisName, input_inner_axis);
 }
 
 af::Status BuildAxisViewByBoundary(af::AscGraph &graph, const std::vector<af::AxisId> &axes, size_t boundary,
@@ -685,24 +756,28 @@ af::Status BuildAxisViewByBoundary(af::AscGraph &graph, const std::vector<af::Ax
   const std::vector<af::AxisId> outer_axes(axes.begin(), axes.begin() + static_cast<int64_t>(split));
   const std::vector<af::AxisId> inner_axes(axes.begin() + static_cast<int64_t>(split), axes.end());
   if (outer_axes.empty()) {
-    outer_axis = graph.CreateAxis("indirect_load_single_outer", af::sym::kSymbolOne).id;
+    outer_axis = graph.CreateAxis(kSingleOuterAxisName, af::sym::kSymbolOne).id;
   } else {
-    GE_ASSERT_SUCCESS(MergeAxesForTemplate(graph, outer_axes, "indirect_load_outer", outer_axis));
+    GE_ASSERT_SUCCESS(MergeAxesForTemplate(graph, outer_axes, kOuterAxisName, outer_axis));
   }
   if (!inner_axes.empty()) {
-    GE_ASSERT_SUCCESS(MergeAxesForTemplate(graph, inner_axes, "indirect_load_inner", inner_axis));
+    GE_ASSERT_SUCCESS(MergeAxesForTemplate(graph, inner_axes, kInnerAxisName, inner_axis));
   }
   return af::SUCCESS;
 }
 
 af::Status NormalizeAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &indirect_load, int64_t axis,
-                                    int64_t rank, ascir::AxisId input_inner_axis) {
+                                    int64_t rank, ascir::AxisId input_inner_axis, ascir::AxisId index_inner_axis,
+                                    bool serialize_outer = false, bool index_inner_from_output = false) {
   const auto output_axes = indirect_load->outputs()[0]->attr.axis;
   GE_ASSERT_TRUE(!output_axes.empty(), "IndirectLoad output axis is empty.");
   const size_t boundary = static_cast<size_t>(axis < 0L ? axis + rank : axis);
   ascir::AxisId outer_axis = af::kIdNone;
   ascir::AxisId inner_axis = af::kIdNone;
   GE_ASSERT_SUCCESS(BuildAxisViewByBoundary(graph, output_axes, boundary, outer_axis, inner_axis));
+  if (index_inner_from_output) {
+    index_inner_axis = inner_axis;
+  }
   const af::Axis *outer = graph.FindAxis(outer_axis);
   GE_ASSERT_NOTNULL(outer, "IndirectLoad outer axis %ld is not found.", outer_axis);
   const bool synthetic_outer =
@@ -710,7 +785,7 @@ af::Status NormalizeAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &i
                                        outer_axis) == indirect_load->attr.sched.axis.end();
   af::AxisId tile_outer_axis = af::kIdNone;
   af::AxisId tile_inner_axis = af::kIdNone;
-  GE_ASSERT_SUCCESS(CreateFixedTileSplit(graph, outer_axis, tile_outer_axis, tile_inner_axis));
+  GE_ASSERT_SUCCESS(CreateFixedTileSplit(graph, outer_axis, serialize_outer, tile_outer_axis, tile_inner_axis));
   std::vector<af::AxisId> vectorized_axes;
   if (inner_axis != af::kIdNone) {
     const auto *inner = graph.FindAxis(inner_axis);
@@ -722,6 +797,7 @@ af::Status NormalizeAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &i
   axes.outer_axis = outer_axis;
   axes.inner_axis = inner_axis;
   axes.input_inner_axis = input_inner_axis;
+  axes.index_inner_axis = index_inner_axis;
   axes.tile_outer_axis = tile_outer_axis;
   axes.tile_inner_axis = tile_inner_axis;
   axes.vectorized_axes = std::move(vectorized_axes);
@@ -745,7 +821,7 @@ af::Status RestoreSkTemplateAxes(std::vector<ascir::ImplGraph> &grouped_graphs) 
     const size_t axis_index = static_cast<size_t>(axis < 0L ? axis + rank : axis);
     ascir::AxisId input_inner_axis = af::kIdNone;
     GE_ASSERT_SUCCESS(BuildSkInputInnerAxis(graph, indirect_load, axis_index, input_inner_axis));
-    GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, axis, rank, input_inner_axis));
+    GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, axis, rank, input_inner_axis, af::kIdNone));
   }
   return af::SUCCESS;
 }
@@ -757,10 +833,16 @@ af::Status ReplaceAxisPrefix(std::vector<af::AxisId> &target_axes, const std::ve
   return af::SUCCESS;
 }
 
-af::Status ReplaceInputRegionAxisPrefix(const NodePath &input_region, const std::vector<af::AxisId> &output_axes,
-                                        size_t axis_index) {
-  for (const auto &node : input_region) {
-    if (!ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(node)) {
+af::Status ReplaceRegionAxisPrefix(const NodePath &region, const std::vector<af::AxisId> &output_axes,
+                                   size_t axis_index, bool is_input_region) {
+  for (const af::AscNodePtr &node : region) {
+    if (!is_input_region && IsInputRegionBoundary(node)) {
+      continue;
+    }
+    const auto role = ascgen_utils::indirect_load::GetTemplateRole(node);
+    const bool should_replace = is_input_region ? ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(node)
+                                                : role == ascgen_utils::indirect_load::TemplateRole::kSimdIndexPre;
+    if (!should_replace) {
       continue;
     }
     GE_ASSERT_SUCCESS(ReplaceAxisPrefix(node->attr.sched.axis, output_axes, axis_index));
@@ -772,7 +854,8 @@ af::Status ReplaceInputRegionAxisPrefix(const NodePath &input_region, const std:
 }
 
 af::Status NormalizeSimdAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &indirect_load,
-                                        const af::AscNodePtr &input_root, const NodePath &input_region) {
+                                        const af::AscNodePtr &input_root, const NodePath &input_region,
+                                        const NodePath &index_region, bool index_inner_from_output) {
   const auto output_axes = indirect_load->outputs()[0]->attr.axis;
   GE_ASSERT_TRUE(!output_axes.empty(), "IndirectLoad SIMD output axis is empty.");
   int64_t axis = 0L;
@@ -780,9 +863,19 @@ af::Status NormalizeSimdAxesForTemplate(af::AscGraph &graph, const af::AscNodePt
   const int64_t rank = static_cast<int64_t>(output_axes.size());
   const size_t axis_index = static_cast<size_t>(axis < 0L ? axis + rank : axis);
   ascir::AxisId input_inner_axis = af::kIdNone;
-  GE_ASSERT_SUCCESS(BuildSimdInputInnerAxis(graph, input_root, axis_index, input_inner_axis));
-  GE_ASSERT_SUCCESS(ReplaceInputRegionAxisPrefix(input_region, output_axes, axis_index));
-  return NormalizeAxesForTemplate(graph, indirect_load, axis, rank, input_inner_axis);
+  GE_ASSERT_SUCCESS(BuildSimdInnerAxis(graph, input_root, axis_index, kInputInnerAxisName, input_inner_axis));
+  ascir::AxisId index_inner_axis = af::kIdNone;
+  const af::AscNodePtr index_root =
+      ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kIndexTensorIndex);
+  GE_ASSERT_NOTNULL(index_root, "IndirectLoad SIMD index producer is missing.");
+  if (af::ops::IsOps<af::ascir_op::Broadcast>(index_root) || index_inner_from_output) {
+    const af::AscNodePtr &index_axis_source = index_inner_from_output ? indirect_load : index_root;
+    GE_ASSERT_SUCCESS(BuildSimdInnerAxis(graph, index_axis_source, axis_index, kIndexInnerAxisName, index_inner_axis));
+  }
+  GE_ASSERT_SUCCESS(ReplaceRegionAxisPrefix(input_region, output_axes, axis_index, true));
+  GE_ASSERT_SUCCESS(ReplaceRegionAxisPrefix(index_region, output_axes, axis_index, false));
+  return NormalizeAxesForTemplate(graph, indirect_load, axis, rank, input_inner_axis, index_inner_axis, false,
+                                  index_inner_from_output);
 }
 
 af::Status NormalizeSimtAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &indirect_load, size_t boundary) {
@@ -790,7 +883,7 @@ af::Status NormalizeSimtAxesForTemplate(af::AscGraph &graph, const af::AscNodePt
   GE_ASSERT_TRUE(!output_axes.empty(), "IndirectLoad SIMT output axis is empty.");
   const int64_t rank = static_cast<int64_t>(output_axes.size());
   GE_ASSERT_TRUE(boundary <= output_axes.size(), "IndirectLoad SIMT boundary is out of range.");
-  return NormalizeAxesForTemplate(graph, indirect_load, static_cast<int64_t>(boundary), rank, af::kIdNone);
+  return NormalizeAxesForTemplate(graph, indirect_load, static_cast<int64_t>(boundary), rank, af::kIdNone, af::kIdNone);
 }
 
 bool CanEmitSimtScalar(const af::AscNodePtr &node) {
@@ -835,6 +928,8 @@ af::AscNodePtr FindPostReduce(const af::AscNodePtr &indirect_load) {
 void CollectRewrittenBoundaries(const af::AscNodePtr &indirect_load, RewrittenGraphAnalysis &analysis) {
   analysis.input_root =
       ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kInputTensorIndex);
+  analysis.index_root =
+      ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kIndexTensorIndex);
   analysis.input_load = FindInputLoad(indirect_load, ascgen_utils::indirect_load::kInputTensorIndex);
   analysis.index_load = FindInputLoad(indirect_load, ascgen_utils::indirect_load::kIndexTensorIndex);
   analysis.output_store = FindOutputStore(indirect_load);
@@ -966,36 +1061,6 @@ af::Status CompleteInputDataTensorAttrs(const RewrittenGraphAnalysis &analysis) 
   return af::SUCCESS;
 }
 
-af::Status RecordTemplateLogicalView(const af::AscNodePtr &indirect_load, const IndirectLoadGraphPaths &paths,
-                                     const char *template_name, bool &is_candidate_legal,
-                                     ascgen_utils::indirect_load::TemplateLogicalView &view) {
-  GE_ASSERT_TRUE(indirect_load->inputs.Size() == 2UL && indirect_load->outputs().size() == 1UL,
-                 "IndirectLoad expects 2 inputs and 1 output.");
-  const auto inputs = indirect_load->inputs();
-  ascgen_utils::indirect_load::LogicalTensorView input_view;
-  GE_ASSERT_SUCCESS(BuildFinalTensorView(inputs[ascgen_utils::indirect_load::kInputTensorIndex]->attr, paths.input,
-                                         template_name, input_view));
-  ascgen_utils::indirect_load::LogicalTensorView index_view;
-  GE_ASSERT_SUCCESS(BuildFinalTensorView(inputs[ascgen_utils::indirect_load::kIndexTensorIndex]->attr, paths.index,
-                                         template_name, index_view));
-  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(input_view, view.input));
-  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(index_view, view.index));
-  view.output.axis_ids = indirect_load->outputs().front()->attr.axis;
-  view.output.sizes = indirect_load->outputs().front()->attr.repeats;
-  view.output.strides = indirect_load->outputs().front()->attr.strides;
-  ascgen_utils::indirect_load::IndirectLoadTensorLayout output_layout;
-  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view.output, output_layout));
-  if (view.input.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported ||
-      view.index.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported ||
-      output_layout.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense) {
-    GELOGW("[IndirectLoad] Skip candidate because input/index layout is unsupported or output is not dense, node[%s].",
-           indirect_load->GetNamePtr());
-    is_candidate_legal = false;
-    return af::SUCCESS;
-  }
-  return ascgen_utils::indirect_load::SetTemplateLogicalView(indirect_load, view);
-}
-
 void CollectIndirectLoadPaths(const af::AscNodePtr &indirect_load, IndirectLoadGraphPaths &paths) {
   for (size_t input_index :
        {ascgen_utils::indirect_load::kInputTensorIndex, ascgen_utils::indirect_load::kIndexTensorIndex}) {
@@ -1009,19 +1074,96 @@ void CollectIndirectLoadPaths(const af::AscNodePtr &indirect_load, IndirectLoadG
   }
 }
 
-af::Status PreparePhysicalViews(const af::AscNodePtr &indirect_load, const char *template_name,
-                                bool &is_candidate_legal, IndirectLoadGraphPaths &paths,
-                                ascgen_utils::indirect_load::TemplateLogicalView &logical_view) {
-  GE_ASSERT_SUCCESS(ValidateBroadcastPrePaths(paths, template_name, is_candidate_legal));
-  if (!is_candidate_legal) {
+TemplatePolicy GetTemplatePolicy(ascir::TemplateId template_id) {
+  if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
+    return {kSimdTemplateName, false, true};
+  }
+  if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
+    return {kSimtTemplateName, true, false};
+  }
+  return {kSkTemplateName, true, false};
+}
+
+af::Status AnalyzeInputPath(const af::AscTensorAttr &logical_attr, const TemplatePolicy &policy, size_t axis_index,
+                            InputPathPlan &plan) {
+  GE_ASSERT_SUCCESS(ValidateBroadcastPath(plan.path, policy.name, plan.legal));
+  if (!plan.legal) {
     return af::SUCCESS;
   }
-  GE_ASSERT_SUCCESS(RecordTemplateLogicalView(indirect_load, paths, template_name, is_candidate_legal, logical_view));
-  if (!is_candidate_legal) {
+  const auto broadcast_iter = std::find_if(plan.path.begin(), plan.path.end(), IsBroadcastNode);
+  ascgen_utils::indirect_load::LogicalTensorView view = {logical_attr.axis, logical_attr.repeats, logical_attr.strides};
+  if (broadcast_iter == plan.path.end()) {
+    return ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, plan.layout);
+  }
+  const auto broadcast_producer = ascgen_utils::indirect_load::GetInputProducer(*broadcast_iter, 0UL);
+  plan.index_inner_from_output = broadcast_producer != nullptr && broadcast_producer->inputs.Size() != 1UL;
+  const bool is_direct = broadcast_iter == plan.path.begin();
+  bool has_direct_outer_broadcast = false;
+  GE_ASSERT_SUCCESS(HasDirectOuterBroadcast(logical_attr, plan.path, axis_index, has_direct_outer_broadcast));
+  if (policy.reject_direct_outer_broadcast && has_direct_outer_broadcast) {
+    plan.legal = false;
     return af::SUCCESS;
   }
-  GE_ASSERT_SUCCESS(InlineBroadcastPrePaths(paths, template_name));
-  return ApplyPhysicalExecutionViews(paths, logical_view);
+  plan.broadcast_action =
+      (is_direct || policy.allow_non_direct_broadcast) ? BroadcastAction::kInline : BroadcastAction::kNone;
+  af::AscTensorAttr physical_attr;
+  GE_ASSERT_SUCCESS(GetBroadcastPhysicalAttr(*broadcast_iter, policy.name, physical_attr));
+  GE_ASSERT_TRUE(
+      physical_attr.repeats.size() == view.sizes.size() && physical_attr.strides.size() == view.strides.size(),
+      "IndirectLoad %s Broadcast source layout rank mismatch.", policy.name);
+  view.strides = physical_attr.strides;
+  for (size_t dim = 0UL; dim < view.sizes.size(); ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(physical_attr.repeats[dim], af::sym::kSymbolOne) == af::TriBool::kTrue &&
+        af::SymbolicUtils::StaticCheckEq(view.sizes[dim], af::sym::kSymbolOne) != af::TriBool::kTrue) {
+      view.strides[dim] = af::sym::kSymbolZero;
+    }
+  }
+  return ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, plan.layout);
+}
+
+af::Status ApplyInputPathPlan(const TemplatePolicy &policy, InputPathPlan &plan) {
+  if (plan.broadcast_action == BroadcastAction::kInline) {
+    GE_ASSERT_SUCCESS(InlineBroadcastPath(plan.path, policy.name, policy.allow_non_direct_broadcast));
+  }
+  return ApplyPhysicalExecutionView(plan.path, plan.layout);
+}
+
+af::Status PreparePhysicalViews(const af::AscNodePtr &indirect_load, ascir::TemplateId template_id,
+                                PhysicalViewPreparation &preparation) {
+  GE_ASSERT_TRUE(indirect_load->inputs.Size() == 2UL && indirect_load->outputs().size() == 1UL,
+                 "IndirectLoad expects 2 inputs and 1 output.");
+  IndirectLoadGraphPaths paths;
+  CollectIndirectLoadPaths(indirect_load, paths);
+  preparation.input.path = std::move(paths.input);
+  preparation.index.path = std::move(paths.index);
+  const TemplatePolicy policy = GetTemplatePolicy(template_id);
+  const auto inputs = indirect_load->inputs();
+  int64_t axis = 0L;
+  GE_ASSERT_SUCCESS(GetIndirectLoadAxis(indirect_load, axis));
+  const size_t rank = indirect_load->outputs().front()->attr.repeats.size();
+  const size_t axis_index = static_cast<size_t>(axis < 0L ? axis + static_cast<int64_t>(rank) : axis);
+  GE_ASSERT_SUCCESS(AnalyzeInputPath(inputs[ascgen_utils::indirect_load::kInputTensorIndex]->attr, policy, axis_index,
+                                     preparation.input));
+  GE_ASSERT_SUCCESS(AnalyzeInputPath(inputs[ascgen_utils::indirect_load::kIndexTensorIndex]->attr, policy, axis_index,
+                                     preparation.index));
+  preparation.logical_view.input = preparation.input.layout;
+  preparation.logical_view.index = preparation.index.layout;
+  const auto &output_attr = indirect_load->outputs().front()->attr;
+  preparation.logical_view.output = {output_attr.axis, output_attr.repeats, output_attr.strides};
+  ascgen_utils::indirect_load::IndirectLoadTensorLayout output_layout;
+  GE_ASSERT_SUCCESS(
+      ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(preparation.logical_view.output, output_layout));
+  preparation.legal =
+      preparation.input.legal && preparation.index.legal &&
+      preparation.input.layout.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported &&
+      preparation.index.layout.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported &&
+      output_layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense;
+  if (!preparation.legal) {
+    return af::SUCCESS;
+  }
+  GE_ASSERT_SUCCESS(ApplyInputPathPlan(policy, preparation.input));
+  GE_ASSERT_SUCCESS(ApplyInputPathPlan(policy, preparation.index));
+  return ascgen_utils::indirect_load::SetTemplateLogicalView(indirect_load, preparation.logical_view);
 }
 
 af::Status CollectRewrittenRegion(const af::AscGraph &graph, const af::AscNodePtr &indirect_load,
@@ -1029,6 +1171,13 @@ af::Status CollectRewrittenRegion(const af::AscGraph &graph, const af::AscNodePt
   NodeSet region_set;
   if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
     CollectInputRegionMembers(indirect_load, ascgen_utils::indirect_load::kInputTensorIndex, region_set);
+    NodeSet index_region;
+    CollectInputRegionMembers(indirect_load, ascgen_utils::indirect_load::kIndexTensorIndex, index_region);
+    for (const af::AscNodePtr &node : graph.GetAllNodes()) {
+      if (index_region.count(node.get()) != 0UL) {
+        analysis.index_region.emplace_back(node);
+      }
+    }
   } else if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
     CollectSimtFusedRegionMembers(indirect_load, analysis, region_set);
   } else {
@@ -1045,33 +1194,39 @@ af::Status CollectRewrittenRegion(const af::AscGraph &graph, const af::AscNodePt
 af::Status AnalyzeRewrittenGraph(af::AscGraph &graph, const af::AscNodePtr &indirect_load,
                                  ascir::TemplateId template_id, bool &is_candidate_legal,
                                  RewrittenGraphAnalysis &analysis) {
-  const char *template_name = template_id == ascir::TemplateId::kIndirectLoadSimd
-                                  ? "SIMD"
-                                  : (template_id == ascir::TemplateId::kIndirectLoadSimt ? "SIMT" : "SK");
-  IndirectLoadGraphPaths paths;
-  CollectIndirectLoadPaths(indirect_load, paths);
-  ascgen_utils::indirect_load::TemplateLogicalView logical_view;
-  GE_ASSERT_SUCCESS(PreparePhysicalViews(indirect_load, template_name, is_candidate_legal, paths, logical_view));
+  PhysicalViewPreparation preparation;
+  GE_ASSERT_SUCCESS(PreparePhysicalViews(indirect_load, template_id, preparation));
+  is_candidate_legal = preparation.legal;
   if (!is_candidate_legal) {
     return af::SUCCESS;
   }
-  analysis.input_path = paths.input;
-  analysis.index_path = paths.index;
+  analysis.input_path = std::move(preparation.input.path);
+  analysis.index_path = std::move(preparation.index.path);
+  analysis.index_inner_from_output = preparation.index.index_inner_from_output;
   int64_t axis = 0L;
   GE_ASSERT_SUCCESS(GetIndirectLoadAxis(indirect_load, axis));
-  const int64_t rank = static_cast<int64_t>(logical_view.output.sizes.size());
+  const int64_t rank = static_cast<int64_t>(preparation.logical_view.output.sizes.size());
   const size_t axis_index = static_cast<size_t>(axis < 0L ? axis + rank : axis);
-  analysis.align_index_path =
-      template_id != ascir::TemplateId::kIndirectLoadSimt && NeedsAlignedUbWindow(logical_view.index, axis_index);
-  analysis.align_input_path =
-      template_id != ascir::TemplateId::kIndirectLoadSimt && NeedsAlignedUbWindow(logical_view.input, axis_index);
+  analysis.align_index_path = template_id != ascir::TemplateId::kIndirectLoadSimt &&
+                              NeedsAlignedUbWindow(preparation.logical_view.index, axis_index);
+  analysis.align_input_path = template_id != ascir::TemplateId::kIndirectLoadSimt &&
+                              NeedsAlignedUbWindow(preparation.logical_view.input, axis_index);
   if (template_id == ascir::TemplateId::kIndirectLoadSK) {
     return af::SUCCESS;
   }
   GE_ASSERT_SUCCESS(RewriteInputPreNodes(graph, indirect_load, template_id));
-
   CollectRewrittenBoundaries(indirect_load, analysis);
-  return CollectRewrittenRegion(graph, indirect_load, template_id, analysis);
+  GE_ASSERT_SUCCESS(CollectRewrittenRegion(graph, indirect_load, template_id, analysis));
+  if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
+    GE_ASSERT_SUCCESS(InlineSimtScalarBroadcasts(graph, analysis.region));
+    analysis.region.clear();
+    GE_ASSERT_SUCCESS(CollectRewrittenRegion(graph, indirect_load, template_id, analysis));
+  }
+  if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
+    GE_ASSERT_SUCCESS(ApplyPhysicalExecutionView(analysis.region, preparation.logical_view.input));
+    GE_ASSERT_SUCCESS(ApplyPhysicalExecutionView(analysis.index_region, preparation.logical_view.index));
+  }
+  return af::SUCCESS;
 }
 
 af::Status AnnotateSimdTemplateRoles(const RewrittenGraphAnalysis &analysis) {
@@ -1084,6 +1239,15 @@ af::Status AnnotateSimdTemplateRoles(const RewrittenGraphAnalysis &analysis) {
                                ? ascgen_utils::indirect_load::TemplateRole::kSimdInputPreStridedUbPath
                                : ascgen_utils::indirect_load::TemplateRole::kSimdInputPre;
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(node, simd_role));
+  }
+  if (af::ops::IsOps<af::ascir_op::Broadcast>(analysis.index_root) || analysis.index_inner_from_output) {
+    for (const af::AscNodePtr &node : analysis.index_region) {
+      if (IsInputRegionBoundary(node)) {
+        continue;
+      }
+      GE_ASSERT_SUCCESS(
+          ascgen_utils::indirect_load::SetTemplateRole(node, ascgen_utils::indirect_load::TemplateRole::kSimdIndexPre));
+    }
   }
   return af::SUCCESS;
 }
@@ -1166,7 +1330,8 @@ af::Status NormalizeTemplateAxes(af::AscGraph &graph, const af::AscNodePtr &indi
                                  ascir::TemplateId template_id, const RewrittenGraphAnalysis &analysis,
                                  size_t boundary) {
   if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
-    return NormalizeSimdAxesForTemplate(graph, indirect_load, analysis.input_root, analysis.region);
+    return NormalizeSimdAxesForTemplate(graph, indirect_load, analysis.input_root, analysis.region,
+                                        analysis.index_region, analysis.index_inner_from_output);
   } else if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
     return NormalizeSimtAxesForTemplate(graph, indirect_load, boundary);
   } else {
@@ -1202,7 +1367,7 @@ af::Status ApplySkGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_
   const size_t axis_index = static_cast<size_t>(axis < 0L ? axis + rank : axis);
   ascir::AxisId input_inner_axis = af::kIdNone;
   GE_ASSERT_SUCCESS(BuildSkInputInnerAxis(graph, indirect_load, axis_index, input_inner_axis));
-  GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, axis, rank, input_inner_axis));
+  GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, axis, rank, input_inner_axis, af::kIdNone));
   GE_ASSERT_SUCCESS(
       ascgen_utils::indirect_load::SetTemplateRole(indirect_load, ascgen_utils::indirect_load::TemplateRole::kSkOp));
   const auto input_boundary = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL);
@@ -1248,12 +1413,10 @@ af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_lo
 
 std::string GenerateScoreFunc(const TemplateCase &template_case) {
   (void)template_case;
-  std::stringstream ss;
-  ss << "int32_t CalcScore(AutofuseTilingData &tiling_data) {" << std::endl;
-  ss << "  (void)tiling_data;" << std::endl;
-  ss << "  return 0;" << std::endl;
-  ss << "}" << std::endl;
-  return ss.str();
+  return "int32_t CalcScore(AutofuseTilingData &tiling_data) {\n"
+         "  (void)tiling_data;\n"
+         "  return 0;\n"
+         "}\n";
 }
 
 af::Status PartitionTaskGraph(const ascir::ImplGraph &graph, const af::AscNodePtr &indirect_load, bool is_sk_template,

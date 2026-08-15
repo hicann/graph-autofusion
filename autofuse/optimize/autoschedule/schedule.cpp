@@ -675,13 +675,19 @@ Status Scheduler::ApplyIndirectLoadNodeAxes(const af::AscNodePtr &node, bool &sk
   if (is_input_pre) {
     GE_ASSERT_SUCCESS(ApplyInputInnerVectorizedAxis(graph_, node, indirect_load_info_.axes.input_inner_axis));
   }
+  const bool is_index_pre =
+      ascgen_utils::indirect_load::GetTemplateRole(node) == ascgen_utils::indirect_load::TemplateRole::kSimdIndexPre;
+  if (is_index_pre) {
+    GE_ASSERT_SUCCESS(ApplyInputInnerVectorizedAxis(graph_, node, indirect_load_info_.axes.index_inner_axis));
+  }
   skip_main_tiling = ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(node);
   if (skip_main_tiling) {
     return af::SUCCESS;
   }
   GE_ASSERT_SUCCESS(AddIndirectLoadSyntheticOuterAxis(node, indirect_load_info_.axes.outer_axis,
                                                       indirect_load_info_.axes.synthetic_outer));
-  GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_info_.axes.outer_axis, !is_input_pre));
+  GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_info_.axes.outer_axis,
+                                                   !is_input_pre && !is_index_pre));
   if (is_input_pre) {
     return af::SUCCESS;
   }

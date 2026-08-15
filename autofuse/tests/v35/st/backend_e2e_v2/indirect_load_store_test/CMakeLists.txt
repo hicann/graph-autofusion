@@ -287,3 +287,15 @@ mark_indirect_load_simt_codegen(indirect_load_simt_elementwise_coverage Recursiv
 
 include(indirect_load_broadcast_cases.cmake)
 include(indirect_load_torch_gather_strided_cases.cmake)
+
+set(indirect_load_embedding_test_workdir ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_embedding_test)
+file(MAKE_DIRECTORY ${indirect_load_embedding_test_workdir})
+do_backend_e2e_st_test(indirect_load_embedding_test
+    WORKDIR ${indirect_load_embedding_test_workdir}
+    CODEGEN indirect_load_embedding_backend_generator.cpp
+    TILING_KEY 0
+    KERNEL_SRC
+        indirect_load_embedding_test_kernel.cpp
+        indirect_load_embedding_test_tiling.cpp
+        autofuse_tiling_data.h
+    TEST_SRC test_e2e_indirect_load_embedding_kernel.cpp)

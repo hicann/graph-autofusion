@@ -316,6 +316,31 @@ __aicore__ inline void IndirectLoadSimdDenseImpl(const LocalTensor<X> &x, const 
                                                             shape_args...);
 }
 
+template <typename X, typename Index, int32_t Rank, int32_t Axis>
+__aicore__ inline bool TryIndirectLoadSimdEmbedding(const LocalTensor<X> &x, const LocalTensor<Index> &index,
+                                                    const LocalTensor<X> &y, uint32_t actual_size,
+                                                    int64_t output_offset, const int64_t (&shape)[3 * Rank]) {
+  if constexpr (Rank == 2 && Axis == 0 && (std::is_same_v<Index, int32_t> || std::is_same_v<Index, int64_t>) &&
+                sizeof(X) <= AscendC::ONE_BLK_SIZE) {
+    const int64_t embedding_size = shape[1];
+    const int64_t block_elements = static_cast<int64_t>(AscendC::ONE_BLK_SIZE / sizeof(X));
+    const bool full_rows = embedding_size > 0 && embedding_size % block_elements == 0 && shape[2] == embedding_size &&
+                           shape[3] == 1 && shape[4] == 1 && shape[5] == 0 && output_offset % embedding_size == 0 &&
+                           actual_size % embedding_size == 0;
+    if (full_rows) {
+      const int64_t first_row = output_offset / embedding_size;
+      const uint32_t row_count = actual_size / static_cast<uint32_t>(embedding_size);
+      for (uint32_t row = 0; row < row_count; ++row) {
+        const int64_t index_value = static_cast<int64_t>(index.GetValue(first_row + row));
+        const int64_t source_offset = index_value * embedding_size;
+        AscendC::DataCopy(y[row * embedding_size], x[source_offset], static_cast<uint32_t>(embedding_size));
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 template <typename X, typename Index, int32_t Rank, int32_t Axis, typename... ShapeArgs>
 __aicore__ inline void IndirectLoadSimdStridedImpl(const LocalTensor<X> &x, const LocalTensor<Index> &index,
                                                    const LocalTensor<X> &y, const LocalTensor<uint8_t> &tmp,
@@ -332,6 +357,9 @@ __aicore__ inline void IndirectLoadSimdStridedImpl(const LocalTensor<X> &x, cons
   if constexpr (Axis > 0) {
     input_window_base = Internal::IndirectLoadSimdOuterOffset<Axis - 1, Rank>::Call(outer_begin, shape);
     index_window_base = Internal::IndirectLoadSimdOuterOffset<Axis - 1, 2 * Rank>::Call(outer_begin, shape);
+  }
+  if (TryIndirectLoadSimdEmbedding<X, Index, Rank, Axis>(x, index, y, actual_size, output_offset, shape)) {
+    return;
   }
   LocalTensor<uint32_t> offsets = tmp.template ReinterpretCast<uint32_t>();
   for (int64_t i = 0; i < actual_size; ++i) {
