@@ -8,6 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include "reg_broadcast_api_call.h"
+#include <limits>
 #include <sstream>
 #include "ascir_ops.h"
 #include "common/ge_common/debug/log.h"
@@ -48,11 +49,16 @@ static void GenParams(const TPipe &tpipe, const Tensor &input, const Tensor &out
       continue;
     }
     // 找到最近一个stride非0的轴
-    size_t pre_pos = 0UL;
+    size_t pre_pos = std::numeric_limits<size_t>::max();
     for (size_t i = 0UL; i < pos; ++i) {
       if (output.vectorized_strides[i] != 0) {
         pre_pos = i;
       }
+    }
+    if (pre_pos == std::numeric_limits<size_t>::max()) {
+      GetOneAxisSize(tpipe, output, pos, ss);
+      ss << ")";
+      continue;
     }
     ascir::AxisId axis_id = output.vectorized_axis[pos];
     auto last_dim_size = output.vectorized_strides[pre_pos];

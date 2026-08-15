@@ -15,4 +15,6 @@
 
 void LoadScalarAbsBrcStore_BeforeAutofuse(af::AscGraph &graph);
 void LoadScalarAbsBrcStore_AfterAutofuse(af::AscGraph &graph);
+void LoadScalarBrcStore_BeforeAutofuse2D(af::AscGraph &graph);
+void LoadScalarBrcStore_AfterAutofuse2D(af::AscGraph &graph);
 #endif

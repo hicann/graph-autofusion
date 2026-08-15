@@ -609,6 +609,7 @@ codegen_e2e_st() {
     MAKE_TARGET_LIST="${MAKE_TARGET_LIST} \
                       load_abs_store_expect_code_e2e_v2 \
                       load_scalar_abs_brc_store_expect_code_e2e_v2 \
+                      load_scalar_brc_store_2d_expect_code_e2e_v2 \
                       load_scalar_clip_store_expect_code_e2e_v2 \
                       load_div_store_expect_code_e2e_v2 \
                       load_scalar_sub_store_expect_code_e2e_v2 \

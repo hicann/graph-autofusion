@@ -25,6 +25,55 @@ using namespace af::ops;
 using namespace af::ascir_op;
 using namespace codegen;
 
+static void BuildBroadcastRegApiCallPrePosNotFoundGraph(af::AscGraph &graph, af::Expression s0, af::Expression s1,
+                                                        af::Expression s2, af::Axis z0, af::Axis z1, af::Axis z2) {
+  Data x_op("x", graph);
+  Load load_op("load");
+  af::ascir_op::Broadcast broadcast_op("broadcast");
+  graph.AddNode(load_op);
+  graph.AddNode(broadcast_op);
+  load_op.x = x_op.y;
+  load_op.attr.sched.axis = {z0.id, z1.id, z2.id};
+  *load_op.y.axis = {z0.id, z1.id, z2.id};
+  *load_op.y.repeats = {One, One, s2};
+  *load_op.y.strides = {Zero, Zero, One};
+  broadcast_op.x = load_op.y;
+  *broadcast_op.y.axis = {z0.id, z1.id, z2.id};
+  *broadcast_op.y.repeats = {s0, s1, s2};
+  *broadcast_op.y.strides = {Zero, Zero, One};
+}
+
+static void ConfigureBroadcastRegApiCallPrePosNotFoundGraph(af::AscGraph &graph, af::AxisId z0, af::AxisId z1,
+                                                            af::AxisId z2) {
+  auto load = graph.FindNode("load");
+  load->attr.api.compute_type = af::ComputeType::kComputeLoad;
+  load->attr.api.type = af::ApiType::kAPITypeCompute;
+  load->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  load->attr.sched.loop_axis = z0;
+  load->outputs[0].attr.vectorized_axis = {z0, z1, z2};
+  load->outputs[0].attr.vectorized_strides = {Zero, Zero, One};
+  load->outputs[0].attr.dtype = af::DT_INT64;
+  load->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
+  load->outputs[0].attr.mem.tensor_id = 0;
+  load->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  load->outputs[0].attr.que.id = 1;
+  load->outputs[0].attr.opt.merge_scope = af::kIdNone;
+
+  auto broadcast = graph.FindNode("broadcast");
+  broadcast->attr.api.compute_type = af::ComputeType::kComputeBroadcast;
+  broadcast->attr.api.type = af::ApiType::kAPITypeCompute;
+  broadcast->attr.api.unit = af::ComputeUnit::kUnitVector;
+  broadcast->attr.sched.loop_axis = z0;
+  broadcast->outputs[0].attr.vectorized_axis = {z0, z1, z2};
+  broadcast->outputs[0].attr.vectorized_strides = {Zero, Zero, One};
+  broadcast->outputs[0].attr.dtype = af::DT_INT64;
+  broadcast->outputs[0].attr.mem.position = af::Position::kPositionVecOut;
+  broadcast->outputs[0].attr.mem.tensor_id = 1;
+  broadcast->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeQueue;
+  broadcast->outputs[0].attr.que.id = 2;
+  broadcast->outputs[0].attr.opt.merge_scope = af::kIdNone;
+}
+
 TEST(CodegenKernel, BroadcastRegApiCallAllCommonAxis) {
   af::AscGraph graph("test_graph");
 
@@ -672,5 +721,45 @@ TEST(CodegenKernel, BroadcastRegApiCall_BrcAlign_BBA) {
             "static_cast<uint32_t>(8)};\n"
             "const uint32_t src_shape_0_brc_to_1[3] = {static_cast<uint32_t>(1), static_cast<uint32_t>(1), "
             "static_cast<uint32_t>(8)};\n"
+            "BroadcastExtend<int64_t,3>(local_1[0], local_0[0], dst_shape_0_brc_to_1, src_shape_0_brc_to_1);\n");
+}
+
+TEST(CodegenKernel, BroadcastRegApiCall_PrePosNotFound) {
+  af::AscGraph graph("test_graph");
+  auto s0 = graph.CreateSizeVar(2);
+  auto s1 = graph.CreateSizeVar(2);
+  auto s2 = graph.CreateSizeVar(7);
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  auto z2 = graph.CreateAxis("z2", s2);
+  BuildBroadcastRegApiCallPrePosNotFoundGraph(graph, s0, s1, s2, z0, z1, z2);
+  ConfigureBroadcastRegApiCallPrePosNotFoundGraph(graph, z0.id, z1.id, z2.id);
+  auto load = graph.FindNode("load");
+  auto broadcast = graph.FindNode("broadcast");
+
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  tpipe.AddTensor(load->outputs[0]);
+  tpipe.AddTensor(broadcast->outputs[0]);
+  tiler.AddAxis(z0);
+  tiler.AddAxis(z1);
+  tiler.AddAxis(z2);
+  tiler.AddSizeVar(af::SizeVar(s0));
+  tiler.AddSizeVar(af::SizeVar(s1));
+  tiler.AddSizeVar(af::SizeVar(s2));
+
+  codegen::ApiTensor x1;
+  x1.id = load->outputs[0].attr.mem.tensor_id;
+  codegen::BroadcastRegApiCall call("BroadcastExtend");
+  EXPECT_EQ(call.Init(broadcast), 0);
+  call.inputs.push_back(&x1);
+
+  std::string result;
+  EXPECT_EQ(call.Generate(tpipe, vector<af::AxisId>{}, result), af::SUCCESS);
+  EXPECT_EQ(result,
+            "const uint32_t dst_shape_0_brc_to_1[3] = {static_cast<uint32_t>(2), static_cast<uint32_t>(2), "
+            "static_cast<uint32_t>(7)};\n"
+            "const uint32_t src_shape_0_brc_to_1[3] = {static_cast<uint32_t>(1), static_cast<uint32_t>(1), "
+            "static_cast<uint32_t>(7)};\n"
             "BroadcastExtend<int64_t,3>(local_1[0], local_0[0], dst_shape_0_brc_to_1, src_shape_0_brc_to_1);\n");
 }
