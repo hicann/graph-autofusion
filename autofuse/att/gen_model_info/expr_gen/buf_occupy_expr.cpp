@@ -88,9 +88,7 @@ af::Status BufOccupyExpr::GetOccupInContainer(ContainerPtr &container, Expr &occ
     GELOGD("trying to reuse temp buffer for tbuf %s, id %lld", container->name.c_str(), container->container_id);
     auto temp_buffer = tuning_space_->tmp_buffer.find(container->container_id);
     if (temp_buffer != tuning_space_->tmp_buffer.end()) {
-      constexpr int32_t kMinTmpBufferSize = 8 * 1024;
-      auto temp_buffer_size = af::sym::Max(temp_buffer->second, CreateExpr(kMinTmpBufferSize));
-      occup_per_tensor = af::sym::Max(occup_per_tensor, temp_buffer_size);
+      occup_per_tensor = af::sym::Max(occup_per_tensor, temp_buffer->second);
       GELOGD("reuse temp buffer for tbuf, buf id %lld, result buffer %s", container->container_id,
              Str(occup_per_tensor).c_str());
       tuning_space_->tmp_buffer.erase(container->container_id);
@@ -123,9 +121,7 @@ af::Status BufOccupyExpr::GetBufferOccupInContainer(std::unordered_map<HardwareD
   }
   for (auto &pair : tuning_space_->tmp_buffer) {
     string arg_name = "b" + std::to_string(pair.first) + "_size";
-    constexpr int32_t kMinTmpBufferSize = 8 * 1024;
-    auto temp_buffer_size = af::sym::Max(pair.second, CreateExpr(kMinTmpBufferSize));
-    container_exprs[arg_name] = temp_buffer_size;
+    container_exprs[arg_name] = pair.second;
     SummaryBufferOccup(buffer_occup, HardwareDef::UB, container_exprs[arg_name]);
     GELOGD("Add temp buffer %s [%s] occupy for UB", arg_name.c_str(), pair.second.Str().get());
   }
