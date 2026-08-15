@@ -563,13 +563,61 @@ static bool IsReduceDoubleTile(const Tiler &tiler, const TPipe &tpipe, bool has_
   return false;
 }
 
-static std::string GetCacheGuardCondition(const ApiCall &call, bool is_enable_cache, bool is_double_tile) {
+static bool IsLoadSourceInvariantOnLoopAxis(const af::AscNodePtr &node, const Tiler &tiler,
+                                            ascir::AxisId loop_axis_id) {
+  if (node == nullptr) {
+    return false;
+  }
+  // Load 的 GM 地址由 Tensor 轴和 stride 共同决定。当前循环轴如果能传递到某个
+  // Tensor 轴，且该轴 stride 非零，则循环迭代会改变 GM offset，不能复用上一轮缓存。
+  for (const auto &output : node->outputs()) {
+    const auto &attr = output->attr;
+    if (attr.axis.size() != attr.strides.size()) {
+      return false;
+    }
+    for (size_t i = 0U; i < attr.axis.size(); ++i) {
+      if (attr.axis[i] == af::kIdNone || !tiler.IsFrom(loop_axis_id, attr.axis[i])) {
+        continue;
+      }
+      if (!ascgen_utils::ExpressEq(attr.strides[i], af::ops::Zero)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static bool IsCacheInputInvariantOnLoopAxis(const af::AscNodePtr &node, const Tiler &tiler,
+                                            ascir::AxisId loop_axis_id) {
+  if (node == nullptr) {
+    return false;
+  }
+  if (node->attr.api.compute_type == af::ComputeType::kComputeLoad) {
+    return IsLoadSourceInvariantOnLoopAxis(node, tiler, loop_axis_id);
+  }
+  // Broadcast 前可能存在多个计算节点；只要任一路输入地址会变化，整个缓存链就不能复用。
+  for (const auto &input_node : node->GetInDataNodes()) {
+    const auto input_asc_node = std::dynamic_pointer_cast<af::AscNode>(input_node);
+    if (!IsCacheInputInvariantOnLoopAxis(input_asc_node, tiler, loop_axis_id)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static std::string GetCacheGuardCondition(const ApiCall &call, bool is_enable_cache, bool is_double_tile,
+                                          bool has_reduce_node, bool is_cache_input_invariant) {
   if (!is_enable_cache) {
     return "";
   }
-  // 双 Tile Reduce 使用专用的 A/R 缓存条件，其他场景使用 AutoSchedule 缓存标记。
+  // 双 Tile Reduce 使用专用的 A/R 缓存条件。
   if (is_double_tile) {
     return call.enable_cache_with_condition;
+  }
+  // 普通 Reduce 的缓存刷新周期不能覆盖会改变 GM 地址的循环轴；无法证明地址不变时，
+  // 返回空条件，调用方会在每个 Tile 正常执行 Load/Broadcast。
+  if (has_reduce_node && !is_cache_input_invariant) {
+    return "";
   }
   // 外层有效轴均为广播轴，缓存值在当前分块循环内保持不变，只需在第一次迭代生成。
   if (call.exec_condition == af::ExecuteCondition::kCacheBlockSplitOriginBroadcastAxis) {
@@ -624,9 +672,18 @@ Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<as
       if (this->axis_id != af::kIdNone && this->compute_stage == ComputeStage::kDefault) {
         auto axis = tiler.GetAxis(this->axis_id);
         const bool is_enable_cache = axis.is_split_b && body.call->enable_cache;
+        // 双 Tile Reduce 的 A/R 缓存有独立的刷新协议；普通 Reduce 才需要额外检查
+        // 缓存链的 GM 地址是否随当前 loop axis 变化。
         const bool is_double_tile = IsReduceDoubleTile(tiler, tpipe, this->is_graph_has_reduce_node) &&
                                     current_axis.size() > kDoubleTileAxisSize;
-        cache_guard = GetCacheGuardCondition(*body.call, is_enable_cache, is_double_tile);
+        const bool is_cache_input_invariant =
+            !this->is_graph_has_reduce_node || IsCacheInputInvariantOnLoopAxis(body.call->node, tiler, this->axis_id);
+        cache_guard = GetCacheGuardCondition(*body.call, is_enable_cache, is_double_tile,
+                                             this->is_graph_has_reduce_node, is_cache_input_invariant);
+        if (is_enable_cache && this->is_graph_has_reduce_node && !is_double_tile && !is_cache_input_invariant) {
+          GELOGD("Node[%s][%s] cache guard skipped because GM offset depends on loop axis[%ld]",
+                 body.call->node_name.c_str(), body.call->type.c_str(), this->axis_id);
+        }
         if (!cache_guard.empty()) {
           ss << "if (" << cache_guard << ") {" << std::endl;
         }
