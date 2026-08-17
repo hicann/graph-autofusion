@@ -575,24 +575,25 @@ void VectorFuncPartitioner::RefineEnableVFFlag(const af::AscNodePtr &node, bool 
     }
   }
 
-  // 4. Compare/Add/Min/Max/LogicalAnd等微指令支持scalar输入，不需要检查直连scalar
+  // 4. IndirectLoad template nodes with custom emit paths should not participate in regular VF fusion.
+  if (ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(node)) {
+    enable_vf = false;
+    GELOGD("Node [%s] is IndirectLoad custom emit node, disable VF support.", node->GetNamePtr());
+    return;
+  }
+
+  // 5. Compare/Add/Min/Max/LogicalAnd等微指令支持scalar输入，不需要检查直连scalar
   if (ScheduleUtils::IsMicroApiSupportsScalarInput(node)) {
     return;
   }
 
-  // 5. 非ScalarBrc场景：如果算子的任意输入直连scalar且不支持scalar输入，就把enable_vf标记为false
+  // 6. 非ScalarBrc场景：如果算子的任意输入直连scalar且不支持scalar输入，就把enable_vf标记为false
   for (const auto &in_node : node->GetInDataNodes()) {
     if (ScheduleUtils::IsScalarLikeNode(in_node)) {
       enable_vf = false;
       GELOGD("Node [%s] has direct Scalar input, disable VF support.", node->GetNamePtr());
       break;
     }
-  }
-
-  // 6. IndirectLoad template nodes with custom emit paths should not participate in regular VF fusion.
-  if (ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(node)) {
-    enable_vf = false;
-    GELOGD("Node [%s] is IndirectLoad custom emit node, disable VF support.", node->GetNamePtr());
   }
 }
 

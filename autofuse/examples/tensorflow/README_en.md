@@ -19,6 +19,8 @@ Use AutoFuse to perform operator fusion in TensorFlow networks. The AutoFuse fus
 
 Before running this example, complete the following steps in sequence:
 
+> Run all the following commands from the graph-autofusion repository root.
+
 1. Follow the [Installation Guide](../../../docs/en/quick_install.md) to correctly install the Toolkit and Ops packages and configure the environment variables.
 2. Follow [Environment Build and Deployment](../../../docs/env_install/tensorflow/env_tf.md) to set up the TensorFlow environment. On x86_64, TensorFlow can be installed directly using pip. On aarch64, TensorFlow must be built from source.
 3. Alternatively, use the one-click configuration script to automatically set up the environment. This script is available only for the **x86_64 architecture**:
@@ -30,9 +32,9 @@ Before running this example, complete the following steps in sequence:
    After the script is complete, activate the environment:
 
    ```bash
-   source scripts/env_install/env/activate_tf1.sh    # TensorFlow 1.15
+   source scripts/env_install/tensorflow/env/activate_tf1.sh    # TensorFlow 1.15
    # Or
-   source scripts/env_install/env/activate_tf2.sh    # TensorFlow 2.6.5
+   source scripts/env_install/tensorflow/env/activate_tf2.sh    # TensorFlow 2.6.5
    ```
 
    > **This script does not support the aarch64 architecture.** On aarch64, follow [Building TensorFlow from Source on aarch64](../../../docs/env_install/tensorflow/build_tf_aarch64.md) to perform the build manually.
@@ -59,18 +61,16 @@ export AUTOFUSE_FLAGS="--enable_autofuse=true"
 ## Run the Example
 
 ```bash
-cd af_tf_eleandele
-
 # TensorFlow 1.15 environment
-python3 test_abs_relu_exp.py --mode tf1
+python3 autofuse/examples/tensorflow/af_tf_eleandele/test_abs_relu_exp.py --mode tf1
 
 # TensorFlow 2.6.5 environment in compatibility mode
-python3 test_abs_relu_exp.py --mode tf2-compat
+python3 autofuse/examples/tensorflow/af_tf_eleandele/test_abs_relu_exp.py --mode tf2-compat
 ```
 
 ## Expected Result
 
-The script performs 100 inference steps. If no error is reported, the fused operator has been executed successfully. You can further verify the fusion result using graph dump files or Profiling data.
+The script performs 100 inference steps. If no errors occur, the sample is considered to have run successfully. Whether operator fusion has occurred should be further verified using graph dumps or profiling data.
 
 ## References
 

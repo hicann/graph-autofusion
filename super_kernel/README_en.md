@@ -48,19 +48,26 @@ Additionally, SuperKernel supports memory semantics-based Notify and Wait events
 
 ```text
 super_kernel/
-├── docs                   # documentation introduction
-├── examples               # example scripts or Notebooks demonstrating typical usage
-├── scripts                # script path
-├── src                    # business code entry, modules divided by function
-│   └── superkernel        # SuperKernel business code
-├── tests                  # test project directory
-│   ├── st                 # System Test
-│   ├── ut                 # Unit Test
-│   └── utils              # common validation and utility functions
+├── docs                   # Documentation
+├── examples               # Example scripts or notebooks demonstrating typical usage
+├── include                # Public SuperKernel headers
+├── kernel                 # Device-side kernel implementations
+├── scripts                # Scripts
+├── src                    # SuperKernel source code
+│   ├── aot                # AOT compilation and optimization implementation
+│   └── jit                # JIT compilation implementation
+├── tests                  # Test project directory
+│   ├── aot                # AOT tests
+│   ├── fixtures           # Shared test data and fixtures
+│   ├── st                 # System tests
+│   ├── ut                 # Unit tests
+│   ├── utils              # Common validation and utility functions
+│   └── conftest.py        # Shared pytest configuration
 ├── CMakeLists.txt         # CMake configuration file
-├── pyproject.toml         # project metadata and packaging configuration
-├── README.md
-└── requirements-dev.txt   # python dependency configuration file
+├── pyproject.toml         # Project metadata and packaging configuration
+├── README.md              # Chinese documentation
+├── README_en.md           # English documentation
+└── requirements-dev.txt   # Python dependency configuration file
 ```
 
 ## Build and Installation

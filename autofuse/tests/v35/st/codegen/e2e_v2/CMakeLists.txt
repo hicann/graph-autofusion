@@ -56,6 +56,7 @@ include(e2e.cmake)
 add_library(e2e_v2_com SHARED
     ./e2e_load_abs_store.cpp
     ./e2e_load_scalar_abs_brc_store.cpp
+    ./e2e_load_scalar_brc_store_2d.cpp
     ./e2e_load_scalar_clip_store.cpp
     ./e2e_load_sub_store.cpp
     ./e2e_load_div_store.cpp
@@ -80,6 +81,7 @@ target_include_directories(e2e_v2_com PUBLIC
 
 add_subdirectory(load_abs_store_expect_code)
 add_subdirectory(load_scalar_abs_brc_store_expect_code)
+add_subdirectory(load_scalar_brc_store_2d_expect_code)
 add_subdirectory(load_scalar_clip_store_expect_code)
 # add_subdirectory(load_sub_store_expect_code)
 add_subdirectory(load_div_store_expect_code)

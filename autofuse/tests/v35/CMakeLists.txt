@@ -50,6 +50,14 @@ target_link_libraries(codegen_st PRIVATE
         ascendc_api_cube_extend
 )
 
+target_sources(codegen_st PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/st/codegen/test_codegen_broadcast_reg_api_call.cpp
+)
+
+target_include_directories(codegen_st PRIVATE
+        ${CODE_ROOT_DIR}/v35/codegen/reg_api_call
+)
+
 target_sources(test_ascir_ut PRIVATE
         ${ASCIR_UTEST_FILES}
         ${ASCIR_REG_FUNC_FILES}

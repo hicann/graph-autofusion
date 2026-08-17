@@ -35,7 +35,11 @@ function(add_indirect_load_strided_template_tests case_name input_stride0 input_
         ${input_stride0} ${input_stride1} ${input_stride2} ${index_stride0} ${index_stride1} ${index_stride2})
 endfunction()
 
-# Dense strides are input=[160, 5, 1], index=[80, 5, 1]. Keep one combined inner-gap and one combined outer-gap
-# graph per template; single-path variants exercise the same layout classification and are covered by UT.
+# Keep the SIMD/SK inner-gap coverage and use its SIMT variant for the common IndexSelect Broadcast layout.
 add_indirect_load_strided_template_tests(indirect_load_rank3_axis1_input_index_gap 384 10 1 192 10 1)
 add_indirect_load_strided_template_tests(indirect_load_rank3_axis1_input_index_outer_gap 192 5 1 128 5 1)
+set(indirect_load_index_select_defs IL_INDEX_SELECT_CASE=1)
+target_compile_definitions(indirect_load_rank3_axis1_input_index_gap_simt_test_codegen_v2 PRIVATE
+                           ${indirect_load_index_select_defs})
+target_compile_definitions(indirect_load_rank3_axis1_input_index_gap_simt_test_e2e_v2 PRIVATE
+                           ${indirect_load_index_select_defs})

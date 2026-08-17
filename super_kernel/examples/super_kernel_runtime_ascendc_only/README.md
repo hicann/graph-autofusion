@@ -8,11 +8,12 @@
 
 ## 目录结构
 ```text
-├── super_kernel_runtime_ascendc_only             # 目录
-   └── superkernel_runtime_ascendc_basic.py       # 主入口，流程上包含子kernel编译、superkernel编译、内存分配、加载执行等
-   └── compile_sk.py                              # 编译sub_kernel、super_kernel算子
-   └── utils.py                                   # 工具函数
-
+super_kernel_runtime_ascendc_only/
+├── README.md                                     # 中文说明文档
+├── README_en.md                                  # 英文说明文档
+├── compile_sk.py                                 # 编译sub_kernel、super_kernel算子
+├── superkernel_runtime_ascendc_basic.py          # 主入口，流程上包含子kernel编译、superkernel编译、内存分配、加载执行等
+└── utils.py                                      # 工具函数
 ```
 
 ## 用例介绍
@@ -23,7 +24,6 @@ graph TB
     input1[input1] --> sk[superkernel]
     input2[input2] --> sk
     sk --> output[output]
-    
     %% 放大的内部视图：用子图展示superkernel内部结构
     subgraph superkernel内部结构
         inner1_in(inner_input1) --> pow(pow)

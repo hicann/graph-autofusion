@@ -12,7 +12,7 @@
 
 注：当前暂不支持gather融合能力，等待[ issue175 ](https://gitcode.com/cann/graph-autofusion/issues/175)这个issue完成后gather可以和add进行融合。
 
-三个用例均开启 NPU Profiling，可通过生成的性能分析文件查看融合后的 Kernel。
+三个用例均开启 NPU Profiling，可通过生成的性能分析文件查看算子执行情况和融合结果。
 
 ## 目录结构
 

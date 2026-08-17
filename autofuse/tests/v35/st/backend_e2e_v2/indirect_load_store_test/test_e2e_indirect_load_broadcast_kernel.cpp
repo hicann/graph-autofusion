@@ -15,6 +15,31 @@
 
 #include "indirect_load_kernel_test_common.h"
 
+#ifndef IL_COMPLEX_BROADCAST
+#define IL_COMPLEX_BROADCAST 0
+#endif
+#ifndef IL_COMPLEX_SIMT
+#define IL_COMPLEX_SIMT 0
+#endif
+#ifndef IL_RETAIN_BROADCAST
+#define IL_RETAIN_BROADCAST 0
+#endif
+#ifndef IL_BROADCAST_POST_REDUCE
+#define IL_BROADCAST_POST_REDUCE 0
+#endif
+#ifndef IL_OUTPUT_S0
+#define IL_OUTPUT_S0 4
+#endif
+#ifndef IL_OUTPUT_S1
+#define IL_OUTPUT_S1 5
+#endif
+#ifndef IL_OUTPUT_S2
+#define IL_OUTPUT_S2 4
+#endif
+#ifndef IL_OUTPUT_S3
+#define IL_OUTPUT_S3 16
+#endif
+
 #if IL_AIC_REPRO
 extern "C" __global__ __aicore__ void indirect_load_aic_repro(GM_ADDR input, GM_ADDR index, GM_ADDR output,
                                                               GM_ADDR workspace, GM_ADDR tiling);
@@ -49,9 +74,13 @@ void InitializeAicReproData(DataType *input, IndexType *index, DataType *expecte
 #else
 using DataType = half;
 using IndexType = int64_t;
-constexpr std::array<int32_t, 4> kOutputShape = {4, 5, 4, 16};
+constexpr std::array<int32_t, 4> kOutputShape = {IL_OUTPUT_S0, IL_OUTPUT_S1, IL_OUTPUT_S2, IL_OUTPUT_S3};
 constexpr bool kInputBroadcast = IL_INPUT_BROADCAST;
 constexpr bool kIndexBroadcast = IL_INDEX_BROADCAST;
+constexpr bool kComplexBroadcast = IL_COMPLEX_BROADCAST;
+constexpr bool kComplexSimt = IL_COMPLEX_SIMT;
+constexpr bool kRetainBroadcast = IL_RETAIN_BROADCAST;
+constexpr bool kBroadcastPostReduce = IL_BROADCAST_POST_REDUCE;
 constexpr uint32_t kBroadcastAxesMask = IL_BROADCAST_AXES_MASK;
 
 constexpr std::array<int32_t, 4> MakeBroadcastSourceShape() {
@@ -65,7 +94,7 @@ constexpr std::array<int32_t, 4> MakeBroadcastSourceShape() {
 }
 
 constexpr std::array<int32_t, 4> kBroadcastSourceShape = MakeBroadcastSourceShape();
-constexpr std::array<int32_t, 4> kInputShape = kInputBroadcast ? kBroadcastSourceShape : kOutputShape;
+constexpr std::array<int32_t, 4> kInputShape = kInputBroadcast && !kComplexSimt ? kBroadcastSourceShape : kOutputShape;
 constexpr std::array<int32_t, 4> kIndexShape = kIndexBroadcast ? kBroadcastSourceShape : kOutputShape;
 constexpr int32_t kInputElementCount = IL_HAS_INPUT_ELEMENT;
 constexpr int32_t kIndexElementCount = IL_HAS_INDEX_ELEMENT;
@@ -78,6 +107,13 @@ int32_t ElementCount(const std::array<int32_t, N> &shape) {
     count *= dim;
   }
   return count;
+}
+
+int32_t ResultCount() {
+  if constexpr (kBroadcastPostReduce) {
+    return kOutputShape[0] * kOutputShape[1];
+  }
+  return ElementCount(kOutputShape);
 }
 
 int32_t DenseOffset(const std::array<int32_t, 4> &coordinate, const std::array<int32_t, 4> &shape) {
@@ -120,7 +156,7 @@ void InitializeData(DataType *x, IndexType *index, DataType *expected) {
     }
     const int32_t gathered_axis = static_cast<int32_t>(gathered_index);
     std::array<int32_t, 4> input_coordinate = {a, b, gathered_axis, d};
-    if (kInputBroadcast) {
+    if (kInputBroadcast && !kComplexSimt) {
       for (size_t dim = 0UL; dim < input_coordinate.size(); ++dim) {
         if ((kBroadcastAxesMask & (1U << dim)) != 0U) {
           input_coordinate[dim] = 0;
@@ -129,13 +165,25 @@ void InitializeData(DataType *x, IndexType *index, DataType *expected) {
     }
     const int32_t input_offset = DenseOffset(input_coordinate, kInputShape);
     float value = static_cast<float>(x[input_offset]);
+    if (kRetainBroadcast) {
+      value += 1.5F;
+    } else if (kComplexBroadcast && !kComplexSimt) {
+      value = value * 2.0F + 1.5F;
+    } else if (kComplexSimt) {
+      value += 1.5F;
+    }
     for (int32_t element = 0; element < kInputElementCount; ++element) {
       value = std::abs(value);
     }
     if (kHasOutputRelu) {
       value = std::max(value, 0.0F);
     }
-    expected[i] = static_cast<DataType>(value);
+    if constexpr (kBroadcastPostReduce) {
+      const int32_t result_offset = a * kOutputShape[1] + b;
+      expected[result_offset] = static_cast<DataType>(static_cast<float>(expected[result_offset]) + value);
+    } else {
+      expected[i] = static_cast<DataType>(value);
+    }
   }
 }
 #endif
@@ -163,7 +211,7 @@ TEST(E2EIndirectLoadBroadcast, GeneratedKernelMatchesReference) {
 #else
   const int32_t input_count = ElementCount(kInputShape);
   const int32_t index_count = ElementCount(kIndexShape);
-  const int32_t output_count = ElementCount(kOutputShape);
+  const int32_t output_count = ResultCount();
   indirect_load_test::KernelData<DataType, IndexType> buffers(input_count, index_count, output_count);
   ASSERT_TRUE(buffers.IsValid());
   InitializeData(buffers.input.get(), buffers.index.get(), buffers.expected.data());

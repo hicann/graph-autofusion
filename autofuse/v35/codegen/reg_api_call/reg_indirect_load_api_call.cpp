@@ -418,6 +418,10 @@ bool IsSimtGmInput(const af::AscNodePtr &node) {
   return af::ops::IsOps<af::ascir_op::Load>(node);
 }
 
+bool IsSimtScalarInput(const af::AscNodePtr &node) {
+  return af::ops::IsOps<af::ascir_op::Scalar>(node);
+}
+
 af::Status CollectSimtBackwardNodes(const af::AscNodePtr &root, const ascir::NodeView &indirect_load,
                                     SimtNodeSet &nodes) {
   std::vector<af::AscNodePtr> pending = {root};
@@ -426,7 +430,7 @@ af::Status CollectSimtBackwardNodes(const af::AscNodePtr &root, const ascir::Nod
     if (current == nullptr || current == indirect_load || !nodes.emplace(current.get()).second) {
       continue;
     }
-    if (IsSimtGmInput(current)) {
+    if (IsSimtGmInput(current) || IsSimtScalarInput(current)) {
       continue;
     }
     GE_ASSERT_TRUE(current->inputs.Size() > 0UL, "IndirectLoad SIMT node[%s] has no input.", current->GetNamePtr());
@@ -450,7 +454,7 @@ af::AscNodePtr FindSimtOutputStore(const ascir::NodeView &indirect_load) {
 }
 
 af::Status ValidateSimtRegionNode(const af::AscNodePtr &node) {
-  if (IsSimtGmInput(node) || af::ops::IsOps<af::ascir_op::Store>(node)) {
+  if (IsSimtGmInput(node) || IsSimtScalarInput(node) || af::ops::IsOps<af::ascir_op::Store>(node)) {
     return af::SUCCESS;
   }
   GE_ASSERT_TRUE(ascgen_utils::indirect_load::IsSimtInlineTransform(node),
@@ -523,50 +527,88 @@ af::Status CollectSimtMetadata(const ascir::NodeView &indirect_load, const af::A
   return af::SUCCESS;
 }
 
-af::Status GenerateSimtEvaluator(const std::string &method, const std::string &return_dtype,
-                                 const std::string &value_dtype, const std::string &offset_type,
-                                 ascir::TensorId value_tensor_id, ascir::TensorId result_tensor_id,
-                                 const std::vector<af::AscNodePtr> &nodes, std::stringstream &ss) {
-  std::map<ascir::TensorId, std::string> values;
-  if (value_tensor_id != af::kIdNone) {
-    values.emplace(value_tensor_id, "value");
+void RegisterSimtGmInput(const af::AscNodePtr &node, std::map<ascir::TensorId, std::string> &values) {
+  const auto output = node->outputs()[0];
+  values[output->attr.mem.tensor_id] = "context.gm_" + std::to_string(output->attr.mem.tensor_id) + "[output_index]";
+}
+
+af::Status EmitSimtScalarInput(const af::AscNodePtr &node, std::map<ascir::TensorId, std::string> &values,
+                               std::stringstream &ss) {
+  std::string value;
+  GE_ASSERT_NOTNULL(node->attr.ir_attr, "IndirectLoad SIMT Scalar node[%s] has no IR attr.", node->GetNamePtr());
+  GE_ASSERT_GRAPH_SUCCESS(node->attr.ir_attr->GetAttrValue("value", value));
+  const auto output = node->outputs()[0];
+  std::string dtype;
+  GE_ASSERT_SUCCESS(Tensor::DtypeName(output->attr.dtype, dtype));
+  std::string processed_value;
+  GE_ASSERT_SUCCESS(ascgen_utils::ScalarValuePreProcess(value, dtype, processed_value));
+  const std::string variable = "v_" + std::to_string(output->attr.mem.tensor_id);
+  ss << "    " << dtype << " " << variable << " = static_cast<" << dtype << ">(" << processed_value << ");"
+     << std::endl;
+  values[output->attr.mem.tensor_id] = variable;
+  return af::SUCCESS;
+}
+
+af::Status EmitSimtTransform(const af::AscNodePtr &node, std::map<ascir::TensorId, std::string> &values,
+                             std::stringstream &ss) {
+  std::vector<std::string> inputs;
+  for (size_t i = 0UL; i < node->inputs.Size(); ++i) {
+    const auto found = values.find(node->inputs()[i]->attr.mem.tensor_id);
+    GE_ASSERT_TRUE(found != values.end(), "SIMT node[%s] input[%zu] has no scalar value.", node->GetNamePtr(), i);
+    inputs.emplace_back(found->second);
   }
-  ss << "  __simt_callee__ __aicore__ inline static " << return_dtype << " " << method << "(";
-  if (!value_dtype.empty()) {
-    ss << value_dtype << " value, ";
-  }
-  ss << offset_type << " output_index, const Context &context) {" << std::endl;
+  std::string expr;
+  GE_ASSERT_SUCCESS(EmitSimtScalarExpr(node, inputs, expr));
+  const auto output = node->outputs()[0];
+  std::string output_dtype;
+  GE_ASSERT_SUCCESS(Tensor::DtypeName(output->attr.dtype, output_dtype));
+  const std::string variable = "v_" + std::to_string(output->attr.mem.tensor_id);
+  ss << "    " << output_dtype << " " << variable << " = " << expr << ";" << std::endl;
+  values[output->attr.mem.tensor_id] = variable;
+  return af::SUCCESS;
+}
+
+af::Status GenerateSimtEvaluatorBody(const std::vector<af::AscNodePtr> &nodes,
+                                     std::map<ascir::TensorId, std::string> &values, ascir::TensorId result_tensor_id,
+                                     std::stringstream &ss) {
   for (const af::AscNodePtr &node : nodes) {
     if (IsSimtGmInput(node)) {
-      const auto output = node->outputs()[0];
-      values[output->attr.mem.tensor_id] =
-          "context.gm_" + std::to_string(output->attr.mem.tensor_id) + "[output_index]";
+      RegisterSimtGmInput(node, values);
+      continue;
+    }
+    if (IsSimtScalarInput(node)) {
+      GE_ASSERT_SUCCESS(EmitSimtScalarInput(node, values, ss));
       continue;
     }
     if (af::ops::IsOps<af::ascir_op::Store>(node)) {
       continue;
     }
-    std::vector<std::string> inputs;
-    for (size_t i = 0UL; i < node->inputs.Size(); ++i) {
-      const auto found = values.find(node->inputs()[i]->attr.mem.tensor_id);
-      GE_ASSERT_TRUE(found != values.end(), "SIMT node[%s] input[%zu] has no scalar value.", node->GetNamePtr(), i);
-      inputs.emplace_back(found->second);
-    }
-    std::string expr;
-    GE_ASSERT_SUCCESS(EmitSimtScalarExpr(node, inputs, expr));
-    const auto output = node->outputs()[0];
-    std::string output_dtype;
-    GE_ASSERT_SUCCESS(Tensor::DtypeName(output->attr.dtype, output_dtype));
-    const std::string variable = "v_" + std::to_string(output->attr.mem.tensor_id);
-    ss << "    " << output_dtype << " " << variable << " = " << expr << ";" << std::endl;
-    values[output->attr.mem.tensor_id] = variable;
+    GE_ASSERT_SUCCESS(EmitSimtTransform(node, values, ss));
   }
   const auto result = values.find(result_tensor_id);
-  GE_ASSERT_TRUE(result != values.end(), "SIMT %s result tensor[%ld] has no scalar value.", method.c_str(),
-                 result_tensor_id);
+  GE_ASSERT_TRUE(result != values.end(), "SIMT evaluator result tensor[%ld] has no scalar value.", result_tensor_id);
   ss << "    return " << result->second << ";" << std::endl;
   ss << "  }" << std::endl;
   return af::SUCCESS;
+}
+
+af::Status GenerateSimtIndexEvaluator(const std::string &index_dtype, const std::string &offset_type,
+                                      ascir::TensorId result_tensor_id, const std::vector<af::AscNodePtr> &nodes,
+                                      std::stringstream &ss) {
+  std::map<ascir::TensorId, std::string> values;
+  ss << "  __simt_callee__ __aicore__ inline static " << index_dtype << " Index(" << offset_type
+     << " output_index, const Context &context) {" << std::endl;
+  return GenerateSimtEvaluatorBody(nodes, values, result_tensor_id, ss);
+}
+
+af::Status GenerateSimtOutputEvaluator(const std::string &output_dtype, const std::string &input_dtype,
+                                       const std::string &offset_type, ascir::TensorId value_tensor_id,
+                                       ascir::TensorId result_tensor_id, const std::vector<af::AscNodePtr> &nodes,
+                                       std::stringstream &ss) {
+  std::map<ascir::TensorId, std::string> values{{value_tensor_id, "value"}};
+  ss << "  __simt_callee__ __aicore__ inline static " << output_dtype << " Output(" << input_dtype << " value, "
+     << offset_type << " output_index, const Context &context) {" << std::endl;
+  return GenerateSimtEvaluatorBody(nodes, values, result_tensor_id, ss);
 }
 
 af::Status CalcVectorizedElementCount(const Tensor &tensor, af::Expression &element_count) {
@@ -697,10 +739,10 @@ Status IndirectLoadRegApiCall::GenerateFuncDefinition(const TPipe &tpipe, const 
   ss << "};" << std::endl;
   ss << "struct " << body_name << " {" << std::endl;
   ss << "  using Context = " << context_name << ";" << std::endl;
-  GE_ASSERT_SUCCESS(GenerateSimtEvaluator("Index", index_dtype, "", plan.offset_type, af::kIdNone,
-                                          index_result_tensor_id_, index_nodes_, ss));
-  GE_ASSERT_SUCCESS(GenerateSimtEvaluator("Output", output_dtype, input_dtype, plan.offset_type, simt_value_tensor_id_,
-                                          output_result_tensor_id_, output_nodes_, ss));
+  GE_ASSERT_SUCCESS(
+      GenerateSimtIndexEvaluator(index_dtype, plan.offset_type, index_result_tensor_id_, index_nodes_, ss));
+  GE_ASSERT_SUCCESS(GenerateSimtOutputEvaluator(output_dtype, input_dtype, plan.offset_type, simt_value_tensor_id_,
+                                                output_result_tensor_id_, output_nodes_, ss));
   ss << "};" << std::endl;
   return af::SUCCESS;
 }

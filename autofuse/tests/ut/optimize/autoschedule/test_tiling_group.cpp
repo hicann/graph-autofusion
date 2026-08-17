@@ -92,7 +92,8 @@ TEST_P(TilingGroupRoleExclusionUT, GenTilingGroupExcludesIndirectLoadRole) {
   ASSERT_EQ(ascgen_utils::indirect_load::SetTemplateRole(role_node, GetParam()), af::SUCCESS);
 
   const auto behavior = ascgen_utils::indirect_load::GetTemplateBehavior(role_node);
-  if (GetParam() == TemplateRole::kSimdInputPre || GetParam() == TemplateRole::kSimdInputPreStridedUbPath) {
+  if (GetParam() == TemplateRole::kSimdInputPre || GetParam() == TemplateRole::kSimdInputPreStridedUbPath ||
+      GetParam() == TemplateRole::kSimdIndexPre) {
     EXPECT_TRUE(behavior.excludes_tiling_group);
     EXPECT_FALSE(behavior.skips_main_schedule_tiling);
   } else {
@@ -112,14 +113,16 @@ TEST_P(TilingGroupRoleExclusionUT, GenTilingGroupExcludesIndirectLoadRole) {
 
 INSTANTIATE_TEST_SUITE_P(IndirectLoadRoles, TilingGroupRoleExclusionUT,
                          testing::Values(TemplateRole::kSimdInputPre, TemplateRole::kSimdInputPreStridedUbPath,
-                                         TemplateRole::kSimtInputBoundary, TemplateRole::kSimtDirectGmBoundary,
-                                         TemplateRole::kSimtInlineTransform),
+                                         TemplateRole::kSimdIndexPre, TemplateRole::kSimtInputBoundary,
+                                         TemplateRole::kSimtDirectGmBoundary, TemplateRole::kSimtInlineTransform),
                          [](const testing::TestParamInfo<TemplateRole> &info) {
                            switch (info.param) {
                              case TemplateRole::kSimdInputPre:
                                return "SimdInputPre";
                              case TemplateRole::kSimdInputPreStridedUbPath:
                                return "SimdInputPreStridedUbPath";
+                             case TemplateRole::kSimdIndexPre:
+                               return "SimdIndexPre";
                              case TemplateRole::kSimtInputBoundary:
                                return "SimtInputBoundary";
                              case TemplateRole::kSimtDirectGmBoundary:

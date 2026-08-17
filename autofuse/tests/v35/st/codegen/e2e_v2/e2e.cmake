@@ -44,6 +44,9 @@ function(do_add_codegen_e2e_st_test)
                           json
                           GTest::gtest
                           GTest::gtest_main)
+    set_target_properties(${E2E_ST1_GENERATOR_EXE_NAME} PROPERTIES
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph"
+        LINK_OPTIONS "-Wl,--disable-new-dtags")
 
 
     list (JOIN ARG_KERNEL_SRC ":" KERNEL_SRC_LIST)
@@ -54,7 +57,7 @@ function(do_add_codegen_e2e_st_test)
        KERNEL_SRC_LIST=\"${KERNEL_SRC_LIST}\"
     )
 
-    add_test(NAME ${E2E_ST1_GENERATOR_EXE_NAME} COMMAND ${E2E_ST1_GENERATOR_EXE_NAME} --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/${E2E_ST1_GENERATOR_EXE_NAME}.xml)
+    add_test(NAME ${E2E_ST1_GENERATOR_EXE_NAME} COMMAND $<TARGET_FILE:${E2E_ST1_GENERATOR_EXE_NAME}> --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/${E2E_ST1_GENERATOR_EXE_NAME}.xml)
     set_tests_properties(${E2E_ST1_GENERATOR_EXE_NAME} PROPERTIES LABELS "st;codegen_e2e_st_test1;${E2E_ST1_GENERATOR_EXE_NAME}")
 
     add_custom_target(${TEST_NAME}_generated_sources_v2
@@ -67,9 +70,12 @@ function(do_add_codegen_e2e_st_test)
     add_dependencies(${E2E_ST2_EXE_KERNEL_EXE_NAME} ${TEST_NAME}_generated_sources_v2)
     target_include_directories(${E2E_ST2_EXE_KERNEL_EXE_NAME} PRIVATE ${ARG_WORKDIR})
     target_link_libraries(${E2E_ST2_EXE_KERNEL_EXE_NAME} tikicpulib_ascend950pr_9599 GTest::gtest GTest::gtest_main)
+    set_target_properties(${E2E_ST2_EXE_KERNEL_EXE_NAME} PROPERTIES
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph"
+        LINK_OPTIONS "-Wl,--disable-new-dtags")
     target_compile_options(${E2E_ST2_EXE_KERNEL_EXE_NAME} PRIVATE -DAUTO_FUSE_DEVICE=1)
     #gtest_discover_tests(${E2E_ST2_EXE_KERNEL_EXE_NAME})
-    add_test(NAME ${E2E_ST2_EXE_KERNEL_EXE_NAME} COMMAND ${E2E_ST2_EXE_KERNEL_EXE_NAME} --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/v35/st/${E2E_ST2_EXE_KERNEL_EXE_NAME}.xml)
+    add_test(NAME ${E2E_ST2_EXE_KERNEL_EXE_NAME} COMMAND $<TARGET_FILE:${E2E_ST2_EXE_KERNEL_EXE_NAME}> --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/v35/st/${E2E_ST2_EXE_KERNEL_EXE_NAME}.xml)
     set_tests_properties(${E2E_ST2_EXE_KERNEL_EXE_NAME} PROPERTIES LABELS "st;codegen_e2e_st_test2;${E2E_ST2_EXE_KERNEL_EXE_NAME}")
 endfunction()
 

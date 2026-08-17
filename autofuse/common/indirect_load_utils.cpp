@@ -22,6 +22,7 @@ namespace {
 constexpr char kTemplateOuterAxisAttr[] = "af.internal.indirect_load.outer_axis";
 constexpr char kTemplateInnerAxisAttr[] = "af.internal.indirect_load.inner_axis";
 constexpr char kTemplateInputInnerAxisAttr[] = "af.internal.indirect_load.input_inner_axis";
+constexpr char kTemplateIndexInnerAxisAttr[] = "af.internal.indirect_load.index_inner_axis";
 constexpr char kTemplateTileOuterAxisAttr[] = "af.internal.indirect_load.tile_outer_axis";
 constexpr char kTemplateTileInnerAxisAttr[] = "af.internal.indirect_load.tile_inner_axis";
 constexpr char kTemplateVectorizedAxesAttr[] = "af.internal.indirect_load.vectorized_axes";
@@ -46,6 +47,7 @@ TemplateAxes ReadTemplateAxes(const af::AscNodePtr &node) {
   axes.outer_axis = op_desc->TryGetExtAttr(kTemplateOuterAxisAttr, static_cast<int64_t>(af::kIdNone));
   axes.inner_axis = op_desc->TryGetExtAttr(kTemplateInnerAxisAttr, static_cast<int64_t>(af::kIdNone));
   axes.input_inner_axis = op_desc->TryGetExtAttr(kTemplateInputInnerAxisAttr, static_cast<int64_t>(af::kIdNone));
+  axes.index_inner_axis = op_desc->TryGetExtAttr(kTemplateIndexInnerAxisAttr, static_cast<int64_t>(af::kIdNone));
   axes.tile_outer_axis = op_desc->TryGetExtAttr(kTemplateTileOuterAxisAttr, static_cast<int64_t>(af::kIdNone));
   axes.tile_inner_axis = op_desc->TryGetExtAttr(kTemplateTileInnerAxisAttr, static_cast<int64_t>(af::kIdNone));
   axes.vectorized_axes = op_desc->TryGetExtAttr(kTemplateVectorizedAxesAttr, std::vector<af::AxisId>{});
@@ -65,6 +67,10 @@ TemplateBehavior GetBehavior(TemplateRole role) {
   switch (role) {
     case TemplateRole::kSimdInputPre:
     case TemplateRole::kSimdInputPreStridedUbPath:
+      behavior.excludes_tiling_group = true;
+      behavior.preserves_vectorized_axis = true;
+      break;
+    case TemplateRole::kSimdIndexPre:
       behavior.excludes_tiling_group = true;
       behavior.preserves_vectorized_axis = true;
       break;
@@ -184,6 +190,8 @@ af::Status SetTemplateAxes(const af::AscNodePtr &node, const TemplateAxes &axes)
                  "Set IndirectLoad inner axis failed, node = %s", node->GetNamePtr());
   GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateInputInnerAxisAttr, static_cast<int64_t>(axes.input_inner_axis)),
                  "Set IndirectLoad input inner axis failed, node = %s", node->GetNamePtr());
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateIndexInnerAxisAttr, static_cast<int64_t>(axes.index_inner_axis)),
+                 "Set IndirectLoad index inner axis failed, node = %s", node->GetNamePtr());
   GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateTileOuterAxisAttr, static_cast<int64_t>(axes.tile_outer_axis)),
                  "Set IndirectLoad tile outer axis failed, node = %s", node->GetNamePtr());
   GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateTileInnerAxisAttr, static_cast<int64_t>(axes.tile_inner_axis)),

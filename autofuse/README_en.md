@@ -22,10 +22,13 @@ autofuse/
 ├── inc                    # Interfaces provided for GE
 ├── optimize               # Scheduling and partitioning module
 ├── scripts                # Script directory
+├── tests                  # Test cases and test framework
+├── tools                  # Debugging and analysis tools
 ├── v35                    # Ascend 950 chip-related optimizations
 ├── CMakeLists.txt         # CMake configuration file
 ├── blacklist.txt          # Project configuration file
-├── README.md
+├── README.md              # Chinese documentation
+└── README_en.md           # English documentation
 ```
 
 ## Build and Installation

@@ -546,8 +546,9 @@ std::vector<af::AscGraph *> CollectImplGraphs(ascir::FusedScheduledResult &resul
   return graphs;
 }
 
-#ifdef IL_EXPECT_ONLY_SIMT
+#if defined(IL_EXPECT_ONLY_SIMT) || defined(IL_EXPECT_SIMT_ONLY)
 void ExpectAraFallbackSimtSemantics(af::AscGraph &graph, const af::AscNodePtr &indirect_load) {
+#ifdef IL_EXPECT_ONLY_SIMT
   static_assert(kRank == 4UL && kAxis == 1L);
   static_assert(kInputPreType == ascir::IndirectLoadInputPreType::kReluExp2);
   static_assert(kOutputPostType == ascir::IndirectLoadOutputPostType::kSumKeepTail);
@@ -595,6 +596,10 @@ void ExpectAraFallbackSimtSemantics(af::AscGraph &graph, const af::AscNodePtr &i
   const af::AscNodePtr store = ascgen_utils::indirect_load::GetOnlyOutputConsumer(reduce);
   ASSERT_NE(store, nullptr);
   EXPECT_TRUE(af::ops::IsOps<af::ascir_op::Store>(store));
+#else
+  (void)graph;
+  (void)indirect_load;
+#endif
 }
 
 bool CheckOnlySimtAraSchedule(ascir::FusedScheduledResult &result) {
@@ -928,7 +933,7 @@ void CheckGeneratedKernel(const std::string &kernel) {
             std::string::npos);
 #endif
 #ifdef IL_POST_REDUCE
-#ifdef IL_EXPECT_ONLY_SIMT
+#if defined(IL_EXPECT_ONLY_SIMT) || defined(IL_EXPECT_SIMT_ONLY)
   EXPECT_EQ(kernel.find("// IndirectLoad SIMD"), std::string::npos);
   EXPECT_EQ(kernel.find("IndirectLoadSimd<"), std::string::npos);
   ExpectPostReduceSimtFramework(kernel);
@@ -1043,7 +1048,7 @@ void OptimizeGraph(const af::ComputeGraphPtr &graph, ascir::FusedScheduledResult
   EXPECT_EQ(optimize_logs.find("[ERROR]"), std::string::npos) << optimize_logs;
   ASSERT_EQ(optimize_status, 0) << optimize_logs;
 #ifdef IL_POST_REDUCE
-#ifdef IL_EXPECT_ONLY_SIMT
+#if defined(IL_EXPECT_ONLY_SIMT) || defined(IL_EXPECT_SIMT_ONLY)
   ASSERT_TRUE(CheckOnlySimtAraSchedule(fused_schedule_result)) << optimize_logs;
 #else
   bool has_expected_template = false;

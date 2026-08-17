@@ -1,5 +1,15 @@
 function(add_indirect_load_broadcast_test test_name template input_element_count index_element_count broadcast_axes_mask
          output_relu clear_broadcast_source_view)
+    if(ARGC GREATER 7)
+        set(input_broadcast ${ARGV7})
+    else()
+        set(input_broadcast 1)
+    endif()
+    if(ARGC GREATER 8)
+        set(index_broadcast ${ARGV8})
+    else()
+        set(index_broadcast 1)
+    endif()
     set(expect_simt 0)
     set(expect_sk 0)
     set(tiling_options)
@@ -25,8 +35,8 @@ function(add_indirect_load_broadcast_test test_name template input_element_count
             autofuse_tiling_data.h
         TEST_SRC test_e2e_indirect_load_broadcast_kernel.cpp)
     set(case_definitions
-        IL_INPUT_BROADCAST=1
-        IL_INDEX_BROADCAST=1
+        IL_INPUT_BROADCAST=${input_broadcast}
+        IL_INDEX_BROADCAST=${index_broadcast}
         IL_HAS_INPUT_ELEMENT=${input_element_count}
         IL_HAS_INDEX_ELEMENT=${index_element_count}
         IL_HAS_OUTPUT_RELU=${output_relu}
@@ -38,13 +48,52 @@ function(add_indirect_load_broadcast_test test_name template input_element_count
     target_compile_definitions(${test_name}_e2e_v2 PRIVATE ${case_definitions})
 endfunction()
 
-# Each template uses one graph containing input/index Broadcast paths and multiple Element nodes on both paths.
-add_indirect_load_broadcast_test(indirect_load_broadcast_elements_simd_test simd 2 2 3 0 1)
-add_indirect_load_broadcast_test(indirect_load_broadcast_elements_simt_test simt 2 2 3 0 0)
+# Direct Broadcast covers IndirectLoad axis 2, its inner neighbor, and a degenerate source crossing the axis boundary.
+add_indirect_load_broadcast_test(indirect_load_broadcast_cross_boundary_simt_fallback_test simt 0 0 14 0 0)
+target_compile_definitions(indirect_load_broadcast_cross_boundary_simt_fallback_test_codegen_v2 PRIVATE
+                           IL_DEGENERATE_BROADCAST=1 IL_OUTPUT_S0=10 IL_OUTPUT_S1=10 IL_OUTPUT_S2=20 IL_OUTPUT_S3=20)
+target_compile_definitions(indirect_load_broadcast_cross_boundary_simt_fallback_test_e2e_v2 PRIVATE
+                           IL_DEGENERATE_BROADCAST=1 IL_OUTPUT_S0=10 IL_OUTPUT_S1=10 IL_OUTPUT_S2=20 IL_OUTPUT_S3=20)
+add_indirect_load_broadcast_test(indirect_load_broadcast_axis_simd_test simd 0 0 4 0 0)
+add_indirect_load_broadcast_test(indirect_load_broadcast_inner_adjacent_simd_test simd 0 0 8 0 0)
+add_indirect_load_broadcast_test(indirect_load_broadcast_continuous_simd_test simd 0 0 12 0 0)
+target_compile_definitions(indirect_load_broadcast_continuous_simd_test_codegen_v2 PRIVATE IL_CONTINUOUS_BROADCAST=1)
+target_compile_definitions(indirect_load_broadcast_continuous_simd_test_e2e_v2 PRIVATE IL_CONTINUOUS_BROADCAST=1)
+add_indirect_load_broadcast_test(indirect_load_broadcast_continuous_index_simt_test simt 0 0 12 0 0 0 1)
+target_compile_definitions(indirect_load_broadcast_continuous_index_simt_test_codegen_v2 PRIVATE
+                           IL_CONTINUOUS_INDEX_BROADCAST=1)
+target_compile_definitions(indirect_load_broadcast_continuous_index_simt_test_e2e_v2 PRIVATE
+                           IL_CONTINUOUS_INDEX_BROADCAST=1)
+add_indirect_load_broadcast_test(indirect_load_broadcast_cross_boundary_simt_test simt 0 0 10 0 0)
+add_indirect_load_broadcast_test(indirect_load_broadcast_axis_simt_test simt 0 0 4 0 0)
+add_indirect_load_broadcast_test(indirect_load_broadcast_reduce_simt_fallback_test simt 0 0 2 0 0)
+target_compile_definitions(indirect_load_broadcast_reduce_simt_fallback_test_codegen_v2 PRIVATE IL_BROADCAST_POST_REDUCE=1)
+target_compile_definitions(indirect_load_broadcast_reduce_simt_fallback_test_e2e_v2 PRIVATE IL_BROADCAST_POST_REDUCE=1)
+
+# A scalar Broadcast after an Element cannot use the physical-view inline path. SIMD keeps it as a regular op;
+# SIMT emits it inside the fused scalar body.
+add_indirect_load_broadcast_test(indirect_load_broadcast_retained_simd_test simd 0 0 10 0 0 0 0)
+target_compile_definitions(indirect_load_broadcast_retained_simd_test_codegen_v2 PRIVATE IL_RETAIN_BROADCAST=1)
+target_compile_definitions(indirect_load_broadcast_retained_simd_test_e2e_v2 PRIVATE IL_RETAIN_BROADCAST=1)
+add_indirect_load_broadcast_test(indirect_load_broadcast_retained_simt_test simt 0 0 10 0 0 0 0)
+target_compile_definitions(indirect_load_broadcast_retained_simt_test_codegen_v2 PRIVATE IL_RETAIN_BROADCAST=1)
+target_compile_definitions(indirect_load_broadcast_retained_simt_test_e2e_v2 PRIVATE IL_RETAIN_BROADCAST=1)
+
+# Keep one SK Broadcast regression outside the SIMD/SIMT matrix.
 add_indirect_load_broadcast_test(indirect_load_broadcast_elements_sk_test sk 2 2 3 0 0)
 add_indirect_load_broadcast_test(indirect_load_broadcast_index_physical_view_simt_test simt 2 2 3 0 0)
 target_compile_definitions(indirect_load_broadcast_index_physical_view_simt_test_codegen_v2 PRIVATE IL_AIC_REPRO=1)
 target_compile_definitions(indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 PRIVATE IL_AIC_REPRO=1)
+
+add_indirect_load_broadcast_test(indirect_load_complex_broadcast_simd_test simd 0 0 3 0 0)
+target_compile_definitions(indirect_load_complex_broadcast_simd_test_codegen_v2 PRIVATE IL_COMPLEX_BROADCAST=1)
+target_compile_definitions(indirect_load_complex_broadcast_simd_test_e2e_v2 PRIVATE IL_COMPLEX_BROADCAST=1)
+
+add_indirect_load_broadcast_test(indirect_load_complex_broadcast_simt_test simt 0 0 3 0 0)
+target_compile_definitions(indirect_load_complex_broadcast_simt_test_codegen_v2 PRIVATE IL_COMPLEX_BROADCAST=1
+                                                                                       IL_COMPLEX_SIMT=1)
+target_compile_definitions(indirect_load_complex_broadcast_simt_test_e2e_v2 PRIVATE IL_COMPLEX_BROADCAST=1
+                                                                                   IL_COMPLEX_SIMT=1)
 
 function(add_indirect_load_stride_zero_test test_name template input_zero_stride_mask index_zero_stride_mask
          input_element_count index_element_count)

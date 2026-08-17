@@ -12,7 +12,7 @@ The following three examples are currently provided:
 
 > **Note:** Gather fusion is not currently supported. After [issue175](https://gitcode.com/cann/graph-autofusion/issues/175) is resolved, `gather` will be able to fuse with `add`.
 
-NPU Profiling is enabled in all three examples. You can inspect the generated profiling data to view the fused kernels.
+NPU Profiling is enabled in all three examples. You can inspect the generated profiling data to review operator execution and fusion results.
 
 ## Directory Structure
 

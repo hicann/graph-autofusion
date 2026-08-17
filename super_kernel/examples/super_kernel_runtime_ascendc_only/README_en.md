@@ -9,11 +9,12 @@ Core features:
 
 ## Directory Structure
 ```text
-├── super_kernel_runtime_ascendc_only             # directory
-   └── superkernel_runtime_ascendc_basic.py       # main entry, flow includes sub-kernel compilation, superkernel compilation, memory allocation, loading execution, and so on
-   └── compile_sk.py                              # compile sub_kernel, super_kernel operators
-   └── utils.py                                   # utility functions
-
+super_kernel_runtime_ascendc_only/
+├── README.md                                     # Chinese documentation
+├── README_en.md                                  # English documentation
+├── compile_sk.py                                 # Compile sub-kernel and SuperKernel operators
+├── superkernel_runtime_ascendc_basic.py          # Main entry for sub-kernel compilation, SuperKernel compilation, memory allocation, loading, and execution
+└── utils.py                                      # Utility functions
 ```
 
 ## Use Case Introduction
@@ -24,7 +25,6 @@ graph TB
     input1[input1] --> sk[superkernel]
     input2[input2] --> sk
     sk --> output[output]
-    
     %% Enlarged internal view: subgraph shows superkernel internal structure
     subgraph superkernel_internal_structure
         inner1_in(inner_input1) --> pow(pow)
