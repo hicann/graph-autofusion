@@ -9,7 +9,6 @@
  */
 #include "compare_v2_api_call.h"
 
-#include <memory>
 #include <sstream>
 #include "attr_utils.h"
 #include "ascir_ops.h"
@@ -30,20 +29,12 @@ using namespace af::ascir_op;
 using namespace ascgen_utils;
 
 namespace {
-constexpr const char *kAscirNodeParams = "AscirNodeParams";
-
 af::Status FillCompareNodeParams(const af::AscNodePtr &node, bool is_scalar, const ge::Expression &outer_call_count,
                                  const std::vector<ge::Expression> &output_dims,
                                  const std::vector<ge::Expression> &output_strides,
                                  const std::vector<ge::Expression> &input_strides) {
   GE_ASSERT_NOTNULL(node);
-  auto params = ascir_param::GetAscirNodeParams(node);
-  if (params == nullptr) {
-    auto op_desc = node->GetOpDesc();
-    GE_ASSERT_NOTNULL(op_desc);
-    params = std::make_shared<ascir_param::AscirNodeParams>();
-    GE_ASSERT_TRUE(op_desc->SetExtAttr(kAscirNodeParams, params), "Node:%s SetExtAttr failed", node->GetNamePtr());
-  }
+  auto params = ascir_param::GetOrCreateAscirNodeParams(node);
 
   auto *compare_params = std::get_if<ascir_param::CompareNodeParams>(&params->specific_params);
   if (compare_params == nullptr) {

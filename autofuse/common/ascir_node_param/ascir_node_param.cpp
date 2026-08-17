@@ -57,6 +57,20 @@ AscirNodeParamsPtr GetAscirNodeParams(af::AscNodePtr node) {
   return op_desc->TryGetExtAttr(kAscirNodeParams, AscirNodeParamsPtr{});
 }
 
+AscirNodeParamsPtr GetOrCreateAscirNodeParams(af::AscNodePtr node) {
+  GE_ASSERT_NOTNULL(node);
+  auto params = GetAscirNodeParams(node);
+  if (params != nullptr) {
+    return params;
+  }
+
+  auto op_desc = node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  params = std::make_shared<AscirNodeParams>();
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kAscirNodeParams, params), "Node:%s SetExtAttr failed", node->GetNamePtr());
+  return params;
+}
+
 const codegen::ReduceSpecificParams &GetCanonicalReduceParams(const ReduceNodeParams &params) {
   return params.canonical_params;
 }
