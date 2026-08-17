@@ -2272,3 +2272,55 @@ def I1e(
     return _common_in_1_out_1_normal_op(
         "I1e", owner_graph, x, axis=axis, size=size, stride=stride
     )
+
+
+def Rand(
+    owner_graph: ascir.HintGraph,
+    *,
+    dtype: ascir.dtypes,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    """
+    Rand - generate uniform random numbers using PhiloxRandom algorithm.
+    Uses fixed philoxKey = {0, 0} and philoxCounter = {0, 0, 0, 0} for continuous mode.
+    Supports float data type.
+    """
+    meta = _get_metadata(owner_graph)
+    name = _generate_op_name(owner_graph, "rand")
+    rand_op = ascir.ops.Rand(name, owner_graph)
+    meta.ops.append(rand_op)
+
+    # Set dtype and view, then infer
+    rand_op.y.dtype = dtype
+    _infer_or_set_view(rand_op.y, axis, size, stride)
+    rand_op.infer_dtype()
+
+    return rand_op.y
+
+
+def Randn(
+    owner_graph: ascir.HintGraph,
+    *,
+    dtype: ascir.dtypes,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    """
+    Randn - generate normal random numbers using PhiloxRandom algorithm.
+    Uses fixed philoxKey = {0, 0} and philoxCounter = {0, 0, 0, 0} for continuous mode.
+    Supports uint32_t and int32_t data types.
+    """
+    meta = _get_metadata(owner_graph)
+    name = _generate_op_name(owner_graph, "randn")
+    randn_op = ascir.ops.Randn(name, owner_graph)
+    meta.ops.append(randn_op)
+
+    # Set dtype and view, then infer
+    randn_op.y.dtype = dtype
+    _infer_or_set_view(randn_op.y, axis, size, stride)
+    randn_op.infer_dtype()
+
+    return randn_op.y

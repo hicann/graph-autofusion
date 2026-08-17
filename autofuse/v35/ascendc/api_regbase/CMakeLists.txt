@@ -15,6 +15,7 @@ set(ascendc_api_regbase_extend_src
         floor_div.h
         pow.h
         polygamma.h
+        random.h
         split.h
         where.h
         erf.h

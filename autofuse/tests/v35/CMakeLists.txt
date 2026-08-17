@@ -34,6 +34,9 @@ target_include_directories(test_codegen PRIVATE
         ${CODE_ROOT_DIR}/v35/codegen/micro_api_call
         ${CODE_ROOT_DIR}/v35/codegen/reg_api_call
         ${CODE_ROOT_DIR}/v35/codegen/vec_func_call
+        ${CODE_ROOT_DIR}
+        ${CODE_ROOT_DIR}/ascir
+        ${CODE_ROOT_DIR}/v35/ascir
 )
 
 target_sources(test_codegen PRIVATE

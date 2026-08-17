@@ -391,7 +391,9 @@ af::Status BaseAlignmentStrategy::AlignVectorizedStrides(ascir::ImplGraph &impl_
 }
 
 af::Status BaseAlignmentStrategy::InferAlignmentForOneNode(ascir::ImplGraph &, const af::AscNodePtr &node, bool &) {
-  GE_ASSERT_TRUE(!node->inputs().empty(), "The inputs of %s(%s) is empty.", node->GetTypePtr(), node->GetNamePtr());
+  GE_ASSERT_TRUE(
+      !node->inputs().empty() || af::ops::IsOps<af::ascir_op::Rand>(node) || af::ops::IsOps<af::ascir_op::Randn>(node),
+      "The inputs of %s(%s) is empty.", node->GetTypePtr(), node->GetNamePtr());
   GE_ASSERT_TRUE(!node->outputs().empty(), "The output of %s(%s) is empty.", node->GetTypePtr(), node->GetNamePtr());
   af::ComputeType compute_type = node->attr.api.compute_type;
   auto it = compute_type_to_infer_func_.find(compute_type);

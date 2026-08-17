@@ -146,6 +146,8 @@ PyMODINIT_FUNC PyInit_pyautofuse(void);
   OP(Axpy)                        \
   OP(CopySign)                    \
   OP(Ceil2Int)                    \
+  OP(Rand)                        \
+  OP(Randn)                       \
   OP(RoundToInt)                  \
   OP(Square)                      \
   OP(Sinh)                        \

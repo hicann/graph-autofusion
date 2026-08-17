@@ -13335,4 +13335,109 @@ af::ComputeGraphPtr ShareGraph::ArgMaxFusedGraph(size_t dims_size) {
   return compute_graph;
 }
 
+static void CreateRandStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
+  auto s0 = graph.CreateSizeVar("s0");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto One = Symbol(1);
+
+  af::ascir_op::Rand rand_op("rand");
+  graph.AddNode(rand_op);
+  *rand_op.y.axis = {z0.id};
+  *rand_op.y.repeats = {s0};
+  *rand_op.y.strides = {One};
+
+  rand_op.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  rand_op.attr.api.type = af::ApiType::kAPITypeCompute;
+  rand_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  rand_op.attr.sched.axis = {z0.id};
+
+  af::ascir_op::Store store("store");
+  store.x = rand_op.y;
+  store.attr.api.compute_type = ComputeType::kComputeStore;
+  store.attr.api.type = af::ApiType::kAPITypeCompute;
+  store.attr.api.unit = ComputeUnit::kUnitMTE3;
+  store.attr.sched.axis = {z0.id};
+  *store.y.axis = {z0.id};
+  *store.y.repeats = {s0};
+  *store.y.strides = {One};
+  store.y.dtype = af::DataType::DT_FLOAT;
+
+  af::ascir_op::Output y("output");
+  y.x = store.y;
+  y.ir_attr.SetIndex(0);
+}
+
+af::ComputeGraphPtr ShareGraph::RandStoreFusedGraph(size_t dims_size) {
+  auto builder = GraphBuilder("rand_store_test");
+  auto ascbc = builder.AddNode("ascbc", "AscGraph", 0, 1);
+  auto netoutput = builder.AddNode("netoutput", af::NETOUTPUT, 1, 0);
+
+  builder.AddDataEdge(ascbc, 0, netoutput, 0);
+  ComputeGraphPtr compute_graph = builder.GetGraph();
+  if (compute_graph == nullptr) {
+    return nullptr;
+  }
+  auto ascbc_node = compute_graph->FindNode("ascbc");
+  af::AscGraph sub_graph("rand_store");
+  CreateRandStoreAscGraph(sub_graph, dims_size);
+
+  std::string sub_graph_str;
+  af::AscGraphUtils::SerializeToReadable(sub_graph, sub_graph_str);
+  af::AttrUtils::SetStr(ascbc_node->GetOpDescBarePtr(), "ascgraph", sub_graph_str);
+  return compute_graph;
+}
+
+static void CreateRandnStoreAscGraph(af::AscGraph &graph, size_t dims_size, ge::DataType dtype) {
+  auto s0 = graph.CreateSizeVar("s0");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto One = Symbol(1);
+
+  af::ascir_op::Randn randn_op("randn");
+  graph.AddNode(randn_op);
+  *randn_op.y.axis = {z0.id};
+  *randn_op.y.repeats = {s0};
+  *randn_op.y.strides = {One};
+  randn_op.y.dtype = dtype;
+
+  randn_op.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  randn_op.attr.api.type = af::ApiType::kAPITypeCompute;
+  randn_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  randn_op.attr.sched.axis = {z0.id};
+
+  af::ascir_op::Store store("store");
+  store.x = randn_op.y;
+  store.attr.api.compute_type = ComputeType::kComputeStore;
+  store.attr.api.type = af::ApiType::kAPITypeCompute;
+  store.attr.api.unit = ComputeUnit::kUnitMTE3;
+  store.attr.sched.axis = {z0.id};
+  *store.y.axis = {z0.id};
+  *store.y.repeats = {s0};
+  *store.y.strides = {One};
+  store.y.dtype = dtype;
+
+  af::ascir_op::Output y("output");
+  y.x = store.y;
+  y.ir_attr.SetIndex(0);
+}
+
+af::ComputeGraphPtr ShareGraph::RandnStoreFusedGraph(size_t dims_size) {
+  auto builder = GraphBuilder("randn_store_test");
+  auto ascbc = builder.AddNode("ascbc", "AscGraph", 0, 1);
+  auto netoutput = builder.AddNode("netoutput", af::NETOUTPUT, 1, 0);
+
+  builder.AddDataEdge(ascbc, 0, netoutput, 0);
+  ComputeGraphPtr compute_graph = builder.GetGraph();
+  if (compute_graph == nullptr) {
+    return nullptr;
+  }
+  auto ascbc_node = compute_graph->FindNode("ascbc");
+  af::AscGraph sub_graph("randn_store");
+  CreateRandnStoreAscGraph(sub_graph, dims_size, ge::DT_UINT32);
+
+  std::string sub_graph_str;
+  af::AscGraphUtils::SerializeToReadable(sub_graph, sub_graph_str);
+  af::AttrUtils::SetStr(ascbc_node->GetOpDescBarePtr(), "ascgraph", sub_graph_str);
+  return compute_graph;
+}
+
 }  // namespace ascir

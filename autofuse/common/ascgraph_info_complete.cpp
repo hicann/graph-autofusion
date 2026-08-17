@@ -104,6 +104,8 @@ static const std::map<std::string, af::ComputeType> kOpTypeToComputeType = {
     {Scalar::Type, af::ComputeType::kComputeInvalid},
     {Output::Type, af::ComputeType::kComputeInvalid},
     {IndexExpr::Type, af::ComputeType::kComputeInvalid},
+    {"Rand", af::ComputeType::kComputeInvalid},
+    {"Randn", af::ComputeType::kComputeInvalid},
 
     {Load::Type, af::ComputeType::kComputeLoad},
     {Store::Type, af::ComputeType::kComputeStore},
