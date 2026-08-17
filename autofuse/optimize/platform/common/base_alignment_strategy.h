@@ -60,6 +60,8 @@ class BaseAlignmentStrategy {
  protected:
   using NodeProcessor = af::Status (BaseAlignmentStrategy::*)(ascir::ImplGraph &, const af::AscNodePtr &, bool &);
 
+  static const char *AlignmentTypeToString(AlignmentType type);
+
   virtual AlignmentType GetDefaultAlignmentType() = 0;
 
   virtual void InitAlignmentInferFunc();

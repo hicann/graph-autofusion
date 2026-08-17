@@ -857,6 +857,7 @@ class OptimizerSt : public ::testing::Test {
     af::Status AccessSetVectorizedStrides(::ascir::ImplGraph &impl_graph) {
       return ForEachNode(impl_graph, &AlignmentStrategyShadow::SetVectorizedStridesForOneNode);
     }
+    using optimize::BaseAlignmentStrategy::AlignmentTypeToString;
   };
 };
 
@@ -4603,4 +4604,16 @@ TEST_F(OptimizerSt, DuplicateElewiseCse_MergeSub) {
 
   ::ascir::FusedScheduledResult fused_scheduled_result;
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), af::SUCCESS);
+}
+
+TEST_F(OptimizerSt, AlignmentTypeToString_AllEnumsMapped) {
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(optimize::AlignmentType::kNotAligned), "NotAligned");
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(optimize::AlignmentType::kAligned), "Aligned");
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(optimize::AlignmentType::kDiscontinuous),
+               "Discontinuous");
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(optimize::AlignmentType::kFixedNotAligned),
+               "FixedNotAligned");
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(optimize::AlignmentType::kInvalid), "Invalid");
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(static_cast<optimize::AlignmentType>(0xFFFFFFFF)),
+               "Invalid");
 }

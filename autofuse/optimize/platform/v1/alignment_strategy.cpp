@@ -18,6 +18,7 @@
 namespace optimize {
 
 AlignmentType AlignmentStrategy::GetDefaultAlignmentType() {
+  GELOGD("GetDefaultAlignmentType: kAligned");
   return AlignmentType::kAligned;
 }
 
@@ -44,7 +45,8 @@ af::Status AlignmentStrategy::BroadcastAlignmentInferFunc(const af::AscNodePtr &
     if (found_brc_axis) {
       if (af::SymbolicUtils::StaticCheckEq(input_attr.repeats[distance], af::sym::kSymbolOne) != af::TriBool::kTrue &&
           af::SymbolicUtils::StaticCheckEq(output_attr.repeats[distance], af::sym::kSymbolOne) != af::TriBool::kTrue) {
-        GELOGD("Brc node[%s]'s input will be set aligned for non_tail axis brc.", node->GetNamePtr());
+        GELOGD("Brc node[%s]'s input will be set aligned for non_tail axis brc, output align_type [%s].",
+               node->GetNamePtr(), AlignmentTypeToString(tensor_to_align_type_[&output_attr].align_type));
         if (iter->second.align_type == AlignmentType::kNotAligned ||
             iter->second.align_type == AlignmentType::kFixedNotAligned) {
           return BackPropagateAlignment(node);
@@ -61,7 +63,8 @@ af::Status AlignmentStrategy::BroadcastAlignmentInferFunc(const af::AscNodePtr &
   if (!found_brc_axis) {
     tensor_to_align_type_[&output_attr] = iter->second;
   }
-
+  GELOGD("Broadcast node[%s] output align_type set to [%s].", node->GetNamePtr(),
+         AlignmentTypeToString(tensor_to_align_type_[&output_attr].align_type));
   return af::SUCCESS;
 }
 
@@ -75,7 +78,7 @@ af::Status AlignmentStrategy::ConcatAlignmentInferFunc(const af::AscNodePtr &nod
     GE_ASSERT_TRUE(!output_attr.strides.empty());
     auto align_type = output_need_align ? AlignmentType::kAligned : AlignmentType::kNotAligned;
     tensor_to_align_type_[&output_attr] = {align_type};
-    GELOGD("Concat node[%s] may keep unaligned for small tail concat api.", node->GetNamePtr());
+    GELOGD("Concat node[%s] small tail align_type set to [%s].", node->GetNamePtr(), AlignmentTypeToString(align_type));
   } else {
     GE_ASSERT_SUCCESS(DefaultAlignmentInferFunc(node));
   }
@@ -110,6 +113,8 @@ af::Status AlignmentStrategy::EleWiseAlignmentInferFunc(const af::AscNodePtr &no
     for (const auto &output : node->outputs()) {
       tensor_to_align_type_[&output->attr] = {out_type};
     }
+    GELOGD("EleWise node[%s] output set to [%s] from aligned input.", node->GetNamePtr(),
+           AlignmentTypeToString(out_type));
     return BackPropagateAlignment(node, out_type);
   }
 
@@ -166,6 +171,7 @@ af::Status AlignmentStrategy::DefaultAlignmentInferFunc(const af::AscNodePtr &no
   for (const auto &output : node->outputs()) {
     tensor_to_align_type_[&output->attr] = {default_align_type};
   }
+  GELOGD("Default align: node[%s] output set to [%s].", node->GetNamePtr(), AlignmentTypeToString(default_align_type));
 
   bool has_mismatched_inputs = false;
   for (const auto &input : node->inputs()) {
@@ -181,8 +187,8 @@ af::Status AlignmentStrategy::DefaultAlignmentInferFunc(const af::AscNodePtr &no
     }
   }
   if (has_mismatched_inputs) {
-    GELOGD("Node [%s] will set aligned_type with [%u] for inputs.", node->GetNamePtr(),
-           static_cast<uint32_t>(default_align_type));
+    GELOGD("Node [%s] will set aligned_type with [%s] for inputs.", node->GetNamePtr(),
+           AlignmentTypeToString(default_align_type));
     GE_ASSERT_SUCCESS(BackPropagateAlignment(node));
   }
 
