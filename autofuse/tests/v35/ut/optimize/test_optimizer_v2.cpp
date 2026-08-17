@@ -1010,6 +1010,9 @@ TEST_F(TestOptimizerV2, PowScalarDtypeCheck) {
   auto scalar_node = graph.FindNode("pow_One");
   ASSERT_NE(scalar_node, nullptr);
   EXPECT_EQ(static_cast<ge::DataType>(scalar_node->outputs[0].attr.dtype), ge::DT_FLOAT16);
+  // 动态创建的 Scalar 必须显式设置 api.type 为 kAPITypeBuffer，否则保持默认 kAPITypeInvalid，
+  // 会导致后续 CloneNonConcatNodes 中 IsBuffer() 返回 false，Scalar 错误进入 ReplaceAxis 触发断言
+  EXPECT_EQ(scalar_node->attr.api.type, af::ApiType::kAPITypeBuffer);
 
   // 验证 Brc 节点 dtype 为 DT_FLOAT16
   auto brc_node = graph.FindNode("pow_Brc");
