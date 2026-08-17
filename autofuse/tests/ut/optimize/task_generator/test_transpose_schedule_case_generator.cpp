@@ -14,6 +14,7 @@
 #include "ascir_utils.h"
 #include "asc_graph_utils.h"
 #include "task_generator/transpose_schedule_case_generator.h"
+#include "template/nddma_template.h"
 #include "asc_graph_builder.h"
 #include "ascgraph_info_complete.h"
 
@@ -122,6 +123,14 @@ TEST_F(TransposeScheduleCaseGeneratorTest, SingleTranspose_RenameOnlyEliminatedC
   optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
   SetupTransposeSchedAxis(graph);
 
+  const auto transpose_sched_axis = graph.FindNode("transpose0")->attr.sched.axis;
+  auto load_node = graph.FindNode("load0");
+  ASSERT_NE(load_node, nullptr);
+  ASSERT_EQ(transpose_sched_axis.size(), 3UL);
+  auto load_sched_axis = transpose_sched_axis;
+  std::swap(load_sched_axis[0], load_sched_axis[1]);
+  load_node->attr.sched.axis = load_sched_axis;
+
   optimize::TransposeFusionCaseGenerator generator;
   std::vector<af::AscGraph> graphs;
   std::vector<std::string> score_functions;
@@ -131,6 +140,50 @@ TEST_F(TransposeScheduleCaseGeneratorTest, SingleTranspose_RenameOnlyEliminatedC
   EXPECT_EQ(graphs[0].FindNode("transpose_load0"), nullptr);
   EXPECT_EQ(graphs[1].FindNode("load0"), nullptr);
   EXPECT_NE(graphs[1].FindNode("transpose_load0"), nullptr);
+  EXPECT_EQ(graph.FindNode("load0")->attr.sched.axis, load_sched_axis);
+
+  const auto retained_transpose = graphs[0].FindNode("transpose0");
+  const auto retained_load = graphs[0].FindNode("load0");
+  ASSERT_NE(retained_transpose, nullptr);
+  ASSERT_NE(retained_load, nullptr);
+  EXPECT_EQ(retained_load->attr.sched.axis, load_sched_axis);
+  EXPECT_EQ(retained_transpose->attr.sched.axis, transpose_sched_axis);
+  EXPECT_NE(retained_load->attr.sched.axis, retained_transpose->attr.sched.axis);
+}
+
+TEST_F(TransposeScheduleCaseGeneratorTest, NddmaTransposeSynchronizesLoadSchedAxis) {
+  auto s0 = Sym("s0"), s1 = Sym("s1");
+  auto graph = AscGraphBuilder("transpose_to_nddma_sched_axis")
+                   .Loops({s0, s1, Sym(32)})
+                   .Data("data0", 0)
+                   .Load("load0", "data0")
+                   .Transpose("transpose0", "load0", {1, 0, 2})
+                   .Store("store0", "transpose0")
+                   .Output("out0", "store0", 0)
+                   .Build();
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  SetupTransposeSchedAxis(graph);
+
+  const auto transpose = graph.FindNode("transpose0");
+  const auto load = graph.FindNode("load0");
+  const auto store = graph.FindNode("store0");
+  ASSERT_NE(transpose, nullptr);
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(store, nullptr);
+  load->outputs[0].attr.vectorized_axis = load->outputs[0].attr.axis;
+  transpose->outputs[0].attr.vectorized_axis = transpose->outputs[0].attr.axis;
+  store->outputs[0].attr.vectorized_axis = store->outputs[0].attr.axis;
+  const auto transpose_sched_axis = transpose->attr.sched.axis;
+  ASSERT_EQ(transpose_sched_axis.size(), 3UL);
+  auto load_sched_axis = transpose_sched_axis;
+  std::swap(load_sched_axis[0], load_sched_axis[1]);
+  load->attr.sched.axis = load_sched_axis;
+
+  EXPECT_EQ(optimize::NddmaTemplate::TransposeToNddmaNode(transpose, graph), af::SUCCESS);
+  const auto nddma = graph.FindNode("load0");
+  ASSERT_NE(nddma, nullptr);
+  EXPECT_EQ(nddma->GetType(), "Nddma");
+  EXPECT_EQ(nddma->attr.sched.axis, transpose_sched_axis);
 }
 
 // Load → Transpose → Sum(Reduce) → Store → Output，图上有 Reduce 节点，

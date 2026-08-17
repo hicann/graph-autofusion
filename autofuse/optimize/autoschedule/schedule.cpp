@@ -10,6 +10,8 @@
 
 #include "schedule.h"
 #include <numeric>
+#include <queue>
+#include <set>
 #include "alignment_handler.h"
 #include "indirect_load_utils.h"
 #include "platform/common/base_alignment_strategy.h"
@@ -791,6 +793,7 @@ Status Scheduler::DoScheduler() {
     // Apply block split for node
     GE_CHK_STATUS_RET(ApplyBlockSplit(new_sched_axes));
   }
+  GE_CHK_STATUS_RET(SynchronizeTransposeInputSchedAxis());
   GE_CHK_STATUS_RET(RemoveRedundantBroadcastNode(graph_));
   auto align_ret = AlignmentHandler::AlignVectorizedStrides(graph_);
   if (align_ret != af::SUCCESS) {
@@ -833,6 +836,45 @@ Status Scheduler::ApplyBlockSplit(const std::vector<ascir::AxisId> &new_sched_ax
       continue;
     }
     graph_.ApplySchedAxisReorder(node, node_new_sched_axes);
+  }
+  return af::SUCCESS;
+}
+
+Status Scheduler::SynchronizeTransposeInputSchedAxis() {
+  af::AscNodePtr transpose_node = nullptr;
+  for (const auto &node : graph_.GetAllNodes()) {
+    if (!af::ops::IsOps<af::ascir_op::Transpose>(node)) {
+      continue;
+    }
+    if (transpose_node != nullptr) {
+      // 多 Transpose 场景应在调度前完成消除，这里不选择任意一个 Transpose 作为同步基准。
+      return af::SUCCESS;
+    }
+    transpose_node = node;
+  }
+  if (transpose_node == nullptr) {
+    return af::SUCCESS;
+  }
+
+  std::queue<af::AscNodePtr> path_nodes;
+  std::set<af::Node *> visited_nodes;
+  for (const auto &input_node : transpose_node->GetInDataNodes()) {
+    path_nodes.push(std::dynamic_pointer_cast<af::AscNode>(input_node));
+  }
+  while (!path_nodes.empty()) {
+    const auto current_node = path_nodes.front();
+    path_nodes.pop();
+    if (current_node == nullptr || !visited_nodes.emplace(current_node.get()).second) {
+      continue;
+    }
+    if (!ScheduleUtils::IsBuffer(current_node)) {
+      GE_ASSERT_TRUE(graph_.ApplySchedAxisReorder(current_node, transpose_node->attr.sched.axis),
+                     "Failed to synchronize sched.axis for node[%s] with transpose[%s].", current_node->GetNamePtr(),
+                     transpose_node->GetNamePtr());
+    }
+    for (const auto &input_node : current_node->GetInDataNodes()) {
+      path_nodes.push(std::dynamic_pointer_cast<af::AscNode>(input_node));
+    }
   }
   return af::SUCCESS;
 }
