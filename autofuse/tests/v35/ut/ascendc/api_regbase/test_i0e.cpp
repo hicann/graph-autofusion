@@ -25,69 +25,70 @@ class TestRegbaseApiI0eUT : public testing::Test {
  protected:
   template <typename T>
   static void InvokeTensorTensorKernel(UnaryInputParam<T> &param) {
-    TPipe tpipe;
-    TBuf<TPosition::VECCALC> xbuf, ybuf, tmp;
-    tpipe.InitBuffer(xbuf, sizeof(T) * param.size);
-    tpipe.InitBuffer(ybuf, sizeof(T) * AlignUp(param.size, ONE_BLK_SIZE / sizeof(T)));
-    tpipe.InitBuffer(tmp, TMP_UB_SIZE);
+    TPipe tp;
+    TBuf<TPosition::VECCALC> src_buf, dst_buf, work_buf;
+    tp.InitBuffer(src_buf, sizeof(T) * param.size);
+    tp.InitBuffer(dst_buf, sizeof(T) * AlignUp(param.size, ONE_BLK_SIZE / sizeof(T)));
+    tp.InitBuffer(work_buf, TMP_UB_SIZE);
 
-    LocalTensor<T> l_x = xbuf.Get<T>();
-    LocalTensor<T> l_y = ybuf.Get<T>();
-    LocalTensor<uint8_t> l_tmp = tmp.Get<uint8_t>();
+    LocalTensor<T> local_x = src_buf.Get<T>();
+    LocalTensor<T> local_y = dst_buf.Get<T>();
+    LocalTensor<uint8_t> local_work = work_buf.Get<uint8_t>();
 
-    GmToUb(l_x, param.x1, param.size);
-    I0eExtend(l_y, l_x, l_tmp, param.size);
-    UbToGm(param.y, l_y, param.size);
+    GmToUb(local_x, param.x1, param.size);
+    I0eExtend(local_y, local_x, local_work, param.size);
+    UbToGm(param.y, local_y, param.size);
   }
 
   template <typename T>
   static void CreateTensorInput(UnaryInputParam<T> &param) {
+    param.x1 = static_cast<T *>(AscendC::GmAlloc(sizeof(T) * param.size));
     param.y = static_cast<T *>(AscendC::GmAlloc(sizeof(T) * param.size));
     param.exp = static_cast<T *>(AscendC::GmAlloc(sizeof(T) * param.size));
-    param.x1 = static_cast<T *>(AscendC::GmAlloc(sizeof(T) * param.size));
-    std::mt19937 eng(1);
+    std::mt19937 rand_eng(1);
 
-    for (uint32_t i = 0; i < param.size; i++) {
-      std::uniform_real_distribution distr(-20.0f, 20.0f);
-      param.x1[i] = static_cast<T>(distr(eng));
-      double abs_x = static_cast<double>(std::fabs(param.x1[i]));
-      param.exp[i] = static_cast<T>(std::exp(-abs_x) * std::cyl_bessel_i(0, abs_x));
+    for (uint32_t idx = 0; idx < param.size; idx++) {
+      std::uniform_real_distribution dist(-20.0f, 20.0f);
+      param.x1[idx] = static_cast<T>(dist(rand_eng));
+      double abs_val = static_cast<double>(std::fabs(param.x1[idx]));
+      param.exp[idx] = static_cast<T>(std::exp(-abs_val) * std::cyl_bessel_i(0, abs_val));
     }
   }
 
   template <typename T>
   static uint32_t Valid(UnaryInputParam<T> &param) {
-    uint32_t diff_count = 0;
-    for (uint32_t i = 0; i < param.size; i++) {
-      double y_val = static_cast<double>(param.y[i]);
-      double exp_val = static_cast<double>(param.exp[i]);
-      double rel_err = std::abs(y_val - exp_val) / std::max(std::abs(exp_val), 1.0);
-      if (rel_err > 1e-5) {
-        diff_count++;
-        printf("diff at index %d: x: %.20e, y: %.20e, expect: %.20e, rel_err: %f\n", i, static_cast<float>(param.x1[i]),
-               static_cast<float>(param.y[i]), static_cast<float>(param.exp[i]), static_cast<float>(rel_err));
+    uint32_t err_count = 0;
+    for (uint32_t idx = 0; idx < param.size; idx++) {
+      double out_val = static_cast<double>(param.y[idx]);
+      double ref_val = static_cast<double>(param.exp[idx]);
+      double rel_error = std::abs(out_val - ref_val) / std::max(std::abs(ref_val), 1.0);
+      if (rel_error > 1e-5) {
+        err_count++;
+        printf("diff at index %d: x: %.20e, y: %.20e, expect: %.20e, rel_err: %f\n", idx,
+               static_cast<float>(param.x1[idx]), static_cast<float>(param.y[idx]), static_cast<float>(param.exp[idx]),
+               static_cast<float>(rel_error));
       }
     }
-    return diff_count;
+    return err_count;
   }
 
   template <typename T>
   static void I0eTest(uint32_t size) {
-    UnaryInputParam<T> param{};
-    param.size = size;
-    CreateTensorInput(param);
+    UnaryInputParam<T> input_param{};
+    input_param.size = size;
+    CreateTensorInput(input_param);
 
-    auto kernel = [&param] { InvokeTensorTensorKernel(param); };
+    auto run_kernel = [&input_param] { InvokeTensorTensorKernel(input_param); };
 
     AscendC::SetKernelMode(KernelMode::AIV_MODE);
-    ICPU_RUN_KF(kernel, 1);
+    ICPU_RUN_KF(run_kernel, 1);
 
-    uint32_t diff_count = Valid(param);
-    EXPECT_EQ(diff_count, 0);
+    uint32_t err_count = Valid(input_param);
+    EXPECT_EQ(err_count, 0);
 
-    AscendC::GmFree(param.x1);
-    AscendC::GmFree(param.exp);
-    AscendC::GmFree(param.y);
+    AscendC::GmFree(input_param.exp);
+    AscendC::GmFree(input_param.y);
+    AscendC::GmFree(input_param.x1);
   }
 };
 
