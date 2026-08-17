@@ -255,7 +255,7 @@ Status ReducePartitionCaseGenerator::GeneratorRCoreTask(ascir::HintGraph &optimi
     std::map<size_t, std::vector<size_t>> map;
     size_t phase_2_graph_size = 0;
     for (size_t i = 0; i < task.grouped_graphs.size(); i++) {
-      GE_ASSERT_TRUE(IsGroupGraphLegal(task.grouped_graphs[i]));
+      GE_ASSERT_TRUE(IsOnlyHasOneOrLessReduce(task.grouped_graphs[i]));
       if (!HasReduce(task.grouped_graphs[i])) {
         ::ascir::ImplGraph graph((task.grouped_graphs[i].GetName() + "_r_multicore").c_str());
         graph.CopyFrom(task.grouped_graphs[i]);
@@ -304,10 +304,8 @@ Status ReducePartitionCaseGenerator::GeneratorTask(ascir::HintGraph &optimize_gr
   const bool force_all_load = ShouldForceAllLoad(optimize_graph);
   GELOGI("Graph %s force AllLoad = %d, begin to generate reduce tasks.", optimize_graph.GetName().c_str(),
          static_cast<int32_t>(force_all_load));
-  if (!force_all_load || options.graph_type != GraphType::kFusedAscBackend) {
-    GE_CHK_STATUS_RET(GeneratorGeneralTask(optimize_graph, tasks));
-    GELOGI("After GeneralTask, graph %s has %zu task(s).", optimize_graph.GetName().c_str(), tasks.size());
-  }
+  GE_CHK_STATUS_RET(GeneratorGeneralTask(optimize_graph, tasks));
+  GELOGI("After GeneralTask, graph %s has %zu task(s).", optimize_graph.GetName().c_str(), tasks.size());
   if (!force_all_load) {
     GE_CHK_STATUS_RET(GeneratorRCoreTask(optimize_graph, tasks));
     GELOGI("After RCoreTask, graph %s has %zu task(s).", optimize_graph.GetName().c_str(), tasks.size());
@@ -324,7 +322,7 @@ Status ReducePartitionCaseGenerator::Generate([[maybe_unused]] ascir::HintGraph 
 }
 
 bool ReducePartitionCaseGenerator::ShouldForceAllLoad(ascir::HintGraph &graph) {
-  if (!IsGroupGraphLegal(graph)) {
+  if (!IsOnlyHasOneOrLessReduce(graph)) {
     return true;
   }
 
@@ -400,7 +398,7 @@ Status ReducePartitionCaseGenerator::GenerateAllLoadCase(ascir::HintGraph &graph
 }
 
 Status ReducePartitionCaseGenerator::ReducePartitionMultipleCitations(ascir::ImplGraph &impl_graph) {
-  if (IsGroupGraphLegal(impl_graph)) {
+  if (IsOnlyHasOneOrLessReduce(impl_graph)) {
     return ge::GRAPH_SUCCESS;
   }
   std::vector<af::AscNodePtr> multi_output_nodes;
@@ -510,20 +508,25 @@ Status ReducePartitionCaseGenerator::PartitionLoadNode(af::AscNodePtr &src_load_
   auto load_node = impl_graph.AddNode(load);
   DoCopyAscNodeTensorAttr(load_input_asc_node, new_load_input_node);
   DoCopyAscNodeTensorAttr(src_load_node, load_node);
+  // dst_node 的多个输入可能来自同一个 src_load_node（如 Mul 的两个输入都是同一个 Load），
+  // 需要遍历所有 peer 边逐一断开并替换，不能找到第一条就 return。
+  // new_load_input -> load_node 的边只需建一次，后续匹配的 peer 边共用这条链路。
+  bool found = false;
   for (const auto &out_anchor : src_load_node->GetAllOutDataAnchors()) {
     GE_CHECK_NOTNULL(out_anchor, "Out data anchor is null, node:%s.", src_load_node->GetNamePtr());
     for (const auto &peer_in_anchor : out_anchor->GetPeerInDataAnchors()) {
       GE_CHECK_NOTNULL(peer_in_anchor);
       GE_CHECK_NOTNULL(peer_in_anchor->GetOwnerNodeBarePtr(), "Peer in node:%s is null", src_load_node->GetNamePtr());
       if (peer_in_anchor->GetOwnerNodeBarePtr() == dst_node.get()) {
-        // remove load->dst
+        if (!found) {
+          found = true;
+          GE_CHK_STATUS_RET(
+              af::GraphUtils::AddEdge(new_load_input_node->GetOutAnchor(0UL), load_node->GetInAnchor(0UL)));
+        }
         GE_CHK_STATUS_RET(af::GraphUtils::RemoveEdge(src_load_node->GetOutAnchor(out_anchor->GetIdx()),
                                                      dst_node->GetInAnchor(peer_in_anchor->GetIdx())));
-        // add new_load_input->new_load->dst
-        GE_CHK_STATUS_RET(af::GraphUtils::AddEdge(new_load_input_node->GetOutAnchor(0UL), load_node->GetInAnchor(0UL)));
         GE_CHK_STATUS_RET(
             af::GraphUtils::AddEdge(load_node->GetOutAnchor(0UL), dst_node->GetInAnchor(peer_in_anchor->GetIdx())));
-        return ge::GRAPH_SUCCESS;
       }
     }
   }
@@ -541,19 +544,17 @@ Status ReducePartitionCaseGenerator::PartitionScalarNode(af::AscNodePtr &src_nod
     scalar_node = impl_graph.AddNode(scalar);
   }
   DoCopyAscNodeTensorAttr(src_node, scalar_node);
+  // dst_node 的多个输入可能来自同一个 src_node，需要遍历所有 peer 边逐一断开并替换，不能找到第一条就 return。
   for (const auto &out_anchor : src_node->GetAllOutDataAnchors()) {
     GE_CHECK_NOTNULL(out_anchor, "Out data anchor is null, node:%s.", src_node->GetNamePtr());
     for (const auto &peer_in_anchor : out_anchor->GetPeerInDataAnchors()) {
       GE_CHECK_NOTNULL(peer_in_anchor);
       GE_CHECK_NOTNULL(peer_in_anchor->GetOwnerNodeBarePtr(), "Peer in node:%s is null", src_node->GetNamePtr());
       if (peer_in_anchor->GetOwnerNodeBarePtr() == dst_node.get()) {
-        // remove src->dst
         GE_CHK_STATUS_RET(af::GraphUtils::RemoveEdge(src_node->GetOutAnchor(out_anchor->GetIdx()),
                                                      dst_node->GetInAnchor(peer_in_anchor->GetIdx())));
-        // add new_scalar->dst
         GE_CHK_STATUS_RET(
             af::GraphUtils::AddEdge(scalar_node->GetOutAnchor(0UL), dst_node->GetInAnchor(peer_in_anchor->GetIdx())));
-        return ge::GRAPH_SUCCESS;
       }
     }
   }
@@ -760,7 +761,7 @@ bool ReducePartitionCaseGenerator::CanFullLoadReduceFuse(const ascir::ImplGraph 
   return true;
 }
 
-bool ReducePartitionCaseGenerator::IsGroupGraphLegal(const ascir::ImplGraph &impl_graph) {
+bool ReducePartitionCaseGenerator::IsOnlyHasOneOrLessReduce(const ascir::ImplGraph &impl_graph) {
   int reduce_count = 0;
   for (const auto &node : impl_graph.GetAllNodes()) {
     if (ScheduleUtils::IsReduce(node)) {

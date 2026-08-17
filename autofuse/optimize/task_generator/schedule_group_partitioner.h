@@ -46,6 +46,8 @@ class ScheduleGroupGraphPartitioner {
   static bool CompareByNodeId(const af::AscNodePtr &lhs, const af::AscNodePtr &rhs);
   static Status RecordAxisSizes(const std::vector<af::Expression> &repeats, const std::vector<int64_t> &axis_ids,
                                 std::map<af::AxisId, af::Expression> &axis_id_to_size);
+  static Status SortSubGraphsByDependency(std::vector<::ascir::ImplGraph> &sub_optimize_graphs);
+  static bool HasDataDependency(const ::ascir::ImplGraph &producer, const ::ascir::ImplGraph &consumer);
 };
 }  // namespace optimize
 
