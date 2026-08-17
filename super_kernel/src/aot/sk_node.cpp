@@ -90,8 +90,6 @@ const char *FusionFailReasonDetail(FusionFailReason reason) {
       return "only exists memory write nodes, mask it as unfusible";
     case FusionFailReason::DEFAULT_NODE:
       return "default node uses aicpu resources, mask it as unfusible";
-    case FusionFailReason::SIMT_OP_UNSUPPORT:
-      return "SIMT operator is not supported for SuperKernel fusion";
     case FusionFailReason::KERNEL_ATTR_GET_FAILED:
       return "Failed to get kernel attribute for SuperKernel fusion";
     case FusionFailReason::EXCEED_SCOPE_MAX:
@@ -1090,10 +1088,6 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
   }
   bool isSimt = (aivType == AIV_TYPE_SIMT_VF_ONLY || aivType == AIV_TYPE_SIMD_SIMT_MIX_VF);
   if (isSimt) {
-    isFusible = false;
-    SetFusionFailReason(FusionFailReason::SIMT_OP_UNSUPPORT);
-    SK_LOGI("%s is SIMT type, aivType=%u, not fusible", Format().c_str(), aivType);
-
     nodeInfos.kernelInfos.isSimtOp = true;
     size_t dynUbufSize = 0;
     aclError aclRet = aclrtFunctionGetAvailDynUbufPerBlock(taskParams.kernelTaskParams.funcHandle, 0, &dynUbufSize);
