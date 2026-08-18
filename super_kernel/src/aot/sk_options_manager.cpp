@@ -142,14 +142,9 @@ const std::array<InnerCapabilityInfo, static_cast<size_t>(SkInnerCapability::SK_
          []() -> std::unique_ptr<OptOptionBase> {
            return std::make_unique<NumberOptOption>("enable_mix_kernel_split", aclskOptionType::SK_OPTION_MAX, 0, 0, 1);
          }},
-        {SkInnerCapability::SIMT_OP_CHECK,
+        {SkInnerCapability::SIMT_OP_SUPPORT,
          []() -> std::unique_ptr<OptOptionBase> {
-           return std::make_unique<NumberOptOption>("enable_simt_op_check", aclskOptionType::SK_OPTION_MAX, 0, 0, 1);
-         }},
-        {SkInnerCapability::DYN_UBUF_SIZE,
-         []() -> std::unique_ptr<OptOptionBase> {
-           return std::make_unique<NumberOptOption>("enable_set_dyn_ubuf_size", aclskOptionType::SK_OPTION_MAX, 0, 0,
-                                                    1);
+           return std::make_unique<NumberOptOption>("simt_op_support", aclskOptionType::SK_OPTION_MAX, 0, 0, 1);
          }},
     }};
 
@@ -492,27 +487,34 @@ void SuperKernelOptionsManager::RegisterDefaultInnerCapabilities() {
   }
 }
 
-void SuperKernelOptionsManager::ApplySoCSpecificCapabilities() {
+void SuperKernelOptionsManager::ApplyArchSpecificCapabilities() {
   const SkKernelArch kernelArch = GetCurrentSkKernelArch();
-  if (kernelArch == SkKernelArch::DAV_3510) {
-    for (const auto &capability : DEFAULT_INNER_CAPABILITIES) {
-      const auto iter = innerCapabilityMap.find(capability.capability);
-      if (iter != innerCapabilityMap.end() && iter->second != nullptr) {
-        iter->second->SetValue(1);
-      }
+  const auto enableCapability = [this](SkInnerCapability capability) {
+    const auto iter = innerCapabilityMap.find(capability);
+    if (iter != innerCapabilityMap.end() && iter->second != nullptr) {
+      iter->second->SetValue(1);
     }
+  };
+
+  switch (kernelArch) {
+    case SkKernelArch::DAV_3510:
+      enableCapability(SkInnerCapability::MIX_KERNEL_SPLIT);
+      enableCapability(SkInnerCapability::SIMT_OP_SUPPORT);
+      break;
+    case SkKernelArch::DAV_2201:
+    default:
+      break;
   }
 
-  SK_LOGI("ApplySoCSpecificCapabilities: kernelArch=%s, mixKernelSplit=%d, simtOpCheck=%d, dynUbufSize=%d",
-          to_string(kernelArch), static_cast<int>(IsInnerCapabilityEnabled(SkInnerCapability::MIX_KERNEL_SPLIT)),
-          static_cast<int>(IsInnerCapabilityEnabled(SkInnerCapability::SIMT_OP_CHECK)),
-          static_cast<int>(IsInnerCapabilityEnabled(SkInnerCapability::DYN_UBUF_SIZE)));
+  SK_LOGI("ApplyArchSpecificCapabilities: kernelArch=%s, mixKernelSplit=%d, simtOpSupport=%d", to_string(kernelArch),
+          static_cast<int>(IsInnerCapabilityEnabled(SkInnerCapability::MIX_KERNEL_SPLIT)),
+          static_cast<int>(IsInnerCapabilityEnabled(SkInnerCapability::SIMT_OP_SUPPORT)));
 }
 
 void SuperKernelOptionsManager::RegisterDefaultOptions() {
   RegisterDefaultSkOptions();
   RegisterDefaultInnerCapabilities();
-  ApplySoCSpecificCapabilities();
+  ApplyArchSpecificCapabilities();
 }
 
 void SuperKernelOptionsManager::SetOptOptionValue(const aclskOption *option) {
@@ -800,7 +802,7 @@ nlohmann::ordered_json SuperKernelOptionsManager::ToJson() const {
     capabilityJson["value"] = IsInnerCapabilityEnabled(capability.capability);
     innerCapabilitiesJson[innerCapability->GetName()] = capabilityJson;
   }
-  optionsJson["inner_options"] = innerCapabilitiesJson;
+  optionsJson["inner_capabilities"] = innerCapabilitiesJson;
 
   return optionsJson;
 }

@@ -803,7 +803,7 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_RecordsMaxDcacheSize) {
   auto *splitOpt = opts->GetOption(aclskOptionType::SPLIT_MODE);
   ASSERT_NE(splitOpt, nullptr);
   splitOpt->SetValue(1);
-  SetInnerCapability(*opts, SkInnerCapability::DYN_UBUF_SIZE, 1);
+  SetInnerCapability(*opts, SkInnerCapability::SIMT_OP_SUPPORT, 1);
 
   auto *k0 = CreateKernelNodeEx(7051, 0, INVALID_TASK_ID, 7052, SkKernelType::AIV_ONLY);
   auto *k1 = CreateKernelNodeEx(7052, 0, 7051, 7053, SkKernelType::AIV_ONLY);
@@ -835,12 +835,12 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_RecordsMaxDcacheSize) {
   EXPECT_STREQ(SkUtGetLastBinaryGetFunctionName(), "sk_entry_mix11_simt");
 }
 
-TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_DynUbufCapabilityDisabledSkipsRecord) {
+TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_SimtOpSupportDisabledSkipsRecord) {
   opts->RegisterDefaultOptions();
   auto *splitOpt = opts->GetOption(aclskOptionType::SPLIT_MODE);
   ASSERT_NE(splitOpt, nullptr);
   splitOpt->SetValue(1);
-  SetInnerCapability(*opts, SkInnerCapability::DYN_UBUF_SIZE, 0);
+  SetInnerCapability(*opts, SkInnerCapability::SIMT_OP_SUPPORT, 0);
 
   auto *k0 = CreateKernelNodeEx(7061, 0, INVALID_TASK_ID, 7062, SkKernelType::AIV_ONLY);
   auto *k1 = CreateKernelNodeEx(7062, 0, 7061, INVALID_TASK_ID, SkKernelType::AIV_ONLY);
@@ -871,7 +871,7 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTaskMissingAllocUbufSize_ReturnsEmpty) {
   auto *splitOpt = opts->GetOption(aclskOptionType::SPLIT_MODE);
   ASSERT_NE(splitOpt, nullptr);
   splitOpt->SetValue(1);
-  SetInnerCapability(*opts, SkInnerCapability::DYN_UBUF_SIZE, 1);
+  SetInnerCapability(*opts, SkInnerCapability::SIMT_OP_SUPPORT, 1);
 
   auto *k0 = CreateKernelNodeEx(7071, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::AIV_ONLY);
   k0->nodeInfos.kernelInfos.isSimtOp = true;
@@ -890,7 +890,7 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTaskUbufSizeOverflow_ReturnsEmpty) {
   auto *splitOpt = opts->GetOption(aclskOptionType::SPLIT_MODE);
   ASSERT_NE(splitOpt, nullptr);
   splitOpt->SetValue(1);
-  SetInnerCapability(*opts, SkInnerCapability::DYN_UBUF_SIZE, 1);
+  SetInnerCapability(*opts, SkInnerCapability::SIMT_OP_SUPPORT, 1);
 
   auto *k0 = CreateKernelNodeEx(7072, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::AIV_ONLY);
   k0->nodeInfos.kernelInfos.isSimtOp = true;

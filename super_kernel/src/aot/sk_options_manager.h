@@ -268,7 +268,7 @@ class SuperKernelOptionsManager {
   void RegisterDefaultOptions();
   void RegisterDefaultSkOptions();
   void RegisterDefaultInnerCapabilities();
-  void ApplySoCSpecificCapabilities();
+  void ApplyArchSpecificCapabilities();
 
   std::unordered_map<aclskOptionType, std::unique_ptr<OptOptionBase>> optionMap;
   std::unordered_map<SkInnerCapability, std::unique_ptr<OptOptionBase>> innerCapabilityMap;

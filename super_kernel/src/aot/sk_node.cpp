@@ -1062,18 +1062,18 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
   nodeInfos.kernelInfos.hasAllocUbufSize = false;
   nodeInfos.kernelInfos.dynUbufSize = 0;
   nodeInfos.kernelInfos.allocUbufSize = 0;
-  if (opts == nullptr || !opts->IsInnerCapabilityEnabled(SkInnerCapability::SIMT_OP_CHECK)) {
+  if (opts == nullptr || !opts->IsInnerCapabilityEnabled(SkInnerCapability::SIMT_OP_SUPPORT)) {
     return;
   }
   SkKernelType kernelType = nodeInfos.kernelInfos.kernelType;
   bool hasAivSection = (kernelType == SkKernelType::AIV_ONLY || kernelType == SkKernelType::MIX_AIV_1_0 ||
                         kernelType == SkKernelType::MIX_AIC_1_1 || kernelType == SkKernelType::MIX_AIC_1_2);
   if (!hasAivSection) {
-    SK_LOGI("IdentifyAndHandleSimtKernel: %s has no AIV section (kernelType=%s), skip SIMT check", Format().c_str(),
+    SK_LOGI("IdentifyAndHandleSimtKernel: %s has no AIV section (kernelType=%s), skip SIMT analysis", Format().c_str(),
             to_string(kernelType));
     return;
   }
-  SK_LOGI("IdentifyAndHandleSimtKernel: checking for %s, kernelType=%s, nodeId=%lu", Format().c_str(),
+  SK_LOGI("IdentifyAndHandleSimtKernel: analyzing %s, kernelType=%s, nodeId=%lu", Format().c_str(),
           to_string(kernelType), nodeId);
   uint32_t aivType = 0;
   rtError_t ret = rtFunctionGetMetaInfo(taskParams.kernelTaskParams.funcHandle, RT_FUNCTION_TYPE_AIV_TYPE_FLAG,

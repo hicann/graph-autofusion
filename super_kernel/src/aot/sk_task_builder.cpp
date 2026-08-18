@@ -2644,7 +2644,7 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
 
   bool useSimtEntry = false;
   size_t skMaxDcacheSize = 0;
-  if (opts.IsInnerCapabilityEnabled(SkInnerCapability::DYN_UBUF_SIZE)) {
+  if (opts.IsInnerCapabilityEnabled(SkInnerCapability::SIMT_OP_SUPPORT)) {
     const SimtDcacheSizeResult dcacheSizeResult = CalculateSimtDcacheSize(tasks);
     if (!dcacheSizeResult.areSimtUbufSizesValid) {
       SK_LOGE("Build failed: SIMT ubuf size validation failed");
