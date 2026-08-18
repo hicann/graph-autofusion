@@ -3781,7 +3781,7 @@ class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Cos";
+    return "CosExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Cos";
@@ -3793,6 +3793,9 @@ class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
         {DT_BF16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"cos_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
@@ -4940,7 +4943,7 @@ class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Sin";
+    return "SinExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Sin";
@@ -4954,6 +4957,9 @@ class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
         {DT_BF16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"sin_reg_base.h"};
   }
   std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {

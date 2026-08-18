@@ -89,6 +89,8 @@ set(ascendc_api_regbase_extend_src
         chebyshev_polynomial_u.h
         chebyshev_polynomial_v.h
         chebyshev_polynomial_w.h
+        sin.h
+        cos.h
 )
 
 set(generated_regbase_files)
