@@ -32,6 +32,21 @@
 #ifndef IL_COMPLEX_SIMT
 #define IL_COMPLEX_SIMT 0
 #endif
+#ifndef IL_COMPLEX_INPUT_BROADCAST
+#define IL_COMPLEX_INPUT_BROADCAST 0
+#endif
+#ifndef IL_COMPLEX_INDEX_BROADCAST
+#define IL_COMPLEX_INDEX_BROADCAST 0
+#endif
+#ifndef IL_INDEX_BINARY_SAME_VIEW
+#define IL_INDEX_BINARY_SAME_VIEW 0
+#endif
+#ifndef IL_INDEX_ABS_DENSE_VIEW
+#define IL_INDEX_ABS_DENSE_VIEW 0
+#endif
+#ifndef IL_BINARY_ELEMENT_KIND
+#define IL_BINARY_ELEMENT_KIND 0
+#endif
 #ifndef IL_RETAIN_BROADCAST
 #define IL_RETAIN_BROADCAST 0
 #endif
@@ -67,6 +82,11 @@ constexpr int64_t kOutputS3 = IL_OUTPUT_S3;
 constexpr std::array<int64_t, 4> kOutputShape = {kOutputS0, kOutputS1, kOutputS2, kOutputS3};
 constexpr bool kComplexBroadcast = IL_COMPLEX_BROADCAST;
 constexpr bool kComplexSimt = IL_COMPLEX_SIMT;
+constexpr bool kComplexInputBroadcast = IL_COMPLEX_INPUT_BROADCAST;
+constexpr bool kComplexIndexBroadcast = IL_COMPLEX_INDEX_BROADCAST;
+constexpr bool kIndexBinarySameView = IL_INDEX_BINARY_SAME_VIEW;
+constexpr bool kIndexAbsDenseView = IL_INDEX_ABS_DENSE_VIEW;
+constexpr int32_t kBinaryElementKind = IL_BINARY_ELEMENT_KIND;
 constexpr bool kRetainBroadcast = IL_RETAIN_BROADCAST;
 constexpr bool kDegenerateBroadcast = IL_DEGENERATE_BROADCAST;
 constexpr bool kContinuousBroadcast = IL_CONTINUOUS_BROADCAST;
@@ -74,7 +94,7 @@ constexpr bool kContinuousIndexBroadcast = IL_CONTINUOUS_INDEX_BROADCAST;
 constexpr int32_t kInputElementCount = IL_HAS_INPUT_ELEMENT;
 constexpr int32_t kIndexElementCount = IL_HAS_INDEX_ELEMENT;
 constexpr bool kHasOutputRelu = IL_HAS_OUTPUT_RELU;
-constexpr bool kInputBroadcast = IL_INPUT_BROADCAST && !kComplexBroadcast;
+constexpr bool kInputBroadcast = IL_INPUT_BROADCAST && !kComplexBroadcast && !kComplexInputBroadcast;
 constexpr bool kIndexBroadcast = IL_INDEX_BROADCAST;
 constexpr uint32_t kBroadcastAxesMask = IL_BROADCAST_AXES_MASK;
 constexpr bool kClearBroadcastSourceView = IL_CLEAR_BROADCAST_SOURCE_VIEW;
@@ -203,6 +223,9 @@ BroadcastGraphView CreateGraphView() {
       view.index_source.repeats[dim] = af::ops::One;
     }
   }
+  if constexpr (kIndexAbsDenseView) {
+    view.index_source.axes = view.output.axes;
+  }
   view.input.strides = MakeDenseStrides(view.input.repeats);
   view.output.strides = MakeDenseStrides(view.output.repeats);
   view.input_source.strides = MakeDenseStrides(view.input_source.repeats);
@@ -240,6 +263,43 @@ void ConnectAbsChain(const std::shared_ptr<af::AscGraph> &graph, const char *pre
     elements.emplace_back(std::move(element));
   }
   destination = elements.empty() ? source : elements.back()->y;
+}
+
+af::AscOpOutput ConnectBinaryElement(const std::shared_ptr<af::AscGraph> &graph, const char *name,
+                                     const af::AscOpOutput &lhs, const af::AscOpOutput &rhs, const TensorView &view) {
+  if constexpr (kBinaryElementKind == 1) {
+    af::ascir_op::Mul element(name);
+    graph->AddNode(element);
+    element.x1 = lhs;
+    element.x2 = rhs;
+    element.attr.api.compute_type = af::ComputeType::kComputeElewise;
+    SetView(element, view);
+    return element.y;
+  } else if constexpr (kBinaryElementKind == 2) {
+    af::ascir_op::Sub element(name);
+    graph->AddNode(element);
+    element.x1 = lhs;
+    element.x2 = rhs;
+    element.attr.api.compute_type = af::ComputeType::kComputeElewise;
+    SetView(element, view);
+    return element.y;
+  } else if constexpr (kBinaryElementKind == 3) {
+    af::ascir_op::Maximum element(name);
+    graph->AddNode(element);
+    element.x1 = lhs;
+    element.x2 = rhs;
+    element.attr.api.compute_type = af::ComputeType::kComputeElewise;
+    SetView(element, view);
+    return element.y;
+  } else {
+    af::ascir_op::Add element(name);
+    graph->AddNode(element);
+    element.x1 = lhs;
+    element.x2 = rhs;
+    element.attr.api.compute_type = af::ComputeType::kComputeElewise;
+    SetView(element, view);
+    return element.y;
+  }
 }
 
 void BuildInputPath(const BroadcastGraphView &view, af::ascir_op::IndirectLoad &indirect_load) {
@@ -336,8 +396,9 @@ void BuildIndexPath(const BroadcastGraphView &view, af::ascir_op::IndirectLoad &
     view.graph->AddNode(broadcast);
     broadcast.attr.api.compute_type = af::ComputeType::kComputeBroadcast;
     broadcast.x = index_load.y;
-    SetView(broadcast, view.index_broadcast);
-    ConnectAbsChain(view.graph, "index_abs_", kIndexElementCount, broadcast.y, view.index_broadcast, indirect_load.x2);
+    SetView(broadcast, kIndexAbsDenseView ? view.output : view.index_broadcast);
+    const TensorView &index_element_view = kIndexAbsDenseView ? view.output : view.index_broadcast;
+    ConnectAbsChain(view.graph, "index_abs_", kIndexElementCount, broadcast.y, index_element_view, indirect_load.x2);
   } else {
     ConnectAbsChain(view.graph, "index_abs_", kIndexElementCount, index_load.y, view.output, indirect_load.x2);
   }
@@ -473,7 +534,6 @@ void BuildComplexIndexPath(const BroadcastGraphView &view, af::ascir_op::Indirec
   af::ascir_op::Broadcast broadcast0("index_broadcast0");
   af::ascir_op::Broadcast broadcast1("index_broadcast1");
   af::ascir_op::Add scalar_add("index_scalar_add");
-  af::ascir_op::Add index_add("index_add");
   af::ascir_op::Broadcast final_broadcast("index_final_broadcast");
   for (af::ascir_op::Broadcast *broadcast : {&broadcast0, &broadcast1}) {
     view.graph->AddNode(*broadcast);
@@ -481,27 +541,90 @@ void BuildComplexIndexPath(const BroadcastGraphView &view, af::ascir_op::Indirec
     SetView(*broadcast, view.index_source);
   }
   view.graph->AddNode(scalar_add);
-  view.graph->AddNode(index_add);
   view.graph->AddNode(final_broadcast);
   final_broadcast.attr.api.compute_type = af::ComputeType::kComputeBroadcast;
   broadcast0.x = scalar0.y;
   broadcast1.x = scalar1.y;
   scalar_add.x1 = broadcast0.y;
   scalar_add.x2 = broadcast1.y;
-  index_add.x1 = index_load.y;
-  index_add.x2 = scalar_add.y;
-  final_broadcast.x = index_add.y;
+  const auto index_add = ConnectBinaryElement(view.graph, "index_add", index_load.y, scalar_add.y, view.index_source);
+  final_broadcast.x = index_add;
   SetView(scalar_add, view.index_source);
-  SetView(index_add, view.index_source);
   SetView(final_broadcast, view.index_broadcast);
   indirect_load.x2 = final_broadcast.y;
 }
 
+void BuildSameViewIndexBinaryPath(const BroadcastGraphView &view, af::ascir_op::IndirectLoad &indirect_load) {
+  af::ascir_op::Data index("same_view_index");
+  af::ascir_op::Load index_load("same_view_index_load");
+  af::ascir_op::Abs index_abs("same_view_index_abs");
+  af::ascir_op::Maximum index_maximum("same_view_index_maximum");
+  view.graph->AddNode(index);
+  view.graph->AddNode(index_load);
+  view.graph->AddNode(index_abs);
+  view.graph->AddNode(index_maximum);
+  index.ir_attr.SetIndex(1);
+  index_load.x = index.y;
+  index_abs.x = index_load.y;
+  index_maximum.x1 = index_load.y;
+  index_maximum.x2 = index_abs.y;
+  index_abs.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  index_maximum.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  SetView(index, view.output);
+  SetView(index_load, view.output);
+  SetView(index_abs, view.output);
+  SetView(index_maximum, view.output);
+  indirect_load.x2 = index_maximum.y;
+}
+
+void BuildComplexInputPath(const BroadcastGraphView &view, af::ascir_op::IndirectLoad &indirect_load) {
+  af::ascir_op::Data x("x");
+  af::ascir_op::Load input_load("input_load");
+  view.graph->AddNode(x);
+  view.graph->AddNode(input_load);
+  x.ir_attr.SetIndex(0);
+  input_load.x = x.y;
+  SetView(x, view.input_source);
+  SetView(input_load, view.input_source);
+
+  af::ascir_op::Scalar scalar0("input_scalar0", *view.graph);
+  af::ascir_op::Scalar scalar1("input_scalar1", *view.graph);
+  scalar0.ir_attr.SetValue("0.0");
+  scalar1.ir_attr.SetValue("0.0");
+  scalar0.y.dtype = af::DT_FLOAT16;
+  scalar1.y.dtype = af::DT_FLOAT16;
+  af::ascir_op::Broadcast broadcast0("input_scalar_broadcast0");
+  af::ascir_op::Broadcast broadcast1("input_scalar_broadcast1");
+  af::ascir_op::Add scalar_add("input_scalar_add");
+  af::ascir_op::Broadcast final_broadcast("input_final_broadcast");
+  for (af::ascir_op::Broadcast *broadcast : {&broadcast0, &broadcast1}) {
+    view.graph->AddNode(*broadcast);
+    broadcast->attr.api.compute_type = af::ComputeType::kComputeBroadcast;
+    SetView(*broadcast, view.input_source);
+  }
+  view.graph->AddNode(scalar_add);
+  view.graph->AddNode(final_broadcast);
+  final_broadcast.attr.api.compute_type = af::ComputeType::kComputeBroadcast;
+  broadcast0.x = scalar0.y;
+  broadcast1.x = scalar1.y;
+  scalar_add.x1 = broadcast0.y;
+  scalar_add.x2 = broadcast1.y;
+  const auto input_add =
+      ConnectBinaryElement(view.graph, "input_source_add", input_load.y, scalar_add.y, view.input_source);
+  final_broadcast.x = input_add;
+  SetView(scalar_add, view.input_source);
+  SetView(final_broadcast, view.input_broadcast);
+  indirect_load.x1 = final_broadcast.y;
+}
+
 af::ComputeGraphPtr CreateGraph() {
   indirect_load_test::BackendGraph backend("indirect_load_broadcast_test", "data0", "data1", af::DT_FLOAT16);
-  const auto build_index = kComplexBroadcast ? BuildComplexIndexPath : BuildIndexPath;
+  const auto build_index = kComplexBroadcast || kComplexIndexBroadcast ? BuildComplexIndexPath
+                           : kIndexBinarySameView                      ? BuildSameViewIndexBinaryPath
+                                                                       : BuildIndexPath;
+  const auto build_input = kComplexInputBroadcast ? BuildComplexInputPath : BuildInputPath;
   return backend.Finalize(
-      indirect_load_test::CreateSubGraph(CreateGraphView(), BuildInputPath, build_index, BuildOutputPath), "output");
+      indirect_load_test::CreateSubGraph(CreateGraphView(), build_input, build_index, BuildOutputPath), "output");
 }
 
 af::ComputeGraphPtr CreateAicReproGraph() {
@@ -603,7 +726,9 @@ void CheckSimdKernel(const std::string &kernel) {
 #if IL_BROADCAST_POST_REDUCE
     EXPECT_NE(kernel.find("ReduceSum"), std::string::npos);
 #else
-    EXPECT_NE(kernel.find(MakeShapeArgs(false)), std::string::npos);
+    if constexpr (!(kIndexBroadcast && kBroadcastAxesMask == 0U) && !kIndexBinarySameView) {
+      EXPECT_NE(kernel.find(MakeShapeArgs(false)), std::string::npos);
+    }
 #endif
   }
   if constexpr (!kDegenerateBroadcast && !IL_BROADCAST_POST_REDUCE) {
@@ -689,7 +814,11 @@ void ExpectComplexLogicalView(const ascgen_utils::indirect_load::TemplateLogical
 
 void ExpectComplexBrcRewrite(af::AscGraph &graph, const af::AscNodePtr &input_add, const af::AscNodePtr &index_vf,
                              const af::AscNodePtr &post_vf) {
-  ASSERT_TRUE(af::ops::IsOps<af::ascir_op::Add>(input_add));
+  const bool is_expected_binary = kBinaryElementKind == 1   ? af::ops::IsOps<af::ascir_op::Mul>(input_add)
+                                  : kBinaryElementKind == 2 ? af::ops::IsOps<af::ascir_op::Sub>(input_add)
+                                  : kBinaryElementKind == 3 ? af::ops::IsOps<af::ascir_op::Maximum>(input_add)
+                                                            : af::ops::IsOps<af::ascir_op::Add>(input_add);
+  ASSERT_TRUE(is_expected_binary);
   ASSERT_TRUE(af::ops::IsOps<af::ascir_op::VectorFunc>(index_vf));
   ASSERT_TRUE(af::ops::IsOps<af::ascir_op::VectorFunc>(post_vf));
   EXPECT_EQ(index_vf->inputs.Size(), 3UL);
@@ -812,8 +941,21 @@ TEST_F(TestBackendIndirectLoadBroadcastE2e, IndirectLoadBroadcastCodegen) {
     EXPECT_NE(result.kernel.find(expected_template == ascir::TemplateId::kIndirectLoadSimd ? "IndirectLoadSimd<"
                                                                                            : "IndirectLoadSimt<"),
               std::string::npos);
-    EXPECT_NE(result.kernel.find("Add("), std::string::npos);
+    const bool has_binary_element =
+        result.kernel.find("Add(") != std::string::npos || result.kernel.find("Mul(") != std::string::npos ||
+        result.kernel.find("Sub(") != std::string::npos || result.kernel.find("Maximum(") != std::string::npos;
+    EXPECT_TRUE(has_binary_element);
     EXPECT_EQ(result.kernel.find("BroadcastExtend<"), std::string::npos);
+    indirect_load_test::WriteGeneratedFiles(result);
+    return;
+  }
+  if constexpr (kComplexInputBroadcast) {
+    ascir::FusedScheduledResult scheduled_result;
+    ASSERT_TRUE(indirect_load_test::SelectTemplate(graph, expected_template, scheduled_result));
+    codegen::Codegen codegen(codegen::CodegenOptions{});
+    codegen::CodegenResult result;
+    ASSERT_EQ(codegen.Generate(shape_info, scheduled_result, result), af::SUCCESS);
+    EXPECT_NE(result.kernel.find(indirect_load_test::GetTemplateMarker(expected_template)), std::string::npos);
     indirect_load_test::WriteGeneratedFiles(result);
     return;
   }

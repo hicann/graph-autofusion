@@ -1077,6 +1077,13 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimdDirectBroadcastUsesUnserializedT
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, IndexBroadcastUsesFinalPhysicalView) {
+  PlatformContextReset platform_reset;
+  ge::PlatformContext::GetInstance().Reset();
+  ge::PlatformInfo platform_info;
+  platform_info.soc_ver = "3510";
+  platform_info.ub_size = 256 * 1024;
+  platform_info.aiv_num = 48;
+  ge::PlatformContext::GetInstance().SetPlatformInfo(platform_info);
   auto graph = BuildIndirectLoadIndexBroadcastGraph();
   optimize::IndirectLoadScheduleCaseGenerator generator;
   std::vector<af::AscGraph> graphs;
@@ -1084,7 +1091,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, IndexBroadcastUsesFinalPhysicalView)
   ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
   const auto simt = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
   ASSERT_NE(simt, graphs.end());
-  EXPECT_EQ(simt->FindNode("index_broadcast"), nullptr);
+  EXPECT_NE(simt->FindNode("index_broadcast"), nullptr);
   const auto indirect_load = simt->FindNode("indirect_load");
   ASSERT_NE(indirect_load, nullptr);
   ascgen_utils::indirect_load::TemplateLogicalView logical_view;
@@ -1120,13 +1127,14 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, CompletesMissingDataViewAfterBroadca
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsBranchedBroadcastPaths) {
-  for (const char *producer_name : {"input_broadcast", "broadcast_input_abs"}) {
-    auto graph = BuildIndirectLoadBroadcastGraph();
+  // 直连广播形态：广播本身与源的旁路消费者不能安全折叠，淘汰所有相关 candidate。
+  for (const char *producer_name : {"input_broadcast", "broadcast_input_load"}) {
+    auto graph = BuildIndirectLoadBroadcastGraph(false);
     ASSERT_TRUE(AddSideConsumer(graph, producer_name));
     optimize::IndirectLoadScheduleCaseGenerator generator;
     std::vector<af::AscGraph> graphs;
     std::vector<std::string> score_functions;
-    ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+    EXPECT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS) << producer_name;
     EXPECT_TRUE(graphs.empty()) << producer_name;
     EXPECT_TRUE(score_functions.empty()) << producer_name;
   }
@@ -1562,6 +1570,13 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceRejectsBothTemplatesForUnk
     optimize::IndirectLoadScheduleCaseGenerator generator;
     std::vector<af::AscGraph> graphs;
     std::vector<std::string> score_functions;
+    if (!test_case.mutate_output) {
+      // 改 reduce 输入 stride 会传导到 IL 输出视图使其非稠密，属于模板无关的不支持场景，直接报错。
+      EXPECT_NE(generator.Generate(graph, graphs, score_functions), af::SUCCESS) << "case=" << test_case.name;
+      EXPECT_TRUE(graphs.empty()) << "case=" << test_case.name;
+      continue;
+    }
+    // 改 reduce 输出 stride 不影响 IL 输出视图，属于模板相关的 post-reduce 校验拒绝，SK 兜底。
     ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS) << "case=" << test_case.name;
     EXPECT_EQ(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd), graphs.end())
         << "case=" << test_case.name;

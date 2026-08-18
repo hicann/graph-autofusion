@@ -21,6 +21,15 @@
 #ifndef IL_COMPLEX_SIMT
 #define IL_COMPLEX_SIMT 0
 #endif
+#ifndef IL_COMPLEX_INPUT_BROADCAST
+#define IL_COMPLEX_INPUT_BROADCAST 0
+#endif
+#ifndef IL_COMPLEX_INDEX_BROADCAST
+#define IL_COMPLEX_INDEX_BROADCAST 0
+#endif
+#ifndef IL_BINARY_ELEMENT_KIND
+#define IL_BINARY_ELEMENT_KIND 0
+#endif
 #ifndef IL_RETAIN_BROADCAST
 #define IL_RETAIN_BROADCAST 0
 #endif
@@ -79,6 +88,9 @@ constexpr bool kInputBroadcast = IL_INPUT_BROADCAST;
 constexpr bool kIndexBroadcast = IL_INDEX_BROADCAST;
 constexpr bool kComplexBroadcast = IL_COMPLEX_BROADCAST;
 constexpr bool kComplexSimt = IL_COMPLEX_SIMT;
+constexpr bool kComplexInputBroadcast = IL_COMPLEX_INPUT_BROADCAST;
+constexpr bool kComplexIndexBroadcast = IL_COMPLEX_INDEX_BROADCAST;
+constexpr int32_t kBinaryElementKind = IL_BINARY_ELEMENT_KIND;
 constexpr bool kRetainBroadcast = IL_RETAIN_BROADCAST;
 constexpr bool kBroadcastPostReduce = IL_BROADCAST_POST_REDUCE;
 constexpr uint32_t kBroadcastAxesMask = IL_BROADCAST_AXES_MASK;
@@ -151,6 +163,13 @@ void InitializeData(DataType *x, IndexType *index, DataType *expected) {
     }
     const int32_t index_offset = DenseOffset(index_coordinate, kIndexShape);
     int64_t gathered_index = static_cast<int64_t>(index[index_offset]);
+    if constexpr (kComplexIndexBroadcast) {
+      if constexpr (kBinaryElementKind == 1) {
+        gathered_index = 0;
+      } else if constexpr (kBinaryElementKind == 3) {
+        gathered_index = std::max(gathered_index, int64_t{0});
+      }
+    }
     for (int32_t element = 0; element < kIndexElementCount; ++element) {
       gathered_index = std::abs(gathered_index);
     }
@@ -165,6 +184,13 @@ void InitializeData(DataType *x, IndexType *index, DataType *expected) {
     }
     const int32_t input_offset = DenseOffset(input_coordinate, kInputShape);
     float value = static_cast<float>(x[input_offset]);
+    if constexpr (kComplexInputBroadcast) {
+      if constexpr (kBinaryElementKind == 1) {
+        value = 0.0F;
+      } else if constexpr (kBinaryElementKind == 3) {
+        value = std::max(value, 0.0F);
+      }
+    }
     if (kRetainBroadcast) {
       value += 1.5F;
     } else if (kComplexBroadcast && !kComplexSimt) {

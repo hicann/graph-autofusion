@@ -281,8 +281,6 @@ af::Status ValidateIndirectLoadOutputLayout(const LogicalTensorView &output) {
 
 af::Status SetImplementation(const af::AscNodePtr &node, Implementation implementation) {
   GE_ASSERT_NOTNULL(node);
-  GE_ASSERT_TRUE(implementation == Implementation::kDefault || implementation == Implementation::kGatherApi,
-                 "IndirectLoad implementation is invalid.");
   const auto op_desc = node->GetOpDesc();
   GE_ASSERT_NOTNULL(op_desc);
   GE_ASSERT_TRUE(op_desc->SetExtAttr(kImplementationAttr, static_cast<int64_t>(implementation)),
@@ -348,11 +346,9 @@ af::Status ValidateSingleIndirectLoadNode(const af::AscGraph &graph, af::AscNode
     if (!af::ops::IsOps<af::ascir_op::IndirectLoad>(candidate)) {
       continue;
     }
-    if (node != nullptr) {
-      GELOGE(af::FAILED, "[IndirectLoad] Graph[%s] contains multiple IndirectLoad nodes, first[%s], next[%s].",
-             graph.GetName().c_str(), node->GetNamePtr(), candidate->GetNamePtr());
-    }
-    GE_ASSERT_TRUE(node == nullptr, "Graph contains multiple IndirectLoad nodes, only one is supported.");
+    GE_ASSERT_TRUE(node == nullptr,
+                   "[IndirectLoad] Graph[%s] contains multiple IndirectLoad nodes, first[%s], next[%s].",
+                   graph.GetName().c_str(), node->GetNamePtr(), candidate->GetNamePtr());
     node = candidate;
   }
   if (node != nullptr) {
