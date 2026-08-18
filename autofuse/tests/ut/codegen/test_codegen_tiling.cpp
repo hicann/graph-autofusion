@@ -4848,6 +4848,31 @@ TEST_F(TestCodegenTiling, CodegenGenerateForInductorCvFusionShouldKeepCubeWrappe
   EXPECT_NE(wrapper_cpp.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
 }
 
+TEST_F(TestCodegenTiling, CodegenGenerateForInductorCvFusionShouldFallbackToSafetyWhenUbCasesFail) {
+  auto graph = ascir::ShareGraph::LoadMatmulElewiseBrcFusedGraph();
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), af::SUCCESS);
+  ASSERT_TRUE(ascgen_utils::IsCubeFusedScheduled(fused_schedule_result));
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  EXPECT_EQ(result.tiling.find("if (!optiling::GetTiling(tiling->tiling_data, 1)) {\n      return -1;"),
+            std::string::npos);
+  const size_t ub_case1_fail_pos = result.tiling.find("if (!optiling::GetTiling(tiling->tiling_data, 1)) {");
+  ASSERT_NE(ub_case1_fail_pos, std::string::npos);
+  const size_t ub_case1_else_pos = result.tiling.find("    } else {", ub_case1_fail_pos);
+  ASSERT_NE(ub_case1_else_pos, std::string::npos);
+  const std::string ub_case1_fail_body = result.tiling.substr(ub_case1_fail_pos, ub_case1_else_pos - ub_case1_fail_pos);
+  EXPECT_NE(ub_case1_fail_body.find("set_g_basen_basem_align(1);"), std::string::npos);
+  EXPECT_NE(ub_case1_fail_body.find("for (size_t i = 2U;"), std::string::npos);
+  EXPECT_NE(ub_case1_fail_body.find("tiling->cv_tiling_data.fusion_mode = 1;"), std::string::npos);
+  EXPECT_NE(ub_case1_fail_body.find("tiling->cv_tiling_data.ub_mode = 0;"), std::string::npos);
+  EXPECT_NE(ub_case1_fail_body.find("return 0;"), std::string::npos);
+}
+
 TEST_F(TestCodegenTiling, CodegenGenerateShouldNotEmitSplitMarkers) {
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
   codegen::Codegen codegen(codegen::CodegenOptions{});
