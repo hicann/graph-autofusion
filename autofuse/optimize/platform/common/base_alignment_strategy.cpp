@@ -428,7 +428,9 @@ void BaseAlignmentStrategy::SetAlignInfoForNodeInputs(AlignmentType aligned_type
       continue;
     }
 
-    if (align_info.align_type == AlignmentType::kFixedNotAligned) {
+    const bool is_compact_reduce =
+        ScheduleUtils::IsReduce(asc_node) && align_info.align_type == AlignmentType::kNotAligned;
+    if (align_info.align_type == AlignmentType::kFixedNotAligned || is_compact_reduce) {
       align_info.conflict_with_output = true;
       GELOGD("SetAlignInfoForNodeInputs: input[%s] is FixedNotAligned, set conflict_with_output=true.",
              asc_node->GetNamePtr());
