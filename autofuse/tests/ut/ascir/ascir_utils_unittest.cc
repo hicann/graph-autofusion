@@ -12,6 +12,7 @@
 #include "graph/symbolizer/symbolic.h"
 
 #include "ascendc_ir.h"
+#include "ascir_registry.h"
 #include "ascir_utils.h"
 #define private public
 #include "asc_graph_dumper_context.h"
@@ -29,6 +30,31 @@ class AscendGraphDumpUT : public testing::Test {
 };
 
 namespace af {
+TEST(UnsupportedAscIrRegistration, HasExpectedDefinitionAndImplementations) {
+  const auto &registry = ascir::AscirRegistry::GetInstance().GetAll();
+  const auto iter = registry.find("Unsupported");
+  ASSERT_NE(iter, registry.end());
+
+  auto definition = iter->second;
+  EXPECT_TRUE(definition.GetInputDefs().empty());
+  ASSERT_EQ(definition.GetOutputDefs().size(), 1U);
+  EXPECT_EQ(definition.GetOutputDefs()[0].first, "y");
+  EXPECT_TRUE(definition.IsStartNode());
+  ASSERT_EQ(definition.GetAttrDefs().size(), 1U);
+  EXPECT_EQ(definition.GetAttrDefs()[0].name, "error_msg");
+  EXPECT_EQ(definition.GetComputeType(), ComputeType::kComputeInvalid);
+
+  auto codegen = definition.GetAscIrCodegenImpl("2201");
+  ASSERT_NE(codegen, nullptr);
+  EXPECT_TRUE(codegen->GetApiCallName().empty());
+  EXPECT_EQ(codegen->GetApiName(), "Unsupported");
+
+  auto att = definition.GetAscIrAttImpl("2201");
+  ASSERT_NE(att, nullptr);
+  EXPECT_EQ(att->GetApiPerf(), nullptr);
+  EXPECT_EQ(att->GetAscendCApiPerfTable(), nullptr);
+}
+
 TEST_F(AscendGraphDumpUT, test_dump_when_env_not_set) {
   AscGraph graph("test");
   ::ascir::utils::DumpGraph(graph, "empty_stage0");
