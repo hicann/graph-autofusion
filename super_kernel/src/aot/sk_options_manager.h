@@ -240,12 +240,11 @@ class SuperKernelOptionsManager {
   bool EnableDebug() const;
 
   /*!
-   * \brief Get an inner option by its type
-   * \param optType The inner option type to retrieve
-   * \return Pointer to the option, or nullptr if not found
+   * \brief Check whether an internal platform capability is enabled
+   * \param capability Internal platform capability
+   * \return True if the capability is enabled
    */
-  OptOptionBase *GetOption(SkInnerOptionType optType);
-  const OptOptionBase *GetOption(SkInnerOptionType optType) const;
+  bool IsInnerCapabilityEnabled(SkInnerCapability capability) const;
 
   /*!
    * \brief Set option value from an aclskOption structure
@@ -268,11 +267,11 @@ class SuperKernelOptionsManager {
  private:
   void RegisterDefaultOptions();
   void RegisterDefaultSkOptions();
-  void RegisterDefaultInnerOptions();
-  void ApplySoCSpecificOptions();
+  void RegisterDefaultInnerCapabilities();
+  void ApplySoCSpecificCapabilities();
 
   std::unordered_map<aclskOptionType, std::unique_ptr<OptOptionBase>> optionMap;
-  std::unordered_map<SkInnerOptionType, std::unique_ptr<OptOptionBase>> innerOptionMap;
+  std::unordered_map<SkInnerCapability, std::unique_ptr<OptOptionBase>> innerCapabilityMap;
 };
 
 struct OptionDumpInfo {

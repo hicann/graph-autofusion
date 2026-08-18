@@ -22,6 +22,15 @@
 #include "sk_node.h"
 #include "stub/ut_common_stubs.h"
 
+namespace {
+
+void SetInnerCapability(SuperKernelOptionsManager &options, SkInnerCapability capability, uint32_t value) {
+  options.RegisterDefaultInnerCapabilities();
+  options.innerCapabilityMap[capability]->SetValue(value);
+}
+
+}  // namespace
+
 class SkTaskBuilderTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -769,6 +778,7 @@ TEST_F(SkTaskBuilderTest, SyncOptimizationAndDispatchSyncBranches) {
 
 TEST_F(SkTaskBuilderTest, Build_WithCustomNotifyWaitReset_Success) {
   opts->AddOption(std::make_unique<NumberOptOption>("split_mode", aclskOptionType::SPLIT_MODE, 1, 1, 4));
+  SetInnerCapability(*opts, SkInnerCapability::MIX_KERNEL_SPLIT, 1);
 
   auto *k0 = CreateKernelNodeEx(7001, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::MIX_AIC_1_1);
   auto *k1 = CreateKernelNodeEx(7002, 1, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::MIX_AIC_1_2);
@@ -793,9 +803,7 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_RecordsMaxDcacheSize) {
   auto *splitOpt = opts->GetOption(aclskOptionType::SPLIT_MODE);
   ASSERT_NE(splitOpt, nullptr);
   splitOpt->SetValue(1);
-  auto *setDynUbufSizeOpt = opts->GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
-  ASSERT_NE(setDynUbufSizeOpt, nullptr);
-  setDynUbufSizeOpt->SetValue(1);
+  SetInnerCapability(*opts, SkInnerCapability::DYN_UBUF_SIZE, 1);
 
   auto *k0 = CreateKernelNodeEx(7051, 0, INVALID_TASK_ID, 7052, SkKernelType::AIV_ONLY);
   auto *k1 = CreateKernelNodeEx(7052, 0, 7051, 7053, SkKernelType::AIV_ONLY);
@@ -827,14 +835,12 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_RecordsMaxDcacheSize) {
   EXPECT_STREQ(SkUtGetLastBinaryGetFunctionName(), "sk_entry_mix11_simt");
 }
 
-TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_DynUbufOptionDisabledSkipsRecord) {
+TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_DynUbufCapabilityDisabledSkipsRecord) {
   opts->RegisterDefaultOptions();
   auto *splitOpt = opts->GetOption(aclskOptionType::SPLIT_MODE);
   ASSERT_NE(splitOpt, nullptr);
   splitOpt->SetValue(1);
-  auto *setDynUbufSizeOpt = opts->GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
-  ASSERT_NE(setDynUbufSizeOpt, nullptr);
-  EXPECT_EQ(setDynUbufSizeOpt->GetIntValue(), 0);
+  SetInnerCapability(*opts, SkInnerCapability::DYN_UBUF_SIZE, 0);
 
   auto *k0 = CreateKernelNodeEx(7061, 0, INVALID_TASK_ID, 7062, SkKernelType::AIV_ONLY);
   auto *k1 = CreateKernelNodeEx(7062, 0, 7061, INVALID_TASK_ID, SkKernelType::AIV_ONLY);
@@ -865,9 +871,7 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTaskMissingAllocUbufSize_ReturnsEmpty) {
   auto *splitOpt = opts->GetOption(aclskOptionType::SPLIT_MODE);
   ASSERT_NE(splitOpt, nullptr);
   splitOpt->SetValue(1);
-  auto *setDynUbufSizeOpt = opts->GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
-  ASSERT_NE(setDynUbufSizeOpt, nullptr);
-  setDynUbufSizeOpt->SetValue(1);
+  SetInnerCapability(*opts, SkInnerCapability::DYN_UBUF_SIZE, 1);
 
   auto *k0 = CreateKernelNodeEx(7071, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::AIV_ONLY);
   k0->nodeInfos.kernelInfos.isSimtOp = true;
@@ -886,9 +890,7 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTaskUbufSizeOverflow_ReturnsEmpty) {
   auto *splitOpt = opts->GetOption(aclskOptionType::SPLIT_MODE);
   ASSERT_NE(splitOpt, nullptr);
   splitOpt->SetValue(1);
-  auto *setDynUbufSizeOpt = opts->GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
-  ASSERT_NE(setDynUbufSizeOpt, nullptr);
-  setDynUbufSizeOpt->SetValue(1);
+  SetInnerCapability(*opts, SkInnerCapability::DYN_UBUF_SIZE, 1);
 
   auto *k0 = CreateKernelNodeEx(7072, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::AIV_ONLY);
   k0->nodeInfos.kernelInfos.isSimtOp = true;

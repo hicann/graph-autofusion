@@ -1062,11 +1062,7 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
   nodeInfos.kernelInfos.hasAllocUbufSize = false;
   nodeInfos.kernelInfos.dynUbufSize = 0;
   nodeInfos.kernelInfos.allocUbufSize = 0;
-  if (opts == nullptr) {
-    return;
-  }
-  const auto *simtCheckOpt = opts->GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  if (simtCheckOpt == nullptr || simtCheckOpt->GetIntValue() != 1) {
+  if (opts == nullptr || !opts->IsInnerCapabilityEnabled(SkInnerCapability::SIMT_OP_CHECK)) {
     return;
   }
   SkKernelType kernelType = nodeInfos.kernelInfos.kernelType;

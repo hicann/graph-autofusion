@@ -2412,8 +2412,7 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
     splitBinCount = splitOptions->GetIntValue();
   }
 
-  auto *mixSplitOpt = opts.GetOption(SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT);
-  if (mixSplitOpt != nullptr && mixSplitOpt->GetIntValue() == 1) {
+  if (opts.IsInnerCapabilityEnabled(SkInnerCapability::MIX_KERNEL_SPLIT)) {
     if (!PrecomputeSyncRelationsByMixGroups(tasks)) {
       SK_LOGE("Build failed: precompute sync relations with mix kernel split failed");
       return {};
@@ -2645,8 +2644,7 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
 
   bool useSimtEntry = false;
   size_t skMaxDcacheSize = 0;
-  const auto *setDynUbufSizeOpt = opts.GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
-  if (setDynUbufSizeOpt != nullptr && setDynUbufSizeOpt->GetIntValue() == 1) {
+  if (opts.IsInnerCapabilityEnabled(SkInnerCapability::DYN_UBUF_SIZE)) {
     const SimtDcacheSizeResult dcacheSizeResult = CalculateSimtDcacheSize(tasks);
     if (!dcacheSizeResult.areSimtUbufSizesValid) {
       SK_LOGE("Build failed: SIMT ubuf size validation failed");
@@ -2679,9 +2677,6 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
   launchInfo.skFuncName = skFuncName;
   launchInfo.useSimtEntry = useSimtEntry;
   launchInfo.skMaxDcacheSize = skMaxDcacheSize;
-  if (useSimtEntry) {
-    SK_LOGI("Build launch info with SIMT max dcache size, skMaxDcacheSize=%zu", skMaxDcacheSize);
-  }
 
   // Generate task queue JSON for aggregation
   SK_LOGI("SkTaskToQueueJson: generating task queue JSON for scopeId=%u", scopeId);
