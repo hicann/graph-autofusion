@@ -586,6 +586,7 @@ codegen_e2e_st() {
                     concat_inter_dim_e2e \
                     load_ub2ub_abs_store_expect_code_e2e \
                     concat_3d_last_dim_e2e \
+                    dynamic_inputs_and_outputs_e2e \
                     load_isfinite_store_e2e \
                     load_max_min_store_e2e \
                     load_rsum_block_store_e2e \

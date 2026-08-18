@@ -889,7 +889,7 @@ std::string TilingLib::TilingFuncDef(const ascir::FusedScheduledResult &fused_sc
      << std::endl;
   ss << kTilingHeadCceKtTestGuard << std::endl;
   // 生成判断是否为静态shape的接口
-  bool is_static = IsStaticSchedResult(elemwise_schedule_result);
+  bool is_static = IsFrontendStaticSchedResult(elemwise_schedule_result);
   ss << GenCheckStaticShapeFunc(is_static);
   if (ascgen_utils::CanUseTilingKey(elemwise_schedule_result)) {
     ss << this->GenFindBestTilingKeyFunc(elemwise_schedule_result, tiling_data_name);
@@ -1136,7 +1136,7 @@ std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedSchedul
 void TilingLib::GenInductorShapeDim(const ascir::FusedScheduledResult &elemwise_schedule_result,
                                     codegen::PgoShapeStringStream &pgo_shape_dim,
                                     std::vector<std::string> &dynamic_shape_vars, const std::string &tiling_var) const {
-  for (auto vars : elemwise_schedule_result.origin_vars) {
+  for (auto vars : GetFrontendShapeVars(elemwise_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       dynamic_shape_vars.push_back(var_define);
@@ -1289,7 +1289,7 @@ std::string TilingLib::GenTilingFunc(const std::map<std::string, std::string> &s
   std::stringstream ss;
   codegen::PgoShapeStringStream pgo_shape_dim;
   std::string tiling_var = "tiling->";
-  for (auto vars : fused_schedule_result.origin_vars) {
+  for (auto vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       auto it = shape_info.find(var_define);
@@ -1395,7 +1395,7 @@ static void GetTilingParse(std::string &tiling_parse, int &vector_core_num) {
 static void FillShapeDimInfo(const ascir::FusedScheduledResult &fused_schedule_result,
                              const std::map<std::string, std::string> &shape_info, std::stringstream &shape_dim_def,
                              std::stringstream &shape_dim_param) {
-  for (const auto &vars : fused_schedule_result.origin_vars) {
+  for (const auto &vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!vars.IsConstExpr()) {
       std::string var_define = std::string(vars.Str().get());
       auto it = shape_info.find(var_define);
@@ -1786,7 +1786,7 @@ std::string TilingLib::GenTilingCacheFunc(const ascir::FusedScheduledResult &fus
   uint32_t index = 0U;
   std::stringstream ss_tmp;
 
-  for (const auto &vars : fused_schedule_result.origin_vars) {
+  for (const auto &vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       auto it = shape_info.find(var_define);
@@ -1828,7 +1828,7 @@ std::string TilingLib::GenDfxInputSymbolInfo(const ascir::FusedScheduledResult &
      << std::endl;
 
   bool first_sym = true;
-  for (const auto &vars : fused_schedule_result.origin_vars) {
+  for (const auto &vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       auto it = shape_info.find(var_define);

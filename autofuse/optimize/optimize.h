@@ -12,6 +12,7 @@
 #define OPTIMIZE_OPTIMIZE_H_
 
 #include "ascir.h"
+#include "ascgraph_info_complete.h"
 #include "schedule_result.h"
 #include "ascgen_log.h"
 
@@ -79,6 +80,12 @@ class Optimizer {
    */
   Status OptimizeFusedAscBackend(const af::ComputeGraphPtr &fused_graph,
                                  ::ascir::FusedScheduledResult &fused_scheduled_result) const;
+  Status DeserializeAscGraphNodes(const af::ComputeGraphPtr &fused_graph,
+                                  std::map<af::Node *, af::AscGraph> &asc_backend_to_ascgraph,
+                                  SizeVarSet &original_var_set, std::vector<af::Expression> &frontend_shape_vars);
+  Status CollectAscBackendNodes(const af::ComputeGraphPtr &fused_graph,
+                                std::map<af::Node *, af::AscGraph> &asc_backend_to_ascgraph,
+                                SizeVarSet &original_var_set, std::vector<af::Expression> &frontend_shape_vars) const;
 
   /**
    * Buf/Que 分配

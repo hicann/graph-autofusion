@@ -349,7 +349,7 @@ std::string TilingLib::ExternFunctionDeclare(const ascir::FusedScheduledResult &
   std::stringstream ss;
 
   // 生成判断是否为静态shape的接口
-  bool is_static = IsStaticSchedResult(fused_schedule_result);
+  bool is_static = IsFrontendStaticSchedResult(fused_schedule_result);
   ss << GenCheckStaticShapeFunc(is_static);
   return ss.str();
 }

@@ -215,13 +215,29 @@ af::Expression CalculateWorkspaceSize(const std::vector<af::AscNodePtr> &workspa
 }
 
 bool IsStaticSchedResult(const ascir::FusedScheduledResult &fused_schedule_result) {
-  for (auto &var : fused_schedule_result.origin_vars) {
+  for (const auto &var : fused_schedule_result.origin_vars) {
     GELOGD("var:%s, is_const:%d", var.Str().get(), static_cast<int32_t>(var.IsConstExpr()));
     if (!var.IsConstExpr()) {
       return false;
     }
   }
 
+  return true;
+}
+
+const std::vector<af::Expression> &GetFrontendShapeVars(const ascir::FusedScheduledResult &fused_schedule_result) {
+  if (fused_schedule_result.frontend_shape_vars_collected || !fused_schedule_result.frontend_shape_vars.empty()) {
+    return fused_schedule_result.frontend_shape_vars;
+  }
+  return fused_schedule_result.origin_vars;
+}
+
+bool IsFrontendStaticSchedResult(const ascir::FusedScheduledResult &fused_schedule_result) {
+  for (const auto &var : GetFrontendShapeVars(fused_schedule_result)) {
+    if (!var.IsConstExpr()) {
+      return false;
+    }
+  }
   return true;
 }
 

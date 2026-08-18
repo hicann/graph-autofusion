@@ -496,7 +496,7 @@ std::map<std::string, std::string> TilingLib::GenerateCVFusionDynamic(
   std::stringstream ss;
   std::stringstream call_cube_tiling;
   std::stringstream shape_symbol;
-  for (auto vars : fused_schedule_result.origin_vars) {
+  for (auto vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       auto it = shape_info.find(var_define);

@@ -356,7 +356,7 @@ std::string TilingLib::GenGetTopnSolutionsFuncForInductor(const ascir::FusedSche
   std::stringstream ss;
   codegen::PgoShapeStringStream pgo_shape_dim;
   int symbol_value_count = 0;
-  for (auto vars : fused_schedule_result.origin_vars) {
+  for (auto vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       pgo_shape_dim.shape_dim_def << "int64_t " << var_define << ", ";
@@ -398,7 +398,7 @@ void TilingLib::GenTopnInitSearchTiling(std::stringstream &ss, const ascir::Fuse
   ss << "  search_tiling.set_ub_size(limit->ub_size - 256);" << std::endl;
   {
     int idx = 0;
-    for (auto vars : fused_schedule_result.origin_vars) {
+    for (auto vars : GetFrontendShapeVars(fused_schedule_result)) {
       if (!(vars.IsConstExpr())) {
         std::string var_define = std::string(vars.Str().get());
         ss << "  const uint32_t " << var_define << " = static_cast<uint32_t>(request.symbol_values[" << idx << "]);"

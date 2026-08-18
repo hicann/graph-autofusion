@@ -9,6 +9,7 @@
  */
 
 #include "optimize.h"
+#include <utility>
 #include <queue>
 #include "attr_utils.h"
 #include "ascir_ops.h"
@@ -552,18 +553,10 @@ Status Optimizer::ExpandReduceFirstStageResults(std::vector<autoschedule::AutoSc
 
 Optimizer::Optimizer(const OptimizerOptions &options) : options_(options) {}
 
-Status Optimizer::Optimize(const af::ComputeGraphPtr &fused_graph,
-                           ascir::FusedScheduledResult &fused_scheduled_result) {
-  GELOGI("Fused graph optimize in, graph_name:[%s].", fused_graph->GetName().c_str());
-  // RAII Guard，函数结束时自动清空 fused_graph_name
-  ascir::utils::FusedGraphNameGuard guard(fused_graph->GetName());
-  ascir::utils::DumpComputeGraph(fused_graph, "BaseFusedGraph");
-  if (options_.graph_type == GraphType::kFusedAscBackend) {
-    return OptimizeFusedAscBackend(fused_graph, fused_scheduled_result);
-  }
-  // deserialize ascgraph on ascgraph node
-  std::map<af::Node *, af::AscGraph> asc_backend_to_ascgraph;
-  SizeVarSet original_var_set;
+Status Optimizer::DeserializeAscGraphNodes(const af::ComputeGraphPtr &fused_graph,
+                                           std::map<af::Node *, af::AscGraph> &asc_backend_to_ascgraph,
+                                           SizeVarSet &original_var_set,
+                                           std::vector<af::Expression> &frontend_shape_vars) {
   for (auto &node : fused_graph->GetDirectNodePtr()) {
     GE_ASSERT_NOTNULL(node);
     if (node->GetType() == kAscGraphNodeType) {
@@ -574,6 +567,10 @@ Status Optimizer::Optimize(const af::ComputeGraphPtr &fused_graph,
       af::AscGraph ascgraph(graph_name.c_str());
       GE_CHK_STATUS_RET(af::AscGraphUtils::DeserializeFromReadable(*serialized_ascgraph, ascgraph),
                         "DeserializeFromBinary failed, graph:[%s].", fused_graph->GetName().c_str());
+      std::vector<af::Expression> graph_shape_vars;
+      GE_CHK_STATUS_RET(AscGraphInfoComplete::CollectFrontendShapeVars(ascgraph, graph_shape_vars),
+                        "Collect frontend shape vars failed, graph:[%s].", ascgraph.GetName().c_str());
+      frontend_shape_vars.insert(frontend_shape_vars.end(), graph_shape_vars.begin(), graph_shape_vars.end());
       ascgraph.SetGraphType(af::AscGraphType::kImplGraph);
       GE_CHK_STATUS_RET(AscGraphInfoComplete::CompleteApiInfo(ascgraph), "CompleteApiInfo failed");
       AscGraphInfoComplete::AppendOriginalSizeVar(ascgraph, original_var_set);
@@ -583,7 +580,24 @@ Status Optimizer::Optimize(const af::ComputeGraphPtr &fused_graph,
   }
   GE_ASSERT_TRUE(!asc_backend_to_ascgraph.empty(), "The fused graph [%s] is invalid, which has none AscBackend node.",
                  fused_graph->GetName().c_str());
+  return af::SUCCESS;
+}
 
+Status Optimizer::Optimize(const af::ComputeGraphPtr &fused_graph,
+                           ascir::FusedScheduledResult &fused_scheduled_result) {
+  GELOGI("Fused graph optimize in, graph_name:[%s].", fused_graph->GetName().c_str());
+  // RAII Guard，函数结束时自动清空 fused_graph_name
+  ascir::utils::FusedGraphNameGuard guard(fused_graph->GetName());
+  ascir::utils::DumpComputeGraph(fused_graph, "BaseFusedGraph");
+  if (options_.graph_type == GraphType::kFusedAscBackend) {
+    return OptimizeFusedAscBackend(fused_graph, fused_scheduled_result);
+  }
+  std::map<af::Node *, af::AscGraph> asc_backend_to_ascgraph;
+  SizeVarSet original_var_set;
+  std::vector<af::Expression> frontend_shape_vars;
+  GE_CHK_STATUS_RET(
+      DeserializeAscGraphNodes(fused_graph, asc_backend_to_ascgraph, original_var_set, frontend_shape_vars),
+      "Deserialize ascgraph nodes failed, graph:[%s].", fused_graph->GetName().c_str());
   // If there is more than one Ascend backend on the fused graph, it is necessary to determine whether partial sub -
   // graphs can be merged based on the supported scenarios. If there are still more than one Ascend nodes after the
   // merging, it should be converted into multiple schedule groups.
@@ -594,22 +608,25 @@ Status Optimizer::Optimize(const af::ComputeGraphPtr &fused_graph,
   } else {
     hint_graph = asc_backend_to_ascgraph.begin()->second;
   }
-
   auto owner_graph = af::AscGraphUtils::GetComputeGraph(hint_graph);
   GE_ASSERT_NOTNULL(owner_graph);
   owner_graph->SetName(ascgen_utils::GenValidName(fused_graph->GetName()));
   GE_ASSERT_SUCCESS(Optimize(hint_graph, fused_scheduled_result), "optimize failed, graph:[%s].",
                     hint_graph.GetName().c_str());
+  GE_CHK_STATUS_RET(AscGraphInfoComplete::NormalizeFrontendShapeVars(frontend_shape_vars),
+                    "Normalize frontend shape vars failed, graph:[%s].", fused_graph->GetName().c_str());
+  fused_scheduled_result.frontend_shape_vars = std::move(frontend_shape_vars);
+  fused_scheduled_result.frontend_shape_vars_collected = true;
   // modify origin var and fused_graph
   fused_scheduled_result.fused_graph_name = fused_graph->GetName().c_str();
   fused_scheduled_result.origin_vars.assign(original_var_set.begin(), original_var_set.end());
   return af::SUCCESS;
 }
 
-Status Optimizer::OptimizeFusedAscBackend(const af::ComputeGraphPtr &fused_graph,
-                                          ascir::FusedScheduledResult &fused_scheduled_result) const {
-  std::map<af::Node *, af::AscGraph> asc_backend_to_ascgraph;
-  SizeVarSet original_var_set;
+Status Optimizer::CollectAscBackendNodes(const af::ComputeGraphPtr &fused_graph,
+                                         std::map<af::Node *, af::AscGraph> &asc_backend_to_ascgraph,
+                                         SizeVarSet &original_var_set,
+                                         std::vector<af::Expression> &frontend_shape_vars) const {
   for (auto &node : fused_graph->GetDirectNodePtr()) {
     GE_ASSERT_NOTNULL(node);
     if (node->GetType() == kAscBackendType) {
@@ -618,6 +635,10 @@ Status Optimizer::OptimizeFusedAscBackend(const af::ComputeGraphPtr &fused_graph
       auto fuse_asc_graph = fuse_attr->GetAscGraph();
       GE_ASSERT_NOTNULL(fuse_asc_graph, "Cannot get ascgraph from ascbc node:[%s].", node->GetNamePtr());
       ascir::utils::DumpGraph(*fuse_asc_graph, "AutoFuseBeforeRemoveDanglingNodes");
+      std::vector<af::Expression> graph_shape_vars;
+      GE_CHK_STATUS_RET(AscGraphInfoComplete::CollectFrontendShapeVars(*fuse_asc_graph, graph_shape_vars),
+                        "Collect frontend shape vars failed, graph:[%s].", fuse_asc_graph->GetName().c_str());
+      frontend_shape_vars.insert(frontend_shape_vars.end(), graph_shape_vars.begin(), graph_shape_vars.end());
       GE_CHK_STATUS_RET(RemoveDanglingNodes(*fuse_asc_graph), "Remove dangling nodes failed, graph:[%s].",
                         fuse_asc_graph->GetName().c_str());
       ::ascir::utils::DumpGraph(*fuse_asc_graph, "AutoFuseBeforeOptimize");
@@ -627,6 +648,20 @@ Status Optimizer::OptimizeFusedAscBackend(const af::ComputeGraphPtr &fused_graph
   }
   GE_ASSERT_TRUE(!asc_backend_to_ascgraph.empty(), "The fused graph [%s] is invalid, which has none AscBackend node.",
                  fused_graph->GetName().c_str());
+  GE_CHK_STATUS_RET(AscGraphInfoComplete::NormalizeFrontendShapeVars(frontend_shape_vars),
+                    "Normalize frontend shape vars failed, graph:[%s].", fused_graph->GetName().c_str());
+  return af::SUCCESS;
+}
+
+Status Optimizer::OptimizeFusedAscBackend(const af::ComputeGraphPtr &fused_graph,
+                                          ascir::FusedScheduledResult &fused_scheduled_result) const {
+  std::map<af::Node *, af::AscGraph> asc_backend_to_ascgraph;
+  SizeVarSet original_var_set;
+  std::vector<af::Expression> frontend_shape_vars;
+  GE_CHK_STATUS_RET(CollectAscBackendNodes(fused_graph, asc_backend_to_ascgraph, original_var_set, frontend_shape_vars),
+                    "Collect ascbackend nodes failed, graph:[%s].", fused_graph->GetName().c_str());
+  fused_scheduled_result.frontend_shape_vars = std::move(frontend_shape_vars);
+  fused_scheduled_result.frontend_shape_vars_collected = true;
 
   GE_ASSERT_SUCCESS(FusedGraphModifier::SubgraphConnectionsToWorkspace(fused_graph, asc_backend_to_ascgraph),
                     "Failed to add workspace between ascgraphs.");
@@ -965,6 +1000,12 @@ Status Optimizer::LoadOpSeqAdjust(const af::AscGraph &impl_graph) {
 
 Status Optimizer::Optimize(af::AscGraph &hint_graph, FusedScheduledResult &fused_scheduled_result) {
   ascir::utils::DumpGraph(hint_graph, "AutoFuseBeforeRemoveDanglingNodes");
+  GE_CHK_STATUS_RET(
+      AscGraphInfoComplete::CollectFrontendShapeVars(hint_graph, fused_scheduled_result.frontend_shape_vars),
+      "Collect frontend shape vars failed, graph:[%s].", hint_graph.GetName().c_str());
+  fused_scheduled_result.frontend_shape_vars_collected = true;
+  GE_CHK_STATUS_RET(AscGraphInfoComplete::NormalizeFrontendShapeVars(fused_scheduled_result.frontend_shape_vars),
+                    "Normalize frontend shape vars failed, graph:[%s].", hint_graph.GetName().c_str());
   GE_CHK_STATUS_RET(RemoveDanglingNodes(hint_graph), "Remove dangling nodes failed, graph:[%s].",
                     hint_graph.GetName().c_str());
   ascir::utils::DumpGraph(hint_graph, "AutoFuseBeforeOptimize");

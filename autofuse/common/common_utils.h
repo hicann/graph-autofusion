@@ -162,6 +162,14 @@ void GetApiReservedBlockNum(const ascir::ImplGraph &graph, uint32_t &total_blk_n
 bool IsScalarNextNodeSupportBlkTensor(const af::AscNodePtr &node);
 bool IsUbScalarLoad(const af::AscNodePtr &node);
 bool IsStaticSchedResult(const ascir::FusedScheduledResult &fused_schedule_result);
+
+// Return the frontend ABI symbol list.  Results produced before the new field
+// was introduced may only have origin_vars; keep that as a compatibility
+// fallback for legacy callers and unit fixtures.
+const std::vector<af::Expression> &GetFrontendShapeVars(const ascir::FusedScheduledResult &fused_schedule_result);
+// Return the frontend static-shape judgment for the external ABI.  Internal
+// tiling-data generation must continue to use IsStaticSchedResult().
+bool IsFrontendStaticSchedResult(const ascir::FusedScheduledResult &fused_schedule_result);
 af::Status ScalarValuePreProcess(const std::string &ori_value, const std::string &dtype,
                                  std::string &after_pre_pro_value);
 void MergeBrcAxisRepeats(const std::vector<af::Expression> &input0_repeats,  // 输入0的vector_repeats, 带广播

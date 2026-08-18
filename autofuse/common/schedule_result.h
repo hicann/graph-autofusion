@@ -57,6 +57,14 @@ struct FusedScheduledResult {
   std::vector<af::AscNodePtr> input_nodes;
   std::vector<af::AscNodePtr> output_nodes;
   std::vector<af::AscNodePtr> workspace_nodes;
+  // Symbols exposed by the frontend AutofuseTiling ABI.  This list is captured
+  // from the original ASC graph before graph optimization and must not be
+  // rebuilt from impl graphs, since an impl graph may legitimately not use all
+  // frontend shape symbols.
+  std::vector<af::Expression> frontend_shape_vars;
+  // Distinguish a captured empty frontend symbol list (static frontend graph)
+  // from legacy results that predate frontend_shape_vars.
+  bool frontend_shape_vars_collected{false};
   std::vector<af::Expression> origin_vars;
   std::vector<std::vector<ScheduledResult>> node_idx_to_scheduled_results;
   GmTensorSizes gm_tensor_sizes;

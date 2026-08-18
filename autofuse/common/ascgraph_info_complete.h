@@ -11,6 +11,9 @@
 #ifndef HINT_GRAPH_INFO_COMPLETE_H
 #define HINT_GRAPH_INFO_COMPLETE_H
 
+#include <vector>
+#include <string>
+
 #include "ascendc_ir.h"
 #include "ascgen_log.h"
 #include "graph/symbolizer/symbolic_utils.h"
@@ -32,6 +35,15 @@ class AscGraphInfoComplete {
   static Status CompleteApiInfo(const af::AscGraph &optimize_graph);
 
   static void AppendOriginalSizeVar(const af::AscGraph &graph, SizeVarSet &size_vars);
+
+  // Capture the complete frontend shape ABI before optimization can remove or
+  // rewrite size vars.  This includes symbols embedded directly in ASC axis
+  // and tensor expressions.  For Inductor's ksN naming convention this restores
+  // the frontend order using the numeric suffix; legacy/non-Inductor symbols
+  // keep the existing deterministic expression order.
+  static Status CollectFrontendShapeVars(const af::AscGraph &graph, std::vector<af::Expression> &frontend_shape_vars);
+
+  static Status NormalizeFrontendShapeVars(std::vector<af::Expression> &frontend_shape_vars);
 };
 }  // namespace optimize
 

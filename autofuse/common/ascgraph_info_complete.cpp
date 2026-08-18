@@ -9,8 +9,14 @@
  */
 
 #include "ascgraph_info_complete.h"
+#include <algorithm>
+#include <cctype>
+#include <limits>
 #include <map>
 #include <queue>
+#include <set>
+#include <string>
+#include <utility>
 #include "ascir_ops.h"
 #include "ascendc_ir_def.h"
 #include "graph/symbolizer/symbolic.h"
@@ -34,6 +40,26 @@ static Status GetNodeIrAttrOffset(const af::NodePtr &node, af::Expression &offse
 void InsertFreeSymbolsIntoVarSet(const af::Expression &exp, SizeVarSet &size_vars) {
   std::vector<af::Expression> free_symbols = exp.FreeSymbols();
   size_vars.insert(free_symbols.begin(), free_symbols.end());
+}
+
+bool ParseKsIndex(const std::string &name, uint64_t &index) {
+  if (name.size() <= 2U || name[0] != 'k' || name[1] != 's') {
+    return false;
+  }
+  uint64_t parsed = 0U;
+  for (size_t i = 2U; i < name.size(); ++i) {
+    const unsigned char ch = static_cast<unsigned char>(name[i]);
+    if (!std::isdigit(ch)) {
+      return false;
+    }
+    const uint64_t digit = static_cast<uint64_t>(ch - static_cast<unsigned char>('0'));
+    if (parsed > (std::numeric_limits<uint64_t>::max() - digit) / 10U) {
+      return false;
+    }
+    parsed = parsed * 10U + digit;
+  }
+  index = parsed;
+  return true;
 }
 
 void CompleteDataApiInfo(af::AscNodePtr &node) {
@@ -251,5 +277,67 @@ void AscGraphInfoComplete::AppendOriginalSizeVar(const af::AscGraph &graph, Size
       InsertFreeSymbolsIntoVarSet(exp, size_vars);
     }
   }
+}
+
+Status AscGraphInfoComplete::CollectFrontendShapeVars(const af::AscGraph &graph,
+                                                      std::vector<af::Expression> &frontend_shape_vars) {
+  frontend_shape_vars.clear();
+  SizeVarSet all_shape_vars;
+  for (const auto &size_var : graph.GetAllSizeVar()) {
+    GE_ASSERT_NOTNULL(size_var);
+    all_shape_vars.insert(size_var->expr);
+  }
+  // ASC graphs produced by the frontend may use Symbol("sN") directly in
+  // axis/repeat/stride expressions without registering it as a SizeVar.  The
+  // original-symbol collector covers those expressions before optimization
+  // removes unused axes or rewrites implementation graphs.
+  AppendOriginalSizeVar(graph, all_shape_vars);
+  for (const auto &expr : all_shape_vars) {
+    if (!expr.IsConstExpr()) {
+      frontend_shape_vars.emplace_back(expr);
+    }
+  }
+  return af::SUCCESS;
+}
+
+Status AscGraphInfoComplete::NormalizeFrontendShapeVars(std::vector<af::Expression> &frontend_shape_vars) {
+  std::set<std::string> seen_names;
+  std::vector<af::Expression> unique_vars;
+  bool all_ks_names = true;
+  std::vector<std::pair<uint64_t, af::Expression>> ks_vars;
+  for (const auto &expr : frontend_shape_vars) {
+    if (expr.IsConstExpr()) {
+      continue;
+    }
+    const std::string name = af::SymbolicUtils::ToString(expr);
+    if (!seen_names.insert(name).second) {
+      continue;
+    }
+    unique_vars.emplace_back(expr);
+    uint64_t index = 0U;
+    if (!ParseKsIndex(name, index)) {
+      all_ks_names = false;
+    } else {
+      ks_vars.emplace_back(index, expr);
+    }
+  }
+
+  if (!all_ks_names) {
+    std::sort(unique_vars.begin(), unique_vars.end(), ExpressionComparator{});
+    frontend_shape_vars = std::move(unique_vars);
+    return af::SUCCESS;
+  }
+
+  std::sort(ks_vars.begin(), ks_vars.end(), [](const auto &lhs, const auto &rhs) {
+    if (lhs.first != rhs.first) {
+      return lhs.first < rhs.first;
+    }
+    return af::SymbolicUtils::ToString(lhs.second) < af::SymbolicUtils::ToString(rhs.second);
+  });
+  frontend_shape_vars.clear();
+  for (const auto &item : ks_vars) {
+    frontend_shape_vars.emplace_back(item.second);
+  }
+  return af::SUCCESS;
 }
 }  // namespace optimize
