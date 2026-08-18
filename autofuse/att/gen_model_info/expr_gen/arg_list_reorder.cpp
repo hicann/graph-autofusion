@@ -249,9 +249,10 @@ bool ArgListReorder::IsReduceInputTensor(const TensorPtr &tensor, const SubAxis 
   if ((tensor == nullptr) || (tensor->data_type_size == 0U)) {
     return false;
   }
-  return std::any_of(tensor->dim_info.begin(), tensor->dim_info.end(), [&](const SubAxis *dim) {
-    return IsSameOrRelatedAxis(dim, reduce_axis) || IsReduceOrigAxis(dim, reduce_axis_ori_axes_set);
-  });
+  return std::any_of(tensor->dim_info.begin(), tensor->dim_info.end(),
+                     [this, reduce_axis, &reduce_axis_ori_axes_set](const SubAxis *dim) {
+                       return IsSameOrRelatedAxis(dim, reduce_axis) || IsReduceOrigAxis(dim, reduce_axis_ori_axes_set);
+                     });
 }
 
 bool ArgListReorder::CollectReduceTailAxis(const TensorPtr &tensor, const SubAxis *reduce_axis,
@@ -282,9 +283,10 @@ bool ArgListReorder::IsReduceTailTileAxis(const SubAxis *tail_axis) const {
   if (tail_axis == nullptr) {
     return false;
   }
-  return std::any_of(tuning_space_->sub_axes.begin(), tuning_space_->sub_axes.end(), [&](const SubAxisPtr &axis) {
-    return (axis->name == tail_axis->name) && (axis->axis_type == AxisPosition::INNER) && !axis->is_bind_multi_core;
-  });
+  return std::any_of(
+      tuning_space_->sub_axes.begin(), tuning_space_->sub_axes.end(), [&tail_axis](const SubAxisPtr &axis) {
+        return (axis->name == tail_axis->name) && (axis->axis_type == AxisPosition::INNER) && !axis->is_bind_multi_core;
+      });
 }
 
 bool ArgListReorder::TryGetReduceTailTileInfo(const NodeInfo &node,
@@ -684,7 +686,7 @@ void ArgListReorder::MakeSureLoadStoreInnerestSameOrder(const std::vector<AttAxi
   }
 
   const bool overlaps_load_store = std::any_of(
-      equal_order_reduce_tail_axes_.begin(), equal_order_reduce_tail_axes_.end(), [&](const std::string &name) {
+      equal_order_reduce_tail_axes_.begin(), equal_order_reduce_tail_axes_.end(), [this](const std::string &name) {
         return load_store_inner_most_dims_.find(name) != load_store_inner_most_dims_.end();
       });
   if (overlaps_load_store) {
