@@ -136,6 +136,7 @@ Status NddmaTemplate::MergeLoadAndTranspose(const af::AscNodePtr &load_node, af:
   GE_CHECK_NOTNULL(peer_in_anchor);
   const auto &out_node = std::dynamic_pointer_cast<af::AscNode>(peer_in_anchor->GetOwnerNode());
   GE_CHECK_NOTNULL(out_node);
+  load_node->attr.sched.axis = out_node->attr.sched.axis;
   load_node->outputs[0].attr.vectorized_strides = out_node->outputs[0].attr.vectorized_strides;
   load_node->outputs[0].attr.vectorized_axis = out_node->outputs[0].attr.vectorized_axis;
   load_node->GetOpDesc()->SetType("Nddma");

@@ -914,6 +914,10 @@ ApiPerfRegister<ApiPerf> airy_ai_api_perf_v2(ApiPerfRegisterV2(kAiryAi, GetPerfF
                                                                &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> erfinv_api_perf_v2(ApiPerfRegisterV2(kErfinv, GetPerfFunc(kUnitVector), nullptr,
                                                               &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> rand_api_perf_v2(ApiPerfRegisterV2(kRand, GetPerfFunc(kUnitVector), nullptr,
+                                                            &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> randn_api_perf_v2(ApiPerfRegisterV2(kRandn, GetPerfFunc(kUnitVector), nullptr,
+                                                             &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> square_api_perf_v2(ApiPerfRegisterV2(kSquare, GetPerfFunc(kSquare + "V2"), nullptr,
                                                               &perf_param_table_v2, &tiling_schedule_config_table_v2));
 

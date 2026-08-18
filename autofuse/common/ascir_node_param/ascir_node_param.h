@@ -118,6 +118,7 @@ struct AscirNodeParams {
 using AscirNodeParamsPtr = std::shared_ptr<AscirNodeParams>;
 
 AscirNodeParamsPtr GetAscirNodeParams(af::AscNodePtr node);
+AscirNodeParamsPtr GetOrCreateAscirNodeParams(af::AscNodePtr node);
 const codegen::ReduceSpecificParams &GetCanonicalReduceParams(const ReduceNodeParams &params);
 ge::Expression ResolveForAtt(const ParamExprProduct &expr);
 af::Status ValidateReduceNodeParams(const ReduceNodeParams &params);

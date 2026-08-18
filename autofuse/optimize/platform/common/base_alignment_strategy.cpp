@@ -23,6 +23,21 @@ bool ShouldSkipRegularAlignment(const af::AscNodePtr &node) {
 }
 }  // namespace
 
+const char *BaseAlignmentStrategy::AlignmentTypeToString(AlignmentType type) {
+  switch (type) {
+    case AlignmentType::kNotAligned:
+      return "NotAligned";
+    case AlignmentType::kAligned:
+      return "Aligned";
+    case AlignmentType::kDiscontinuous:
+      return "Discontinuous";
+    case AlignmentType::kFixedNotAligned:
+      return "FixedNotAligned";
+    default:
+      return "Invalid";
+  }
+}
+
 af::Status BaseAlignmentStrategy::ForEachNode(ascir::ImplGraph &graph, NodeProcessor processor) {
   bool changed = false;
   for (const auto &node : graph.GetAllNodes()) {
@@ -188,6 +203,8 @@ af::Status BaseAlignmentStrategy::DefaultAlignmentInferFunc(const af::AscNodePtr
     for (const auto &output : node->outputs()) {
       tensor_to_align_type_[&output->attr] = {out_type};
     }
+    GELOGD("Base default align: node[%s] output set to [%s] from aligned input.", node->GetNamePtr(),
+           AlignmentTypeToString(out_type));
     return BackPropagateAlignment(node, out_type);
   }
 
@@ -265,6 +282,7 @@ af::Status BaseAlignmentStrategy::ReduceAlignmentInferFunc(const af::AscNodePtr 
       tensor_to_align_type_[&output->attr] = {AlignmentType::kNotAligned};
     } else {
       tensor_to_align_type_[&output->attr] = {AlignmentType::kAligned};
+      GELOGD("Reduce node[%s] output set to kAligned (stride != 0).", node->GetNamePtr());
     }
   }
   GE_ASSERT_SUCCESS(BackPropagateAlignment(node));
@@ -324,6 +342,7 @@ af::Status BaseAlignmentStrategy::AddPadForAlignmentConflictOneNode(ascir::ImplG
     GE_ASSERT_SUCCESS(CheckIsNoNeedPad(node, out_attr, is_no_need_pad));
     if (is_no_need_pad) {
       tensor_to_align_type_[&out_attr] = {AlignmentType::kAligned};
+      GELOGD("Node[%s] output[%zu] no need pad, set to kAligned.", node->GetNamePtr(), i);
       continue;
     }
     const auto dtype = node->outputs[0].attr.dtype;
@@ -344,6 +363,7 @@ af::Status BaseAlignmentStrategy::AddPadForAlignmentConflictOneNode(ascir::ImplG
     pad_node->attr.api.type = af::ApiType::kAPITypeCompute;
     pad_node->attr.api.unit = af::ComputeUnit::kUnitVector;
     tensor_to_align_type_[&pad_node->outputs[0].attr] = {AlignmentType::kAligned};
+    GELOGD("Pad node[%s] output set to kAligned.", pad_node->GetNamePtr());
     auto out_anchor = node->GetOutDataAnchor(static_cast<int32_t>(i));
     GE_ASSERT_NOTNULL(out_anchor);
     GE_ASSERT_SUCCESS(af::AscGraphUtils::InsertNodeAfter(out_anchor, pad_node));
@@ -371,7 +391,9 @@ af::Status BaseAlignmentStrategy::AlignVectorizedStrides(ascir::ImplGraph &impl_
 }
 
 af::Status BaseAlignmentStrategy::InferAlignmentForOneNode(ascir::ImplGraph &, const af::AscNodePtr &node, bool &) {
-  GE_ASSERT_TRUE(!node->inputs().empty(), "The inputs of %s(%s) is empty.", node->GetTypePtr(), node->GetNamePtr());
+  GE_ASSERT_TRUE(
+      !node->inputs().empty() || af::ops::IsOps<af::ascir_op::Rand>(node) || af::ops::IsOps<af::ascir_op::Randn>(node),
+      "The inputs of %s(%s) is empty.", node->GetTypePtr(), node->GetNamePtr());
   GE_ASSERT_TRUE(!node->outputs().empty(), "The output of %s(%s) is empty.", node->GetTypePtr(), node->GetNamePtr());
   af::ComputeType compute_type = node->attr.api.compute_type;
   auto it = compute_type_to_infer_func_.find(compute_type);
@@ -394,18 +416,26 @@ void BaseAlignmentStrategy::SetAlignInfoForNodeInputs(AlignmentType aligned_type
   for (const auto &input : node->inputs()) {
     auto asc_node = std::dynamic_pointer_cast<af::AscNode>(input->anchor.GetOwnerNode());
     if ((asc_node == nullptr) || ShouldSkipRegularAlignment(asc_node)) {
+      GELOGD("SetAlignInfoForNodeInputs: skip input node[%s] (null or should skip).",
+             asc_node != nullptr ? asc_node->GetNamePtr() : "null");
       continue;
     }
 
     auto &align_info = tensor_to_align_type_[&input->attr];
     if (align_info.align_type == aligned_type) {
+      GELOGD("SetAlignInfoForNodeInputs: input[%s] already [%s], skip.", asc_node->GetNamePtr(),
+             AlignmentTypeToString(aligned_type));
       continue;
     }
 
     if (align_info.align_type == AlignmentType::kFixedNotAligned) {
       align_info.conflict_with_output = true;
+      GELOGD("SetAlignInfoForNodeInputs: input[%s] is FixedNotAligned, set conflict_with_output=true.",
+             asc_node->GetNamePtr());
     } else if (visited_nodes.insert(asc_node.get()).second) {
       node_queue.push(asc_node.get());
+      GELOGD("SetAlignInfoForNodeInputs: input[%s] enqueued (from [%s] to [%s]).", asc_node->GetNamePtr(),
+             AlignmentTypeToString(align_info.align_type), AlignmentTypeToString(aligned_type));
     }
   }
 }
@@ -417,15 +447,20 @@ bool BaseAlignmentStrategy::SetAlignInfoForNodeOutputs(AlignmentType aligned_typ
   for (const auto &output : node->outputs()) {
     auto &align_info = tensor_to_align_type_[&output->attr];
     if (align_info.align_type == aligned_type) {
+      GELOGD("SetAlignInfoForNodeOutputs: output[%s] already [%s], skip.", node->GetNamePtr(),
+             AlignmentTypeToString(aligned_type));
       continue;
     }
 
     if (align_info.align_type == AlignmentType::kFixedNotAligned) {
       align_info.conflict_with_output = true;
+      GELOGD("SetAlignInfoForNodeOutputs: output[%s] is FixedNotAligned, set conflict_with_output=true.",
+             node->GetNamePtr());
       continue;
     }
 
-    GELOGD("Node [%s]'s align type need to be changed.", node->GetNamePtr());
+    GELOGD("Node [%s]'s align type changed from [%s] to [%s].", node->GetNamePtr(),
+           AlignmentTypeToString(align_info.align_type), AlignmentTypeToString(aligned_type));
     align_info.align_type = aligned_type;
     alignment_changed = true;
 
@@ -437,6 +472,7 @@ bool BaseAlignmentStrategy::SetAlignInfoForNodeOutputs(AlignmentType aligned_typ
       auto asc_node = std::dynamic_pointer_cast<af::AscNode>(peer_in->GetOwnerNode());
       GE_ASSERT_NOTNULL(asc_node);
       if (ShouldSkipRegularAlignment(asc_node)) {
+        GELOGD("SetAlignInfoForNodeOutputs: skip peer[%s] (should skip).", asc_node->GetNamePtr());
         continue;
       }
       if (ScheduleUtils::IsReduce(asc_node)) {
@@ -447,6 +483,7 @@ bool BaseAlignmentStrategy::SetAlignInfoForNodeOutputs(AlignmentType aligned_typ
       }
       if (visited_nodes.insert(asc_node.get()).second) {
         node_queue.push(asc_node.get());
+        GELOGD("SetAlignInfoForNodeOutputs: peer[%s] enqueued.", asc_node->GetNamePtr());
       }
     }
   }
@@ -455,6 +492,8 @@ bool BaseAlignmentStrategy::SetAlignInfoForNodeOutputs(AlignmentType aligned_typ
 }
 
 af::Status BaseAlignmentStrategy::BackPropagateAlignment(const af::AscNodePtr &node, AlignmentType aligned_type) {
+  GELOGD("BackPropagateAlignment start: node[%s], align_type[%s].", node->GetNamePtr(),
+         AlignmentTypeToString(aligned_type));
   std::set<af::Node *> visited_nodes;
   std::queue<af::Node *> node_queue;
   visited_nodes.emplace(node.get());
@@ -469,6 +508,8 @@ af::Status BaseAlignmentStrategy::BackPropagateAlignment(const af::AscNodePtr &n
       SetAlignInfoForNodeInputs(aligned_type, curr_node, visited_nodes, node_queue);
     }
   }
+  GELOGD("BackPropagateAlignment end: node[%s], align_type[%s].", node->GetNamePtr(),
+         AlignmentTypeToString(aligned_type));
   return af::SUCCESS;
 }
 

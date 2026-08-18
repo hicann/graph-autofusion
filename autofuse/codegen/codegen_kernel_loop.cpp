@@ -503,7 +503,7 @@ void Loop::Destruct() {
   }
 }
 
-void Loop::CollectTensorCrossLoop(std::map<ascir::AxisId, std::vector<ApiCall *>> &api_calls) {
+void Loop::CollectTensorCrossLoop(std::map<ascir::AxisId, std::map<Loop *, std::vector<ApiCall *>>> &api_calls) {
   if (this->bodys.size() <= 1) {
     return;
   }
@@ -517,7 +517,7 @@ void Loop::CollectTensorCrossLoop(std::map<ascir::AxisId, std::vector<ApiCall *>
         ascir::AxisId target_axis;
         bool flag = inner_body.call->IsReadOutersideWrite(target_axis);
         if (flag) {
-          api_calls[target_axis].emplace_back(inner_body.call);
+          api_calls[target_axis][body.loop].emplace_back(inner_body.call);
         }
       }
     }
@@ -633,11 +633,11 @@ static std::string GetCacheGuardCondition(const ApiCall &call, bool is_enable_ca
 Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<ascir::AxisId> &current_axis,
                           std::stringstream &ss) {
   bool need_collect = this->bodys.size() > 1;
-  std::map<ascir::AxisId, std::vector<ApiCall *>> api_calls_cross_loop;
+  std::map<ascir::AxisId, std::map<Loop *, std::vector<ApiCall *>>> api_calls_cross_loop;
   if (need_collect) {
     CollectTensorCrossLoop(api_calls_cross_loop);
   }
-  auto target_calls = api_calls_cross_loop[this->axis_id];
+  auto &cross_loop_map = api_calls_cross_loop[this->axis_id];
 
   for (const auto &body : this->bodys) {
     if ((body.type == LoopType::CALL) && (body.call->api_call_context.scene == ApiScene::kCVFuseUBLoad ||
@@ -645,14 +645,19 @@ Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<as
       continue;
     }
     if (body.type == LoopType::LOOP) {
-      for (auto call : target_calls) {
-        GE_CHK_STATUS_RET(call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
-        used_calls.insert(call);
+      auto it = cross_loop_map.find(body.loop);
+      if (it != cross_loop_map.end()) {
+        for (auto call : it->second) {
+          GE_CHK_STATUS_RET(call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
+          used_calls.insert(call);
+        }
       }
       body.loop->compute_stage = this->compute_stage;
       GE_CHK_STATUS_RET(body.loop->GenerateLoop(tiler, tpipe, current_axis, ss), "Generate loop for body failed");
-      for (auto call : target_calls) {
-        GE_CHK_BOOL_RET_STATUS(call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
+      if (it != cross_loop_map.end()) {
+        for (auto call : it->second) {
+          GE_CHK_BOOL_RET_STATUS(call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
+        }
       }
       used_calls.clear();
     } else {
@@ -818,7 +823,7 @@ Status Loop::GenerateLoop(const Tiler &tiler, const TPipe &tpipe, std::vector<as
       ss << "uint32_t " << reduce_dim_a << ";" << std::endl;
     }
     if (axis.type != Axis::Type::kAxisTypeBlockInner && this->is_graph_has_reduce_node) {
-      ss << "bool control_dis_enable_cache_a = true;" << std::endl;
+      ss << "control_dis_enable_cache_a = true;" << std::endl;
       ss << "if ( " << axis.loop_size.Str() << " == 1) {" << std::endl;
       ss << "control_dis_enable_cache_a = false;" << std::endl;
       ss << "}" << std::endl;
@@ -1007,6 +1012,9 @@ Status Loop::Generate(const Tiler &tiler, const TPipe &tpipe, std::string &resul
   std::vector<ascir::AxisId> current_axis;
   this->compute_stage = stage;
   stringstream ss;
+  if (this->is_graph_has_reduce_node) {
+    ss << "bool control_dis_enable_cache_a = true;" << std::endl;
+  }
   GE_CHK_STATUS_RET(this->GenerateLoop(tiler, tpipe, current_axis, ss), "Generate loop failed");
   result = ss.str();
   return af::SUCCESS;

@@ -86,6 +86,7 @@ class Scheduler {
   void RemoveDuplicatedAxisFromGroup();
   Status InitIndirectLoadScheduleCase();
   Status ApplyIndirectLoadNodeAxes(const af::AscNodePtr &node, bool &skip_main_tiling) const;
+  Status SynchronizeTransposeInputSchedAxis();
   Status ModifyStoreAfterReduce(ascir::NodeView &node, ascir::AxisId reduce_block_id);
   Status ApplyBlockSplitToNode(ascir::NodeView &node, bool is_store_after_reduce);
   void TileTiling(ascir::AxisId tile_id, std::pair<af::AxisPtr, af::AxisPtr> &tiled_axes) const {

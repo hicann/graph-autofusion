@@ -5313,6 +5313,40 @@ class SoftmaxAscIrCodegenImplV2 : public AscIrCodegenV2 {
 };
 
 /*********************************************************************************/
+class RandAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "UnaryOutputApiCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "Rand";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"random_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {"adv_api/math/philox.h"};
+  }
+};
+
+/*********************************************************************************/
+class RandnAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "UnaryOutputApiCall";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "Rand";
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"random_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {"adv_api/math/philox.h"};
+  }
+};
+
+/*********************************************************************************/
 class UnsupportedAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
   [[nodiscard]] std::string GetApiCallName() const override {

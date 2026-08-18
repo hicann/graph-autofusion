@@ -501,6 +501,16 @@ REG_ASC_IR(Output).Impl(v2_soc_versions,
                          {{"T", TensorType{DT_INT8, DT_UINT8, DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_INT64,
                                            DT_UINT64, DT_FLOAT16, DT_FLOAT, DT_BF16, DT_BOOL}}}});
 
+REG_ASC_IR(Rand).Inputs({}).Output("y", "T").StartNode().Impl(
+    v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::RandAscIrAttImplV2>(),
+                      af::ascir::AscIrImplCreator<af::ascir::RandAscIrCodegenImplV2>(),
+                      {{"T", TensorType{DT_FLOAT}}}});
+
+REG_ASC_IR(Randn).Inputs({}).Output("y", "T").StartNode().Impl(
+    v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::RandnAscIrAttImplV2>(),
+                      af::ascir::AscIrImplCreator<af::ascir::RandnAscIrCodegenImplV2>(),
+                      {{"T", TensorType{DT_UINT32, DT_INT32}}}});
+
 REG_ASC_IR(Workspace).Impl(v2_soc_versions,
                            {af::ascir::AscIrImplCreator<af::ascir::WorkspaceAscIrAttImplV2>(),
                             af::ascir::AscIrImplCreator<af::ascir::WorkspaceAscIrCodegenImplV2>(),

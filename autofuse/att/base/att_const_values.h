@@ -371,6 +371,8 @@ inline const std::string kRoundToInt = "RoundToInt";
 inline const std::string kTruncToInt = "TruncToInt";
 inline const std::string kTrunc = "Trunc";
 inline const std::string kVmAdd = "VmAdd";
+inline const std::string kRand = "Rand";
+inline const std::string kRandn = "Randn";
 inline const std::string kPlaceholder = "Placeholder";
 #define JOIN(a, b) a##b
 #define JOIN_A_B_C(a, b, c) a##b##c

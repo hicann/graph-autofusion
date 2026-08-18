@@ -177,7 +177,7 @@ struct Loop {
                   ComputeStage stage = ComputeStage::kDefault);
   const Tensor *GetReduceOutputTensor(const TPipe &tpipe) const;
   const Tensor *GetReduceInputTensor(const TPipe &tpipe) const;
-  void CollectTensorCrossLoop(std::map<ascir::AxisId, std::vector<ApiCall *>> &api_calls);
+  void CollectTensorCrossLoop(std::map<ascir::AxisId, std::map<Loop *, std::vector<ApiCall *>>> &api_calls);
   Status ActualSizeDefine(const Tiler &tiler, const TPipe &tpipe, std::string dtype_name, std::string &result);
 
  private:

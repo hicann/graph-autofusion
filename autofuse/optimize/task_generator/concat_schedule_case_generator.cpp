@@ -364,17 +364,16 @@ Status ConcatFusionCaseGenerator::ReplaceWithStore(const af::AscNodePtr &concat_
                                                    const af::InDataAnchorPtr &concat_in_anchor,
                                                    const af::Axis &replace_axis) {
   const auto in_index = concat_in_anchor->GetIdx();
-  const auto &src_out_anchor = concat_in_anchor->GetPeerOutAnchor();
-  const auto old_axis_id = concat_node->attr.sched.axis[concat_dim_];
-  const auto new_axis_id = replace_axis.id;
-  // 前向刷轴
-  GE_CHK_STATUS_RET(PropagateAxisChanges(concat_node.get(), old_axis_id, new_axis_id),
-                    "PropagateAxisChanges failed in ReplaceWithStore");
+  const auto src_out_anchor = concat_in_anchor->GetPeerOutAnchor();
   GE_ASSERT_NOTNULL(src_out_anchor);
   concat_in_anchor->UnlinkAll();
-  std::vector<af::InDataAnchorPtr> dst_in_anchors;
   auto src_node = dynamic_cast<af::AscNode *>(src_out_anchor->GetOwnerNodeBarePtr());
   GE_ASSERT_NOTNULL(src_node);
+  const auto old_axis_id = concat_node->attr.sched.axis[concat_dim_];
+  const auto new_axis_id = replace_axis.id;
+  GE_CHK_STATUS_RET(PropagateAxisChanges(src_node, old_axis_id, new_axis_id),
+                    "PropagateAxisChanges failed in ReplaceWithStore");
+  std::vector<af::InDataAnchorPtr> dst_in_anchors;
   std::unordered_map<std::string, af::NodePtr> name_to_new_node;
   GE_ASSERT_SUCCESS(CloneNonConcatNodes(replace_axis, old_axis_id, in_index, dst_in_anchors, name_to_new_node));
   for (const auto &peer_in_anchor : dst_in_anchors) {
@@ -410,8 +409,8 @@ Status ConcatFusionCaseGenerator::ReplaceWithConcat(ascir::ImplGraph &owner_grap
   // 前向刷轴
   const auto old_axis_id = concat_node->attr.sched.axis[concat_dim_];
   const auto new_axis_id = new_concat_axis.id;
-  GE_CHK_STATUS_RET(PropagateAxisChanges(concat_node.get(), old_axis_id, new_axis_id),
-                    "PropagateAxisChanges failed in ReplaceWithStore");
+  GE_CHK_STATUS_RET(PropagateAxisChanges(new_concat_node.get(), old_axis_id, new_axis_id),
+                    "PropagateAxisChanges failed in ReplaceWithConcat");
   GELOGD("New axis %s, size = %s", new_concat_axis.name.c_str(),
          af::SymbolicUtils::ToString(new_concat_axis.size).c_str());
   std::vector<af::InDataAnchorPtr> dst_in_anchors;

@@ -112,6 +112,9 @@ af::AscNodePtr PassUtils::CreateOneScalarBrc(af::AscGraph &graph, const af::AscN
   af::ascir_op::Scalar scalar_one(scalar_name.c_str(), graph);
   scalar_one.ir_attr.SetValue(af::SymbolicUtils::ToString(af::sym::kSymbolOne));
   scalar_one.y.dtype = static_cast<ge::DataType>(ref_node->outputs[0].attr.dtype);
+  // 动态创建的 Scalar 在 CompleteApiInfo() 之后生成，api.type 保持默认 kAPITypeInvalid，
+  // 会导致 IsBuffer() 返回 false，Scalar 错误进入 ReplaceAxis 触发断言。
+  scalar_one.attr.api.type = af::ApiType::kAPITypeBuffer;
 
   std::string brc_name = ref_node->GetName() + "_Brc";
   af::ascir_op::Broadcast brc(brc_name.c_str());

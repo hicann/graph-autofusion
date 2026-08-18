@@ -686,6 +686,34 @@ static AscGraph BuildRedundantBroadcastGraph(const std::string &name) {
       .Output("y", "store", 0, af::DT_FLOAT16)
       .Build();
 }
+
+static bool CheckReservedTransposeInputSchedAxis(const ::ascir::ImplGraph &impl_graph) {
+  const auto transpose_node = impl_graph.FindNode("transpose0");
+  if (transpose_node == nullptr) {
+    return false;
+  }
+
+  for (const auto &input_node : transpose_node->GetInDataNodes()) {
+    const auto input_asc_node = std::dynamic_pointer_cast<af::AscNode>(input_node);
+    EXPECT_NE(input_asc_node, nullptr);
+    if (input_asc_node == nullptr) {
+      continue;
+    }
+    EXPECT_EQ(input_asc_node->attr.sched.axis, transpose_node->attr.sched.axis)
+        << "graph=" << impl_graph.GetName() << ", input=" << input_asc_node->GetName();
+  }
+  return true;
+}
+
+template <typename ImplGraphs>
+static bool CheckReservedTransposeImplGraphs(const ImplGraphs &impl_graphs) {
+  bool found_reserved_transpose = false;
+  for (const auto &impl_graph : impl_graphs) {
+    found_reserved_transpose = CheckReservedTransposeInputSchedAxis(impl_graph) || found_reserved_transpose;
+  }
+  return found_reserved_transpose;
+}
+
 }  // namespace
 
 static void ConstructSoftmaxGraph(af::AscGraph &graph) {
@@ -857,6 +885,7 @@ class OptimizerSt : public ::testing::Test {
     af::Status AccessSetVectorizedStrides(::ascir::ImplGraph &impl_graph) {
       return ForEachNode(impl_graph, &AlignmentStrategyShadow::SetVectorizedStridesForOneNode);
     }
+    using optimize::BaseAlignmentStrategy::AlignmentTypeToString;
   };
 };
 
@@ -4252,6 +4281,17 @@ TEST(OptimizeST, TransposeSkipPadTilingCase) {
   ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0].size(), 2UL);
   EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.size(), 2UL);
   EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][1].schedule_groups[0].impl_graphs.size(), 2UL);
+
+  bool found_reserved_transpose = false;
+  for (const auto &node_results : fused_scheduled_result.node_idx_to_scheduled_results) {
+    for (const auto &scheduled_results : node_results) {
+      for (const auto &schedule_group : scheduled_results.schedule_groups) {
+        found_reserved_transpose =
+            CheckReservedTransposeImplGraphs(schedule_group.impl_graphs) || found_reserved_transpose;
+      }
+    }
+  }
+  EXPECT_TRUE(found_reserved_transpose);
 }
 
 TEST_F(OptimizerSt, vecoutCanBeReuse) {
@@ -4603,4 +4643,16 @@ TEST_F(OptimizerSt, DuplicateElewiseCse_MergeSub) {
 
   ::ascir::FusedScheduledResult fused_scheduled_result;
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), af::SUCCESS);
+}
+
+TEST_F(OptimizerSt, AlignmentTypeToString_AllEnumsMapped) {
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(optimize::AlignmentType::kNotAligned), "NotAligned");
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(optimize::AlignmentType::kAligned), "Aligned");
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(optimize::AlignmentType::kDiscontinuous),
+               "Discontinuous");
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(optimize::AlignmentType::kFixedNotAligned),
+               "FixedNotAligned");
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(optimize::AlignmentType::kInvalid), "Invalid");
+  EXPECT_STREQ(AlignmentStrategyShadow::AlignmentTypeToString(static_cast<optimize::AlignmentType>(0xFFFFFFFF)),
+               "Invalid");
 }

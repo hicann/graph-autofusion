@@ -97,6 +97,7 @@ Status ScheduleGroupGraphPartitioner::PartitionByConnectivity(const ::ascir::Imp
     for (auto &sub_optimize_graph : sub_optimize_graphs) {
       GE_CHK_STATUS_RET(ScheduleUtils::RemoveUnusedAxes(sub_optimize_graph), "Failed to remove unused axes");
     }
+    GE_CHK_STATUS_RET(SortSubGraphsByDependency(sub_optimize_graphs), "Failed to sort subgraphs by dependency");
   }
   if (visited.size() != num_nodes) {
     for (const auto &node : optimize_graph.GetAllNodes()) {
@@ -177,6 +178,78 @@ Status ScheduleGroupGraphPartitioner::AddConnectedNodes(const af::AscNodePtr &ro
 
 bool ScheduleGroupGraphPartitioner::CompareByNodeId(const AscNodePtr &lhs, const AscNodePtr &rhs) {
   return lhs->GetOpDesc()->GetId() < rhs->GetOpDesc()->GetId();
+}
+
+bool ScheduleGroupGraphPartitioner::HasDataDependency(const ::ascir::ImplGraph &producer,
+                                                      const ::ascir::ImplGraph &consumer) {
+  std::set<std::string> producer_output_names;
+  for (const auto &node : producer.GetAllNodes()) {
+    if (node->GetOutDataNodes().empty()) {
+      producer_output_names.insert(node->GetName());
+    }
+  }
+  if (producer_output_names.empty()) {
+    return false;
+  }
+  for (const auto &node : consumer.GetAllNodes()) {
+    for (const auto &in_node : node->GetInDataNodes()) {
+      if (producer_output_names.find(in_node->GetName()) != producer_output_names.end()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+Status ScheduleGroupGraphPartitioner::SortSubGraphsByDependency(std::vector<::ascir::ImplGraph> &sub_optimize_graphs) {
+  const size_t n = sub_optimize_graphs.size();
+  if (n <= 1U) {
+    return af::SUCCESS;
+  }
+  std::vector<std::vector<bool>> dep_matrix(n, std::vector<bool>(n, false));
+  std::vector<size_t> in_degree(n, 0U);
+  for (size_t i = 0U; i < n; ++i) {
+    for (size_t j = 0U; j < n; ++j) {
+      if (i != j) {
+        dep_matrix[i][j] = HasDataDependency(sub_optimize_graphs[i], sub_optimize_graphs[j]);
+        if (dep_matrix[i][j]) {
+          ++in_degree[j];
+        }
+      }
+    }
+  }
+  std::vector<size_t> sorted;
+  sorted.reserve(n);
+  std::queue<size_t> zero_in_degree_queue;
+  for (size_t i = 0U; i < n; ++i) {
+    if (in_degree[i] == 0U) {
+      zero_in_degree_queue.push(i);
+    }
+  }
+  while (!zero_in_degree_queue.empty()) {
+    size_t idx = zero_in_degree_queue.front();
+    zero_in_degree_queue.pop();
+    sorted.emplace_back(idx);
+    for (size_t j = 0U; j < n; ++j) {
+      if (dep_matrix[idx][j]) {
+        --in_degree[j];
+        if (in_degree[j] == 0U) {
+          zero_in_degree_queue.push(j);
+        }
+      }
+    }
+  }
+  if (sorted.size() != n) {
+    GELOGE(af::FAILED, "Cycle detected in subgraph dependency, sorted[%zu] != total[%zu]", sorted.size(), n);
+    return af::FAILED;
+  }
+  std::vector<::ascir::ImplGraph> reordered;
+  reordered.reserve(n);
+  for (const auto idx : sorted) {
+    reordered.emplace_back(std::move(sub_optimize_graphs[idx]));
+  }
+  sub_optimize_graphs = std::move(reordered);
+  return af::SUCCESS;
 }
 
 Status ScheduleGroupGraphPartitioner::RecordAxisSizes(const std::vector<af::Expression> &repeats,
