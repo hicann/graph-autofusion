@@ -644,8 +644,8 @@ TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDynUbufAppendsLaunchCfg) {
   launchInfo.entryInfo.numBlocks = 2;
   ASSERT_TRUE(launchInfo.devArgs.Init(sizeof(SkDeviceEntryArgs)));
   launchInfo.devArgs.Get()->skHeader.totalSize = sizeof(SkDeviceEntryArgs);
-  launchInfo.hasMinAvailableUbufSize = true;
-  launchInfo.minAvailableUbufSize = 32768;
+  launchInfo.useSimtEntry = true;
+  launchInfo.skMaxDcacheSize = 32768;
   SetFunctionAllocUbufSize(4096);
 
   UpdateContext ctx{};

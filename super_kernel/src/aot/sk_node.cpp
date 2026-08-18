@@ -1113,7 +1113,7 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
   return;
 }
 
-bool SuperKernelKernelNode::SetupLaunchKernelCfgWithDynUbuf(size_t minAvailableUbufSize) {
+bool SuperKernelKernelNode::SetupLaunchKernelCfgWithMaxDcacheSize(size_t skMaxDcacheSize) {
   launchKernelAttrs_.clear();
   const aclrtLaunchKernelCfg *originCfg = taskParams.kernelTaskParams.cfg;
   if (originCfg != nullptr && originCfg->attrs != nullptr) {
@@ -1132,28 +1132,28 @@ bool SuperKernelKernelNode::SetupLaunchKernelCfgWithDynUbuf(size_t minAvailableU
   if (!GetFunctionAllocUbufSize(taskParams.kernelTaskParams.funcHandle, skAllocUbufSize, Format())) {
     return false;
   }
-  if (minAvailableUbufSize > SK_TOTAL_UB_SIZE || skAllocUbufSize > SK_TOTAL_UB_SIZE - minAvailableUbufSize) {
+  if (skMaxDcacheSize > SK_TOTAL_UB_SIZE || skAllocUbufSize > SK_TOTAL_UB_SIZE - skMaxDcacheSize) {
     SK_LOGE(
-        "invalid dyn ubuf calculation for %s, totalUbSize=%zu, minAvailableUbufSize=%zu, "
+        "invalid dyn ubuf calculation for %s, totalUbSize=%zu, skMaxDcacheSize=%zu, "
         "skAllocUbufSize=%zu",
-        Format().c_str(), SK_TOTAL_UB_SIZE, minAvailableUbufSize, skAllocUbufSize);
+        Format().c_str(), SK_TOTAL_UB_SIZE, skMaxDcacheSize, skAllocUbufSize);
     return false;
   }
-  size_t finalDynUbufSize = SK_TOTAL_UB_SIZE - minAvailableUbufSize - skAllocUbufSize;
-  if (finalDynUbufSize > std::numeric_limits<uint32_t>::max()) {
-    SK_LOGE("dynUbufSize exceeds uint32_t range for %s, dynUbufSize=%zu", Format().c_str(), finalDynUbufSize);
+  size_t skEntryDynUbufSize = SK_TOTAL_UB_SIZE - skMaxDcacheSize - skAllocUbufSize;
+  if (skEntryDynUbufSize > std::numeric_limits<uint32_t>::max()) {
+    SK_LOGE("dynUbufSize exceeds uint32_t range for %s, dynUbufSize=%zu", Format().c_str(), skEntryDynUbufSize);
     return false;
   }
-  dynUbufAttr.value.dynUBufSize = static_cast<uint32_t>(finalDynUbufSize);
+  dynUbufAttr.value.dynUBufSize = static_cast<uint32_t>(skEntryDynUbufSize);
   launchKernelAttrs_.push_back(dynUbufAttr);
 
   launchKernelCfg_.attrs = launchKernelAttrs_.data();
   launchKernelCfg_.numAttrs = launchKernelAttrs_.size();
   taskParams.kernelTaskParams.cfg = &launchKernelCfg_;
   SK_LOGI(
-      "Set dyn ubuf launch cfg for %s, minAvailableUbufSize=%zu, skAllocUbufSize=%zu, "
-      "finalDynUbufSize=%zu, attrCount=%zu",
-      Format().c_str(), minAvailableUbufSize, skAllocUbufSize, finalDynUbufSize, launchKernelCfg_.numAttrs);
+      "Set dyn ubuf launch cfg for %s, skMaxDcacheSize=%zu, skAllocUbufSize=%zu, "
+      "skEntryDynUbufSize=%zu, attrCount=%zu",
+      Format().c_str(), skMaxDcacheSize, skAllocUbufSize, skEntryDynUbufSize, launchKernelCfg_.numAttrs);
   return true;
 }
 
@@ -1237,8 +1237,7 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
     taskParams.type = ACL_MODEL_RI_TASK_KERNEL;
     taskParams.opInfoPtr = ctx.launchInfo->cacheInfo;
     taskParams.opInfoSize = ctx.launchInfo->cacheopInfoSize;
-    if (ctx.launchInfo->hasMinAvailableUbufSize &&
-        !SetupLaunchKernelCfgWithDynUbuf(ctx.launchInfo->minAvailableUbufSize)) {
+    if (ctx.launchInfo->useSimtEntry && !SetupLaunchKernelCfgWithMaxDcacheSize(ctx.launchInfo->skMaxDcacheSize)) {
       SK_LOGE("Failed to setup dyn ubuf launch cfg for kernel node %s", Format().c_str());
       return false;
     }

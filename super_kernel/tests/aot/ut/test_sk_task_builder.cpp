@@ -1,6 +1,6 @@
 /**
  * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under terms and conditions of
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
@@ -788,7 +788,7 @@ TEST_F(SkTaskBuilderTest, Build_WithCustomNotifyWaitReset_Success) {
   EXPECT_NE(launchInfo.devArgs.Get(), nullptr);
 }
 
-TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_RecordsMinAvailableUbufSize) {
+TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_RecordsMaxDcacheSize) {
   opts->RegisterDefaultOptions();
   auto *splitOpt = opts->GetOption(aclskOptionType::SPLIT_MODE);
   ASSERT_NE(splitOpt, nullptr);
@@ -822,8 +822,8 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_RecordsMinAvailableUbufSize) {
   SkLaunchInfo &launchInfo = buildResult.launchInfo;
 
   EXPECT_NE(launchInfo.entryInfo.skEntryFunc, nullptr);
-  EXPECT_TRUE(launchInfo.hasMinAvailableUbufSize);
-  EXPECT_EQ(launchInfo.minAvailableUbufSize, SK_TOTAL_UB_SIZE - 24576U - 8192U);
+  EXPECT_TRUE(launchInfo.useSimtEntry);
+  EXPECT_EQ(launchInfo.skMaxDcacheSize, SK_TOTAL_UB_SIZE - 24576U - 8192U);
   EXPECT_STREQ(SkUtGetLastBinaryGetFunctionName(), "sk_entry_mix11_simt");
 }
 
@@ -855,8 +855,8 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTasks_DynUbufOptionDisabledSkipsRecord) 
   SkLaunchInfo &launchInfo = buildResult.launchInfo;
 
   EXPECT_NE(launchInfo.entryInfo.skEntryFunc, nullptr);
-  EXPECT_FALSE(launchInfo.hasMinAvailableUbufSize);
-  EXPECT_EQ(launchInfo.minAvailableUbufSize, 0U);
+  EXPECT_FALSE(launchInfo.useSimtEntry);
+  EXPECT_EQ(launchInfo.skMaxDcacheSize, 0U);
   EXPECT_STREQ(SkUtGetLastBinaryGetFunctionName(), "sk_entry_aiv");
 }
 
@@ -878,7 +878,7 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTaskMissingAllocUbufSize_ReturnsEmpty) {
   SkBuildResult buildResult = builder->Build("Unknown", tasks, {}, 0);
 
   EXPECT_EQ(buildResult.launchInfo.entryInfo.skEntryFunc, nullptr);
-  EXPECT_FALSE(buildResult.launchInfo.hasMinAvailableUbufSize);
+  EXPECT_FALSE(buildResult.launchInfo.useSimtEntry);
 }
 
 TEST_F(SkTaskBuilderTest, Build_WithSimtTaskUbufSizeOverflow_ReturnsEmpty) {
@@ -901,7 +901,7 @@ TEST_F(SkTaskBuilderTest, Build_WithSimtTaskUbufSizeOverflow_ReturnsEmpty) {
   SkBuildResult buildResult = builder->Build("Unknown", tasks, {}, 0);
 
   EXPECT_EQ(buildResult.launchInfo.entryInfo.skEntryFunc, nullptr);
-  EXPECT_FALSE(buildResult.launchInfo.hasMinAvailableUbufSize);
+  EXPECT_FALSE(buildResult.launchInfo.useSimtEntry);
 }
 
 TEST_F(SkTaskBuilderTest, Build_WithResetTask_Success) {

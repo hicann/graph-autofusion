@@ -131,15 +131,15 @@ SkQueueType InferFirstKernelEventQueueType(const std::vector<SuperKernelBaseNode
   return SkQueueType::UNKNOWN;
 }
 
-struct SimtAvailableUbufInfo {
-  bool success = true;
-  bool hasMinAvailableUbufSize = false;
-  size_t minAvailableUbufSize = 0;
+struct SimtDcacheSizeResult {
+  bool areSimtUbufSizesValid = true;
+  bool hasSimtTask = false;
+  size_t skMaxDcacheSize = 0;
 };
 
-SimtAvailableUbufInfo GetMinSimtAvailableUbufSize(const std::vector<SuperKernelBaseNode *> &tasks) {
-  SimtAvailableUbufInfo availableUbufInfo;
-  size_t minAvailableUbufSize = SK_TOTAL_UB_SIZE;
+SimtDcacheSizeResult CalculateSimtDcacheSize(const std::vector<SuperKernelBaseNode *> &tasks) {
+  SimtDcacheSizeResult dcacheSizeResult;
+  size_t skMaxDcacheSize = SK_TOTAL_UB_SIZE;
   for (const auto *task : tasks) {
     if (task == nullptr || task->GetNodeType() != SkNodeType::NODE_KERNEL) {
       continue;
@@ -148,11 +148,12 @@ SimtAvailableUbufInfo GetMinSimtAvailableUbufSize(const std::vector<SuperKernelB
     if (!kernelInfo.isSimtOp) {
       continue;
     }
+    dcacheSizeResult.hasSimtTask = true;
     if (!kernelInfo.hasDynUbufSize || !kernelInfo.hasAllocUbufSize) {
       SK_LOGE("SIMT kernel lacks ubuf size info, nodeId=%lu, hasDynUbufSize=%d, hasAllocUbufSize=%d", task->GetNodeId(),
               kernelInfo.hasDynUbufSize, kernelInfo.hasAllocUbufSize);
-      availableUbufInfo.success = false;
-      return availableUbufInfo;
+      dcacheSizeResult.areSimtUbufSizesValid = false;
+      return dcacheSizeResult;
     }
     if (kernelInfo.dynUbufSize > SK_TOTAL_UB_SIZE ||
         kernelInfo.allocUbufSize > SK_TOTAL_UB_SIZE - kernelInfo.dynUbufSize) {
@@ -160,17 +161,16 @@ SimtAvailableUbufInfo GetMinSimtAvailableUbufSize(const std::vector<SuperKernelB
           "SIMT kernel ubuf size exceeds total ub size, nodeId=%lu, dynUbufSize=%zu, "
           "allocUbufSize=%zu, totalUbSize=%zu",
           task->GetNodeId(), kernelInfo.dynUbufSize, kernelInfo.allocUbufSize, SK_TOTAL_UB_SIZE);
-      availableUbufInfo.success = false;
-      return availableUbufInfo;
+      dcacheSizeResult.areSimtUbufSizesValid = false;
+      return dcacheSizeResult;
     }
-    availableUbufInfo.hasMinAvailableUbufSize = true;
-    minAvailableUbufSize =
-        std::min(minAvailableUbufSize, SK_TOTAL_UB_SIZE - kernelInfo.dynUbufSize - kernelInfo.allocUbufSize);
+    size_t taskMaxDcacheSize = SK_TOTAL_UB_SIZE - kernelInfo.dynUbufSize - kernelInfo.allocUbufSize;
+    skMaxDcacheSize = std::min(skMaxDcacheSize, taskMaxDcacheSize);
   }
-  if (availableUbufInfo.hasMinAvailableUbufSize) {
-    availableUbufInfo.minAvailableUbufSize = minAvailableUbufSize;
+  if (dcacheSizeResult.hasSimtTask) {
+    dcacheSizeResult.skMaxDcacheSize = skMaxDcacheSize;
   }
-  return availableUbufInfo;
+  return dcacheSizeResult;
 }
 
 bool MatchKernelOption(const SuperKernelOptionsManager &opts, const std::vector<std::string> &kernelList,
@@ -2644,16 +2644,16 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
   }
 
   bool useSimtEntry = false;
-  size_t minAvailableUbufSize = 0;
+  size_t skMaxDcacheSize = 0;
   const auto *setDynUbufSizeOpt = opts.GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
   if (setDynUbufSizeOpt != nullptr && setDynUbufSizeOpt->GetIntValue() == 1) {
-    const SimtAvailableUbufInfo availableUbufInfo = GetMinSimtAvailableUbufSize(tasks);
-    if (!availableUbufInfo.success) {
-      SK_LOGE("Build failed: get SIMT min available ubuf size failed");
+    const SimtDcacheSizeResult dcacheSizeResult = CalculateSimtDcacheSize(tasks);
+    if (!dcacheSizeResult.areSimtUbufSizesValid) {
+      SK_LOGE("Build failed: SIMT ubuf size validation failed");
       return {};
     }
-    useSimtEntry = availableUbufInfo.hasMinAvailableUbufSize;
-    minAvailableUbufSize = availableUbufInfo.minAvailableUbufSize;
+    useSimtEntry = dcacheSizeResult.hasSimtTask;
+    skMaxDcacheSize = dcacheSizeResult.skMaxDcacheSize;
   }
 
   SK_LOGI("Get entry info...");
@@ -2677,10 +2677,10 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
   launchInfo.entryInfo = std::move(entryInfo);
   launchInfo.devArgs = std::move(devArgs);
   launchInfo.skFuncName = skFuncName;
-  launchInfo.hasMinAvailableUbufSize = useSimtEntry;
-  launchInfo.minAvailableUbufSize = minAvailableUbufSize;
+  launchInfo.useSimtEntry = useSimtEntry;
+  launchInfo.skMaxDcacheSize = skMaxDcacheSize;
   if (useSimtEntry) {
-    SK_LOGI("Build launch info with SIMT min available ubuf size, minAvailableUbufSize=%zu", minAvailableUbufSize);
+    SK_LOGI("Build launch info with SIMT max dcache size, skMaxDcacheSize=%zu", skMaxDcacheSize);
   }
 
   // Generate task queue JSON for aggregation

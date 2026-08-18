@@ -594,7 +594,7 @@ class SuperKernelKernelNode : public SuperKernelBaseNode {
 
  private:
   void IdentifyAndHandleSimtKernel(const SuperKernelOptionsManager *opts);
-  bool SetupLaunchKernelCfgWithDynUbuf(size_t minAvailableUbufSize);
+  bool SetupLaunchKernelCfgWithMaxDcacheSize(size_t skMaxDcacheSize);
 
   bool isScopeBegin = false;
   bool isScopeEnd = false;
