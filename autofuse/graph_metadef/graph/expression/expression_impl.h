@@ -30,7 +30,7 @@ using ExpressionImplPtr = std::unique_ptr<ExpressionImpl>;
 using RelationalFunc = std::function<SymEngine::RCP<const SymEngine::Basic>(
     const SymEngine::RCP<const SymEngine::Basic> &, const SymEngine::RCP<const SymEngine::Basic> &)>;
 
-enum OperationType : size_t {
+enum class OperationType : size_t {
   kOpAdd = 0,
   kOpMax,
   kOpMin,

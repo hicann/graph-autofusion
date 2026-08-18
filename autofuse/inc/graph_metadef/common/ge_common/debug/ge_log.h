@@ -38,7 +38,7 @@ extern "C" {
 #define GE_MODULE_NAME static_cast<int32_t>(GE)
 #define GE_MODULE_NAME_U16 static_cast<uint16_t>(GE)
 
-enum TraceStatus { TRACE_INIT = 0, TRACE_RUNNING, TRACE_WAITING, TRACE_STOP };
+enum class TraceStatus { TRACE_INIT = 0, TRACE_RUNNING, TRACE_WAITING, TRACE_STOP };
 
 class GE_FUNC_VISIBILITY GeLog {
  public:

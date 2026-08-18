@@ -20,7 +20,7 @@
 #include "register/graph_optimizer/fusion_common/op_slice_info.h"
 
 namespace fe {
-enum BufferFusionPassType {
+enum class BufferFusionPassType {
   BUILT_IN_AI_CORE_BUFFER_FUSION_PASS,
   BUILT_IN_VECTOR_CORE_BUFFER_FUSION_PASS,
   CUSTOM_AI_CORE_BUFFER_FUSION_PASS,

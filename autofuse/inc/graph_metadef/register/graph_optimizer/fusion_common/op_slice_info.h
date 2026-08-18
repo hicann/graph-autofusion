@@ -16,8 +16,8 @@
 #include <memory>
 
 namespace fe {
-enum OpReduceType { REDUCE_MEAN = 0, REDUCE_ADD, REDUCE_MAX, REDUCE_MIN };
-enum OpL1FusionType { L1FUSION_DISABLE = 0, L1FUSION_BASIC, L1FUSION_INPUT_CTR };
+enum class OpReduceType { REDUCE_MEAN = 0, REDUCE_ADD, REDUCE_MAX, REDUCE_MIN };
+enum class OpL1FusionType { L1FUSION_DISABLE = 0, L1FUSION_BASIC, L1FUSION_INPUT_CTR };
 
 class InputSplitInfoImpl;
 using InputSplitInfoImplPtr = std::shared_ptr<InputSplitInfoImpl>;
