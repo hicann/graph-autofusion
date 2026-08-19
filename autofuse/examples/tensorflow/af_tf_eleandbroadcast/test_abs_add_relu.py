@@ -10,12 +10,12 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 #
-# TensorFlow 场景 AutoFuse 示例（abs -> relu -> exp 逐元素融合）。
+# TensorFlow 场景 AutoFuse 示例（abs -> add(broadcast) -> relu）。
 # 支持 TF1（npu_bridge）和 TF2 兼容模式（npu_device.compat），通过 --mode 选择。
 #
 # 用法：
-#   TF1 环境：  python3 test_abs_relu_exp.py --mode tf1
-#   TF2 环境：  python3 test_abs_relu_exp.py --mode tf2-compat
+#   TF1 环境：  python3 test_abs_add_relu.py --mode tf1
+#   TF2 环境：  python3 test_abs_add_relu.py --mode tf2-compat
 #
 
 import os
@@ -32,19 +32,22 @@ from common.tf_runner import run_example  # noqa: E402
 
 
 def build_model(placeholder_fn):
-    """构建 abs -> relu -> exp 计算图及对应输入数据。"""
+    """构建 abs -> add(broadcast) -> relu 计算图及对应输入数据。"""
     data1 = placeholder_fn(tf.float16, shape=[128, 192])
-    input_data = np.random.rand(128, 192).astype(np.float16)
+    data2 = placeholder_fn(tf.float16, shape=[192])
+
+    input_data1 = np.random.uniform(-1.0, 1.0, size=(128, 192)).astype(np.float16)
+    input_data2 = np.random.uniform(-1.0, 1.0, size=(192,)).astype(np.float16)
 
     abs_0 = tf.abs(data1)
-    relu_0 = tf.nn.relu(abs_0)
-    exp_0 = tf.exp(relu_0)
+    add_0 = tf.add(abs_0, data2)
+    relu_0 = tf.nn.relu(add_0)
 
-    return exp_0, {data1: input_data}
+    return relu_0, {data1: input_data1, data2: input_data2}
 
 
 if __name__ == "__main__":
     run_example(
         build_model,
-        description="AutoFuse abs-relu-exp 示例",
+        description="AutoFuse abs-add(broadcast)-relu 示例",
     )

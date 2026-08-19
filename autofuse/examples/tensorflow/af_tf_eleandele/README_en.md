@@ -16,15 +16,17 @@ Run all the following commands from the graph-autofusion repository root.
 ```bash
 # TensorFlow 1.15 environment
 source scripts/env_install/tensorflow/env/activate_tf1.sh
+export AUTOFUSE_FLAGS="--enable_autofuse=true"
 python3 autofuse/examples/tensorflow/af_tf_eleandele/test_abs_relu_exp.py --mode tf1
 
 # TensorFlow 2.6.5 environment (compatibility mode)
 source scripts/env_install/tensorflow/env/activate_tf2.sh
+export AUTOFUSE_FLAGS="--enable_autofuse=true"
 python3 autofuse/examples/tensorflow/af_tf_eleandele/test_abs_relu_exp.py --mode tf2-compat
 ```
 
 ## Expected Result
 
-The script constructs an `abs → relu → exp` computation graph and performs 100 inference steps on the NPU. If no error is reported, the fusion is successful. The three operators are fused into an `AscBackend`-type fused operator named `autofuse_pointwise_0_Abs_Relu_Exp`, which is executed as a single Kernel on the NPU.
+The script constructs an `abs → relu → exp` computation graph and performs 100 inference steps on the NPU. If the script finishes without errors, the example has executed successfully. Use graph dump files or Profiling data to confirm whether fusion takes effect.
 
-To view the fusion result, enable profiling (the script already includes the profiling configuration). After execution, check `PROF_*/mindstudio_profiler_output/op_summary_*.csv` under the `./profiling` directory in the repository root. If `autofuse_pointwise_0_Abs_Relu_Exp` appears in the profiling data and the standalone `Abs`, `Relu`, and `Exp` kernels no longer appear, it indicates that the three operators have been fused into a single fused operator.
+Profiling is already configured in the script. After running the commands above, check `./profiling/PROF_*/mindstudio_profiler_output/op_summary_*.csv`. When fusion takes effect, an AutoFuse fused Kernel containing `Abs`, `Relu`, and `Exp` can be observed, typically with a name similar to `autofuse_pointwise_0_Abs_Relu_Exp`, while the corresponding standalone `Abs`, `Relu`, and `Exp` Kernels no longer appear.

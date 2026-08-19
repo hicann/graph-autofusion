@@ -10,12 +10,12 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 #
-# TensorFlow 场景 AutoFuse 示例（abs -> relu -> exp 逐元素融合）。
+# TensorFlow 场景 AutoFuse 示例（abs -> reduce_sum）。
 # 支持 TF1（npu_bridge）和 TF2 兼容模式（npu_device.compat），通过 --mode 选择。
 #
 # 用法：
-#   TF1 环境：  python3 test_abs_relu_exp.py --mode tf1
-#   TF2 环境：  python3 test_abs_relu_exp.py --mode tf2-compat
+#   TF1 环境：  python3 test_abs_reducesum.py --mode tf1
+#   TF2 环境：  python3 test_abs_reducesum.py --mode tf2-compat
 #
 
 import os
@@ -32,19 +32,18 @@ from common.tf_runner import run_example  # noqa: E402
 
 
 def build_model(placeholder_fn):
-    """构建 abs -> relu -> exp 计算图及对应输入数据。"""
+    """构建 abs -> reduce_sum 计算图及对应输入数据。"""
     data1 = placeholder_fn(tf.float16, shape=[128, 192])
-    input_data = np.random.rand(128, 192).astype(np.float16)
+    input_data = np.random.uniform(-1.0, 1.0, size=(128, 192)).astype(np.float16)
 
     abs_0 = tf.abs(data1)
-    relu_0 = tf.nn.relu(abs_0)
-    exp_0 = tf.exp(relu_0)
+    reduce_sum_0 = tf.reduce_sum(abs_0, axis=1)
 
-    return exp_0, {data1: input_data}
+    return reduce_sum_0, {data1: input_data}
 
 
 if __name__ == "__main__":
     run_example(
         build_model,
-        description="AutoFuse abs-relu-exp 示例",
+        description="AutoFuse abs-reduce_sum 示例",
     )
