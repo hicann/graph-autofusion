@@ -391,7 +391,7 @@ static void CreateTransposeBoolAscGraph(af::AscGraph &graph) {
   output.y.dtype = af::DT_BOOL;
   output.ir_attr.SetIndex(0);
 
-  ConstructVVAscGraphAxisInfo(graph, 2, {1, 0});
+  ConstructVVAscGraphAxisInfo(graph, 3, {1, 0, 2});
 }
 
 af::ComputeGraphPtr ShareGraph::TransposeBoolFusedGraph() {
