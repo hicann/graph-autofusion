@@ -93,6 +93,14 @@ bool GetRealPath(const std::string &file_path, std::string &real_file_path) {
   return true;
 }
 
+bool NeedAppendDataCopyTailAxis(const af::Expression &gm_tail_stride, const af::Expression &ub_tail_stride) {
+  const auto is_zero_or_one = [](const af::Expression &stride) {
+    return af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolOne) == af::TriBool::kTrue ||
+           af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) == af::TriBool::kTrue;
+  };
+  return !(is_zero_or_one(gm_tail_stride) && is_zero_or_one(ub_tail_stride));
+}
+
 af::Status GetApiTilingTypeName(const ascir::NodeView &node, std::string &type_name) {
   auto impl = ascgen_utils::GetAscIrCodegenImpl(node->GetType());
   GE_ASSERT_NOTNULL(impl, "GetAscIrCodegenImpl of node %s[%s] is null", node->GetTypePtr(), node->GetNamePtr());

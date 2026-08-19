@@ -129,6 +129,10 @@ std::string GenValidName(const std::string &t_name);
 bool GetRealPath(const std::string &file_path, std::string &real_file_path);
 bool IsEmptyTensorSence(const ascir::FusedScheduledResult &fused_schedule_result);
 
+// DataCopy 对非连续 GM/UB 尾轴补齐一个长度为 1 的逻辑轴。
+// codegen 与 ATT 性能建模必须使用同一判定，避免 block_len 不一致。
+bool NeedAppendDataCopyTailAxis(const af::Expression &gm_tail_stride, const af::Expression &ub_tail_stride);
+
 template <typename T>
 static std::string VectorToStr(const std::vector<T> &vec, char start = '[', char end = ']') {
   std::string result;

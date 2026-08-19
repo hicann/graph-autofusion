@@ -552,6 +552,24 @@ bool IsValidNode(const af::AscNodePtr &node) {
          node->attr.type != "Split";
 }
 
+bool IsScoreEligibleGraph(const af::AscGraph &graph) {
+  bool has_broadcast = false;
+  for (const auto &node : graph.GetAllNodes()) {
+    if (!IsValidNode(node) || node->attr.api.compute_type == af::ComputeType::kComputeSplit) {
+      return false;
+    }
+    has_broadcast = has_broadcast || ScheduleUtils::IsBroadcast(node);
+    // Slice/Split can be lowered to a Load.  Keep the score for the regular
+    // broadcast load (singleton broadcast axes are accepted), but reject a
+    // load whose GM strides are not continuous for its repeats.
+    if (ScheduleUtils::IsLoad(node) &&
+        !ScheduleUtils::IsContinuesStrides(node->outputs[0].attr.repeats, node->outputs[0].attr.strides)) {
+      return false;
+    }
+  }
+  return has_broadcast;
+}
+
 bool IsValidDataType(const af::AscNodePtr &node) {
   const auto dsize = af::GetSizeByDataType(node->outputs[0].attr.dtype);
   const int b8 = 1;
@@ -644,19 +662,12 @@ std::string NddmaTemplate::GetScoreFunc(const af::AscGraph &origin_graph, const 
   GELOGD("Start to get score func for Nddma Graph [%s]", nddma_graph.GetName().c_str());
   af::AscNodePtr nddma_node;
   uint32_t nddma_node_cnt = 0;
-  // 打分函数仅在 纯elementwise+brc && 单个nddma节点 场景下生效
-  // 从原图判断节点类型，排除transpose转成nddma的场景
-  for (const auto &node : origin_graph.GetAllNodes()) {
-    if (!IsValidNode(node)) {
-      GELOGD("Graph [%s]: Not elewise + broadcast graph, assigning default score.", origin_graph.GetName().c_str());
-      return "";
-    }
-    // 判断load连续性，排除部分split场景
-    // 无法排除首轴split / split单输出等连续load场景
-    if (ScheduleUtils::IsLoad(node) && !ScheduleUtils::IsContinuesVecStrides(node)) {
-      GELOGD("Graph [%s]: Not contiguous load in graph, assigning default score.", origin_graph.GetName().c_str());
-      return "";
-    }
+  // 打分函数仅在纯 elementwise + broadcast 且单个 NDDMA 节点场景下生效。
+  // 从原图判断节点类型，排除 Slice/Split 及 transpose 转成 NDDMA 的场景。
+  if (!IsScoreEligibleGraph(origin_graph)) {
+    GELOGD("Graph [%s]: Not score-eligible elementwise+broadcast graph, assigning default score.",
+           origin_graph.GetName().c_str());
+    return "";
   }
 
   for (const auto &node : nddma_graph.GetAllNodes()) {
