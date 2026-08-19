@@ -190,6 +190,7 @@ target_link_libraries(aihac_codegen PUBLIC
         $<BUILD_INTERFACE:ascendc_api_extend>
         error_manager
         c_sec
+        acl_rt
         unified_dlog
         runtime
         atrace_share

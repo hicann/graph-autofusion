@@ -1017,6 +1017,8 @@ static void VerifyConv2DOffsetTiling(const std::map<std::string, std::string> &r
 
 }  // namespace
 
+void CreateMatmulGraph(af::AscGraph &graph, bool is_dynamic);
+
 class TestCodegenTiling : public testing::Test, public codegen::TilingLib {
  public:
   void SetUp() override {
@@ -1027,6 +1029,28 @@ class TestCodegenTiling : public testing::Test, public codegen::TilingLib {
   void TearDown() override {
     ge::PlatformContext::GetInstance().Reset();
     ge::RuntimeStub::Reset();
+  }
+
+  std::string GenerateMatmulTilingForSoc(const std::shared_ptr<ge::RuntimeStub> &stub, const std::string &platform) {
+    ge::PlatformContext::GetInstance().SetPlatform(platform);
+    ge::RuntimeStub::SetInstance(stub);
+
+    af::AscGraph graph("matmul_elemwise_pro");
+    CreateMatmulElemwiseDynamicGraph(graph);
+
+    af::AscGraph mm_graph("mutmul");
+    CreateMatmulGraph(mm_graph, true);
+    optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+    ascir::FusedScheduledResult fused_schedule_result;
+    EXPECT_EQ(optimizer.Optimize(graph, fused_schedule_result), 0);
+
+    ascir::ScheduleGroup schedule_group;
+    schedule_group.impl_graphs.push_back(mm_graph);
+    fused_schedule_result.node_idx_to_scheduled_results[0][0].schedule_groups.push_back(schedule_group);
+    fused_schedule_result.node_idx_to_scheduled_results[0][0].cube_type = ascir::CubeTemplateType::kUBFuse;
+
+    std::map<std::string, std::string> shape_info{{"s0", "64"}, {"s1", "64"}};
+    return Generate(fused_schedule_result, shape_info, "", "0").at("tiling_def_and_tiling_const");
   }
   void SetupLoadAttrs(af::AscNode &load, uint64_t z0_id, const af::Expression &z0_size) {
     auto &attr = load.outputs[0].attr;
@@ -1142,6 +1166,20 @@ class TestCodegenTiling : public testing::Test, public codegen::TilingLib {
 
  protected:
   TestCodegenTiling() : codegen::TilingLib("test", "test") {}
+};
+
+class RuntimeStubWithFullSocName : public ge::RuntimeStubV2Common {
+ public:
+  const char *aclrtGetSocName() override {
+    return "Ascend910_9591";
+  }
+};
+
+class RuntimeStubWithNullSocName : public ge::RuntimeStubV2Common {
+ public:
+  const char *aclrtGetSocName() override {
+    return nullptr;
+  }
 };
 
 TEST_F(TestCodegenTiling, NoWorkspaceTest) {
@@ -3307,6 +3345,18 @@ TEST_F(TestCodegenTiling, TestMatmulElemwiseDynamicShapeFuse) {
 
   auto pos = res["tiling_def_and_tiling_const"].find("TilingResult result = wrapper.DoMatMulTiling(");
   ASSERT_NE(pos, std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, CubeTilingUsesAclrtSocName) {
+  const auto tiling_code = GenerateMatmulTilingForSoc(std::make_shared<RuntimeStubWithFullSocName>(), "3510");
+
+  EXPECT_NE(tiling_code.find("compile_info.soc_version = \"Ascend910_9591\";"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, CubeTilingFallsBackToPlatformNpuArchWhenAclrtSocNameIsNull) {
+  const auto tiling_code = GenerateMatmulTilingForSoc(std::make_shared<RuntimeStubWithNullSocName>(), "3510");
+
+  EXPECT_NE(tiling_code.find("compile_info.soc_version = \"3510\";"), std::string::npos);
 }
 
 // ==================== Conv2D 相关辅助函数 ====================
