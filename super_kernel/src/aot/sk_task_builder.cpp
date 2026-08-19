@@ -23,6 +23,7 @@
 #include <tuple>
 #include "securec.h"
 #include "sk_event_recorder.h"
+#include "runtime/rt_external_kernel.h"
 #include "runtime/kernel.h"
 
 extern "C" aclrtBinHandle AscendGetEntryBinHandle();
