@@ -11,6 +11,10 @@
 !af-test-developer/**
 !af-code-reviewer/
 !af-code-reviewer/**
+!af-inductor-cv-validator/
+!af-inductor-cv-validator/**
+af-inductor-cv-validator/**/__pycache__/
+af-inductor-cv-validator/**/*.pyc
 !af-perf-modeler/
 !af-perf-modeler/**
 !sk-model-analysis/
