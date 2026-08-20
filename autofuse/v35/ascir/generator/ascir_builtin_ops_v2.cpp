@@ -1050,7 +1050,7 @@ REG_ASC_IR(IndirectLoad)
     .Attr<int64_t>("axis")
     .Attr<bool>("negative_index_support")
     .Attr<bool>("need_check_bound")
-    .Attr<int64_t>("max")
+    .Attr<Expression>("max")
     .ComputeType(ComputeType::kComputeLoad)
     .Impl(v2_soc_versions,
           {af::ascir::AscIrImplCreator<af::ascir::IndirectLoadAscIrAttImplV2>(),

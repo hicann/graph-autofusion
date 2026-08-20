@@ -1158,8 +1158,6 @@ DEFINE_IR_ATTR_ACCESSORS(IndirectLoad, AscIndirectLoadIrAttrDef, kNegativeIndexS
                          PyBool_FromLong, PyObject_IsTrue, SetNegative_index_support, GetNegative_index_support)
 DEFINE_IR_ATTR_ACCESSORS(IndirectLoad, AscIndirectLoadIrAttrDef, kNeedCheckBoundAttr, bool, PyBool_Check,
                          PyBool_FromLong, PyObject_IsTrue, SetNeed_check_bound, GetNeed_check_bound)
-DEFINE_IR_ATTR_ACCESSORS(IndirectLoad, AscIndirectLoadIrAttrDef, kMaxAttr, int64_t, PyLong_Check, PyLong_FromLong,
-                         PyLong_AsLong, SetMax, GetMax)
 DEFINE_IR_ATTR_ACCESSORS(MatMul, AscMatMulIrAttrDef, kHasRelu, int64_t, PyLong_Check, PyLong_FromLong, PyLong_AsLong,
                          SetHas_relu, GetHas_relu)
 DEFINE_IR_ATTR_ACCESSORS(MatMul, AscMatMulIrAttrDef, kTransposeX1, int64_t, PyLong_Check, PyLong_FromLong,
@@ -1227,6 +1225,31 @@ DEFINE_IR_ATTR_ACCESSORS(
     Unsupported, AscUnsupportedIrAttrDef, kErrorMsgAttr, std::string, PyUnicode_Check,
     [](const std::string &str) { return PyUnicode_FromString(str.c_str()); }, PyUnicode_AsUTF8, SetError_msg,
     GetError_msg)
+
+template <>
+PyObject *OpsOperatorIrAttr<af::ascir_op::IndirectLoad, kMaxAttr>::_getter(PyObject *self, void *closure) {
+  (void)closure;
+  auto *attr = GetValidatedIrAttr<af::ascir_op::IndirectLoad, af::ascir_op::IndirectLoad::AscIndirectLoadIrAttrDef>(
+      self, "AscIndirectLoadIrAttrDef");
+  GE_ASSERT_NOTNULL(attr);
+  af::Expression v;
+  PY_ASSERT_GRAPH_SUCCESS(attr->GetMax(v));
+  return SizeExpr::FromSizeExpr(v);
+}
+
+template <>
+int OpsOperatorIrAttr<af::ascir_op::IndirectLoad, kMaxAttr>::_setter(PyObject *self, PyObject *value, void *closure) {
+  (void)closure;
+  auto v = SizeExpr::AsSizeExpr(value);
+  if ((!v.IsValid()) || (v.Serialize().get() == nullptr)) {
+    return -1;
+  }
+  auto *attr = GetValidatedIrAttr<af::ascir_op::IndirectLoad, af::ascir_op::IndirectLoad::AscIndirectLoadIrAttrDef>(
+      self, "AscIndirectLoadIrAttrDef");
+  GE_ASSERT_NOTNULL(attr);
+  PY_ASSERT_GRAPH_SUCCESS(attr->SetMax(v));
+  return 0;
+}
 
 template <>
 PyObject *OpsOperatorIrAttr<af::ascir_op::Load, kOffsetAttr>::_getter(PyObject *self, void *closure) {

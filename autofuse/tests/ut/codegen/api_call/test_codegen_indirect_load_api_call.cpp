@@ -872,7 +872,8 @@ TEST(IndirectLoadApiCallTest, GenerateSimdProducesIndirectLoadSimdCall) {
   GenerateSimdCall(ge::DT_FLOAT16, result);
   EXPECT_NE(result.find("// IndirectLoad SIMD"), std::string::npos);
   EXPECT_NE(result.find("IndirectLoadSimd<half, int32_t, 2, 1>"), std::string::npos);
-  EXPECT_EQ(result.find("tmp_buf_0"), std::string::npos);
+  // Symbolic sizes are dynamic shapes, which use the strided path and require a temporary UB buffer.
+  EXPECT_NE(result.find("tmp_buf_0"), std::string::npos);
 }
 
 TEST(IndirectLoadApiCallTest, GenerateSimdUint32InputProducesTypedCall) {

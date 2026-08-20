@@ -923,6 +923,16 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, ClassifiesNonOverlappingStridedLayou
   EXPECT_EQ(layout.physical_repeats, view.sizes);
 }
 
+TEST(IndirectLoadScheduleCaseGeneratorTest, ClassifiesDynamicShapeAsStridedLayout) {
+  const af::Expression s0 = af::Symbol("s0");
+  const af::Expression s1 = af::Symbol("s1");
+  const ascgen_utils::indirect_load::LogicalTensorView view = {{0, 1}, {s0, s1}, {s1, af::Symbol(1)}};
+  ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
+  ASSERT_EQ(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, layout), af::SUCCESS);
+  EXPECT_EQ(layout.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kStrided);
+  EXPECT_EQ(layout.physical_repeats, view.sizes);
+}
+
 TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsOverlappingStridedLayout) {
   const ascgen_utils::indirect_load::LogicalTensorView view = {
       {0, 1, 2}, {af::Symbol(2), af::Symbol(3), af::Symbol(4)}, {af::Symbol(10), af::Symbol(4), af::Symbol(1)}};
