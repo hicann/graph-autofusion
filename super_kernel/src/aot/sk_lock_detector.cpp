@@ -76,7 +76,7 @@ bool LockDetector::HasDeadlock(SuperKernelBaseNode *curNode) {
     return false;
   }
 
-  uint64_t preNodeId = curNode->GetPreNodeId();
+  const uint64_t preNodeId = curNode->GetPreNodeId();
   SuperKernelBaseNode *preNode = graph_->GetNodeById(preNodeId);
   if (preNode == nullptr) {
     SK_LOGE("[lock detector] HasDeadlock: preNode %lu not found for curNode %lu", preNodeId, curNode->GetNodeId());
@@ -138,7 +138,7 @@ bool LockDetector::CheckKernelNodeDeadlock(SuperKernelBaseNode *preNode) {
 }
 
 bool LockDetector::CheckWaitNodeDeadlock(SuperKernelBaseNode *preNode) {
-  uint64_t notifyId = preNode->GetCorrespondingNotifyNodeId();
+  const uint64_t notifyId = preNode->GetCorrespondingNotifyNodeId();
   // Case 1: notify node not in modelRI
   if (notifyId == INVALID_TASK_ID) {
     SK_LOGI("Deadlock detected in wait node, waitNodeId=%lu, notifyNodeId=%lu is not in graph", preNode->GetNodeId(),
@@ -176,8 +176,8 @@ bool LockDetector::CheckWaitNodeDeadlock(SuperKernelBaseNode *preNode) {
 }
 
 bool LockDetector::CheckNotifyNodeDeadlock(SuperKernelBaseNode *preNode) {
-  uint32_t cubeNum = preNode->GetCubeNum();
-  uint32_t vecNum = preNode->GetVecNum();
+  const uint32_t cubeNum = preNode->GetCubeNum();
+  const uint32_t vecNum = preNode->GetVecNum();
   if ((cubeNum > 0 || vecNum > 0) && !HasEnoughCores(preNode, false)) {
     SK_LOGI("Not enough cores for notify node, nodeId=%lu, requiredCube=%u, requiredVec=%u", preNode->GetNodeId(),
             cubeNum, vecNum);
@@ -201,8 +201,8 @@ bool LockDetector::CheckNotifyNodeDeadlock(SuperKernelBaseNode *preNode) {
 }
 
 bool LockDetector::HasEnoughCores(const SuperKernelBaseNode *curNode, bool isSuperKernel) {
-  uint32_t curNodeCubeNum = curNode->GetCubeNum();
-  uint32_t curNodeVecNum = curNode->GetVecNum();
+  const uint32_t curNodeCubeNum = curNode->GetCubeNum();
+  const uint32_t curNodeVecNum = curNode->GetVecNum();
 
   if (isSuperKernel) {
     if (curNodeCubeNum <= superKernelCubeNum && curNodeVecNum <= superKernelVecNum) {
@@ -266,10 +266,10 @@ void LockDetector::Reset() {
       "nodeNum=%u, kernelNodeNum=%u",
       depOpCubeNum, depOpVecNum, superKernelCubeNum, superKernelVecNum, nodeNum, kernelNodeNum);
 
-  size_t nodesCount = nodes.size();
-  size_t tempVisitedNodesCount = tempVisitedNodes.size();
-  size_t streamIdsCount = skStreamIds.size();
-  size_t streamRangesCount = skRangeInStream.size();
+  const size_t nodesCount = nodes.size();
+  const size_t tempVisitedNodesCount = tempVisitedNodes.size();
+  const size_t streamIdsCount = skStreamIds.size();
+  const size_t streamRangesCount = skRangeInStream.size();
 
   depOpCubeNum = 0;
   depOpVecNum = 0;
