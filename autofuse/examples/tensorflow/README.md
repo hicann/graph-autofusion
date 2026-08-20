@@ -2,17 +2,30 @@
 
 ## 功能描述
 
-使用 autofuse 完成 TensorFlow 网络下的算子融合。通过 GE（Graph Engine）中的 Autofuse fusion pass 自动识别可融合算子并完成融合。
+使用 AutoFuse 完成 TensorFlow 网络下的算子融合。通过 GE（Graph Engine）中的 AutoFuse fusion pass 自动识别可融合算子并完成融合。
 
 ## 目录结构
 
 ```text
-├── README.md                              # 本文档
-├── README_en.md                           # 英文文档
-└── af_tf_eleandele/                       # elementwise 类型算子融合的样例
-    ├── README.md                          # 样例说明
-    ├── README_en.md                       # 英文样例说明
-    └── test_abs_relu_exp.py               # 通过 autofuse 完成 abs + relu + exp 三个 elementwise 算子的融合
+├── README.md
+├── README_en.md
+├── common/
+│   ├── __init__.py
+│   ├── config.py                           # 公共配置
+│   ├── profiling_utils.py                  # Profiling 公共工具
+│   └── tf_runner.py                        # TF1/TF2 公共运行框架
+├── af_tf_eleandele/
+│   ├── README.md
+│   ├── README_en.md
+│   └── test_abs_relu_exp.py                # abs + relu + exp 融合样例
+├── af_tf_eleandbroadcast/
+│   ├── README.md
+│   ├── README_en.md
+│   └── test_abs_add_relu.py                # abs + add + relu 融合样例
+└── af_tf_eleandreduce/
+    ├── README.md
+    ├── README_en.md
+    └── test_abs_reducesum.py               # abs + reduce_sum 融合样例
 ```
 
 ## 前置说明
@@ -58,21 +71,19 @@ export AUTOFUSE_FLAGS="--enable_autofuse=true"
 
 ## 执行用例
 
-```bash
-# TF 1.15 环境
-python3 autofuse/examples/tensorflow/af_tf_eleandele/test_abs_relu_exp.py --mode tf1
+当前包含以下三个用例，可根据实际场景参考对应文档执行：
 
-# TF 2.6.5 环境（兼容模式）
-python3 autofuse/examples/tensorflow/af_tf_eleandele/test_abs_relu_exp.py --mode tf2-compat
-```
+- [Elementwise + Elementwise](./af_tf_eleandele/README.md)：`abs + relu + exp`
+- [Elementwise + Broadcast](./af_tf_eleandbroadcast/README.md)：`abs + add + relu`
+- [Elementwise + Reduce](./af_tf_eleandreduce/README.md)：`abs + reduce_sum`
 
 ## 预期执行结果
 
-脚本执行 100 步推理，无报错表示用例执行成功；是否发生融合，需要通过 Dump 图或 Profiling 进一步确认。
+各用例脚本均执行 100 步推理，无报错表示用例执行成功；是否发生融合，需要通过 Dump 图或 Profiling 进一步确认。
 
 ## 参考
 
-- [Autofuse 简介](../../README.md)
+- [AutoFuse 简介](../../README.md)
 - [环境编译部署](../../../docs/env_install/tensorflow/env_tf.md)
 - [aarch64 架构 TF 源码编译](../../../docs/env_install/tensorflow/build_tf_aarch64.md)
 - [精度调试工具指南](https://hiascend.com/document/redirect/CannCommunityToolAccucacy)

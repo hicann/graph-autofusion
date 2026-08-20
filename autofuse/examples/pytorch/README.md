@@ -1,4 +1,4 @@
-# PyTorch Inductor 场景用例演示
+# PyTorch 场景用例演示
 
 ## 功能描述
 
@@ -6,9 +6,9 @@
 
 当前包含以下三个用例：
 
-- `add + ge`：将加法和比较算子融合为一个算子；
-- `mul + reducesum`：将乘法和求和归约算子融合为一个算子；
-- `gather + add`：构造索引取数和逐元素加法图模式
+* `add + ge`：将加法和比较算子融合为一个算子；
+* `mul + reducesum`：将乘法和求和归约算子融合为一个算子；
+* `gather + add`：构造索引取数和逐元素加法图模式
 
 注：当前暂不支持gather融合能力，等待[ issue175 ](https://gitcode.com/cann/graph-autofusion/issues/175)这个issue完成后gather可以和add进行融合。
 
@@ -37,17 +37,17 @@ pytorch
 ## 前置说明
 
 运行本用例前，请先认真阅读[ PyTorch环境安装说明 ](../../../docs/env_install/pytorch/env_pytorch.md)。需完成以下步骤：
+
 1. CANN 包版本要求为 `9.0.0` 及以上，通过 [CANN 快速安装](https://www.hiascend.com/cann/download?versionId=745&ids=d802%2Ch0501%2Ch0602%2Ch0701) 正确安装 toolkit 和 ops 包，可以参考[ 安装指导 ](../../../docs/zh/quick_install.md)。
 2. `torch_npu` 版本要求为 `2.9.0` 及以上，可以根据 [环境快速安装脚本](../../../scripts/env_install/pytorch/setup_torch_npu_daily.sh) 快速安装python环境和 `torch_npu` 。
 
 ## 设置环境变量
 
+执行用例前，请确保当前终端已进入安装有 PyTorch 和 `torch_npu` 的 Python 环境。Python 环境的安装和激活方式请参考[ PyTorch环境安装说明 ](../../../docs/env_install/pytorch/env_pytorch.md)。
+
 每次新开终端后，执行：
 
 ```bash
-# 环境激活
-source /mnt/workspace/env/venv/torch210_daily/bin/activate
-
 # CANN 包安装路径根据实际安装位置确定。
 export CANN_INSTALL_PATH=/home/developer/Ascend
 
@@ -60,26 +60,11 @@ export ASCEND_DEVICE_ID=0
 
 ## 执行用例
 
-### add + ge 融合
+当前包含以下三个用例，可根据实际场景参考对应文档完成用例执行：
 
-```bash
-cd af_pointwise
-python af_add_ge.py
-```
-
-### mul + reducesum 融合
-
-```bash
-cd af_reduce
-python af_mul_reducesum.py
-```
-
-### gather + add 图模式
-
-```bash
-cd af_gather
-python af_gather_add.py
-```
+* [add + ge 融合用例](./af_pointwise/README.md)
+* [mul + reducesum 融合用例](./af_reduce/README.md)
+* [gather + add 图模式用例](./af_gather/README.md)
 
 ## 预期执行结果
 
@@ -101,6 +86,6 @@ op_summary_时间戳.csv
 
 ## 参考
 
-- [Autofuse 简介与快速上手](../../README.md)
-- [Profiling 性能分析工具指南](https://hiascend.com/document/redirect/CannCommunityToolProfiling)
-- [精度调试工具指南](https://hiascend.com/document/redirect/CannCommunityToolAccucacy)
+* [Autofuse 简介与快速上手](../../README.md)
+* [Profiling 性能分析工具指南](https://hiascend.com/document/redirect/CannCommunityToolProfiling)
+* [精度调试工具指南](https://hiascend.com/document/redirect/CannCommunityToolAccucacy)

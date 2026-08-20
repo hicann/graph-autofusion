@@ -129,6 +129,10 @@ std::string GenValidName(const std::string &t_name);
 bool GetRealPath(const std::string &file_path, std::string &real_file_path);
 bool IsEmptyTensorSence(const ascir::FusedScheduledResult &fused_schedule_result);
 
+// DataCopy 对非连续 GM/UB 尾轴补齐一个长度为 1 的逻辑轴。
+// codegen 与 ATT 性能建模必须使用同一判定，避免 block_len 不一致。
+bool NeedAppendDataCopyTailAxis(const af::Expression &gm_tail_stride, const af::Expression &ub_tail_stride);
+
 template <typename T>
 static std::string VectorToStr(const std::vector<T> &vec, char start = '[', char end = ']') {
   std::string result;
@@ -162,6 +166,14 @@ void GetApiReservedBlockNum(const ascir::ImplGraph &graph, uint32_t &total_blk_n
 bool IsScalarNextNodeSupportBlkTensor(const af::AscNodePtr &node);
 bool IsUbScalarLoad(const af::AscNodePtr &node);
 bool IsStaticSchedResult(const ascir::FusedScheduledResult &fused_schedule_result);
+
+// Return the frontend ABI symbol list.  Results produced before the new field
+// was introduced may only have origin_vars; keep that as a compatibility
+// fallback for legacy callers and unit fixtures.
+const std::vector<af::Expression> &GetFrontendShapeVars(const ascir::FusedScheduledResult &fused_schedule_result);
+// Return the frontend static-shape judgment for the external ABI.  Internal
+// tiling-data generation must continue to use IsStaticSchedResult().
+bool IsFrontendStaticSchedResult(const ascir::FusedScheduledResult &fused_schedule_result);
 af::Status ScalarValuePreProcess(const std::string &ori_value, const std::string &dtype,
                                  std::string &after_pre_pro_value);
 void MergeBrcAxisRepeats(const std::vector<af::Expression> &input0_repeats,  // 输入0的vector_repeats, 带广播

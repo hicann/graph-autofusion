@@ -396,7 +396,7 @@ Status Codegen::GenerateForInductor(const ascir::FusedScheduledResult &fused_sch
     fallback.tiling_lib_.DisableInductorPgo();
     return fallback.GenerateForInductor(fused_schedule_result, result);
   }
-  const auto generate_tiling_without_pgo = [&]() {
+  const auto generate_tiling_without_pgo = [this, &fused_schedule_result, &result]() {
     if (!tiling_lib_.IsInductorPgoEnabled() || ascgen_utils::IsCubeFusedScheduled(fused_schedule_result) ||
         !ascgen_utils::IsStaticSchedResult(fused_schedule_result)) {
       return af::FAILED;

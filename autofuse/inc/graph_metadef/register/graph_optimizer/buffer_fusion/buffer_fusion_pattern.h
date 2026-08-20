@@ -28,9 +28,9 @@ extern const int64_t TBE_OUTPUT_BRANCH_MULTI;
 extern const int64_t TBE_PATTERN_GROUPID_INVALID;
 extern const int32_t TBE_OUTPUT_MAX_NUM_LIMIT;
 
-enum SkipStatus { DISABLED = 0, AVAILABLE = 1, SKIPPED = 2 };
+enum class SkipStatus { DISABLED = 0, AVAILABLE = 1, SKIPPED = 2 };
 
-enum ShapeTypeRule { IGNORE_SHAPE_TYPE = 0, ONLY_SUPPORT_STATIC, ONLY_SUPPORT_DYNAMIC };
+enum class ShapeTypeRule { IGNORE_SHAPE_TYPE = 0, ONLY_SUPPORT_STATIC, ONLY_SUPPORT_DYNAMIC };
 
 enum class PatternRelation { RELATIVE_POSITION_CONSISTENT = 0 };
 
@@ -82,7 +82,7 @@ class BufferFusionPattern {
                                  const int64_t repeat_min = TBE_PATTERN_NUM_DEFAULT,
                                  const int64_t repeat_max = TBE_PATTERN_NUM_DEFAULT,
                                  const int64_t group_id = TBE_PATTERN_GROUPID_INVALID,
-                                 const ShapeTypeRule shape_type_rule = ONLY_SUPPORT_STATIC,
+                                 const ShapeTypeRule shape_type_rule = ShapeTypeRule::ONLY_SUPPORT_STATIC,
                                  const bool not_pattern = false, const bool is_allow_series = true);
 
   /**

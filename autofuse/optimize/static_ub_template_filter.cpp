@@ -304,16 +304,17 @@ bool FilterScheduledResult(FilterState &state, ascir::ScheduledResult &scheduled
     const size_t before_group_size = schedule_group.impl_graphs.size();
     size_t impl_idx = 0UL;
     schedule_group.impl_graphs.erase(
-        std::remove_if(schedule_group.impl_graphs.begin(), schedule_group.impl_graphs.end(),
-                       [&](const af::AscGraph &impl_graph) {
-                         const size_t current_impl_idx = impl_idx++;
-                         const TemplatePosition position = {node_idx, result_idx, group_idx, current_impl_idx};
-                         const bool drop = ShouldDropImplGraph(impl_graph, state.ub_size, position);
-                         if (drop) {
-                           schedule_group.graph_name_to_score_funcs.erase(impl_graph.GetName());
-                         }
-                         return drop;
-                       }),
+        std::remove_if(
+            schedule_group.impl_graphs.begin(), schedule_group.impl_graphs.end(),
+            [&schedule_group, &impl_idx, &state, node_idx, result_idx, group_idx](const af::AscGraph &impl_graph) {
+              const size_t current_impl_idx = impl_idx++;
+              const TemplatePosition position = {node_idx, result_idx, group_idx, current_impl_idx};
+              const bool drop = ShouldDropImplGraph(impl_graph, state.ub_size, position);
+              if (drop) {
+                schedule_group.graph_name_to_score_funcs.erase(impl_graph.GetName());
+              }
+              return drop;
+            }),
         schedule_group.impl_graphs.end());
     if (before_group_size > 0UL && schedule_group.impl_graphs.empty()) {
       GELOGD(
@@ -333,7 +334,7 @@ af::Status FilterNodeScheduledResults(ascir::FusedScheduledResult &fused_schedul
   FilterState state = {fused_scheduled_result, ub_size};
   size_t result_idx = 0UL;
   scheduled_results.erase(std::remove_if(scheduled_results.begin(), scheduled_results.end(),
-                                         [&](ascir::ScheduledResult &scheduled_result) {
+                                         [&state, node_idx, &result_idx](ascir::ScheduledResult &scheduled_result) {
                                            const size_t current_result_idx = result_idx++;
                                            return !FilterScheduledResult(state, scheduled_result, node_idx,
                                                                          current_result_idx);

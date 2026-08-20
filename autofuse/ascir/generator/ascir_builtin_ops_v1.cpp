@@ -41,6 +41,15 @@ namespace af {
 namespace ascir {
 EXPORT_GENERATOR()
 
+class AscIrAttStub : public af::ascir::AscIrAtt {
+  void *GetApiPerf() const override {
+    return nullptr;
+  }
+  void *GetAscendCApiPerfTable() const override {
+    return nullptr;
+  }
+};
+
 const std::vector<std::string> v1_soc_versions{"2201"};
 
 REG_ASC_IR(Data)
@@ -930,5 +939,15 @@ REG_ASC_IR(Conv2DOffsetBias)
 
 REG_ASC_IR(Split).Input("x", "T").DynamicOutput("y", "T").Attr<int64_t>("index").Attr<int64_t>(
     "gid");  // global_id, SplitOp的全局编号
+
+REG_ASC_IR(Unsupported)
+    .Inputs({})
+    .Output("y", "T")
+    .StartNode()
+    .Attr<std::string>("error_msg")
+    .ComputeType(ComputeType::kComputeInvalid)
+    .Impl(v1_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::AscIrAttStub>(),
+                            af::ascir::AscIrImplCreator<af::ascir::UnsupportedAscIrCodegenImpl>(),
+                            {{"T", TensorType{DT_FLOAT}}}});
 }  // namespace ascir
 }  // namespace af

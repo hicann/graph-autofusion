@@ -199,6 +199,11 @@ Status TransposeScoreFunctionGenerator::GetScoreByExpr(int32_t &score) const {
   }
   // 非尾轴转置需要根据尾轴大小确定分数
   int32_t dim = -1;
+  if (!repeat_.GetHint(dim)) {
+    GELOGI("The repeat of axis %d is not constant, skip score calc.", dim);
+    score = 0;
+    return af::SUCCESS;
+  }
   GE_ASSERT_TRUE(repeat_.GetHint(dim), "Failed to get int value, expr = %s",
                  af::SymbolicUtils::ToString(repeat_).c_str());
   const auto limited_size = kTransposeNoNeedUBConvertSize / GetSizeByDataType(transpose_node_->inputs[0].attr.dtype);

@@ -47,6 +47,44 @@ TEST_F(CommonUtilsTest, IsStaticSchedResultTest) {
   EXPECT_EQ(IsStaticSchedResult({static_result}), true);
 }
 
+TEST_F(CommonUtilsTest, FrontendShapeVarsTakePrecedenceOverImplVars) {
+  ascir::FusedScheduledResult result;
+  result.frontend_shape_vars = {af::Symbol("ks0"), af::Symbol("ks1"), af::Symbol("ks2"), af::Symbol("ks10")};
+  result.frontend_shape_vars_collected = true;
+  // Simulate an optimized impl graph that no longer retains the frontend
+  // symbols and therefore remains static under the original internal rule.
+  result.origin_vars = {af::Symbol(10)};
+
+  const auto &vars = GetFrontendShapeVars(result);
+  ASSERT_EQ(vars.size(), 4U);
+  EXPECT_EQ(af::SymbolicUtils::ToString(vars[0]), "ks0");
+  EXPECT_EQ(af::SymbolicUtils::ToString(vars[1]), "ks1");
+  EXPECT_EQ(af::SymbolicUtils::ToString(vars[2]), "ks2");
+  EXPECT_EQ(af::SymbolicUtils::ToString(vars[3]), "ks10");
+  EXPECT_TRUE(IsStaticSchedResult(result));
+  EXPECT_FALSE(IsFrontendStaticSchedResult(result));
+}
+
+TEST_F(CommonUtilsTest, FrontendShapeVarsFallbackToOriginVars) {
+  ascir::FusedScheduledResult result;
+  result.origin_vars = {af::Symbol(10), af::Symbol(20)};
+
+  const auto &vars = GetFrontendShapeVars(result);
+  ASSERT_EQ(vars.size(), 2U);
+  EXPECT_TRUE(vars[0].IsConstExpr());
+  EXPECT_TRUE(IsStaticSchedResult(result));
+}
+
+TEST_F(CommonUtilsTest, EmptyFrontendShapeVarsRemainStatic) {
+  ascir::FusedScheduledResult result;
+  result.frontend_shape_vars_collected = true;
+  result.origin_vars = {af::Symbol("ks0")};
+
+  EXPECT_TRUE(GetFrontendShapeVars(result).empty());
+  EXPECT_FALSE(IsStaticSchedResult(result));
+  EXPECT_TRUE(IsFrontendStaticSchedResult(result));
+}
+
 TEST_F(CommonUtilsTest, ScalarValuePreProcessTest) {
   std::string after_pre_pro_value;
   EXPECT_EQ(ScalarValuePreProcess("inf", "float", after_pre_pro_value), 0);

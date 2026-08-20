@@ -2103,6 +2103,16 @@ class Conv2DAscIrCodegenImpl : public AscIrCodegen {
     return true;
   }
 };
+
+class UnsupportedAscIrCodegenImpl : public AscIrCodegen {
+ public:
+  std::string GetApiCallName() const override {
+    return "";
+  }
+  std::string GetApiName() const override {
+    return "Unsupported";
+  }
+};
 }  // namespace ascir
 }  // namespace af
 

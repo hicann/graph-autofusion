@@ -22,7 +22,7 @@
 #include "register/graph_optimizer/fusion_common/fusion_turbo_utils.h"
 
 namespace fe {
-enum TensorUptType {
+enum class TensorUptType {
   UPDATE_NONE = 0,
   UPDATE_THIS = 1,
   UPDATE_PEER,
@@ -161,10 +161,10 @@ class FusionTurbo {
                               const int32_t &output_index = 0) const;
 
   static Status LinkInput(Relations &input_relations, const ge::NodePtr &dst_node,
-                          const TensorUptType &update_tensor = UPDATE_THIS);
+                          const TensorUptType &update_tensor = TensorUptType::UPDATE_THIS);
 
   static Status LinkOutput(Relations &output_relations, const ge::NodePtr &src_node,
-                           const TensorUptType &update_tensor = UPDATE_THIS);
+                           const TensorUptType &update_tensor = TensorUptType::UPDATE_THIS);
 
   static ge::NodePtr GetPeerOutNode(const ge::NodePtr &node, const int32_t &this_node_input_index);
 

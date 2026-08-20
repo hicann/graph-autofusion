@@ -79,11 +79,8 @@ static void SetDataCopyParams(const MergeInfo &merge_info, DataCopyParams &param
   if (multi_axis_copy) {  // nddma场景尾轴stride可以不等于1或者0，这种情况不需要补轴
     return;
   }
-  if (param.repeats.size() != 0 &&
-      (af::SymbolicUtils::StaticCheckEq(merge_ub_strides.back(), af::sym::kSymbolOne) == af::TriBool::kTrue ||
-       af::SymbolicUtils::StaticCheckEq(merge_ub_strides.back(), af::sym::kSymbolZero) == af::TriBool::kTrue) &&
-      (af::SymbolicUtils::StaticCheckEq(merge_gm_strides.back(), af::sym::kSymbolOne) == af::TriBool::kTrue ||
-       af::SymbolicUtils::StaticCheckEq(merge_gm_strides.back(), af::sym::kSymbolZero) == af::TriBool::kTrue)) {
+  if (!param.repeats.empty() &&
+      !ascgen_utils::NeedAppendDataCopyTailAxis(merge_gm_strides.back(), merge_ub_strides.back())) {
     // 对应的场景为: ub和gm的尾轴stride都等于1或者0，这种情况不需要补轴。
     return;
   }

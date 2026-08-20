@@ -16,8 +16,7 @@
 #include <algorithm>
 #include <cstring>
 
-#include "runtime/base.h"
-#include "runtime/dev.h"
+#include "acl/acl_rt.h"
 
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
@@ -38,10 +37,8 @@ namespace {
 constexpr int64_t kAscendcOpParaSize = 2 * 1024 * 1024;
 
 std::string GetFullSocVersionForCubeTiling(const std::string &fallback_soc_version) {
-  constexpr uint32_t kSocVersionLen = 64U;
-  char soc_version[kSocVersionLen] = {};
-  auto res = rtGetSocSpec("version", "SoC_version", soc_version, kSocVersionLen);
-  if (res == RT_ERROR_NONE && soc_version[0] != '\0') {
+  const char *soc_version = aclrtGetSocName();
+  if (soc_version != nullptr && soc_version[0] != '\0') {
     return std::string(soc_version);
   }
   GELOGW("Failed to get full SoC_version for cube tiling, fallback to %s", fallback_soc_version.c_str());
@@ -496,7 +493,7 @@ std::map<std::string, std::string> TilingLib::GenerateCVFusionDynamic(
   std::stringstream ss;
   std::stringstream call_cube_tiling;
   std::stringstream shape_symbol;
-  for (auto vars : fused_schedule_result.origin_vars) {
+  for (auto vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       auto it = shape_info.find(var_define);

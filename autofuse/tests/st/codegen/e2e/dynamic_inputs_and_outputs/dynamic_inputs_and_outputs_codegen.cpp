@@ -15,6 +15,7 @@
 #include "codegen.h"
 #include "e2e_load_abs_store.h"
 #include "e2e_common.h"
+#include "ascgraph_info_complete.h"
 
 #include <iostream>
 #include <vector>
@@ -118,4 +119,39 @@ TEST_F(DynamicInputsAndOutputsST, DynamicInputsAndOutputsCodegen) {
   }
 
   EXPECT_EQ(gen_success, true);
+}
+
+TEST_F(DynamicInputsAndOutputsST, FrontendShapeAbiKeepsNaturalKsOrderWhenImplDropsSymbols) {
+  auto fused_schedule_result = GenTestCase(1);
+  fused_schedule_result.fused_graph_name = af::AscendString("dynamic_inputs_and_outputs_frontend_shape_abi");
+  af::AscGraph original_asc_graph("dynamic_inputs_and_outputs_frontend_shape_abi_original");
+  original_asc_graph.CreateSizeVar("ks10");
+  original_asc_graph.CreateSizeVar("ks2");
+  original_asc_graph.CreateSizeVar("ks0");
+  original_asc_graph.CreateSizeVar("ks1");
+  ASSERT_EQ(optimize::AscGraphInfoComplete::CollectFrontendShapeVars(original_asc_graph,
+                                                                     fused_schedule_result.frontend_shape_vars),
+            af::SUCCESS);
+  ASSERT_EQ(optimize::AscGraphInfoComplete::NormalizeFrontendShapeVars(fused_schedule_result.frontend_shape_vars),
+            af::SUCCESS);
+  // The optimized implementation graph is intentionally modeled as retaining only one symbol.
+  fused_schedule_result.origin_vars = {af::Symbol("ks0")};
+
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  const auto signature_begin = result.tiling.find("extern \"C\" int64_t AutofuseTiling(");
+  ASSERT_NE(signature_begin, std::string::npos);
+  const auto signature_end = result.tiling.find(")", signature_begin);
+  ASSERT_NE(signature_end, std::string::npos);
+  const auto signature = result.tiling.substr(signature_begin, signature_end - signature_begin);
+
+  size_t previous = 0U;
+  for (const auto &symbol : {std::string("ks0"), std::string("ks1"), std::string("ks2"), std::string("ks10")}) {
+    const auto current = signature.find(symbol);
+    ASSERT_NE(current, std::string::npos) << symbol << " missing from generated AutofuseTiling ABI";
+    EXPECT_GE(current, previous) << "generated symbol order does not match frontend order";
+    previous = current;
+  }
 }

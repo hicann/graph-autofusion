@@ -93,6 +93,14 @@ bool GetRealPath(const std::string &file_path, std::string &real_file_path) {
   return true;
 }
 
+bool NeedAppendDataCopyTailAxis(const af::Expression &gm_tail_stride, const af::Expression &ub_tail_stride) {
+  const auto is_zero_or_one = [](const af::Expression &stride) {
+    return af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolOne) == af::TriBool::kTrue ||
+           af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) == af::TriBool::kTrue;
+  };
+  return !(is_zero_or_one(gm_tail_stride) && is_zero_or_one(ub_tail_stride));
+}
+
 af::Status GetApiTilingTypeName(const ascir::NodeView &node, std::string &type_name) {
   auto impl = ascgen_utils::GetAscIrCodegenImpl(node->GetType());
   GE_ASSERT_NOTNULL(impl, "GetAscIrCodegenImpl of node %s[%s] is null", node->GetTypePtr(), node->GetNamePtr());
@@ -215,13 +223,29 @@ af::Expression CalculateWorkspaceSize(const std::vector<af::AscNodePtr> &workspa
 }
 
 bool IsStaticSchedResult(const ascir::FusedScheduledResult &fused_schedule_result) {
-  for (auto &var : fused_schedule_result.origin_vars) {
+  for (const auto &var : fused_schedule_result.origin_vars) {
     GELOGD("var:%s, is_const:%d", var.Str().get(), static_cast<int32_t>(var.IsConstExpr()));
     if (!var.IsConstExpr()) {
       return false;
     }
   }
 
+  return true;
+}
+
+const std::vector<af::Expression> &GetFrontendShapeVars(const ascir::FusedScheduledResult &fused_schedule_result) {
+  if (fused_schedule_result.frontend_shape_vars_collected || !fused_schedule_result.frontend_shape_vars.empty()) {
+    return fused_schedule_result.frontend_shape_vars;
+  }
+  return fused_schedule_result.origin_vars;
+}
+
+bool IsFrontendStaticSchedResult(const ascir::FusedScheduledResult &fused_schedule_result) {
+  for (const auto &var : GetFrontendShapeVars(fused_schedule_result)) {
+    if (!var.IsConstExpr()) {
+      return false;
+    }
+  }
   return true;
 }
 

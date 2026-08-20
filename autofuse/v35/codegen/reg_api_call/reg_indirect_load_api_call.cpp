@@ -10,6 +10,7 @@
 
 #include "reg_indirect_load_api_call.h"
 
+#include <algorithm>
 #include <cctype>
 #include <limits>
 #include <map>
@@ -252,6 +253,30 @@ uint64_t BuildNonZeroStrideMask(const std::vector<ascir::SizeExpr> &strides) {
     }
   }
   return mask;
+}
+
+bool ApplySimtIndexPhysicalStrides(const std::vector<af::AscNodePtr> &index_nodes, LogicalTensorInfo &index) {
+  for (const af::AscNodePtr &node : index_nodes) {
+    const std::vector<af::Expression> *physical_strides = nullptr;
+    if (af::ops::IsOps<af::ascir_op::Broadcast>(node) && !node->inputs().empty() &&
+        node->inputs()[0]->attr.strides.size() == index.strides.size()) {
+      physical_strides = &node->inputs()[0]->attr.strides;
+    } else if (!node->outputs().empty() && node->outputs()[0]->attr.strides.size() == index.strides.size()) {
+      physical_strides = &node->outputs()[0]->attr.strides;
+    }
+    if (physical_strides == nullptr) {
+      continue;
+    }
+    const bool has_zero_stride =
+        std::any_of(physical_strides->begin(), physical_strides->end(), [](const af::Expression &stride) {
+          return af::SymbolicUtils::StaticCheckEq(stride, af::ops::Zero) == af::TriBool::kTrue;
+        });
+    if (has_zero_stride) {
+      index.strides = *physical_strides;
+      return true;
+    }
+  }
+  return false;
 }
 
 SimtCodegenPlan BuildSimtCodegenPlan(const LogicalTensorInfo &input, const LogicalTensorInfo &index,
@@ -709,10 +734,12 @@ Status IndirectLoadRegApiCall::GenerateFuncDefinition(const TPipe &tpipe, const 
   GE_ASSERT_NOTNULL(input_tensor, "IndirectLoad SIMT input tensor is missing.");
   const Tensor &input = *input_tensor;
   const LogicalTensorInfo input_info = BuildLogicalTensorInfo(logical_view_.input, tpipe);
-  const LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
+  LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
   const LogicalTensorInfo output_info = BuildLogicalTensorInfo(logical_view_.output, tpipe);
+  const bool index_broadcast_strided = ApplySimtIndexPhysicalStrides(index_nodes_, index_info);
   const bool strided = logical_view_.input.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
-                       logical_view_.index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense;
+                       logical_view_.index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
+                       index_broadcast_strided;
   const SimtCodegenPlan plan =
       BuildSimtCodegenPlan(input_info, index_info, output_info, static_cast<size_t>(axis_), strided);
   std::string input_dtype;
@@ -873,10 +900,12 @@ Status IndirectLoadRegApiCall::GenerateSimtInvocation(const TPipe &tpipe, const 
                                                       const std::string &output_dtype, const std::string &outer_tb_var,
                                                       std::stringstream &ss) const {
   const LogicalTensorInfo input_info = BuildLogicalTensorInfo(logical_view_.input, tpipe);
-  const LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
+  LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
   const LogicalTensorInfo output_info = BuildLogicalTensorInfo(logical_view_.output, tpipe);
+  const bool index_broadcast_strided = ApplySimtIndexPhysicalStrides(index_nodes_, index_info);
   const bool strided = logical_view_.input.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
-                       logical_view_.index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense;
+                       logical_view_.index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
+                       index_broadcast_strided;
   const SimtCodegenPlan plan =
       BuildSimtCodegenPlan(input_info, index_info, output_info, static_cast<size_t>(axis_), strided);
   const std::string body_name = "IndirectLoadSimtBody_" + ascgen_utils::GenValidName(node_name);

@@ -297,6 +297,12 @@ Register::Register() {
   const std::string kAscendcIndirectLoadSkRegBaseStr = {
 #include "indirect_load_sk_reg_base.h"
   };
+  const std::string kAscendcSinRegBaseStr = {
+#include "sin_reg_base.h"
+  };
+  const std::string kAscendcCosRegBaseStr = {
+#include "cos_reg_base.h"
+  };
   std::unordered_map<std::string, std::string> api_to_file{
       {"cast_reg_base.h", kAscendcCastRegStr},
       {"compare_reg_base.h", kAscendcCompareRegStr},
@@ -385,6 +391,8 @@ Register::Register() {
       {"indirect_load_simd_policy_reg_base.h", kAscendcIndirectLoadSimdPolicyRegBaseStr},
       {"indirect_load_simd_reg_base.h", kAscendcIndirectLoadSimdRegBaseStr},
       {"indirect_load_sk_reg_base.h", kAscendcIndirectLoadSkRegBaseStr},
+      {"sin_reg_base.h", kAscendcSinRegBaseStr},
+      {"cos_reg_base.h", kAscendcCosRegBaseStr},
   };
 
   AscendCApiRegistry::GetInstance().RegisterApi(api_to_file);

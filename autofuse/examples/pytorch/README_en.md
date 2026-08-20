@@ -1,4 +1,4 @@
-# PyTorch Inductor Examples
+# PyTorch Scenario Examples
 
 ## Description
 
@@ -44,12 +44,11 @@ Before running these examples, carefully read the [PyTorch Environment Installat
 
 ## Setting Environment Variables
 
+Before running the examples, ensure that the current terminal is using a Python environment with PyTorch and `torch_npu` installed. For details about environment installation and activation, see the [PyTorch Environment Installation Guide](../../../docs/env_install/pytorch/env_pytorch.md).
+
 Run the following commands whenever you open a new terminal:
 
 ```bash
-# Activate the Python environment.
-source /mnt/workspace/env/venv/torch210_daily/bin/activate
-
 # Set the CANN installation path based on the actual installation location.
 export CANN_INSTALL_PATH=/home/developer/Ascend
 
@@ -62,26 +61,11 @@ export ASCEND_DEVICE_ID=0
 
 ## Running the Examples
 
-### add + ge Fusion
+The following three examples are provided. Refer to the corresponding document based on your use case:
 
-```bash
-cd af_pointwise
-python af_add_ge.py
-```
-
-### mul + reducesum Fusion
-
-```bash
-cd af_reduce
-python af_mul_reducesum.py
-```
-
-### gather + add Graph Pattern
-
-```bash
-cd af_gather
-python af_gather_add.py
-```
+* [add + ge Fusion Example](./af_pointwise/README_en.md)
+* [mul + reducesum Fusion Example](./af_reduce/README_en.md)
+* [gather + add Graph Pattern Example](./af_gather/README_en.md)
 
 ## Expected Results
 

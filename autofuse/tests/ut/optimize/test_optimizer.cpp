@@ -6013,9 +6013,9 @@ TEST_F(TestOptimizer, TransposeWithUB) {
   SetCurShapeEnvContext(nullptr);
 }
 
-TEST_F(TestOptimizer, TransposeWithDynamicTail) {
+TEST_F(TestOptimizer, TransposeWithEnvSetStaticTail) {
   // Transpose 尾轴为动态shape
-  af::AscGraph graph("transpose_with_dynamic_tail");
+  af::AscGraph graph("transpose_with_env_set_static_tail");
   auto shape_env = ShapeEnvAttr(ShapeEnvSetting(false, DynamicMode::kDynamic));
   SetCurShapeEnvContext(&shape_env);
   auto s0 = graph.CreateSizeVar(16);
@@ -6108,6 +6108,105 @@ TEST_F(TestOptimizer, TransposeWithDynamicTail) {
   ASSERT_EQ(schedule_tasks[0].score_func,
             "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
             "  return 1;\n"
+            "}\n");
+  SetCurShapeEnvContext(nullptr);
+}
+
+TEST_F(TestOptimizer, TransposeWithDynamicTail) {
+  // Transpose 尾轴为动态shape
+  af::AscGraph graph("transpose_with_dynamic_tail");
+  auto shape_env = ShapeEnvAttr(ShapeEnvSetting(false, DynamicMode::kDynamic));
+  SetCurShapeEnvContext(&shape_env);
+  auto s0 = graph.CreateSizeVar(16);
+  auto s1 = graph.CreateSizeVar(86);
+  auto s2 = graph.CreateSizeVar("s2");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  auto z2 = graph.CreateAxis("z2", s2);
+
+  Data x1_op("x1", graph);
+  x1_op.ir_attr.SetIndex(0);
+  Data x2_op("x2", graph);
+  x2_op.ir_attr.SetIndex(1);
+  Data x3_op("x3", graph);
+  x3_op.ir_attr.SetIndex(2);
+
+  Load load_op1("load1");
+  Load load_op2("load2");
+  Load load_op3("load3");
+
+  std::vector<Data> all_data{x1_op, x2_op, x3_op};
+  std::vector<Load> all_load{load_op1, load_op2, load_op3};
+
+  for (size_t i = 0U; i < all_data.size(); ++i) {
+    auto &x_op = all_data[i];
+    auto &load_op = all_load[i];
+    x_op.y.dtype = ge::DT_FLOAT16;
+    x_op.attr.api.type = af::ApiType::kAPITypeBuffer;
+    load_op.x = x_op.y;
+    load_op.attr.sched.axis = {z0.id, z1.id, z2.id};
+    load_op.y.dtype = ge::DT_FLOAT16;
+    *load_op.y.axis = {z0.id, z1.id};
+    load_op.y.dtype = ge::DT_FLOAT16;
+    *load_op.y.repeats = {s0, s1, s2};
+    *load_op.y.strides = {s1 * s2, s2, af::ops::One};
+  }
+  load_op1.attr.sched.axis = {z1.id, z0.id, z2.id};
+  *load_op1.y.axis = {z1.id, z0.id, z2.id};
+  *load_op1.y.repeats = {s1, s0, s2};
+  *load_op1.y.strides = {s0 * s2, s2, af::ops::One};
+
+  af::ascir_op::Transpose transpose_op("transpose");
+  transpose_op.attr.sched.axis = {z0.id, z1.id, z2.id};
+  transpose_op.x = load_op1.y;
+  transpose_op.y.dtype = ge::DT_FLOAT16;
+  *transpose_op.y.axis = {z0.id, z1.id, z2.id};
+  *transpose_op.y.strides = {s1 * s2, s2, af::ops::One};
+  *transpose_op.y.repeats = {s0, s1, s2};
+
+  af::ascir_op::Add add_op("add");
+  add_op.attr.sched.axis = {z0.id, z1.id, z2.id};
+  add_op.x1 = load_op2.y;
+  add_op.x2 = load_op3.y;
+  add_op.y.dtype = ge::DT_FLOAT16;
+  *add_op.y.axis = {z0.id, z1.id, z2.id};
+  *add_op.y.strides = {s1 * s2, s2, af::ops::One};
+  *add_op.y.repeats = {s0, s1, s2};
+
+  af::ascir_op::Mul mul_op("mul");
+  mul_op.attr.sched.axis = {z0.id, z1.id, z2.id};
+  mul_op.x1 = transpose_op.y;
+  mul_op.x2 = add_op.y;
+  mul_op.y.dtype = ge::DT_FLOAT16;
+  *mul_op.y.axis = {z0.id, z1.id, z2.id};
+  *mul_op.y.strides = {s1 * s2, s2, af::ops::One};
+  *mul_op.y.repeats = {s0, s1, s2};
+
+  Store store_op("store");
+  store_op.attr.sched.axis = {z0.id, z1.id, z2.id};
+
+  store_op.x = mul_op.y;
+  store_op.y.dtype = ge::DT_FLOAT16;
+  *store_op.y.axis = {z0.id, z1.id, z2.id};
+  *store_op.y.repeats = {s0, s1, s2};
+  *store_op.y.strides = {s1 * s2, s2, af::ops::One};
+  store_op.ir_attr.SetOffset(af::Symbol(0));
+
+  Output y_op("y");
+  y_op.x = store_op.y;
+  y_op.ir_attr.SetIndex(0);
+
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  std::vector<optimize::ScheduleTask> schedule_tasks;
+  optimize::OptimizerOptions options{optimize::GraphType::kAscGraph};
+  int res = optimize::ScheduleTaskGenerator::GenerateTasks(graph, schedule_tasks, options);
+  ASSERT_EQ(res, 0);
+  ASSERT_EQ(schedule_tasks.size(), 2);
+  auto compute_graph = af::AscGraphUtils::GetComputeGraph(schedule_tasks[1].grouped_graphs[0]);
+  ASSERT_EQ(compute_graph->FindNode("transpose"), nullptr);
+  ASSERT_EQ(schedule_tasks[0].score_func,
+            "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
+            "  return 0;\n"
             "}\n");
   SetCurShapeEnvContext(nullptr);
 }

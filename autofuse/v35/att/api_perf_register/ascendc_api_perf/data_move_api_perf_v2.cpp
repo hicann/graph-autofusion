@@ -23,11 +23,21 @@ uint32_t GetCacheLineSize() {
   return TilingScheduleConfigTableV2().GetCacheLineSize();
 }
 
+Expr GetCodegenTailAxis(const NodeDetail &node_info, const std::vector<Expr> &dims) {
+  if (!node_info.vectorized_shape.empty()) {
+    return node_info.vectorized_shape.back();
+  }
+  return dims.back();
+}
+
+bool IsFlattenedCodegenShape(const NodeDetail &node_info, const std::vector<Expr> &dims) {
+  return dims.size() == 1U && node_info.vectorized_shape.size() > 1U;
+}
+
 // 初始化block_len扩展所需的参数
 af::Status InitBlockLenExpandParams(const NodeDetail &node_info, const std::vector<Expr> &dims, Expr &block_len,
                                     Expr &cache_line_ele_num) {
-  const size_t dim_size = dims.size();
-  block_len = dims[dim_size - 1UL];
+  block_len = GetCodegenTailAxis(node_info, dims);
   const int32_t kCacheLineSize = static_cast<int32_t>(GetCacheLineSize());
   const auto &data_type_size = kDataTypeSizeMap.find(node_info.input_dtype[0]);
   GE_ASSERT_TRUE(data_type_size != kDataTypeSizeMap.cend(), "Check data type size failed, node[%s]",
@@ -61,7 +71,7 @@ af::Status AppendCacheLineConfig(const NodeDetail &node_info, CacheLineDirection
 af::Status GetLoadCase(const NodeDetail &node_info, Expr &blk, int32_t &use_case) {
   size_t dim_size = node_info.input_dims.size();
   GE_ASSERT_TRUE(!node_info.input_dims.empty(), "Check node input dims failed, node[%s]", node_info.ToString().c_str());
-  const auto blk_len = node_info.input_dims[dim_size - 1UL];
+  const auto blk_len = GetCodegenTailAxis(node_info, node_info.input_dims);
   if (blk_len.IsConstExpr()) {
     int32_t blk_len_val;
     constexpr int32_t blk_threshold = 256U;
@@ -85,7 +95,7 @@ af::Status InitBlockLenExpand(const NodeDetail &node_info, std::vector<Expr> &di
                               Expr &cache_line_ele_num, Expr &block_len_ref, int32_t &kCacheLineSize,
                               int32_t &blk_len_val, int32_t &stride_val) {
   GE_ASSERT_SUCCESS(InitBlockLenExpandParams(node_info, dims, block_len, cache_line_ele_num));
-  block_len_ref = dims[dims.size() - 1UL];
+  block_len_ref = GetCodegenTailAxis(node_info, dims);
   kCacheLineSize = static_cast<int32_t>(GetCacheLineSize());
   if (block_len_ref.IsConstExpr() && node_info.gm_stride.IsConstExpr()) {
     block_len_ref.GetConstValue(blk_len_val);
@@ -126,10 +136,14 @@ af::Status ExpandLoadBlockLen(const NodeDetail &node_info, PerfOutputInfo &perf,
   if (TryInitStaticExpand(node_info, dims, static_res) == af::SUCCESS) {
     int32_t block_len_bytes = static_res.blk_len_val * static_res.data_type_size_val;
     if ((block_len_bytes < static_res.cache_line_size) && (static_res.stride_val > 0)) {
-      dims[dims.size() - 1UL] = static_res.cache_line_ele_num;
+      if (IsFlattenedCodegenShape(node_info, dims)) {
+        dims.emplace_back(static_res.cache_line_ele_num);
+      } else {
+        dims[dims.size() - 1UL] = static_res.cache_line_ele_num;
+      }
     }
   } else {
-    auto &block_len_ref_actual = dims[dims.size() - 1UL];
+    auto block_len_ref_actual = GetCodegenTailAxis(node_info, dims);
     const auto &data_type_size = kDataTypeSizeMap.find(node_info.input_dtype[0]);
     Expr cache_line_ele_num_threshold = CreateExpr(kCacheLineSize) / data_type_size->second;
     auto need_expand_checker = af::sym::LogicalAnd({af::sym::Gt(node_info.gm_stride, CreateExpr(0)),
@@ -149,6 +163,11 @@ af::Status ExpandLoadBlockLen(const NodeDetail &node_info, PerfOutputInfo &perf,
       ternary_op.SetVariable(res);
       perf.ternary_ops[res] = ternary_op;
       block_len_ref_actual = res;
+    }
+    if (IsFlattenedCodegenShape(node_info, dims)) {
+      dims.emplace_back(block_len_ref_actual);
+    } else {
+      dims[dims.size() - 1UL] = block_len_ref_actual;
     }
     GELOGD("Load block len checker[%s], need_expand[%d], block_len[%s]", need_expand_checker.Serialize().get(),
            need_expand, block_len_ref_actual.Serialize().get());
@@ -223,11 +242,17 @@ af::Status ExpandBlockLen(const NodeDetail &node_info, PerfOutputInfo &perf, std
   if (TryInitStaticExpand(node_info, dims, static_res) == af::SUCCESS) {
     // 存在非连续并且block_len较小，无法并包，考虑将block_len对齐到cache line大小
     // 原有行为：block_len_ref是局部拷贝，赋值不反映到dims
-    if ((static_res.blk_len_val < static_res.cache_line_size) && (static_res.stride_val > 0)) {
-      GELOGD("Nddma: block_len needs padding (static)");
+    const int32_t block_len_bytes = static_res.blk_len_val * static_res.data_type_size_val;
+    if ((block_len_bytes < static_res.cache_line_size) && (static_res.stride_val > 0)) {
+      if (IsFlattenedCodegenShape(node_info, dims)) {
+        dims.emplace_back(static_res.cache_line_ele_num);
+      } else {
+        dims[dims.size() - 1UL] = static_res.cache_line_ele_num;
+      }
+      GELOGD("Nddma: block_len padded to codegen tail cache line (static)");
     }
   } else {
-    auto &block_len_ref_actual = dims[dims.size() - 1UL];
+    auto block_len_ref_actual = GetCodegenTailAxis(node_info, dims);
     auto &cache_line_ele_num = static_res.cache_line_ele_num;
     auto is_small_block_len_checker = af::sym::LogicalAnd(
         {af::sym::Gt(node_info.gm_stride, CreateExpr(0)), af::sym::Lt(block_len_ref_actual, cache_line_ele_num)});
@@ -246,6 +271,11 @@ af::Status ExpandBlockLen(const NodeDetail &node_info, PerfOutputInfo &perf, std
       ternary_op.SetVariable(res);
       perf.ternary_ops[res] = ternary_op;
       block_len_ref_actual = res;
+    }
+    if (IsFlattenedCodegenShape(node_info, dims)) {
+      dims.emplace_back(block_len_ref_actual);
+    } else {
+      dims[dims.size() - 1UL] = block_len_ref_actual;
     }
     GELOGD("Block len checker[%s], is_small_block_len[%d], block_len[%s]", is_small_block_len_checker.Serialize().get(),
            is_small_block_len, block_len_ref_actual.Serialize().get());

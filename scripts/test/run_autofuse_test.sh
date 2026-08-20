@@ -586,6 +586,7 @@ codegen_e2e_st() {
                     concat_inter_dim_e2e \
                     load_ub2ub_abs_store_expect_code_e2e \
                     concat_3d_last_dim_e2e \
+                    dynamic_inputs_and_outputs_e2e \
                     load_isfinite_store_e2e \
                     load_max_min_store_e2e \
                     load_rsum_block_store_e2e \
@@ -628,8 +629,9 @@ codegen_e2e_st() {
   fi
   echo "$(date '+%F %T') make codegen_e2e_st_test1 end"
 
-  ctest --output-on-failure -j${THREAD_NUM} -L st -L codegen_e2e_st_test1 --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error \
-        -O ${BUILD_PATH}/ctest_codegen_e2e_st_test1.log
+  (cd "${AUTOFUSE_BUILD_PATH}/tests" && \
+    ctest --output-on-failure -j${THREAD_NUM} -L st -L codegen_e2e_st_test1 --no-tests=error \
+          -O ${BUILD_PATH}/ctest_codegen_e2e_st_test1.log)
   if [ $? -ne 0 ]; then
     echo "execute command: run codegen_e2e_st_test1 failed."
     return 1
@@ -643,8 +645,9 @@ codegen_e2e_st() {
   fi
   echo "$(date '+%F %T') make codegen_e2e_st_test2 end"
 
-  ctest --output-on-failure -j${THREAD_NUM} -L st -L codegen_e2e_st_test2 --test-dir ${AUTOFUSE_BUILD_PATH}/tests --no-tests=error \
-        -O ${BUILD_PATH}/ctest_codegen_e2e_st_test2.log
+  (cd "${AUTOFUSE_BUILD_PATH}/tests" && \
+    ctest --output-on-failure -j${THREAD_NUM} -L st -L codegen_e2e_st_test2 --no-tests=error \
+          -O ${BUILD_PATH}/ctest_codegen_e2e_st_test2.log)
   if [ $? -ne 0 ]; then
     echo "execute command: run codegen_e2e_st_test2 failed."
     return 1
@@ -805,12 +808,17 @@ build_backend() {
                            indirect_load_broadcast_retained_simd_test_e2e_v2 \
                           indirect_load_complex_broadcast_simd_test_e2e_v2 \
                           indirect_load_complex_broadcast_simt_test_e2e_v2 \
+                          indirect_load_complex_input_broadcast_simd_test_e2e_v2 \
                           indirect_load_broadcast_cross_boundary_simt_test_e2e_v2 \
                          indirect_load_broadcast_axis_simt_test_e2e_v2 \
                            indirect_load_broadcast_reduce_simt_fallback_test_e2e_v2 \
                          indirect_load_broadcast_retained_simt_test_e2e_v2 \
                         indirect_load_broadcast_elements_sk_test_e2e_v2 \
                         indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 \
+                        indirect_load_broadcast_identity_index_simd_test_e2e_v2 \
+                        indirect_load_broadcast_index_abs_simt_test_e2e_v2 \
+                        indirect_load_broadcast_index_where_simt_test_e2e_v2 \
+                        indirect_load_index_binary_same_view_simd_test_e2e_v2 \
                         indirect_load_stride_zero_elements_simd_test_e2e_v2 \
                        indirect_load_stride_zero_elements_simt_test_e2e_v2 \
                        indirect_load_stride_zero_elements_sk_test_e2e_v2 \

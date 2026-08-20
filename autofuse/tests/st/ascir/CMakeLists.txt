@@ -24,6 +24,7 @@ add_executable(test_ascir_st
     reg_func/test_reg_func_gather.cpp
     reg_func/test_reg_func_erf.cpp
     reg_func/test_reg_func_axpy.cpp
+    reg_func/test_reg_func_unsupported.cpp
     reg_func_v2/test_reg_func_sin_v2.cpp
     code_dumper/code_dumper_unittest.cc
 )

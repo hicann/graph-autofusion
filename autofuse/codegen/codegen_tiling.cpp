@@ -53,6 +53,50 @@ std::string GenUint64Literal(uint64_t value) {
   return std::to_string(value) + (value >= kInt64TilingKeyCapacity ? "ULL" : "");
 }
 
+void GenInductorCvSafetyFallback(std::stringstream &ss, uint64_t count, const std::string &indent) {
+  ss << indent << "set_g_basen_basem_align(1);" << std::endl;
+  ss << indent << "uint32_t vec_core_num = limit->aiv_num;" << std::endl;
+  ss << indent << "tiling->tiling_data.set_block_dim(vec_core_num);" << std::endl;
+  ss << indent << "tiling->tiling_data.set_ub_size(limit->ub_size - 256);" << std::endl;
+  ss << indent << "double min_perf = DBL_MAX;" << std::endl;
+  ss << indent << "size_t choice_case_id = 2U;" << std::endl;
+  ss << indent << "for (size_t i = 2U; i < " << GenUint64Literal(count) << "; i++) {" << std::endl;
+  ss << indent << "  double cur_perf;" << std::endl;
+  ss << indent << "  if (!optiling::GetTiling(tiling->tiling_data, i, &cur_perf)) {" << std::endl;
+  ss << indent << "    return -1;" << std::endl;
+  ss << indent << "  }" << std::endl;
+  ss << indent << "  if (cur_perf < min_perf) {" << std::endl;
+  ss << indent << "    min_perf = cur_perf;" << std::endl;
+  ss << indent << "    choice_case_id = i;" << std::endl;
+  ss << indent << "  }" << std::endl;
+  ss << indent << "}" << std::endl;
+  ss << indent << "if (!optiling::GetTiling(tiling->tiling_data, choice_case_id)) {" << std::endl;
+  ss << indent << "  return -1;" << std::endl;
+  ss << indent << "}" << std::endl;
+  ss << indent << "tiling->stage_size_name = tiling->tiling_data.STAGE_SIZE_NAME;" << std::endl;
+  ss << indent << "tiling->tiling_data.set_tiling_key(tiling->tiling_data.get_tiling_key() - 2);" << std::endl;
+  ss << indent << "// Subtract 2 from tiling_key because case 0/1 are reserved for CV UB normal/fallback tiling."
+     << std::endl;
+  ss << indent << "const bool is_cv_safety_aiv_only = is_cv_safety_aiv_only_mode(cube_tiling_key);" << std::endl;
+  ss << indent << "const bool is_cv_safety_mix = is_cv_safety_mix_mode(cube_tiling_key);" << std::endl;
+  ss << indent << "const bool use_launch_aic_num = is_cv_safety_blockidx_scheduled_mode(cube_tiling_key);" << std::endl;
+  ss << indent << "uint32_t vec_block_dim = tiling->tiling_data.get_block_dim();" << std::endl;
+  ss << indent << "int64_t vec_wss = GetWorkspaceSize(tiling->tiling_data);" << std::endl;
+  ss << indent
+     << "*blockDim = is_cv_safety_aiv_only ? vec_block_dim : "
+        "((cube_block_dim * 2 < vec_block_dim) ? (vec_block_dim + 1) / 2 : cube_block_dim);"
+     << std::endl;
+  ss << indent << "*workspaceSize = vec_wss + ws_size;" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.fusion_mode = 1;" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.ub_mode = 0;" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.mix_mode = is_cv_safety_aiv_only ? 2 : (is_cv_safety_mix ? 1 : 0);"
+     << std::endl;
+  ss << indent << "tiling->cv_tiling_data.cv_aic_num = use_launch_aic_num ? *blockDim : cube_block_dim;" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.cv_aiv_num = vec_block_dim;" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.cv_vec_wss = vec_wss;" << std::endl;
+  ss << indent << "return 0;" << std::endl;
+}
+
 bool TryCalcTilingKeyCount(const ascir::FusedScheduledResult &result, uint64_t limit, uint64_t &count) {
   count = 0U;
   for (const auto &scheduled_results : result.node_idx_to_scheduled_results) {
@@ -845,7 +889,7 @@ std::string TilingLib::TilingFuncDef(const ascir::FusedScheduledResult &fused_sc
      << std::endl;
   ss << kTilingHeadCceKtTestGuard << std::endl;
   // 生成判断是否为静态shape的接口
-  bool is_static = IsStaticSchedResult(elemwise_schedule_result);
+  bool is_static = IsFrontendStaticSchedResult(elemwise_schedule_result);
   ss << GenCheckStaticShapeFunc(is_static);
   if (ascgen_utils::CanUseTilingKey(elemwise_schedule_result)) {
     ss << this->GenFindBestTilingKeyFunc(elemwise_schedule_result, tiling_data_name);
@@ -1054,45 +1098,7 @@ std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedSchedul
   ss << "  tiling->tiling_data.set_ub_size(limit->ub_size - 256);" << std::endl;
 
   ss << "  if (cube_tiling_key_ub != 1) {" << std::endl;
-  ss << "    set_g_basen_basem_align(1);" << std::endl;
-  ss << "    uint32_t vec_core_num = limit->aiv_num;" << std::endl;
-  ss << "    tiling->tiling_data.set_block_dim(vec_core_num);" << std::endl;
-  ss << "    tiling->tiling_data.set_ub_size(limit->ub_size - 256);" << std::endl;
-  ss << "    double min_perf = DBL_MAX;" << std::endl;
-  ss << "    size_t choice_case_id = 2U;" << std::endl;
-  ss << "    for (size_t i = 2U; i < " << GenUint64Literal(count) << "; i++) {" << std::endl;
-  ss << "      double cur_perf;" << std::endl;
-  ss << "      if (!optiling::GetTiling(tiling->tiling_data, i, &cur_perf)) {" << std::endl;
-  ss << "        return -1;" << std::endl;
-  ss << "      }" << std::endl;
-  ss << "      if (cur_perf < min_perf) {" << std::endl;
-  ss << "        min_perf = cur_perf;" << std::endl;
-  ss << "        choice_case_id = i;" << std::endl;
-  ss << "      }" << std::endl;
-  ss << "    }" << std::endl;
-  ss << "    if (!optiling::GetTiling(tiling->tiling_data, choice_case_id)) {" << std::endl;
-  ss << "      return -1;" << std::endl;
-  ss << "    }" << std::endl;
-  ss << "    tiling->stage_size_name = tiling->tiling_data.STAGE_SIZE_NAME;" << std::endl;
-  ss << "    tiling->tiling_data.set_tiling_key(tiling->tiling_data.get_tiling_key() - 2);" << std::endl;
-  ss << "    // Subtract 2 from tiling_key because case 0/1 are reserved for CV UB normal/fallback tiling."
-     << std::endl;
-  ss << "    const bool is_cv_safety_aiv_only = is_cv_safety_aiv_only_mode(cube_tiling_key);" << std::endl;
-  ss << "    const bool is_cv_safety_mix = is_cv_safety_mix_mode(cube_tiling_key);" << std::endl;
-  ss << "    const bool use_launch_aic_num = is_cv_safety_blockidx_scheduled_mode(cube_tiling_key);" << std::endl;
-  ss << "    uint32_t vec_block_dim = tiling->tiling_data.get_block_dim();" << std::endl;
-  ss << "    int64_t vec_wss = GetWorkspaceSize(tiling->tiling_data);" << std::endl;
-  ss << "    *blockDim = is_cv_safety_aiv_only ? vec_block_dim : "
-        "((cube_block_dim * 2 < vec_block_dim) ? (vec_block_dim + 1) / 2 : cube_block_dim);"
-     << std::endl;
-  ss << "    *workspaceSize = vec_wss + ws_size;" << std::endl;
-  ss << "    tiling->cv_tiling_data.fusion_mode = 1;" << std::endl;
-  ss << "    tiling->cv_tiling_data.ub_mode = 0;" << std::endl;
-  ss << "    tiling->cv_tiling_data.mix_mode = is_cv_safety_aiv_only ? 2 : (is_cv_safety_mix ? 1 : 0);" << std::endl;
-  ss << "    tiling->cv_tiling_data.cv_aic_num = use_launch_aic_num ? *blockDim : cube_block_dim;" << std::endl;
-  ss << "    tiling->cv_tiling_data.cv_aiv_num = vec_block_dim;" << std::endl;
-  ss << "    tiling->cv_tiling_data.cv_vec_wss = vec_wss;" << std::endl;
-  ss << "    return 0;" << std::endl;
+  GenInductorCvSafetyFallback(ss, count, "    ");
   ss << "  }" << std::endl;
 
   ss << "  if (!optiling::GetTiling(tiling->tiling_data, 0)) {" << std::endl;
@@ -1101,7 +1107,7 @@ std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedSchedul
   ss << "    tiling->tiling_data.set_ub_size(limit->ub_size - 256 - basen_basem_align_tmp * " << cube_info.type_size
      << ");" << std::endl;
   ss << "    if (!optiling::GetTiling(tiling->tiling_data, 1)) {" << std::endl;
-  ss << "      return -1;" << std::endl;
+  GenInductorCvSafetyFallback(ss, count, "      ");
   ss << "    } else {" << std::endl;
   ss << "      tiling->stage_size_name = tiling->tiling_data.STAGE_SIZE_NAME;" << std::endl;
   ss << "      tiling->cv_tiling_data.fusion_mode = 0;" << std::endl;
@@ -1130,7 +1136,7 @@ std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedSchedul
 void TilingLib::GenInductorShapeDim(const ascir::FusedScheduledResult &elemwise_schedule_result,
                                     codegen::PgoShapeStringStream &pgo_shape_dim,
                                     std::vector<std::string> &dynamic_shape_vars, const std::string &tiling_var) const {
-  for (auto vars : elemwise_schedule_result.origin_vars) {
+  for (auto vars : GetFrontendShapeVars(elemwise_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       dynamic_shape_vars.push_back(var_define);
@@ -1283,7 +1289,7 @@ std::string TilingLib::GenTilingFunc(const std::map<std::string, std::string> &s
   std::stringstream ss;
   codegen::PgoShapeStringStream pgo_shape_dim;
   std::string tiling_var = "tiling->";
-  for (auto vars : fused_schedule_result.origin_vars) {
+  for (auto vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       auto it = shape_info.find(var_define);
@@ -1389,7 +1395,7 @@ static void GetTilingParse(std::string &tiling_parse, int &vector_core_num) {
 static void FillShapeDimInfo(const ascir::FusedScheduledResult &fused_schedule_result,
                              const std::map<std::string, std::string> &shape_info, std::stringstream &shape_dim_def,
                              std::stringstream &shape_dim_param) {
-  for (const auto &vars : fused_schedule_result.origin_vars) {
+  for (const auto &vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!vars.IsConstExpr()) {
       std::string var_define = std::string(vars.Str().get());
       auto it = shape_info.find(var_define);
@@ -1780,7 +1786,7 @@ std::string TilingLib::GenTilingCacheFunc(const ascir::FusedScheduledResult &fus
   uint32_t index = 0U;
   std::stringstream ss_tmp;
 
-  for (const auto &vars : fused_schedule_result.origin_vars) {
+  for (const auto &vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       auto it = shape_info.find(var_define);
@@ -1822,7 +1828,7 @@ std::string TilingLib::GenDfxInputSymbolInfo(const ascir::FusedScheduledResult &
      << std::endl;
 
   bool first_sym = true;
-  for (const auto &vars : fused_schedule_result.origin_vars) {
+  for (const auto &vars : GetFrontendShapeVars(fused_schedule_result)) {
     if (!(vars.IsConstExpr())) {
       std::string var_define = std::string(vars.Str().get());
       auto it = shape_info.find(var_define);

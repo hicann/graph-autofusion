@@ -70,6 +70,7 @@ class RuntimeStub {
 
   virtual rtError_t rtGetSocVersion(char *version, const uint32_t maxLen);
   virtual rtError_t rtGetSocSpec(const char *label, const char *key, char *val, const uint32_t maxLen);
+  virtual const char *aclrtGetSocName();
 
  private:
   static std::mutex mutex_;
@@ -96,6 +97,7 @@ extern "C" {
 
 rtError_t rtGetSocVersion(char *version, const uint32_t maxLen);
 rtError_t rtGetSocSpec(const char *label, const char *key, char *val, const uint32_t maxLen);
+const char *aclrtGetSocName();
 
 #ifdef __cplusplus
 }

@@ -290,10 +290,10 @@ bool RecomputeCaseGenerator::IsRecomputableNode(ascir::HintGraph &hint_graph, af
   auto output_tensors = node->outputs();
   if (is_static_graph_) {
     return std::all_of(output_tensors.begin(), output_tensors.end(),
-                       [&](af::AscTensor *&tensor) { return check_static_tensor(tensor->attr); });
+                       [&check_static_tensor](af::AscTensor *&tensor) { return check_static_tensor(tensor->attr); });
   }
   return std::all_of(output_tensors.begin(), output_tensors.end(),
-                     [&](af::AscTensor *&tensor) { return check_dynamic_tensor(tensor->attr); });
+                     [&check_dynamic_tensor](af::AscTensor *&tensor) { return check_dynamic_tensor(tensor->attr); });
 }
 
 bool RecomputeCaseGenerator::IsRecomputableAlwaysBetter() const {

@@ -701,7 +701,7 @@ __aicore__ inline void CastExtend(const AscendC::LocalTensor<OutT> &dst, const A
     CastExtendImpl<func, InT, OutT, roundMode, dim>(dstUb, srcUb, count, repeatTimes, innerLoopStride, output_dims,
                                                     output_stride, input_stride);
   } else if constexpr (SupportType<Tuple<OutT, InT>, Tuple<uint8_t, int16_t>>()) {
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510) || (__NPU_ARCH__ == 5102))
     AscendC::SetCtrlSpr<60, 60>(0);
 #endif
     constexpr auto func = CastExtendInt16ToUint8<InT, OutT, roundMode>;
@@ -712,7 +712,7 @@ __aicore__ inline void CastExtend(const AscendC::LocalTensor<OutT> &dst, const A
     CastExtendImpl<func, InT, OutT, roundMode, dim>(dstUb, srcUb, count, repeatTimes, innerLoopStride, output_dims,
                                                     output_stride, input_stride);
   } else {
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510) || (__NPU_ARCH__ == 5102))
     AscendC::SetCtrlSpr<60, 60>(0);
 #endif
     constexpr auto func = CastExtendCommon<InT, OutT, roundMode>;

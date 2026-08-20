@@ -1017,6 +1017,8 @@ static void VerifyConv2DOffsetTiling(const std::map<std::string, std::string> &r
 
 }  // namespace
 
+void CreateMatmulGraph(af::AscGraph &graph, bool is_dynamic);
+
 class TestCodegenTiling : public testing::Test, public codegen::TilingLib {
  public:
   void SetUp() override {
@@ -1027,6 +1029,28 @@ class TestCodegenTiling : public testing::Test, public codegen::TilingLib {
   void TearDown() override {
     ge::PlatformContext::GetInstance().Reset();
     ge::RuntimeStub::Reset();
+  }
+
+  std::string GenerateMatmulTilingForSoc(const std::shared_ptr<ge::RuntimeStub> &stub, const std::string &platform) {
+    ge::PlatformContext::GetInstance().SetPlatform(platform);
+    ge::RuntimeStub::SetInstance(stub);
+
+    af::AscGraph graph("matmul_elemwise_pro");
+    CreateMatmulElemwiseDynamicGraph(graph);
+
+    af::AscGraph mm_graph("mutmul");
+    CreateMatmulGraph(mm_graph, true);
+    optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+    ascir::FusedScheduledResult fused_schedule_result;
+    EXPECT_EQ(optimizer.Optimize(graph, fused_schedule_result), 0);
+
+    ascir::ScheduleGroup schedule_group;
+    schedule_group.impl_graphs.push_back(mm_graph);
+    fused_schedule_result.node_idx_to_scheduled_results[0][0].schedule_groups.push_back(schedule_group);
+    fused_schedule_result.node_idx_to_scheduled_results[0][0].cube_type = ascir::CubeTemplateType::kUBFuse;
+
+    std::map<std::string, std::string> shape_info{{"s0", "64"}, {"s1", "64"}};
+    return Generate(fused_schedule_result, shape_info, "", "0").at("tiling_def_and_tiling_const");
   }
   void SetupLoadAttrs(af::AscNode &load, uint64_t z0_id, const af::Expression &z0_size) {
     auto &attr = load.outputs[0].attr;
@@ -1142,6 +1166,20 @@ class TestCodegenTiling : public testing::Test, public codegen::TilingLib {
 
  protected:
   TestCodegenTiling() : codegen::TilingLib("test", "test") {}
+};
+
+class RuntimeStubWithFullSocName : public ge::RuntimeStubV2Common {
+ public:
+  const char *aclrtGetSocName() override {
+    return "Ascend910_9591";
+  }
+};
+
+class RuntimeStubWithNullSocName : public ge::RuntimeStubV2Common {
+ public:
+  const char *aclrtGetSocName() override {
+    return nullptr;
+  }
 };
 
 TEST_F(TestCodegenTiling, NoWorkspaceTest) {
@@ -3309,6 +3347,18 @@ TEST_F(TestCodegenTiling, TestMatmulElemwiseDynamicShapeFuse) {
   ASSERT_NE(pos, std::string::npos);
 }
 
+TEST_F(TestCodegenTiling, CubeTilingUsesAclrtSocName) {
+  const auto tiling_code = GenerateMatmulTilingForSoc(std::make_shared<RuntimeStubWithFullSocName>(), "3510");
+
+  EXPECT_NE(tiling_code.find("compile_info.soc_version = \"Ascend910_9591\";"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, CubeTilingFallsBackToPlatformNpuArchWhenAclrtSocNameIsNull) {
+  const auto tiling_code = GenerateMatmulTilingForSoc(std::make_shared<RuntimeStubWithNullSocName>(), "3510");
+
+  EXPECT_NE(tiling_code.find("compile_info.soc_version = \"3510\";"), std::string::npos);
+}
+
 // ==================== Conv2D 相关辅助函数 ====================
 
 void CreateConv2dGraph(af::AscGraph &graph, bool is_dynamic = false) {
@@ -4846,6 +4896,31 @@ TEST_F(TestCodegenTiling, CodegenGenerateForInductorCvFusionShouldKeepCubeWrappe
   const std::string wrapper_cpp = result.tiling.substr(wrapper_cpp_pos, wrapper_cpp_end_pos - wrapper_cpp_pos);
   EXPECT_NE(wrapper_cpp.find("#include \"cube_kernel_tiling_wrapper.h\""), std::string::npos);
   EXPECT_NE(wrapper_cpp.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, CodegenGenerateForInductorCvFusionShouldFallbackToSafetyWhenUbCasesFail) {
+  auto graph = ascir::ShareGraph::LoadMatmulElewiseBrcFusedGraph();
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), af::SUCCESS);
+  ASSERT_TRUE(ascgen_utils::IsCubeFusedScheduled(fused_schedule_result));
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  EXPECT_EQ(result.tiling.find("if (!optiling::GetTiling(tiling->tiling_data, 1)) {\n      return -1;"),
+            std::string::npos);
+  const size_t ub_case1_fail_pos = result.tiling.find("if (!optiling::GetTiling(tiling->tiling_data, 1)) {");
+  ASSERT_NE(ub_case1_fail_pos, std::string::npos);
+  const size_t ub_case1_else_pos = result.tiling.find("    } else {", ub_case1_fail_pos);
+  ASSERT_NE(ub_case1_else_pos, std::string::npos);
+  const std::string ub_case1_fail_body = result.tiling.substr(ub_case1_fail_pos, ub_case1_else_pos - ub_case1_fail_pos);
+  EXPECT_NE(ub_case1_fail_body.find("set_g_basen_basem_align(1);"), std::string::npos);
+  EXPECT_NE(ub_case1_fail_body.find("for (size_t i = 2U;"), std::string::npos);
+  EXPECT_NE(ub_case1_fail_body.find("tiling->cv_tiling_data.fusion_mode = 1;"), std::string::npos);
+  EXPECT_NE(ub_case1_fail_body.find("tiling->cv_tiling_data.ub_mode = 0;"), std::string::npos);
+  EXPECT_NE(ub_case1_fail_body.find("return 0;"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, CodegenGenerateShouldNotEmitSplitMarkers) {

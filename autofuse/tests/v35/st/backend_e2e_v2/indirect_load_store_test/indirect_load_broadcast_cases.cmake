@@ -85,6 +85,35 @@ add_indirect_load_broadcast_test(indirect_load_broadcast_index_physical_view_sim
 target_compile_definitions(indirect_load_broadcast_index_physical_view_simt_test_codegen_v2 PRIVATE IL_AIC_REPRO=1)
 target_compile_definitions(indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 PRIVATE IL_AIC_REPRO=1)
 
+# Identity Broadcast keeps the index source axis/repeats unchanged but still exercises the direct-Broadcast fold.
+add_indirect_load_broadcast_test(indirect_load_broadcast_identity_index_simd_test simd 0 0 0 0 0 0 1)
+
+# Regression: a unary elementwise op after an index Broadcast must retain the source physical view in SIMT.
+add_indirect_load_broadcast_test(indirect_load_broadcast_index_abs_simt_test simt 0 1 2 0 0 0 1)
+target_compile_definitions(indirect_load_broadcast_index_abs_simt_test_codegen_v2 PRIVATE IL_INDEX_ABS_DENSE_VIEW=1)
+target_compile_definitions(indirect_load_broadcast_index_abs_simt_test_e2e_v2 PRIVATE IL_INDEX_ABS_DENSE_VIEW=1)
+
+# Regression: a three-input Where chain must remain in the SIMT index region before IndirectLoad.
+set(indirect_load_broadcast_index_where_simt_test_workdir
+    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_broadcast_index_where_simt_test)
+file(MAKE_DIRECTORY ${indirect_load_broadcast_index_where_simt_test_workdir})
+do_backend_e2e_st_test(indirect_load_broadcast_index_where_simt_test
+    WORKDIR ${indirect_load_broadcast_index_where_simt_test_workdir}
+    CODEGEN indirect_load_broadcast_where_backend_generator.cpp
+    TILING_KEY 1
+    KERNEL_SRC
+        indirect_load_broadcast_where_test_kernel.cpp
+        indirect_load_broadcast_where_test_tiling.cpp
+        autofuse_tiling_data.h
+    TEST_SRC test_e2e_indirect_load_broadcast_where_kernel.cpp)
+
+# Same-view tensor fan-in without Broadcast: the binary operation is coordinate-preserving.
+add_indirect_load_broadcast_test(indirect_load_index_binary_same_view_simd_test simd 0 1 0 0 0 0 0)
+target_compile_definitions(indirect_load_index_binary_same_view_simd_test_codegen_v2 PRIVATE
+                           IL_INDEX_BINARY_SAME_VIEW=1 IL_BINARY_ELEMENT_KIND=3)
+target_compile_definitions(indirect_load_index_binary_same_view_simd_test_e2e_v2 PRIVATE
+                           IL_INDEX_BINARY_SAME_VIEW=1 IL_BINARY_ELEMENT_KIND=3)
+
 add_indirect_load_broadcast_test(indirect_load_complex_broadcast_simd_test simd 0 0 3 0 0)
 target_compile_definitions(indirect_load_complex_broadcast_simd_test_codegen_v2 PRIVATE IL_COMPLEX_BROADCAST=1)
 target_compile_definitions(indirect_load_complex_broadcast_simd_test_e2e_v2 PRIVATE IL_COMPLEX_BROADCAST=1)
@@ -94,6 +123,16 @@ target_compile_definitions(indirect_load_complex_broadcast_simt_test_codegen_v2 
                                                                                        IL_COMPLEX_SIMT=1)
 target_compile_definitions(indirect_load_complex_broadcast_simt_test_e2e_v2 PRIVATE IL_COMPLEX_BROADCAST=1
                                                                                    IL_COMPLEX_SIMT=1)
+
+# Input Broadcast whose source is a multi-input Add: the direct Broadcast is inlined and the SIMD
+# candidate consumes the computed source through its physical view (source multi-input scenario).
+# Note: SIMT rejects multi-input input sources by design (ValidateSimtTemplateRegion requires a Load
+# boundary), covered by UT SimdRegionMetadataAndSimtRejectsMultiInputRegion.
+add_indirect_load_broadcast_test(indirect_load_complex_input_broadcast_simd_test simd 0 0 12 0 0 1 0)
+target_compile_definitions(indirect_load_complex_input_broadcast_simd_test_codegen_v2 PRIVATE
+                           IL_COMPLEX_INPUT_BROADCAST=1)
+target_compile_definitions(indirect_load_complex_input_broadcast_simd_test_e2e_v2 PRIVATE
+                           IL_COMPLEX_INPUT_BROADCAST=1)
 
 function(add_indirect_load_stride_zero_test test_name template input_zero_stride_mask index_zero_stride_mask
          input_element_count index_element_count)

@@ -23,7 +23,7 @@
   } while (0)
 
 namespace fe {
-enum Direction {
+enum class Direction {
   CURRENT = 0, /* 表示NodeIndex指示的是当前节点的对应输入输出。 */
   /* 当连接输入的场景，PEER模式下会获取<node, index>的对端输出节点和对端index。 */
   /* 当连接输出的场景，PEER模式下会获取<node, index>的所有对端输入节点和所有对端index。 */
@@ -36,7 +36,7 @@ enum Direction {
 struct NodeIndex {
   ge::NodePtr node;
   int32_t index;
-  Direction direction = CURRENT;
+  Direction direction = Direction::CURRENT;
   NodeIndex() {
     node = nullptr;
     index = -1;

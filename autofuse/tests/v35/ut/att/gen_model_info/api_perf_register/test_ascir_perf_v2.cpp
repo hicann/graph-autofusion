@@ -3059,6 +3059,122 @@ TEST_F(UTestAscirPerfV2, TestLoadApiExpandBlockLenSmallBlock) {
   EXPECT_EQ(Str(res.Replace(ret)), "(" + expect_stride + " + " + load_perf + " + 160.0)");
 }
 
+// LoadV2: codegen 对非连续尾轴补 repeat=1，ATT 必须保留合轴后的 block_count。
+TEST_F(UTestAscirPerfV2, TestLoadApiCodegenTailAxisCase0) {
+  TensorShapeInfo shape;
+  const Expr z0z1t_size = CreateExpr("z0z1t_size");
+  shape.data_type = "float16";
+  shape.dims = {CreateExpr(128) * z0z1t_size};
+  shape.repeats = {z0z1t_size, CreateExpr(128)};
+  shape.strides = {CreateExpr(128), CreateExpr(1)};
+  shape.gm_strides = {CreateExpr(384), CreateExpr(3)};
+
+  NodeDetail node;
+  node.optype = kLoad;
+  ASSERT_EQ(SetDims(shape, node), af::SUCCESS);
+  ASSERT_EQ(node.vectorized_shape.size(), 2U);
+  EXPECT_EQ(Str(node.vectorized_shape[0]), "(128 * z0z1t_size)");
+  EXPECT_EQ(Str(node.vectorized_shape[1]), "1");
+}
+
+// LoadV2: 单根合轴后的 case1 也需要补 repeat=1，不能只依赖 repeats.size()>1。
+TEST_F(UTestAscirPerfV2, TestLoadApiCodegenTailAxisCase1) {
+  TensorShapeInfo shape;
+  const Expr z2t_size = CreateExpr("z2t_size");
+  shape.data_type = "float16";
+  shape.dims = {z2t_size};
+  shape.repeats = {z2t_size};
+  shape.strides = {CreateExpr(1)};
+  shape.gm_strides = {CreateExpr(3)};
+
+  NodeDetail node;
+  node.optype = kLoad;
+  ASSERT_EQ(SetDims(shape, node), af::SUCCESS);
+  ASSERT_EQ(node.vectorized_shape.size(), 2U);
+  EXPECT_EQ(Str(node.vectorized_shape[0]), "z2t_size");
+  EXPECT_EQ(Str(node.vectorized_shape[1]), "1");
+}
+
+TEST_F(UTestAscirPerfV2, TestLoadApiCodegenTailAxisStrideMatchesDataCopy) {
+  TensorShapeInfo shape;
+  shape.data_type = "float16";
+  shape.dims = {CreateExpr(128)};
+  shape.repeats = {CreateExpr(128)};
+  shape.strides = {CreateExpr(1)};
+  shape.gm_strides = {CreateExpr(3)};
+
+  NodeDetail node;
+  node.optype = kLoad;
+  ASSERT_EQ(SetDims(shape, node), af::SUCCESS);
+  ASSERT_EQ(SetStride(shape, node, 4), af::SUCCESS);
+  // DataCopyPadExtend emits src_stride = GM stride - block_len = 3 - 1.
+  EXPECT_EQ(Str(node.gm_stride), "2");
+}
+
+TEST_F(UTestAscirPerfV2, TestLoadApiCodegenDynamicTailAxisStrideMatchesDataCopy) {
+  TensorShapeInfo shape;
+  const Expr dynamic_stride = CreateExpr("dynamic_stride");
+  shape.data_type = "float16";
+  shape.dims = {CreateExpr(8), CreateExpr(16), CreateExpr(32)};
+  shape.repeats = shape.dims;
+  shape.origin_repeats = shape.repeats;
+  shape.strides = {CreateExpr(512), CreateExpr(32), CreateExpr(1)};
+  shape.gm_strides = {CreateExpr(1536), CreateExpr(96), dynamic_stride};
+
+  NodeDetail node;
+  node.optype = kLoad;
+  ASSERT_EQ(SetDims(shape, node), af::SUCCESS);
+  ASSERT_FALSE(node.vectorized_shape.empty());
+
+  const auto result = CalculateStride(shape, false, node, 4, false);
+  ASSERT_EQ(result.ternary_ops.size(), 1U);
+  const auto if_case = result.ternary_ops.at(result.stride).DeepCopyIfCase();
+  ASSERT_NE(if_case, nullptr);
+  ASSERT_NE(if_case->GetChoiceA(), nullptr);
+  EXPECT_EQ(Str(if_case->GetCondLeft()), "dynamic_stride");
+  EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(if_case->GetChoiceA()->GetExpr(), dynamic_stride - CreateExpr(1)),
+            af::TriBool::kTrue);
+}
+
+TEST_F(UTestAscirPerfV2, TestLoadApiCodegenTailAxisSwapUsesVectorizedShape) {
+  TensorShapeInfo shape;
+  shape.data_type = "float16";
+  shape.data_type_size = 2;
+  shape.dims = {CreateExpr(8), CreateExpr(16)};
+  shape.repeats = shape.dims;
+  shape.origin_repeats = shape.repeats;
+  shape.strides = {CreateExpr(16), CreateExpr(1)};
+  shape.gm_strides = {CreateExpr(48), CreateExpr(3)};
+
+  NodeDetail node;
+  node.name = "LoadWithTailAxis";
+  node.optype = kLoad;
+  node.input_dtype = {"float16"};
+  node.output_dtype = {"float16"};
+  ASSERT_EQ(SetDims(shape, node), af::SUCCESS);
+  ASSERT_EQ(node.input_dims.size(), 2U);
+  ASSERT_EQ(node.vectorized_shape.size(), 3U);
+
+  PerfOutputInfo perf;
+  ASSERT_EQ(GetDmaPerf(shape, node, perf, 2, true), af::SUCCESS);
+  EXPECT_NE(perf.pipe_res.find(PipeType::AIV_MTE2), perf.pipe_res.end());
+  EXPECT_TRUE(perf.ternary_ops.empty());
+}
+
+TEST_F(UTestAscirPerfV2, TestLoadApiCodegenTailAxisContinuous) {
+  TensorShapeInfo shape;
+  shape.data_type = "float16";
+  shape.dims = {CreateExpr(128)};
+  shape.repeats = {CreateExpr(128)};
+  shape.strides = {CreateExpr(1)};
+  shape.gm_strides = {CreateExpr(1)};
+
+  NodeDetail node;
+  node.optype = kLoad;
+  ASSERT_EQ(SetDims(shape, node), af::SUCCESS);
+  EXPECT_TRUE(node.vectorized_shape.empty());
+}
+
 // LoadV2: GM非连续 + block_len >= cache_line(128B) 时，不触发ExpandLoadBlockLen
 TEST_F(UTestAscirPerfV2, TestLoadApiExpandBlockLenLargeBlock) {
   std::vector<att::TensorShapeInfo> input_shapes(1);

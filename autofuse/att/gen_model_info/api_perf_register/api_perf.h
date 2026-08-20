@@ -33,9 +33,10 @@ struct NodeDetail {
   std::string optype;
   std::vector<std::string> input_dtype{};
   std::vector<std::string> output_dtype{};
-  std::vector<Expr> repeats{};      // 合轴前
-  std::vector<Expr> input_dims{};   // 合轴后
-  std::vector<Expr> output_dims{};  // 合轴后
+  std::vector<Expr> repeats{};           // 合轴前
+  std::vector<Expr> vectorized_shape{};  // codegen实际使用的vectorized shape
+  std::vector<Expr> input_dims{};        // 合轴后
+  std::vector<Expr> output_dims{};       // 合轴后
   Expr gm_stride{CreateExpr(0)};
   Expr ub_stride{CreateExpr(0)};
   ascir_param::CastNodeParams cast_node_params;

@@ -68,27 +68,27 @@ std::string PrintArgs(const std::vector<SymEngineExprPtr> &args, const std::stri
 std::string DefaultCeilPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   return kPrintCeil + kPrintBracket_L + PrintArgs(args, kPrintDelim, type) + kPrintBracket_R;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpCeil, DefaultCeilPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpCeil, DefaultCeilPrinter);
 
 std::string DefaultFloorPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   return kPrintFloor + kPrintBracket_L + PrintArgs(args, kPrintDelim, type) + kPrintBracket_R;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpFloor, DefaultFloorPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpFloor, DefaultFloorPrinter);
 
 std::string DefaultAbsPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   return kPrintAbs + kPrintBracket_L + PrintArgs(args, kPrintDelim, type) + kPrintBracket_R;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpAbs, DefaultAbsPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpAbs, DefaultAbsPrinter);
 
 std::string DefaultLogicalAndPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   return kPrintLogicalAnd + kPrintBracket_L + PrintArgs(args, kPrintDelim, type) + kPrintBracket_R;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpLogicalAnd, DefaultLogicalAndPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpLogicalAnd, DefaultLogicalAndPrinter);
 
 std::string DefaultLogicalOrPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   return kPrintLogicalOr + kPrintBracket_L + PrintArgs(args, kPrintDelim, type) + kPrintBracket_R;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpLogicalOr, DefaultLogicalOrPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpLogicalOr, DefaultLogicalOrPrinter);
 
 std::string DefaultAddPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   std::vector<SymEngineExprPtr> positive_args;
@@ -112,7 +112,7 @@ std::string DefaultAddPrinter(const std::vector<SymEngineExprPtr> &args, StrType
   res_str += kPrintBracket_R;
   return res_str;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpAdd, DefaultAddPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpAdd, DefaultAddPrinter);
 
 std::string DefaultMulPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   // split mul to num and dens
@@ -141,7 +141,7 @@ std::string DefaultMulPrinter(const std::vector<SymEngineExprPtr> &args, StrType
   res_str += kPrintBracket_R;
   return res_str;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpMul, DefaultMulPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpMul, DefaultMulPrinter);
 
 std::string DefaultMaxPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   std::string res_str;
@@ -155,7 +155,7 @@ std::string DefaultMaxPrinter(const std::vector<SymEngineExprPtr> &args, StrType
   }
   return res_str;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpMax, DefaultMaxPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpMax, DefaultMaxPrinter);
 
 std::string DefaultMinPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   std::string res_str;
@@ -169,7 +169,7 @@ std::string DefaultMinPrinter(const std::vector<SymEngineExprPtr> &args, StrType
   }
   return res_str;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpMin, DefaultMinPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpMin, DefaultMinPrinter);
 
 std::string PrintIntExpPow(const SymEngineExprPtr &base, const uint32_t exp, StrType type) {
   std::string res_str = "(";
@@ -212,7 +212,7 @@ std::string DefaultPowPrinter(const std::vector<SymEngineExprPtr> &args, StrType
   }
   return GetDefaultPowPrint(args, type);
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpPow, DefaultPowPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpPow, DefaultPowPrinter);
 
 std::string GetDefaultModPrint(const std::vector<SymEngineExprPtr> &base_args, StrType type) {
   constexpr const size_t mod_args_num = 2UL;
@@ -223,25 +223,25 @@ std::string GetDefaultModPrint(const std::vector<SymEngineExprPtr> &base_args, S
   return kPrintMod + "(" + ExpressionImpl::SymExprToExpressionImplRef(base_args[dividend_idx]).Str(type) + ", " +
          ExpressionImpl::SymExprToExpressionImplRef(base_args[divisor_idx]).Str(type) + ")";
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpMod, GetDefaultModPrint);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpMod, GetDefaultModPrint);
 
 std::string DefaultLogPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   return kPrintLog + kPrintBracket_L + PrintArgs(args, kPrintDelim, type) + kPrintBracket_R;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpLog, DefaultLogPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpLog, DefaultLogPrinter);
 
 std::string DefaultEqualPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   GE_ASSERT_TRUE(args.size() == kRelationArgsNum, "Equal operator args size should be 2, but get %zu", args.size());
 
   return kPrintEq + kPrintBracket_L + PrintArgs(args, kPrintDelim, type) + kPrintBracket_R;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpEq, DefaultEqualPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpEq, DefaultEqualPrinter);
 
 std::string DefaultUnEqualPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   GE_ASSERT_TRUE(args.size() == kRelationArgsNum, "Unequal operator args size should be 2, but get %zu", args.size());
   return kPrintNe + kPrintBracket_L + PrintArgs(args, kPrintDelim, type) + kPrintBracket_R;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpNe, DefaultUnEqualPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpNe, DefaultUnEqualPrinter);
 
 std::string DefaultStrictLessThanPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   GE_ASSERT_TRUE(args.size() == kRelationArgsNum, "StrictLessThan operator args size should be 2, but get %zu",
@@ -249,13 +249,13 @@ std::string DefaultStrictLessThanPrinter(const std::vector<SymEngineExprPtr> &ar
   return kPrintLt + kPrintBracket_L + ExpressionImpl::SymExprToExpressionImplRef(args[0]).Str(type) + kPrintDelim +
          ExpressionImpl::SymExprToExpressionImplRef(args[1]).Str(type) + kPrintBracket_R;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpLt, DefaultStrictLessThanPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpLt, DefaultStrictLessThanPrinter);
 
 std::string DefaultLessThanPrinter(const std::vector<SymEngineExprPtr> &args, StrType type) {
   GE_ASSERT_TRUE(args.size() == kRelationArgsNum, "LessThan operator args size should be 2, but get %zu", args.size());
   return kPrintLe + kPrintBracket_L + ExpressionImpl::SymExprToExpressionImplRef(args[0]).Str(type) + kPrintDelim +
          ExpressionImpl::SymExprToExpressionImplRef(args[1]).Str(type) + kPrintBracket_R;
 }
-REGISTER_EXPR_DEFAULT_PRINTER(kOpLe, DefaultLessThanPrinter);
+REGISTER_EXPR_DEFAULT_PRINTER(OperationType::kOpLe, DefaultLessThanPrinter);
 }  // namespace
 }  // namespace af

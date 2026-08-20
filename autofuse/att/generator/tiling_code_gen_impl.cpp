@@ -3847,11 +3847,13 @@ void TilingCodeGenImpl::GenPGOByCoreNumFunctionHead(size_t impl_graph_id) {
 
 bool TilingCodeGenImpl::TryGenPGOByCoreNumReuseTiling(size_t asc_graph_id, size_t impl_graph_id, size_t group_id,
                                                       uint32_t group_index) {
-  const auto iter = std::find_if(tiling_model_info_.cbegin(), tiling_model_info_.cend(), [&](const auto &model_info) {
-    const auto &ident = model_info.schedule_group_ident;
-    return ident.asc_graph_id == asc_graph_id && ident.impl_graph_id == impl_graph_id && ident.group_id == group_id &&
-           model_info.reuse_schedule_group != nullptr && model_info.reuse_schedule_group->IsReuseGroup(ident);
-  });
+  const auto iter = std::find_if(tiling_model_info_.cbegin(), tiling_model_info_.cend(),
+                                 [asc_graph_id, impl_graph_id, group_id](const auto &model_info) {
+                                   const auto &ident = model_info.schedule_group_ident;
+                                   return ident.asc_graph_id == asc_graph_id && ident.impl_graph_id == impl_graph_id &&
+                                          ident.group_id == group_id && model_info.reuse_schedule_group != nullptr &&
+                                          model_info.reuse_schedule_group->IsReuseGroup(ident);
+                                 });
   if (iter == tiling_model_info_.cend()) {
     return false;
   }
@@ -5175,7 +5177,7 @@ std::pair<std::string, bool> TilingCodeGenImpl::GenConflictExprContextCode(
     auto input_vars = GetVarsNames(args_manager.GetInputVars());
     input_var_names.insert(input_vars.begin(), input_vars.end());
   }
-  auto emit_decl = [&](const std::string &name, const std::string &src) {
+  auto emit_decl = [&code, &declared_symbols](const std::string &name, const std::string &src) {
     code += "    auto " + name + " = " + src + ".get_" + name + "();\n";
     declared_symbols.insert(name);
   };
