@@ -29,8 +29,8 @@ Status BinaryApiTmpCall::Generate(const TPipe &tpipe, const std::vector<ascir::A
                                   const std::vector<std::reference_wrapper<const Tensor>> &inputs,
                                   const std::vector<std::reference_wrapper<const Tensor>> &outputs,
                                   std::string &result) const {
-  size_t x1_idx = 0;
-  size_t x2_idx = 1;
+  const size_t x1_idx = 0;
+  const size_t x2_idx = 1;
 
   auto x1 = inputs[x1_idx].get();
   auto x2 = inputs[x2_idx].get();

@@ -33,7 +33,7 @@ class NameGenerator {
     return unique_name;
   }
 
-  const std::unordered_map<std::string, std::string> &GetNameMapping() {
+  const std::unordered_map<std::string, std::string> &GetNameMapping() const {
     return name_mapping_;
   }
 

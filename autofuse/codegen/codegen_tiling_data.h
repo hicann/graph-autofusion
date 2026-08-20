@@ -58,13 +58,13 @@ class TilingData {
   std::string GenGenTilingDataFieldConstValueFunc() const;
   af::Status ProcessCubeFusionResult(ascir::FusedScheduledResult &schedule_result);
 
-  std::string GenTingDataField(std::string field_name);
-  std::string GetNameOfGenTilingDataFieldConstDefFunc(const std::string field_name);
-  std::string GetNameOfGenTilingDataFieldConstDefFuncSimple(const std::string field_name);
-  std::string GetNameOfGenTilingDataFieldConstValueFuncSimple(const std::string field_name);
+  std::string GenTingDataField(std::string field_name) const;
+  std::string GetNameOfGenTilingDataFieldConstDefFunc(const std::string field_name) const;
+  std::string GetNameOfGenTilingDataFieldConstDefFuncSimple(const std::string field_name) const;
+  std::string GetNameOfGenTilingDataFieldConstValueFuncSimple(const std::string field_name) const;
 
   std::string GenStringReplaceFunc() const;
-  std::string GenConstGenResultReplace();
+  std::string GenConstGenResultReplace() const;
 
   std::string GenTilingDataFieldConstDefFunc(std::string &dtype, std::string &filed_name);
   std::string GetCommonTilingField(bool is_group, const ascir::FusedScheduledResult &fused_schedule_result);

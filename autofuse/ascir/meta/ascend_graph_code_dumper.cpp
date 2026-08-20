@@ -115,7 +115,7 @@ void ExpressionHandle(const af::AscNodeAttr *asc_node_attr, const std::string &n
 }
 
 using handle_ptr = void (*)(const af::AscNodeAttr *asc_node_attr, const std::string &name, std::string &value_string);
-std::unordered_map<std::string, handle_ptr> IrAttrHandleMap = {
+const std::unordered_map<std::string, handle_ptr> IrAttrHandleMap = {
     {"float", FloatHandle}, {"int64_t", Int64Handle}, {"std::string", StringHandle}, {"Expression", ExpressionHandle}};
 
 bool IsNodeWithIrInputs(const af::NodePtr &node) {
@@ -140,7 +140,7 @@ std::string GetOutputName(const af::NodePtr &src_node, uint32_t idx) {
   std::map<size_t, std::pair<size_t, size_t>> ir_output_2_ranges;
   GE_ASSERT_GRAPH_SUCCESS(af::OpDescUtils::GetIrOutputDescRange(op_desc, ir_output_2_ranges));
 
-  for (auto ir_output_2_range : ir_output_2_ranges) {
+  for (const auto &ir_output_2_range : ir_output_2_ranges) {
     if (idx >= ir_output_2_range.second.first &&
         idx < ir_output_2_range.second.first + ir_output_2_range.second.second) {
       GE_ASSERT_TRUE(ir_output_2_range.first < ir_outputs.size());
@@ -416,7 +416,7 @@ Status PythonCodeDumper::GenerateIrAttrCode(const af::NodePtr &node, std::ostrea
       continue;
     }
     std::string value;
-    IrAttrHandleMap[attr_def.asc_ir_type](node_attr_group, attr_def.name, value);
+    IrAttrHandleMap.at(attr_def.asc_ir_type)(node_attr_group, attr_def.name, value);
     if (value.empty()) {
       continue;
     }
