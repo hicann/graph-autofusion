@@ -75,7 +75,7 @@ class BaseAlignmentStrategy {
   virtual af::Status SplitAlignmentInferFunc(const af::AscNodePtr &node);
 
   virtual af::Status SetAlignWidth(const ascir::ImplGraph &impl_graph);
-  af::Status ForEachNode(ascir::ImplGraph &impl_graph, NodeProcessor processor);
+  af::Status ForEachNode(ascir::ImplGraph &graph, NodeProcessor processor);
   af::Status InferAlignmentForOneNode(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node, bool &changed);
   // 当前tensor的对齐行为只会出现在尾轴,如果没有新的对齐行为或者类型,该函数不应该修改
   af::Status SetVectorizedStridesForOneNode(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node, bool &changed);

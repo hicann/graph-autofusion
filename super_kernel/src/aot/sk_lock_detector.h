@@ -142,11 +142,11 @@ class LockDetector {
 
   void UpdateNodeInfo(const SuperKernelBaseNode &node);
 
-  void UpdateSKRangeInStream(const SuperKernelBaseNode &node);
+  void UpdateSKRangeInStream(const SuperKernelBaseNode &curNode);
 
-  bool IsBeforeSKRange(const SuperKernelBaseNode &node);
+  bool IsBeforeSKRange(const SuperKernelBaseNode &curNode);
 
-  bool IsAfterSKRange(const SuperKernelBaseNode &node);
+  bool IsAfterSKRange(const SuperKernelBaseNode &curNode);
 
   bool HasIntersection(const std::unordered_set<uint32_t> &lhsStreams, const std::unordered_set<uint32_t> &rhsStreams);
 

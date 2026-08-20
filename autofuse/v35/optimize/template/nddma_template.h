@@ -37,7 +37,7 @@ class NddmaTemplate : public BaseTemplate {
   static bool IsSecondaryTailAxisAligned(const af::AscNodePtr &node);
   std::string GetScoreFunc(const af::AscGraph &origin_graph, const af::AscGraph &nddma_graph) override;
   static af::Status ReorderRepeats(const af::AscNodePtr &node_src, const af::AscNodePtr &node_dst);
-  af::Status ProcessSliceToNddma(const af::AscNodePtr &node, bool &is_nddma_generated_cur);
+  af::Status ProcessSliceToNddma(const af::AscNodePtr &node_load, bool &is_nddma_generated_cur);
   static Status ProcessTransposeNodes(af::AscGraph &new_case, bool &is_nddma_generated);
   static af::Status IsNeedDropTransposeBrcFuse(af::AscGraph &graph, bool &is_need_drop);
   static af::Status BroadcastInputNodeIsScalar(const af::AscNodePtr &node, bool &is_scalar);

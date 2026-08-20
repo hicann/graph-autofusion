@@ -19,7 +19,7 @@ class AlignmentHandler {
   // 只允许load出现尾轴非连续
   static af::Status AlignVectorizedStrides(ascir::ImplGraph &impl_graph);
   // 优化节点的vectorized stride
-  static af::Status ModifyVectorizedStrides(af::AscGraph &nddma_graph);
+  static af::Status ModifyVectorizedStrides(af::AscGraph &impl_graph);
 };
 }  // namespace optimize::autoschedule
 

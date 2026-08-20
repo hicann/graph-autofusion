@@ -121,7 +121,7 @@ class SuperKernelGraph {
   }
   std::string BitsetToString(const std::bitset<MAX_SCOPE_NUM> &bitset) const;
   // Expand update nodes
-  bool ExpandUpdateNodes(std::vector<SuperKernelBaseNode *> &needUpdateNodes);
+  bool ExpandUpdateNodes(std::vector<SuperKernelBaseNode *> &customNodes);
   void SetUpdateFlag(bool flag) {
     needUpdate = flag;
   }

@@ -537,7 +537,7 @@ class SuperKernelBaseNode {
 
  protected:
   aclmdlRITaskParams taskParams;
-  void LogNodeUpdateResult(const aclmdlRITaskParams *taskParams) const;
+  void LogNodeUpdateResult(const aclmdlRITaskParams *resultParams) const;
   const char *GetUpdateTargetTypeName(aclmdlRITaskType type) const;
   uint32_t notifyExpandVecNum;
   uint32_t notifyExpandCubeNum;
