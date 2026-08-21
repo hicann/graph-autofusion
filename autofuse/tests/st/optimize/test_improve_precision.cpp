@@ -20,8 +20,8 @@
 #undef private
 #include "common/platform_context.h"
 
-#include "ascgraph_info_complete.h"
 #include "tests/framework/easy_asc_graph/asc_graph_builder.h"
+#include "tests/framework/improve_precision_test_utils.h"
 #include "runtime_stub.h"
 
 using namespace af;
@@ -29,33 +29,14 @@ using namespace af::ascir_op;
 using af::ops::IsOps;
 using af::ops::One;
 using af::testing::AscGraphBuilder;
+using af::testing::CheckNodeOutputDtype;
+using af::testing::CountNodesByType;
+using af::testing::HasCastOutputDtype;
 using af::testing::Sym;
 using namespace af::pre_process;
 
 namespace {
 // ====================== Helpers ======================
-
-size_t CountNodesByType(AscGraph &graph, const std::string &type) {
-  size_t count = 0U;
-  for (const auto &node : AscGraphUtils::GetComputeGraph(graph)->GetAllNodes()) {
-    if (node->GetType() == type) {
-      ++count;
-    }
-  }
-  return count;
-}
-
-bool CheckNodeOutputDtype(AscGraph &graph, const std::string &node_name, ge::DataType expected_dtype) {
-  for (const auto &node : AscGraphUtils::GetComputeGraph(graph)->GetAllNodes()) {
-    if (node->GetName() == node_name) {
-      auto desc = node->GetOpDesc();
-      if (desc != nullptr && desc->GetOutputDesc(0).GetDataType() == expected_dtype) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
 
 class TestImprovePrecisionST : public ::testing::Test {
  protected:
@@ -319,6 +300,64 @@ TEST_F(TestImprovePrecisionST, LoadWithExistingCastPeer_NoDuplicateCast) {
 
   // Cast(fp16→fp16) 被删除, Abs 变 fp32
   EXPECT_TRUE(CheckNodeOutputDtype(graph, "abs0", ge::DT_FLOAT));
+}
+
+TEST_F(TestImprovePrecisionST, UnsupportedCastBypass_PreservesIntermediateFloatCast) {
+  auto graph = AscGraphBuilder("st_unsupported_cast_bypass")
+                   .Loops({Sym("s0")})
+                   .Data("data0", 0, ge::DT_BF16)
+                   .Load("load0", "data0")
+                   .Cast("cast_bf16_to_fp32", "load0", ge::DT_FLOAT)
+                   .Cast("cast_fp32_identity", "cast_bf16_to_fp32", ge::DT_FLOAT)
+                   .Cast("cast_fp32_identity2", "cast_fp32_identity", ge::DT_FLOAT)
+                   .Cast("cast_fp32_to_fp16", "cast_fp32_identity2", ge::DT_FLOAT16)
+                   .Store("store0", "cast_fp32_to_fp16")
+                   .Output("output0", "store0", 0, ge::DT_FLOAT16)
+                   .Build();
+
+  ASSERT_EQ(ImprovePrecisionForAscGraph(graph), af::SUCCESS);
+
+  EXPECT_EQ(CountNodesByType(graph, Cast::Type), 2U);
+  EXPECT_TRUE(HasCastOutputDtype(graph, ge::DT_FLOAT));
+  EXPECT_TRUE(HasCastOutputDtype(graph, ge::DT_FLOAT16));
+}
+
+TEST_F(TestImprovePrecisionST, SupportedChainEndpoint_CollapsesAcrossUnsupportedIntermediateCast) {
+  auto graph = AscGraphBuilder("st_supported_chain_endpoint")
+                   .Loops({Sym("s0")})
+                   .Data("data0", 0, ge::DT_BF16)
+                   .Load("load0", "data0")
+                   .Cast("cast_bf16_to_fp32", "load0", ge::DT_FLOAT)
+                   .Cast("cast_fp32_to_fp16", "cast_bf16_to_fp32", ge::DT_FLOAT16)
+                   .Cast("cast_fp16_to_fp32", "cast_fp32_to_fp16", ge::DT_FLOAT)
+                   .Store("store0", "cast_fp16_to_fp32")
+                   .Output("output0", "store0", 0, ge::DT_FLOAT)
+                   .Build();
+
+  ASSERT_EQ(ImprovePrecisionForAscGraph(graph), af::SUCCESS);
+
+  EXPECT_EQ(CountNodesByType(graph, Cast::Type), 1U);
+  EXPECT_TRUE(HasCastOutputDtype(graph, ge::DT_FLOAT));
+}
+
+TEST_F(TestImprovePrecisionST, UnsupportedChainEndpoint_RemovesIdentitySubchain) {
+  auto graph = AscGraphBuilder("st_identity_subchain")
+                   .Loops({Sym("s0")})
+                   .Data("data0", 0, ge::DT_BF16)
+                   .Load("load0", "data0")
+                   .Cast("cast_bf16_to_fp32", "load0", ge::DT_FLOAT)
+                   .Cast("cast_fp32_identity", "cast_bf16_to_fp32", ge::DT_FLOAT)
+                   .Cast("cast_fp32_identity2", "cast_fp32_identity", ge::DT_FLOAT)
+                   .Cast("cast_fp32_to_fp16", "cast_fp32_identity2", ge::DT_FLOAT16)
+                   .Store("store0", "cast_fp32_to_fp16")
+                   .Output("output0", "store0", 0, ge::DT_FLOAT16)
+                   .Build();
+
+  ASSERT_EQ(ImprovePrecisionForAscGraph(graph), af::SUCCESS);
+
+  EXPECT_EQ(CountNodesByType(graph, Cast::Type), 2U);
+  EXPECT_FALSE(CheckNodeOutputDtype(graph, "cast_fp32_identity", ge::DT_FLOAT));
+  EXPECT_FALSE(CheckNodeOutputDtype(graph, "cast_fp32_identity2", ge::DT_FLOAT));
 }
 
 TEST_F(TestImprovePrecisionST, PreProcessEntryPoint_Succeeds) {

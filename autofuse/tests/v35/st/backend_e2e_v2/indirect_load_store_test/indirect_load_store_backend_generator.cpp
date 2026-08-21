@@ -284,8 +284,13 @@ void ExpectSimtKernelStructure(const std::string &kernel) {
 #define IL_STRINGIFY(value) IL_STRINGIFY_IMPL(value)
 void ExpectSimtPolicyCall(const std::string &kernel) {
   const std::string function = GetFunctionContaining(kernel, "// IndirectLoad SIMT");
+#if defined(IL_STATIC_SHAPE)
   const std::string policy = "AscendC::IndirectLoadSimt" IL_STRINGIFY(IL_EXPECT_SIMT_POLICY) "Policy<uint" +
                              std::to_string(IL_EXPECT_SIMT_OFFSET_BITS) + "_t";
+#else
+  const std::string policy =
+      "AscendC::IndirectLoadSimtStridedPolicy<uint" + std::to_string(IL_EXPECT_SIMT_OFFSET_BITS) + "_t";
+#endif
   EXPECT_NE(function.find(policy), std::string::npos) << policy;
 }
 #endif
@@ -842,7 +847,7 @@ void ExpectGeneratedTemplates(const std::string &kernel) {
       EXPECT_NE(kernel.find(kMarkers[i]), std::string::npos) << kMarkers[i];
       EXPECT_NE(kernel.find(apis[i]), std::string::npos) << apis[i];
       if (kIndirectLoadTemplates[i] == ascir::TemplateId::kIndirectLoadSimd) {
-#ifdef IL_INPUT_OUTER_STRIDE
+#if defined(IL_INPUT_OUTER_STRIDE) || !defined(IL_STATIC_SHAPE)
         EXPECT_EQ(kernel.find("IndirectLoadSimdGatherApi<"), std::string::npos);
 #else
         EXPECT_NE(kernel.find("IndirectLoadSimdGatherApi<"), std::string::npos);
@@ -859,7 +864,7 @@ void ExpectGeneratedTemplates(const std::string &kernel) {
 }
 
 void ExpectSimdKernelStructure(const std::string &kernel) {
-#ifndef IL_INPUT_OUTER_STRIDE
+#if !defined(IL_INPUT_OUTER_STRIDE) && defined(IL_STATIC_SHAPE)
   if ((kExpectedTemplates & TemplateMask(ascir::TemplateId::kIndirectLoadSimd)) != 0U) {
     const std::string gather_function = GetFunctionContaining(kernel, "IndirectLoadSimdGatherApi<");
     EXPECT_NE(gather_function.find("IndirectLoadSimdGatherApi<"), std::string::npos);
@@ -998,7 +1003,7 @@ void CheckGeneratedKernel(const std::string &kernel) {
   EXPECT_NE(kernel.find("\n      Exp2("), std::string::npos);
   EXPECT_NE(kernel.find("\n      Log2("), std::string::npos);
   EXPECT_NE(kernel.find("AscendC::RoundMode::CAST_FLOOR"), std::string::npos);
-#if IL_RANK == 4 && IL_AXIS == 2
+#if IL_RANK == 4 && IL_AXIS == 2 && defined(IL_STATIC_SHAPE)
   ExpectSimdFramework(kernel);
 #endif
 #else

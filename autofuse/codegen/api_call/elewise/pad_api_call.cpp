@@ -43,7 +43,7 @@ Status PadApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::AxisId>
   (void)RegisterBasicDumpParam(this->api_name_, inputs, outputs, {}, tpipe.tmp_buf.name + "_" + std::to_string(id));
   stringstream ss;
   stringstream axis_size_product;
-  size_t axis_num = y.vectorized_axis.size();
+  const size_t axis_num = y.vectorized_axis.size();
   for (size_t i = 0; i < axis_num; i++) {
     auto axis = tpipe.tiler.GetAxis(y.vectorized_axis[i]);
     if (i == (axis_num - 1UL)) {

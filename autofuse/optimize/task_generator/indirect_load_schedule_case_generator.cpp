@@ -1240,11 +1240,7 @@ af::Status PreparePhysicalViews(const af::AscNodePtr &indirect_load, ascir::Temp
   const auto outputs = indirect_load->outputs();
   const auto &output_attr = outputs.front()->attr;
   preparation.logical_view.output = {output_attr.axis, output_attr.repeats, output_attr.strides};
-  ascgen_utils::indirect_load::IndirectLoadTensorLayout output_layout;
-  GE_ASSERT_SUCCESS(
-      ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(preparation.logical_view.output, output_layout));
-  GE_ASSERT_TRUE(output_layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense,
-                 "IndirectLoad node[%s] output layout is not dense.", indirect_load->GetNamePtr());
+  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ValidateIndirectLoadOutputLayout(preparation.logical_view.output));
   // 本函数只做只读分析；Broadcast 删除与物理视图写回在 AnalyzeRewrittenGraph 中统一执行。
   return ascgen_utils::indirect_load::SetTemplateLogicalView(indirect_load, preparation.logical_view);
 }

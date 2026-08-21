@@ -11,6 +11,7 @@
 #include "pre_process/improve_precision.h"
 
 #include <atomic>
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -127,6 +128,13 @@ Status GetOutputTensorDesc(const NodePtr &node, GeTensorDescPtr &output_tensor_d
   GE_ASSERT_NOTNULL(op_desc);
   output_tensor_desc = op_desc->MutableOutputDesc(0);
   GE_ASSERT_NOTNULL(output_tensor_desc);
+  return af::SUCCESS;
+}
+
+Status GetNodeOutputDtype(const NodePtr &node, DataType &dtype) {
+  GeTensorDescPtr output_tensor_desc;
+  GE_ASSERT_SUCCESS(GetOutputTensorDesc(node, output_tensor_desc));
+  dtype = output_tensor_desc->GetDataType();
   return af::SUCCESS;
 }
 
@@ -256,8 +264,145 @@ const std::unordered_map<std::string, std::string> kTypeToGroup = {
     {af::ascir_op::Scalar::Type, af::ascir_op::Scalar::Type},
     {af::ascir_op::Store::Type, af::ascir_op::Store::Type}};
 
-bool ShouldDeleteCastNode(DataType peer_output_dtype, DataType output_dtype) {
-  return IsFloatDataType(output_dtype) && IsFloatDataType(peer_output_dtype);
+struct CastChain {
+  std::vector<NodePtr> nodes;
+  std::vector<DataType> output_dtypes;
+};
+
+bool CanCollapseCast(DataType input_dtype, DataType output_dtype) {
+  return input_dtype == output_dtype ||
+         (IsFloatDataType(input_dtype) && IsFloatDataType(output_dtype) && CheckCastDtype(input_dtype, output_dtype));
+}
+
+struct CastChainPlan {
+  std::vector<size_t> costs;
+  std::vector<size_t> previous;
+  std::vector<bool> requires_cast;
+};
+
+Status CollectLinearCastChain(const NodePtr &start, CastChain &chain) {
+  chain.nodes.clear();
+  chain.output_dtypes.clear();
+  NodePtr current = start;
+  while (current->GetType() == af::ascir_op::Cast::Type) {
+    std::vector<NodePtr> consumers;
+    GE_ASSERT_SUCCESS(GetPeerInNodes(current, consumers, 0));
+    if (consumers.size() != 1U) {
+      chain.nodes.clear();
+      chain.output_dtypes.clear();
+      return af::SUCCESS;
+    }
+    const auto asc_node = std::dynamic_pointer_cast<af::AscNode>(current);
+    GE_ASSERT_NOTNULL(asc_node);
+    chain.nodes.push_back(current);
+    chain.output_dtypes.push_back(asc_node->outputs[0].attr.dtype);
+    current = consumers[0];
+  }
+  return af::SUCCESS;
+}
+
+void UpdateMinimumCastPath(const std::vector<DataType> &output_dtypes, size_t target, CastChainPlan &plan) {
+  const auto unreachable = output_dtypes.size() + 1U;
+  for (size_t source = 0U; source < target; ++source) {
+    if (plan.costs[source] == unreachable || !CanCollapseCast(output_dtypes[source], output_dtypes[target])) {
+      continue;
+    }
+    const auto transition_cost = output_dtypes[source] == output_dtypes[target] ? 0U : 1U;
+    if (plan.costs[source] + transition_cost < plan.costs[target]) {
+      plan.costs[target] = plan.costs[source] + transition_cost;
+      plan.previous[target] = source;
+      plan.requires_cast[target] = transition_cost == 1U;
+    }
+  }
+}
+
+CastChainPlan BuildMinimumCastPlan(DataType source_dtype, const std::vector<DataType> &output_dtypes) {
+  const auto chain_size = output_dtypes.size();
+  CastChainPlan plan{std::vector<size_t>(chain_size, chain_size + 1U), std::vector<size_t>(chain_size, chain_size),
+                     std::vector<bool>(chain_size, false)};
+  for (size_t target = 0U; target < chain_size; ++target) {
+    if (CanCollapseCast(source_dtype, output_dtypes[target])) {
+      plan.requires_cast[target] = source_dtype != output_dtypes[target];
+      plan.costs[target] = plan.requires_cast[target] ? 1U : 0U;
+    }
+    UpdateMinimumCastPath(output_dtypes, target, plan);
+  }
+  return plan;
+}
+
+std::vector<bool> MarkRetainedCastNodes(const CastChainPlan &plan) {
+  const auto chain_size = plan.previous.size();
+  std::vector<bool> keep(chain_size, false);
+  for (size_t index = chain_size - 1U; index < chain_size; index = plan.previous[index]) {
+    keep[index] = plan.requires_cast[index];
+    if (plan.previous[index] >= chain_size) {
+      break;
+    }
+  }
+  return keep;
+}
+
+Status DeleteUnretainedCastNodes(AscGraph &asc_graph, const CastChain &chain, const std::vector<bool> &keep,
+                                 std::vector<NodePtr> &retained_nodes) {
+  retained_nodes.clear();
+  for (size_t i = 0U; i < chain.nodes.size(); ++i) {
+    if (keep[i]) {
+      retained_nodes.push_back(chain.nodes[i]);
+    }
+  }
+  for (auto i = chain.nodes.size(); i > 0U; --i) {
+    if (!keep[i - 1U]) {
+      GE_ASSERT_SUCCESS(DelNode(asc_graph, chain.nodes[i - 1U]));
+    }
+  }
+  return af::SUCCESS;
+}
+
+Status OptimizeLinearCastChain(AscGraph &asc_graph, const NodePtr &source, const CastChain &chain,
+                               std::vector<NodePtr> &retained_nodes) {
+  retained_nodes.clear();
+  GE_ASSERT_TRUE(chain.nodes.size() > 1U);
+  DataType source_dtype;
+  GE_ASSERT_SUCCESS(GetNodeOutputDtype(source, source_dtype));
+  if (source_dtype == chain.output_dtypes.back()) {
+    for (auto i = chain.nodes.size(); i > 0U; --i) {
+      GE_ASSERT_SUCCESS(DelNode(asc_graph, chain.nodes[i - 1U]));
+    }
+    return af::SUCCESS;
+  }
+  const auto plan = BuildMinimumCastPlan(source_dtype, chain.output_dtypes);
+  if (plan.costs.back() == chain.nodes.size() + 1U) {
+    retained_nodes = chain.nodes;
+    return af::SUCCESS;
+  }
+  return DeleteUnretainedCastNodes(asc_graph, chain, MarkRetainedCastNodes(plan), retained_nodes);
+}
+
+Status CanOptimizeLinearCastChain(const NodePtr &source, const CastChain &chain, bool &can_optimize) {
+  can_optimize = false;
+  if (chain.nodes.size() <= 1U) {
+    return af::SUCCESS;
+  }
+  DataType source_dtype;
+  GE_ASSERT_SUCCESS(GetNodeOutputDtype(source, source_dtype));
+  if (!IsFloatDataType(source_dtype)) {
+    return af::SUCCESS;
+  }
+  can_optimize = std::all_of(chain.output_dtypes.begin(), chain.output_dtypes.end(),
+                             [](const auto dtype) { return IsFloatDataType(dtype); });
+  return af::SUCCESS;
+}
+
+Status DeleteIdentityCast(AscGraph &asc_graph, const NodePtr &source, const NodePtr &cast_node, bool &deleted) {
+  DataType source_dtype;
+  GE_ASSERT_SUCCESS(GetNodeOutputDtype(source, source_dtype));
+  DataType cast_dtype;
+  GE_ASSERT_SUCCESS(GetNodeOutputDtype(cast_node, cast_dtype));
+  deleted = source_dtype == cast_dtype;
+  if (deleted) {
+    GE_ASSERT_SUCCESS(DelNode(asc_graph, cast_node));
+  }
+  return af::SUCCESS;
 }
 
 bool ShouldChangeDataType(const NodePtr &node, const std::vector<NodePtr> &peer_in_nodes, DataType peer_output_dtype,
@@ -344,7 +489,7 @@ Status ConfigureCastTensor(const NodePtr &src_node, const NodePtr &cast_node, co
   GE_ASSERT_NOTNULL(c_o_attr);
   // 当上游节点为 Scalar 时，其输出为标量形状，axis/repeats/strides 不包含目标张量的完整形状信息。
   // 前因：前端可能传入冗余连续 Cast（如 scalar->cast(FP32->FP32)->cast(FP32->FP16)->store），
-  // ImprovePrecision 的 ShouldDeleteCastNode 会删除所有浮点间 Cast，再在 Store 前重新插入新 Cast。
+  // ImprovePrecision 会删除冗余浮点 Cast，再在 Store 前重新插入新 Cast。
   // 若从 Scalar 复制输出信息，新 Cast 的 axis/repeats/strides 为空，
   // 导致后续 InsertBroadcast 补充的 broadcast 节点输出信息也丢失。
   // 因此当上游为 Scalar 时，从下游节点取 tensor 信息。
@@ -363,24 +508,17 @@ Status ConfigureCastTensor(const NodePtr &src_node, const NodePtr &cast_node, co
   return af::SUCCESS;
 }
 
-// ====================== Per-type processing ======================
-Status CastNodeProc(AscGraph &asc_graph, const NodePtr &node) {
+Status ProcessCastNodePrecision(AscGraph &asc_graph, const NodePtr &node) {
   NodePtr peer_out_node;
   GE_ASSERT_SUCCESS(GetPeerOutNode(node, peer_out_node, 0));
   std::vector<NodePtr> peer_in_nodes;
   GE_ASSERT_SUCCESS(GetPeerInNodes(node, peer_in_nodes, 0));
 
-  GeTensorDescPtr peer_output_tensor_desc;
-  GE_ASSERT_SUCCESS(GetOutputTensorDesc(peer_out_node, peer_output_tensor_desc));
   GeTensorDescPtr output_tensor_desc;
   GE_ASSERT_SUCCESS(GetOutputTensorDesc(node, output_tensor_desc));
-  const auto peer_output_dtype = peer_output_tensor_desc->GetDataType();
+  DataType peer_output_dtype;
+  GE_ASSERT_SUCCESS(GetNodeOutputDtype(peer_out_node, peer_output_dtype));
   const auto output_dtype = output_tensor_desc->GetDataType();
-  if (ShouldDeleteCastNode(peer_output_dtype, output_dtype)) {
-    GE_ASSERT_SUCCESS(DelNode(asc_graph, node));
-    return af::SUCCESS;
-  }
-
   if (IsFloatToUltraLowNeedInsertCast(peer_out_node, peer_output_dtype, output_dtype)) {
     GE_ASSERT_SUCCESS(UpdateTopoId(asc_graph, node, 1));
     NodePtr c_node = nullptr;
@@ -397,6 +535,41 @@ Status CastNodeProc(AscGraph &asc_graph, const NodePtr &node) {
     return af::SUCCESS;
   }
 
+  return af::SUCCESS;
+}
+
+Status ProcessCastChains(AscGraph &asc_graph, const std::vector<NodePtr> &nodes) {
+  std::unordered_set<NodePtr> processed;
+  std::vector<NodePtr> retained_nodes;
+  for (const auto &node : nodes) {
+    if (processed.find(node) != processed.end()) {
+      continue;
+    }
+    NodePtr source;
+    GE_ASSERT_SUCCESS(GetPeerOutNode(node, source, 0));
+    CastChain chain;
+    GE_ASSERT_SUCCESS(CollectLinearCastChain(node, chain));
+    bool can_optimize = false;
+    GE_ASSERT_SUCCESS(CanOptimizeLinearCastChain(source, chain, can_optimize));
+    if (!can_optimize) {
+      processed.insert(node);
+      bool deleted = false;
+      GE_ASSERT_SUCCESS(DeleteIdentityCast(asc_graph, source, node, deleted));
+      if (!deleted) {
+        retained_nodes.push_back(node);
+      }
+      continue;
+    }
+    std::vector<NodePtr> chain_retained_nodes;
+    GE_ASSERT_SUCCESS(OptimizeLinearCastChain(asc_graph, source, chain, chain_retained_nodes));
+    retained_nodes.insert(retained_nodes.end(), chain_retained_nodes.begin(), chain_retained_nodes.end());
+    for (const auto &cast_node : chain.nodes) {
+      processed.insert(cast_node);
+    }
+  }
+  for (const auto &node : retained_nodes) {
+    GE_ASSERT_SUCCESS(ProcessCastNodePrecision(asc_graph, node));
+  }
   return af::SUCCESS;
 }
 
@@ -440,13 +613,13 @@ Status InsertCastToIncreasePrecision(AscGraph &asc_graph, const NodePtr &load_no
 Status IsNeedInsertCastBeforeOther(const NodePtr &other_node, bool &need_insert, std::vector<int32_t> &input_idxs) {
   std::vector<NodePtr> peer_out_nodes;
   GE_ASSERT_SUCCESS(GetPeerOutNodes(other_node, peer_out_nodes));
-  GeTensorDescPtr peer_output_tensor_desc;
   for (auto idx = 0U; idx < peer_out_nodes.size(); idx++) {
     const auto &peer_out_node = peer_out_nodes[idx];
-    GE_ASSERT_SUCCESS(GetOutputTensorDesc(peer_out_node, peer_output_tensor_desc));
+    DataType peer_dtype;
+    GE_ASSERT_SUCCESS(GetNodeOutputDtype(peer_out_node, peer_dtype));
     const auto &type = peer_out_node->GetType();
     if (type == af::ascir_op::Cast::Type || type == af::ascir_op::Load::Type || type == af::ascir_op::Gather::Type) {
-      if (IsLowPrecisionDataType(peer_output_tensor_desc->GetDataType())) {
+      if (IsLowPrecisionDataType(peer_dtype)) {
         need_insert = true;
         input_idxs.push_back(static_cast<int32_t>(idx));
       }
@@ -475,12 +648,12 @@ Status InsertCastBeforeNode(AscGraph &asc_graph, const NodePtr &other_node, bool
 Status IsNeedInsertCastBeforeStore(const NodePtr &store_node, bool &need_insert, bool &is_increase_precision) {
   NodePtr peer_out_node;
   GE_ASSERT_SUCCESS(GetPeerOutNode(store_node, peer_out_node, 0));
-  GeTensorDescPtr peer_output_tensor_desc;
-  GE_ASSERT_SUCCESS(GetOutputTensorDesc(peer_out_node, peer_output_tensor_desc));
-  GeTensorDescPtr store_output_tensor_desc;
-  GE_ASSERT_SUCCESS(GetOutputTensorDesc(store_node, store_output_tensor_desc));
-  is_increase_precision = IsHighPrecisionDataType(store_output_tensor_desc->GetDataType());
-  if (peer_output_tensor_desc->GetDataType() == store_output_tensor_desc->GetDataType()) {
+  DataType peer_dtype;
+  GE_ASSERT_SUCCESS(GetNodeOutputDtype(peer_out_node, peer_dtype));
+  DataType store_dtype;
+  GE_ASSERT_SUCCESS(GetNodeOutputDtype(store_node, store_dtype));
+  is_increase_precision = IsHighPrecisionDataType(store_dtype);
+  if (peer_dtype == store_dtype) {
     need_insert = false;
     return af::SUCCESS;
   }
@@ -569,9 +742,7 @@ Status ProcessStoreNodes(AscGraph &asc_graph, const std::vector<NodePtr> &nodes)
 }
 
 Status ProcessNodeGroups(AscGraph &asc_graph, TypeToNodesMap &type_to_nodes) {
-  for (const auto &node : type_to_nodes[af::ascir_op::Cast::Type]) {
-    GE_ASSERT_SUCCESS(CastNodeProc(asc_graph, node));
-  }
+  GE_ASSERT_SUCCESS(ProcessCastChains(asc_graph, type_to_nodes[af::ascir_op::Cast::Type]));
   GE_ASSERT_SUCCESS(ProcessLoadGatherNodes(asc_graph, type_to_nodes[af::ascir_op::Load::Type]));
   GE_ASSERT_SUCCESS(ProcessLoadGatherNodes(asc_graph, type_to_nodes[af::ascir_op::Gather::Type]));
   for (const auto &node : type_to_nodes[af::ascir_op::Scalar::Type]) {

@@ -602,10 +602,10 @@ std::string codegen::TilingData::GenStringReplaceFunc() const {
   return ss.str();
 }
 
-std::string codegen::TilingData::GenConstGenResultReplace() {
+std::string codegen::TilingData::GenConstGenResultReplace() const {
   std::stringstream ss;
 
-  for (auto &field_var : field_var_defs_) {
+  for (const auto &field_var : field_var_defs_) {
     ss << "  replaceSubstring(tiling_data_const_gen_result, \"" << field_var << "\"," << field_var << ");" << std::endl;
   }
 
@@ -799,13 +799,13 @@ std::string codegen::TilingData::GenerateConst(const ascir::FusedScheduledResult
   return ss.str();
 }
 
-std::string codegen::TilingData::GenTingDataField(std::string field_name) {
+std::string codegen::TilingData::GenTingDataField(std::string field_name) const {
   if (!const_mode_) {
     return "";
   }
 
   std::stringstream ss;
-  for (auto &field : const_tiling_data_field) {
+  for (const auto &field : const_tiling_data_field) {
     ss << field << ".";
   }
   ss << field_name;
@@ -813,14 +813,14 @@ std::string codegen::TilingData::GenTingDataField(std::string field_name) {
   return ss.str();
 }
 
-std::string codegen::TilingData::GetNameOfGenTilingDataFieldConstDefFunc(const std::string field_name) {
+std::string codegen::TilingData::GetNameOfGenTilingDataFieldConstDefFunc(const std::string field_name) const {
   if (!const_mode_) {
     return "";
   }
 
   std::stringstream ss;
   ss << "Gen";
-  for (auto &field : const_tiling_data_field) {
+  for (const auto &field : const_tiling_data_field) {
     ss << field << "_";
   }
   ss << field_name << "_field_DeclareFunc";
@@ -828,7 +828,7 @@ std::string codegen::TilingData::GetNameOfGenTilingDataFieldConstDefFunc(const s
   return ss.str();
 }
 
-std::string codegen::TilingData::GetNameOfGenTilingDataFieldConstDefFuncSimple(const std::string field_name) {
+std::string codegen::TilingData::GetNameOfGenTilingDataFieldConstDefFuncSimple(const std::string field_name) const {
   if (!const_mode_) {
     return "";
   }
@@ -839,7 +839,7 @@ std::string codegen::TilingData::GetNameOfGenTilingDataFieldConstDefFuncSimple(c
   return ss.str();
 }
 
-std::string codegen::TilingData::GetNameOfGenTilingDataFieldConstValueFuncSimple(const std::string field_name) {
+std::string codegen::TilingData::GetNameOfGenTilingDataFieldConstValueFuncSimple(const std::string field_name) const {
   if (!const_mode_) {
     return "";
   }

@@ -171,11 +171,11 @@ class ScopeSplitPass {
 
   /*!
    * \brief Check if two scopes have the same kernel nodes
-   * \param scope1 First scope
-   * \param scope2 Second scope
+   * \param originScope First scope
+   * \param currentScope Second scope
    * \return true if kernel node sets are identical
    */
-  static bool HasSameKernelNodes(const SuperKernelScopeInfo &scope1, const SuperKernelScopeInfo &scope2);
+  static bool HasSameKernelNodes(const SuperKernelScopeInfo &originScope, const SuperKernelScopeInfo &currentScope);
 
  private:
   /*!

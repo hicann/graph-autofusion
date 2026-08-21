@@ -10,6 +10,7 @@
 
 #include "indirect_load_utils.h"
 
+#include <algorithm>
 #include <string>
 
 #include "ascir_ops.h"
@@ -240,6 +241,22 @@ af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, Indirect
   layout.kind = IndirectLoadLayoutKind::kUnsupported;
   layout.physical_repeats = logical.sizes;
 
+  const bool has_dynamic_shape = std::any_of(logical.sizes.begin(), logical.sizes.end(),
+                                             [](const af::Expression &size) { return !size.IsConstExpr(); });
+  if (has_dynamic_shape) {
+    for (size_t dim = 0UL; dim < logical.sizes.size(); ++dim) {
+      if (af::SymbolicUtils::StaticCheckLe(logical.sizes[dim], af::sym::kSymbolZero) == af::TriBool::kTrue ||
+          af::SymbolicUtils::StaticCheckLt(logical.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+        return af::SUCCESS;
+      }
+      if (af::SymbolicUtils::StaticCheckEq(logical.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+        layout.physical_repeats[dim] = af::sym::kSymbolOne;
+      }
+    }
+    // Dynamic shapes cannot use the dense fast path. Reuse the stride-aware path so codegen derives offsets at runtime.
+    layout.kind = IndirectLoadLayoutKind::kStrided;
+    return af::SUCCESS;
+  }
   af::Expression physical_span = af::sym::kSymbolOne;
   bool has_zero_stride = false;
   bool has_physical_gap = false;
@@ -272,10 +289,21 @@ af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, Indirect
 }
 
 af::Status ValidateIndirectLoadOutputLayout(const LogicalTensorView &output) {
-  IndirectLoadTensorLayout layout;
-  GE_ASSERT_SUCCESS(ClassifyIndirectLoadLayout(output, layout));
-  GE_ASSERT_TRUE(layout.kind == IndirectLoadLayoutKind::kDense,
-                 "IndirectLoad output must use a dense contiguous layout.");
+  GE_ASSERT_TRUE(IsValidLogicalTensorView(output), "IndirectLoad output layout rank is invalid.");
+  af::Expression expected_stride = af::sym::kSymbolOne;
+  for (size_t index = output.sizes.size(); index > 0UL; --index) {
+    const size_t dim = index - 1UL;
+    GE_ASSERT_TRUE(
+        af::SymbolicUtils::StaticCheckLe(output.sizes[dim], af::sym::kSymbolZero) != af::TriBool::kTrue &&
+            af::SymbolicUtils::StaticCheckLt(output.strides[dim], af::sym::kSymbolZero) != af::TriBool::kTrue,
+        "IndirectLoad output must use a dense contiguous layout.");
+    if (af::SymbolicUtils::StaticCheckEq(output.sizes[dim], af::sym::kSymbolOne) == af::TriBool::kTrue) {
+      continue;
+    }
+    GE_ASSERT_TRUE(af::SymbolicUtils::StaticCheckEq(output.strides[dim], expected_stride) == af::TriBool::kTrue,
+                   "IndirectLoad output must use a dense contiguous layout.");
+    expected_stride = af::sym::Mul(expected_stride, output.sizes[dim]);
+  }
   return af::SUCCESS;
 }
 

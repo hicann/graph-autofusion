@@ -119,7 +119,6 @@ std::shared_ptr<af::AscGraph> CreateSubGraph() {
   indirect_load.ir_attr.SetAxis(1);
   indirect_load.ir_attr.SetNegative_index_support(true);
   indirect_load.ir_attr.SetNeed_check_bound(true);
-  indirect_load.ir_attr.SetMax(32);
   SetView(indirect_load, view.axes, view.output_sizes, view.output_strides, af::DT_FLOAT);
 
   af::ascir_op::Store store("graph_hint/store");

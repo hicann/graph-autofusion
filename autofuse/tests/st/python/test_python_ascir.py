@@ -162,6 +162,18 @@ class TestAscir:
             )
 
     @staticmethod
+    def test_indirect_load_max_expression_attr():
+        graph = ascir.HintGraph("test_indirect_load_max")
+        dynamic_max = graph.create_size("dynamic_max")
+        indirect_load = ascir.ops.IndirectLoad("indirect_load")
+
+        indirect_load.attr.ir_attr.max = dynamic_max
+        assert indirect_load.attr.ir_attr.max == dynamic_max
+
+        with pytest.raises(TypeError):
+            indirect_load.attr.ir_attr.max = "invalid"
+
+    @staticmethod
     def test_graph_create_node_with_indirect_load_api():
         ascir.utils.set_platform("3510", 1, 245760)
         try:

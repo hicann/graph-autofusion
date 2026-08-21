@@ -228,10 +228,10 @@ class SuperKernelOptionsManager {
   /*!
    * \brief Simple regex-like pattern matching without std::regex
    * \param pattern The regex pattern (supports: . *)
-   * \param text The text to match against
-   * \return True if text matches the pattern, false otherwise
+   * \param opName The operator name to match against
+   * \return True if opName matches the pattern, false otherwise
    */
-  static bool MatchRegex(const std::string &pattern, const std::string &text);
+  static bool MatchRegex(const std::string &pattern, const std::string &opName);
 
   /*!
    * \brief Check if debug mode is enabled
