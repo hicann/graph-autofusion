@@ -3370,12 +3370,19 @@ TEST_F(TestOptimizer, ScalarBroadcastOptimization_Two_Scalar) {
   EXPECT_EQ(res, af::SUCCESS);
   auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
   EXPECT_EQ(compute_graph->GetAllNodesSize(), 10);
-  EXPECT_EQ(compute_graph->FindNode("brc1"), nullptr);
-  EXPECT_EQ(compute_graph->FindNode("brc2"), nullptr);
-  EXPECT_EQ(compute_graph->FindNode("brc3"), nullptr);
-  EXPECT_NE(compute_graph->FindNode("brc4"), nullptr);
-  EXPECT_NE(compute_graph->FindNode("brc5"), nullptr);
-  EXPECT_NE(compute_graph->FindNode("brc6"), nullptr);
+  const auto retained_brc1 = compute_graph->FindNode("brc1");
+  const auto retained_brc2 = compute_graph->FindNode("brc2");
+  const auto retained_brc3 = compute_graph->FindNode("brc3");
+  ASSERT_NE(retained_brc1, nullptr);
+  ASSERT_NE(retained_brc2, nullptr);
+  ASSERT_NE(retained_brc3, nullptr);
+  EXPECT_EQ(compute_graph->FindNode("brc4"), nullptr);
+  EXPECT_EQ(compute_graph->FindNode("brc5"), nullptr);
+  EXPECT_EQ(compute_graph->FindNode("brc6"), nullptr);
+  EXPECT_EQ(retained_brc1->GetInDataNodes().at(0)->GetName(), "add");
+  EXPECT_EQ(retained_brc2->GetInDataNodes().at(0)->GetName(), "brc1");
+  EXPECT_EQ(retained_brc3->GetInDataNodes().at(0)->GetName(), "brc2");
+  EXPECT_EQ(compute_graph->FindNode("store")->GetInDataNodes().at(0)->GetName(), "brc3");
 }
 
 TEST_F(TestOptimizer, ScalarBroadcastOptimization_Same_Input) {
