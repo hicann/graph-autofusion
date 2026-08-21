@@ -24,7 +24,11 @@
 #include "runtime_stub.h"
 #include "common/platform_context.h"
 
-class TestBackendExpmE2e : public testing::Test {
+namespace {
+constexpr int64_t kExpm1SimtDcacheSize = 32 * 1024;
+}
+
+class TestBackendExpm1E2e : public testing::Test {
  protected:
   void SetUp() override {
     dlog_setlevel(ASCGEN_MODULE_NAME, DLOG_ERROR, 0);
@@ -38,14 +42,14 @@ class TestBackendExpmE2e : public testing::Test {
   }
 };
 
-TEST_F(TestBackendExpmE2e, ExpmE2eCodegen) {
+TEST_F(TestBackendExpm1E2e, Expm1E2eCodegen) {
   bool gen_success = true;
   std::string tilig_stub = R"(
 #define REGISTER_TILING_DEFAULT(tiling)
 #define GET_TILING_DATA(t, tiling)  AutofuseTilingData t = *(AutofuseTilingData*)tiling;
 )";
   std::map<std::string, std::string> shape_info({{"s0", "stub_s0"}, {"s1", "stub_s1"}, {"s2", "stub_s2"}});
-  auto graph = ascir::ShareGraph::ExpmBf16FusedGraph(3);
+  auto graph = ascir::ShareGraph::Expm1Bf16FusedGraph(3);
   std::cout << "KERNEL_SRC_LIST=" << KERNEL_SRC_LIST << std::endl;
   std::vector<std::string> parts = splitString(KERNEL_SRC_LIST, ':');
   std::string kernel_src_file_name = parts[0];
@@ -66,6 +70,9 @@ TEST_F(TestBackendExpmE2e, ExpmE2eCodegen) {
     EXPECT_EQ(optimizer.Optimize(graph, fused_schedule_result), 0);
     codegen::CodegenResult result;
     EXPECT_EQ(codegen.Generate(shape_info, fused_schedule_result, result), 0);
+    EXPECT_NE(result.kernel.find("Expm1Extend"), std::string::npos);
+    EXPECT_NE(result.kernel.find("Expm1SimtCompute"), std::string::npos);
+    EXPECT_NE(result.tiling.find(std::to_string(kExpm1SimtDcacheSize)), std::string::npos);
     kernel_file << tilig_stub << RemoveSubDirInclude(result.kernel);
     tiling_file << result.tiling;
     tiling_data_file << result.tiling_data;

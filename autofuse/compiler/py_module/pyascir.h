@@ -127,7 +127,7 @@ PyMODINIT_FUNC PyInit_pyautofuse(void);
   OP(Log10)                       \
   OP(LogicalXor)                  \
   OP(Log1p)                       \
-  OP(Expm)                        \
+  OP(Expm1)                       \
   OP(Log2)                        \
   OP(LShift)                      \
   OP(Mod)                         \

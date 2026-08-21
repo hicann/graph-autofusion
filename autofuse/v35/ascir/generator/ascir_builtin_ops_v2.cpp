@@ -629,12 +629,12 @@ REG_ASC_IR(Ln).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::LnA
                                       af::ascir::AscIrImplCreator<af::ascir::LnAscIrCodegenImplV2>(),
                                       {{"T", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16}}}});
 
-REG_ASC_IR(Expm)
+REG_ASC_IR(Expm1)
     .Input("x", "T")
     .Output("y", "T")
     .ComputeType(ComputeType::kComputeElewise)
-    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::ExpmAscIrAttImplV2>(),
-                            af::ascir::AscIrImplCreator<af::ascir::ExpmAscIrCodegenImplV2>(),
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::Expm1AscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::Expm1AscIrCodegenImplV2>(),
                             {{"T", TensorType{DT_FLOAT, DT_BF16, DT_FLOAT16}}}});
 
 REG_ASC_IR(Log2)

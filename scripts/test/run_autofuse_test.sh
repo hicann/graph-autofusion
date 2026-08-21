@@ -888,10 +888,10 @@ build_backend() {
                       select_bool_test_e2e_v2 \
                       copysign_bf16_test_e2e_v2 \
                       erfcx_test_e2e_v2 \
-                      expm_test_e2e_v2 \
                       i0_store_test_e2e_v2 \
                       i0e_store_test_e2e_v2 \
                       i1e_store_test_e2e_v2 \
+                      expm1_test_e2e_v2 \
                       bessel_j0_store_test_e2e_v2 \
                       bessel_j1_store_test_e2e_v2 \
                       bessel_y0_store_test_e2e_v2 \

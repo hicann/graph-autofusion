@@ -117,8 +117,8 @@ Register::Register() {
   const std::string kAscendcErfcxRegBaseStr = {
 #include "erfcx_reg_base.h"
   };
-  const std::string kAscendcExpmRegBaseStr = {
-#include "expm_reg_base.h"
+  const std::string kAscendcExpm1RegBaseStr = {
+#include "expm1_reg_base.h"
   };
   const std::string kAscendcFmodRegBaseStr = {
 #include "fmod_reg_base.h"
@@ -331,7 +331,7 @@ Register::Register() {
       {"atan2_reg_base.h", kAscendcAtan2RegBaseStr},
       {"copy_sign_reg_base.h", kAscendcCopySignRegBaseStr},
       {"erfcx_reg_base.h", kAscendcErfcxRegBaseStr},
-      {"expm_reg_base.h", kAscendcExpmRegBaseStr},
+      {"expm1_reg_base.h", kAscendcExpm1RegBaseStr},
       {"fmod_reg_base.h", kAscendcFmodRegBaseStr},
       {"trunc_div_reg_base.h", kAscendcTruncDivRegBaseStr},
       {"remainder_reg_base.h", kAscendcRemainderRegBaseStr},

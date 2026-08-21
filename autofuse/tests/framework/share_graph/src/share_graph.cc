@@ -12750,7 +12750,7 @@ af::ComputeGraphPtr ShareGraph::ErfcxTestFusedGraph(size_t dims_size, af::DataTy
   return compute_graph;
 }
 
-static void CreateExpmBf16AscGraph(af::AscGraph &graph, size_t dims_size) {
+static void CreateExpm1Bf16AscGraph(af::AscGraph &graph, size_t dims_size) {
   af::ascir_op::Data x("data", graph);
   x.y.dtype = af::DataType::DT_BF16;
   x.ir_attr.SetIndex(0);
@@ -12759,12 +12759,12 @@ static void CreateExpmBf16AscGraph(af::AscGraph &graph, size_t dims_size) {
   xLocal.x = x.y;
   xLocal.y.dtype = af::DataType::DT_BF16;
 
-  af::ascir_op::Expm expm("expm");
-  expm.x = xLocal.y;
-  expm.y.dtype = af::DataType::DT_BF16;
+  af::ascir_op::Expm1 expm1("expm1");
+  expm1.x = xLocal.y;
+  expm1.y.dtype = af::DataType::DT_BF16;
 
   af::ascir_op::Store x_out("store");
-  x_out.x = expm.y;
+  x_out.x = expm1.y;
   x_out.y.dtype = af::DataType::DT_BF16;
 
   af::ascir_op::Output y("output");
@@ -12782,8 +12782,8 @@ static void CreateExpmBf16AscGraph(af::AscGraph &graph, size_t dims_size) {
  *      /     \
  *   data0
  */
-af::ComputeGraphPtr ShareGraph::ExpmBf16FusedGraph(size_t dims_size) {
-  auto builder = GraphBuilder("expm_bf16_test");
+af::ComputeGraphPtr ShareGraph::Expm1Bf16FusedGraph(size_t dims_size) {
+  auto builder = GraphBuilder("expm1_bf16_test");
   auto data = builder.AddNode("data", "Data", 0, 1);
   af::AttrUtils::SetInt(data->GetOpDescBarePtr(), "_parent_node_index", 0);
 
@@ -12797,8 +12797,8 @@ af::ComputeGraphPtr ShareGraph::ExpmBf16FusedGraph(size_t dims_size) {
     return nullptr;
   }
   auto ascbc_node = compute_graph->FindNode("ascbc");
-  af::AscGraph sub_graph("expm_bf16_test");
-  CreateExpmBf16AscGraph(sub_graph, dims_size);
+  af::AscGraph sub_graph("expm1_bf16_test");
+  CreateExpm1Bf16AscGraph(sub_graph, dims_size);
 
   std::string sub_graph_str;
   af::AscGraphUtils::SerializeToReadable(sub_graph, sub_graph_str);

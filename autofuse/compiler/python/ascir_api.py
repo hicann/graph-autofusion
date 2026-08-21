@@ -2051,7 +2051,7 @@ def Ln(
     )
 
 
-def Expm(
+def Expm1(
     owner_graph: ascir.HintGraph,
     x: ascir.OpsOperatorOutput,
     *,
@@ -2060,7 +2060,7 @@ def Expm(
     stride: Optional[List[ascir.SizeExpr]] = None,
 ) -> ascir.OpsOperatorOutput:
     return _common_in_1_out_1_normal_op(
-        "Expm", owner_graph, x, axis=axis, size=size, stride=stride
+        "Expm1", owner_graph, x, axis=axis, size=size, stride=stride
     )
 
 

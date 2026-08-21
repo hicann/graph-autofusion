@@ -755,8 +755,8 @@ ApiPerfRegister<ApiPerf> logical_xor_api_perf_v2(ApiPerfRegisterV2(kLogicalXor, 
                                                                    &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> log1p_api_perf_v2(ApiPerfRegisterV2(kLog1p, GetPerfFunc(kLog1p + "V2"), nullptr,
                                                              &perf_param_table_v2, &tiling_schedule_config_table_v2));
-ApiPerfRegister<ApiPerf> expm_api_perf_v2(ApiPerfRegisterV2(kExpm, GetPerfFunc(kExpm + "V2"), nullptr,
-                                                            &perf_param_table_v2, &tiling_schedule_config_table_v2));
+ApiPerfRegister<ApiPerf> expm1_api_perf_v2(ApiPerfRegisterV2(kExpm1, GetPerfFunc(kExpm1 + "V2"), nullptr,
+                                                             &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> log2_api_perf_v2(ApiPerfRegisterV2(kLog2, GetPerfFunc(kLog2 + "V2"), nullptr,
                                                             &perf_param_table_v2, &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> lShift_api_perf_v2(ApiPerfRegisterV2(kLShift, GetPerfFunc(kLShift + "V2"), nullptr,
