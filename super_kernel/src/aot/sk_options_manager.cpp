@@ -131,18 +131,18 @@ const DefaultOptionFactoryEntry *FindDefaultOptionFactory(aclskOptionType optTyp
   return nullptr;
 }
 
-struct InnerCapabilityInfo {
-  SkInnerCapability capability;
+struct InnerOptionInfo {
+  SkInnerOptionType optionType;
   std::unique_ptr<OptOptionBase> (*factory)();
 };
 
-const std::array<InnerCapabilityInfo, static_cast<size_t>(SkInnerCapability::SK_INNER_CAPABILITY_MAX)>
-    DEFAULT_INNER_CAPABILITIES = {{
-        {SkInnerCapability::MIX_KERNEL_SPLIT,
+const std::array<InnerOptionInfo, static_cast<size_t>(SkInnerOptionType::SK_INNER_OPTION_MAX)> DEFAULT_INNER_OPTIONS = {
+    {
+        {SkInnerOptionType::MIX_KERNEL_SPLIT,
          []() -> std::unique_ptr<OptOptionBase> {
-           return std::make_unique<NumberOptOption>("enable_mix_kernel_split", aclskOptionType::SK_OPTION_MAX, 0, 0, 1);
+           return std::make_unique<NumberOptOption>("mix_kernel_split", aclskOptionType::SK_OPTION_MAX, 0, 0, 1);
          }},
-        {SkInnerCapability::SIMT_OP_SUPPORT,
+        {SkInnerOptionType::SIMT_OP_SUPPORT,
          []() -> std::unique_ptr<OptOptionBase> {
            return std::make_unique<NumberOptOption>("simt_op_support", aclskOptionType::SK_OPTION_MAX, 0, 0, 1);
          }},
@@ -362,9 +362,9 @@ const OptOptionBase *SuperKernelOptionsManager::GetOption(aclskOptionType optTyp
   return iter->second.get();
 }
 
-bool SuperKernelOptionsManager::IsInnerCapabilityEnabled(SkInnerCapability capability) const {
-  const auto iter = innerCapabilityMap.find(capability);
-  return iter != innerCapabilityMap.end() && iter->second != nullptr && iter->second->GetIntValue() == 1;
+bool SuperKernelOptionsManager::IsInnerOptionEnabled(SkInnerOptionType optionType) const {
+  const auto iter = innerOptionMap.find(optionType);
+  return iter != innerOptionMap.end() && iter->second != nullptr && iter->second->GetIntValue() == 1;
 }
 
 bool SuperKernelOptionsManager::MatchKernelNameInList(const std::vector<std::string> &kernelList,
@@ -479,42 +479,42 @@ void SuperKernelOptionsManager::RegisterDefaultSkOptions() {
   }
 }
 
-void SuperKernelOptionsManager::RegisterDefaultInnerCapabilities() {
-  for (const auto &capability : DEFAULT_INNER_CAPABILITIES) {
-    if (innerCapabilityMap.find(capability.capability) == innerCapabilityMap.end()) {
-      innerCapabilityMap[capability.capability] = capability.factory();
+void SuperKernelOptionsManager::RegisterDefaultInnerOptions() {
+  for (const auto &option : DEFAULT_INNER_OPTIONS) {
+    if (innerOptionMap.find(option.optionType) == innerOptionMap.end()) {
+      innerOptionMap[option.optionType] = option.factory();
     }
   }
 }
 
-void SuperKernelOptionsManager::ApplyArchSpecificCapabilities() {
+void SuperKernelOptionsManager::ApplyArchSpecificOptions() {
   const SkKernelArch kernelArch = GetCurrentSkKernelArch();
-  const auto enableCapability = [this](SkInnerCapability capability) {
-    const auto iter = innerCapabilityMap.find(capability);
-    if (iter != innerCapabilityMap.end() && iter->second != nullptr) {
+  const auto enableOption = [this](SkInnerOptionType optionType) {
+    const auto iter = innerOptionMap.find(optionType);
+    if (iter != innerOptionMap.end() && iter->second != nullptr) {
       iter->second->SetValue(1);
     }
   };
 
   switch (kernelArch) {
     case SkKernelArch::DAV_3510:
-      enableCapability(SkInnerCapability::MIX_KERNEL_SPLIT);
-      enableCapability(SkInnerCapability::SIMT_OP_SUPPORT);
+      enableOption(SkInnerOptionType::MIX_KERNEL_SPLIT);
+      enableOption(SkInnerOptionType::SIMT_OP_SUPPORT);
       break;
     case SkKernelArch::DAV_2201:
     default:
       break;
   }
 
-  SK_LOGI("ApplyArchSpecificCapabilities: kernelArch=%s, mixKernelSplit=%d, simtOpSupport=%d", to_string(kernelArch),
-          static_cast<int>(IsInnerCapabilityEnabled(SkInnerCapability::MIX_KERNEL_SPLIT)),
-          static_cast<int>(IsInnerCapabilityEnabled(SkInnerCapability::SIMT_OP_SUPPORT)));
+  SK_LOGI("ApplyArchSpecificOptions: kernelArch=%s, mixKernelSplit=%d, simtOpSupport=%d", to_string(kernelArch),
+          static_cast<int>(IsInnerOptionEnabled(SkInnerOptionType::MIX_KERNEL_SPLIT)),
+          static_cast<int>(IsInnerOptionEnabled(SkInnerOptionType::SIMT_OP_SUPPORT)));
 }
 
 void SuperKernelOptionsManager::RegisterDefaultOptions() {
   RegisterDefaultSkOptions();
-  RegisterDefaultInnerCapabilities();
-  ApplyArchSpecificCapabilities();
+  RegisterDefaultInnerOptions();
+  ApplyArchSpecificOptions();
 }
 
 void SuperKernelOptionsManager::SetOptOptionValue(const aclskOption *option) {
@@ -788,21 +788,21 @@ nlohmann::ordered_json SuperKernelOptionsManager::ToJson() const {
     optionsJson[opt->GetName()] = optJson;
   }
 
-  nlohmann::ordered_json innerCapabilitiesJson = nlohmann::ordered_json::object();
-  for (const auto &capability : DEFAULT_INNER_CAPABILITIES) {
-    const auto iter = innerCapabilityMap.find(capability.capability);
-    if (iter == innerCapabilityMap.end() || iter->second == nullptr) {
+  nlohmann::ordered_json innerOptionsJson = nlohmann::ordered_json::object();
+  for (const auto &option : DEFAULT_INNER_OPTIONS) {
+    const auto iter = innerOptionMap.find(option.optionType);
+    if (iter == innerOptionMap.end() || iter->second == nullptr) {
       continue;
     }
 
-    const OptOptionBase *innerCapability = iter->second.get();
-    nlohmann::ordered_json capabilityJson;
-    capabilityJson["name"] = innerCapability->GetName();
-    capabilityJson["type"] = static_cast<int>(capability.capability);
-    capabilityJson["value"] = IsInnerCapabilityEnabled(capability.capability);
-    innerCapabilitiesJson[innerCapability->GetName()] = capabilityJson;
+    const OptOptionBase *innerOption = iter->second.get();
+    nlohmann::ordered_json optionJson;
+    optionJson["name"] = innerOption->GetName();
+    optionJson["type"] = static_cast<int>(option.optionType);
+    optionJson["value"] = IsInnerOptionEnabled(option.optionType);
+    innerOptionsJson[innerOption->GetName()] = optionJson;
   }
-  optionsJson["inner_capabilities"] = innerCapabilitiesJson;
+  optionsJson["inner_options"] = innerOptionsJson;
 
   return optionsJson;
 }

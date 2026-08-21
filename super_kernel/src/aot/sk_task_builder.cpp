@@ -132,7 +132,7 @@ SkQueueType InferFirstKernelEventQueueType(const std::vector<SuperKernelBaseNode
 }
 
 struct SimtDcacheSizeResult {
-  bool areSimtUbufSizesValid = true;
+  bool isValid = true;
   bool hasSimtTask = false;
   size_t skMaxDcacheSize = 0;
 };
@@ -152,7 +152,7 @@ SimtDcacheSizeResult CalculateSimtDcacheSize(const std::vector<SuperKernelBaseNo
     if (!kernelInfo.hasDynUbufSize || !kernelInfo.hasAllocUbufSize) {
       SK_LOGE("SIMT kernel lacks ubuf size info, nodeId=%lu, hasDynUbufSize=%d, hasAllocUbufSize=%d", task->GetNodeId(),
               kernelInfo.hasDynUbufSize, kernelInfo.hasAllocUbufSize);
-      dcacheSizeResult.areSimtUbufSizesValid = false;
+      dcacheSizeResult.isValid = false;
       return dcacheSizeResult;
     }
     if (kernelInfo.dynUbufSize > SK_TOTAL_UB_SIZE ||
@@ -161,7 +161,7 @@ SimtDcacheSizeResult CalculateSimtDcacheSize(const std::vector<SuperKernelBaseNo
           "SIMT kernel ubuf size exceeds total ub size, nodeId=%lu, dynUbufSize=%zu, "
           "allocUbufSize=%zu, totalUbSize=%zu",
           task->GetNodeId(), kernelInfo.dynUbufSize, kernelInfo.allocUbufSize, SK_TOTAL_UB_SIZE);
-      dcacheSizeResult.areSimtUbufSizesValid = false;
+      dcacheSizeResult.isValid = false;
       return dcacheSizeResult;
     }
     size_t taskMaxDcacheSize = SK_TOTAL_UB_SIZE - kernelInfo.dynUbufSize - kernelInfo.allocUbufSize;
@@ -2412,7 +2412,7 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
     splitBinCount = splitOptions->GetIntValue();
   }
 
-  if (opts.IsInnerCapabilityEnabled(SkInnerCapability::MIX_KERNEL_SPLIT)) {
+  if (opts.IsInnerOptionEnabled(SkInnerOptionType::MIX_KERNEL_SPLIT)) {
     if (!PrecomputeSyncRelationsByMixGroups(tasks)) {
       SK_LOGE("Build failed: precompute sync relations with mix kernel split failed");
       return {};
@@ -2644,9 +2644,9 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
 
   bool useSimtEntry = false;
   size_t skMaxDcacheSize = 0;
-  if (opts.IsInnerCapabilityEnabled(SkInnerCapability::SIMT_OP_SUPPORT)) {
+  if (opts.IsInnerOptionEnabled(SkInnerOptionType::SIMT_OP_SUPPORT)) {
     const SimtDcacheSizeResult dcacheSizeResult = CalculateSimtDcacheSize(tasks);
-    if (!dcacheSizeResult.areSimtUbufSizesValid) {
+    if (!dcacheSizeResult.isValid) {
       SK_LOGE("Build failed: SIMT ubuf size validation failed");
       return {};
     }
