@@ -219,6 +219,42 @@ TEST(CodegenInfershapeTest, TestInfershapeFunc_Compile_OK_WithLambda) {
   ASSERT_TRUE(CompileCodegenCode(code));
 }
 
+TEST(CodegenInfershapeTest, TestInfershapeFunc_CollectUsedSymbols) {
+  codegen::CodegenOptions opt;
+  codegen::Codegen codegen(opt);
+  vector<vector<std::string>> symbol_shape_str{{"s1 + s10", "s1 * s1"}};
+  std::map<std::string, std::string> shape_info = {
+      {"s0", "invalid_unused_symbol"},
+      {"s1", "1"},
+      {"s10", "10"},
+  };
+
+  std::string code = codegen.GenerateInferShape(symbol_shape_str, shape_info);
+
+  EXPECT_NE(code.find("auto s1 = 1;"), std::string::npos);
+  EXPECT_NE(code.find("auto s10 = 10;"), std::string::npos);
+  EXPECT_EQ(code.find("auto s0 = invalid_unused_symbol;"), std::string::npos);
+  ASSERT_TRUE(CompileCodegenCode(code));
+}
+
+TEST(CodegenInfershapeTest, TestInfershapeFunc_CollectUsedSymbolsWithBuiltinFunctions) {
+  codegen::CodegenOptions opt;
+  codegen::Codegen codegen(opt);
+  vector<vector<std::string>> symbol_shape_str{{"Max(input_s1, Min(s1, 32))", "Pow(s2, 2)", "Mod(s3, 8)"}};
+  std::map<std::string, std::string> shape_info = {
+      {"unused", "invalid_unused_symbol"}, {"input_s1", "1"}, {"s1", "2"}, {"s2", "3"}, {"s3", "4"},
+  };
+
+  std::string code = codegen.GenerateInferShape(symbol_shape_str, shape_info);
+
+  EXPECT_NE(code.find("auto input_s1 = 1;"), std::string::npos);
+  EXPECT_NE(code.find("auto s1 = 2;"), std::string::npos);
+  EXPECT_NE(code.find("auto s2 = 3;"), std::string::npos);
+  EXPECT_NE(code.find("auto s3 = 4;"), std::string::npos);
+  EXPECT_EQ(code.find("auto unused = invalid_unused_symbol;"), std::string::npos);
+  ASSERT_TRUE(CompileCodegenCode(code));
+}
+
 TEST(CodegenInfershapeTest, TestInfershapeFunc_Compile_NOK) {
   codegen::CodegenOptions opt;
   codegen::Codegen codegen(opt);

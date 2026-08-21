@@ -10,6 +10,8 @@
 
 #include "codegen_infershape.h"
 #include "code_printer.h"
+#include <set>
+#include "graph/symbolizer/symbolic.h"
 namespace codegen {
 namespace {
 std::string GetFileHeaderDefine() {
@@ -62,6 +64,23 @@ static_assert(std::is_standard_layout<InferShapeSymbolEvalContext>::value,
 )";
   return file_header_str;
 }
+
+std::set<std::string> CollectUsedSymbols(const std::vector<std::vector<std::string>> &symbol_shape_str,
+                                         const std::map<std::string, std::string> &shape_info) {
+  std::set<std::string> used_symbols;
+  for (const auto &shape_dims : symbol_shape_str) {
+    for (const auto &expr_str : shape_dims) {
+      const auto expr = af::Expression::Parse(expr_str.c_str());
+      for (const auto &symbol : expr.FreeSymbols()) {
+        const auto symbol_name = symbol.Str();
+        if (symbol_name != nullptr && shape_info.find(symbol_name.get()) != shape_info.end()) {
+          used_symbols.insert(symbol_name.get());
+        }
+      }
+    }
+  }
+  return used_symbols;
+}
 }  // namespace
 
 std::string InfershapeGen::GenInferShapeFunc(const std::vector<std::vector<std::string>> &symbol_shape_str,
@@ -71,8 +90,9 @@ std::string InfershapeGen::GenInferShapeFunc(const std::vector<std::vector<std::
   printer.AddLine(GetFileHeaderDefine());
 
   std::string common_get_input_str;
-  for (const auto &it : shape_info) {
-    common_get_input_str += (blank_space + "auto " + it.first + " = " + it.second + ";\n");
+  std::set<std::string> used_symbols = CollectUsedSymbols(symbol_shape_str, shape_info);
+  for (const auto &sym_name : used_symbols) {
+    common_get_input_str += (blank_space + "auto " + sym_name + " = " + shape_info.at(sym_name) + ";\n");
   }
 
   printer.DefineFuncBegin("extern \"C\" ge::graphStatus", "InferShape", "InferShapeSymbolEvalContext *context");
