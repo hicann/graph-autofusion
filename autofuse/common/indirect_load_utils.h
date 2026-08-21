@@ -33,7 +33,6 @@ enum class TemplateRole : int64_t {
   kSimtInlineTransform,
   kSimtOp,
   kSkInputBoundary,
-  kSkOp,
   kStridedUbPath,
 };
 
@@ -49,6 +48,7 @@ struct TemplateBehavior {
   bool skips_api_emit = false;
   bool uses_direct_gm_pipeline = false;
   bool skips_ub_lifecycle = false;
+  bool skips_input_lifecycle = false;
   bool preserves_vectorized_axis = false;
 };
 
@@ -89,11 +89,8 @@ struct TemplateLogicalView {
 
 TemplateBehavior GetTemplateBehavior(const af::AscNodePtr &node);
 TemplateRole GetTemplateRole(const af::AscNodePtr &node);
-bool IsSimtInlineTransform(const af::AscNodePtr &node);
-bool HasPostReduceConsumer(const af::AscNodePtr &node);
 af::AscNodePtr GetPostReduceConsumer(const af::AscNodePtr &node);
 af::AscNodePtr GetPostReduceInputProducer(const af::AscNodePtr &node);
-bool IsPostReduceInputProducer(const af::AscNodePtr &node);
 bool ShouldSkipTpipeTensorCollection(const af::AscNodePtr &node);
 af::Status InheritTemplateRoleIfIL(af::AscGraph &graph, const std::string &vf_node_name, const af::AscNodePtr &src);
 af::Status SetTemplateRole(const af::AscNodePtr &node, TemplateRole role);
@@ -105,10 +102,7 @@ af::Status SetImplementation(const af::AscNodePtr &node, Implementation implemen
 af::Status GetImplementation(const af::AscNodePtr &node, Implementation &implementation);
 af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout);
 af::Status ValidateIndirectLoadOutputLayout(const LogicalTensorView &output);
-bool ShouldSkipMainScheduleTiling(const af::AscNodePtr &node);
-bool ShouldPreserveVectorizedAxis(const af::AscNodePtr &node);
 bool ShouldApplyInputInnerVectorization(const af::AscNodePtr &node);
-bool ShouldDisableRegularVectorFunc(const af::AscNodePtr &node);
 af::AscNodePtr GetInputProducer(const af::AscNodePtr &node, size_t input_index);
 af::AscNodePtr GetOnlyOutputConsumer(const af::AscNodePtr &node);
 af::AscNodePtr FindIndirectLoadNode(const af::AscGraph &graph);

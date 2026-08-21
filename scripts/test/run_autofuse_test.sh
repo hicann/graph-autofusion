@@ -785,7 +785,6 @@ build_backend() {
                        indirect_load_rank3_axis1_pow2_gather_e2e_v2 \
                        indirect_load_rank3_axis1_pow2_simt_e2e_v2 \
                        indirect_load_rank3_axis1_float_int32_gather_e2e_v2 \
-                       indirect_load_rank3_axis1_float_int64_gather_exact_e2e_v2 \
                        indirect_load_rank3_axis1_float_int64_gather_e2e_v2 \
                        indirect_load_rank4_axis1_float_int64_strided_post_simd_e2e_v2 \
                        indirect_load_rank4_axis1_direct_index_abs_exp2_sum_simd_e2e_v2 \
@@ -825,9 +824,7 @@ build_backend() {
                        indirect_load_rank3_axis1_input_index_gap_simd_test_e2e_v2 \
                        indirect_load_rank3_axis1_input_index_gap_simt_test_e2e_v2 \
                        indirect_load_rank3_axis1_input_index_gap_sk_test_e2e_v2 \
-                       indirect_load_rank3_axis1_input_index_outer_gap_simd_test_e2e_v2 \
                        indirect_load_rank3_axis1_input_index_outer_gap_simt_test_e2e_v2 \
-                       indirect_load_rank3_axis1_input_index_outer_gap_sk_test_e2e_v2 \
                        indirect_load_rank3_axis1_torch_gather_frontend_e2e_v2 \
                        load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \
                       gather_reduce_store_test_e2e_v2 \

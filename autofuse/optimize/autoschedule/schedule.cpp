@@ -659,8 +659,8 @@ Status Scheduler::InitIndirectLoadScheduleCase() {
   }
   GE_ASSERT_NOTNULL(tiling_case_.ub_tiling_y.first);
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, indirect_load_info_.axes));
-  if (ascgen_utils::indirect_load::HasPostReduceConsumer(indirect_load)) {
-    indirect_load_info_.reduce = ascgen_utils::indirect_load::GetPostReduceConsumer(indirect_load);
+  indirect_load_info_.reduce = ascgen_utils::indirect_load::GetPostReduceConsumer(indirect_load);
+  if (indirect_load_info_.reduce != nullptr) {
     indirect_load_info_.reduce_input = ascgen_utils::indirect_load::GetPostReduceInputProducer(indirect_load);
     GE_ASSERT_NOTNULL(indirect_load_info_.reduce_input, "IndirectLoad post Reduce input producer is missing.");
   }
@@ -682,7 +682,7 @@ Status Scheduler::ApplyIndirectLoadNodeAxes(const af::AscNodePtr &node, bool &sk
   if (is_index_pre) {
     GE_ASSERT_SUCCESS(ApplyInputInnerVectorizedAxis(graph_, node, indirect_load_info_.axes.index_inner_axis));
   }
-  skip_main_tiling = ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(node);
+  skip_main_tiling = ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_main_schedule_tiling;
   if (skip_main_tiling) {
     return af::SUCCESS;
   }
@@ -759,7 +759,8 @@ Status Scheduler::TileSplit() {
     // 非reduce场景应该将向量化轴调整为tensor中的相对顺序, 带reduce场景由于tiling策略已经做了特别的reorder,需要跳过
     // tiling策略暂时无法支持具有reduce和transpose融合的场景
     for (auto &output : node->outputs()) {
-      if (indirect_load_info_.active && ascgen_utils::indirect_load::ShouldPreserveVectorizedAxis(node)) {
+      if (indirect_load_info_.active &&
+          ascgen_utils::indirect_load::GetTemplateBehavior(node).preserves_vectorized_axis) {
         continue;
       }
       output->attr.vectorized_axis = node_vectorized_axes;
@@ -817,7 +818,8 @@ Status Scheduler::ApplyBlockSplit(const std::vector<ascir::AxisId> &new_sched_ax
   bool is_reduce_after = false;
   for (auto node : graph_.GetAllNodes()) {
     if (ScheduleUtils::IsBuffer(node) ||
-        (indirect_load_info_.active && ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(node))) {
+        (indirect_load_info_.active &&
+         ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_main_schedule_tiling)) {
       continue;
     }
     if ((!is_reduce_after) && ScheduleUtils::IsReduce(node)) {

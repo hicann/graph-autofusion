@@ -105,20 +105,10 @@ bool IsSupportedBroadcastPath(const NodePath &path, size_t broadcast_index, asci
     return false;
   }
   const af::AscNodePtr &broadcast = path[broadcast_index];
-  const auto broadcast_source = ascgen_utils::indirect_load::GetInputProducer(broadcast, 0UL);
   if (!IsSingleConsumerWithoutControlEdge(broadcast)) {
     GELOGI("[IndirectLoad] Reject candidate[%d]: Broadcast path node[%s] is not safely foldable.",
            static_cast<int32_t>(template_id), broadcast->GetNamePtr());
     return false;
-  }
-  if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
-    if (!IsSingleConsumerWithoutControlEdge(broadcast_source)) {
-      GELOGI("[IndirectLoad] Reject candidate[%d]: Broadcast source node[%s] is not safely foldable.",
-             static_cast<int32_t>(template_id),
-             broadcast_source == nullptr ? "<null>" : broadcast_source->GetNamePtr());
-      return false;
-    }
-    return true;
   }
   // CollectInputPaths 只有 SK 会继续回溯 Broadcast 前的单输入链。
   for (size_t i = 0UL; i < broadcast_index; ++i) {
@@ -205,50 +195,6 @@ af::Status BuildBroadcastLogicalView(const af::AscTensorAttr &logical_attr, cons
     }
   }
   return af::SUCCESS;
-}
-
-bool HasMixedInnerBroadcast(const ascgen_utils::indirect_load::LogicalTensorView &logical_view,
-                            const af::AscTensorAttr &physical_attr, size_t axis_index) {
-  bool has_broadcast_axis = false;
-  bool has_regular_axis = false;
-  for (size_t dim = axis_index; dim < logical_view.sizes.size(); ++dim) {
-    const bool is_broadcast =
-        af::SymbolicUtils::StaticCheckEq(physical_attr.repeats[dim], af::sym::kSymbolOne) == af::TriBool::kTrue &&
-        af::SymbolicUtils::StaticCheckEq(logical_view.sizes[dim], af::sym::kSymbolOne) != af::TriBool::kTrue;
-    has_broadcast_axis = has_broadcast_axis || is_broadcast;
-    has_regular_axis = has_regular_axis || !is_broadcast;
-  }
-  return has_broadcast_axis && has_regular_axis;
-}
-
-bool HasDirectOuterBroadcast(const ascgen_utils::indirect_load::LogicalTensorView &logical_view,
-                             const af::AscTensorAttr &physical_attr, size_t axis_index) {
-  for (size_t dim = 0UL; dim < axis_index; ++dim) {
-    if (af::SymbolicUtils::StaticCheckEq(physical_attr.repeats[dim], af::sym::kSymbolOne) == af::TriBool::kTrue &&
-        af::SymbolicUtils::StaticCheckEq(logical_view.sizes[dim], af::sym::kSymbolOne) != af::TriBool::kTrue) {
-      return !HasMixedInnerBroadcast(logical_view, physical_attr, axis_index);
-    }
-  }
-  return false;
-}
-
-bool IsSupportedDirectOuterBroadcast(const af::AscNodePtr &broadcast,
-                                     const ascgen_utils::indirect_load::LogicalTensorView &logical_view,
-                                     const af::AscTensorAttr &physical_attr, size_t axis_index,
-                                     ascir::TemplateId template_id) {
-  if (template_id != ascir::TemplateId::kIndirectLoadSimd) {
-    return true;
-  }
-  const auto broadcast_producer = ascgen_utils::indirect_load::GetInputProducer(broadcast, 0UL);
-  if (broadcast_producer == nullptr || broadcast_producer->inputs.Size() != 1UL) {
-    return true;
-  }
-  if (!HasDirectOuterBroadcast(logical_view, physical_attr, axis_index)) {
-    return true;
-  }
-  GELOGI("[IndirectLoad] Reject candidate[%d]: direct outer Broadcast in the input/index path.",
-         static_cast<int32_t>(template_id));
-  return false;
 }
 
 af::Status ApplyZeroStrideCompactView(const NodePath &path,
@@ -570,9 +516,8 @@ bool IsSkTemplateCandidateLegal(const af::AscNodePtr &indirect_load) {
 
 af::Status ValidateIndirectLoadNode(const af::AscNodePtr &indirect_load) {
   const auto outputs = indirect_load->outputs();
-  GE_ASSERT_TRUE(outputs.size() == kIndirectLoadOutputCount,
-                 "IndirectLoad node[%s] output count is invalid, actual:%zu.", indirect_load->GetNamePtr(),
-                 outputs.size());
+  GE_ASSERT_TRUE(outputs.size() == kIndirectLoadOutputCount, "Invalid IndirectLoad output number:%zu, node[%s].",
+                 outputs.size(), indirect_load->GetNamePtr());
   const auto output = outputs[0];
   GE_ASSERT_NOTNULL(output, "IndirectLoad output tensor is null.");
   const size_t output_rank = output->attr.axis.size();
@@ -583,8 +528,8 @@ af::Status ValidateIndirectLoadNode(const af::AscNodePtr &indirect_load) {
   GE_ASSERT_TRUE(axis_index != kIndirectLoadInvalidAxisIndex, "IndirectLoad axis index of node[%s] is invalid.",
                  indirect_load->GetNamePtr());
   const auto inputs = indirect_load->inputs();
-  GE_ASSERT_TRUE(inputs.size() == kIndirectLoadInputCount, "IndirectLoad node[%s] input count is invalid, actual:%zu.",
-                 indirect_load->GetNamePtr(), inputs.size());
+  GE_ASSERT_TRUE(inputs.size() == kIndirectLoadInputCount, "Invalid IndirectLoad input number:%zu, node[%s].",
+                 inputs.size(), indirect_load->GetNamePtr());
   const auto input = inputs[ascgen_utils::indirect_load::kInputTensorIndex];
   const auto index = inputs[ascgen_utils::indirect_load::kIndexTensorIndex];
   GE_ASSERT_NOTNULL(input, "IndirectLoad input tensor is null.");
@@ -1031,6 +976,9 @@ af::Status MoveInputPreNode(const af::AscNodePtr &node, const af::AscNodePtr &in
 
 af::Status RewriteInputPreNodes(af::AscGraph &graph, const af::AscNodePtr &indirect_load,
                                 ascir::TemplateId template_id) {
+  if (template_id == ascir::TemplateId::kIndirectLoadSK) {
+    return af::SUCCESS;
+  }
   if (HasControlEdge(indirect_load)) {
     GELOGI("[IndirectLoad] Skip moving input-pre nodes for node[%s].", indirect_load->GetNamePtr());
     return af::SUCCESS;
@@ -1170,27 +1118,23 @@ af::Status AnalyzeInputPath(const af::AscNodePtr &indirect_load, size_t input_id
   } else {
     const size_t broadcast_index = static_cast<size_t>(plan.path_broadcast_index);
     const af::AscNodePtr &broadcast = plan.path[broadcast_index];
-    // 取源物理属性前保留源存在性检查；SIMD/SK 的路径折叠安全性在 FoldBroadcastPath 阶段统一校验。
+    // 取源物理属性前保留源存在性检查。
     if (ascgen_utils::indirect_load::GetInputProducer(broadcast, 0UL) == nullptr) {
       GELOGI("[IndirectLoad] Reject candidate[%d]: Broadcast node[%s] source is invalid.",
              static_cast<int32_t>(template_id), broadcast->GetNamePtr());
       is_path_supported = false;
       return af::SUCCESS;
     }
-    // 折叠源物理属性：以广播源的物理属性重写逻辑视图的 strides，源形状为 1 而逻辑视图非 1 的维度置 stride 0。
+    // 基于广播源物理属性构造执行视图：源形状为 1 而逻辑视图非 1 的维度置 stride 0。
     af::AscTensorAttr physical_attr;
     GE_ASSERT_SUCCESS(GetBroadcastPhysicalAttr(broadcast, template_id, physical_attr));
     GE_ASSERT_SUCCESS(BuildBroadcastLogicalView(logical_attr, physical_attr, template_id, view));
-    if (!IsSupportedDirectOuterBroadcast(broadcast, view, physical_attr, axis_index, template_id)) {
-      is_path_supported = false;
-      return af::SUCCESS;
-    }
   }
 
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, plan.layout));
   if (plan.layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported) {
     GELOGI("[IndirectLoad] Reject candidate[%d]: input path layout%s is unsupported.",
-           static_cast<int32_t>(template_id), has_broadcast ? " after Broadcast folding" : "");
+           static_cast<int32_t>(template_id), has_broadcast ? " with Broadcast source view" : "");
     is_path_supported = false;
   }
   plan.simd_index_uses_output_inner_axis = template_id == ascir::TemplateId::kIndirectLoadSimd &&
@@ -1198,22 +1142,27 @@ af::Status AnalyzeInputPath(const af::AscNodePtr &indirect_load, size_t input_id
   return af::SUCCESS;
 }
 
-af::Status RewriteInputPathsForTemplate(ascir::TemplateId template_id, PhysicalViewPreparation &preparation,
-                                        RewrittenGraphAnalysis &analysis, bool &is_candidate_legal) {
-  if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
-    // SIMT 先完成 input-pre 搬移，再统一处理当前直连的 input Broadcast。
-    return af::SUCCESS;
-  }
+af::Status RewriteSkInputPaths(PhysicalViewPreparation &preparation, RewrittenGraphAnalysis &analysis,
+                               bool &is_candidate_legal) {
   for (InputViewPlan *const plan : {&preparation.input, &preparation.index}) {
-    GE_ASSERT_SUCCESS(FoldBroadcastPath(*plan, template_id, is_candidate_legal));
+    GE_ASSERT_SUCCESS(FoldBroadcastPath(*plan, ascir::TemplateId::kIndirectLoadSK, is_candidate_legal));
     if (!is_candidate_legal) {
       return af::SUCCESS;
     }
   }
+  analysis.input_path = std::move(preparation.input.path);
+  analysis.index_path = std::move(preparation.index.path);
+  return af::SUCCESS;
+}
+
+af::Status RewriteBroadcastPaths(const af::AscNodePtr &indirect_load, ascir::TemplateId template_id,
+                                 PhysicalViewPreparation &preparation, RewrittenGraphAnalysis &analysis,
+                                 bool &is_candidate_legal) {
   if (template_id == ascir::TemplateId::kIndirectLoadSK) {
-    // SK 需要保留完整路径，供调用方统一写回物理视图。
-    analysis.input_path = std::move(preparation.input.path);
-    analysis.index_path = std::move(preparation.index.path);
+    return RewriteSkInputPaths(preparation, analysis, is_candidate_legal);
+  }
+  if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
+    return RewriteSimtInputBroadcast(indirect_load, preparation.input, is_candidate_legal);
   }
   return af::SUCCESS;
 }
@@ -1314,28 +1263,18 @@ af::Status AnalyzeRewrittenGraph(af::AscGraph &graph, const af::AscNodePtr &indi
                               NeedsAlignedUbWindow(preparation.logical_view.input, axis_index);
   analysis.simd_index_uses_output_inner_axis = preparation.index.simd_index_uses_output_inner_axis;
 
-  // 改写阶段：全部拓扑改动一次完成（Broadcast 删除/折叠、input-pre 搬移）
-  GE_ASSERT_SUCCESS(RewriteInputPathsForTemplate(template_id, preparation, analysis, is_candidate_legal));
+  // SK 跳过 input-pre 搬移；SIMD/SIMT 将 input-pre 单目元素链搬到 IndirectLoad 之后。
+  GE_ASSERT_SUCCESS(RewriteInputPreNodes(graph, indirect_load, template_id));
+  GE_ASSERT_SUCCESS(RewriteBroadcastPaths(indirect_load, template_id, preparation, analysis, is_candidate_legal));
   if (!is_candidate_legal) {
     return af::SUCCESS;
   }
-  if (template_id == ascir::TemplateId::kIndirectLoadSK) {
-    // SK 不参与 region 收集，直接处理完整路径并结束。
-    GE_ASSERT_SUCCESS(ApplyTemplatePathLayouts(indirect_load, template_id, preparation, analysis));
-    return af::SUCCESS;
-  }
-  // 将 input-pre 单目元素链搬到 IndirectLoad 之后
-  GE_ASSERT_SUCCESS(RewriteInputPreNodes(graph, indirect_load, template_id));
-  if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
-    GE_ASSERT_SUCCESS(RewriteSimtInputBroadcast(indirect_load, preparation.input, is_candidate_legal));
-    if (!is_candidate_legal) {
-      return af::SUCCESS;
-    }
-  }
 
-  // 收集阶段：一次遍历收集全部状态（改写定稿后无需重收）
-  GE_ASSERT_SUCCESS(CollectRewrittenBoundaries(indirect_load, analysis));
-  GE_ASSERT_SUCCESS(CollectRewrittenRegion(graph, indirect_load, template_id, analysis));
+  if (template_id != ascir::TemplateId::kIndirectLoadSK) {
+    // 收集阶段：一次遍历收集全部状态（改写定稿后无需重收）
+    GE_ASSERT_SUCCESS(CollectRewrittenBoundaries(indirect_load, analysis));
+    GE_ASSERT_SUCCESS(CollectRewrittenRegion(graph, indirect_load, template_id, analysis));
+  }
 
   // 路径布局处理：紧凑零 stride 写回物理视图，需对齐的 strided 路径标注 UB role。
   GE_ASSERT_SUCCESS(ApplyTemplatePathLayouts(indirect_load, template_id, preparation, analysis));
@@ -1463,8 +1402,6 @@ af::Status ApplySkGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_
   ascir::AxisId input_inner_axis = af::kIdNone;
   GE_ASSERT_SUCCESS(BuildSkInputInnerAxis(graph, indirect_load, axis_index, input_inner_axis));
   GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, axis_index, input_inner_axis, af::kIdNone));
-  GE_ASSERT_SUCCESS(
-      ascgen_utils::indirect_load::SetTemplateRole(indirect_load, ascgen_utils::indirect_load::TemplateRole::kSkOp));
   const auto input_boundary = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL);
   GE_ASSERT_TRUE(input_boundary != nullptr && af::ops::IsOps<af::ascir_op::Load>(input_boundary),
                  "IndirectLoad SK input boundary must be a Load node, node[%s].", indirect_load->GetNamePtr());

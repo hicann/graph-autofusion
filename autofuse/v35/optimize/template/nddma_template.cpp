@@ -247,7 +247,7 @@ af::Status NddmaTemplate::Generate([[maybe_unused]] const af::AscGraph &origin_g
   for (const auto &node : new_case.GetAllNodes()) {
     GE_CHECK_NOTNULL(node);
     if ((!af::ops::IsOps<af::ascir_op::Load>(node) && !af::ops::IsOps<af::ascir_op::Nddma>(node)) ||
-        ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(node)) {
+        ascgen_utils::indirect_load::GetTemplateBehavior(node).uses_direct_gm_pipeline) {
       continue;
     }
     if (node->GetOutAllNodes().size() > 1UL) {

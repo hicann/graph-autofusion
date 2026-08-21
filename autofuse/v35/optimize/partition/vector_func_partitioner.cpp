@@ -576,7 +576,7 @@ void VectorFuncPartitioner::RefineEnableVFFlag(const af::AscNodePtr &node, bool 
   }
 
   // 4. IndirectLoad template nodes with custom emit paths should not participate in regular VF fusion.
-  if (ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(node)) {
+  if (ascgen_utils::indirect_load::GetTemplateBehavior(node).uses_direct_gm_pipeline) {
     enable_vf = false;
     GELOGD("Node [%s] is IndirectLoad custom emit node, disable VF support.", node->GetNamePtr());
     return;

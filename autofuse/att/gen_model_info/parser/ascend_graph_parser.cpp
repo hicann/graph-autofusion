@@ -765,7 +765,9 @@ af::Status AscendGraphParser::GetNodeFromData(const af::AscNodePtr &ge_node, Nod
 af::Status AscendGraphParser::ConvertNodeInfos(const af::AscNodePtr &ge_node, const ScheduleAttr &attrs,
                                                const af::AscGraph &graph, const bool use_cache_flag) {
   if (ascgen_utils::indirect_load::GetTemplateBehavior(ge_node).uses_direct_gm_pipeline) {
-    if (ascgen_utils::indirect_load::IsPostReduceInputProducer(ge_node)) {
+    const auto post_reduce_consumer = ascgen_utils::indirect_load::GetOnlyOutputConsumer(ge_node);
+    if (post_reduce_consumer != nullptr &&
+        post_reduce_consumer->attr.api.compute_type == af::ComputeType::kComputeReduce) {
       NodeInfo reduce_input_tensor_info;
       reduce_input_tensor_info.name = ge_node->GetName();
       GE_ASSERT_SUCCESS(ParserNodeOutputInfos(ge_node, graph, reduce_input_tensor_info));

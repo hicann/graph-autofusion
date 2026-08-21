@@ -22,11 +22,26 @@
 #include "common/checker.h"
 #include "common_utils.h"
 #include "indirect_load_utils.h"
+#include "utils/extern_math_util.h"
 #include "v35/ascir/ascir_codegen_v2.h"
 
 namespace codegen {
 namespace {
+constexpr size_t kIndirectLoadInputCount = 2UL;
+constexpr size_t kIndirectLoadOutputCount = 1UL;
+constexpr char kSimtContextNamePrefix[] = "IndirectLoadSimtContext_";
+constexpr char kSimtBodyNamePrefix[] = "IndirectLoadSimtBody_";
+constexpr char kGlobalTensorNamePrefix[] = "global_";
+constexpr char kSimtGmFieldNamePrefix[] = "gm_";
+constexpr char kSimtValueNamePrefix[] = "v_";
+
 struct LogicalTensorInfo {
+  LogicalTensorInfo() = default;
+  explicit LogicalTensorInfo(const ascgen_utils::indirect_load::LogicalTensorView &view)
+      : sizes(view.sizes), strides(view.strides) {}
+  LogicalTensorInfo(const std::vector<ascir::SizeExpr> &sizes_in, const std::vector<ascir::SizeExpr> &strides_in)
+      : sizes(sizes_in), strides(strides_in) {}
+
   std::vector<ascir::SizeExpr> sizes;
   std::vector<ascir::SizeExpr> strides;
 };
@@ -82,29 +97,18 @@ bool IsAxisDerivedFrom(const TPipe &tpipe, ascir::AxisId axis_id, ascir::AxisId 
   return false;
 }
 
-LogicalTensorInfo BuildLogicalTensorInfo(const ascgen_utils::indirect_load::LogicalTensorView &view,
-                                         const TPipe &tpipe) {
-  (void)tpipe;
-  LogicalTensorInfo info;
-  info.sizes = view.sizes;
-  info.strides = view.strides;
-  return info;
-}
-
 af::Status BuildTensorWindowInfo(const ascgen_utils::indirect_load::IndirectLoadTensorLayout &layout,
-                                 const Tensor &tensor, size_t axis_pos, const TPipe &tpipe, LogicalTensorInfo &info) {
+                                 const Tensor &tensor, size_t axis_pos, LogicalTensorInfo &info) {
   GE_ASSERT_TRUE(layout.axis_ids.size() == layout.sizes.size() && layout.sizes.size() == layout.strides.size(),
                  "IndirectLoad tensor window layout rank mismatch.");
   GE_ASSERT_TRUE(axis_pos < layout.sizes.size(), "IndirectLoad tensor window axis is out of range.");
   GE_ASSERT_TRUE(tensor.vectorized_axis.size() == tensor.vectorized_strides.size(),
                  "IndirectLoad tensor vectorized axis/stride rank mismatch.");
-  info = BuildLogicalTensorInfo(layout, tpipe);
-  // Dense and zero-stride-compact layouts keep their logical row-major/alias
-  // strides after the local window is built.  A merged vectorized axis may
-  // expose a unit vectorized stride for every source axis; using it directly
-  // would collapse, for example, the [s6, s7] index axes to [1, 1].
-  if (layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
-      layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact) {
+  info = LogicalTensorInfo(layout);
+  // Dense layouts keep their logical row-major strides after the local window is built. For a zero-stride-compact
+  // view, preserve zero-stride axes but derive non-zero window strides from the physical vectorized tensor view;
+  // bitwidth-changing producers can introduce padding between logical elements.
+  if (layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense) {
     return af::SUCCESS;
   }
   af::Expression compact_stride = af::sym::kSymbolOne;
@@ -130,64 +134,48 @@ af::Status BuildTensorWindowInfo(const ascgen_utils::indirect_load::IndirectLoad
   return af::SUCCESS;
 }
 
-bool TryGetNonNegativeConst(const af::Expression &expr, uint64_t &value) {
-  int64_t signed_value = 0L;
-  if (!expr.IsConstExpr() || !expr.GetConstValue(signed_value) || signed_value < 0L) {
+bool TryBuildStaticSpan(const af::Expression &size_expr, uint64_t stride, uint64_t &span) {
+  int64_t size = 0L;
+  if (!size_expr.GetConstValue(size) || size < 0L) {
     return false;
   }
-  value = static_cast<uint64_t>(signed_value);
-  return true;
+  return !ge::MulOverflow(static_cast<uint64_t>(size), stride, span);
 }
 
-bool CheckedMul(uint64_t lhs, uint64_t rhs, uint64_t &result) {
-  if (lhs != 0U && rhs > std::numeric_limits<uint64_t>::max() / lhs) {
+bool TryAccumulateStaticOffset(const af::Expression &size_expr, const af::Expression &stride_expr, uint64_t &offset) {
+  int64_t size = 0L;
+  int64_t stride = 0L;
+  if (!size_expr.GetConstValue(size) || size <= 0L || !stride_expr.GetConstValue(stride) || stride < 0L) {
     return false;
   }
-  result = lhs * rhs;
-  return true;
-}
-
-bool CheckedAdd(uint64_t lhs, uint64_t rhs, uint64_t &result) {
-  if (rhs > std::numeric_limits<uint64_t>::max() - lhs) {
-    return false;
-  }
-  result = lhs + rhs;
-  return true;
+  uint64_t dim_offset = 0U;
+  return !ge::MulOverflow(static_cast<uint64_t>(size - 1L), static_cast<uint64_t>(stride), dim_offset) &&
+         !ge::AddOverflow(offset, dim_offset, offset);
 }
 
 bool TryGetStaticSpans(const LogicalTensorInfo &input, const LogicalTensorInfo &output, size_t axis,
                        SimtCodegenPlan &plan) {
   uint64_t inner = 1U;
   for (size_t i = axis + 1U; i < output.sizes.size(); ++i) {
-    uint64_t size = 0U;
-    if (!TryGetNonNegativeConst(output.sizes[i], size) || !CheckedMul(inner, size, inner)) {
+    if (!TryBuildStaticSpan(output.sizes[i], inner, inner)) {
       return false;
     }
   }
-  uint64_t output_axis_size = 0U;
-  uint64_t input_axis_size = 0U;
-  uint64_t input_stride = 0U;
-  if (!TryGetNonNegativeConst(output.sizes[axis], output_axis_size) ||
-      !TryGetNonNegativeConst(input.sizes[axis], input_axis_size) ||
-      !TryGetNonNegativeConst(input.strides[axis], input_stride) ||
-      !CheckedMul(output_axis_size, inner, plan.output_axis_span_value) ||
-      !CheckedMul(input_axis_size, input_stride, plan.input_axis_span_value)) {
+  int64_t input_stride = 0L;
+  if (!input.strides[axis].GetConstValue(input_stride) || input_stride < 0L ||
+      !TryBuildStaticSpan(output.sizes[axis], inner, plan.output_axis_span_value) ||
+      !TryBuildStaticSpan(input.sizes[axis], static_cast<uint64_t>(input_stride), plan.input_axis_span_value)) {
     return false;
   }
   plan.inner_span_value = inner;
-  plan.input_axis_stride_value = input_stride;
+  plan.input_axis_stride_value = static_cast<uint64_t>(input_stride);
   return true;
 }
 
 bool TryGetMaxElementOffset(const LogicalTensorInfo &tensor, uint64_t &max_offset) {
   max_offset = 0U;
   for (size_t i = 0U; i < tensor.sizes.size(); ++i) {
-    uint64_t size = 0U;
-    uint64_t stride = 0U;
-    uint64_t dim_offset = 0U;
-    if (!TryGetNonNegativeConst(tensor.sizes[i], size) || size == 0U ||
-        !TryGetNonNegativeConst(tensor.strides[i], stride) || !CheckedMul(size - 1U, stride, dim_offset) ||
-        !CheckedAdd(max_offset, dim_offset, max_offset)) {
+    if (!TryAccumulateStaticOffset(tensor.sizes[i], tensor.strides[i], max_offset)) {
       return false;
     }
   }
@@ -237,8 +225,8 @@ bool CanUseUint32Offsets(const LogicalTensorInfo &input, const LogicalTensorInfo
 
 bool CanUseUint32Divisors(const LogicalTensorInfo &index) {
   for (const af::Expression &size_expr : index.sizes) {
-    uint64_t size = 0U;
-    if (!TryGetNonNegativeConst(size_expr, size) || size > static_cast<uint64_t>(INT32_MAX)) {
+    int64_t size = 0L;
+    if (!size_expr.GetConstValue(size) || size < 0L || size > static_cast<int64_t>(INT32_MAX)) {
       return false;
     }
   }
@@ -421,31 +409,24 @@ af::Status CheckIndirectLoadShape(const ascgen_utils::indirect_load::TemplateLog
   const auto &input = logical_view.input;
   const auto &index = logical_view.index;
   const auto &output = logical_view.output;
-  GE_ASSERT_TRUE(input.sizes.size() == index.sizes.size(),
-                 "IndirectLoad expects input and index with the same logical rank.");
-  GE_ASSERT_TRUE(index.sizes.size() == output.sizes.size(),
-                 "IndirectLoad index and output must have the same logical rank.");
+  GE_ASSERT_TRUE(input.sizes.size() == index.sizes.size(), "Invalid IndirectLoad logical rank, input:%zu, index:%zu.",
+                 input.sizes.size(), index.sizes.size());
+  GE_ASSERT_TRUE(index.sizes.size() == output.sizes.size(), "Invalid IndirectLoad logical rank, index:%zu, output:%zu.",
+                 index.sizes.size(), output.sizes.size());
   GE_ASSERT_TRUE(input.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported &&
                      index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported,
                  "IndirectLoad input or index layout is unsupported.");
   GE_ASSERT_TRUE(input.sizes.size() == input.strides.size() && index.sizes.size() == index.strides.size(),
                  "IndirectLoad logical sizes/strides rank mismatch.");
-  GE_ASSERT_SUCCESS(CheckDenseStrides({output.sizes, output.strides}, "output logical view"));
+  GE_ASSERT_SUCCESS(CheckDenseStrides(LogicalTensorInfo(output.sizes, output.strides), "output logical view"));
   GE_ASSERT_TRUE(output_tensor.axis_size.size() == output_tensor.axis_strides.size(),
                  "IndirectLoad output tensor sizes/strides rank mismatch.");
-  GE_ASSERT_SUCCESS(CheckDenseStrides({output_tensor.axis_size, output_tensor.axis_strides}, "output tensor"));
+  GE_ASSERT_SUCCESS(
+      CheckDenseStrides(LogicalTensorInfo(output_tensor.axis_size, output_tensor.axis_strides), "output tensor"));
   return af::SUCCESS;
 }
 
 using SimtNodeSet = std::unordered_set<const af::AscNode *>;
-
-bool IsSimtGmInput(const af::AscNodePtr &node) {
-  return af::ops::IsOps<af::ascir_op::Load>(node);
-}
-
-bool IsSimtScalarInput(const af::AscNodePtr &node) {
-  return af::ops::IsOps<af::ascir_op::Scalar>(node);
-}
 
 af::Status CollectSimtBackwardNodes(const af::AscNodePtr &root, const ascir::NodeView &indirect_load,
                                     SimtNodeSet &nodes) {
@@ -455,7 +436,7 @@ af::Status CollectSimtBackwardNodes(const af::AscNodePtr &root, const ascir::Nod
     if (current == nullptr || current == indirect_load || !nodes.emplace(current.get()).second) {
       continue;
     }
-    if (IsSimtGmInput(current) || IsSimtScalarInput(current)) {
+    if (af::ops::IsOps<af::ascir_op::Load>(current) || af::ops::IsOps<af::ascir_op::Scalar>(current)) {
       continue;
     }
     GE_ASSERT_TRUE(current->inputs.Size() > 0UL, "IndirectLoad SIMT node[%s] has no input.", current->GetNamePtr());
@@ -479,10 +460,12 @@ af::AscNodePtr FindSimtOutputStore(const ascir::NodeView &indirect_load) {
 }
 
 af::Status ValidateSimtRegionNode(const af::AscNodePtr &node) {
-  if (IsSimtGmInput(node) || IsSimtScalarInput(node) || af::ops::IsOps<af::ascir_op::Store>(node)) {
+  if (af::ops::IsOps<af::ascir_op::Load>(node) || af::ops::IsOps<af::ascir_op::Scalar>(node) ||
+      af::ops::IsOps<af::ascir_op::Store>(node)) {
     return af::SUCCESS;
   }
-  GE_ASSERT_TRUE(ascgen_utils::indirect_load::IsSimtInlineTransform(node),
+  GE_ASSERT_TRUE(ascgen_utils::indirect_load::GetTemplateRole(node) ==
+                     ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform,
                  "IndirectLoad SIMT node[%s] has no inline-transform role.", node->GetNamePtr());
   GE_ASSERT_TRUE(!af::ops::IsOps<af::ascir_op::VectorFunc>(node),
                  "IndirectLoad SIMT transform must use scalar emission, node:%s", node->GetNamePtr());
@@ -524,7 +507,8 @@ af::Status CollectSimtRegionMetadata(const ascir::NodeView &indirect_load, std::
       GE_ASSERT_SUCCESS(ValidateSimtRegionNode(node));
       output_nodes.emplace_back(node);
     }
-    if (IsSimtGmInput(node) && (index_set.count(node.get()) != 0UL || output_set.count(node.get()) != 0UL)) {
+    if (af::ops::IsOps<af::ascir_op::Load>(node) &&
+        (index_set.count(node.get()) != 0UL || output_set.count(node.get()) != 0UL)) {
       AppendSimtGmTensor(node, gm_tensors);
     }
   }
@@ -545,16 +529,11 @@ af::Status CollectSimtMetadata(const ascir::NodeView &indirect_load, const af::A
     }
     GE_ASSERT_SUCCESS(ValidateSimtRegionNode(node));
     nodes.emplace_back(node);
-    if (IsSimtGmInput(node)) {
+    if (af::ops::IsOps<af::ascir_op::Load>(node)) {
       AppendSimtGmTensor(node, gm_tensors);
     }
   }
   return af::SUCCESS;
-}
-
-void RegisterSimtGmInput(const af::AscNodePtr &node, std::map<ascir::TensorId, std::string> &values) {
-  const auto output = node->outputs()[0];
-  values[output->attr.mem.tensor_id] = "context.gm_" + std::to_string(output->attr.mem.tensor_id) + "[output_index]";
 }
 
 af::Status EmitSimtScalarInput(const af::AscNodePtr &node, std::map<ascir::TensorId, std::string> &values,
@@ -567,7 +546,7 @@ af::Status EmitSimtScalarInput(const af::AscNodePtr &node, std::map<ascir::Tenso
   GE_ASSERT_SUCCESS(Tensor::DtypeName(output->attr.dtype, dtype));
   std::string processed_value;
   GE_ASSERT_SUCCESS(ascgen_utils::ScalarValuePreProcess(value, dtype, processed_value));
-  const std::string variable = "v_" + std::to_string(output->attr.mem.tensor_id);
+  const std::string variable = kSimtValueNamePrefix + std::to_string(output->attr.mem.tensor_id);
   ss << "    " << dtype << " " << variable << " = static_cast<" << dtype << ">(" << processed_value << ");"
      << std::endl;
   values[output->attr.mem.tensor_id] = variable;
@@ -587,7 +566,7 @@ af::Status EmitSimtTransform(const af::AscNodePtr &node, std::map<ascir::TensorI
   const auto output = node->outputs()[0];
   std::string output_dtype;
   GE_ASSERT_SUCCESS(Tensor::DtypeName(output->attr.dtype, output_dtype));
-  const std::string variable = "v_" + std::to_string(output->attr.mem.tensor_id);
+  const std::string variable = kSimtValueNamePrefix + std::to_string(output->attr.mem.tensor_id);
   ss << "    " << output_dtype << " " << variable << " = " << expr << ";" << std::endl;
   values[output->attr.mem.tensor_id] = variable;
   return af::SUCCESS;
@@ -595,13 +574,17 @@ af::Status EmitSimtTransform(const af::AscNodePtr &node, std::map<ascir::TensorI
 
 af::Status GenerateSimtEvaluatorBody(const std::vector<af::AscNodePtr> &nodes,
                                      std::map<ascir::TensorId, std::string> &values, ascir::TensorId result_tensor_id,
-                                     std::stringstream &ss) {
+                                     std::stringstream &ss, const SimtNodeSet *index_nodes = nullptr) {
   for (const af::AscNodePtr &node : nodes) {
-    if (IsSimtGmInput(node)) {
-      RegisterSimtGmInput(node, values);
+    if (af::ops::IsOps<af::ascir_op::Load>(node)) {
+      const auto output = node->outputs()[0];
+      const bool is_index_node = index_nodes != nullptr && index_nodes->count(node.get()) != 0UL;
+      const char *offset = is_index_node ? "index_offset" : "output_index";
+      values[output->attr.mem.tensor_id] = "context." + std::string(kSimtGmFieldNamePrefix) +
+                                           std::to_string(output->attr.mem.tensor_id) + "[" + offset + "]";
       continue;
     }
-    if (IsSimtScalarInput(node)) {
+    if (af::ops::IsOps<af::ascir_op::Scalar>(node)) {
       GE_ASSERT_SUCCESS(EmitSimtScalarInput(node, values, ss));
       continue;
     }
@@ -617,23 +600,23 @@ af::Status GenerateSimtEvaluatorBody(const std::vector<af::AscNodePtr> &nodes,
   return af::SUCCESS;
 }
 
-af::Status GenerateSimtIndexEvaluator(const std::string &index_dtype, const std::string &offset_type,
-                                      ascir::TensorId result_tensor_id, const std::vector<af::AscNodePtr> &nodes,
-                                      std::stringstream &ss) {
+af::Status GenSimtIndexEvaluator(const std::string &index_dtype, const std::string &offset_type,
+                                 ascir::TensorId result_tensor_id, const std::vector<af::AscNodePtr> &nodes,
+                                 std::stringstream &ss) {
   std::map<ascir::TensorId, std::string> values;
   ss << "  __simt_callee__ __aicore__ inline static " << index_dtype << " Index(" << offset_type
      << " output_index, const Context &context) {" << std::endl;
   return GenerateSimtEvaluatorBody(nodes, values, result_tensor_id, ss);
 }
 
-af::Status GenerateSimtOutputEvaluator(const std::string &output_dtype, const std::string &input_dtype,
-                                       const std::string &offset_type, ascir::TensorId value_tensor_id,
-                                       ascir::TensorId result_tensor_id, const std::vector<af::AscNodePtr> &nodes,
-                                       std::stringstream &ss) {
+af::Status GenSimtOutputEvaluator(const std::string &output_dtype, const std::string &input_dtype,
+                                  const std::string &offset_type, ascir::TensorId value_tensor_id,
+                                  ascir::TensorId result_tensor_id, const std::vector<af::AscNodePtr> &nodes,
+                                  const SimtNodeSet &index_nodes, std::stringstream &ss) {
   std::map<ascir::TensorId, std::string> values{{value_tensor_id, "value"}};
   ss << "  __simt_callee__ __aicore__ inline static " << output_dtype << " Output(" << input_dtype << " value, "
-     << offset_type << " output_index, const Context &context) {" << std::endl;
-  return GenerateSimtEvaluatorBody(nodes, values, result_tensor_id, ss);
+     << offset_type << " output_index, " << offset_type << " index_offset, const Context &context) {" << std::endl;
+  return GenerateSimtEvaluatorBody(nodes, values, result_tensor_id, ss, &index_nodes);
 }
 
 af::Status CalcVectorizedElementCount(const Tensor &tensor, af::Expression &element_count) {
@@ -652,7 +635,8 @@ af::Status GenerateSimtContextInitializer(const std::string &context_name, const
     const SimtGmTensor &gm_tensor = gm_tensors[i];
     std::string dtype;
     GE_ASSERT_SUCCESS(Tensor::DtypeName(gm_tensor.dtype, dtype));
-    ss << (i == 0UL ? "" : ", ") << "(__gm__ " << dtype << " *)global_" << gm_tensor.gm_tensor_id << ".GetPhyAddr()";
+    ss << (i == 0UL ? "" : ", ") << "(__gm__ " << dtype << " *)" << kGlobalTensorNamePrefix << gm_tensor.gm_tensor_id
+       << ".GetPhyAddr()";
   }
   ss << "};" << std::endl;
   return af::SUCCESS;
@@ -688,8 +672,10 @@ Status IndirectLoadRegApiCall::ParseAttr(const ascir::NodeView &node) {
 }
 
 Status IndirectLoadRegApiCall::ParseSimtAttr(const ascir::NodeView &node) {
-  GE_ASSERT_TRUE(node->inputs.Size() == 2UL && node->outputs().size() == 1UL,
-                 "IndirectLoad SIMT expects 2 inputs and 1 output.");
+  GE_ASSERT_TRUE(node->inputs.Size() == kIndirectLoadInputCount, "Invalid IndirectLoad SIMT input number:%zu.",
+                 node->inputs.Size());
+  GE_ASSERT_TRUE(node->outputs().size() == kIndirectLoadOutputCount, "Invalid IndirectLoad SIMT output number:%zu.",
+                 node->outputs().size());
   GE_ASSERT_TRUE(logical_view_.input.sizes.size() < 64UL, "IndirectLoad SIMT rank must be smaller than 64.");
   const auto node_inputs = node->inputs();
   index_result_tensor_id_ = node_inputs[ascgen_utils::indirect_load::kIndexTensorIndex]->attr.mem.tensor_id;
@@ -705,16 +691,19 @@ Status IndirectLoadRegApiCall::ParseSimtAttr(const ascir::NodeView &node) {
         ascgen_utils::indirect_load::GetInputProducer(node, ascgen_utils::indirect_load::kIndexTensorIndex);
     GE_ASSERT_SUCCESS(CollectSimtMetadata(node, index_root, index_nodes_, simt_gm_tensors_));
     GE_ASSERT_SUCCESS(CollectSimtMetadata(node, output_root, output_nodes_, simt_gm_tensors_));
-    GE_ASSERT_TRUE(outputs.size() == 1UL, "IndirectLoad SIMT expects one output.");
+    GE_ASSERT_TRUE(outputs.size() == kIndirectLoadOutputCount, "Invalid IndirectLoad SIMT output number:%zu.",
+                   outputs.size());
     outputs[0].id = output_result_tensor_id_;
     return af::SUCCESS;
   }
   af::AscNodePtr store;
   GE_ASSERT_SUCCESS(CollectSimtRegionMetadata(node, index_nodes_, output_nodes_, simt_gm_tensors_, store));
-  GE_ASSERT_TRUE(store->inputs.Size() == 1UL && store->outputs().size() == 1UL,
-                 "IndirectLoad SIMT Store expects 1 input and 1 output.");
+  GE_ASSERT_TRUE(store->inputs.Size() == 1UL, "Invalid IndirectLoad SIMT Store input number:%zu.",
+                 store->inputs.Size());
+  GE_ASSERT_TRUE(store->outputs().size() == 1UL, "Invalid IndirectLoad SIMT Store output number:%zu.",
+                 store->outputs().size());
   output_result_tensor_id_ = store->inputs()[0]->attr.mem.tensor_id;
-  output_gm_tensor_ = "global_" + std::to_string(store->outputs()[0]->attr.mem.tensor_id);
+  output_gm_tensor_ = kGlobalTensorNamePrefix + std::to_string(store->outputs()[0]->attr.mem.tensor_id);
   output_dtype_ = store->outputs()[0]->attr.dtype;
   GE_ASSERT_TRUE(store->inputs()[0]->attr.dtype == output_dtype_,
                  "IndirectLoad SIMT output transform dtype[%d] does not match Store dtype[%d].",
@@ -729,13 +718,13 @@ Status IndirectLoadRegApiCall::GenerateFuncDefinition(const TPipe &tpipe, const 
     return af::SUCCESS;
   }
 
-  GE_ASSERT_TRUE(inputs.size() == 2U, "IndirectLoad SIMT expects 2 inputs.");
+  GE_ASSERT_TRUE(inputs.size() == kIndirectLoadInputCount, "Invalid IndirectLoad SIMT input number:%zu.",
+                 inputs.size());
   const Tensor *input_tensor = tpipe.GetTensor(inputs[ascgen_utils::indirect_load::kInputTensorIndex]->id);
   GE_ASSERT_NOTNULL(input_tensor, "IndirectLoad SIMT input tensor is missing.");
-  const Tensor &input = *input_tensor;
-  const LogicalTensorInfo input_info = BuildLogicalTensorInfo(logical_view_.input, tpipe);
-  LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
-  const LogicalTensorInfo output_info = BuildLogicalTensorInfo(logical_view_.output, tpipe);
+  const LogicalTensorInfo input_info(logical_view_.input);
+  LogicalTensorInfo index_info(logical_view_.index);
+  const LogicalTensorInfo output_info(logical_view_.output);
   const bool index_broadcast_strided = ApplySimtIndexPhysicalStrides(index_nodes_, index_info);
   const bool strided = logical_view_.input.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
                        logical_view_.index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
@@ -743,10 +732,10 @@ Status IndirectLoadRegApiCall::GenerateFuncDefinition(const TPipe &tpipe, const 
   const SimtCodegenPlan plan =
       BuildSimtCodegenPlan(input_info, index_info, output_info, static_cast<size_t>(axis_), strided);
   std::string input_dtype;
-  GE_ASSERT_SUCCESS(Tensor::DtypeName(input.dtype, input_dtype));
+  GE_ASSERT_SUCCESS(Tensor::DtypeName(input_tensor->dtype, input_dtype));
   const std::string valid_node_name = ascgen_utils::GenValidName(node_name);
-  const std::string context_name = "IndirectLoadSimtContext_" + valid_node_name;
-  const std::string body_name = "IndirectLoadSimtBody_" + valid_node_name;
+  const std::string context_name = kSimtContextNamePrefix + valid_node_name;
+  const std::string body_name = kSimtBodyNamePrefix + valid_node_name;
   std::string index_dtype;
   std::string output_dtype;
   GE_ASSERT_SUCCESS(Tensor::DtypeName(index_dtype_, index_dtype));
@@ -761,15 +750,18 @@ Status IndirectLoadRegApiCall::GenerateFuncDefinition(const TPipe &tpipe, const 
   for (const SimtGmTensor &tensor : simt_gm_tensors_) {
     std::string dtype;
     GE_ASSERT_SUCCESS(Tensor::DtypeName(tensor.dtype, dtype));
-    ss << "  __gm__ " << dtype << " *gm_" << tensor.value_tensor_id << ";" << std::endl;
+    ss << "  __gm__ " << dtype << " *" << kSimtGmFieldNamePrefix << tensor.value_tensor_id << ";" << std::endl;
   }
   ss << "};" << std::endl;
   ss << "struct " << body_name << " {" << std::endl;
   ss << "  using Context = " << context_name << ";" << std::endl;
-  GE_ASSERT_SUCCESS(
-      GenerateSimtIndexEvaluator(index_dtype, plan.offset_type, index_result_tensor_id_, index_nodes_, ss));
-  GE_ASSERT_SUCCESS(GenerateSimtOutputEvaluator(output_dtype, input_dtype, plan.offset_type, simt_value_tensor_id_,
-                                                output_result_tensor_id_, output_nodes_, ss));
+  SimtNodeSet index_node_set;
+  for (const af::AscNodePtr &node : index_nodes_) {
+    index_node_set.insert(node.get());
+  }
+  GE_ASSERT_SUCCESS(GenSimtIndexEvaluator(index_dtype, plan.offset_type, index_result_tensor_id_, index_nodes_, ss));
+  GE_ASSERT_SUCCESS(GenSimtOutputEvaluator(output_dtype, input_dtype, plan.offset_type, simt_value_tensor_id_,
+                                           output_result_tensor_id_, output_nodes_, index_node_set, ss));
   ss << "};" << std::endl;
   return af::SUCCESS;
 }
@@ -778,7 +770,8 @@ Status IndirectLoadRegApiCall::Generate(const TPipe &tpipe, const std::vector<as
                                         const std::vector<std::reference_wrapper<const Tensor>> &inputs,
                                         const std::vector<std::reference_wrapper<const Tensor>> &outputs,
                                         std::string &result) const {
-  GE_ASSERT_TRUE(inputs.size() == 2U && outputs.size() == 1U, "IndirectLoad expects 2 inputs and 1 output.");
+  GE_ASSERT_TRUE(inputs.size() == kIndirectLoadInputCount, "Invalid IndirectLoad input number:%zu.", inputs.size());
+  GE_ASSERT_TRUE(outputs.size() == kIndirectLoadOutputCount, "Invalid IndirectLoad output number:%zu.", outputs.size());
   GE_ASSERT_TRUE(
       template_id_ == ascir::TemplateId::kIndirectLoadSK || template_id_ == ascir::TemplateId::kIndirectLoadSimd,
       "IndirectLoad tensor-based Generate only supports SK and SIMD.");
@@ -800,7 +793,8 @@ Status IndirectLoadRegApiCall::Generate(const TPipe &tpipe, const std::vector<as
   if (template_id_ != ascir::TemplateId::kIndirectLoadSimt) {
     return ApiCall::Generate(tpipe, current_axis, result);
   }
-  GE_ASSERT_TRUE(inputs.size() == 2U, "IndirectLoad SIMT expects 2 inputs.");
+  GE_ASSERT_TRUE(inputs.size() == kIndirectLoadInputCount, "Invalid IndirectLoad SIMT input number:%zu.",
+                 inputs.size());
   const Tensor *input_tensor = tpipe.GetTensor(inputs[ascgen_utils::indirect_load::kInputTensorIndex]->id);
   GE_ASSERT_NOTNULL(input_tensor, "IndirectLoad SIMT input tensor is missing.");
   return GenerateSimt(tpipe, current_axis, *input_tensor, result);
@@ -817,9 +811,9 @@ Status IndirectLoadRegApiCall::GenerateSk(const TPipe &tpipe, const std::vector<
   GE_ASSERT_TRUE(tmp_iter != tmp_buf_id.end(), "IndirectLoad SK requires an API-level tmp buffer.");
 
   const size_t axis_pos = static_cast<size_t>(axis_);
-  const LogicalTensorInfo x_info = BuildLogicalTensorInfo(logical_view_.input, tpipe);
+  const LogicalTensorInfo x_info(logical_view_.input);
   LogicalTensorInfo index_info;
-  GE_ASSERT_SUCCESS(BuildTensorWindowInfo(logical_view_.index, index, axis_pos, tpipe, index_info));
+  GE_ASSERT_SUCCESS(BuildTensorWindowInfo(logical_view_.index, index, axis_pos, index_info));
   std::string x_dtype_name;
   std::string index_dtype_name;
   GE_ASSERT_SUCCESS(Tensor::DtypeName(x.dtype, x_dtype_name));
@@ -852,8 +846,8 @@ Status IndirectLoadRegApiCall::GenerateSimd(const TPipe &tpipe, const std::vecto
   const size_t axis_pos = static_cast<size_t>(axis_);
   LogicalTensorInfo input_info;
   LogicalTensorInfo index_info;
-  GE_ASSERT_SUCCESS(BuildTensorWindowInfo(logical_view_.input, input, axis_pos, tpipe, input_info));
-  GE_ASSERT_SUCCESS(BuildTensorWindowInfo(logical_view_.index, index, axis_pos, tpipe, index_info));
+  GE_ASSERT_SUCCESS(BuildTensorWindowInfo(logical_view_.input, input, axis_pos, input_info));
+  GE_ASSERT_SUCCESS(BuildTensorWindowInfo(logical_view_.index, index, axis_pos, index_info));
   const bool requires_strided_api =
       logical_view_.input.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
       logical_view_.index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense;
@@ -899,16 +893,16 @@ Status IndirectLoadRegApiCall::GenerateSimd(const TPipe &tpipe, const std::vecto
 Status IndirectLoadRegApiCall::GenerateSimtInvocation(const TPipe &tpipe, const std::string &input_dtype,
                                                       const std::string &output_dtype, const std::string &outer_tb_var,
                                                       std::stringstream &ss) const {
-  const LogicalTensorInfo input_info = BuildLogicalTensorInfo(logical_view_.input, tpipe);
-  LogicalTensorInfo index_info = BuildLogicalTensorInfo(logical_view_.index, tpipe);
-  const LogicalTensorInfo output_info = BuildLogicalTensorInfo(logical_view_.output, tpipe);
+  const LogicalTensorInfo input_info(logical_view_.input);
+  LogicalTensorInfo index_info(logical_view_.index);
+  const LogicalTensorInfo output_info(logical_view_.output);
   const bool index_broadcast_strided = ApplySimtIndexPhysicalStrides(index_nodes_, index_info);
   const bool strided = logical_view_.input.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
                        logical_view_.index.kind != ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense ||
                        index_broadcast_strided;
   const SimtCodegenPlan plan =
       BuildSimtCodegenPlan(input_info, index_info, output_info, static_cast<size_t>(axis_), strided);
-  const std::string body_name = "IndirectLoadSimtBody_" + ascgen_utils::GenValidName(node_name);
+  const std::string body_name = kSimtBodyNamePrefix + ascgen_utils::GenValidName(node_name);
   const Tensor *output_tensor = has_post_reduce_ ? tpipe.GetTensor(output_result_tensor_id_) : nullptr;
   af::Expression output_element_count = af::ops::One;
   if (has_post_reduce_) {
@@ -952,7 +946,7 @@ Status IndirectLoadRegApiCall::GenerateSimt(const TPipe &tpipe, const std::vecto
   GE_ASSERT_SUCCESS(Tensor::DtypeName(input.dtype, input_dtype));
   GE_ASSERT_SUCCESS(Tensor::DtypeName(output_dtype_, output_dtype));
   const std::string valid_node_name = ascgen_utils::GenValidName(node_name);
-  const std::string context_name = "IndirectLoadSimtContext_" + valid_node_name;
+  const std::string context_name = kSimtContextNamePrefix + valid_node_name;
   std::stringstream ss;
   ss << "// IndirectLoad SIMT" << std::endl;
   ss << "{" << std::endl;

@@ -34,6 +34,37 @@ bool IsValidLogicalTensorView(const LogicalTensorView &view) {
          view.axis_ids.size() == view.strides.size();
 }
 
+enum class TensorDimKind : int64_t { kIllegal, kZeroStride, kRegular };
+TensorDimKind ClassifyTensorDim(const af::Expression &size, const af::Expression &stride) {
+  if (af::SymbolicUtils::StaticCheckLe(size, af::sym::kSymbolZero) == af::TriBool::kTrue ||
+      af::SymbolicUtils::StaticCheckLt(stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
+    return TensorDimKind::kIllegal;
+  }
+  if (af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
+    return TensorDimKind::kZeroStride;
+  }
+  return TensorDimKind::kRegular;
+}
+
+bool TryClassifyDynamicShapeLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout) {
+  const bool has_dynamic_shape = std::any_of(logical.sizes.begin(), logical.sizes.end(),
+                                             [](const af::Expression &size) { return !size.IsConstExpr(); });
+  if (!has_dynamic_shape) {
+    return false;
+  }
+  for (size_t dim = 0UL; dim < logical.sizes.size(); ++dim) {
+    const auto dim_kind = ClassifyTensorDim(logical.sizes[dim], logical.strides[dim]);
+    if (dim_kind == TensorDimKind::kIllegal) {
+      return false;
+    }
+    if (dim_kind == TensorDimKind::kZeroStride) {
+      layout.physical_repeats[dim] = af::sym::kSymbolOne;
+    }
+  }
+  layout.kind = IndirectLoadLayoutKind::kStrided;
+  return true;
+}
+
 bool IsValidTensorLayout(const IndirectLoadTensorLayout &layout) {
   return IsValidLogicalTensorView(layout) && layout.kind != IndirectLoadLayoutKind::kUnsupported &&
          layout.physical_repeats.size() == layout.sizes.size();
@@ -68,19 +99,11 @@ TemplateBehavior GetBehavior(TemplateRole role) {
   switch (role) {
     case TemplateRole::kSimdInputPre:
     case TemplateRole::kSimdInputPreStridedUbPath:
-      behavior.excludes_tiling_group = true;
-      behavior.preserves_vectorized_axis = true;
-      break;
     case TemplateRole::kSimdIndexPre:
       behavior.excludes_tiling_group = true;
       behavior.preserves_vectorized_axis = true;
       break;
     case TemplateRole::kSimtInputBoundary:
-      behavior.skips_main_schedule_tiling = true;
-      behavior.skips_api_emit = true;
-      behavior.uses_direct_gm_pipeline = true;
-      behavior.preserves_vectorized_axis = true;
-      break;
     case TemplateRole::kSimtDirectGmBoundary:
     case TemplateRole::kSimtInlineTransform:
       behavior.skips_main_schedule_tiling = true;
@@ -98,10 +121,7 @@ TemplateBehavior GetBehavior(TemplateRole role) {
       behavior.skips_api_emit = true;
       behavior.preserves_vectorized_axis = true;
       break;
-    case TemplateRole::kSkOp:
-    case TemplateRole::kStridedUbPath:
-      break;
-    case TemplateRole::kNone:
+    default:
       break;
   }
   return behavior;
@@ -112,58 +132,61 @@ TemplateRole GetTemplateRole(const af::AscNodePtr &node) {
   return GetAnnotatedTemplateRole(node);
 }
 
-bool IsSimtInlineTransform(const af::AscNodePtr &node) {
-  return GetTemplateRole(node) == TemplateRole::kSimtInlineTransform;
-}
-
 TemplateBehavior GetTemplateBehavior(const af::AscNodePtr &node) {
   const TemplateRole role = GetTemplateRole(node);
   TemplateBehavior behavior = GetBehavior(role);
-  if (role == TemplateRole::kSimtOp && HasPostReduceConsumer(node)) {
+  if (role == TemplateRole::kSimtOp && GetPostReduceConsumer(node) != nullptr) {
     behavior = {};
     behavior.excludes_tiling_group = true;
   }
+  behavior.skips_input_lifecycle = node != nullptr && af::ops::IsOps<af::ascir_op::IndirectLoad>(node) &&
+                                   ::ascir::GetTemplateIdOrDefault(*node) == ::ascir::TemplateId::kIndirectLoadSimt;
   return behavior;
 }
 
-bool HasPostReduceConsumer(const af::AscNodePtr &node) {
-  return GetPostReduceConsumer(node) != nullptr;
-}
-
-af::AscNodePtr GetPostReduceConsumer(const af::AscNodePtr &node) {
-  for (af::AscNodePtr consumer = GetOnlyOutputConsumer(node); consumer != nullptr;
-       consumer = GetOnlyOutputConsumer(consumer)) {
-    if (consumer->attr.api.compute_type == af::ComputeType::kComputeReduce) {
-      return consumer;
-    }
+af::AscNodePtr GetOnlyOutputConsumer(const af::AscNodePtr &node) {
+  if (node == nullptr || node->GetOutDataNodesSize() != 1UL) {
+    return nullptr;
   }
-  return nullptr;
+  return std::dynamic_pointer_cast<af::AscNode>(*node->GetOutDataNodes().begin());
 }
 
-af::AscNodePtr GetPostReduceInputProducer(const af::AscNodePtr &node) {
+namespace {
+struct PostReduceChain {
+  af::AscNodePtr input_producer;
+  af::AscNodePtr reduce;
+};
+
+PostReduceChain FindPostReduceChain(const af::AscNodePtr &node) {
   af::AscNodePtr producer = node;
   while (producer != nullptr) {
     const af::AscNodePtr consumer = GetOnlyOutputConsumer(producer);
     if (consumer == nullptr) {
-      return nullptr;
+      return {};
     }
     if (consumer->attr.api.compute_type == af::ComputeType::kComputeReduce) {
-      return producer;
+      return {producer, consumer};
     }
     producer = consumer;
   }
-  return nullptr;
+  return {};
+}
+}  // namespace
+
+af::AscNodePtr GetPostReduceConsumer(const af::AscNodePtr &node) {
+  return FindPostReduceChain(node).reduce;
 }
 
-bool IsPostReduceInputProducer(const af::AscNodePtr &node) {
-  const af::AscNodePtr consumer = GetOnlyOutputConsumer(node);
-  return consumer != nullptr && consumer->attr.api.compute_type == af::ComputeType::kComputeReduce;
+af::AscNodePtr GetPostReduceInputProducer(const af::AscNodePtr &node) {
+  return FindPostReduceChain(node).input_producer;
 }
 
 bool ShouldSkipTpipeTensorCollection(const af::AscNodePtr &node) {
   const TemplateBehavior behavior = GetTemplateBehavior(node);
+  const af::AscNodePtr consumer = GetOnlyOutputConsumer(node);
   return (behavior.skips_api_emit || behavior.skips_ub_lifecycle) &&
-         !(IsSimtInlineTransform(node) && IsPostReduceInputProducer(node));
+         !(GetTemplateRole(node) == TemplateRole::kSimtInlineTransform && consumer != nullptr &&
+           consumer->attr.api.compute_type == af::ComputeType::kComputeReduce);
 }
 
 af::Status InheritTemplateRoleIfIL(af::AscGraph &graph, const std::string &vf_node_name, const af::AscNodePtr &src) {
@@ -241,20 +264,7 @@ af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, Indirect
   layout.kind = IndirectLoadLayoutKind::kUnsupported;
   layout.physical_repeats = logical.sizes;
 
-  const bool has_dynamic_shape = std::any_of(logical.sizes.begin(), logical.sizes.end(),
-                                             [](const af::Expression &size) { return !size.IsConstExpr(); });
-  if (has_dynamic_shape) {
-    for (size_t dim = 0UL; dim < logical.sizes.size(); ++dim) {
-      if (af::SymbolicUtils::StaticCheckLe(logical.sizes[dim], af::sym::kSymbolZero) == af::TriBool::kTrue ||
-          af::SymbolicUtils::StaticCheckLt(logical.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue) {
-        return af::SUCCESS;
-      }
-      if (af::SymbolicUtils::StaticCheckEq(logical.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue) {
-        layout.physical_repeats[dim] = af::sym::kSymbolOne;
-      }
-    }
-    // Dynamic shapes cannot use the dense fast path. Reuse the stride-aware path so codegen derives offsets at runtime.
-    layout.kind = IndirectLoadLayoutKind::kStrided;
+  if (TryClassifyDynamicShapeLayout(logical, layout)) {
     return af::SUCCESS;
   }
   af::Expression physical_span = af::sym::kSymbolOne;
@@ -262,12 +272,11 @@ af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, Indirect
   bool has_physical_gap = false;
   for (size_t index = logical.sizes.size(); index > 0UL; --index) {
     const size_t dim = index - 1UL;
-    if (af::SymbolicUtils::StaticCheckLe(logical.sizes[dim], af::sym::kSymbolZero) == af::TriBool::kTrue ||
-        af::SymbolicUtils::StaticCheckLt(logical.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+    const auto dim_kind = ClassifyTensorDim(logical.sizes[dim], logical.strides[dim]);
+    if (dim_kind == TensorDimKind::kIllegal) {
       return af::SUCCESS;
     }
-    const af::TriBool is_zero = af::SymbolicUtils::StaticCheckEq(logical.strides[dim], af::sym::kSymbolZero);
-    if (is_zero == af::TriBool::kTrue) {
+    if (dim_kind == TensorDimKind::kZeroStride) {
       layout.physical_repeats[dim] = af::sym::kSymbolOne;
       has_zero_stride = true;
       continue;
@@ -293,10 +302,6 @@ af::Status ValidateIndirectLoadOutputLayout(const LogicalTensorView &output) {
   af::Expression expected_stride = af::sym::kSymbolOne;
   for (size_t index = output.sizes.size(); index > 0UL; --index) {
     const size_t dim = index - 1UL;
-    GE_ASSERT_TRUE(
-        af::SymbolicUtils::StaticCheckLe(output.sizes[dim], af::sym::kSymbolZero) != af::TriBool::kTrue &&
-            af::SymbolicUtils::StaticCheckLt(output.strides[dim], af::sym::kSymbolZero) != af::TriBool::kTrue,
-        "IndirectLoad output must use a dense contiguous layout.");
     if (af::SymbolicUtils::StaticCheckEq(output.sizes[dim], af::sym::kSymbolOne) == af::TriBool::kTrue) {
       continue;
     }
@@ -326,22 +331,10 @@ af::Status GetImplementation(const af::AscNodePtr &node, Implementation &impleme
   return af::SUCCESS;
 }
 
-bool ShouldSkipMainScheduleTiling(const af::AscNodePtr &node) {
-  return GetTemplateBehavior(node).skips_main_schedule_tiling;
-}
-
-bool ShouldPreserveVectorizedAxis(const af::AscNodePtr &node) {
-  return GetTemplateBehavior(node).preserves_vectorized_axis;
-}
-
 bool ShouldApplyInputInnerVectorization(const af::AscNodePtr &node) {
   const TemplateRole role = GetTemplateRole(node);
   return role == TemplateRole::kSimdInputPre || role == TemplateRole::kSimdInputPreStridedUbPath ||
          role == TemplateRole::kSkInputBoundary;
-}
-
-bool ShouldDisableRegularVectorFunc(const af::AscNodePtr &node) {
-  return GetTemplateBehavior(node).uses_direct_gm_pipeline;
 }
 
 af::AscNodePtr GetInputProducer(const af::AscNodePtr &node, size_t input_index) {
@@ -352,33 +345,31 @@ af::AscNodePtr GetInputProducer(const af::AscNodePtr &node, size_t input_index) 
   return std::dynamic_pointer_cast<af::AscNode>(input_anchor->GetPeerOutAnchor()->GetOwnerNode());
 }
 
-af::AscNodePtr GetOnlyOutputConsumer(const af::AscNodePtr &node) {
-  if (node == nullptr || node->GetOutDataNodesSize() != 1UL) {
-    return nullptr;
-  }
-  return std::dynamic_pointer_cast<af::AscNode>(*node->GetOutDataNodes().begin());
-}
-
-af::AscNodePtr FindIndirectLoadNode(const af::AscGraph &graph) {
+namespace {
+std::vector<af::AscNodePtr> CollectIndirectLoadNodes(const af::AscGraph &graph) {
+  std::vector<af::AscNodePtr> nodes;
   for (const af::AscNodePtr &node : graph.GetAllNodes()) {
     if (af::ops::IsOps<af::ascir_op::IndirectLoad>(node)) {
-      return node;
+      nodes.push_back(node);
     }
   }
-  return nullptr;
+  return nodes;
+}
+}  // namespace
+
+af::AscNodePtr FindIndirectLoadNode(const af::AscGraph &graph) {
+  const auto nodes = CollectIndirectLoadNodes(graph);
+  return nodes.empty() ? nullptr : nodes.front();
 }
 
 af::Status ValidateSingleIndirectLoadNode(const af::AscGraph &graph, af::AscNodePtr &node) {
   node = nullptr;
-  for (const af::AscNodePtr &candidate : graph.GetAllNodes()) {
-    if (!af::ops::IsOps<af::ascir_op::IndirectLoad>(candidate)) {
-      continue;
-    }
-    GE_ASSERT_TRUE(node == nullptr,
-                   "[IndirectLoad] Graph[%s] contains multiple IndirectLoad nodes, first[%s], next[%s].",
-                   graph.GetName().c_str(), node->GetNamePtr(), candidate->GetNamePtr());
-    node = candidate;
-  }
+  const auto nodes = CollectIndirectLoadNodes(graph);
+  GE_ASSERT_TRUE(nodes.size() <= 1UL,
+                 "[IndirectLoad] Graph[%s] contains multiple IndirectLoad nodes, first[%s], next[%s].",
+                 graph.GetName().c_str(), nodes.empty() ? "<null>" : nodes[0]->GetNamePtr(),
+                 nodes.size() < 2UL ? "<null>" : nodes[1]->GetNamePtr());
+  node = nodes.empty() ? nullptr : nodes.front();
   if (node != nullptr) {
     GELOGD("[IndirectLoad] Graph[%s] found IndirectLoad node[%s].", graph.GetName().c_str(), node->GetNamePtr());
   }
