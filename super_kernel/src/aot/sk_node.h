@@ -510,7 +510,7 @@ class SuperKernelBaseNode {
     return fusionFailReason_;
   }
 
-  // Task params accessor (for dump after update)
+  // Original task params captured during node initialization.
   const aclmdlRITaskParams &GetTaskParams() const {
     return taskParams;
   }
@@ -591,6 +591,9 @@ class SuperKernelKernelNode : public SuperKernelBaseNode {
   bool IsScheModeOn() const override {
     return nodeInfos.kernelInfos.isScheModeOn;
   }
+  const aclmdlRITaskParams &GetUpdateParams() const {
+    return updateParams;
+  }
 
  private:
   void IdentifyAndHandleSimtKernel(const SuperKernelOptionsManager *opts);
@@ -602,6 +605,9 @@ class SuperKernelKernelNode : public SuperKernelBaseNode {
   bool isScopeEnd = false;
   bool isPlaceholder = false;
   std::string scopeName;
+  aclmdlRITaskParams updateParams{};
+  std::vector<aclrtLaunchKernelAttr> launchKernelAttrs_;
+  aclrtLaunchKernelCfg launchKernelCfg_{};
 };
 
 class SuperKernelMemoryNode : public SuperKernelBaseNode {

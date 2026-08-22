@@ -597,14 +597,20 @@ TEST_F(SkNodeTest, InValidateNode_SetsInvalidatedFlag) {
   EXPECT_TRUE(node.IsInvalidated());
 }
 
-TEST_F(SkNodeTest, KernelUpdate_CustomParamsSyncTaskParamsForDump) {
+TEST_F(SkNodeTest, KernelUpdate_CustomParamsStoredSeparatelyForDump) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 8;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
   task.params.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x3008);
+  task.params.kernelTaskParams.numBlocks = 1;
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   node.SetNodeId(8);
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
+  MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix11));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
+  ASSERT_TRUE(node.InitNode());
 
   int value = 0;
   aclmdlRITaskParams custom{};
@@ -616,12 +622,13 @@ TEST_F(SkNodeTest, KernelUpdate_CustomParamsSyncTaskParamsForDump) {
   ctx.customParams = &custom;
   EXPECT_TRUE(node.Update(ctx));
   EXPECT_TRUE(node.IsUpdated());
-  EXPECT_EQ(node.GetTaskParams().type, ACL_MODEL_RI_TASK_VALUE_WRITE);
-  EXPECT_EQ(node.GetTaskParams().valueWriteTaskParams.devAddr, &value);
-  EXPECT_EQ(node.GetTaskParams().valueWriteTaskParams.value, 0x1234U);
+  EXPECT_EQ(node.GetTaskParams().type, ACL_MODEL_RI_TASK_KERNEL);
+  EXPECT_EQ(node.GetUpdateParams().type, ACL_MODEL_RI_TASK_VALUE_WRITE);
+  EXPECT_EQ(node.GetUpdateParams().valueWriteTaskParams.devAddr, &value);
+  EXPECT_EQ(node.GetUpdateParams().valueWriteTaskParams.value, 0x1234U);
 }
 
-TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDynUbufAppendsLaunchCfg) {
+TEST_F(SkNodeTest, KernelUpdate_LaunchInfoBuildsIndependentDynUbufCfg) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 18;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
@@ -659,25 +666,86 @@ TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDynUbufAppendsLaunchCfg) {
   aclrtLaunchKernelCfg launchKernelCfg{};
   ASSERT_TRUE(node.SetupLaunchKernelCfg(task.params.kernelTaskParams.funcHandle, launchInfo.skMaxDcacheSize,
                                         launchKernelAttrs, launchKernelCfg));
-  ASSERT_EQ(launchKernelCfg.numAttrs, 2U);
+  ASSERT_EQ(launchKernelCfg.numAttrs, 1U);
   ASSERT_NE(launchKernelCfg.attrs, nullptr);
-  EXPECT_EQ(launchKernelCfg.attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE);
-  EXPECT_EQ(launchKernelCfg.attrs[0].value.schemMode, 1U);
-  EXPECT_EQ(launchKernelCfg.attrs[1].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
-  EXPECT_EQ(launchKernelCfg.attrs[1].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
+  EXPECT_EQ(launchKernelCfg.attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
+  EXPECT_EQ(launchKernelCfg.attrs[0].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
 
   UpdateContext ctx{};
   ctx.launchInfo = &launchInfo;
   EXPECT_TRUE(node.Update(ctx));
 
-  const auto &params = node.GetTaskParams();
-  EXPECT_EQ(params.kernelTaskParams.cfg, &originCfg);
-  EXPECT_EQ(params.reserved0[0], 0x12U);
-  EXPECT_EQ(params.reserved1[0], 0x34U);
-  EXPECT_EQ(params.kernelTaskParams.rsv[0], 0x56U);
-  EXPECT_EQ(task.params.reserved0[0], 0x12U);
-  EXPECT_EQ(task.params.reserved1[0], 0x34U);
-  EXPECT_EQ(task.params.kernelTaskParams.rsv[0], 0x56U);
+  const auto &params = node.GetUpdateParams();
+  ASSERT_NE(params.kernelTaskParams.cfg, nullptr);
+  ASSERT_EQ(params.kernelTaskParams.cfg->numAttrs, 1U);
+  ASSERT_NE(params.kernelTaskParams.cfg->attrs, nullptr);
+  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
+  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
+  EXPECT_EQ(params.reserved0[0], 0U);
+  EXPECT_EQ(params.reserved1[0], 0);
+  EXPECT_EQ(params.kernelTaskParams.rsv[0], 0U);
+  EXPECT_EQ(node.GetTaskParams().kernelTaskParams.cfg, &originCfg);
+  EXPECT_EQ(node.GetTaskParams().reserved0[0], 0x12U);
+  EXPECT_EQ(node.GetTaskParams().reserved1[0], 0x34U);
+  EXPECT_EQ(node.GetTaskParams().kernelTaskParams.rsv[0], 0x56U);
+  EXPECT_EQ(task.params.reserved0[0], 0U);
+  EXPECT_EQ(task.params.reserved1[0], 0U);
+  EXPECT_EQ(task.params.kernelTaskParams.rsv[0], 0U);
+  ASSERT_NE(task.params.kernelTaskParams.cfg, nullptr);
+  EXPECT_EQ(task.params.kernelTaskParams.cfg->numAttrs, 1U);
+}
+
+TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDoesNotInheritOriginParams) {
+  UtSkNodeRITaskInternal task{};
+  task.taskId = 19;
+  task.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.reserved0[0] = 0x12;
+  task.params.reserved1[0] = 0x34;
+  task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x3019);
+  task.params.kernelTaskParams.numBlocks = 1;
+  task.params.kernelTaskParams.rsv[0] = 0x56;
+  aclrtLaunchKernelCfg originCfg{};
+  task.params.kernelTaskParams.cfg = &originCfg;
+
+  SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
+  MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix11));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
+  ASSERT_TRUE(node.InitNode());
+
+  SkLaunchInfo launchInfo{};
+  launchInfo.entryInfo.skEntryFunc = reinterpret_cast<aclrtFuncHandle>(0x4019);
+  launchInfo.entryInfo.numBlocks = 2;
+  ASSERT_TRUE(launchInfo.devArgs.Init(sizeof(SkDeviceEntryArgs)));
+  launchInfo.devArgs.Get()->skHeader.totalSize = sizeof(SkDeviceEntryArgs);
+
+  UpdateContext ctx{};
+  ctx.launchInfo = &launchInfo;
+  EXPECT_TRUE(node.Update(ctx));
+
+  const auto &params = node.GetUpdateParams();
+  EXPECT_EQ(params.type, ACL_MODEL_RI_TASK_KERNEL);
+  EXPECT_EQ(params.taskGrp, nullptr);
+  EXPECT_EQ(params.opInfoPtr, nullptr);
+  EXPECT_EQ(params.opInfoSize, 0U);
+  EXPECT_EQ(params.kernelTaskParams.funcHandle, launchInfo.entryInfo.skEntryFunc);
+  EXPECT_EQ(params.kernelTaskParams.args, launchInfo.devArgs.Get());
+  EXPECT_EQ(params.kernelTaskParams.argsSize, sizeof(SkDeviceEntryArgs));
+  EXPECT_EQ(params.kernelTaskParams.isHostArgs, 1U);
+  EXPECT_EQ(params.kernelTaskParams.numBlocks, launchInfo.entryInfo.numBlocks);
+  EXPECT_EQ(params.kernelTaskParams.cfg, nullptr);
+  EXPECT_EQ(params.reserved0[0], 0U);
+  EXPECT_EQ(params.reserved1[0], 0);
+  EXPECT_EQ(params.kernelTaskParams.rsv[0], 0U);
+  EXPECT_EQ(node.GetTaskParams().kernelTaskParams.cfg, &originCfg);
+  EXPECT_EQ(node.GetTaskParams().reserved0[0], 0x12U);
+  EXPECT_EQ(node.GetTaskParams().reserved1[0], 0x34U);
+  EXPECT_EQ(node.GetTaskParams().kernelTaskParams.rsv[0], 0x56U);
+  EXPECT_EQ(task.params.reserved0[0], 0U);
+  EXPECT_EQ(task.params.reserved1[0], 0U);
+  EXPECT_EQ(task.params.kernelTaskParams.rsv[0], 0U);
+  EXPECT_EQ(task.params.kernelTaskParams.cfg, nullptr);
 }
 
 TEST_F(SkNodeTest, MemoryUpdate_CustomParamsSyncTaskParamsForDump) {
