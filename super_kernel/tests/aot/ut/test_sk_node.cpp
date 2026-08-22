@@ -47,6 +47,10 @@ std::unique_ptr<aclmdlRITask> MakeTaskHandle(TestRITask &task) {
   return std::make_unique<aclmdlRITask>(reinterpret_cast<aclmdlRITask>(&task));
 }
 
+void SetSimtOpSupportCapability(SuperKernelOptionsManager &options, uint32_t value) {
+  options.innerOptionMap[SkInnerOptionType::SIMT_OP_SUPPORT]->SetValue(value);
+}
+
 }  // namespace
 
 class SkNodeTest : public testing::Test {
@@ -624,6 +628,9 @@ TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDynUbufAppendsLaunchCfg) {
   task.params.type = ACL_MODEL_RI_TASK_KERNEL;
   task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x3018);
   task.params.kernelTaskParams.numBlocks = 1;
+  task.params.reserved0[0] = 0x12;
+  task.params.reserved1[0] = 0x34;
+  task.params.kernelTaskParams.rsv[0] = 0x56;
 
   aclrtLaunchKernelAttr originAttr{};
   originAttr.id = ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE;
@@ -644,22 +651,33 @@ TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDynUbufAppendsLaunchCfg) {
   launchInfo.entryInfo.numBlocks = 2;
   ASSERT_TRUE(launchInfo.devArgs.Init(sizeof(SkDeviceEntryArgs)));
   launchInfo.devArgs.Get()->skHeader.totalSize = sizeof(SkDeviceEntryArgs);
-  launchInfo.hasMinAvailableUbufSize = true;
-  launchInfo.minAvailableUbufSize = 32768;
+  launchInfo.useSimtEntry = true;
+  launchInfo.skMaxDcacheSize = 32768;
   SetFunctionAllocUbufSize(4096);
+
+  std::vector<aclrtLaunchKernelAttr> launchKernelAttrs;
+  aclrtLaunchKernelCfg launchKernelCfg{};
+  ASSERT_TRUE(node.SetupLaunchKernelCfg(task.params.kernelTaskParams.funcHandle, launchInfo.skMaxDcacheSize,
+                                        launchKernelAttrs, launchKernelCfg));
+  ASSERT_EQ(launchKernelCfg.numAttrs, 2U);
+  ASSERT_NE(launchKernelCfg.attrs, nullptr);
+  EXPECT_EQ(launchKernelCfg.attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE);
+  EXPECT_EQ(launchKernelCfg.attrs[0].value.schemMode, 1U);
+  EXPECT_EQ(launchKernelCfg.attrs[1].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
+  EXPECT_EQ(launchKernelCfg.attrs[1].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
 
   UpdateContext ctx{};
   ctx.launchInfo = &launchInfo;
   EXPECT_TRUE(node.Update(ctx));
 
   const auto &params = node.GetTaskParams();
-  ASSERT_NE(params.kernelTaskParams.cfg, nullptr);
-  ASSERT_EQ(params.kernelTaskParams.cfg->numAttrs, 2U);
-  ASSERT_NE(params.kernelTaskParams.cfg->attrs, nullptr);
-  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE);
-  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].value.schemMode, 1U);
-  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[1].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
-  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[1].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
+  EXPECT_EQ(params.kernelTaskParams.cfg, &originCfg);
+  EXPECT_EQ(params.reserved0[0], 0x12U);
+  EXPECT_EQ(params.reserved1[0], 0x34U);
+  EXPECT_EQ(params.kernelTaskParams.rsv[0], 0x56U);
+  EXPECT_EQ(task.params.reserved0[0], 0x12U);
+  EXPECT_EQ(task.params.reserved1[0], 0x34U);
+  EXPECT_EQ(task.params.kernelTaskParams.rsv[0], 0x56U);
 }
 
 TEST_F(SkNodeTest, MemoryUpdate_CustomParamsSyncTaskParamsForDump) {
@@ -1998,7 +2016,7 @@ aclError FakeAclrtGetFunctionAttributeMix12(aclrtFuncHandle funcHandle, aclrtFun
   return ACL_SUCCESS;
 }
 
-TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_NullOpts_SkipCheck) {
+TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_NullOptions_SkipCheck) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 2001;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
@@ -2015,7 +2033,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_NullOpts_SkipCheck) {
   EXPECT_FALSE(node.nodeInfos.kernelInfos.isSimtOp);
 }
 
-TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_SimtCheckDisabled_SkipCheck) {
+TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_SimtOpSupportDisabled_SkipAnalysis) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 2002;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
@@ -2025,9 +2043,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_SimtCheckDisabled_SkipCheck) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(0);
+  SetSimtOpSupportCapability(opts, 0);
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeAivOnly));
@@ -2048,10 +2064,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AicOnly_SkipCheck) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeAicOnly));
   MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
@@ -2072,10 +2085,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_MixAic10_SkipCheck) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMixAic10));
   MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
@@ -2096,10 +2106,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_NotSimtType) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(0);
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
@@ -2122,10 +2129,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_SimtType3) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(3);
   SkUtSetAclrtFunctionAvailDynUbufSize(4096);
   SetFunctionAllocUbufSize(1024);
@@ -2161,10 +2165,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_SimtType4) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(4);
   SkUtSetAclrtFunctionAvailDynUbufSize(8192);
   SetFunctionAllocUbufSize(2048);
@@ -2200,10 +2201,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_Mix11_SimtType) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(3);
   SkUtSetAclrtFunctionAvailDynUbufSize(12288);
   SetFunctionAllocUbufSize(4096);
@@ -2239,10 +2237,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_Mix12_SimtType) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(4);
   SkUtSetAclrtFunctionAvailDynUbufSize(16384);
   SetFunctionAllocUbufSize(8192);
@@ -2278,10 +2273,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_DynUbufQueryFailed) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(3);
   SkUtSetAclrtFunctionGetAvailDynUbufPerBlockRet(ACL_ERROR_FAILURE);
 
@@ -2307,10 +2299,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AllocUbufQueryFailed) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(3);
   SkUtSetAclrtFunctionAvailDynUbufSize(4096);
   SetRtFunctionGetMetaInfoRet(-1);

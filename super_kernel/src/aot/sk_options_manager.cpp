@@ -131,38 +131,22 @@ const DefaultOptionFactoryEntry *FindDefaultOptionFactory(aclskOptionType optTyp
   return nullptr;
 }
 
-using DefaultInnerOptionFactory = std::unique_ptr<OptOptionBase> (*)();
-
-struct DefaultInnerOptionFactoryEntry {
-  SkInnerOptionType optType;
-  DefaultInnerOptionFactory factory;
+struct InnerOptionInfo {
+  SkInnerOptionType optionType;
+  std::unique_ptr<OptOptionBase> (*factory)();
 };
 
-const std::array<DefaultInnerOptionFactoryEntry, static_cast<size_t>(SkInnerOptionType::SK_INNER_OPTION_MAX)>
-    DEFAULT_INNER_OPTION_FACTORIES = {{
-        {SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT,
+const std::array<InnerOptionInfo, static_cast<size_t>(SkInnerOptionType::SK_INNER_OPTION_MAX)> DEFAULT_INNER_OPTIONS = {
+    {
+        {SkInnerOptionType::MIX_KERNEL_SPLIT,
          []() -> std::unique_ptr<OptOptionBase> {
-           return std::make_unique<NumberOptOption>("enable_mix_kernel_split", aclskOptionType::SK_OPTION_MAX, 0, 0, 1);
+           return std::make_unique<NumberOptOption>("mix_kernel_split", aclskOptionType::SK_OPTION_MAX, 0, 0, 1);
          }},
-        {SkInnerOptionType::ENABLE_SIMT_OP_CHECK,
+        {SkInnerOptionType::SIMT_OP_SUPPORT,
          []() -> std::unique_ptr<OptOptionBase> {
-           return std::make_unique<NumberOptOption>("enable_simt_op_check", aclskOptionType::SK_OPTION_MAX, 0, 0, 1);
-         }},
-        {SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE,
-         []() -> std::unique_ptr<OptOptionBase> {
-           return std::make_unique<NumberOptOption>("enable_set_dyn_ubuf_size", aclskOptionType::SK_OPTION_MAX, 0, 0,
-                                                    1);
+           return std::make_unique<NumberOptOption>("simt_op_support", aclskOptionType::SK_OPTION_MAX, 0, 0, 1);
          }},
     }};
-
-const DefaultInnerOptionFactoryEntry *FindDefaultInnerOptionFactory(SkInnerOptionType optType) {
-  for (const auto &entry : DEFAULT_INNER_OPTION_FACTORIES) {
-    if (entry.optType == optType) {
-      return &entry;
-    }
-  }
-  return nullptr;
-}
 
 uint32_t GetValidatedUintValue(const std::string &optionName, uint32_t value, uint32_t defaultValue, uint32_t minValue,
                                uint32_t maxValue) {
@@ -378,20 +362,9 @@ const OptOptionBase *SuperKernelOptionsManager::GetOption(aclskOptionType optTyp
   return iter->second.get();
 }
 
-OptOptionBase *SuperKernelOptionsManager::GetOption(SkInnerOptionType optType) {
-  auto iter = innerOptionMap.find(optType);
-  if (iter == innerOptionMap.end()) {
-    return nullptr;
-  }
-  return iter->second.get();
-}
-
-const OptOptionBase *SuperKernelOptionsManager::GetOption(SkInnerOptionType optType) const {
-  auto iter = innerOptionMap.find(optType);
-  if (iter == innerOptionMap.end()) {
-    return nullptr;
-  }
-  return iter->second.get();
+bool SuperKernelOptionsManager::IsInnerOptionEnabled(SkInnerOptionType optionType) const {
+  const auto iter = innerOptionMap.find(optionType);
+  return iter != innerOptionMap.end() && iter->second != nullptr && iter->second->GetIntValue() == 1;
 }
 
 bool SuperKernelOptionsManager::MatchKernelNameInList(const std::vector<std::string> &kernelList,
@@ -507,58 +480,41 @@ void SuperKernelOptionsManager::RegisterDefaultSkOptions() {
 }
 
 void SuperKernelOptionsManager::RegisterDefaultInnerOptions() {
-  for (int32_t i = 0; i < static_cast<int32_t>(SkInnerOptionType::SK_INNER_OPTION_MAX); ++i) {
-    auto type = static_cast<SkInnerOptionType>(i);
-    if (innerOptionMap.find(type) != innerOptionMap.end()) {
-      continue;
+  for (const auto &option : DEFAULT_INNER_OPTIONS) {
+    if (innerOptionMap.find(option.optionType) == innerOptionMap.end()) {
+      innerOptionMap[option.optionType] = option.factory();
     }
-    const auto *entry = FindDefaultInnerOptionFactory(type);
-    if (entry == nullptr) {
-      continue;
-    }
-    innerOptionMap[type] = entry->factory();
   }
 }
 
-void SuperKernelOptionsManager::ApplySoCSpecificOptions() {
-  std::string socName = GetSocName();
-  bool isDav3510 = GetCurrentSkKernelArch() == SkKernelArch::DAV_3510;
-  if (isDav3510) {
-    auto *mixSplitOpt = GetOption(SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT);
-    if (mixSplitOpt != nullptr) {
-      mixSplitOpt->SetValue(1);
+void SuperKernelOptionsManager::ApplyArchSpecificOptions() {
+  const SkKernelArch kernelArch = GetCurrentSkKernelArch();
+  const auto enableOption = [this](SkInnerOptionType optionType) {
+    const auto iter = innerOptionMap.find(optionType);
+    if (iter != innerOptionMap.end() && iter->second != nullptr) {
+      iter->second->SetValue(1);
     }
+  };
 
-    auto *simtCheckOpt = GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-    if (simtCheckOpt != nullptr) {
-      simtCheckOpt->SetValue(1);
-    }
-
-    auto *setDynUbufSizeOpt = GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
-    if (setDynUbufSizeOpt != nullptr) {
-      setDynUbufSizeOpt->SetValue(1);
-    }
+  switch (kernelArch) {
+    case SkKernelArch::DAV_3510:
+      enableOption(SkInnerOptionType::MIX_KERNEL_SPLIT);
+      enableOption(SkInnerOptionType::SIMT_OP_SUPPORT);
+      break;
+    case SkKernelArch::DAV_2201:
+    default:
+      break;
   }
 
-  SK_LOGI(
-      "ApplySoCSpecificOptions: socName=%s, "
-      "enableMixKernelSplit=%u, enableSimtOpCheck=%u, enableSetDynUbufSize=%u",
-      socName.c_str(),
-      GetOption(SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT) != nullptr
-          ? GetOption(SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT)->GetIntValue()
-          : 0,
-      GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK) != nullptr
-          ? GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK)->GetIntValue()
-          : 0,
-      GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE) != nullptr
-          ? GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE)->GetIntValue()
-          : 0);
+  SK_LOGI("ApplyArchSpecificOptions: kernelArch=%s, mixKernelSplit=%d, simtOpSupport=%d", to_string(kernelArch),
+          static_cast<int>(IsInnerOptionEnabled(SkInnerOptionType::MIX_KERNEL_SPLIT)),
+          static_cast<int>(IsInnerOptionEnabled(SkInnerOptionType::SIMT_OP_SUPPORT)));
 }
 
 void SuperKernelOptionsManager::RegisterDefaultOptions() {
   RegisterDefaultSkOptions();
   RegisterDefaultInnerOptions();
-  ApplySoCSpecificOptions();
+  ApplyArchSpecificOptions();
 }
 
 void SuperKernelOptionsManager::SetOptOptionValue(const aclskOption *option) {
@@ -833,30 +789,18 @@ nlohmann::ordered_json SuperKernelOptionsManager::ToJson() const {
   }
 
   nlohmann::ordered_json innerOptionsJson = nlohmann::ordered_json::object();
-  for (int32_t i = 0; i < static_cast<int32_t>(SkInnerOptionType::SK_INNER_OPTION_MAX); ++i) {
-    auto type = static_cast<SkInnerOptionType>(i);
-    const auto iter = innerOptionMap.find(type);
+  for (const auto &option : DEFAULT_INNER_OPTIONS) {
+    const auto iter = innerOptionMap.find(option.optionType);
     if (iter == innerOptionMap.end() || iter->second == nullptr) {
       continue;
     }
 
-    const OptOptionBase *opt = iter->second.get();
-    nlohmann::ordered_json optJson;
-    optJson["name"] = opt->GetName();
-    optJson["type"] = static_cast<int>(type);
-
-    switch (type) {
-      case SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT:
-      case SkInnerOptionType::ENABLE_SIMT_OP_CHECK:
-      case SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE:
-        optJson["value"] = opt->GetIntValue();
-        break;
-      default:
-        optJson["value"] = nullptr;
-        break;
-    }
-
-    innerOptionsJson[opt->GetName()] = optJson;
+    const OptOptionBase *innerOption = iter->second.get();
+    nlohmann::ordered_json optionJson;
+    optionJson["name"] = innerOption->GetName();
+    optionJson["type"] = static_cast<int>(option.optionType);
+    optionJson["value"] = IsInnerOptionEnabled(option.optionType);
+    innerOptionsJson[innerOption->GetName()] = optionJson;
   }
   optionsJson["inner_options"] = innerOptionsJson;
 

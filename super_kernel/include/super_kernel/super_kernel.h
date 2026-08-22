@@ -60,12 +60,7 @@ enum class aclskOptionType : uint32_t {
   SK_OPTION_MAX
 };
 
-enum class SkInnerOptionType : uint32_t {
-  ENABLE_MIX_KERNEL_SPLIT = 0,
-  ENABLE_SIMT_OP_CHECK = 1,
-  ENABLE_SET_DYN_UBUF_SIZE = 2,
-  SK_INNER_OPTION_MAX
-};
+enum class SkInnerOptionType : uint32_t { MIX_KERNEL_SPLIT = 0, SIMT_OP_SUPPORT = 1, SK_INNER_OPTION_MAX };
 
 typedef struct aclskPreloadOption {
   uint32_t preloadMode;

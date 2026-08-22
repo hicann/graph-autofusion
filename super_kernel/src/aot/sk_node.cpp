@@ -824,32 +824,30 @@ bool SuperKernelBaseNode::Update(const UpdateContext &ctx) {
   return true;
 }
 
-void SuperKernelBaseNode::LogNodeUpdateResult(const aclmdlRITaskParams *resultParams) const {
+void SuperKernelBaseNode::LogNodeUpdateResult(const aclmdlRITaskParams *paramsToLog) const {
   std::ostringstream oss;
   oss << "node update result: nodeId=" << nodeId;
-  if (resultParams == nullptr) {
+  if (paramsToLog == nullptr) {
     oss << ", type=INVALID";
     SK_LOGI("%s", oss.str().c_str());
     return;
   }
 
-  oss << ", type=" << GetUpdateTargetTypeName(resultParams->type);
-  switch (resultParams->type) {
+  oss << ", type=" << GetUpdateTargetTypeName(paramsToLog->type);
+  switch (paramsToLog->type) {
     case ACL_MODEL_RI_TASK_KERNEL:
-      oss << ", opInfoPtr=" << resultParams->opInfoPtr << ", opInfoSize=" << resultParams->opInfoSize
-          << ", funcHandle=" << resultParams->kernelTaskParams.funcHandle
-          << ", args=" << resultParams->kernelTaskParams.args
-          << ", argsSize=" << resultParams->kernelTaskParams.argsSize
-          << ", numBlocks=" << static_cast<uint32_t>(resultParams->kernelTaskParams.numBlocks);
+      oss << ", opInfoPtr=" << paramsToLog->opInfoPtr << ", opInfoSize=" << paramsToLog->opInfoSize
+          << ", funcHandle=" << paramsToLog->kernelTaskParams.funcHandle
+          << ", args=" << paramsToLog->kernelTaskParams.args << ", argsSize=" << paramsToLog->kernelTaskParams.argsSize
+          << ", numBlocks=" << static_cast<uint32_t>(paramsToLog->kernelTaskParams.numBlocks);
       break;
     case ACL_MODEL_RI_TASK_VALUE_WRITE:
-      oss << ", addr=" << resultParams->valueWriteTaskParams.devAddr << ", value=0x" << std::hex
-          << resultParams->valueWriteTaskParams.value << std::dec;
+      oss << ", addr=" << paramsToLog->valueWriteTaskParams.devAddr << ", value=0x" << std::hex
+          << paramsToLog->valueWriteTaskParams.value << std::dec;
       break;
     case ACL_MODEL_RI_TASK_VALUE_WAIT:
-      oss << ", addr=" << resultParams->valueWaitTaskParams.devAddr << ", value=0x" << std::hex
-          << resultParams->valueWaitTaskParams.value << ", flag=0x" << resultParams->valueWaitTaskParams.flag
-          << std::dec;
+      oss << ", addr=" << paramsToLog->valueWaitTaskParams.devAddr << ", value=0x" << std::hex
+          << paramsToLog->valueWaitTaskParams.value << ", flag=0x" << paramsToLog->valueWaitTaskParams.flag << std::dec;
       break;
     default:
       break;
@@ -1063,22 +1061,18 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
   nodeInfos.kernelInfos.hasAllocUbufSize = false;
   nodeInfos.kernelInfos.dynUbufSize = 0;
   nodeInfos.kernelInfos.allocUbufSize = 0;
-  if (opts == nullptr) {
-    return;
-  }
-  const auto *simtCheckOpt = opts->GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  if (simtCheckOpt == nullptr || simtCheckOpt->GetIntValue() != 1) {
+  if (opts == nullptr || !opts->IsInnerOptionEnabled(SkInnerOptionType::SIMT_OP_SUPPORT)) {
     return;
   }
   SkKernelType kernelType = nodeInfos.kernelInfos.kernelType;
   bool hasAivSection = (kernelType == SkKernelType::AIV_ONLY || kernelType == SkKernelType::MIX_AIV_1_0 ||
                         kernelType == SkKernelType::MIX_AIC_1_1 || kernelType == SkKernelType::MIX_AIC_1_2);
   if (!hasAivSection) {
-    SK_LOGI("IdentifyAndHandleSimtKernel: %s has no AIV section (kernelType=%s), skip SIMT check", Format().c_str(),
+    SK_LOGI("IdentifyAndHandleSimtKernel: %s has no AIV section (kernelType=%s), skip SIMT analysis", Format().c_str(),
             to_string(kernelType));
     return;
   }
-  SK_LOGI("IdentifyAndHandleSimtKernel: checking for %s, kernelType=%s, nodeId=%lu", Format().c_str(),
+  SK_LOGI("IdentifyAndHandleSimtKernel: analyzing %s, kernelType=%s, nodeId=%lu", Format().c_str(),
           to_string(kernelType), nodeId);
   uint32_t aivType = 0;
   rtError_t ret = rtFunctionGetMetaInfo(taskParams.kernelTaskParams.funcHandle, RT_FUNCTION_TYPE_AIV_TYPE_FLAG,
@@ -1114,15 +1108,17 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
   return;
 }
 
-bool SuperKernelKernelNode::SetupLaunchKernelCfgWithDynUbuf(size_t minAvailableUbufSize) {
-  launchKernelAttrs_.clear();
+bool SuperKernelKernelNode::SetupLaunchKernelCfg(aclrtFuncHandle funcHandle, size_t skMaxDcacheSize,
+                                                 std::vector<aclrtLaunchKernelAttr> &launchKernelAttrs,
+                                                 aclrtLaunchKernelCfg &launchKernelCfg) const {
+  launchKernelAttrs.clear();
   const aclrtLaunchKernelCfg *originCfg = taskParams.kernelTaskParams.cfg;
   if (originCfg != nullptr && originCfg->attrs != nullptr) {
-    launchKernelAttrs_.reserve(originCfg->numAttrs + 1);
+    launchKernelAttrs.reserve(originCfg->numAttrs + 1);
     for (size_t attrIdx = 0; attrIdx < originCfg->numAttrs; ++attrIdx) {
       const aclrtLaunchKernelAttr &originAttr = originCfg->attrs[attrIdx];
       if (originAttr.id != ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE) {
-        launchKernelAttrs_.push_back(originAttr);
+        launchKernelAttrs.push_back(originAttr);
       }
     }
   }
@@ -1130,31 +1126,26 @@ bool SuperKernelKernelNode::SetupLaunchKernelCfgWithDynUbuf(size_t minAvailableU
   aclrtLaunchKernelAttr dynUbufAttr{};
   dynUbufAttr.id = ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE;
   size_t skAllocUbufSize = 0;
-  if (!GetFunctionAllocUbufSize(taskParams.kernelTaskParams.funcHandle, skAllocUbufSize, Format())) {
+  if (!GetFunctionAllocUbufSize(funcHandle, skAllocUbufSize, Format())) {
     return false;
   }
-  if (minAvailableUbufSize > SK_TOTAL_UB_SIZE || skAllocUbufSize > SK_TOTAL_UB_SIZE - minAvailableUbufSize) {
+  if (skMaxDcacheSize > SK_TOTAL_UB_SIZE || skAllocUbufSize > SK_TOTAL_UB_SIZE - skMaxDcacheSize) {
     SK_LOGE(
-        "invalid dyn ubuf calculation for %s, totalUbSize=%zu, minAvailableUbufSize=%zu, "
+        "invalid dyn ubuf calculation for %s, totalUbSize=%zu, skMaxDcacheSize=%zu, "
         "skAllocUbufSize=%zu",
-        Format().c_str(), SK_TOTAL_UB_SIZE, minAvailableUbufSize, skAllocUbufSize);
+        Format().c_str(), SK_TOTAL_UB_SIZE, skMaxDcacheSize, skAllocUbufSize);
     return false;
   }
-  size_t finalDynUbufSize = SK_TOTAL_UB_SIZE - minAvailableUbufSize - skAllocUbufSize;
-  if (finalDynUbufSize > std::numeric_limits<uint32_t>::max()) {
-    SK_LOGE("dynUbufSize exceeds uint32_t range for %s, dynUbufSize=%zu", Format().c_str(), finalDynUbufSize);
-    return false;
-  }
-  dynUbufAttr.value.dynUBufSize = static_cast<uint32_t>(finalDynUbufSize);
-  launchKernelAttrs_.push_back(dynUbufAttr);
+  size_t skEntryDynUbufSize = SK_TOTAL_UB_SIZE - skMaxDcacheSize - skAllocUbufSize;
+  dynUbufAttr.value.dynUBufSize = static_cast<uint32_t>(skEntryDynUbufSize);
+  launchKernelAttrs.push_back(dynUbufAttr);
 
-  launchKernelCfg_.attrs = launchKernelAttrs_.data();
-  launchKernelCfg_.numAttrs = launchKernelAttrs_.size();
-  taskParams.kernelTaskParams.cfg = &launchKernelCfg_;
+  launchKernelCfg.attrs = launchKernelAttrs.data();
+  launchKernelCfg.numAttrs = launchKernelAttrs.size();
   SK_LOGI(
-      "Set dyn ubuf launch cfg for %s, minAvailableUbufSize=%zu, skAllocUbufSize=%zu, "
-      "finalDynUbufSize=%zu, attrCount=%zu",
-      Format().c_str(), minAvailableUbufSize, skAllocUbufSize, finalDynUbufSize, launchKernelCfg_.numAttrs);
+      "Set dyn ubuf launch cfg for %s, skMaxDcacheSize=%zu, skAllocUbufSize=%zu, "
+      "skEntryDynUbufSize=%zu, attrCount=%zu",
+      Format().c_str(), skMaxDcacheSize, skAllocUbufSize, skEntryDynUbufSize, launchKernelCfg.numAttrs);
   return true;
 }
 
@@ -1202,7 +1193,8 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
     SK_LOGE("Failed to update base node for %s", Format().c_str());
     return false;
   }
-  const aclmdlRITaskParams *resultParams = nullptr;
+  aclmdlRITaskParams updateParams{};
+  bool hasUpdateParams = false;
 
   if (ctx.customParams != nullptr && ctx.customParams->type != 0) {
     // check update value
@@ -1219,38 +1211,48 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
                 Format().c_str());
         break;
     }
+    updateParams = *ctx.customParams;
     // update kernel with custom params for stream sync
-    aclError aclRet = aclmdlRITaskSetParams(*originTask, ctx.customParams);
+    aclError aclRet = aclmdlRITaskSetParams(*originTask, &updateParams);
     if (aclRet != ACL_SUCCESS) {
       SK_LOGE("Failed to set kernel with custom params for %s", Format().c_str());
       return false;
     }
     // Sync taskParams for JSON dump
-    taskParams = *ctx.customParams;
-    resultParams = &taskParams;
+    taskParams = updateParams;
+    hasUpdateParams = true;
   } else if (ctx.launchInfo != nullptr && ctx.launchInfo->entryInfo.skEntryFunc != nullptr) {
-    taskParams.kernelTaskParams.args = static_cast<void *>(ctx.launchInfo->devArgs.Get());
-    taskParams.kernelTaskParams.argsSize = ctx.launchInfo->devArgs.Get()->skHeader.totalSize;
-    taskParams.kernelTaskParams.isHostArgs = true;
-
-    taskParams.kernelTaskParams.funcHandle = ctx.launchInfo->entryInfo.skEntryFunc;
-    taskParams.kernelTaskParams.numBlocks = ctx.launchInfo->entryInfo.numBlocks;
-    taskParams.type = ACL_MODEL_RI_TASK_KERNEL;
-    taskParams.opInfoPtr = ctx.launchInfo->cacheInfo;
-    taskParams.opInfoSize = ctx.launchInfo->cacheopInfoSize;
-    if (ctx.launchInfo->hasMinAvailableUbufSize &&
-        !SetupLaunchKernelCfgWithDynUbuf(ctx.launchInfo->minAvailableUbufSize)) {
-      SK_LOGE("Failed to setup dyn ubuf launch cfg for kernel node %s", Format().c_str());
-      return false;
+    updateParams = taskParams;
+    updateParams.type = ACL_MODEL_RI_TASK_KERNEL;
+    updateParams.opInfoPtr = ctx.launchInfo->cacheInfo;
+    updateParams.opInfoSize = ctx.launchInfo->cacheopInfoSize;
+    updateParams.kernelTaskParams.args = static_cast<void *>(ctx.launchInfo->devArgs.Get());
+    updateParams.kernelTaskParams.argsSize = ctx.launchInfo->devArgs.Get()->skHeader.totalSize;
+    updateParams.kernelTaskParams.isHostArgs = true;
+    updateParams.kernelTaskParams.funcHandle = ctx.launchInfo->entryInfo.skEntryFunc;
+    updateParams.kernelTaskParams.numBlocks = ctx.launchInfo->entryInfo.numBlocks;
+    aclrtLaunchKernelCfg *originCfg = taskParams.kernelTaskParams.cfg;
+    updateParams.kernelTaskParams.cfg = originCfg;
+    std::vector<aclrtLaunchKernelAttr> launchKernelAttrs;
+    aclrtLaunchKernelCfg launchKernelCfg{};
+    if (ctx.launchInfo->useSimtEntry) {
+      if (!SetupLaunchKernelCfg(updateParams.kernelTaskParams.funcHandle, ctx.launchInfo->skMaxDcacheSize,
+                                launchKernelAttrs, launchKernelCfg)) {
+        SK_LOGE("Failed to setup dyn ubuf launch cfg for kernel node %s", Format().c_str());
+        return false;
+      }
+      updateParams.kernelTaskParams.cfg = &launchKernelCfg;
     }
 
-    aclError aclRet = aclmdlRITaskSetParams(*originTask, &taskParams);
+    aclError aclRet = aclmdlRITaskSetParams(*originTask, &updateParams);
+    updateParams.kernelTaskParams.cfg = originCfg;
 
     if (aclRet != ACL_SUCCESS) {
       SK_LOGE("Failed to update kernel node %s", Format().c_str());
       return false;
     }
-    resultParams = &taskParams;
+    taskParams = updateParams;
+    hasUpdateParams = true;
   } else {
     aclError aclRet = InValidateNode();
     if (aclRet != ACL_SUCCESS) {
@@ -1258,7 +1260,7 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
     }
   }
 
-  LogNodeUpdateResult(resultParams);
+  LogNodeUpdateResult(hasUpdateParams ? &updateParams : nullptr);
   return true;
 }
 
@@ -1362,7 +1364,8 @@ bool SuperKernelMemoryNode::Update(const UpdateContext &ctx) {
     SK_LOGE("Failed to update base node for %s", Format().c_str());
     return false;
   }
-  const aclmdlRITaskParams *resultParams = nullptr;
+  aclmdlRITaskParams updateParams{};
+  bool hasUpdateParams = false;
 
   if (ctx.customParams != nullptr && ctx.customParams->type != 0) {
     // check update value
@@ -1379,15 +1382,16 @@ bool SuperKernelMemoryNode::Update(const UpdateContext &ctx) {
                 Format().c_str());
         break;
     }
+    updateParams = *ctx.customParams;
     // update memory node with custom params for stream sync
-    aclError aclRet = aclmdlRITaskSetParams(*originTask, ctx.customParams);
+    aclError aclRet = aclmdlRITaskSetParams(*originTask, &updateParams);
     if (aclRet != ACL_SUCCESS) {
       SK_LOGE("Failed to set custom params on memory node %s", Format().c_str());
       return false;
     }
     // Sync taskParams for JSON dump
-    taskParams = *ctx.customParams;
-    resultParams = &taskParams;
+    taskParams = updateParams;
+    hasUpdateParams = true;
   } else {
     aclError aclRet = InValidateNode();
     if (aclRet != ACL_SUCCESS) {
@@ -1395,7 +1399,7 @@ bool SuperKernelMemoryNode::Update(const UpdateContext &ctx) {
     }
   }
 
-  LogNodeUpdateResult(resultParams);
+  LogNodeUpdateResult(hasUpdateParams ? &updateParams : nullptr);
   return true;
 }
 

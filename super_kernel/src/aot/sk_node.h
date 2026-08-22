@@ -534,7 +534,7 @@ class SuperKernelBaseNode {
 
  protected:
   aclmdlRITaskParams taskParams;
-  void LogNodeUpdateResult(const aclmdlRITaskParams *resultParams) const;
+  void LogNodeUpdateResult(const aclmdlRITaskParams *paramsToLog) const;
   const char *GetUpdateTargetTypeName(aclmdlRITaskType type) const;
   uint32_t notifyExpandVecNum;
   uint32_t notifyExpandCubeNum;
@@ -594,14 +594,14 @@ class SuperKernelKernelNode : public SuperKernelBaseNode {
 
  private:
   void IdentifyAndHandleSimtKernel(const SuperKernelOptionsManager *opts);
-  bool SetupLaunchKernelCfgWithDynUbuf(size_t minAvailableUbufSize);
+  bool SetupLaunchKernelCfg(aclrtFuncHandle funcHandle, size_t skMaxDcacheSize,
+                            std::vector<aclrtLaunchKernelAttr> &launchKernelAttrs,
+                            aclrtLaunchKernelCfg &launchKernelCfg) const;
 
   bool isScopeBegin = false;
   bool isScopeEnd = false;
   bool isPlaceholder = false;
   std::string scopeName;
-  std::vector<aclrtLaunchKernelAttr> launchKernelAttrs_;
-  aclrtLaunchKernelCfg launchKernelCfg_{};
 };
 
 class SuperKernelMemoryNode : public SuperKernelBaseNode {
