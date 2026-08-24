@@ -47,6 +47,27 @@ TEST(TestUtilsApi, Floor_ShouldReturnInt_WhenNumIsUnsignedInt) {
   ASSERT_EQ(Floor(0U), 0);
 }
 
+TEST(TestUtilsApi, IsInteger_ShouldCheckExactFloatValue) {
+  EXPECT_TRUE(IsIntegerWithinUint32Magnitude(0.0f));
+  EXPECT_TRUE(IsIntegerWithinUint32Magnitude(-0.0f));
+  EXPECT_TRUE(IsIntegerWithinUint32Magnitude(2.0f));
+  EXPECT_TRUE(IsIntegerWithinUint32Magnitude(-2.0f));
+  EXPECT_TRUE(IsIntegerWithinUint32Magnitude(16777216.0f));
+  EXPECT_TRUE(IsIntegerWithinUint32Magnitude(4294967040.0f));
+  EXPECT_TRUE(IsIntegerWithinUint32Magnitude(-4294967040.0f));
+
+  EXPECT_FALSE(IsIntegerWithinUint32Magnitude(0.5f));
+  EXPECT_FALSE(IsIntegerWithinUint32Magnitude(-2.25f));
+  EXPECT_FALSE(IsIntegerWithinUint32Magnitude(123456.75f));
+  EXPECT_FALSE(IsIntegerWithinUint32Magnitude(4294967296.0f));
+  EXPECT_FALSE(IsIntegerWithinUint32Magnitude(-4294967296.0f));
+}
+
+TEST(TestUtilsApi, IsInteger_ShouldRejectNanAndInfinity) {
+  EXPECT_FALSE(IsIntegerWithinUint32Magnitude(AfInfinity<float>()));
+  EXPECT_FALSE(IsIntegerWithinUint32Magnitude(GetScalarValueByBitCode<uint32_t, float>(0x7FC00000U)));
+}
+
 TEST(TestUtilsApi, TestFindNearestPower2) {
   uint64_t n1 = KernelUtils::FindNearestPower2(0);
   ASSERT_EQ(n1, 0);
