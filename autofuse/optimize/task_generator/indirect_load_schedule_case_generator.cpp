@@ -1269,7 +1269,6 @@ af::Status AnalyzeRewrittenGraph(af::AscGraph &graph, const af::AscNodePtr &indi
   if (!is_candidate_legal) {
     return af::SUCCESS;
   }
-
   if (template_id != ascir::TemplateId::kIndirectLoadSK) {
     // 收集阶段：一次遍历收集全部状态（改写定稿后无需重收）
     GE_ASSERT_SUCCESS(CollectRewrittenBoundaries(indirect_load, analysis));

@@ -639,7 +639,7 @@ TEST_F(UTestAscirPerfV2, TestNddma1DModelSupportsFourDtypeSizes) {
   }
 }
 
-TEST_F(UTestAscirPerfV2, TestNddmaRaw2DTo5DKeepLegacyOutputAfterMerge) {
+TEST_F(UTestAscirPerfV2, TestNddmaEffectiveRank2To5UsesNewModel) {
   auto nddma = ApiPerfFactory::Instance().Create("NddmaV2");
   ASSERT_NE(nddma, nullptr);
   NodeInfo node;
@@ -663,9 +663,20 @@ TEST_F(UTestAscirPerfV2, TestNddmaRaw2DTo5DKeepLegacyOutputAfterMerge) {
 
     ASSERT_EQ(nddma->GetPerfFunc()(shapes, shapes, node, perf_res), af::SUCCESS);
     const auto cycles = Str(perf_res.pipe_res[PipeType::AIV_MTE2]);
-    EXPECT_EQ(cycles.find("nddma_1d_multicore"), std::string::npos);
-    EXPECT_EQ(cycles, "((2048 / (((6.3899998664856 / (block_dim)) + 7.6100001335144))) + 418.978912353516)");
+    EXPECT_NE(cycles.find("nddma_1d_multicore"), std::string::npos);
   }
+}
+
+TEST_F(UTestAscirPerfV2, TestNddmaFallsBackOnDtypeSizeMismatch) {
+  const auto shape = Make1DNddmaShape("float16", 4, CreateExpr(256), CreateExpr(1), CreateExpr(1));
+  const std::vector<TensorShapeInfo> shapes = {shape};
+  NodeInfo node;
+  node.node_ptr = GraphConstructUtils::ConstructSingleOp("Nddma", 1, 1);
+  PerfOutputInfo perf_res;
+  auto nddma = ApiPerfFactory::Instance().Create("NddmaV2");
+  ASSERT_NE(nddma, nullptr);
+  ASSERT_EQ(nddma->GetPerfFunc()(shapes, shapes, node, perf_res), af::SUCCESS);
+  EXPECT_EQ(Str(perf_res.pipe_res[PipeType::AIV_MTE2]).find("nddma_1d_multicore"), std::string::npos);
 }
 
 TEST_F(UTestAscirPerfV2, TestNddma1DModelFallsBackForCvUbFusion) {

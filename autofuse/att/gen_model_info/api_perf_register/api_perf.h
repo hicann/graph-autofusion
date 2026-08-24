@@ -19,8 +19,9 @@
 #include "perf_param.h"
 
 namespace att {
-// legacy 连续轴合并前的原始 DataCopyNddma 描述。所有向量均按 vectorized_axis 排列，dim 和 stride 的单位
-// 分别为元素个数和元素；input_strides 对应 GM stride，output_strides 对应 UB vectorized stride。
+// Codegen DataCopyNddma 的 effective view。向量已按 vectorized_axis 排列，并应与
+// CalculateDmaParams 合轴、忽略双零 stride 轴及 tail actual size 后的参数一致；dim 和 stride 的单位
+// 分别为元素个数和元素，input_strides 对应 GM stride，output_strides 对应 UB vectorized stride。
 struct NddmaDescriptorInfo {
   std::vector<Expr> output_dims;
   std::vector<Expr> input_strides;

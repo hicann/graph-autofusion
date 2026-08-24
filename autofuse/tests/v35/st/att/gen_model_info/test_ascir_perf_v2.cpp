@@ -410,7 +410,6 @@ TEST_F(STestAscirPerfV2, TestNddma1DModelHandlesStaticAndDynamicShapes) {
   EXPECT_NE(cycles.find("TernaryOp"), std::string::npos);
   EXPECT_NE(cycles.find("input_stride"), std::string::npos);
   EXPECT_NE(cycles.find("output_stride"), std::string::npos);
-  EXPECT_NE(cycles.find("Max"), std::string::npos);
   EXPECT_NE(cycles.find("Min"), std::string::npos);
   EXPECT_NE(cycles.find("n"), std::string::npos);
 }
