@@ -45,7 +45,7 @@ static const std::map<ge::DataType, DtypeInfo> kDtypeInfoMap = {
 };
 
 const DtypeInfo *GetDtypeInfo(ge::DataType dtype) {
-  auto it = kDtypeInfoMap.find(dtype);
+  const auto it = kDtypeInfoMap.find(dtype);
   if (it != kDtypeInfoMap.end()) {
     return &it->second;
   }
@@ -126,7 +126,7 @@ static std::string GetTensorTypeStr(const af::AscGraph &graph, const af::AscTens
   std::stringstream ss;
 
   // 数据类型 - 使用简写类型名
-  auto dtype = attr.dtype;
+  const auto dtype = attr.dtype;
   std::string dtype_str;
   const DtypeInfo *info = GetDtypeInfo(dtype);
   if (info != nullptr) {
@@ -141,24 +141,24 @@ static std::string GetTensorTypeStr(const af::AscGraph &graph, const af::AscTens
   // 形状
   for (size_t i = 0; i < attr.axis.size(); ++i) {
     if (i > 0) ss << ",";
-    auto axis_id = attr.axis[i];
+    const auto axis_id = attr.axis[i];
 
     // 如果是 repeats，输出大小
     if (i < attr.repeats.size()) {
-      auto repeat = attr.repeats[i];
+      const auto repeat = attr.repeats[i];
       if (repeat.GetExprType() == af::ExprType::kExprConstantRation) {
         int64_t val = 0;
         if (repeat.GetConstValue(val)) {
           ss << val;
         } else {
-          auto it = axis_id_to_name.find(axis_id);
+          const auto it = axis_id_to_name.find(axis_id);
           ss << (it != axis_id_to_name.end() ? it->second : "axis") << "_size";
         }
       } else {
         ss << af::SymbolicUtils::ToString(repeat);
       }
     } else {
-      auto it = axis_id_to_name.find(axis_id);
+      const auto it = axis_id_to_name.find(axis_id);
       ss << (it != axis_id_to_name.end() ? it->second : "axis") << "_size";
     }
   }
@@ -177,7 +177,7 @@ DumpContext BuildDumpContext(const ascir::Graph &graph) {
 
   // 收集函数参数（data, workspace, output）
   for (auto node : graph.GetAllNodes()) {
-    auto node_type = node->GetType();
+    const auto node_type = node->GetType();
     if (node_type == NodeType::kData) {
       if (!node->outputs().empty()) {
         auto &output_attr = node->outputs()[0]->attr;
@@ -237,16 +237,16 @@ std::vector<std::string> CollectInputNames(const ascir::Graph &graph, const af::
   std::vector<std::string> input_names;
 
   for (uint32_t index = 0U; index < node->GetAllInDataAnchorsSize(); index++) {
-    auto in_anchor = node->GetInDataAnchor(static_cast<int32_t>(index));
+    const auto in_anchor = node->GetInDataAnchor(static_cast<int32_t>(index));
     if (in_anchor == nullptr) {
       input_names.push_back("nil");
       continue;
     }
-    auto peer_out_anchor = in_anchor->GetPeerOutAnchor();
+    const auto peer_out_anchor = in_anchor->GetPeerOutAnchor();
     if (peer_out_anchor == nullptr) {
       input_names.push_back("nil");
     } else {
-      auto peer_name = peer_out_anchor->GetOwnerNode()->GetName();
+      const auto peer_name = peer_out_anchor->GetOwnerNode()->GetName();
       int32_t out_idx = peer_out_anchor->GetIdx();
       // 检查源节点是否有多个输出，如果有则显示索引
       auto peer_node = peer_out_anchor->GetOwnerNodeBarePtr();
