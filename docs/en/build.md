@@ -45,7 +45,7 @@ If your compilation environment cannot access the network, download the source c
    | Open-Source Software | Version | Download Link |
    |---|---|---|
    | makeself | 2.5.0 | [makeself-release-2.5.0-patch1.tar.gz](https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz) |
-   | cann-cmake | master-002 | [cmake-master-002.tar.gz](https://cann-3rd.obs.cn-north-4.myhuaweicloud.com/cmake/cmake-master-002.tar.gz) |
+   | cann-cmake | master-052 | [cmake-master-052.tar.gz](https://cann-3rd.obs.cn-north-4.myhuaweicloud.com/cmake/cmake-master-052.tar.gz) |
 
 3. Upload the source code and third-party open-source software to the offline compilation environment. Extract the source code.
 
@@ -61,7 +61,7 @@ If your compilation environment cannot access the network, download the source c
    mkdir open_source
    # Move third-party open-source software packages to open_source directory
    mv makeself-release-2.5.0-patch1.tar.gz open_source/
-   mv cmake-master-002.tar.gz open_source/
+   mv cmake-master-052.tar.gz open_source/
    # Extract third-party open-source software packages and rename (cann-cmake package remains unchanged)
    cd open_source
    tar -zxvf makeself-release-2.5.0-patch1.tar.gz && mv makeself-release-2.5.0 makeself
@@ -79,7 +79,7 @@ If your compilation environment cannot access the network, download the source c
    │     ├── Makefile
    │     ├── README.md
    │     └── ...
-   │  └── cmake-master-002.tar.gz
+   │  └── cmake-master-052.tar.gz
    ```
 
 ### 4.2 Install Dependencies

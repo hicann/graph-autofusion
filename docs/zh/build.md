@@ -45,7 +45,7 @@ git clone https://gitcode.com/cann/graph-autofusion.git
    | 开源软件 | 版本 | 下载地址 |
    |---|---|---|
    | makeself | 2.5.0 | [makeself-release-2.5.0-patch1.tar.gz](https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz) |
-   | cann-cmake | master-002 | [cmake-master-002.tar.gz](https://cann-3rd.obs.cn-north-4.myhuaweicloud.com/cmake/cmake-master-002.tar.gz) |
+   | cann-cmake | master-052 | [cmake-master-052.tar.gz](https://cann-3rd.obs.cn-north-4.myhuaweicloud.com/cmake/cmake-master-052.tar.gz) |
 
 3. 将源码及第三方开源软件上传到离线编译环境中，解压缩源码。
 
@@ -61,7 +61,7 @@ git clone https://gitcode.com/cann/graph-autofusion.git
    mkdir open_source
    # 将第三方开源软件压缩包放到open_source目录下
    mv makeself-release-2.5.0-patch1.tar.gz open_source/
-   mv cmake-master-002.tar.gz open_source/
+   mv cmake-master-052.tar.gz open_source/
    # 解压缩第三方开源软件压缩包并改名（cann-cmake压缩包保持不变）
    cd open_source
    tar -zxvf makeself-release-2.5.0-patch1.tar.gz && mv makeself-release-2.5.0 makeself
@@ -79,7 +79,7 @@ git clone https://gitcode.com/cann/graph-autofusion.git
    │     ├── Makefile
    │     ├── README.md
    │     └── ...
-   │  └── cmake-master-002.tar.gz
+   │  └── cmake-master-052.tar.gz
    ```
 
 ### 4.2 安装依赖
