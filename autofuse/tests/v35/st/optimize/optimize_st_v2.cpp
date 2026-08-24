@@ -406,32 +406,25 @@ TEST_F(OptimizerStV2, NddmaCaseBrcOutputWithMultiRef) {
                    .Data("data0", 0, af::DT_FLOAT)
                    .Load("load0", "data0", load_shape, load_strides)
                    .Broadcast("broadcast", "load0", {0, 1})  // broadcast on both axes
-                   .Scalar("scalar0", "0", af::DT_FLOAT)
-                   .Add("exp0", "broadcast", "scalar0")
-                   .Abs("abs0", "exp0")
-                   .Store("store", "abs0")
+                   .Exp("exp0", "broadcast")
+                   .Abs("abs0", "broadcast")
+                   .Mul("mul0", "exp0", "abs0")
+                   .Store("store", "mul0")
                    .Output("output", "store", 8, af::DT_FLOAT)
                    .Build();
 
   ::ascir::FusedScheduledResult fused_scheduled_result;
-  ASSERT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
-  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results.empty());
-  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results[0].empty());
-  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups.empty());
-  const auto &impl_graphs = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs;
-  ASSERT_GT(impl_graphs.size(), 1UL);
-  bool has_nddma = false;
-  bool has_vector_func = false;
-  for (const auto &node : impl_graphs[1].GetAllNodes()) {
-    if (node->GetOpDesc()->GetType() == "Nddma") {
-      has_nddma = true;
+  EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
+
+  for (const auto &node :
+       fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[1].GetAllNodes()) {
+    if (node->GetOpDesc()->GetId() == 1) {
+      EXPECT_EQ(node->GetOpDesc()->GetType(), "Nddma");
     }
-    if (node->GetOpDesc()->GetType() == "VectorFunc") {
-      has_vector_func = true;
+    if (node->GetOpDesc()->GetId() == 2) {
+      EXPECT_EQ(node->GetOpDesc()->GetType(), "VectorFunc");
     }
   }
-  EXPECT_TRUE(has_nddma);
-  EXPECT_TRUE(has_vector_func);
 }
 
 TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc) {
@@ -463,24 +456,16 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc) {
   *broadcast0.y.repeats = {s0, s1};
   *broadcast0.y.strides = {s1, af::ops::One};
 
-  Scalar scalar0("scalar0", graph);
-  scalar0.y.dtype = dtype;
-  scalar0.attr.sched.axis = {z0.id, z1.id};
-  *scalar0.y.axis = {z0.id, z1.id};
-  *scalar0.y.repeats = {s0, s1};
-  *scalar0.y.strides = {s1, af::ops::One};
-
-  Add exp0("exp0");
+  Exp exp0("exp0");
   exp0.attr.sched.axis = {z0.id, z1.id};
-  exp0.x1 = broadcast0.y;
-  exp0.x2 = scalar0.y;
+  exp0.x = broadcast0.y;
   *exp0.y.axis = {z0.id, z1.id};
   exp0.y.dtype = dtype;
   *exp0.y.repeats = {s0, s1};
   *exp0.y.strides = {s1, af::ops::One};
 
   Abs abs0("abs0");
-  abs0.x = exp0.y;
+  abs0.x = broadcast0.y;
   abs0.attr.sched.axis = {z0.id, z1.id};
   abs0.y.dtype = dtype;
   *abs0.y.axis = {z0.id, z1.id};
@@ -488,9 +473,18 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc) {
   *abs0.y.strides = {s1, One};
   abs0.attr.api.compute_type = ComputeType::kComputeElewise;
 
+  Mul mul0("mul0");
+  mul0.attr.sched.axis = {z0.id, z1.id};
+  mul0.x1 = exp0.y;
+  mul0.x2 = abs0.y;
+  mul0.y.dtype = dtype;
+  *mul0.y.axis = {z0.id, z1.id};
+  *mul0.y.repeats = {s0, s1};
+  *mul0.y.strides = {s1, One};
+
   Store store_op("store");
   store_op.attr.sched.axis = {z0.id, z1.id};
-  store_op.x = abs0.y;
+  store_op.x = mul0.y;
   *store_op.y.axis = {z0.id, z1.id};
   store_op.y.dtype = dtype;
   *store_op.y.strides = {s1, af::ops::One};
@@ -505,8 +499,15 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc) {
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
   const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
 
-  ASSERT_FALSE(schedule_group.impl_graphs.empty());
-  EXPECT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2UL);
+  ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
+
+  const auto score_func_iter = schedule_group.graph_name_to_score_funcs.find(schedule_group.impl_graphs[2].GetName());
+  ASSERT_NE(score_func_iter, schedule_group.graph_name_to_score_funcs.end());
+  const auto res =
+      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
+      "  return -1;\n"
+      "}\n";
+  EXPECT_EQ(score_func_iter->second, res);
 }
 
 TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc_Dynamic) {
@@ -538,24 +539,16 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc_Dynamic) {
   *broadcast0.y.repeats = {s0, s1};
   *broadcast0.y.strides = {s1, af::ops::One};
 
-  Scalar scalar0("scalar0", graph);
-  scalar0.y.dtype = dtype;
-  scalar0.attr.sched.axis = {z0.id, z1.id};
-  *scalar0.y.axis = {z0.id, z1.id};
-  *scalar0.y.repeats = {s0, s1};
-  *scalar0.y.strides = {s1, af::ops::One};
-
-  Add exp0("exp0");
+  Exp exp0("exp0");
   exp0.attr.sched.axis = {z0.id, z1.id};
-  exp0.x1 = broadcast0.y;
-  exp0.x2 = scalar0.y;
+  exp0.x = broadcast0.y;
   *exp0.y.axis = {z0.id, z1.id};
   exp0.y.dtype = dtype;
   *exp0.y.repeats = {s0, s1};
   *exp0.y.strides = {s1, af::ops::One};
 
   Abs abs0("abs0");
-  abs0.x = exp0.y;
+  abs0.x = broadcast0.y;
   abs0.attr.sched.axis = {z0.id, z1.id};
   abs0.y.dtype = dtype;
   *abs0.y.axis = {z0.id, z1.id};
@@ -563,9 +556,18 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc_Dynamic) {
   *abs0.y.strides = {s1, One};
   abs0.attr.api.compute_type = ComputeType::kComputeElewise;
 
+  Mul mul0("mul0");
+  mul0.attr.sched.axis = {z0.id, z1.id};
+  mul0.x1 = exp0.y;
+  mul0.x2 = abs0.y;
+  mul0.y.dtype = dtype;
+  *mul0.y.axis = {z0.id, z1.id};
+  *mul0.y.repeats = {s0, s1};
+  *mul0.y.strides = {s1, One};
+
   Store store_op("store");
   store_op.attr.sched.axis = {z0.id, z1.id};
-  store_op.x = abs0.y;
+  store_op.x = mul0.y;
   *store_op.y.axis = {z0.id, z1.id};
   store_op.y.dtype = dtype;
   *store_op.y.strides = {s1, af::ops::One};
@@ -580,8 +582,17 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc_Dynamic) {
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
   const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
 
-  ASSERT_FALSE(schedule_group.impl_graphs.empty());
-  EXPECT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2UL);
+  ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
+  const auto score_func_iter = schedule_group.graph_name_to_score_funcs.find(schedule_group.impl_graphs[2].GetName());
+  ASSERT_NE(score_func_iter, schedule_group.graph_name_to_score_funcs.end());
+  const auto res =
+      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
+      "  const auto tail_size = static_cast<int64_t>((2 * tiling_data.s1));\n"
+      "  if (tail_size % 32 == 0) { return -1; }\n"
+      "  if (tail_size > 4096) { return -1; }\n"
+      "  return 0;\n"
+      "}\n";
+  EXPECT_EQ(score_func_iter->second, res);
 }
 
 TEST_F(OptimizerStV2, NddmaCaseLargeTailBrcScoreFunc) {
@@ -597,18 +608,25 @@ TEST_F(OptimizerStV2, NddmaCaseLargeTailBrcScoreFunc) {
                    .Data("data0", 0, af::DT_FLOAT)
                    .Load("load0", "data0", load0_shape, load0_strides)
                    .Broadcast("broadcast", "load0", {1})  // broadcast on axis 1
-                   .Scalar("scalar0", "0", af::DT_FLOAT)
-                   .Add("exp0", "broadcast", "scalar0")
-                   .Abs("abs0", "exp0")
-                   .Store("store", "abs0")
+                   .Exp("exp0", "broadcast")
+                   .Abs("abs0", "broadcast")
+                   .Mul("mul0", "exp0", "abs0")
+                   .Store("store", "mul0")
                    .Output("output", "store", 8, af::DT_FLOAT)
                    .Build();
 
   ::ascir::FusedScheduledResult fused_scheduled_result;
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
   const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
-  ASSERT_FALSE(schedule_group.impl_graphs.empty());
-  EXPECT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2UL);
+  ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
+
+  const auto score_func_iter = schedule_group.graph_name_to_score_funcs.find(schedule_group.impl_graphs[2].GetName());
+  ASSERT_NE(score_func_iter, schedule_group.graph_name_to_score_funcs.end());
+  const auto res =
+      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
+      "  return -1;\n"
+      "}\n";
+  EXPECT_EQ(score_func_iter->second, res);
 }
 
 TEST_F(OptimizerStV2, NddmaCaseLargeTailBrc_Dynamic) {
@@ -624,18 +642,17 @@ TEST_F(OptimizerStV2, NddmaCaseLargeTailBrc_Dynamic) {
                    .Data("data0", 0, af::DT_FLOAT)
                    .Load("load0", "data0", load0_shape, load0_strides)
                    .Broadcast("broadcast", "load0", {1})  // broadcast on axis 1
-                   .Scalar("scalar0", "0", af::DT_FLOAT)
-                   .Add("exp0", "broadcast", "scalar0")
-                   .Abs("abs0", "exp0")
-                   .Store("store", "abs0")
+                   .Exp("exp0", "broadcast")
+                   .Abs("abs0", "broadcast")
+                   .Mul("mul0", "exp0", "abs0")
+                   .Store("store", "mul0")
                    .Output("output", "store", 8, af::DT_FLOAT)
                    .Build();
 
   ::ascir::FusedScheduledResult fused_scheduled_result;
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
   const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
-  ASSERT_FALSE(schedule_group.impl_graphs.empty());
-  EXPECT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2UL);
+  ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
 }
 
 /**
