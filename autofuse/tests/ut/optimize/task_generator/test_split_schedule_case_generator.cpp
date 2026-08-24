@@ -279,6 +279,9 @@ TEST_F(SplitScheduleCaseGeneratorTest, split_data_to_different_axis) {
   std::vector<std::string> score_functions;
   EXPECT_EQ(generator.Generate(graph, generated_graphs, score_functions), af::SUCCESS);
   ASSERT_EQ(generated_graphs.size(), 2UL);
+  ASSERT_EQ(score_functions.size(), 2U);
+  EXPECT_TRUE(score_functions[0].empty());
+  EXPECT_TRUE(score_functions[1].empty());
 
   auto cg0 = af::AscGraphUtils::GetComputeGraph(generated_graphs[0]);
   auto cg1 = af::AscGraphUtils::GetComputeGraph(generated_graphs[1]);

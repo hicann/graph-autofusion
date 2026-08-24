@@ -36,8 +36,6 @@ class SplitFusionCaseGenerator : public FusionCaseGenerator {
   Status RemoveUnusedNodes(const af::AscNodePtr &split_node) const;
   static Status UpdateSplitAxis(ascir::ImplGraph &owner_graph, af::AscNodePtr &node, uint32_t split_dim,
                                 size_t start_index);
-  static Status GenerateScoreFuncForUbSplit(const ascir::HintGraph &graph, const af::AscNodePtr &split_node,
-                                            size_t split_dim, std::string &score_func);
   static af::Status SetSplitOpAttr(af::ascir_op::Split &split_op, const af::AscNodePtr &split_node, size_t split_dim,
                                    size_t start, size_t end);
   af::Status SetLoadOpAttr(af::ascir_op::Store &store_op, const af::ascir_op::Split &split_op,

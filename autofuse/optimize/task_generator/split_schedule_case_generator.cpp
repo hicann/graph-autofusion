@@ -20,7 +20,6 @@
 #include "ascir/meta/ascir_ops_utils.h"
 #include "optimize/schedule_utils.h"
 #include "optimize/task_generator/split_group_partitioner.h"
-#include "optimize/task_generator/split_score_function_generator.h"
 #include "platform/platform_factory.h"
 
 namespace optimize {
@@ -71,12 +70,9 @@ Status SplitFusionCaseGenerator::Generate(ascir::HintGraph &graph, std::vector<a
   GE_CHK_STATUS_RET(ConvertSplitToLoads(optimized_graph, split_node, split_dim), "ConvertSplitToLoads failed");
   graphs.emplace_back(optimized_graph);
 
-  // 多模板, 为ub split模板提供打分函数
+  // 多模板，保持 score_functions 与模板数量对齐，但默认不生成 Split 打分函数。
   if ((graphs.size() > 1U)) {
-    split_node = FindSplitNodes(graphs[0]).front();
     score_functions.resize(2U);  // ub_split + split_2_load
-    GE_CHK_STATUS_RET(GenerateScoreFuncForUbSplit(graph, split_node, split_dim, score_functions[0]),
-                      "Failed to generate score func");
   }
   return af::SUCCESS;
 }
@@ -358,9 +354,4 @@ Status SplitFusionCaseGenerator::RemoveUnusedNodes(const af::AscNodePtr &split_n
   return af::SUCCESS;
 }
 
-Status SplitFusionCaseGenerator::GenerateScoreFuncForUbSplit(const ascir::HintGraph &graph,
-                                                             const af::AscNodePtr &split_node, size_t split_dim,
-                                                             std::string &score_func) {
-  return SplitScoreFunctionGenerator(graph, split_node, split_dim).Generate(score_func);
-}
 }  // namespace optimize
