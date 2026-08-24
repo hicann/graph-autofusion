@@ -224,6 +224,7 @@ enum class KernelCapBitOffset : uint8_t {
   EARLY_START_SET_FLAG = 1,   // Bit 1: early start set flag
   DCCI = 2,                   // Bit 2: DCCI flag
   DISABLE_SCHEMODE = 3,       // Bit 3: disable ScheMode flag
+  BLOCKDIM_SCALE_UP = 4,       // Bit 4: scale up operator blockDim to SK blockDim
 };
 
 struct KernelCapBits {
@@ -231,9 +232,11 @@ struct KernelCapBits {
   bool earlyStartSetFlag = false;
   bool disableDcci = false;
   bool disableScheMode = false;
+  bool blockDimScaleUp = false;
 };
 
 KernelCapBits ParseKernelCapBits(uint64_t cap);
+bool ShouldDisableScheMode(const KernelCapBits &capBits);
 
 struct KernelInfos {
   SkKernelType kernelType = SkKernelType::DEFAULT;

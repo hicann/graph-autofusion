@@ -112,7 +112,12 @@ KernelCapBits ParseKernelCapBits(uint64_t cap) {
   bits.earlyStartSetFlag = getBit(KernelCapBitOffset::EARLY_START_SET_FLAG);
   bits.disableDcci = getBit(KernelCapBitOffset::DCCI);
   bits.disableScheMode = getBit(KernelCapBitOffset::DISABLE_SCHEMODE);
+  bits.blockDimScaleUp = getBit(KernelCapBitOffset::BLOCKDIM_SCALE_UP);
   return bits;
+}
+
+bool ShouldDisableScheMode(const KernelCapBits &capBits) {
+  return capBits.disableScheMode || capBits.blockDimScaleUp;
 }
 
 // Implementation of FusionFailReasonInfo methods (requires complete ScopeProcessStatus/DeadlockFailReason definition)
@@ -568,10 +573,10 @@ bool InitKernelResolvedFuncs(KernelInfos &kernelInfos) {
   kernelInfos.capBits = capBits;
   SK_LOGI(
       "bindMap size=%lu, aicFound=%d, aivFound=%d, earlyStartWaitFlag=%d, "
-      "earlyStartSetFlag=%d, disableDcci=%d, disableScheMode=%d",
+      "earlyStartSetFlag=%d, disableDcci=%d, disableScheMode=%d, blockDimScaleUp=%d",
       bindMap.size(), aicItor != bindMap.end(), aivItor != bindMap.end(), capBits.earlyStartWaitFlag,
-      capBits.earlyStartSetFlag, capBits.disableDcci, capBits.disableScheMode);
-  if (capBits.disableScheMode == true) {
+      capBits.earlyStartSetFlag, capBits.disableDcci, capBits.disableScheMode, capBits.blockDimScaleUp);
+  if (ShouldDisableScheMode(capBits)) {
     const bool originScheModeOn = kernelInfos.isScheModeOn;
     kernelInfos.isScheModeOn = false;
     SK_LOGI(

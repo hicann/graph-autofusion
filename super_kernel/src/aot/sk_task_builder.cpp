@@ -2196,7 +2196,51 @@ bool SkTaskBuilder::ApplyPerOpMaxCoreNum(const std::vector<SuperKernelBaseNode *
   return true;
 }
 
-SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, bool useSimtEntry) {
+void SkTaskBuilder::ApplyBlockDimScaleUp(SkTask &skTaskCube, SkTask &skTaskVec,
+                                         const std::vector<SuperKernelBaseNode *> &tasks) {
+  auto updateTaskQue = [&](SkTask &skTask) {
+    TaskQue *taskQue = skTask.GetTaskQue();
+    for (uint32_t i = 0; i < taskQue->taskCnt; ++i) {
+      TaskInfo &taskInfo = taskQue->taskInfos[i];
+      const SuperKernelBaseNode *relatedNode = nullptr;
+      if (taskInfo.type == SkTaskType::TYPE_FUNC || taskInfo.type == SkTaskType::TYPE_PRELOAD) {
+        relatedNode = tasks[taskInfo.index];
+      } else if (taskInfo.type == SkTaskType::TYPE_SYNC) {
+        const EarlyStartInfo &earlyStartInfo = taskSyncInfos_[taskInfo.index].earlyStartInfo;
+        switch (static_cast<SkEarlyStartMask>(taskInfo.extraInfo)) {
+          case SkEarlyStartMask::AIV_TO_AIC_WAIT:
+          case SkEarlyStartMask::AIC_TO_AIV_WAIT:
+            relatedNode = earlyStartInfo.relatedWaitNode;
+            break;
+          case SkEarlyStartMask::AIC_TO_AIC_SET:
+          case SkEarlyStartMask::AIV_TO_AIV_SET:
+            relatedNode = earlyStartInfo.relatedSetNode;
+            break;
+          case SkEarlyStartMask::AIC_TO_AIC_WAIT:
+          case SkEarlyStartMask::AIC_TO_AIV_SET:
+            relatedNode = earlyStartInfo.nextAicRelatedNode;
+            break;
+          case SkEarlyStartMask::AIV_TO_AIV_WAIT:
+          case SkEarlyStartMask::AIV_TO_AIC_SET:
+            relatedNode = earlyStartInfo.nextAivRelatedNode;
+            break;
+          default:
+            break;
+        }
+      }
+      if (relatedNode != nullptr && relatedNode->GetNodeType() == SkNodeType::NODE_KERNEL &&
+          GetKernelInfos(relatedNode).capBits.blockDimScaleUp) {
+        taskInfo.numBlocks = skTask.numBlocks;
+      }
+    }
+  };
+
+  updateTaskQue(skTaskCube);
+  updateTaskQue(skTaskVec);
+}
+
+SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, bool useSimtEntry,
+                                            const std::vector<SuperKernelBaseNode *> &tasks) {
   SkHostEntryInfo entryInfo;
   bool enableDebug = opts.EnableDebug();
   // ========== 读取环境变量配置 ==========
@@ -2360,6 +2404,9 @@ SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVe
         taskInfo.numBlocks = taskInfo.numBlocks * 2;
       }
     }
+  }
+  if (!tasks.empty()) {
+    ApplyBlockDimScaleUp(skTaskCube, skTaskVec, tasks);
   }
 
   SK_LOGI("sk entry resolved: type=%s, funcName=%s, funcHandle=%p, numBlocks=%d", to_string(entryInfo.entryType),
@@ -2656,7 +2703,7 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
   }
 
   SK_LOGI("Get entry info...");
-  SkHostEntryInfo entryInfo = GenEntryInfo(aicTask, aivTask, useSimtEntry);
+  SkHostEntryInfo entryInfo = GenEntryInfo(aicTask, aivTask, useSimtEntry, tasks);
   if (entryInfo.skEntryFunc == nullptr) {
     SK_LOGE("Build failed: GenEntryInfo failed");
     return {};
