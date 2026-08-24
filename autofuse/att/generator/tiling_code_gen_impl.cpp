@@ -258,14 +258,23 @@ inline std::string GenCurMaxBlockDim(const std::string &item_prefix, const std::
   return "      cur_block_dim = " + (!block_num.empty() ? call_max_block_dim : cur_block) + ";";
 }
 
-inline std::string GenScheduleResultBlockDimExpr(
+inline std::vector<std::string> GenScheduleResultBlockDimCode(
     const std::map<size_t, std::pair<std::string, std::string>> &graph_info) {
-  std::string block_dim_expr;
-  for (const auto &group_info : graph_info) {
-    const std::string group_block_dim = "tiling_data." + group_info.second.second + "_tiling_data.get_block_dim()";
-    block_dim_expr = block_dim_expr.empty() ? group_block_dim : "Max(" + block_dim_expr + ", " + group_block_dim + ")";
+  std::vector<std::string> block_dim_code;
+  if (graph_info.empty()) {
+    block_dim_code.emplace_back("      tiling_data.set_block_dim(tiling_data.get_block_dim());");
+    return block_dim_code;
   }
-  return block_dim_expr.empty() ? "tiling_data.get_block_dim()" : block_dim_expr;
+  auto group_info = graph_info.cbegin();
+  const std::string first_group_block_dim = "tiling_data." + group_info->second.second + "_tiling_data.get_block_dim()";
+  block_dim_code.emplace_back("      uint32_t max_block_dim = " + first_group_block_dim + ";");
+  ++group_info;
+  for (; group_info != graph_info.cend(); ++group_info) {
+    const std::string group_block_dim = "tiling_data." + group_info->second.second + "_tiling_data.get_block_dim()";
+    block_dim_code.emplace_back("      max_block_dim = Max(max_block_dim, " + group_block_dim + ");");
+  }
+  block_dim_code.emplace_back("      tiling_data.set_block_dim(max_block_dim);");
+  return block_dim_code;
 }
 
 inline bool HasSymbol(const Expr &expr) {
@@ -1671,10 +1680,15 @@ af::Status TilingCodeGenImpl::GenExternFuncDef() {
 }
 
 af::Status TilingCodeGenImpl::GenExpressionMacro() {
-  const std::array<std::string, 14U> macros = {"#define Max(a, b) ((double)(a) > (double)(b) ? (a) : (b))",
-                                               "#define Min(a, b) ((double)(a) < (double)(b) ? (a) : (b))",
-                                               "#define Abs(a) ((double)(a) >= 0 ? (a) : -(a))",
-                                               "#define Log(a) (log((double)(a)))",
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kSolver,
+                      "template <typename T, typename U> inline auto Max(T a, U b) { return static_cast<double>(a) > "
+                      "static_cast<double>(b) ? a : b; }");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kSolver,
+                      "template <typename T, typename U> inline auto Min(T a, U b) { return static_cast<double>(a) < "
+                      "static_cast<double>(b) ? a : b; }");
+  AddAtomicHeaderLine(autofuse::GeneratedHeaderId::kSolver,
+                      "template <typename T> inline auto Abs(T a) { return static_cast<double>(a) >= 0 ? a : -a; }");
+  const std::array<std::string, 11U> macros = {"#define Log(a) (log((double)(a)))",
                                                "#define Pow(a, b) pow(a, b)",
                                                "#define Rational(a, b) ((double)(a) / (double)(b))",
                                                "#define ExpectEq(a, b) ((a) == (b))",
@@ -3923,7 +3937,9 @@ void TilingCodeGenImpl::GenPGOByCoreNumGetScheduleResult(
 void TilingCodeGenImpl::GenPGOUpdateTilingInfo(
     const size_t asc_graph_id, const size_t impl_graph_id,
     const std::map<size_t, std::pair<std::string, std::string>> &graph_info) {
-  tiling_func_.AddLine("      tiling_data.set_block_dim(" + GenScheduleResultBlockDimExpr(graph_info) + ");");
+  for (const auto &line : GenScheduleResultBlockDimCode(graph_info)) {
+    tiling_func_.AddLine(line);
+  }
   GenUpdateWorkspace(asc_graph_id, impl_graph_id);
   if (enable_group_parallels_[asc_graph_id][impl_graph_id]) {
     tiling_func_.AddLine("      ArrangeBlockOffsetsAscGraph" + std::to_string(asc_graph_id) + "Result" +

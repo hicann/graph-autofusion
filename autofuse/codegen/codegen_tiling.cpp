@@ -246,10 +246,7 @@ void AddFallbackHeader(std::map<std::string, std::string> &headers, const std::s
 }
 
 std::string GetFallbackSolverMacros() {
-  return "#define Max(a, b) ((double)(a) > (double)(b) ? (a) : (b))\n"
-         "#define Min(a, b) ((double)(a) < (double)(b) ? (a) : (b))\n"
-         "#define Abs(a) ((double)(a) >= 0 ? (a) : -(a))\n"
-         "#define Log(a) (log((double)(a)))\n"
+  return "#define Log(a) (log((double)(a)))\n"
          "#define Pow(a, b) pow(a, b)\n"
          "#define Rational(a, b) ((double)(a) / (double)(b))\n"
          "#define ExpectEq(a, b) ((a) == (b))\n"
@@ -263,6 +260,18 @@ std::string GetFallbackSolverMacros() {
 
 std::string GetFallbackSolverFunctions() {
   return R"(namespace optiling {
+template <typename T, typename U>
+inline auto Max(T a, U b) {
+  return static_cast<double>(a) > static_cast<double>(b) ? a : b;
+}
+template <typename T, typename U>
+inline auto Min(T a, U b) {
+  return static_cast<double>(a) < static_cast<double>(b) ? a : b;
+}
+template <typename T>
+inline auto Abs(T a) {
+  return static_cast<double>(a) >= 0 ? a : -a;
+}
 inline bool IsEqual(double a, double b) {
   constexpr double kEpsilon = 1e-8;
   double abs = (a > b) ? (a - b) : (b - a);

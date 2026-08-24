@@ -150,6 +150,12 @@ TEST(GeneratorUT, AtomicHeaderKeysReplaceHistoricalSplitHeaders) {
   const auto &solver_header = tiling_res.at(kTilingSolverHeaderIdentify);
   EXPECT_NE(solver_header.find("GetTemp(size_t idx)"), std::string::npos);
   EXPECT_NE(solver_header.find("#include <cstddef>"), std::string::npos);
+  EXPECT_EQ(solver_header.find("#define Max(a, b)"), std::string::npos);
+  EXPECT_NE(solver_header.find("inline auto Max"), std::string::npos);
+  EXPECT_EQ(solver_header.find("#define Min(a, b)"), std::string::npos);
+  EXPECT_NE(solver_header.find("inline auto Min"), std::string::npos);
+  EXPECT_EQ(solver_header.find("#define Abs(a)"), std::string::npos);
+  EXPECT_NE(solver_header.find("inline auto Abs"), std::string::npos);
 
   const auto &solver_source = tiling_res.at(kTilingSolverIdentify);
   ExpectSystemHeaders(solver_source, {"algorithm", "cmath", "cstddef", "cstdint", "functional", "utility", "vector"},
@@ -1028,7 +1034,9 @@ static const std::string kExpectPGOCode =
         valid_candidates[candidate_index - candidate_begin_index0] = false;
         continue;
       }
-      tiling_data.set_block_dim(Max(tiling_data.group0_tiling_data.get_block_dim(), tiling_data.group1_tiling_data.get_block_dim()));
+      uint32_t max_block_dim = tiling_data.group0_tiling_data.get_block_dim();
+      max_block_dim = Max(max_block_dim, tiling_data.group1_tiling_data.get_block_dim());
+      tiling_data.set_block_dim(max_block_dim);
       auto workspaceSizeTmp = GetWorkspaceSize(tiling_data);
       if (workspaceSizeTmp > workspaceSize) {
         workspaceSize = workspaceSizeTmp;
@@ -1066,7 +1074,9 @@ static const std::string kExpectPGOCode =
       std::unordered_map<int64_t, uint64_t> workspace_map;
       workspace_map.reserve(workspace_map_filter_use.size());
       workspace_map.insert(workspace_map_filter_use.begin(), workspace_map_filter_use.end());
-      tiling_data.set_block_dim(Max(tiling_data.group0_tiling_data.get_block_dim(), tiling_data.group1_tiling_data.get_block_dim()));
+      uint32_t max_block_dim = tiling_data.group0_tiling_data.get_block_dim();
+      max_block_dim = Max(max_block_dim, tiling_data.group1_tiling_data.get_block_dim());
+      tiling_data.set_block_dim(max_block_dim);
       auto workspaceSizeTmp = GetWorkspaceSize(tiling_data);
       if (workspaceSizeTmp > workspaceSize) {
         workspaceSize = workspaceSizeTmp;
@@ -1135,9 +1145,12 @@ TEST(GeneratorUT, GenGetScheduleResultPGOSuccess) {
   EXPECT_EQ(genImpl.GenPGOGetScheduleResult(0, 0, graph_info, hardware_map), af::SUCCESS);
   const std::string tiling_func_output = genImpl.tiling_func_.GetOutputStr();
   EXPECT_EQ(tiling_func_output.empty(), false);
-  EXPECT_NE(tiling_func_output.find("tiling_data.set_block_dim(Max(tiling_data.group0_tiling_data.get_block_dim(), "
-                                    "tiling_data.group1_tiling_data.get_block_dim()));"),
+  EXPECT_NE(tiling_func_output.find("uint32_t max_block_dim = tiling_data.group0_tiling_data.get_block_dim();"),
             std::string::npos);
+  EXPECT_NE(tiling_func_output.find("max_block_dim = Max(max_block_dim, "
+                                    "tiling_data.group1_tiling_data.get_block_dim());"),
+            std::string::npos);
+  EXPECT_NE(tiling_func_output.find("tiling_data.set_block_dim(max_block_dim);"), std::string::npos);
   EXPECT_NE(tiling_func_output.find("ArrangeBlockOffsetsAscGraph0Result0(tiling_data, ori_block_dim);"),
             std::string::npos);
   EXPECT_EQ(tiling_func_output.find("ArrangeBlockOffsetsAscGraph0Result0(tiling_data, tiling_data.get_block_dim());"),

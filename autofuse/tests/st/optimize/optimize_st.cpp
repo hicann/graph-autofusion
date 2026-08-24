@@ -817,9 +817,11 @@ class OptimizerSt : public ::testing::Test {
  protected:
   void SetUp() override {
     dlog_setlevel(ASCGEN_MODULE_NAME, DLOG_ERROR, 0);
+    ge::PlatformContext::GetInstance().Reset();
   }
   void TearDown() override {
     dlog_setlevel(ASCGEN_MODULE_NAME, DLOG_ERROR, 0);
+    ge::PlatformContext::GetInstance().Reset();
   }
 
   optimize::Optimizer optimizer;
