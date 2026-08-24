@@ -2198,7 +2198,8 @@ bool SkTaskBuilder::ApplyPerOpMaxCoreNum(const std::vector<SuperKernelBaseNode *
 
 void SkTaskBuilder::ApplyBlockDimScaleUp(SkTask &skTaskCube, SkTask &skTaskVec,
                                          const std::vector<SuperKernelBaseNode *> &tasks) {
-  auto updateTaskQue = [&](SkTask &skTask) {
+  auto updateTaskQue = [&](SkTask &skTask, SkQueueType queueType) {
+    SK_LOGI("ApplyBlockDimScaleUp: update %s task queue, numBlocks=%u", to_string(queueType), skTask.numBlocks);
     TaskQue *taskQue = skTask.GetTaskQue();
     for (uint32_t i = 0; i < taskQue->taskCnt; ++i) {
       TaskInfo &taskInfo = taskQue->taskInfos[i];
@@ -2230,13 +2231,19 @@ void SkTaskBuilder::ApplyBlockDimScaleUp(SkTask &skTaskCube, SkTask &skTaskVec,
       }
       if (relatedNode != nullptr && relatedNode->GetNodeType() == SkNodeType::NODE_KERNEL &&
           GetKernelInfos(relatedNode).capBits.blockDimScaleUp) {
+        const uint32_t originNumBlocks = taskInfo.numBlocks;
         taskInfo.numBlocks = skTask.numBlocks;
+        SK_LOGI(
+            "ApplyBlockDimScaleUp: funcName=%s, taskQueue=%s, taskType=%s, taskIndex=%u, numBlocks changed from %u "
+            "to %u",
+            GetKernelInfos(relatedNode).funcName.c_str(), to_string(queueType), to_string(taskInfo.type),
+            taskInfo.index, originNumBlocks, taskInfo.numBlocks);
       }
     }
   };
 
-  updateTaskQue(skTaskCube);
-  updateTaskQue(skTaskVec);
+  updateTaskQue(skTaskCube, SkQueueType::AIC);
+  updateTaskQue(skTaskVec, SkQueueType::AIV);
 }
 
 SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, bool useSimtEntry,

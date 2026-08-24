@@ -211,8 +211,7 @@ class SkTaskBuilder {
   // ========== DEBUG mode helpers ==========
   bool ApplyPerOpMaxCoreNum(const std::vector<SuperKernelBaseNode *> &tasks, SkTask &aicTask, SkTask &aivTask);
 
-  void ApplyBlockDimScaleUp(SkTask &skTaskCube, SkTask &skTaskVec,
-                            const std::vector<SuperKernelBaseNode *> &tasks);
+  void ApplyBlockDimScaleUp(SkTask &skTaskCube, SkTask &skTaskVec, const std::vector<SuperKernelBaseNode *> &tasks);
 
   // Helper: determine whether crossed sync can be removed
   bool JudgeRemoveCrossSync(size_t sendIdx, size_t recvIdx, bool isCubToVec);

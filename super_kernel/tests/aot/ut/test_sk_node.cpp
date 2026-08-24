@@ -1760,9 +1760,9 @@ TEST_F(SkNodeTest, ShouldDisableScheMode_Bit3OrBit4Set) {
       ShouldDisableScheMode(ParseKernelCapBits(1ULL << static_cast<uint8_t>(KernelCapBitOffset::DISABLE_SCHEMODE))));
   EXPECT_TRUE(
       ShouldDisableScheMode(ParseKernelCapBits(1ULL << static_cast<uint8_t>(KernelCapBitOffset::BLOCKDIM_SCALE_UP))));
-  EXPECT_TRUE(ShouldDisableScheMode(ParseKernelCapBits(
-      (1ULL << static_cast<uint8_t>(KernelCapBitOffset::DISABLE_SCHEMODE)) |
-      (1ULL << static_cast<uint8_t>(KernelCapBitOffset::BLOCKDIM_SCALE_UP)))));
+  EXPECT_TRUE(
+      ShouldDisableScheMode(ParseKernelCapBits((1ULL << static_cast<uint8_t>(KernelCapBitOffset::DISABLE_SCHEMODE)) |
+                                               (1ULL << static_cast<uint8_t>(KernelCapBitOffset::BLOCKDIM_SCALE_UP)))));
 }
 
 TEST_F(SkNodeTest, KernelInfos_IsSimtOpFlag) {

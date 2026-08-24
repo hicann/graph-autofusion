@@ -224,7 +224,7 @@ enum class KernelCapBitOffset : uint8_t {
   EARLY_START_SET_FLAG = 1,   // Bit 1: early start set flag
   DCCI = 2,                   // Bit 2: DCCI flag
   DISABLE_SCHEMODE = 3,       // Bit 3: disable ScheMode flag
-  BLOCKDIM_SCALE_UP = 4,       // Bit 4: scale up operator blockDim to SK blockDim
+  BLOCKDIM_SCALE_UP = 4,      // Bit 4: scale up operator blockDim to SK blockDim
 };
 
 struct KernelCapBits {

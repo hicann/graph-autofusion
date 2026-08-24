@@ -553,10 +553,9 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpOverwritesFuncAndPreloadAf
   std::vector<SuperKernelBaseNode *> tasks = {scaled, unchanged, skDriver};
 
   SkDfxInfo dfxInfos[3]{};
-  ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, scaled, &dfxInfos[0], 0, 1, SkTaskType::TYPE_PRELOAD,
-                                        SkQueueType::AIC));
   ASSERT_TRUE(
-      builder->DispatchFuncTask(aic, aiv, scaled, &dfxInfos[0], 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC));
+      builder->DispatchFuncTask(aic, aiv, scaled, &dfxInfos[0], 0, 1, SkTaskType::TYPE_PRELOAD, SkQueueType::AIC));
+  ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, scaled, &dfxInfos[0], 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC));
   ASSERT_TRUE(
       builder->DispatchFuncTask(aic, aiv, unchanged, &dfxInfos[1], 1, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC));
   ASSERT_TRUE(
@@ -2246,8 +2245,7 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpUpdatesRelatedEarlyStartSy
   ASSERT_TRUE(aiv.taskQue.Init(6));
   ASSERT_TRUE(builder->DispatchSyncTasks(aic, aiv, 0, earlyStartInfo, true, SkQueueType::AIC));
   SkDfxInfo dfxInfos[3]{};
-  ASSERT_TRUE(
-      builder->DispatchFuncTask(aic, aiv, scaled, &dfxInfos[0], 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC));
+  ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, scaled, &dfxInfos[0], 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC));
   ASSERT_TRUE(
       builder->DispatchFuncTask(aic, aiv, aicDriver, &dfxInfos[1], 1, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC));
   ASSERT_TRUE(
