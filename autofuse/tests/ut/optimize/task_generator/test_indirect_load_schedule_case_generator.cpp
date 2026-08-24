@@ -891,9 +891,6 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimtSetsDcacheAndUsesUnifiedVectoriz
   EXPECT_TRUE(behavior.skips_ub_lifecycle);
   EXPECT_TRUE(behavior.preserves_vectorized_axis);
   EXPECT_FALSE(ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(indirect_load));
-  EXPECT_FALSE(ascgen_utils::indirect_load::ShouldSkipMainScheduleTiling(indirect_load));
-  EXPECT_TRUE(ascgen_utils::indirect_load::ShouldPreserveVectorizedAxis(indirect_load));
-  EXPECT_TRUE(ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(indirect_load));
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, ClassifiesDenseLayout) {
@@ -993,24 +990,28 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, KeepsBroadcastElementPathForGeneralI
   }
 }
 
-TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsOuterInputBroadcastForSimd) {
+TEST(IndirectLoadScheduleCaseGeneratorTest, AcceptsOuterInputBroadcastForSimd) {
   auto graph = BuildIndirectLoadBroadcastGraph(false, false, 2L);
   optimize::IndirectLoadScheduleCaseGenerator generator;
   std::vector<af::AscGraph> graphs;
   std::vector<std::string> score_functions;
   ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
 
-  EXPECT_EQ(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd), graphs.end());
+  const auto simd = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, graphs.end());
+  EXPECT_NE(simd->FindNode("input_broadcast"), nullptr);
 }
 
-TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsDirectOuterIndexBroadcastForSimd) {
+TEST(IndirectLoadScheduleCaseGeneratorTest, AcceptsOuterIndexBroadcastForSimd) {
   auto graph = BuildIndirectLoadBroadcastGraph(false, true, 2L);
   optimize::IndirectLoadScheduleCaseGenerator generator;
   std::vector<af::AscGraph> graphs;
   std::vector<std::string> score_functions;
   ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
 
-  EXPECT_EQ(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd), graphs.end());
+  const auto simd = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd);
+  ASSERT_NE(simd, graphs.end());
+  EXPECT_NE(simd->FindNode("index_outer_broadcast"), nullptr);
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, SimtRewritesInputBroadcastAndSetsTemplateMetadata) {
@@ -1053,10 +1054,15 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastDirectPathUsesPhysicalViewF
   EXPECT_EQ(graphs.size(), 4UL);
   ASSERT_EQ(score_functions.size(), graphs.size());
   for (auto &candidate : graphs) {
-    EXPECT_EQ(candidate.FindNode("input_broadcast"), nullptr);
-    EXPECT_EQ(candidate.FindNode("broadcast_input_abs"), nullptr);
     const auto indirect_load = candidate.FindNode("indirect_load");
     ASSERT_NE(indirect_load, nullptr);
+    const auto template_id = ascir::GetTemplateIdOrDefault(*indirect_load);
+    if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
+      EXPECT_NE(candidate.FindNode("input_broadcast"), nullptr);
+    } else {
+      EXPECT_EQ(candidate.FindNode("input_broadcast"), nullptr);
+    }
+    EXPECT_EQ(candidate.FindNode("broadcast_input_abs"), nullptr);
     ascgen_utils::indirect_load::TemplateLogicalView logical_view;
     ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(indirect_load, logical_view), af::SUCCESS);
     EXPECT_EQ(logical_view.input.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact);
@@ -1068,7 +1074,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastDirectPathUsesPhysicalViewF
   ASSERT_EQ(generator.Generate(inner_graph, inner_graphs, inner_score_functions), af::SUCCESS);
   const auto inner_simd = FindGeneratedGraphByTemplate(inner_graphs, ascir::TemplateId::kIndirectLoadSimd);
   ASSERT_NE(inner_simd, inner_graphs.end());
-  EXPECT_EQ(inner_simd->FindNode("input_broadcast"), nullptr);
+  EXPECT_NE(inner_simd->FindNode("input_broadcast"), nullptr);
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, SimdDirectBroadcastUsesUnserializedTileSplit) {
@@ -1136,8 +1142,8 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, CompletesMissingDataViewAfterBroadca
   EXPECT_EQ(completed_input->outputs()[0]->attr.strides, input_load->outputs()[0]->attr.strides);
 }
 
-TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsBranchedBroadcastPaths) {
-  // 直连广播形态：广播本身与源的旁路消费者不能安全折叠，淘汰所有相关 candidate。
+TEST(IndirectLoadScheduleCaseGeneratorTest, BranchedBroadcastPathsKeepSimdCandidate) {
+  // SIMD 不折叠 Broadcast，因此 Broadcast 或其源节点存在旁路消费者时仍可保留 SIMD candidate。
   for (const char *producer_name : {"input_broadcast", "broadcast_input_load"}) {
     auto graph = BuildIndirectLoadBroadcastGraph(false);
     ASSERT_TRUE(AddSideConsumer(graph, producer_name));
@@ -1145,8 +1151,9 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsBranchedBroadcastPaths) {
     std::vector<af::AscGraph> graphs;
     std::vector<std::string> score_functions;
     EXPECT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS) << producer_name;
-    EXPECT_TRUE(graphs.empty()) << producer_name;
-    EXPECT_TRUE(score_functions.empty()) << producer_name;
+    EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd), graphs.end())
+        << producer_name;
+    EXPECT_EQ(score_functions.size(), graphs.size()) << producer_name;
   }
 }
 
@@ -1684,7 +1691,6 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratedSkCandidateUsesSkBehavior) 
   EXPECT_FALSE(behavior.uses_direct_gm_pipeline);
   EXPECT_FALSE(behavior.skips_ub_lifecycle);
   EXPECT_FALSE(behavior.preserves_vectorized_axis);
-  EXPECT_FALSE(ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(indirect_load));
 
   const auto input_boundary = ascgen_utils::indirect_load::GetInputProducer(indirect_load, 0UL);
   ASSERT_NE(input_boundary, nullptr);

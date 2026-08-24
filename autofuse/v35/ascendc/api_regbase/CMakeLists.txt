@@ -32,7 +32,7 @@ set(ascendc_api_regbase_extend_src
         airy_ai.h
         copy_sign.h
         erfcx.h
-        expm.h
+        expm1.h
         fmod.h
         neg.h
         square.h

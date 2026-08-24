@@ -28,7 +28,7 @@ using namespace af::ascir_op;
 
 namespace optimize {
 namespace {
-constexpr int64_t kGatherSimtDcacheSize = 32 * 1024;
+constexpr int64_t kSimtDcacheSize = 32 * 1024;
 
 static Status GetNodeIrAttrOffset(const af::NodePtr &node, af::Expression &offset) {
   auto asc_node = std::dynamic_pointer_cast<af::AscNode>(node);
@@ -80,6 +80,9 @@ void CompleteStoreApiInfo(af::AscNodePtr &node) {
 void CompleteElewiseApiInfo(af::AscNodePtr &node) {
   node->attr.api.type = af::ApiType::kAPITypeCompute;
   node->attr.api.unit = af::ComputeUnit::kUnitVector;
+  if (af::ops::IsOps<Expm1>(node)) {
+    (void)::ascir::SetDcacheSize(node, kSimtDcacheSize);
+  }
 }
 
 void CompleteBroadcastApiInfo(af::AscNodePtr &node) {
@@ -105,7 +108,7 @@ void CompleteSplitApiInfo(af::AscNodePtr &node) {
 void CompleteGatherApiInfo(af::AscNodePtr &node) {
   node->attr.api.type = af::ApiType::kAPITypeCompute;
   node->attr.api.unit = af::ComputeUnit::kUnitMTE2;
-  (void)::ascir::SetDcacheSize(node, kGatherSimtDcacheSize);
+  (void)::ascir::SetDcacheSize(node, kSimtDcacheSize);
 }
 
 void CompleteCubeApiInfo(af::AscNodePtr &node) {
@@ -164,6 +167,7 @@ static const std::map<std::string, af::ComputeType> kOpTypeToComputeType = {
     {Isnan::Type, af::ComputeType::kComputeElewise},
     {IsFinite::Type, af::ComputeType::kComputeElewise},
     {Ln::Type, af::ComputeType::kComputeElewise},
+    {Expm1::Type, af::ComputeType::kComputeElewise},
     {LogicalNot::Type, af::ComputeType::kComputeElewise},
 
     {Add::Type, af::ComputeType::kComputeElewise},

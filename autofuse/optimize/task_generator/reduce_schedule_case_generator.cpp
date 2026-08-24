@@ -296,7 +296,7 @@ Status ReducePartitionCaseGenerator::GeneratorTask(ascir::HintGraph &optimize_gr
                                                    const OptimizerOptions &options) {
   (void)options;
   const af::AscNodePtr indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(optimize_graph);
-  if (indirect_load != nullptr && ascgen_utils::indirect_load::HasPostReduceConsumer(indirect_load)) {
+  if (indirect_load != nullptr && ascgen_utils::indirect_load::GetPostReduceConsumer(indirect_load) != nullptr) {
     GELOGI("Graph %s has indirect load with post reduce consumer, skip reduce task generation.",
            optimize_graph.GetName().c_str());
     return ge::GRAPH_SUCCESS;

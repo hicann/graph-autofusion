@@ -1789,23 +1789,25 @@ class LnAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
-class ExpmAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
+class Expm1AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::string GetApiCallName() const override {
     return "UnaryApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "ExpmExtend";
+    return "Expm1Extend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Expm1";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"expm_reg_base.h"};
+    return {"expm1_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "basic_api/reg_compute/kernel_reg_compute_intf.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(

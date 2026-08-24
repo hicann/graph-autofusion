@@ -168,8 +168,8 @@ AscNodePtr AscGraphAddAscirNodeByType(AscGraph &asc_graph, const char *op_type, 
   if (type == ascir_op::Exp2::Type) {
     MAKE_NODE(Exp2);
   }
-  if (type == ascir_op::Expm::Type) {
-    MAKE_NODE(Expm);
+  if (type == ascir_op::Expm1::Type) {
+    MAKE_NODE(Expm1);
   }
   if (type == ascir_op::FlashSoftmax::Type) {
     MAKE_NODE(FlashSoftmax);

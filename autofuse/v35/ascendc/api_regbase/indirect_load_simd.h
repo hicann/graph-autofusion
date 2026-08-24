@@ -324,15 +324,17 @@ __aicore__ inline bool TryIndirectLoadSimdEmbedding(const LocalTensor<X> &x, con
                 sizeof(X) <= AscendC::ONE_BLK_SIZE) {
     const int64_t embedding_size = shape[1];
     const int64_t block_elements = static_cast<int64_t>(AscendC::ONE_BLK_SIZE / sizeof(X));
+    const int64_t input_row_stride = shape[2];
+    const int64_t index_row_stride = shape[4];
     const bool full_rows = embedding_size > 0 && embedding_size % block_elements == 0 && shape[2] == embedding_size &&
-                           shape[3] == 1 && shape[4] == 1 && shape[5] == 0 && output_offset % embedding_size == 0 &&
-                           actual_size % embedding_size == 0;
+                           shape[3] == 1 && index_row_stride > 0 && shape[5] == 0 &&
+                           output_offset % embedding_size == 0 && actual_size % embedding_size == 0;
     if (full_rows) {
       const int64_t first_row = output_offset / embedding_size;
       const uint32_t row_count = actual_size / static_cast<uint32_t>(embedding_size);
       for (uint32_t row = 0; row < row_count; ++row) {
-        const int64_t index_value = static_cast<int64_t>(index.GetValue(first_row + row));
-        const int64_t source_offset = index_value * embedding_size;
+        const int64_t index_value = static_cast<int64_t>(index.GetValue((first_row + row) * index_row_stride));
+        const int64_t source_offset = index_value * input_row_stride;
         AscendC::DataCopy(y[row * embedding_size], x[source_offset], static_cast<uint32_t>(embedding_size));
       }
       return true;

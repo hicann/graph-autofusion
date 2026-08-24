@@ -39,7 +39,7 @@ af::Status LoadToNddmaTemplate::Generate(const af::AscGraph &origin_graph,
     if (!af::ops::IsOps<af::ascir_op::Load>(node)) {
       continue;
     }
-    if (ascgen_utils::indirect_load::ShouldDisableRegularVectorFunc(node)) {
+    if (ascgen_utils::indirect_load::GetTemplateBehavior(node).uses_direct_gm_pipeline) {
       continue;
     }
     DiscontinuityInfo info;

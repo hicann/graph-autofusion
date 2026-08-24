@@ -264,7 +264,7 @@ __simt_callee__ __aicore__ inline Y IndirectLoadSimtCompute(__gm__ X *x, Context
   if constexpr (AddressPolicy::kUsesInputAxis) {
     input_offset += indirect_index * address_policy.input_axis_stride;
   }
-  return FusedBody::Output(x[input_offset], output_index, context);
+  return FusedBody::Output(x[input_offset], output_index, address.index_offset, context);
 }
 
 template <typename X, typename Y, typename FusedBody, typename Context, uint32_t ThreadNum, typename AddressPolicy>

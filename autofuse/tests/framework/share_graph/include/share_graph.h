@@ -183,7 +183,7 @@ struct ShareGraph {
                                                            af::DataType out_dtype);
   static af::ComputeGraphPtr CeilBf16FusedGraph(size_t dims_size);
   static af::ComputeGraphPtr CosBf16FusedGraph(size_t dims_size);
-  static af::ComputeGraphPtr ExpmBf16FusedGraph(size_t dims_size);
+  static af::ComputeGraphPtr Expm1Bf16FusedGraph(size_t dims_size);
   static af::ComputeGraphPtr AtanhBf16FusedGraph(size_t dims_size);
   static af::ComputeGraphPtr CoshBf16FusedGraph(size_t dims_size);
   static af::ComputeGraphPtr DigammaBf16FusedGraph(size_t dims_size);

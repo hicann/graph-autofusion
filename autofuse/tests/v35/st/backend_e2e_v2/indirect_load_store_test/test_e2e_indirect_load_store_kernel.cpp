@@ -8,6 +8,80 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
+#ifndef AUTOFUSE_TESTS_V35_ST_BACKEND_E2E_V2_INDIRECT_LOAD_STORE_TEST_INDIRECT_LOAD_KERNEL_TEST_COMMON_H_
+#define AUTOFUSE_TESTS_V35_ST_BACKEND_E2E_V2_INDIRECT_LOAD_STORE_TEST_INDIRECT_LOAD_KERNEL_TEST_COMMON_H_
+
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+#include <gtest/gtest.h>
+#include "tikicpulib.h"
+
+#include "autofuse_tiling_data.h"
+
+#if !defined(IL_CASE_STORE) && !defined(IL_CASE_MIXED)
+extern "C" int64_t AutofuseTiling(AutofuseTilingData *, uint32_t *, uint32_t *, uint32_t, uint32_t);
+#endif
+
+namespace indirect_load_test {
+inline void GmFree(void *ptr) {
+  AscendC::GmFree(ptr);
+}
+
+template <typename DataType, typename IndexType>
+struct KernelData {
+  KernelData(int64_t input_count, int64_t index_count, int64_t output_count)
+      : input(reinterpret_cast<DataType *>(AscendC::GmAlloc(input_count * sizeof(DataType))), GmFree),
+        index(reinterpret_cast<IndexType *>(AscendC::GmAlloc(index_count * sizeof(IndexType))), GmFree),
+        output(reinterpret_cast<DataType *>(AscendC::GmAlloc(output_count * sizeof(DataType))), GmFree),
+        expected(static_cast<size_t>(output_count)) {}
+
+  [[nodiscard]] bool IsValid() const {
+    return input != nullptr && index != nullptr && output != nullptr;
+  }
+
+  std::unique_ptr<DataType, decltype(&GmFree)> input;
+  std::unique_ptr<IndexType, decltype(&GmFree)> index;
+  std::unique_ptr<DataType, decltype(&GmFree)> output;
+  std::vector<DataType> expected;
+};
+
+#if !defined(IL_CASE_STORE) && !defined(IL_CASE_MIXED)
+struct KernelTiling {
+  KernelTiling() : workspace(nullptr, GmFree) {
+    EXPECT_EQ(AutofuseTiling(&data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+    EXPECT_GT(data.block_dim, 0U);
+    if (workspace_size != 0U) {
+      workspace.reset(reinterpret_cast<uint8_t *>(AscendC::GmAlloc(workspace_size)));
+    }
+  }
+
+  [[nodiscard]] bool IsValid() const {
+    return workspace_size == 0U || workspace != nullptr;
+  }
+
+  AutofuseTilingData data{};
+  uint32_t workspace_size = 0U;
+  uint32_t block_dim = 48U;
+  std::unique_ptr<uint8_t, decltype(&GmFree)> workspace;
+};
+#endif
+}  // namespace indirect_load_test
+
+#endif  // AUTOFUSE_TESTS_V35_ST_BACKEND_E2E_V2_INDIRECT_LOAD_STORE_TEST_INDIRECT_LOAD_KERNEL_TEST_COMMON_H_
+
+#if defined(IL_CASE_STORE) || defined(IL_CASE_MIXED)
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -496,3 +570,820 @@ TEST(E2EIndirectLoadStore, GeneratedKernelMatchesReference) {
   }
 #endif
 }
+
+#endif
+
+#if defined(IL_CASE_BROADCAST)
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+
+#ifndef IL_COMPLEX_BROADCAST
+#define IL_COMPLEX_BROADCAST 0
+#endif
+#ifndef IL_COMPLEX_SIMT
+#define IL_COMPLEX_SIMT 0
+#endif
+#ifndef IL_COMPLEX_INPUT_BROADCAST
+#define IL_COMPLEX_INPUT_BROADCAST 0
+#endif
+#ifndef IL_COMPLEX_INDEX_BROADCAST
+#define IL_COMPLEX_INDEX_BROADCAST 0
+#endif
+#ifndef IL_BINARY_ELEMENT_KIND
+#define IL_BINARY_ELEMENT_KIND 0
+#endif
+#ifndef IL_RETAIN_BROADCAST
+#define IL_RETAIN_BROADCAST 0
+#endif
+#ifndef IL_BROADCAST_POST_REDUCE
+#define IL_BROADCAST_POST_REDUCE 0
+#endif
+#ifndef IL_INPUT_ABS_BEFORE_BROADCAST
+#define IL_INPUT_ABS_BEFORE_BROADCAST 0
+#endif
+#ifndef IL_OUTPUT_S0
+#define IL_OUTPUT_S0 4
+#endif
+#ifndef IL_OUTPUT_S1
+#define IL_OUTPUT_S1 5
+#endif
+#ifndef IL_OUTPUT_S2
+#define IL_OUTPUT_S2 4
+#endif
+#ifndef IL_OUTPUT_S3
+#define IL_OUTPUT_S3 16
+#endif
+
+#if IL_AIC_REPRO
+extern "C" __global__ __aicore__ void indirect_load_aic_repro(GM_ADDR input, GM_ADDR index, GM_ADDR output,
+                                                              GM_ADDR workspace, GM_ADDR tiling);
+#else
+extern "C" __global__ __aicore__ void indirect_load_broadcast_test(GM_ADDR x, GM_ADDR index, GM_ADDR y,
+                                                                   GM_ADDR workspace, GM_ADDR tiling);
+#endif
+
+namespace {
+#if IL_AIC_REPRO
+using DataType = float;
+using IndexType = int64_t;
+constexpr int32_t kInputRows = 100000;
+constexpr int32_t kRows = 1024;
+constexpr int32_t kColumns = 1024;
+
+void InitializeAicReproData(DataType *input, IndexType *index, DataType *expected) {
+  for (int32_t row = 0; row < kInputRows; ++row) {
+    for (int32_t column = 0; column < kColumns; ++column) {
+      input[static_cast<int64_t>(row) * kColumns + column] =
+          static_cast<DataType>((row % 97) * 0.25F + (column % 31) * 0.03125F);
+    }
+  }
+  for (int32_t row = 0; row < kRows; ++row) {
+    index[row] = static_cast<IndexType>((static_cast<int64_t>(row) * 97 + 13) % kInputRows);
+    for (int32_t column = 0; column < kColumns; ++column) {
+      const int64_t output_offset = static_cast<int64_t>(row) * kColumns + column;
+      expected[output_offset] = input[index[row] * kColumns + column];
+    }
+  }
+}
+#else
+using DataType = half;
+using IndexType = int64_t;
+constexpr std::array<int32_t, 4> kOutputShape = {IL_OUTPUT_S0, IL_OUTPUT_S1, IL_OUTPUT_S2, IL_OUTPUT_S3};
+constexpr bool kInputBroadcast = IL_INPUT_BROADCAST;
+constexpr bool kIndexBroadcast = IL_INDEX_BROADCAST;
+constexpr bool kComplexBroadcast = IL_COMPLEX_BROADCAST;
+constexpr bool kComplexSimt = IL_COMPLEX_SIMT;
+constexpr bool kComplexInputBroadcast = IL_COMPLEX_INPUT_BROADCAST;
+constexpr bool kComplexIndexBroadcast = IL_COMPLEX_INDEX_BROADCAST;
+constexpr int32_t kBinaryElementKind = IL_BINARY_ELEMENT_KIND;
+constexpr bool kRetainBroadcast = IL_RETAIN_BROADCAST;
+constexpr bool kBroadcastPostReduce = IL_BROADCAST_POST_REDUCE;
+constexpr bool kInputAbsBeforeBroadcast = IL_INPUT_ABS_BEFORE_BROADCAST;
+constexpr uint32_t kBroadcastAxesMask = IL_BROADCAST_AXES_MASK;
+
+constexpr std::array<int32_t, 4> MakeBroadcastSourceShape() {
+  auto shape = kOutputShape;
+  for (size_t dim = 0UL; dim < shape.size(); ++dim) {
+    if ((kBroadcastAxesMask & (1U << dim)) != 0U) {
+      shape[dim] = 1;
+    }
+  }
+  return shape;
+}
+
+constexpr std::array<int32_t, 4> kBroadcastSourceShape = MakeBroadcastSourceShape();
+constexpr std::array<int32_t, 4> kInputShape = kInputBroadcast && !kComplexSimt ? kBroadcastSourceShape : kOutputShape;
+constexpr std::array<int32_t, 4> kIndexShape = kIndexBroadcast ? kBroadcastSourceShape : kOutputShape;
+constexpr int32_t kInputElementCount = IL_HAS_INPUT_ELEMENT;
+constexpr int32_t kIndexElementCount = IL_HAS_INDEX_ELEMENT;
+constexpr bool kHasOutputRelu = IL_HAS_OUTPUT_RELU;
+
+template <size_t N>
+int32_t ElementCount(const std::array<int32_t, N> &shape) {
+  int32_t count = 1;
+  for (const int32_t dim : shape) {
+    count *= dim;
+  }
+  return count;
+}
+
+int32_t ResultCount() {
+  if constexpr (kBroadcastPostReduce) {
+    return kOutputShape[0] * kOutputShape[1];
+  }
+  return ElementCount(kOutputShape);
+}
+
+int32_t DenseOffset(const std::array<int32_t, 4> &coordinate, const std::array<int32_t, 4> &shape) {
+  int32_t offset = 0;
+  for (size_t dim = 0UL; dim < coordinate.size(); ++dim) {
+    offset = offset * shape[dim] + coordinate[dim];
+  }
+  return offset;
+}
+
+void InitializeData(DataType *x, IndexType *index, DataType *expected) {
+  for (int32_t i = 0; i < ElementCount(kInputShape); ++i) {
+    x[i] = static_cast<DataType>(static_cast<float>((i % 29) - 14) * 0.25F);
+  }
+  for (int32_t i = 0; i < ElementCount(kIndexShape); ++i) {
+    const int32_t gathered_axis = (i * 3 + 1) % kInputShape[2];
+    index[i] = static_cast<IndexType>(kIndexElementCount == 0 || i % 2 == 0 ? gathered_axis : -gathered_axis);
+  }
+  for (int32_t i = 0; i < ElementCount(kOutputShape); ++i) {
+    int32_t coordinate = i;
+    const int32_t d = coordinate % kOutputShape[3];
+    coordinate /= kOutputShape[3];
+    const int32_t c = coordinate % kOutputShape[2];
+    coordinate /= kOutputShape[2];
+    const int32_t b = coordinate % kOutputShape[1];
+    coordinate /= kOutputShape[1];
+    const int32_t a = coordinate;
+    std::array<int32_t, 4> index_coordinate = {a, b, c, d};
+    if (kIndexBroadcast) {
+      for (size_t dim = 0UL; dim < index_coordinate.size(); ++dim) {
+        if ((kBroadcastAxesMask & (1U << dim)) != 0U) {
+          index_coordinate[dim] = 0;
+        }
+      }
+    }
+    const int32_t index_offset = DenseOffset(index_coordinate, kIndexShape);
+    int64_t gathered_index = static_cast<int64_t>(index[index_offset]);
+    if constexpr (kComplexIndexBroadcast) {
+      if constexpr (kBinaryElementKind == 1) {
+        gathered_index = 0;
+      } else if constexpr (kBinaryElementKind == 3) {
+        gathered_index = std::max(gathered_index, int64_t{0});
+      }
+    }
+    for (int32_t element = 0; element < kIndexElementCount; ++element) {
+      gathered_index = std::abs(gathered_index);
+    }
+    const int32_t gathered_axis = static_cast<int32_t>(gathered_index);
+    std::array<int32_t, 4> input_coordinate = {a, b, gathered_axis, d};
+    if (kInputBroadcast && !kComplexSimt) {
+      for (size_t dim = 0UL; dim < input_coordinate.size(); ++dim) {
+        if ((kBroadcastAxesMask & (1U << dim)) != 0U) {
+          input_coordinate[dim] = 0;
+        }
+      }
+    }
+    const int32_t input_offset = DenseOffset(input_coordinate, kInputShape);
+    float value = static_cast<float>(x[input_offset]);
+    if constexpr (kInputAbsBeforeBroadcast) {
+      value = std::abs(value);
+    }
+    if constexpr (kComplexInputBroadcast) {
+      if constexpr (kBinaryElementKind == 1) {
+        value = 0.0F;
+      } else if constexpr (kBinaryElementKind == 3) {
+        value = std::max(value, 0.0F);
+      }
+    }
+    if (kRetainBroadcast) {
+      value += 1.5F;
+    } else if (kComplexBroadcast && !kComplexSimt) {
+      value = value * 2.0F + 1.5F;
+    } else if (kComplexSimt) {
+      value += 1.5F;
+    }
+    for (int32_t element = 0; element < kInputElementCount; ++element) {
+      value = std::abs(value);
+    }
+    if (kHasOutputRelu) {
+      value = std::max(value, 0.0F);
+    }
+    if constexpr (kBroadcastPostReduce) {
+      const int32_t result_offset = a * kOutputShape[1] + b;
+      expected[result_offset] = static_cast<DataType>(static_cast<float>(expected[result_offset]) + value);
+    } else {
+      expected[i] = static_cast<DataType>(value);
+    }
+  }
+}
+#endif
+}  // namespace
+
+TEST(E2EIndirectLoadBroadcast, GeneratedKernelMatchesReference) {
+#if IL_AIC_REPRO
+  constexpr int64_t input_count = static_cast<int64_t>(kInputRows) * kColumns;
+  constexpr int64_t index_count = kRows;
+  constexpr int64_t output_count = static_cast<int64_t>(kRows) * kColumns;
+  indirect_load_test::KernelData<DataType, IndexType> buffers(input_count, index_count, output_count);
+  ASSERT_TRUE(buffers.IsValid());
+  InitializeAicReproData(buffers.input.get(), buffers.index.get(), buffers.expected.data());
+  std::fill_n(buffers.output.get(), output_count, 0.0F);
+  indirect_load_test::KernelTiling tiling;
+  ASSERT_TRUE(tiling.IsValid());
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_aic_repro, tiling.data.block_dim, reinterpret_cast<uint8_t *>(buffers.input.get()),
+              reinterpret_cast<uint8_t *>(buffers.index.get()), reinterpret_cast<uint8_t *>(buffers.output.get()),
+              tiling.workspace.get(), reinterpret_cast<uint8_t *>(&tiling.data));
+  for (int64_t i = 0; i < output_count; ++i) {
+    EXPECT_FLOAT_EQ(buffers.output.get()[i], buffers.expected[static_cast<size_t>(i)]) << "offset=" << i;
+  }
+#else
+  const int32_t input_count = ElementCount(kInputShape);
+  const int32_t index_count = ElementCount(kIndexShape);
+  const int32_t output_count = ResultCount();
+  indirect_load_test::KernelData<DataType, IndexType> buffers(input_count, index_count, output_count);
+  ASSERT_TRUE(buffers.IsValid());
+  InitializeData(buffers.input.get(), buffers.index.get(), buffers.expected.data());
+  std::fill_n(buffers.output.get(), output_count, static_cast<DataType>(0.0F));
+  indirect_load_test::KernelTiling tiling;
+  ASSERT_TRUE(tiling.IsValid());
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_broadcast_test, tiling.data.block_dim, reinterpret_cast<uint8_t *>(buffers.input.get()),
+              reinterpret_cast<uint8_t *>(buffers.index.get()), reinterpret_cast<uint8_t *>(buffers.output.get()),
+              tiling.workspace.get(), reinterpret_cast<uint8_t *>(&tiling.data));
+  for (int32_t i = 0; i < output_count; ++i) {
+    EXPECT_NEAR(static_cast<float>(buffers.output.get()[i]),
+                static_cast<float>(buffers.expected[static_cast<size_t>(i)]), 0.0625F)
+        << "offset=" << i;
+  }
+#endif
+}
+
+#endif
+
+#if defined(IL_CASE_BROADCAST_WHERE)
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include <cstdint>
+
+#include <gtest/gtest.h>
+#include "tikicpulib.h"
+
+#include "autofuse_tiling_data.h"
+
+extern "C" int64_t AutofuseTiling(AutofuseTilingData *, uint32_t *, uint32_t *, uint32_t, uint32_t);
+
+#ifndef IL_ADD_IL_REDUCE
+#ifdef IL_EMBEDDING_REDUCE
+extern "C" __global__ __aicore__ void indirect_load_embedding_reduce_simt_test(GM_ADDR input0, GM_ADDR input1,
+                                                                               GM_ADDR input2, GM_ADDR output,
+                                                                               GM_ADDR workspace, GM_ADDR tiling);
+#else
+extern "C" __global__ __aicore__ void indirect_load_broadcast_index_where_simt_test(GM_ADDR input0, GM_ADDR input1,
+                                                                                    GM_ADDR input2, GM_ADDR output,
+                                                                                    GM_ADDR workspace, GM_ADDR tiling);
+#endif
+#else
+extern "C" __global__ __aicore__ void indirect_load_add_il_reduce_test(GM_ADDR input0, GM_ADDR input1, GM_ADDR input2,
+                                                                       GM_ADDR output, GM_ADDR workspace,
+                                                                       GM_ADDR tiling);
+#endif
+
+namespace {
+#ifndef IL_ADD_IL_REDUCE
+#ifdef IL_EMBEDDING_REDUCE
+constexpr int32_t kEmbRows = 2;
+constexpr int32_t kEmbColumns = 2;
+constexpr int32_t kEmbReduceSize = 2;
+constexpr int32_t kEmbTableRows = 4;
+
+TEST(E2EIndirectLoadEmbeddingReduce, GeneratedKernelMatchesReference) {
+  const int64_t index_count = static_cast<int64_t>(kEmbRows) * kEmbReduceSize;
+  const int64_t table_count = static_cast<int64_t>(kEmbTableRows) * kEmbColumns;
+  const int64_t output_count = static_cast<int64_t>(kEmbRows) * kEmbColumns;
+  auto *index0 = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * index_count));
+  auto *table = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * table_count));
+  auto *unused_input = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * index_count));
+  auto *output = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * output_count));
+  ASSERT_NE(index0, nullptr);
+  ASSERT_NE(table, nullptr);
+  ASSERT_NE(unused_input, nullptr);
+  ASSERT_NE(output, nullptr);
+
+  for (int32_t row = 0; row < kEmbTableRows; ++row) {
+    for (int32_t col = 0; col < kEmbColumns; ++col) {
+      table[static_cast<int64_t>(row) * kEmbColumns + col] = static_cast<float>(row * kEmbColumns + col);
+    }
+  }
+  for (int32_t p0 = 0; p0 < kEmbRows; ++p0) {
+    for (int32_t p2 = 0; p2 < kEmbReduceSize; ++p2) {
+      const int32_t pos = p0 * kEmbReduceSize + p2;
+      index0[pos] = static_cast<int64_t>((p0 * kEmbReduceSize + p2) % kEmbTableRows);
+      unused_input[pos] = 0;
+    }
+  }
+
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0;
+  uint32_t block_dim = 48;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_embedding_reduce_simt_test, block_dim, reinterpret_cast<uint8_t *>(index0),
+              reinterpret_cast<uint8_t *>(table), reinterpret_cast<uint8_t *>(unused_input),
+              reinterpret_cast<uint8_t *>(output), reinterpret_cast<uint8_t *>(workspace),
+              reinterpret_cast<uint8_t *>(&tiling_data));
+
+  for (int32_t p0 = 0; p0 < kEmbRows; ++p0) {
+    for (int32_t p1 = 0; p1 < kEmbColumns; ++p1) {
+      float expected = 0.0F;
+      for (int32_t p2 = 0; p2 < kEmbReduceSize; ++p2) {
+        const int64_t idx = index0[p0 * kEmbReduceSize + p2];
+        expected += table[idx * kEmbColumns + p1] * (idx >= 0 ? 1.0F : 0.0F);
+      }
+      const int64_t offset = static_cast<int64_t>(p0) * kEmbColumns + p1;
+      EXPECT_NEAR(output[offset], expected, 0.0625F) << "p0=" << p0 << ", p1=" << p1;
+    }
+  }
+
+  if (workspace != nullptr) {
+    AscendC::GmFree(workspace);
+  }
+  AscendC::GmFree(index0);
+  AscendC::GmFree(table);
+  AscendC::GmFree(unused_input);
+  AscendC::GmFree(output);
+}
+#else
+constexpr int32_t kRows = 6400;
+constexpr int32_t kColumns = 32;
+constexpr int32_t kTableRows = 315511;
+
+TEST(E2EIndirectLoadBroadcastWhere, GeneratedKernelMatchesReference) {
+  const int64_t table_count = static_cast<int64_t>(kTableRows) * kColumns;
+  const int64_t output_count = static_cast<int64_t>(kRows) * kColumns;
+  auto *index0 = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kRows));
+  auto *table = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * table_count));
+  auto *index2 = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kRows));
+  auto *output = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * output_count));
+  ASSERT_NE(index0, nullptr);
+  ASSERT_NE(table, nullptr);
+  ASSERT_NE(index2, nullptr);
+  ASSERT_NE(output, nullptr);
+
+  for (int32_t row = 0; row < kTableRows; ++row) {
+    for (int32_t column = 0; column < kColumns; ++column) {
+      table[static_cast<int64_t>(row) * kColumns + column] =
+          static_cast<float>((row % 97) * 0.25F + (column % 31) * 0.03125F);
+    }
+  }
+  for (int32_t row = 0; row < kRows; ++row) {
+    index0[row] = row % 2 == 0 ? -1 : static_cast<int64_t>((row * 17 + 3) % kTableRows);
+    index2[row] = static_cast<int64_t>((row * 29 + 7) % kTableRows);
+  }
+
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0;
+  uint32_t block_dim = 48;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_broadcast_index_where_simt_test, block_dim, reinterpret_cast<uint8_t *>(index0),
+              reinterpret_cast<uint8_t *>(table), reinterpret_cast<uint8_t *>(index2),
+              reinterpret_cast<uint8_t *>(output), reinterpret_cast<uint8_t *>(workspace),
+              reinterpret_cast<uint8_t *>(&tiling_data));
+
+  for (int32_t row = 0; row < kRows; ++row) {
+    const int64_t selected = index0[row] == -1 ? index2[row] : index0[row];
+    for (int32_t column = 0; column < kColumns; ++column) {
+      const int64_t offset = static_cast<int64_t>(row) * kColumns + column;
+      const float expected = table[selected * kColumns + column];
+      EXPECT_FLOAT_EQ(output[offset], expected) << "row=" << row << ", column=" << column;
+    }
+  }
+
+  if (workspace != nullptr) {
+    AscendC::GmFree(workspace);
+  }
+  AscendC::GmFree(index0);
+  AscendC::GmFree(table);
+  AscendC::GmFree(index2);
+  AscendC::GmFree(output);
+}
+#endif  // IL_EMBEDDING_REDUCE
+#else
+constexpr int32_t kAddIlReduceRows = 4;
+constexpr int32_t kAddIlReduceColumns = 16;
+constexpr int32_t kAddIlReduceTableRows = 8;
+
+TEST(E2EIndirectLoadAddIlReduce, GeneratedKernelMatchesReference) {
+  const int64_t table_count = static_cast<int64_t>(kAddIlReduceTableRows) * kAddIlReduceColumns;
+  auto *index0 = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kAddIlReduceRows));
+  auto *table = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * table_count));
+  auto *offset = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kAddIlReduceRows));
+  auto *output = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kAddIlReduceRows));
+  ASSERT_NE(index0, nullptr);
+  ASSERT_NE(table, nullptr);
+  ASSERT_NE(offset, nullptr);
+  ASSERT_NE(output, nullptr);
+
+  for (int32_t row = 0; row < kAddIlReduceTableRows; ++row) {
+    for (int32_t column = 0; column < kAddIlReduceColumns; ++column) {
+      table[row * kAddIlReduceColumns + column] = static_cast<float>(row * kAddIlReduceColumns + column);
+    }
+  }
+  for (int32_t row = 0; row < kAddIlReduceRows; ++row) {
+    index0[row] = static_cast<int64_t>((row * 3) % kAddIlReduceTableRows);
+    offset[row] = row % 2 == 0 ? 1 : -1;
+  }
+
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0;
+  uint32_t block_dim = 48;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_add_il_reduce_test, block_dim, reinterpret_cast<uint8_t *>(index0),
+              reinterpret_cast<uint8_t *>(table), reinterpret_cast<uint8_t *>(offset),
+              reinterpret_cast<uint8_t *>(output), reinterpret_cast<uint8_t *>(workspace),
+              reinterpret_cast<uint8_t *>(&tiling_data));
+
+  for (int32_t row = 0; row < kAddIlReduceRows; ++row) {
+    // 与图语义一致：FLOAT 域做 Add 后 Cast 回 INT64 作为 gather 行号。
+    const int64_t selected = static_cast<int64_t>(static_cast<float>(index0[row]) + static_cast<float>(offset[row]));
+    float expected = 0.0F;
+    for (int32_t column = 0; column < kAddIlReduceColumns; ++column) {
+      expected += table[selected * kAddIlReduceColumns + column];
+    }
+    EXPECT_NEAR(output[row], expected, 0.0625F) << "row=" << row;
+  }
+
+  if (workspace != nullptr) {
+    AscendC::GmFree(workspace);
+  }
+  AscendC::GmFree(index0);
+  AscendC::GmFree(table);
+  AscendC::GmFree(offset);
+  AscendC::GmFree(output);
+}
+#endif  // IL_ADD_IL_REDUCE
+}  // namespace
+
+#endif
+
+#if defined(IL_CASE_STRIDE_ZERO)
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+
+extern "C" __global__ __aicore__ void indirect_load_stride_zero_test(GM_ADDR x, GM_ADDR index, GM_ADDR y,
+                                                                     GM_ADDR workspace, GM_ADDR tiling);
+
+namespace {
+using DataType = half;
+using IndexType = int64_t;
+constexpr std::array<int64_t, 4> kShape = {4, 5, 4, 16};
+constexpr uint32_t kInputZeroStrideMask = IL_INPUT_ZERO_STRIDE_MASK;
+constexpr uint32_t kIndexZeroStrideMask = IL_INDEX_ZERO_STRIDE_MASK;
+constexpr bool kHasInputElement = IL_HAS_INPUT_ELEMENT > 0;
+constexpr bool kHasIndexElement = IL_HAS_INDEX_ELEMENT > 0;
+
+std::array<int64_t, 4> MakeStrides(uint32_t zero_stride_mask) {
+  std::array<int64_t, 4> strides{};
+  int64_t stride = 1;
+  for (size_t index = kShape.size(); index > 0UL; --index) {
+    const size_t dim = index - 1UL;
+    if ((zero_stride_mask & (1U << dim)) == 0U) {
+      strides[dim] = stride;
+      stride *= kShape[dim];
+    }
+  }
+  return strides;
+}
+
+int64_t StorageSpan(const std::array<int64_t, 4> &strides) {
+  int64_t span = 1;
+  for (size_t dim = 0; dim < kShape.size(); ++dim) {
+    span += (kShape[dim] - 1) * strides[dim];
+  }
+  return span;
+}
+
+int64_t Offset(const std::array<int64_t, 4> &coordinate, const std::array<int64_t, 4> &strides) {
+  int64_t offset = 0;
+  for (size_t dim = 0; dim < coordinate.size(); ++dim) {
+    offset += coordinate[dim] * strides[dim];
+  }
+  return offset;
+}
+
+void InitializeData(DataType *x, IndexType *index, DataType *expected, const std::array<int64_t, 4> &input_strides,
+                    const std::array<int64_t, 4> &index_strides) {
+  const int64_t input_count = StorageSpan(input_strides);
+  const int64_t index_count = StorageSpan(index_strides);
+  for (int64_t i = 0; i < input_count; ++i) {
+    x[i] = static_cast<DataType>(static_cast<float>((i % 37) - 18) * 0.25F);
+  }
+  for (int64_t i = 0; i < index_count; ++i) {
+    const int64_t gathered_axis = (i * 3 + 1) % kShape[2];
+    index[i] = kHasIndexElement && (i % 2 == 1) ? -gathered_axis : gathered_axis;
+  }
+
+  const int64_t output_count = kShape[0] * kShape[1] * kShape[2] * kShape[3];
+  for (int64_t output_offset = 0; output_offset < output_count; ++output_offset) {
+    int64_t linear = output_offset;
+    const int64_t d = linear % kShape[3];
+    linear /= kShape[3];
+    const int64_t c = linear % kShape[2];
+    linear /= kShape[2];
+    const int64_t b = linear % kShape[1];
+    const int64_t a = linear / kShape[1];
+    std::array<int64_t, 4> coordinate = {a, b, c, d};
+    int64_t gathered_axis = index[Offset(coordinate, index_strides)];
+    if (kHasIndexElement) {
+      gathered_axis = std::abs(gathered_axis);
+    }
+    coordinate[2] = gathered_axis;
+    float value = static_cast<float>(x[Offset(coordinate, input_strides)]);
+    if (kHasInputElement) {
+      value = std::abs(value);
+    }
+    expected[output_offset] = static_cast<DataType>(std::max(value, 0.0F));
+  }
+}
+}  // namespace
+
+TEST(E2EIndirectLoadStrideZero, GeneratedKernelMatchesPhysicalStrideReference) {
+  const auto dense_strides = MakeStrides(0U);
+  const auto input_strides = MakeStrides(kInputZeroStrideMask);
+  const auto index_strides = MakeStrides(kIndexZeroStrideMask);
+  const int64_t input_count = StorageSpan(input_strides);
+  const int64_t index_count = StorageSpan(index_strides);
+  const int64_t output_count = StorageSpan(dense_strides);
+  indirect_load_test::KernelData<DataType, IndexType> buffers(input_count, index_count, output_count);
+  ASSERT_TRUE(buffers.IsValid());
+  InitializeData(buffers.input.get(), buffers.index.get(), buffers.expected.data(), input_strides, index_strides);
+  std::fill_n(buffers.output.get(), output_count, static_cast<DataType>(0.0F));
+  indirect_load_test::KernelTiling tiling;
+  ASSERT_TRUE(tiling.IsValid());
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_stride_zero_test, tiling.data.block_dim, reinterpret_cast<uint8_t *>(buffers.input.get()),
+              reinterpret_cast<uint8_t *>(buffers.index.get()), reinterpret_cast<uint8_t *>(buffers.output.get()),
+              tiling.workspace.get(), reinterpret_cast<uint8_t *>(&tiling.data));
+  for (int64_t i = 0; i < output_count; ++i) {
+    EXPECT_NEAR(static_cast<float>(buffers.output.get()[i]),
+                static_cast<float>(buffers.expected[static_cast<size_t>(i)]), 0.0625F)
+        << "offset=" << i;
+  }
+}
+
+#endif
+
+#if defined(IL_CASE_TORCH_STRIDED)
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+#include <gtest/gtest.h>
+#include "tikicpulib.h"
+
+#include "autofuse_tiling_data.h"
+
+extern "C" __global__ __aicore__ void indirect_load_torch_gather_strided_test(GM_ADDR data, GM_ADDR index,
+                                                                              GM_ADDR output, GM_ADDR workspace,
+                                                                              GM_ADDR tiling);
+extern "C" int64_t AutofuseTiling(AutofuseTilingData *, uint32_t *, uint32_t *, uint32_t, uint32_t);
+
+namespace {
+constexpr int32_t kInputStride0 = IL_INPUT_STRIDE0;
+constexpr int32_t kInputStride1 = IL_INPUT_STRIDE1;
+constexpr int32_t kInputStride2 = IL_INPUT_STRIDE2;
+constexpr int32_t kIndexStride0 = IL_INDEX_STRIDE0;
+constexpr int32_t kIndexStride1 = IL_INDEX_STRIDE1;
+constexpr int32_t kIndexStride2 = IL_INDEX_STRIDE2;
+#ifdef IL_INDEX_SELECT_CASE
+constexpr int32_t kEffectiveInputStride0 = 138;
+constexpr int32_t kEffectiveInputStride1 = 23;
+constexpr int32_t kEffectiveInputStride2 = 1;
+#else
+constexpr int32_t kEffectiveInputStride0 = kInputStride0;
+constexpr int32_t kEffectiveInputStride1 = kInputStride1;
+constexpr int32_t kEffectiveInputStride2 = kInputStride2;
+#endif
+#ifdef IL_INDEX_SELECT_CASE
+constexpr int32_t kDim0 = 30;
+constexpr int32_t kInputDim1 = 6;
+constexpr int32_t kOutputDim1 = 3;
+constexpr int32_t kDim2 = 23;
+#else
+constexpr int32_t kDim0 = 8;
+constexpr int32_t kInputDim1 = 32;
+constexpr int32_t kOutputDim1 = 16;
+constexpr int32_t kDim2 = 5;
+#endif
+#ifdef IL_INDEX_SELECT_CASE
+constexpr int32_t kInputStorageSize = kDim0 * kInputDim1 * kDim2;
+constexpr int32_t kIndexStorageSize = kOutputDim1;
+constexpr int32_t kOutputSize = kDim0 * kOutputDim1 * kDim2;
+#else
+constexpr int32_t kInputStorageSize = (8 - 1) * kInputStride0 + (32 - 1) * kInputStride1 + (5 - 1) * kInputStride2 + 1;
+constexpr int32_t kIndexStorageSize = (8 - 1) * kIndexStride0 + (16 - 1) * kIndexStride1 + (5 - 1) * kIndexStride2 + 1;
+constexpr int32_t kOutputSize = 8 * 16 * 5;
+#endif
+
+void Initialize(float *data, int64_t *index, std::vector<float> &expected) {
+  for (int32_t i = 0; i < kInputStorageSize; ++i) {
+    data[i] = 1.0F + static_cast<float>((i * 37) % 997) / 997.0F;
+  }
+  std::fill_n(index, kIndexStorageSize, int64_t{0});
+  for (int32_t a0 = 0; a0 < kDim0; ++a0) {
+    for (int32_t a1 = 0; a1 < kOutputDim1; ++a1) {
+      for (int32_t a2 = 0; a2 < kDim2; ++a2) {
+        const int32_t output_offset = kOutputDim1 * kDim2 * a0 + kDim2 * a1 + a2;
+#ifdef IL_INDEX_SELECT_CASE
+        const int32_t index_offset = a1;
+        const int64_t index_value = (a1 * 2 + 1) % kInputDim1;
+#else
+        const int32_t index_offset = kIndexStride0 * a0 + kIndexStride1 * a1 + kIndexStride2 * a2;
+        const int64_t index_value = (a0 * 17 + a1 * 7 + a2 * 3) % 32;
+#endif
+        index[index_offset] = index_value;
+        expected[static_cast<size_t>(output_offset)] =
+            data[kEffectiveInputStride0 * a0 + kEffectiveInputStride1 * index_value + kEffectiveInputStride2 * a2];
+      }
+    }
+  }
+}
+}  // namespace
+
+TEST(E2EIndirectLoadTorchGatherStrided, GeneratedKernelMatchesReference) {
+  const auto gm_free = [](void *ptr) { AscendC::GmFree(ptr); };
+  std::unique_ptr<float, decltype(gm_free)> data(
+      reinterpret_cast<float *>(AscendC::GmAlloc(kInputStorageSize * sizeof(float))), gm_free);
+  std::unique_ptr<int64_t, decltype(gm_free)> index(
+      reinterpret_cast<int64_t *>(AscendC::GmAlloc(kIndexStorageSize * sizeof(int64_t))), gm_free);
+  std::unique_ptr<float, decltype(gm_free)> output(
+      reinterpret_cast<float *>(AscendC::GmAlloc(kOutputSize * sizeof(float))), gm_free);
+  ASSERT_NE(data, nullptr);
+  ASSERT_NE(index, nullptr);
+  ASSERT_NE(output, nullptr);
+
+  std::vector<float> expected(kOutputSize);
+  Initialize(data.get(), index.get(), expected);
+  std::fill_n(output.get(), kOutputSize, 0.0F);
+
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0U;
+  uint32_t block_dim = 48U;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+#if IL_EXPECT_SIMT
+  ASSERT_EQ(tiling_data.get_tiling_key(), static_cast<uint32_t>(IL_EXPECT_TILING_KEY));
+#else
+  ASSERT_EQ(tiling_data.graph0_tiling_key, static_cast<uint32_t>(IL_EXPECT_TILING_KEY));
+#endif
+  ASSERT_GT(tiling_data.block_dim, 0U);
+  std::unique_ptr<uint8_t, decltype(gm_free)> workspace(nullptr, gm_free);
+  if (workspace_size > 0U) {
+    workspace.reset(reinterpret_cast<uint8_t *>(AscendC::GmAlloc(workspace_size)));
+    ASSERT_NE(workspace, nullptr);
+    std::fill_n(workspace.get(), workspace_size, uint8_t{0});
+  }
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_torch_gather_strided_test, tiling_data.block_dim, reinterpret_cast<uint8_t *>(data.get()),
+              reinterpret_cast<uint8_t *>(index.get()), reinterpret_cast<uint8_t *>(output.get()), workspace.get(),
+              reinterpret_cast<uint8_t *>(&tiling_data));
+  int32_t mismatch_count = 0;
+  int32_t first_mismatch = -1;
+  for (int32_t i = 0; i < kOutputSize; ++i) {
+    if (output.get()[i] != expected[static_cast<size_t>(i)]) {
+      if (first_mismatch < 0) {
+        first_mismatch = i;
+      }
+      ++mismatch_count;
+    }
+  }
+  if (mismatch_count > 0) {
+    ADD_FAILURE() << "mismatch count=" << mismatch_count << ", first mismatch at offset=" << first_mismatch
+                  << ", actual=" << output.get()[first_mismatch]
+                  << ", expected=" << expected[static_cast<size_t>(first_mismatch)];
+  }
+}
+
+#endif
+
+#if defined(IL_CASE_EMBEDDING)
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#include <algorithm>
+#include <cstdint>
+
+extern "C" __global__ __aicore__ void indirect_load_embedding_test(GM_ADDR input, GM_ADDR index, GM_ADDR output,
+                                                                   GM_ADDR workspace, GM_ADDR tiling);
+
+namespace {
+constexpr int32_t kInputRows = 64;
+constexpr int32_t kEmbeddingSize = 32;
+constexpr int32_t kIndexRows = 32;
+
+void InitializeData(float *input, int32_t *index, float *expected) {
+  for (int32_t row = 0; row < kInputRows; ++row) {
+    for (int32_t col = 0; col < kEmbeddingSize; ++col) {
+      input[row * kEmbeddingSize + col] = static_cast<float>(row * kEmbeddingSize + col);
+    }
+  }
+  for (int32_t row = 0; row < kIndexRows; ++row) {
+    index[row] = static_cast<int32_t>((row * 7 + 3) % kInputRows);
+    float sum = 0.0F;
+    for (int32_t col = 0; col < kEmbeddingSize; ++col) {
+      sum += 2.0F * (input[index[row] * kEmbeddingSize + col] + 0.1F);
+    }
+    expected[row] = sum;
+  }
+}
+}  // namespace
+
+TEST(E2EIndirectLoadEmbedding, GeneratedKernelMatchesReference) {
+  constexpr int64_t input_count = static_cast<int64_t>(kInputRows) * kEmbeddingSize;
+  constexpr int64_t index_count = kIndexRows;
+  constexpr int64_t output_count = kIndexRows;
+  indirect_load_test::KernelData<float, int32_t> buffers(input_count, index_count, output_count);
+  ASSERT_TRUE(buffers.IsValid());
+  InitializeData(buffers.input.get(), buffers.index.get(), buffers.expected.data());
+  std::fill_n(buffers.output.get(), output_count, 0.0F);
+
+  indirect_load_test::KernelTiling tiling;
+  ASSERT_TRUE(tiling.IsValid());
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_embedding_test, tiling.data.block_dim, reinterpret_cast<uint8_t *>(buffers.input.get()),
+              reinterpret_cast<uint8_t *>(buffers.index.get()), reinterpret_cast<uint8_t *>(buffers.output.get()),
+              tiling.workspace.get(), reinterpret_cast<uint8_t *>(&tiling.data));
+
+  // 设备侧 ReduceSum 走向量/树形归约，与 CPU 串行累加顺序不同，浮点结果存在数 ULP 差异，故用绝对容差比较。
+  for (int64_t i = 0; i < output_count; ++i) {
+    EXPECT_NEAR(buffers.output.get()[i], buffers.expected[static_cast<size_t>(i)], 0.0625F) << "offset=" << i;
+  }
+}
+
+#endif

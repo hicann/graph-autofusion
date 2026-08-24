@@ -632,12 +632,12 @@ static std::string GetCacheGuardCondition(const ApiCall &call, bool is_enable_ca
 
 Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<ascir::AxisId> &current_axis,
                           std::stringstream &ss) {
-  bool need_collect = this->bodys.size() > 1;
   std::map<ascir::AxisId, std::map<Loop *, std::vector<ApiCall *>>> api_calls_cross_loop;
-  if (need_collect) {
+  if (this->bodys.size() > 1) {
     CollectTensorCrossLoop(api_calls_cross_loop);
   }
   auto &cross_loop_map = api_calls_cross_loop[this->axis_id];
+  static const std::vector<ApiCall *> kEmptyCrossLoopCalls;
 
   for (const auto &body : this->bodys) {
     if ((body.type == LoopType::CALL) && (body.call->api_call_context.scene == ApiScene::kCVFuseUBLoad ||
@@ -646,29 +646,28 @@ Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<as
     }
     if (body.type == LoopType::LOOP) {
       auto it = cross_loop_map.find(body.loop);
-      if (it != cross_loop_map.end()) {
-        for (auto call : it->second) {
-          GE_CHK_STATUS_RET(call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
-          used_calls.insert(call);
-        }
+      const auto &cross_loop_calls = it == cross_loop_map.end() ? kEmptyCrossLoopCalls : it->second;
+      for (auto call : cross_loop_calls) {
+        GE_CHK_STATUS_RET(call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
+        used_calls.insert(call);
       }
       body.loop->compute_stage = this->compute_stage;
       GE_CHK_STATUS_RET(body.loop->GenerateLoop(tiler, tpipe, current_axis, ss), "Generate loop for body failed");
-      if (it != cross_loop_map.end()) {
-        for (auto call : it->second) {
-          GE_CHK_BOOL_RET_STATUS(call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
-        }
+      for (auto call : cross_loop_calls) {
+        GE_CHK_BOOL_RET_STATUS(call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
       }
       used_calls.clear();
     } else {
       if (body.call->unit == af::ComputeUnit::kUnitNone || body.call->skip_api_emit) {
         continue;
       }
-      const bool skips_ub_lifecycle =
-          ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(body.call->node))
-              .skips_ub_lifecycle;
-      GE_CHK_BOOL_RET_STATUS(body.call->WaitInputs(tpipe, ss), af::FAILED, "Func WaitInputs return false");
-      if (!IsFindInUsedCalls(body.call) && !skips_ub_lifecycle) {
+      const auto behavior =
+          ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(body.call->node));
+      // SIMT IndirectLoad 的 input0/input1 不进入通用 Wait/Free；输出生命周期仍由 skips_ub_lifecycle 单独控制。
+      if (!behavior.skips_input_lifecycle) {
+        GE_CHK_BOOL_RET_STATUS(body.call->WaitInputs(tpipe, ss), af::FAILED, "Func WaitInputs return false");
+      }
+      if (!IsFindInUsedCalls(body.call) && !behavior.skips_ub_lifecycle) {
         GE_CHK_STATUS_RET(body.call->AllocOutputs(tpipe, ss), "Codegen alloc outputs failed");
       }
       std::string call;
@@ -700,13 +699,15 @@ Status Loop::GenerateBody(const Tiler &tiler, const TPipe &tpipe, std::vector<as
         ss << "}" << std::endl;
       }
 
-      if (!skips_ub_lifecycle) {
+      // post-reduce SIMT 需要保留输出 Alloc/Sync/Free，因此不能与输入生命周期共用一个开关。
+      if (!behavior.skips_ub_lifecycle) {
         if (!IsFindInUsedCalls(body.call)) {
           GE_CHK_BOOL_RET_STATUS(body.call->SyncOutputs(tpipe, ss), af::FAILED, "Func SyncOutputs return false");
         }
-        GE_CHK_BOOL_RET_STATUS(body.call->FreeInputs(tpipe, ss), af::FAILED, "Func FreeInputs return false");
-        GE_CHK_BOOL_RET_STATUS(body.call->FreeUnusedOutputs(tpipe, ss), af::FAILED,
-                               "Func FreeUnusedOutputs return false");
+        if (!behavior.skips_input_lifecycle) {
+          GE_CHK_BOOL_RET_STATUS(body.call->FreeInputs(tpipe, ss), af::FAILED, "Func FreeInputs return false");
+        }
+        GE_CHK_BOOL_RET_STATUS(body.call->FreeUnusedOutputs(tpipe, ss), af::FAILED, "Func FreeUnusedOutputs fails");
       }
       ss << std::endl;
     }

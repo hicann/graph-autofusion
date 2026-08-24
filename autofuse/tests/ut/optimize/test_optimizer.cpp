@@ -2410,6 +2410,31 @@ TEST_F(TestOptimizer, CompleteGatherApiInfoSetsDcacheSize) {
   EXPECT_EQ(::ascir::GetDcacheSize(*gather_node), kSimtDcacheSize);
 }
 
+TEST_F(TestOptimizer, CompleteExpm1ApiInfoSetsDcacheSize) {
+  constexpr int64_t kSimtDcacheSize = 32 * 1024;
+  af::AscGraph graph("Expm1DcacheGraph");
+
+  af::ascir_op::Data data("data", graph);
+  data.y.dtype = ge::DT_BF16;
+  data.ir_attr.SetIndex(0);
+
+  af::ascir_op::Expm1 expm1("expm1");
+  expm1.x = data.y;
+  expm1.y.dtype = ge::DT_BF16;
+
+  af::ascir_op::Output output("output");
+  output.x = expm1.y;
+  output.y.dtype = ge::DT_BF16;
+  output.ir_attr.SetIndex(0);
+
+  auto expm1_node = graph.FindNode("expm1");
+  ASSERT_NE(expm1_node, nullptr);
+  EXPECT_EQ(::ascir::GetDcacheSize(*expm1_node), 0);
+
+  ASSERT_EQ(optimize::AscGraphInfoComplete::CompleteApiInfo(graph), af::SUCCESS);
+  EXPECT_EQ(::ascir::GetDcacheSize(*expm1_node), kSimtDcacheSize);
+}
+
 TEST_F(TestOptimizer, MergeAxesReduce) {
   af::AscGraph graph("LoadAbsStore");
   auto s0 = graph.CreateSizeVar("s0");
