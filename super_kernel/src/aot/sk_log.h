@@ -241,15 +241,41 @@ class FileHandleManager {
   bool InitializeDefault(const std::string &baseDir, pid_t pid, const std::string &modelLabel);
 
  private:
+  class ThreadAwareMutex {
+   public:
+    void lock() {
+      mutex_.lock();
+      heldByCurrentThread_ = true;
+    }
+
+    void unlock() {
+      heldByCurrentThread_ = false;
+      mutex_.unlock();
+    }
+
+    bool IsHeldByCurrentThread() const {
+      return heldByCurrentThread_;
+    }
+
+   private:
+    std::mutex mutex_;
+    inline static thread_local bool heldByCurrentThread_ = false;
+  };
+
   FileHandleManager();
   ~FileHandleManager();
 
   FileHandleManager(const FileHandleManager &) = delete;
   FileHandleManager &operator=(const FileHandleManager &) = delete;
 
- private:
+  bool IsLockedByCurrentThread() const {
+    return mutex_.IsHeldByCurrentThread();
+  }
+
+  friend class FileLogger;
+
   std::unordered_map<std::string, FileHandleInfo> handles_;
-  mutable std::mutex mutex_;
+  mutable ThreadAwareMutex mutex_;
 
   // Thread-local current handle to avoid multi-threading conflicts
   static thread_local std::string currentHandle_;
@@ -296,9 +322,18 @@ class FileLogger {
   template <typename... Args>
   void WriteLogIfEnabled(LogLevel level, const char *funcName, const char *fileName, int lineNum, const char *format,
                          Args &&...args) {
-    if (config_.enabled && level >= config_.minLevel) {
-      std::string message = FormatMessage(level, funcName, fileName, lineNum, format, std::forward<Args>(args)...);
-      WriteLog(message);
+    if (enabled_.load(std::memory_order_relaxed) && level >= minLevel_.load(std::memory_order_relaxed)) {
+      // SK_LOG* has already emitted its passthrough log. Skip the file sink when re-entered by its manager.
+      if (FileHandleManager::Instance().IsLockedByCurrentThread()) {
+        return;
+      }
+      LoggerConfig config = GetConfigSnapshot();
+      if (!config.enabled || level < config.minLevel) {
+        return;
+      }
+      std::string message =
+          FormatMessage(config, level, funcName, fileName, lineNum, format, std::forward<Args>(args)...);
+      WriteLog(message, config);
     }
   }
 
@@ -332,18 +367,23 @@ class FileLogger {
   FileLogger &operator=(const FileLogger &) = delete;
 
   // Format message (using variadic arguments to avoid format-security warning)
-  std::string FormatMessage(LogLevel level, const char *funcName, const char *fileName, int lineNum, const char *format,
-                            ...);
+  std::string FormatMessage(const LoggerConfig &config, LogLevel level, const char *funcName, const char *fileName,
+                            int lineNum, const char *format, ...);
 
-  void WriteLog(const std::string &message);
+  void WriteLog(const std::string &message, const LoggerConfig &config);
 
   // Get the effective model label. Prefer the thread-local label and fall back to config_.
   std::string GetEffectiveModelLabel() const;
+  LoggerConfig GetConfigSnapshot() const;
 
  private:
   LoggerConfig config_;
+  std::atomic<bool> enabled_{false};
+  std::atomic<LogLevel> minLevel_{LogLevel::INFO};
   std::atomic<bool> initialized_{false};
-  pid_t pid_{0};
+  std::atomic<pid_t> pid_{0};
+  // Serialize initialization without preventing log calls from taking a configuration snapshot.
+  std::mutex initializationMutex_;
   mutable std::mutex mutex_;
 
   // Thread-local model label, used to isolate concurrent aclskOptimize calls.

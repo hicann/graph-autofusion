@@ -305,7 +305,6 @@ inline std::vector<OptionDumpInfo> CollectAllOptions(const SuperKernelOptionsMan
       case aclskOptionType::SPLIT_MODE:
       case aclskOptionType::DEBUG_SYNC_ALL:
       case aclskOptionType::STREAM_FUSION:
-      case aclskOptionType::CONSTANT_CODEGEN:
       case aclskOptionType::AUTO_OP_PARALLEL:
       case aclskOptionType::DEBUG_CROSS_CORE_SYNC_CHECK:
       case aclskOptionType::DEBUG_OP_EXEC_TRACE:

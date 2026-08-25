@@ -19,7 +19,6 @@ add_executable(super_kernel_aot_utest
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_graph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_node.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_common.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_constant_codegen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_scope_split.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_node_scope_tagging.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_scope_range.cpp
@@ -59,7 +58,6 @@ add_executable(super_kernel_aot_utest
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_resource_manager.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_scope_postprocess.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_event_recorder.cpp
-    ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_constant_codegen.cpp
 )
 
 target_include_directories(super_kernel_aot_utest PRIVATE

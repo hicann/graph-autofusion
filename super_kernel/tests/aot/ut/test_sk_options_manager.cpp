@@ -1270,50 +1270,63 @@ TEST_F(SuperKernelOptionsManagerTest, ToJson_AfterParseOptions) {
   opts_test->ParseOptions(&optList);
 
   nlohmann::ordered_json json = opts_test->ToJson();
-  size_t expectedSize = static_cast<size_t>(aclskOptionType::SK_OPTION_MAX) + 1;
+  size_t expectedSize = static_cast<size_t>(aclskOptionType::SK_OPTION_MAX);
   EXPECT_EQ(json.size(), expectedSize);
   EXPECT_TRUE(json.contains("preload_code"));
   EXPECT_TRUE(json.contains("split_mode"));
   EXPECT_TRUE(json.contains("debug_sync_all"));
   EXPECT_TRUE(json.contains("kernel_map"));
+  EXPECT_FALSE(json.contains("constant_codegen"));
+  EXPECT_EQ(opts_test->GetOption(static_cast<aclskOptionType>(6U)), nullptr);
   EXPECT_TRUE(json.contains("inner_options"));
 }
 
+TEST_F(SuperKernelOptionsManagerTest, ParseOptions_IgnoresRemovedConstantCodegenOption) {
+  aclskOption option{};
+  option.optionType = static_cast<aclskOptionType>(6U);
+
+  aclskOptions optList;
+  optList.options = &option;
+  optList.numOptions = 1;
+
+  opts_test->ParseOptions(&optList);
+
+  EXPECT_EQ(opts_test->GetOption(static_cast<aclskOptionType>(6U)), nullptr);
+  EXPECT_FALSE(opts_test->ToJson().contains("constant_codegen"));
+}
+
 TEST_F(SuperKernelOptionsManagerTest, ToJson_NewIntegerOptions) {
-  aclskOption options[7]{};
+  aclskOption options[6]{};
   options[0].optionType = aclskOptionType::STREAM_FUSION;
   options[0].streamFusion.streamFusion = 0;
 
-  options[1].optionType = aclskOptionType::CONSTANT_CODEGEN;
-  options[1].constantCodegen.enableConstant = 1;
+  options[1].optionType = aclskOptionType::AUTO_OP_PARALLEL;
+  options[1].autoOpParallel.enableAutoOpParallel = 1;
 
-  options[2].optionType = aclskOptionType::AUTO_OP_PARALLEL;
-  options[2].autoOpParallel.enableAutoOpParallel = 1;
+  options[2].optionType = aclskOptionType::DEBUG_CROSS_CORE_SYNC_CHECK;
+  options[2].debugCrossCoreSyncCheck.enableCrossCoreSyncCheck = 1;
 
-  options[3].optionType = aclskOptionType::DEBUG_CROSS_CORE_SYNC_CHECK;
-  options[3].debugCrossCoreSyncCheck.enableCrossCoreSyncCheck = 1;
+  options[3].optionType = aclskOptionType::DEBUG_OP_EXEC_TRACE;
+  options[3].debugOpExecTrace.enableOpExecTrace = 1;
 
-  options[4].optionType = aclskOptionType::DEBUG_OP_EXEC_TRACE;
-  options[4].debugOpExecTrace.enableOpExecTrace = 1;
+  options[4].optionType = aclskOptionType::EARLY_START;
+  options[4].earlyStart.enableEarlyStart = 1;
 
-  options[5].optionType = aclskOptionType::EARLY_START;
-  options[5].earlyStart.enableEarlyStart = 1;
-
-  options[6].optionType = aclskOptionType::DEBUG_PER_OP_MAX_CORE_NUM;
-  options[6].debugPerOpMaxCoreNum.enableDebugPerOpMaxCoreNum = 1;
+  options[5].optionType = aclskOptionType::DEBUG_PER_OP_MAX_CORE_NUM;
+  options[5].debugPerOpMaxCoreNum.enableDebugPerOpMaxCoreNum = 1;
 
   aclskOptions optList;
   optList.options = options;
-  optList.numOptions = 7;
+  optList.numOptions = 6;
 
   opts_test->ParseOptions(&optList);
 
   nlohmann::ordered_json json = opts_test->ToJson();
-  size_t expectedSize = static_cast<size_t>(aclskOptionType::SK_OPTION_MAX) + 1;
+  size_t expectedSize = static_cast<size_t>(aclskOptionType::SK_OPTION_MAX);
   ASSERT_EQ(json.size(), expectedSize);
   ASSERT_TRUE(json.contains("inner_options"));
   ASSERT_TRUE(json.contains("stream_fusion"));
-  ASSERT_TRUE(json.contains("constant_codegen"));
+  ASSERT_FALSE(json.contains("constant_codegen"));
   ASSERT_TRUE(json.contains("auto_op_parallel"));
   ASSERT_TRUE(json.contains("debug_cross_core_sync_check"));
   ASSERT_TRUE(json.contains("debug_op_exec_trace"));
@@ -1321,8 +1334,9 @@ TEST_F(SuperKernelOptionsManagerTest, ToJson_NewIntegerOptions) {
   ASSERT_TRUE(json.contains("debug_per_op_max_core_num"));
   EXPECT_EQ(json["stream_fusion"]["type"], static_cast<int>(aclskOptionType::STREAM_FUSION));
   EXPECT_EQ(json["stream_fusion"]["value"], 0);
-  EXPECT_EQ(json["constant_codegen"]["type"], static_cast<int>(aclskOptionType::CONSTANT_CODEGEN));
-  EXPECT_EQ(json["constant_codegen"]["value"], 1);
+  EXPECT_EQ(static_cast<uint32_t>(aclskOptionType::AUTO_OP_PARALLEL), 7U);
+  EXPECT_EQ(static_cast<uint32_t>(aclskOptionType::DEBUG_PER_OP_MAX_CORE_NUM), 17U);
+  EXPECT_EQ(opts_test->GetOption(static_cast<aclskOptionType>(6U)), nullptr);
   EXPECT_EQ(json["auto_op_parallel"]["type"], static_cast<int>(aclskOptionType::AUTO_OP_PARALLEL));
   EXPECT_EQ(json["auto_op_parallel"]["value"], 1);
   EXPECT_EQ(json["debug_cross_core_sync_check"]["type"],

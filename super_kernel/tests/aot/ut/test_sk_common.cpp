@@ -9,7 +9,9 @@
  */
 
 #include <gtest/gtest.h>
+#include <atomic>
 #include <cstring>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 #include <elf.h>
@@ -338,6 +340,47 @@ TEST_F(SkCommonTest, GetFuncSymbolInfo_SameBinHandleUsesCache) {
   EXPECT_EQ(symbolName1, symbolName2);
   EXPECT_EQ(funcSize1, funcSize2);
   EXPECT_EQ(symbolBind1, symbolBind2);
+}
+
+TEST_F(SkCommonTest, GetFuncSymbolInfo_ConcurrentCacheAccessReturnsConsistentResults) {
+  constexpr uint32_t threadCount = 16;
+  constexpr uint32_t handlesPerThread = 64;
+  auto buffer = BuildMinimalValidElf64();
+  std::atomic<uint32_t> ready{0};
+  std::atomic<bool> start{false};
+  std::atomic<bool> resultsConsistent{true};
+  std::vector<std::thread> threads;
+
+  for (uint32_t threadIndex = 0; threadIndex < threadCount; ++threadIndex) {
+    threads.emplace_back([&, threadIndex]() {
+      ready.fetch_add(1, std::memory_order_relaxed);
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (uint32_t i = 0; i < handlesPerThread; ++i) {
+        const uintptr_t handleValue = 0x100000U + threadIndex * handlesPerThread + i;
+        std::string symbolName;
+        uint64_t funcSize = 0;
+        std::string symbolBind;
+        bool ret = GetFuncSymbolInfo(reinterpret_cast<aclrtBinHandle>(handleValue),
+                                     reinterpret_cast<const char *>(buffer.data()), buffer.size(), 0x10, symbolName,
+                                     funcSize, symbolBind);
+        if (ret || !symbolName.empty() || funcSize != 0 || !symbolBind.empty()) {
+          resultsConsistent.store(false, std::memory_order_relaxed);
+        }
+      }
+    });
+  }
+
+  while (ready.load(std::memory_order_acquire) != threadCount) {
+    std::this_thread::yield();
+  }
+  start.store(true, std::memory_order_release);
+  for (auto &thread : threads) {
+    thread.join();
+  }
+
+  EXPECT_TRUE(resultsConsistent.load(std::memory_order_relaxed));
 }
 
 TEST_F(SkCommonTest, GetDeviceCubeCoreNum_GetDeviceFails_Returns0) {

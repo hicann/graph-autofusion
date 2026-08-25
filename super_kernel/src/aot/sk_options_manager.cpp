@@ -63,10 +63,6 @@ const std::array<DefaultOptionFactoryEntry, static_cast<size_t>(aclskOptionType:
          []() -> std::unique_ptr<OptOptionBase> {
            return std::make_unique<OptOptionBase>("kernel_map", aclskOptionType::KERNEL_MAP);
          }},
-        {aclskOptionType::CONSTANT_CODEGEN,
-         []() -> std::unique_ptr<OptOptionBase> {
-           return std::make_unique<NumberOptOption>("constant_codegen", aclskOptionType::CONSTANT_CODEGEN, 0, 0, 1);
-         }},
         {aclskOptionType::AUTO_OP_PARALLEL,
          []() -> std::unique_ptr<OptOptionBase> {
            return std::make_unique<NumberOptOption>("auto_op_parallel", aclskOptionType::AUTO_OP_PARALLEL, 0, 0, 1);
@@ -658,10 +654,6 @@ void SuperKernelOptionsManager::SetOptOptionValue(const aclskOption *option) {
     case aclskOptionType::STREAM_FUSION:
       subOption->SetValue(option->streamFusion.streamFusion);
       break;
-    case aclskOptionType::CONSTANT_CODEGEN:
-      subOption->SetValue(option->constantCodegen.enableConstant);
-      SK_LOGI("Constant codegen option set: enable=%u", option->constantCodegen.enableConstant);
-      break;
     case aclskOptionType::AUTO_OP_PARALLEL:
       subOption->SetValue(option->autoOpParallel.enableAutoOpParallel);
       SK_LOGI("Auto op parallel option set: enable=%u", option->autoOpParallel.enableAutoOpParallel);
@@ -750,7 +742,6 @@ nlohmann::ordered_json SuperKernelOptionsManager::ToJson() const {
       case aclskOptionType::SPLIT_MODE:
       case aclskOptionType::DEBUG_SYNC_ALL:
       case aclskOptionType::STREAM_FUSION:
-      case aclskOptionType::CONSTANT_CODEGEN:
       case aclskOptionType::AUTO_OP_PARALLEL:
       case aclskOptionType::DEBUG_CROSS_CORE_SYNC_CHECK:
       case aclskOptionType::DEBUG_OP_EXEC_TRACE:
