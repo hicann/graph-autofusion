@@ -12,7 +12,6 @@
 #include "sk_graph.h"
 #include "sk_dump_json.h"
 #include "sk_log.h"
-#include "sk_constant_codegen.h"
 #include "sk_common.h"
 #include <algorithm>
 #include <cstring>
@@ -20,7 +19,6 @@
 #include <memory>
 #include <new>
 #include <string>
-#include <tuple>
 #include "securec.h"
 #include "sk_event_recorder.h"
 #include "runtime/rt_external_kernel.h"
@@ -2273,58 +2271,6 @@ SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVe
       "useSimtEntry=%d",
       enableDebug, enableProfiling, enableOpTrace, enableEarlyStart, useSimtEntry);
 
-  // ========== 1. 首先尝试常量化代码生成 ==========
-  if (!useSimtEntry) {
-    auto [constantFunc, constantType] =
-        TryGenerateConstantFuncHandle(skTaskCube, skTaskVec, opts, graph_.GetModelLabel());
-
-    if (constantFunc != nullptr) {
-      // 常量化成功，直接使用特化的 funcHandle
-      entryInfo.skEntryFunc = constantFunc;
-      entryInfo.entryType = constantType;
-
-      // 根据 kernelType 设置 numBlocks
-      bool isMix12 = false;
-      if (constantType == SkKernelType::AIV_ONLY) {
-        entryInfo.numBlocks = skTaskVec.numBlocks;
-        skTaskCube.numBlocks = 0;
-      } else if (constantType == SkKernelType::AIC_ONLY) {
-        entryInfo.numBlocks = skTaskCube.numBlocks;
-        skTaskVec.numBlocks = 0;
-      } else if (constantType == SkKernelType::MIX_AIC_1_2) {
-        uint32_t mix_1_2_aiv_numBlocks = (skTaskVec.numBlocks + 1) / 2;
-        entryInfo.numBlocks = std::max(skTaskCube.numBlocks, mix_1_2_aiv_numBlocks);
-        skTaskCube.numBlocks = entryInfo.numBlocks;
-        skTaskVec.numBlocks = entryInfo.numBlocks * 2;
-        isMix12 = true;
-      } else {  // MIX_AIC_1_1
-        entryInfo.numBlocks = skTaskCube.numBlocks;
-        skTaskVec.numBlocks = skTaskCube.numBlocks;
-      }
-
-      SK_LOGI("sk entry resolved via CONSTANT_CODEGEN: type=%s, funcHandle=%p, numBlocks=%u",
-              to_string(entryInfo.entryType), entryInfo.skEntryFunc, entryInfo.numBlocks);
-
-      // 处理 MIX_AIC_1_2 的 numBlocks 调整
-      if (isMix12) {
-        auto *taskQue = skTaskVec.GetTaskQue();
-        for (auto i = 0; i < taskQue->taskCnt; i++) {
-          TaskInfo &taskInfo = taskQue->taskInfos[i];
-          if (taskInfo.relatedType == SkKernelType::MIX_AIC_1_1) {
-            taskInfo.numBlocks = taskInfo.numBlocks * 2;
-          }
-        }
-      }
-
-      return entryInfo;
-    }
-  } else {
-    SK_LOGI("Skip constant codegen because SIMT ubuf constraint requires SIMT sk entry");
-  }
-
-  // ========== 2. 常量化失败，回退到原有逻辑 ==========
-  SK_LOGI("Constant codegen disabled or unsuccessful, falling back to default entry resolution");
-
   // 根据 task 分布确定 kernel 类型和 numBlocks
   SkKernelType kernelType = SkKernelType::AIC_ONLY;
   bool isMix12 = false;
@@ -2374,7 +2320,7 @@ SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVe
 
   entryInfo.entryType = kernelType;
 
-  // ========== 3. 根据配置构建 entryFuncName ==========
+  // ========== 根据配置构建 entryFuncName ==========
   uint8_t flags = static_cast<uint8_t>(EntryFuncFlag::NONE);
   if (enableDebug) {
     flags = flags | static_cast<uint8_t>(EntryFuncFlag::DEBUG);
@@ -2402,7 +2348,7 @@ SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVe
     return {};
   }
 
-  // ========== 4. 处理 MIX_AIC_1_2 的 numBlocks 调整 ==========
+  // ========== 处理 MIX_AIC_1_2 的 numBlocks 调整 ==========
   if (isMix12) {
     auto *taskQue = skTaskVec.GetTaskQue();
     for (auto i = 0; i < taskQue->taskCnt; i++) {

@@ -18,6 +18,7 @@
 #include <unordered_set>
 #include <array>
 #include <memory>
+#include <mutex>
 #include <limits>
 #include <cstdint>
 #include <stdexcept>
@@ -421,12 +422,13 @@ ScheModeState GetScheModeFromKernelTask(aclmdlRITask kernelTask) {
 
 const SkBindMap &GetSkBindMap(aclrtBinHandle binHdl) {
   static SkAllBinMap allBinMap;
+  static std::mutex allBinMapMutex;
+  std::lock_guard<std::mutex> lock(allBinMapMutex);
   auto it = allBinMap.find(binHdl);
   if (it != allBinMap.end()) {
     return it->second;
   }
-  allBinMap[binHdl] = InitSuperKernelBindMap(binHdl);
-  return allBinMap[binHdl];
+  return allBinMap.emplace(binHdl, InitSuperKernelBindMap(binHdl)).first->second;
 }
 
 template <SkNodeCoreType coreType>

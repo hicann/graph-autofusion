@@ -1,6 +1,6 @@
 /**
  * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under terms and conditions of
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
@@ -9,6 +9,10 @@
  */
 
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <atomic>
+#include <thread>
+#include <vector>
 #include "sk_scope_info.h"
 
 class ScopeIdGeneratorTest : public testing::Test {};
@@ -20,6 +24,44 @@ TEST_F(ScopeIdGeneratorTest, NextId_IncrementSequentially) {
 
   EXPECT_EQ(id1, id0 + 1);
   EXPECT_EQ(id2, id1 + 1);
+}
+
+TEST_F(ScopeIdGeneratorTest, NextId_ConcurrentCallsReturnUniqueIds) {
+  constexpr uint32_t threadCount = 32;
+  constexpr uint32_t idsPerThread = 1024;
+  std::atomic<uint32_t> ready{0};
+  std::atomic<bool> start{false};
+  std::vector<std::vector<uint16_t>> ids(threadCount);
+  std::vector<std::thread> threads;
+
+  for (uint32_t threadIndex = 0; threadIndex < threadCount; ++threadIndex) {
+    threads.emplace_back([&, threadIndex]() {
+      ids[threadIndex].reserve(idsPerThread);
+      ready.fetch_add(1, std::memory_order_relaxed);
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (uint32_t i = 0; i < idsPerThread; ++i) {
+        ids[threadIndex].push_back(ScopeIdGenerator::Instance().NextId());
+      }
+    });
+  }
+
+  while (ready.load(std::memory_order_acquire) != threadCount) {
+    std::this_thread::yield();
+  }
+  start.store(true, std::memory_order_release);
+  for (auto &thread : threads) {
+    thread.join();
+  }
+
+  std::vector<uint16_t> flattened;
+  flattened.reserve(threadCount * idsPerThread);
+  for (const auto &threadIds : ids) {
+    flattened.insert(flattened.end(), threadIds.begin(), threadIds.end());
+  }
+  std::sort(flattened.begin(), flattened.end());
+  EXPECT_EQ(std::adjacent_find(flattened.begin(), flattened.end()), flattened.end());
 }
 
 class SuperKernelScopeInfoIdTest : public testing::Test {};

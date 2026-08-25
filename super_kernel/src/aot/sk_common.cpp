@@ -236,11 +236,12 @@ bool GetFuncSymbolInfo(aclrtBinHandle binHdl, const char *binAddr, size_t binSiz
     return false;
   }
   static SkBinSymbolTable symbolTable;
+  static std::mutex symbolTableMutex;
+  std::lock_guard<std::mutex> lock(symbolTableMutex);
   auto cacheIt = symbolTable.find(binHdl);
   if (cacheIt == symbolTable.end()) {
     SK_LOGI("Building symbol table for binHdl=%p", binHdl);
-    symbolTable[binHdl] = BuildFuncSymbolTable(binAddr, binSize);
-    cacheIt = symbolTable.find(binHdl);
+    cacheIt = symbolTable.emplace(binHdl, BuildFuncSymbolTable(binAddr, binSize)).first;
   }
 
   const auto &funcSymTable = cacheIt->second;

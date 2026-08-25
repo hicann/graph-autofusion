@@ -45,7 +45,6 @@ enum class aclskOptionType : uint32_t {
   DCCI_DISABLE_ON_KERNEL = 3,
   DEBUG_SYNC_ALL = 4,
   KERNEL_MAP = 5,
-  CONSTANT_CODEGEN = 6,
   AUTO_OP_PARALLEL = 7,
   DCCI_BEFORE_KERNEL_START = 8,
   DEBUG_OP_EXEC_TRACE = 9,
@@ -139,14 +138,6 @@ typedef struct aclskUbufLockIgnoreKernelOption {
   char **ubufLockIgnoreKernel;
 } aclskUbufLockIgnoreKernelOption;
 
-/**
- * 常量化代码生成选项
- * enableConstant: 1 启用常量化, 0 禁用常量化
- */
-typedef struct aclskConstantCodegenOption {
-  uint32_t enableConstant;
-} aclskConstantCodegenOption;
-
 enum aclskEarlyStartValue : uint32_t {
   ACLSK_EARLY_START_DISABLED = 0U,  // 默认值，表示不启用early start
   ACLSK_EARLY_START_ENABLED = 1U,   // 启用early start
@@ -168,7 +159,6 @@ struct aclskOption {
     aclskDcciOption disableKernelDcci;
     aclskDebugSyncAllOption debugSync;
     aclskKernelMapOption kernelMap;
-    aclskConstantCodegenOption constantCodegen;
     aclskAutoOpParallelOption autoOpParallel;
     aclskDcciOption dcciBeforeKernelStart;
     aclskDebugOpExecTraceOption debugOpExecTrace;

@@ -46,51 +46,55 @@ namespace sk {
 namespace logger {
 
 bool FileHandleManager::RegisterFile(const std::string &name, const std::string &path) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  {
+    std::lock_guard<ThreadAwareMutex> lock(mutex_);
 
-  if (handles_.find(name) != handles_.end()) {
-    return true;  // Already registered
+    if (handles_.find(name) != handles_.end()) {
+      return true;  // Already registered
+    }
+
+    FileHandleInfo handle;
+    handle.filePath = path;
+    handle.fileStream.open(path, std::ios::app | std::ios::out);
+
+    if (handle.fileStream.is_open()) {
+      handle.createTime = std::chrono::system_clock::now();
+
+      // Get current file size for existing files
+      handle.fileStream.seekp(0, std::ios::end);
+      handle.currentSize = static_cast<size_t>(handle.fileStream.tellp());
+
+      handles_.emplace(name, std::move(handle));
+      return true;
+    }
   }
 
-  FileHandleInfo handle;
-  handle.filePath = path;
-  handle.fileStream.open(path, std::ios::app | std::ios::out);
-
-  if (!handle.fileStream.is_open()) {
-    SK_DLOGE("Failed to open log file: %s", path.c_str());
-    return false;
-  }
-
-  handle.createTime = std::chrono::system_clock::now();
-
-  // Get current file size for existing files
-  handle.fileStream.seekp(0, std::ios::end);
-  handle.currentSize = static_cast<size_t>(handle.fileStream.tellp());
-
-  handles_.emplace(name, std::move(handle));
-  return true;
+  SK_LOGE("Failed to open log file: %s", path.c_str());
+  return false;
 }
 
 bool FileHandleManager::SwitchToFile(const std::string &name) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  {
+    std::lock_guard<ThreadAwareMutex> lock(mutex_);
 
-  auto it = handles_.find(name);
-  if (it == handles_.end()) {
-    SK_DLOGE("File handle not found: %s", name.c_str());
-    return false;
+    auto it = handles_.find(name);
+    if (it != handles_.end()) {
+      currentHandle_ = name;
+      return true;
+    }
   }
 
-  currentHandle_ = name;
-  return true;
+  SK_LOGE("File handle not found: %s", name.c_str());
+  return false;
 }
 
 void FileHandleManager::SwitchToDefault() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<ThreadAwareMutex> lock(mutex_);
   currentHandle_ = "default";
 }
 
 bool FileHandleManager::Write(const std::string &name, const std::string &content) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<ThreadAwareMutex> lock(mutex_);
 
   auto it = handles_.find(name);
   if (it == handles_.end() || !it->second.fileStream.is_open()) {
@@ -112,12 +116,12 @@ bool FileHandleManager::WriteToCurrent(const std::string &content) {
 }
 
 std::string FileHandleManager::GetCurrentHandle() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<ThreadAwareMutex> lock(mutex_);
   return currentHandle_;
 }
 
 size_t FileHandleManager::GetFileSize(const std::string &name) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<ThreadAwareMutex> lock(mutex_);
 
   auto it = handles_.find(name);
   if (it == handles_.end()) {
@@ -127,7 +131,7 @@ size_t FileHandleManager::GetFileSize(const std::string &name) {
 }
 
 void FileHandleManager::CloseFile(const std::string &name) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<ThreadAwareMutex> lock(mutex_);
 
   auto it = handles_.find(name);
   if (it != handles_.end()) {
@@ -160,7 +164,7 @@ thread_local std::string FileLogger::currentModelLabel_;
 FileHandleManager::FileHandleManager() {}
 
 FileHandleManager::~FileHandleManager() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<ThreadAwareMutex> lock(mutex_);
   for (auto &pair : handles_) {
     if (pair.second.fileStream.is_open()) {
       pair.second.fileStream.flush();
@@ -242,39 +246,45 @@ FileLogger &FileLogger::Instance() {
 }
 
 bool FileLogger::Initialize(const LoggerConfig &config) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> initializationLock(initializationMutex_);
 
-  std::string modelLabel = config.modelLabel;
-  if (modelLabel.empty()) {
-    modelLabel = GetCurrentModelLabel();
+  LoggerConfig effectiveConfig = config;
+  if (effectiveConfig.modelLabel.empty()) {
+    effectiveConfig.modelLabel = GetCurrentModelLabel();
   }
-  if (modelLabel.empty()) {
-    modelLabel = config_.modelLabel;
+  if (effectiveConfig.modelLabel.empty()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    effectiveConfig.modelLabel = config_.modelLabel;
   }
 
-  config_ = config;
-  config_.modelLabel = modelLabel;
-  if (!config_.enabled) {
+  initialized_.store(false, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    config_ = effectiveConfig;
+    enabled_.store(false, std::memory_order_relaxed);
+    minLevel_.store(effectiveConfig.minLevel, std::memory_order_relaxed);
+  }
+  if (!effectiveConfig.enabled) {
     SK_DLOGI("File logger is disabled");
-    initialized_.store(true);
+    initialized_.store(true, std::memory_order_relaxed);
     return true;
   }
 
   // Use the current model label to create sk_meta directory structure.
-  std::string logDir = GetSkMetaBasePath() + "/" + SanitizePathComponent(config_.modelLabel);
+  std::string logDir = GetSkMetaBasePath() + "/" + SanitizePathComponent(effectiveConfig.modelLabel);
   if (!CreateDirectoryRecursive(logDir)) {
     logDir.clear();
   }
-  if (logDir.empty() && config_.enabled) {
+  if (logDir.empty()) {
     SK_DLOGE("Failed to create sk_meta directory");
     return false;
   }
 
   // Extract PID from created directory
-  pid_ = getpid();
+  pid_.store(getpid(), std::memory_order_relaxed);
 
   // 为新 model label 注册日志文件
-  std::string modelLabelForLog = config_.modelLabel;
+  std::string modelLabelForLog = effectiveConfig.modelLabel;
   std::string handleName = "model_" + SanitizePathComponent(modelLabelForLog);
   std::string defaultPath = logDir + "/super_kernel.log";
 
@@ -286,7 +296,8 @@ bool FileLogger::Initialize(const LoggerConfig &config) {
   // 切换到新的日志文件
   FileHandleManager::Instance().SwitchToFile(handleName);
 
-  initialized_.store(true);
+  initialized_.store(true, std::memory_order_relaxed);
+  enabled_.store(true, std::memory_order_relaxed);
 
   // Convert to absolute path for better visibility
   char absPath[PATH_MAX] = {0};  // Initialize buffer with zeros
@@ -304,11 +315,20 @@ std::string FileLogger::GetEffectiveModelLabel() const {
   if (!currentModelLabel_.empty()) {
     return currentModelLabel_;
   }
+  std::lock_guard<std::mutex> lock(mutex_);
   return config_.modelLabel;
 }
 
+LoggerConfig FileLogger::GetConfigSnapshot() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  LoggerConfig config = config_;
+  config.enabled = enabled_.load(std::memory_order_relaxed);
+  config.minLevel = minLevel_.load(std::memory_order_relaxed);
+  return config;
+}
+
 bool FileLogger::RegisterLogFile(const std::string &name, const std::string &subPath) {
-  if (!initialized_.load() || !config_.enabled) {
+  if (!initialized_.load() || !enabled_.load(std::memory_order_relaxed)) {
     return false;
   }
 
@@ -340,7 +360,7 @@ bool FileLogger::RegisterLogFile(const std::string &name, const std::string &sub
 }
 
 bool FileLogger::SwitchToFile(const std::string &name) {
-  if (!initialized_.load() || !config_.enabled) {
+  if (!initialized_.load() || !enabled_.load(std::memory_order_relaxed)) {
     return false;
   }
   return FileHandleManager::Instance().SwitchToFile(name);
@@ -351,7 +371,7 @@ void FileLogger::SwitchToDefault() {
 }
 
 std::unique_ptr<LogContextGuard> FileLogger::CreateContext(const std::string &fileName, const std::string &modelLabel) {
-  if (!initialized_.load() || !config_.enabled) {
+  if (!initialized_.load() || !enabled_.load(std::memory_order_relaxed)) {
     return nullptr;
   }
 
@@ -373,18 +393,20 @@ std::unique_ptr<LogContextGuard> FileLogger::CreateContext(const std::string &fi
 }
 
 void FileLogger::SetEnabled(bool enabled) {
-  config_.enabled = enabled;
+  enabled_.store(enabled, std::memory_order_relaxed);
 }
 
 bool FileLogger::IsEnabled() const {
-  return config_.enabled;
+  return enabled_.load(std::memory_order_relaxed);
 }
 
 void FileLogger::SetMinLevel(LogLevel level) {
-  config_.minLevel = level;
+  minLevel_.store(level, std::memory_order_relaxed);
 }
 
 void FileLogger::SetModelLabel(const std::string &modelLabel) {
+  std::lock_guard<std::mutex> initializationLock(initializationMutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   config_.modelLabel = modelLabel;
 }
 
@@ -396,24 +418,27 @@ const std::string &FileLogger::GetCurrentModelLabel() {
   return currentModelLabel_;
 }
 
-std::string FileLogger::FormatMessage(LogLevel level, const char *funcName, const char *fileName, int lineNum,
-                                      const char *format, ...) {
+std::string FileLogger::FormatMessage(const LoggerConfig &config, LogLevel level, const char *funcName,
+                                      const char *fileName, int lineNum, const char *format, ...) {
   std::ostringstream oss;
 
   // Timestamp
-  if (config_.enableTimestamp) {
+  if (config.enableTimestamp) {
     auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
+    auto timeValue = std::chrono::system_clock::to_time_t(now);
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
-    oss << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S");
-    oss << "." << std::setfill('0') << std::setw(3) << ms.count();
-    oss << " ";
+    std::tm localTime{};
+    if (localtime_r(&timeValue, &localTime) != nullptr) {
+      oss << std::put_time(&localTime, "%Y-%m-%d %H:%M:%S");
+      oss << "." << std::setfill('0') << std::setw(3) << ms.count();
+      oss << " ";
+    }
   }
 
   // Process/Thread ID
-  if (config_.enablePidTid) {
-    oss << "[" << pid_ << ":" << std::this_thread::get_id() << "] ";
+  if (config.enablePidTid) {
+    oss << "[" << pid_.load(std::memory_order_relaxed) << ":" << std::this_thread::get_id() << "] ";
   }
 
   // Log level
@@ -453,20 +478,21 @@ std::string FileLogger::FormatMessage(LogLevel level, const char *funcName, cons
   return oss.str();
 }
 
-void FileLogger::WriteLog(const std::string &message) {
+void FileLogger::WriteLog(const std::string &message, const LoggerConfig &config) {
   if (message.empty()) {
     return;
   }
 
   // 获取当前 handle，判断是否在 LogContextGuard 上下文中
-  std::string currentHandle = FileHandleManager::Instance().GetCurrentHandle();
+  auto &handleManager = FileHandleManager::Instance();
+  std::string currentHandle = handleManager.GetCurrentHandle();
   std::string targetHandle;
 
   // 如果当前 handle 是 "default" 或以 "model_" 开头但没有额外后缀，
   // 说明没有通过 LogContextGuard 切换到非 default 日志
   // 此时需要根据当前 model label 计算正确的 handle
   if (currentHandle == "default" || currentHandle.find('_') == currentHandle.rfind('_')) {
-    std::string modelLabel = GetEffectiveModelLabel();
+    std::string modelLabel = currentModelLabel_.empty() ? config.modelLabel : currentModelLabel_;
     targetHandle = "model_" + SanitizePathComponent(modelLabel);
   } else {
     // 在 LogContextGuard 上下文中，使用当前 handle
@@ -474,12 +500,12 @@ void FileLogger::WriteLog(const std::string &message) {
   }
 
   // Long log segmentation handling
-  if (message.size() > config_.maxLineLength) {
+  if (message.size() > config.maxLineLength) {
     size_t offset = 0;
     size_t segmentNum = 0;
 
     while (offset < message.size()) {
-      size_t length = std::min(config_.maxLineLength, message.size() - offset);
+      size_t length = std::min(config.maxLineLength, message.size() - offset);
       std::string segment;
 
       if (segmentNum == 0) {
@@ -488,12 +514,12 @@ void FileLogger::WriteLog(const std::string &message) {
         segment = "[CONT:" + std::to_string(segmentNum) + "] " + message.substr(offset, length);
       }
 
-      FileHandleManager::Instance().Write(targetHandle, segment);
+      handleManager.Write(targetHandle, segment);
       offset += length;
       segmentNum++;
     }
   } else {
-    FileHandleManager::Instance().Write(targetHandle, message);
+    handleManager.Write(targetHandle, message);
   }
 }
 

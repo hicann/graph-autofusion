@@ -23,11 +23,14 @@
 #include <vector>
 #include <atomic>
 #include <fstream>
+#include <future>
 #include <string>
 #include <set>
 #include <mutex>
 
+#define private public
 #include "sk_log.h"
+#undef private
 #include "sk_model_context.h"
 
 namespace {
@@ -476,6 +479,146 @@ TEST_F(TestSkModelContext, LogContextGuard_ConcurrentThreadsKeepModelContextsIso
   EXPECT_TRUE(restoreChecks[0]);
   EXPECT_TRUE(restoreChecks[1]);
   sk::logger::FileLogger::Instance().SetEnabled(false);
+}
+
+TEST_F(TestSkModelContext, FileLoggerConcurrentConfigurationAccessCompletesWithFinalState) {
+  sk::logger::LoggerConfig config;
+  config.enabled = false;
+  config.modelLabel = "concurrent_config";
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+
+  constexpr uint32_t threadCount = 8;
+  constexpr uint32_t iterations = 1000;
+  std::atomic<uint32_t> ready{0};
+  std::atomic<bool> start{false};
+  std::vector<std::thread> threads;
+  for (uint32_t threadIndex = 0; threadIndex < threadCount; ++threadIndex) {
+    threads.emplace_back([&, threadIndex]() {
+      ready.fetch_add(1, std::memory_order_relaxed);
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (uint32_t i = 0; i < iterations; ++i) {
+        sk::logger::FileLogger::Instance().SetEnabled((i + threadIndex) % 2U == 0U);
+        sk::logger::FileLogger::Instance().SetMinLevel((i % 2U == 0U) ? sk::logger::LogLevel::DEBUG
+                                                                      : sk::logger::LogLevel::WARNING);
+        sk::logger::FileLogger::Instance().SetModelLabel("concurrent_model_" + std::to_string(threadIndex));
+        (void)sk::logger::FileLogger::Instance().IsEnabled();
+        sk::logger::FileLogger::Instance().WriteLogIfEnabled(sk::logger::LogLevel::INFO, __FUNCTION__, __FILE__,
+                                                             __LINE__, "iteration=%u", i);
+      }
+    });
+  }
+
+  while (ready.load(std::memory_order_acquire) != threadCount) {
+    std::this_thread::yield();
+  }
+  start.store(true, std::memory_order_release);
+  for (auto &thread : threads) {
+    thread.join();
+  }
+
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+  EXPECT_FALSE(sk::logger::FileLogger::Instance().IsEnabled());
+  sk::logger::FileLogger::Instance().SetEnabled(true);
+  EXPECT_TRUE(sk::logger::FileLogger::Instance().IsEnabled());
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+}
+
+TEST_F(TestSkModelContext, FileLoggerInitializationLockDoesNotBlockLogConfigSnapshot) {
+  auto &logger = sk::logger::FileLogger::Instance();
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = "initialization_lock_snapshot";
+  ASSERT_TRUE(logger.Initialize(config));
+
+  std::unique_lock<std::mutex> initializationLock(logger.initializationMutex_);
+  auto writeFuture = std::async(std::launch::async, [&logger]() {
+    logger.WriteLogIfEnabled(sk::logger::LogLevel::INFO, __FUNCTION__, __FILE__, __LINE__,
+                             "log while initialization is serialized");
+  });
+
+  EXPECT_EQ(writeFuture.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  initializationLock.unlock();
+  writeFuture.get();
+  logger.SetEnabled(false);
+}
+
+TEST_F(TestSkModelContext, FileHandleManagerRegisterFailureDoesNotReenterMutex) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  EXPECT_EXIT(
+      {
+        alarm(1);
+        sk::logger::FileLogger::Instance().SetEnabled(true);
+        sk::logger::FileLogger::Instance().SetMinLevel(sk::logger::LogLevel::ERROR);
+        bool registered = sk::logger::FileHandleManager::Instance().RegisterFile(
+            "reentrant_register_failure", "/proc/graph_autofusion_missing/super_kernel.log");
+        _exit(registered ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(TestSkModelContext, FileHandleManagerSwitchFailureDoesNotReenterMutex) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  EXPECT_EXIT(
+      {
+        alarm(1);
+        sk::logger::FileLogger::Instance().SetEnabled(true);
+        sk::logger::FileLogger::Instance().SetMinLevel(sk::logger::LogLevel::ERROR);
+        bool switched = sk::logger::FileHandleManager::Instance().SwitchToFile("missing_handle_for_reentrant_log");
+        _exit(switched ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(TestSkModelContext, FileHandleManagerLogDoesNotAcquireLoggerConfigMutex) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  EXPECT_EXIT(
+      {
+        alarm(1);
+        auto &logger = sk::logger::FileLogger::Instance();
+        auto &handleManager = sk::logger::FileHandleManager::Instance();
+        logger.SetEnabled(true);
+        logger.SetMinLevel(sk::logger::LogLevel::ERROR);
+        std::lock_guard<decltype(handleManager.mutex_)> managerLock(handleManager.mutex_);
+        std::lock_guard<std::mutex> configLock(logger.mutex_);
+        logger.WriteLogIfEnabled(sk::logger::LogLevel::ERROR, __FUNCTION__, __FILE__, __LINE__,
+                                 "log while manager and config are locked");
+        _exit(0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(TestSkModelContext, FileHandleManagerFailureIsWrittenToFileAfterUnlock) {
+  const std::string modelLabel = "file_handle_failure_file_sink";
+  const std::string handleName = "model_" + modelLabel;
+  const std::string logPath = GetSkMetaBasePath() + "/" + modelLabel + "/super_kernel.log";
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = modelLabel;
+  sk::logger::FileLogger::SetCurrentModelLabel(modelLabel);
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+
+  EXPECT_FALSE(sk::logger::FileHandleManager::Instance().SwitchToFile("missing_handle_for_file_sink"));
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+  sk::logger::FileHandleManager::Instance().CloseFile(handleName);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
+  std::ifstream file(logPath);
+  ASSERT_TRUE(file.good());
+  bool foundError = false;
+  std::string line;
+  while (std::getline(file, line)) {
+    if (line.find("File handle not found: missing_handle_for_file_sink") != std::string::npos) {
+      foundError = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(foundError);
+  file.close();
+  std::remove(logPath.c_str());
+  rmdir((GetSkMetaBasePath() + "/" + modelLabel).c_str());
+  sk::logger::FileLogger::SetCurrentModelLabel("");
 }
 
 TEST_F(TestSkModelContext, LogContextGuard_FileAndModelContextsRestoreInNestedOrder) {
