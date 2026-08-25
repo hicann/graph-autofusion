@@ -16,14 +16,17 @@ ApiPerfFactory &ApiPerfFactory::Instance() {
 }
 
 std::unique_ptr<ApiPerf> ApiPerfFactory::Create(const std::string &class_name) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  const auto iter = creator_map_.find(class_name);
-  if (iter == creator_map_.end()) {
-    GELOGW("Cannot find node type %s in inner map.", class_name.c_str());
-    return nullptr;
+  ApiPerfCreatorFun creator;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto iter = creator_map_.find(class_name);
+    if (iter == creator_map_.end()) {
+      GELOGW("Cannot find node type %s in inner map.", class_name.c_str());
+      return nullptr;
+    }
+    creator = iter->second;
   }
-  auto &func = creator_map_[class_name];
   GELOGD("Create ApiPerf success, class_name: %s", class_name.c_str());
-  return func(class_name);
+  return creator(class_name);
 }
 }  // namespace att

@@ -1781,90 +1781,70 @@ namespace {
 PerfParamTableV1 perf_param_table_v1;
 TilingScheduleConfigTableV1 tiling_schedule_config_table_v1;
 TilingScheduleConfigTableV1HeavyOp tiling_schedule_config_table_v1_heavy_op;
-ApiPerfRegister<ApiPerf> add_api_perf(kAdd, GetPerfFunc(kAdd), nullptr, &perf_param_table_v1,
-                                      &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> gather_api_perf(kGather, GetPerfFunc(kGather), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> add_api_perf(kAdd, kAdd, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> gather_api_perf(kGather, kGather, nullptr, &perf_param_table_v1,
                                          &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> abs_api_perf(kAbs, GetPerfFunc(kAbs), nullptr, &perf_param_table_v1,
-                                      &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> broadcast_api_perf(kBroadcast, GetPerfFunc(kBroadcast), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> abs_api_perf(kAbs, kAbs, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> broadcast_api_perf(kBroadcast, kBroadcast, nullptr, &perf_param_table_v1,
                                             &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> cast_api_perf(kCast, GetPerfFunc(kCast), nullptr, &perf_param_table_v1,
-                                       &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> div_api_perf(kDiv, GetPerfFunc(kDiv), nullptr, &perf_param_table_v1,
-                                      &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> erf_api_perf(kErf, GetPerfFunc(kErf), nullptr, &perf_param_table_v1,
-                                      &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> exp_api_perf(kExp, GetPerfFunc(kExp), nullptr, &perf_param_table_v1,
-                                      &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> logical_and_api_perf(kLogicalAnd, GetPerfFunc(kLogicalAnd), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> cast_api_perf(kCast, kCast, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> div_api_perf(kDiv, kDiv, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> erf_api_perf(kErf, kErf, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> exp_api_perf(kExp, kExp, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> logical_and_api_perf(kLogicalAnd, kLogicalAnd, nullptr, &perf_param_table_v1,
                                               &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> logical_or_api_perf(kLogicalOr, GetPerfFunc(kLogicalOr), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> logical_or_api_perf(kLogicalOr, kLogicalOr, nullptr, &perf_param_table_v1,
                                              &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> logical_not_api_perf(kLogicalNot, GetPerfFunc(kLogicalNot), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> logical_not_api_perf(kLogicalNot, kLogicalNot, nullptr, &perf_param_table_v1,
                                               &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> maximum_api_perf(kMaximum, GetPerfFunc(kMaximum), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> maximum_api_perf(kMaximum, kMaximum, nullptr, &perf_param_table_v1,
                                           &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> minimum_api_perf(kMinimum, GetPerfFunc(kMinimum), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> minimum_api_perf(kMinimum, kMinimum, nullptr, &perf_param_table_v1,
                                           &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> min_api_perf(kMin, GetPerfFunc(kMin), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> min_api_perf(kMin, kMin, nullptr, &perf_param_table_v1,
                                       &tiling_schedule_config_table_v1_heavy_op);
-ApiPerfRegister<ApiPerf> mul_api_perf(kMul, GetPerfFunc(kMul), nullptr, &perf_param_table_v1,
-                                      &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> neg_api_perf(kNeg, GetPerfFunc(kNeg), nullptr, &perf_param_table_v1,
-                                      &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> reciprocal_api_perf(kReciprocal, GetPerfFunc(kReciprocal), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> mul_api_perf(kMul, kMul, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> neg_api_perf(kNeg, kNeg, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> reciprocal_api_perf(kReciprocal, kReciprocal, nullptr, &perf_param_table_v1,
                                              &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> relu_api_perf(kRelu, GetPerfFunc(kRelu), nullptr, &perf_param_table_v1,
-                                       &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> remove_pad_api_perf(kRemovePad, GetPerfFunc(kRemovePad), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> relu_api_perf(kRelu, kRelu, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> remove_pad_api_perf(kRemovePad, kRemovePad, nullptr, &perf_param_table_v1,
                                              &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> rsqrt_api_perf(kRsqrt, GetPerfFunc(kRsqrt), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> rsqrt_api_perf(kRsqrt, kRsqrt, nullptr, &perf_param_table_v1,
                                         &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> sign_api_perf(kSign, GetPerfFunc(kSign), nullptr, &perf_param_table_v1,
-                                       &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> sqrt_api_perf(kSqrt, GetPerfFunc(kSqrt), nullptr, &perf_param_table_v1,
-                                       &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> sub_api_perf(kSub, GetPerfFunc(kSub), nullptr, &perf_param_table_v1,
-                                      &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> tanh_api_perf(kTanh, GetPerfFunc(kTanh), nullptr, &perf_param_table_v1,
-                                       &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> where_api_perf(kWhere, GetPerfFunc(kWhere), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> sign_api_perf(kSign, kSign, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> sqrt_api_perf(kSqrt, kSqrt, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> sub_api_perf(kSub, kSub, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> tanh_api_perf(kTanh, kTanh, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> where_api_perf(kWhere, kWhere, nullptr, &perf_param_table_v1,
                                         &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> select_api_perf(kSelect, GetPerfFunc(kWhere), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> select_api_perf(kSelect, kWhere, nullptr, &perf_param_table_v1,
                                          &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> ge_api_perf(kGe, GetPerfFunc(kGe), nullptr, &perf_param_table_v1,
-                                     &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> eq_api_perf(kEq, GetPerfFunc(kEq), nullptr, &perf_param_table_v1,
-                                     &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> ne_api_perf(kNe, GetPerfFunc(kNe), nullptr, &perf_param_table_v1,
-                                     &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> gt_api_perf(kGt, GetPerfFunc(kGt), nullptr, &perf_param_table_v1,
-                                     &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> le_api_perf(kLe, GetPerfFunc(kLe), nullptr, &perf_param_table_v1,
-                                     &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> lt_api_perf(kLt, GetPerfFunc(kLt), nullptr, &perf_param_table_v1,
-                                     &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> ub2ub_api_perf(kUb2ub, GetPerfFunc(kUb2ub), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> ge_api_perf(kGe, kGe, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> eq_api_perf(kEq, kEq, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> ne_api_perf(kNe, kNe, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> gt_api_perf(kGt, kGt, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> le_api_perf(kLe, kLe, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> lt_api_perf(kLt, kLt, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> ub2ub_api_perf(kUb2ub, kUb2ub, nullptr, &perf_param_table_v1,
                                         &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> load_api_perf(kLoad, GetPerfFunc(kLoad), nullptr, &perf_param_table_v1,
-                                       &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> store_api_perf(kStore, GetPerfFunc(kStore), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> load_api_perf(kLoad, kLoad, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> store_api_perf(kStore, kStore, nullptr, &perf_param_table_v1,
                                         &tiling_schedule_config_table_v1);
 
-ApiPerfRegister<ApiPerf> reduce_all_api_perf(kAll, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> reduce_all_api_perf(kAll, kUnitVector, nullptr, &perf_param_table_v1,
                                              &tiling_schedule_config_table_v1_heavy_op);
-ApiPerfRegister<ApiPerf> reduce_any_api_perf(kAny, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> reduce_any_api_perf(kAny, kUnitVector, nullptr, &perf_param_table_v1,
                                              &tiling_schedule_config_table_v1_heavy_op);
-ApiPerfRegister<ApiPerf> reduce_max_api_perf(kMax, GetPerfFunc(kMax), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> reduce_max_api_perf(kMax, kMax, nullptr, &perf_param_table_v1,
                                              &tiling_schedule_config_table_v1_heavy_op);
-ApiPerfRegister<ApiPerf> reduce_mean_api_perf(kMean, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> reduce_mean_api_perf(kMean, kUnitVector, nullptr, &perf_param_table_v1,
                                               &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> reduce_min_api_perf(kMin, GetPerfFunc(kMin), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> reduce_min_api_perf(kMin, kMin, nullptr, &perf_param_table_v1,
                                              &tiling_schedule_config_table_v1_heavy_op);
-ApiPerfRegister<ApiPerf> reduce_prod_api_perf(kProd, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> reduce_prod_api_perf(kProd, kUnitVector, nullptr, &perf_param_table_v1,
                                               &tiling_schedule_config_table_v1_heavy_op);
-ApiPerfRegister<ApiPerf> reduce_sum_api_perf(kSum, GetPerfFunc(kSum), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> reduce_sum_api_perf(kSum, kSum, nullptr, &perf_param_table_v1,
                                              &tiling_schedule_config_table_v1_heavy_op);
 // 不需要建模的ASCIR
 ApiPerfRegister<ApiPerf> data_api_perf(kData, DefaultGetPerf, nullptr, &perf_param_table_v1,
@@ -1878,45 +1858,44 @@ ApiPerfRegister<ApiPerf> output_api_perf(kOutput, DefaultGetPerf, nullptr, &perf
 ApiPerfRegister<ApiPerf> workspace_api_perf(kWorkspace, DefaultGetPerf, nullptr, &perf_param_table_v1,
                                             &tiling_schedule_config_table_v1);
 // 目前无建模的ASCIR
-ApiPerfRegister<ApiPerf> pad_api_perf(kPad, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> pad_api_perf(kPad, kUnitVector, nullptr, &perf_param_table_v1,
                                       &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> nop_api_perf(kNop, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> nop_api_perf(kNop, kUnitVector, nullptr, &perf_param_table_v1,
                                       &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> ln_api_perf(kLn, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
-                                     &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> isnan_api_perf(kIsnan, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> ln_api_perf(kLn, kUnitVector, nullptr, &perf_param_table_v1, &tiling_schedule_config_table_v1);
+ApiPerfRegister<ApiPerf> isnan_api_perf(kIsnan, kUnitVector, nullptr, &perf_param_table_v1,
                                         &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> isfinite_api_perf(kIsFinite, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> isfinite_api_perf(kIsFinite, kUnitVector, nullptr, &perf_param_table_v1,
                                            &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> max_api_perf(kMax, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> max_api_perf(kMax, kUnitVector, nullptr, &perf_param_table_v1,
                                       &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> mean_api_perf(kMean, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> mean_api_perf(kMean, kUnitVector, nullptr, &perf_param_table_v1,
                                        &tiling_schedule_config_table_v1_heavy_op);
-ApiPerfRegister<ApiPerf> prod_api_perf(kProd, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> prod_api_perf(kProd, kUnitVector, nullptr, &perf_param_table_v1,
                                        &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> any_api_perf(kAny, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> any_api_perf(kAny, kUnitVector, nullptr, &perf_param_table_v1,
                                       &tiling_schedule_config_table_v1_heavy_op);
-ApiPerfRegister<ApiPerf> all_api_perf(kAll, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> all_api_perf(kAll, kUnitVector, nullptr, &perf_param_table_v1,
                                       &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> sigmoid_api_perf(kSigmoid, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> sigmoid_api_perf(kSigmoid, kUnitVector, nullptr, &perf_param_table_v1,
                                           &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> true_div_api_perf(kTrueDiv, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> true_div_api_perf(kTrueDiv, kUnitVector, nullptr, &perf_param_table_v1,
                                            &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> pow_api_perf(kPow, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> pow_api_perf(kPow, kUnitVector, nullptr, &perf_param_table_v1,
                                       &tiling_schedule_config_table_v1_heavy_op);
-ApiPerfRegister<ApiPerf> clip_by_value_api_perf(kClipByValue, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> clip_by_value_api_perf(kClipByValue, kUnitVector, nullptr, &perf_param_table_v1,
                                                 &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> concat_api_perf(kConcat, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> concat_api_perf(kConcat, kUnitVector, nullptr, &perf_param_table_v1,
                                          &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> leaky_relu_api_perf(kLeakyRelu, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> leaky_relu_api_perf(kLeakyRelu, kUnitVector, nullptr, &perf_param_table_v1,
                                              &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> bitwise_and_api_perf(kBitwiseAnd, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> bitwise_and_api_perf(kBitwiseAnd, kUnitVector, nullptr, &perf_param_table_v1,
                                               &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> transpose_api_perf(kTranspose, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> transpose_api_perf(kTranspose, kUnitVector, nullptr, &perf_param_table_v1,
                                             &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> floor_div_api_perf(kFloorDiv, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> floor_div_api_perf(kFloorDiv, kUnitVector, nullptr, &perf_param_table_v1,
                                             &tiling_schedule_config_table_v1);
-ApiPerfRegister<ApiPerf> gelu_api_perf(kGelu, GetPerfFunc(kUnitVector), nullptr, &perf_param_table_v1,
+ApiPerfRegister<ApiPerf> gelu_api_perf(kGelu, kUnitVector, nullptr, &perf_param_table_v1,
                                        &tiling_schedule_config_table_v1);
 }  // namespace
 }  // namespace att
