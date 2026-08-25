@@ -1238,6 +1238,11 @@ bool OnnxUtils::DecodeGraph(const int32_t recursion_depth, const onnx::GraphProt
     if (node_proto.op_type() == kNodeTypeForSubgraph) {
       ComputeGraphPtr compute_graph;
       // in this case, node only have one attr, whose type is AttributeProto_AttributeType_GRAPH
+      if (node_proto.attribute_size() == 0) {
+        REPORT_INNER_ERR_MSG("E18888", "Subgraph node %s has no attribute.", node_proto.name().c_str());
+        GELOGE(GRAPH_FAILED, "[Check][Param] Subgraph node %s has no attribute.", node_proto.name().c_str());
+        return false;
+      }
       const auto &node_attr = node_proto.attribute(0);
       if ((node_attr.type() == onnx::AttributeProto_AttributeType_GRAPH) &&
           (DecodeGraph(recursion_depth + 1, node_attr.g(), compute_graph))) {

@@ -145,7 +145,7 @@ af::Status NddmaApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_s
   std::string node_name = node_ptr != nullptr ? node_ptr->GetName() : "NddmaNode";
   NodeDetail dma_info;
   dma_info.name = node_name;
-  dma_info.optype = node_ptr->GetType();
+  dma_info.optype = node_ptr != nullptr ? node_ptr->GetType() : "Nddma";
   dma_info.input_dtype = {output_shapes[0].data_type};
   dma_info.output_dtype = {output_shapes[0].data_type};
   bool selected = false;

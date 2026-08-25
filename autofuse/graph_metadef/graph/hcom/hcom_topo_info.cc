@@ -27,6 +27,11 @@ Status HcomTopoInfo::SetGroupTopoInfo(const char_t *group, const HcomTopoInfo::T
 }
 
 Status HcomTopoInfo::GetGroupRankSize(const char_t *group, int64_t &rank_size) {
+  if (group == nullptr) {
+    REPORT_INNER_ERR_MSG("E18888", "Group pointer is nullptr.");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] group is nullptr.");
+    return ge::GRAPH_FAILED;
+  }
   {
     const std::lock_guard<std::mutex> lock(mutex_);
     const auto &iter_info = rank_info_.find(group);

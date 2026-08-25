@@ -694,6 +694,9 @@ void VectorFuncPartitioner::FixCompareClusterConnections(const ClusterPtr &clust
       continue;
     }
     const auto &in_cluster = cluster_dict_.GetNodeCluster(in_node);
+    if (in_cluster == nullptr) {
+      continue;
+    }
     if (in_cluster->Id() == cluster->Id()) {
       // in_node已经在这个cluster中，跳过
       continue;

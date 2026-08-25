@@ -1140,6 +1140,12 @@ bool ModelSerializeImp::LoadWeightFromFile(const std::string &file_path, const i
     GELOGE(GRAPH_FAILED, "Value length is less than 0.");
     return false;
   }
+  // Issue #275: upper bound check to prevent OOM from malformed model files
+  constexpr int64_t kMaxWeightLength = 2LL * 1024LL * 1024LL * 1024LL;
+  if (length > kMaxWeightLength) {
+    GELOGE(GRAPH_FAILED, "Value length %ld exceeds maximum allowed size %ld.", length, kMaxWeightLength);
+    return false;
+  }
   auto bin_data = std::unique_ptr<char_t[]>(new (std::nothrow) char_t[length]);
   if (bin_data == nullptr) {
     GELOGE(FAILED, "[Allocate][Mem]Allocate mem failed");

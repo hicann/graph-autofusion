@@ -2833,7 +2833,7 @@ af::Status TilingCodeGenImpl::GenSearchAllTilingbyCaseId() {
   return af::SUCCESS;
 }
 
-af::Status TilingCodeGenImpl::ValidateSingleResultAndGroup() {
+af::Status TilingCodeGenImpl::ValidateSingleResultAndGroup(bool need_free_memory) {
   tiling_func_.AddLine("  if (!ret) {");
   for (const auto &model_info : tiling_model_info_) {
     ArgsManager args_manager(model_info);
@@ -2844,6 +2844,11 @@ af::Status TilingCodeGenImpl::ValidateSingleResultAndGroup() {
   }
   GE_ASSERT_SUCCESS(GenOpLog("    ", "Failed to execute tiling func."));
   tiling_func_.AddLine("  }");
+  // Issue #274: release memory allocated in GenPGODefaultTiling only in PGO/inductor function scope
+  // 仅在 PGO 路径（GenPGOSearchTilingKey）内调用时传入 true，因为 memory 变量仅在该函数体内声明
+  if (need_free_memory) {
+    tiling_func_.AddLine("  free(memory);");
+  }
   tiling_func_.AddLine("  return ret;");
   tiling_func_.AddLine("}");
   tiling_func_.AddLine("");
@@ -2933,7 +2938,7 @@ af::Status TilingCodeGenImpl::GenPGOSearchTilingKey() {
   if (is_uniq_group_) {
     GenPGOSearchTilingKeyUniqGroupBatch();
   }
-  GE_ASSERT_SUCCESS(ValidateSingleResultAndGroup(), "Gen ValidateSingleResultAndGroup failed.");
+  GE_ASSERT_SUCCESS(ValidateSingleResultAndGroup(true), "Gen ValidateSingleResultAndGroup failed.");
   return af::SUCCESS;
 }
 
@@ -2950,6 +2955,8 @@ void TilingCodeGenImpl::GenPGOSearchTilingKeyUniqGroupBatch() {
   tiling_func_.AddLine(
       "    if (PgoConfig::Instance().batch_callback(PgoConfig::Instance().tensor_args, stream, "
       "workspaceSize, &tiling_data_list) != 0) {");
+  // Issue #274: release memory allocated in GenPGODefaultTiling before early return
+  tiling_func_.AddLine("      free(memory);");
   tiling_func_.AddLine("      return false;");
   tiling_func_.AddLine("    }");
   tiling_func_.AddLine("  }");
@@ -4981,9 +4988,11 @@ af::Status TilingCodeGenImpl::GenTiling(std::map<std::string, std::string> &tili
   GE_ASSERT_SUCCESS(InitTilingGeneration(cache_reuse_info, cache_capacity));
   const auto &cur_ident = tiling_model_info_[0].schedule_group_ident;
   GenGroupNamespaceHead(cur_ident);
+  auto &reuse_group = tiling_model_info_[0].reuse_schedule_group;
+  GE_ASSERT_NOTNULL(reuse_group, "reuse_schedule_group is nullptr for op %s.", op_name_.c_str());
   GELOGD("Generate tiling code for %s of %s reuse_ident is %s.", cur_ident.GetGroupPrefix().c_str(), op_name_.c_str(),
-         tiling_model_info_[0].reuse_schedule_group->reuse_group_ident.GetGroupPrefix().c_str());
-  if (tiling_model_info_[0].reuse_schedule_group->IsReuseGroup(cur_ident)) {
+         reuse_group->reuse_group_ident.GetGroupPrefix().c_str());
+  if (reuse_group->IsReuseGroup(cur_ident)) {
     RequireReuseGroupTranslationUnitHeaders();
     if (config_.enable_autofuse_pgo) {
       RequireTranslationUnitSystemHeader("cfloat");

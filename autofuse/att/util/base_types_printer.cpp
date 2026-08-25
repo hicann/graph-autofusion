@@ -11,7 +11,13 @@
 
 namespace af {
 void to_json(nlohmann::json &j, const Expression &arg) {
-  auto expr = arg.IsValid() ? "" : std::string(arg.Str().get());
+  std::string expr;
+  if (arg.IsValid()) {
+    auto str_ptr = arg.Str();
+    if (str_ptr) {
+      expr = str_ptr.get();
+    }
+  }
   j = nlohmann::json{
       {expr},
   };

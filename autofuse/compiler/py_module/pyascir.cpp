@@ -215,7 +215,15 @@ void ApiInfo::Dealloc(PyObject *self) {
 
 int ApiInfo::set(PyObject *self, PyObject *value, void *closure) {
   (void)closure;
+  if (value == nullptr) {
+    PyErr_SetString(PyExc_ValueError, "value is null");
+    return -1;
+  }
   const char *val = PyUnicode_AsUTF8(value);
+  if (val == nullptr) {
+    PyErr_SetString(PyExc_TypeError, "expected a string");
+    return -1;
+  }
   static const map<string, af::ComputeType> name_to_type = {
       {"load", af::ComputeType::kComputeLoad},           {"gather", af::ComputeType::kComputeGather},
       {"store", af::ComputeType::kComputeStore},         {"elemwise", af::ComputeType::kComputeElewise},

@@ -241,7 +241,7 @@ class TilingCodeGenImpl {
   virtual af::Status GenGetTilingKey();
   virtual af::Status GenPGOSearchTilingKey();
   void GenPGOSearchTilingKeyUniqGroupBatch();
-  virtual af::Status ValidateSingleResultAndGroup();
+  virtual af::Status ValidateSingleResultAndGroup(bool need_free_memory = false);
   // 根据caseid生成选择逻辑
   virtual af::Status GenGetTilingbyCaseId();
   virtual af::Status GenPGODefaultTiling();
