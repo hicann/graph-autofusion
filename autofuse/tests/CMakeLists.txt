@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.16.1)
 project(autofuse)
 
+option(ENABLE_DEVICE_VALIDATION "Register host device validation contract tests" ON)
+option(ENABLE_DEVICE_VALIDATION_RUNNER "Register runner-backed validation tests" OFF)
+option(ENABLE_DEVICE_VALIDATION_REAL_CODEGEN "Register real-codegen validation ST" OFF)
+option(ENABLE_DEVICE_VALIDATION_HARDWARE "Register real-device validation ST" OFF)
+
 enable_testing()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

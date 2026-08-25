@@ -1,0 +1,14 @@
+{
+  "profile": "ascend950",
+  "soc_version": "Ascend950PR_9579",
+  "allowed_abi": "AutofuseLaunchV2,AutofuseLaunch",
+  "dtypes": ["float16", "bfloat16", "float32", "int32", "int64", "uint8"],
+  "max_shape_elements": 4294967296,
+  "simulator_backend": "ascendc_simulator",
+  "real_device_backend": "ascendc_real_device",
+  "profiler": "optional",
+  "tools": {"toolkit": "ASCEND_HOME_PATH", "profiler": "msprof"},
+  "ascir": {"platform": "2201", "core_type": 1, "ub_size": 245760},
+  "resources": {"max_tiling_bytes": 67108864, "max_workspace_bytes": 4294967296,
+    "max_block_dimension": 4096}
+}
