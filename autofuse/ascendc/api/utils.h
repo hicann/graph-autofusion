@@ -280,6 +280,41 @@ constexpr __aicore__ static inline T AfInfinity() {
   return T();
 }
 
+inline __aicore__ bool IsIntegerWithinUint32Magnitude(float value) {
+  constexpr uint32_t kExponentMask = 0x7F800000U;
+  constexpr uint32_t kFractionMask = 0x007FFFFFU;
+  constexpr uint32_t kExponentBias = 127U;
+  constexpr uint32_t kFractionBits = 23U;
+  constexpr uint32_t kUint32Exponent = 32U;
+
+  const uint32_t bits = GetScalarValueByBitCode<float, uint32_t>(value);
+  const uint32_t exponent = (bits & kExponentMask) >> kFractionBits;
+  const uint32_t fraction = bits & kFractionMask;
+
+  // NaN and infinity are not integers.
+  if (exponent == 0xFFU) {
+    return false;
+  }
+
+  // Ignore the sign bit and limit the absolute value to the uint32 range.
+  if (exponent >= kExponentBias + kUint32Exponent) {
+    return false;
+  }
+
+  // Zero and non-zero values with an absolute value less than one.
+  if (exponent < kExponentBias) {
+    return exponent == 0U && fraction == 0U;
+  }
+
+  const uint32_t integer_bits = exponent - kExponentBias;
+  if (integer_bits >= kFractionBits) {
+    return true;
+  }
+
+  const uint32_t fractional_mask = (1U << (kFractionBits - integer_bits)) - 1U;
+  return (fraction & fractional_mask) == 0U;
+}
+
 static constexpr float ROUND_TO_NEAREST_INT_BIAS = 0.5f;
 template <typename T>
 inline __aicore__ uint32_t ConvertToUint32(T value) {

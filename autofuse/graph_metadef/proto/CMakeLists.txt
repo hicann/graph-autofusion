@@ -1,9 +1,9 @@
 # -----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of 
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, 
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
@@ -18,7 +18,7 @@ set(METADEF_ATTR_GROUP_PROTO_LIST
         "${METADEF_PROTO_DIR}/af_attr_group_base.proto"
         )
 
-protobuf_generate(metadef_protos_af METADEF_PROTO_SRCS METADEF_PROTO_HDRS ${METADEF_PROTO_LIST} ${METADEF_ATTR_GROUP_PROTO_LIST} TARGET)
+generate_cann_protobuf(metadef_protos_af METADEF_PROTO_SRCS METADEF_PROTO_HDRS ${METADEF_PROTO_LIST} ${METADEF_ATTR_GROUP_PROTO_LIST} TARGET)
 
 set(METADEF_GRAPH_PROTO_SRCS
         "${CMAKE_BINARY_DIR}/proto/metadef_protos_af/proto/af_ir.pb.cc"
@@ -62,4 +62,3 @@ target_compile_options(metadef_attr_group_protos_obj_af PRIVATE
         $<$<AND:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,$<STREQUAL:${CMAKE_CONFIGURATION_TYPES},Debug>>:/MTd>
         $<$<AND:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,$<STREQUAL:${CMAKE_CONFIGURATION_TYPES},Release>>:/MT>
         )
-

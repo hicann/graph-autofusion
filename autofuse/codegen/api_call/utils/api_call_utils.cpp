@@ -120,7 +120,6 @@ bool CalculateDmaParams(const TPipe &tpipe, const Tensor &gm_tensor, const Tenso
   }
   AxisInfo axis_info;
   MergeInfo merge_info;
-
   size_t vec_axis_pos = ub_tensor.vectorized_axis.size() - 1;
   bool has_non_zero_axis = false;
   for (vec_axis_pos = ub_tensor.vectorized_axis.size(); vec_axis_pos-- > 0UL;) {
@@ -128,11 +127,8 @@ bool CalculateDmaParams(const TPipe &tpipe, const Tensor &gm_tensor, const Tenso
     GE_ASSERT_TRUE((pos != gm_tensor.axis.end()), "Codegen vectorized axis[%zu] not found", vec_axis_pos);
     const auto axis_pos = std::distance(gm_tensor.axis.begin(), pos);
     // 如果当前轴gm和ub上对应的stride均为0，如果前序轴的stride不为1，则保留当前轴
-    const bool ignore_zero_axis = has_non_zero_axis || vec_axis_pos == 0UL ||
-                                  af::SymbolicUtils::StaticCheckEq(ub_tensor.vectorized_strides[vec_axis_pos - 1],
-                                                                   af::ops::One) == af::TriBool::kTrue ||
-                                  af::SymbolicUtils::StaticCheckEq(ub_tensor.vectorized_strides[vec_axis_pos - 1],
-                                                                   af::ops::Zero) == af::TriBool::kTrue;
+    const bool ignore_zero_axis =
+        ascgen_utils::ShouldIgnoreDataCopyZeroAxis(has_non_zero_axis, vec_axis_pos, ub_tensor.vectorized_strides);
     if (af::SymbolicUtils::StaticCheckEq(gm_tensor.axis_strides[axis_pos], af::ops::Zero) == af::TriBool::kTrue &&
         af::SymbolicUtils::StaticCheckEq(ub_tensor.vectorized_strides[vec_axis_pos], af::ops::Zero) ==
             af::TriBool::kTrue &&
@@ -142,9 +138,9 @@ bool CalculateDmaParams(const TPipe &tpipe, const Tensor &gm_tensor, const Tenso
     has_non_zero_axis = true;
     ascir::SizeExpr cur_axis_stride = axis_info.prev_axis_stride * axis_info.prev_repeat;
     ascir::SizeExpr cur_vectorized_axis_stride = axis_info.prev_vectorized_axis_stride * axis_info.prev_repeat;
-    if (af::SymbolicUtils::StaticCheckEq(cur_axis_stride, gm_tensor.axis_strides[axis_pos]) != af::TriBool::kTrue ||
-        af::SymbolicUtils::StaticCheckEq(cur_vectorized_axis_stride, ub_tensor.vectorized_strides[vec_axis_pos]) !=
-            af::TriBool::kTrue ||
+    if (!ascgen_utils::IsDataCopyAxisContinuous(cur_axis_stride, cur_vectorized_axis_stride,
+                                                gm_tensor.axis_strides[axis_pos],
+                                                ub_tensor.vectorized_strides[vec_axis_pos]) ||
         merge_info.merge_repeats.empty() ||
         (vec_axis_pos < (ub_tensor.vectorized_axis.size() - 1) &&
          tpipe.tiler.GetAxis(ub_tensor.vectorized_axis[vec_axis_pos + 1]).type ==
@@ -161,6 +157,14 @@ bool CalculateDmaParams(const TPipe &tpipe, const Tensor &gm_tensor, const Tenso
   std::reverse(merge_info.merge_repeats.begin(), merge_info.merge_repeats.end());
   std::reverse(merge_info.merge_gm_strides.begin(), merge_info.merge_gm_strides.end());
   std::reverse(merge_info.merge_ub_strides.begin(), merge_info.merge_ub_strides.end());
+  GELOGD(
+      "[Codegen NDDMA] effective view: raw_rank=%zu, effective_rank=%zu, repeats=[%s], gm_strides=[%s], "
+      "ub_strides=[%s], vectorized_axis=[%s]",
+      ub_tensor.vectorized_axis.size(), merge_info.merge_repeats.size(),
+      ascgen_utils::VectorToStr(merge_info.merge_repeats).c_str(),
+      ascgen_utils::VectorToStr(merge_info.merge_gm_strides).c_str(),
+      ascgen_utils::VectorToStr(merge_info.merge_ub_strides).c_str(),
+      ascgen_utils::VectorToStr(ub_tensor.vectorized_axis).c_str());
   SetDataCopyParams(merge_info, param, multi_axis_copy);
   return true;
 }

@@ -23,51 +23,27 @@ constexpr size_t kMaxNddmaRank = 5U;
 constexpr uint64_t kLowCoreUpperBound = 2U;
 constexpr uint64_t kInputStrideUpperBound = 128U;
 
-// 合并模型直接表示最终多项式，避免运行时重新组合 NG、NGM 和 rho。
-struct NddmaLowCoreParams {
-  double constant;
-  double bytes;
-  double stride;
-  double bytes_stride;
-};
-
-struct NddmaHighCoreParams {
-  double constant;
-  double stride;
-  double stride_square;
-  double bytes;
-  double bytes_stride;
-  double bytes_stride_square;
-};
-
 struct Nddma1DParams {
-  NddmaLowCoreParams low_os_one;
-  NddmaLowCoreParams low_os_ge_two;
-  NddmaHighCoreParams high_os_one;
-  NddmaHighCoreParams high_os_ge_two;
+  double t1;
+  double h1;
+  double t2;
+  double h2;
+  double a1, a2, b1, b2, b3, b4, c1, c2, c3, c4;
 };
 
 const Nddma1DParams *GetNddma1DParams(uint64_t dtype_size) {
-  static constexpr Nddma1DParams kB8 = {
-      {194.421, 0.08501521772, 1.1117457, 0.0081160848},
-      {53.81133, 6.998497418, 0.26072115, -0.0000079948},
-      {373.274, 1.673508468, 0.008698207194, 0.1650886939, 0.01221712541, 0.00006349958196},
-      {94.1599102, 0.5169452208, 0.000001100449223, 13.88854236, 0.00001331045708, -0.00000000003374437189}};
-  static constexpr Nddma1DParams kB16 = {
-      {204.604, 0.0388230407, 0.96094416, 0.0091341897},
-      {61.53027, 3.498120341, 0.34357215, -0.0000114298},
-      {399.909, 2.009597249, -0.007116959052, 0.07542046912, 0.01910209069, -0.00006764977277},
-      {116.1609008, 0.6810487439, 0.0000008016156689, 6.936002307, -0.00001459675784, -0.00000000002666778076}};
-  static constexpr Nddma1DParams kB32 = {
-      {235.137, 0.01746346643, 0.3675047, 0.0058486918},
-      {158.723147, 0.2427621164, 1.4596785, 0.0013874442},
-      {453.859, 1.420515439, -0.008545279188, 0.03400250258, 0.02260694081, -0.0001359947351},
-      {323.0812754, 0.7652737348, 0.03310192195, 0.4195876242, 0.007483747325, 0.00003146382551}};
-  static constexpr Nddma1DParams kB64 = {
-      {243.205, 0.01747194879, 0.90051511, 0.0030237371},
-      {189.027128, 0.1244607288, 1.98330501, 0.0007092839},
-      {468.971, 3.366949543, -0.02124182228, 0.03402448402, 0.0113054963, -0.00007132549515},
-      {361.5012267, 4.200466405, -0.009748131943, 0.2462524565, 0.0008811088948, -0.000003486197538}};
+  static constexpr Nddma1DParams kB8 = {11.7626,      194.421,     6.05735,     373.274,      1.1117457,
+                                        0.0081160848, -140.60967,  -0.85102455, 6.9134822,    -0.0081240796,
+                                        1.5052979,    0.007823918, 0.47972982,  -0.0078196972};
+  static constexpr Nddma1DParams kB16 = {25.7579,      204.604,     13.259,      399.909,     0.93077499,
+                                         0.0041300563, -144.93927,  -0.65222426, 3.4593577,   -0.0041392279,
+                                         1.1389125,    0.015061621, 0.84385983,  -0.015043028};
+  static constexpr Nddma1DParams kB32 = {57.2624,      235.137,      29.4096,      453.859,     0.29118972,
+                                         0.0021022688, -75.847618,   -0.098291434, 0.23017978,  -0.0021037148,
+                                         1.5982043,    0.0048954057, 0.21802244,   0.0016884734};
+  static constexpr Nddma1DParams kB64 = {57.2346,       243.205,     29.3906,      468.971,     0.32660604,
+                                         0.00087486841, -62.346718,  -0.089369196, 0.10364992,  -0.00088051835,
+                                         0.75774914,    0.021509891, 1.1274142,    -0.021494907};
   switch (dtype_size) {
     case 1U:
       return &kB8;
@@ -143,43 +119,97 @@ bool HasStaticByteCountOverflow(const Expr &dim, uint64_t dtype_size) {
   return static_cast<uint64_t>(dim_value) > std::numeric_limits<uint64_t>::max() / dtype_size;
 }
 
-Expr BuildLowCore(const NddmaLowCoreParams &params, const Expr &bytes, const Expr &stride) {
-  return CreateExpr(params.constant) + CreateExpr(params.bytes) * bytes + CreateExpr(params.stride) * stride +
-         CreateExpr(params.bytes_stride) * bytes * stride;
-}
-
-Expr BuildHighCore(const NddmaHighCoreParams &params, const Expr &bytes, const Expr &stride) {
-  const Expr stride_square = stride * stride;
-  return CreateExpr(params.constant) + CreateExpr(params.stride) * stride +
-         CreateExpr(params.stride_square) * stride_square +
-         bytes * (CreateExpr(params.bytes) + CreateExpr(params.bytes_stride) * stride +
-                  CreateExpr(params.bytes_stride_square) * stride_square);
-}
-
-Expr SelectOutputStrideModel(const Expr &output_stride, const Expr &os_one, const Expr &os_ge_two) {
-  if (output_stride.IsConstExpr()) {
-    if (af::SymbolicUtils::StaticCheckEq(output_stride, af::sym::kSymbolOne) == af::TriBool::kTrue) {
-      return os_one;
-    }
-    if (af::SymbolicUtils::StaticCheckGt(output_stride, af::sym::kSymbolOne) == af::TriBool::kTrue) {
-      return os_ge_two;
-    }
+NddmaFallbackReason ValidateNddmaDescriptorInput(const TensorShapeInfo &shape_info,
+                                                 const std::vector<int64_t> &vectorized_axis,
+                                                 const std::vector<bool> &tile_inner) {
+  if (shape_info.repeats.empty()) {
+    return NddmaFallbackReason::kNoDescriptor;
   }
-  const Expr output_stride_gate =
-      af::sym::Max(af::sym::kSymbolZero, af::sym::Min(af::sym::kSymbolOne, output_stride - af::sym::kSymbolOne));
-  return os_one + output_stride_gate * (os_ge_two - os_one);
+  if (shape_info.repeats.size() != shape_info.gm_strides.size() ||
+      shape_info.repeats.size() != shape_info.strides.size()) {
+    return NddmaFallbackReason::kSchemaMismatch;
+  }
+  if (vectorized_axis.empty() || vectorized_axis.size() != shape_info.repeats.size()) {
+    return NddmaFallbackReason::kCodegenMismatch;
+  }
+  if (!tile_inner.empty() && tile_inner.size() != shape_info.repeats.size()) {
+    return NddmaFallbackReason::kSchemaMismatch;
+  }
+  return NddmaFallbackReason::kNone;
 }
 
-void BuildNddma1DBranches(const NddmaNormalizedDesc &descriptor, uint64_t dtype_size, const Nddma1DParams &params,
-                          Expr &low_core, Expr &high_core) {
-  const Expr bytes = descriptor.output_dims[0] * CreateExpr(dtype_size);
-  const Expr input_stride = af::sym::Min(CreateExpr(kInputStrideUpperBound), descriptor.input_strides[0]);
-  const Expr low_os_one = BuildLowCore(params.low_os_one, bytes, input_stride);
-  const Expr low_os_ge_two = BuildLowCore(params.low_os_ge_two, bytes, input_stride);
-  const Expr high_os_one = BuildHighCore(params.high_os_one, bytes, input_stride);
-  const Expr high_os_ge_two = BuildHighCore(params.high_os_ge_two, bytes, input_stride);
-  low_core = SelectOutputStrideModel(descriptor.output_strides[0], low_os_one, low_os_ge_two);
-  high_core = SelectOutputStrideModel(descriptor.output_strides[0], high_os_one, high_os_ge_two);
+void BuildNddmaEffectiveView(const TensorShapeInfo &shape_info, const std::vector<bool> &tile_inner,
+                             std::vector<Expr> &effective_repeats, std::vector<Expr> &effective_gm_strides,
+                             std::vector<Expr> &effective_ub_strides, std::vector<int64_t> &effective_axes) {
+  const auto &origin_repeats =
+      shape_info.origin_repeats.size() == shape_info.repeats.size() ? shape_info.origin_repeats : shape_info.repeats;
+  const size_t rank = origin_repeats.size();
+  Expr prev_repeat = CreateExpr(1);
+  Expr prev_actual_repeat = CreateExpr(1);
+  Expr prev_gm_stride = CreateExpr(1);
+  Expr prev_ub_stride = CreateExpr(1);
+  bool has_non_zero_axis = false;
+  for (size_t pos = rank; pos-- > 0U;) {
+    const bool ignore_zero_axis =
+        ascgen_utils::ShouldIgnoreDataCopyZeroAxis(has_non_zero_axis, pos, shape_info.strides);
+    const bool zero_axis =
+        af::SymbolicUtils::StaticCheckEq(shape_info.gm_strides[pos], CreateExpr(0)) == af::TriBool::kTrue &&
+        af::SymbolicUtils::StaticCheckEq(shape_info.strides[pos], CreateExpr(0)) == af::TriBool::kTrue &&
+        ignore_zero_axis;
+    if (zero_axis) {
+      continue;
+    }
+    has_non_zero_axis = true;
+    const Expr cur_gm_stride = prev_gm_stride * prev_repeat;
+    const Expr cur_ub_stride = prev_ub_stride * prev_repeat;
+    const bool tile_boundary = !tile_inner.empty() && pos + 1U < rank && tile_inner[pos + 1U];
+    if (!ascgen_utils::IsDataCopyAxisContinuous(cur_gm_stride, cur_ub_stride, shape_info.gm_strides[pos],
+                                                shape_info.strides[pos]) ||
+        effective_repeats.empty() || tile_boundary) {
+      effective_repeats.emplace_back(shape_info.repeats[pos]);
+      effective_gm_strides.emplace_back(shape_info.gm_strides[pos]);
+      effective_ub_strides.emplace_back(shape_info.strides[pos]);
+      effective_axes.emplace_back(static_cast<int64_t>(pos));
+      prev_gm_stride = shape_info.gm_strides[pos];
+      prev_ub_stride = shape_info.strides[pos];
+      prev_repeat = origin_repeats[pos];
+      prev_actual_repeat = shape_info.repeats[pos];
+      continue;
+    }
+    const Expr product = origin_repeats[pos] * prev_repeat;
+    effective_repeats.back() = shape_info.repeats[pos] * prev_actual_repeat;
+    prev_repeat = product;
+    prev_actual_repeat = shape_info.repeats[pos] * prev_actual_repeat;
+  }
+  std::reverse(effective_repeats.begin(), effective_repeats.end());
+  std::reverse(effective_gm_strides.begin(), effective_gm_strides.end());
+  std::reverse(effective_ub_strides.begin(), effective_ub_strides.end());
+  std::reverse(effective_axes.begin(), effective_axes.end());
+}
+
+NddmaFallbackReason MapNddmaEffectiveAxes(std::vector<int64_t> &effective_axes,
+                                          const std::vector<int64_t> &vectorized_axis) {
+  for (auto &axis : effective_axes) {
+    if (axis < 0 || static_cast<size_t>(axis) >= vectorized_axis.size()) {
+      return NddmaFallbackReason::kCodegenMismatch;
+    }
+    axis = vectorized_axis[static_cast<size_t>(axis)];
+  }
+  return NddmaFallbackReason::kNone;
+}
+
+Expr AbsExpr(const Expr &value) {
+  return af::sym::Max(value, af::sym::kSymbolZero - value);
+}
+
+Expr BuildNddma1DResidual(const Nddma1DParams &p, const Expr &bytes, const Expr &input_stride,
+                          const Expr &output_stride, uint64_t dtype_size, bool high_core) {
+  const Expr s = af::sym::Min(CreateExpr(kInputStrideUpperBound), input_stride * CreateExpr(dtype_size));
+  const Expr g = af::sym::Min(af::sym::kSymbolOne, output_stride - af::sym::kSymbolOne);
+  const Expr ng = (CreateExpr(p.a1) + CreateExpr(p.a2) * bytes) * s;
+  const Expr ngu = (CreateExpr(p.b1) + CreateExpr(p.b2) * s + (CreateExpr(p.b3) + CreateExpr(p.b4) * s) * bytes) * g;
+  const Expr rho = CreateExpr(p.c1) + CreateExpr(p.c2) * s + g * (CreateExpr(p.c3) + CreateExpr(p.c4) * s);
+  return (ng + ngu) * (high_core ? rho : CreateExpr(1));
 }
 
 af::Status SelectCoreBranch(const Expr &block_dim, const Expr &low_core, const Expr &high_core,
@@ -203,6 +233,42 @@ af::Status SelectCoreBranch(const Expr &block_dim, const Expr &low_core, const E
   result.ternary_ops[result.cycles] = std::move(ternary);
   return af::SUCCESS;
 }
+
+NddmaFallbackReason BuildNddmaCoreCycles(const NddmaNormalizedDesc &normalized, const Nddma1DParams &params,
+                                         uint64_t dtype_size, Expr &low_core, Expr &high_core) {
+  Expr total_elements = CreateExpr(1);
+  for (const auto &dim : normalized.output_dims) {
+    total_elements = total_elements * dim;
+  }
+  if (HasStaticByteCountOverflow(total_elements, dtype_size)) {
+    return NddmaFallbackReason::kSchemaMismatch;
+  }
+  const Expr total_bytes = total_elements * CreateExpr(dtype_size);
+  low_core = total_bytes / CreateExpr(params.t1) + CreateExpr(params.h1);
+  high_core = total_bytes / CreateExpr(params.t2) + CreateExpr(params.h2);
+  Expr input_prefix = CreateExpr(0);
+  Expr output_prefix = CreateExpr(0);
+  for (size_t i = 0; i < normalized.effective_rank; ++i) {
+    if (i > 0U) {
+      input_prefix = input_prefix + normalized.output_dims[i - 1U] * normalized.input_strides[i - 1U];
+      output_prefix = output_prefix + normalized.output_dims[i - 1U] * normalized.output_strides[i - 1U];
+    }
+    Expr input_stride = normalized.input_strides[i];
+    Expr output_stride = normalized.output_strides[i];
+    if (i > 0U) {
+      input_stride = AbsExpr(input_stride - input_prefix) + CreateExpr(1);
+      output_stride = AbsExpr(output_stride - output_prefix) + CreateExpr(1);
+    }
+    Expr suffix_elements = CreateExpr(1);
+    for (size_t suffix = i; suffix < normalized.effective_rank; ++suffix) {
+      suffix_elements = suffix_elements * normalized.output_dims[suffix];
+    }
+    const Expr bytes = suffix_elements * CreateExpr(dtype_size);
+    low_core = low_core + BuildNddma1DResidual(params, bytes, input_stride, output_stride, dtype_size, false);
+    high_core = high_core + BuildNddma1DResidual(params, bytes, input_stride, output_stride, dtype_size, true);
+  }
+  return NddmaFallbackReason::kNone;
+}
 }  // namespace
 
 const char *NddmaFallbackReasonToString(NddmaFallbackReason reason) {
@@ -214,30 +280,39 @@ const char *NddmaFallbackReasonToString(NddmaFallbackReason reason) {
 }
 
 NddmaFallbackReason BuildNddmaDescriptor(const TensorShapeInfo &shape_info, const std::vector<int64_t> &vectorized_axis,
-                                         NddmaDescriptorInfo &descriptor) {
+                                         NddmaDescriptorInfo &descriptor, const std::vector<bool> &tile_inner) {
   descriptor = NddmaDescriptorInfo{};
-  if (shape_info.repeats.empty()) {
-    return NddmaFallbackReason::kNoDescriptor;
+  const auto input_reason = ValidateNddmaDescriptorInput(shape_info, vectorized_axis, tile_inner);
+  if (input_reason != NddmaFallbackReason::kNone) {
+    return input_reason;
   }
-  if (shape_info.repeats.size() != shape_info.gm_strides.size() ||
-      shape_info.repeats.size() != shape_info.strides.size()) {
-    return NddmaFallbackReason::kSchemaMismatch;
+  std::vector<Expr> effective_repeats;
+  std::vector<Expr> effective_gm_strides;
+  std::vector<Expr> effective_ub_strides;
+  std::vector<int64_t> effective_axes;
+  BuildNddmaEffectiveView(shape_info, tile_inner, effective_repeats, effective_gm_strides, effective_ub_strides,
+                          effective_axes);
+  const auto axis_reason = MapNddmaEffectiveAxes(effective_axes, vectorized_axis);
+  if (axis_reason != NddmaFallbackReason::kNone) {
+    return axis_reason;
   }
-  descriptor.output_dims = shape_info.repeats;
-  descriptor.input_strides = shape_info.gm_strides;
-  descriptor.output_strides = shape_info.strides;
-  if (vectorized_axis.empty()) {
-    return NddmaFallbackReason::kCodegenMismatch;
-  }
-  descriptor.vectorized_axis = vectorized_axis;
+  descriptor.output_dims = std::move(effective_repeats);
+  descriptor.input_strides = std::move(effective_gm_strides);
+  descriptor.output_strides = std::move(effective_ub_strides);
+  descriptor.vectorized_axis = std::move(effective_axes);
+  GELOGD(
+      "[ATT NDDMA] effective view: raw_rank=%zu, effective_rank=%zu, repeats=[%s], gm_strides=[%s], ub_strides=[%s], "
+      "axes=[%s]",
+      shape_info.repeats.size(), descriptor.output_dims.size(), GetVecString(descriptor.output_dims).c_str(),
+      GetVecString(descriptor.input_strides).c_str(), GetVecString(descriptor.output_strides).c_str(),
+      ascgen_utils::VectorToStr(descriptor.vectorized_axis).c_str());
   return NddmaFallbackReason::kNone;
 }
 
 NddmaFallbackReason NormalizeNddmaDescriptor(const NddmaDescriptorInfo &descriptor, NddmaNormalizedDesc &normalized) {
   normalized = NddmaNormalizedDesc{};
-  normalized.raw_rank = descriptor.output_dims.size();
-  normalized.effective_rank = normalized.raw_rank;
-  if (normalized.raw_rank < kMinNddmaRank || normalized.raw_rank > kMaxNddmaRank) {
+  normalized.effective_rank = descriptor.output_dims.size();
+  if (normalized.effective_rank < kMinNddmaRank || normalized.effective_rank > kMaxNddmaRank) {
     return NddmaFallbackReason::kRankUnsupported;
   }
   if (!HasValidVectorLengths(descriptor)) {
@@ -246,10 +321,10 @@ NddmaFallbackReason NormalizeNddmaDescriptor(const NddmaDescriptorInfo &descript
   if (!HasValidAxisOrder(descriptor)) {
     return NddmaFallbackReason::kCodegenMismatch;
   }
-  normalized.output_dims = descriptor.output_dims;
-  normalized.input_strides = descriptor.input_strides;
-  normalized.output_strides = descriptor.output_strides;
-  normalized.vectorized_axis = descriptor.vectorized_axis;
+  normalized.output_dims.assign(descriptor.output_dims.rbegin(), descriptor.output_dims.rend());
+  normalized.input_strides.assign(descriptor.input_strides.rbegin(), descriptor.input_strides.rend());
+  normalized.output_strides.assign(descriptor.output_strides.rbegin(), descriptor.output_strides.rend());
+  normalized.vectorized_axis.assign(descriptor.vectorized_axis.rbegin(), descriptor.vectorized_axis.rend());
   return HasInvalidStaticValue(normalized) ? NddmaFallbackReason::kStrideInvalid : NddmaFallbackReason::kNone;
 }
 
@@ -258,12 +333,11 @@ af::Status EvaluateNddmaModel(const NddmaDescriptorInfo &descriptor, const std::
   result = NddmaModelResult{};
   NddmaNormalizedDesc normalized;
   result.fallback_reason = NormalizeNddmaDescriptor(descriptor, normalized);
-  result.raw_rank = normalized.raw_rank;
   result.effective_rank = normalized.effective_rank;
   if (result.fallback_reason != NddmaFallbackReason::kNone) {
     return af::SUCCESS;
   }
-  if (normalized.raw_rank != 1U || normalized.effective_rank != 1U) {
+  if (normalized.effective_rank < kMinNddmaRank || normalized.effective_rank > kMaxNddmaRank) {
     result.fallback_reason = NddmaFallbackReason::kNoRegisteredModel;
     return af::SUCCESS;
   }
@@ -278,15 +352,23 @@ af::Status EvaluateNddmaModel(const NddmaDescriptorInfo &descriptor, const std::
         params == nullptr ? NddmaFallbackReason::kDtypeUnsupported : NddmaFallbackReason::kSchemaMismatch;
     return af::SUCCESS;
   }
-  if (HasStaticByteCountOverflow(normalized.output_dims[0], dtype_size)) {
+  Expr low_core;
+  Expr high_core;
+  result.fallback_reason = BuildNddmaCoreCycles(normalized, *params, dtype_size, low_core, high_core);
+  if (result.fallback_reason != NddmaFallbackReason::kNone) {
+    return af::SUCCESS;
+  }
+  GE_ASSERT_SUCCESS(SelectCoreBranch(block_dim, low_core, high_core, result));
+  // Fitted residual terms can become non-positive outside their measured
+  // domain (for example, tiny B with a large effective stride).  Do not emit
+  // an invalid performance expression; use the existing legacy path instead.
+  if (IsStaticNonPositive(result.cycles)) {
+    result.selected = false;
     result.fallback_reason = NddmaFallbackReason::kSchemaMismatch;
     return af::SUCCESS;
   }
-  Expr low_core;
-  Expr high_core;
-  BuildNddma1DBranches(normalized, dtype_size, *params, low_core, high_core);
-  GE_ASSERT_SUCCESS(SelectCoreBranch(block_dim, low_core, high_core, result));
   result.selected = true;
+  result.model_name = normalized.effective_rank == 1U ? "NDDMA_1D_MULTICORE_V2" : "NDDMA_ND_MULTICORE_V1";
   result.fallback_reason = NddmaFallbackReason::kNone;
   return af::SUCCESS;
 }

@@ -65,12 +65,6 @@ struct DmaParamsExpr {
   }
 };
 
-struct AxisInfo {
-  ascir::SizeExpr prev_repeat = af::ops::One;
-  ascir::SizeExpr prev_axis_stride = af::ops::One;
-  ascir::SizeExpr prev_vectorized_axis_stride = af::ops::One;
-};
-
 struct ApiLoopParams {
   std::vector<std::string> outer_repeats;
   std::vector<std::vector<ascir::SizeExpr>> inputs_strides;
@@ -84,6 +78,12 @@ struct MergeInfo {
   std::vector<ascir::SizeExpr> merge_repeats;
   std::vector<ascir::SizeExpr> merge_gm_strides;
   std::vector<ascir::SizeExpr> merge_ub_strides;
+};
+
+struct AxisInfo {
+  ascir::SizeExpr prev_repeat = af::ops::One;
+  ascir::SizeExpr prev_axis_stride = af::ops::One;
+  ascir::SizeExpr prev_vectorized_axis_stride = af::ops::One;
 };
 
 struct VectorizedAixsLoopStatus {

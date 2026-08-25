@@ -167,6 +167,13 @@ bool IsScalarNextNodeSupportBlkTensor(const af::AscNodePtr &node);
 bool IsUbScalarLoad(const af::AscNodePtr &node);
 bool IsStaticSchedResult(const ascir::FusedScheduledResult &fused_schedule_result);
 
+// Shared DataCopy axis rules. The caller owns the original loop state so the
+// codegen state machine remains unchanged while ATT can reuse the same rules.
+bool ShouldIgnoreDataCopyZeroAxis(bool has_non_zero_axis, size_t axis_pos,
+                                  const std::vector<af::Expression> &ub_strides);
+bool IsDataCopyAxisContinuous(const af::Expression &cur_gm_stride, const af::Expression &cur_ub_stride,
+                              const af::Expression &gm_stride, const af::Expression &ub_stride);
+
 // Return the frontend ABI symbol list.  Results produced before the new field
 // was introduced may only have origin_vars; keep that as a compatibility
 // fallback for legacy callers and unit fixtures.

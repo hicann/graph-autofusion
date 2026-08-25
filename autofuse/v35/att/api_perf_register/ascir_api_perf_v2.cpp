@@ -40,7 +40,25 @@ af::Status TryNewNddmaModel(const TensorShapeInfo &shape_info, const NodeInfo &n
     LogNddmaFallback(node_detail.name, shape_info.data_type, nullptr, result);
     return af::SUCCESS;
   }
-  const auto build_reason = BuildNddmaDescriptor(shape_info, GetNddmaVectorizedAxis(node.node_ptr), descriptor);
+  uint64_t expected_dtype_size = 0U;
+  const auto dtype_iter = kDataTypeSizeMap.find(shape_info.data_type);
+  if (dtype_iter == kDataTypeSizeMap.end() || !dtype_iter->second.GetConstValue(expected_dtype_size) ||
+      expected_dtype_size == 0U || expected_dtype_size != shape_info.data_type_size) {
+    result.raw_rank = shape_info.repeats.size();
+    result.fallback_reason = NddmaFallbackReason::kDtypeUnsupported;
+    LogNddmaFallback(node_detail.name, shape_info.data_type, nullptr, result);
+    return af::SUCCESS;
+  }
+  std::vector<bool> tile_inner;
+  if (!node.outputs.empty() && node.outputs[0] != nullptr &&
+      node.outputs[0]->dim_info.size() == shape_info.repeats.size()) {
+    tile_inner.reserve(node.outputs[0]->dim_info.size());
+    for (const auto *axis : node.outputs[0]->dim_info) {
+      tile_inner.push_back(axis != nullptr && axis->axis_type == AxisPosition::INNER && !axis->is_bind_multi_core);
+    }
+  }
+  const auto build_reason =
+      BuildNddmaDescriptor(shape_info, GetNddmaVectorizedAxis(node.node_ptr), descriptor, tile_inner);
   if (build_reason != NddmaFallbackReason::kNone) {
     result.raw_rank = shape_info.repeats.size();
     result.fallback_reason = build_reason;
@@ -49,6 +67,7 @@ af::Status TryNewNddmaModel(const TensorShapeInfo &shape_info, const NodeInfo &n
   }
   node_detail.nddma_descriptor = descriptor;
   GE_ASSERT_SUCCESS(EvaluateNddmaModel(descriptor, shape_info.data_type, CreateExpr("block_dim"), result));
+  result.raw_rank = shape_info.repeats.size();
   if (!result.selected) {
     LogNddmaFallback(node_detail.name, shape_info.data_type, &descriptor, result);
     return af::SUCCESS;

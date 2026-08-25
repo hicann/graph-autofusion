@@ -59,7 +59,24 @@ inline __aicore__ void Pow(const AscendC::LocalTensor<T> &dst, const AscendC::Lo
       return;
     }
   } else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, bfloat16_t>) {
-    Power<T, false, pow_config>(dst, src1, src2, tmp_buf, calCount);
+    if (IsIntegerWithinUint32Magnitude(src2)) {
+      const bool is_negative = src2 < 0.0f;
+      const float abs_src2 = is_negative ? -src2 : src2;
+      uint32_t src_u32 = static_cast<uint32_t>(abs_src2);
+      Duplicate(dst, static_cast<float>(1.0), calCount);
+      while (src_u32 > 0) {
+        if (src_u32 & 0x01) {
+          Mul(dst, dst, src1, calCount);
+        }
+        src_u32 >>= 1;
+        Mul(src1, src1, src1, calCount);
+      }
+      if (is_negative) {
+        Reciprocal(dst, dst, calCount);
+      }
+    } else {
+      Power<T, false, pow_config>(dst, src1, src2, tmp_buf, calCount);
+    }
     return;
   }
   Power(dst, src1, src2, tmp_buf, calCount);
@@ -122,7 +139,24 @@ inline __aicore__ void Pow(const AscendC::LocalTensor<T> &dst, const T &src1, co
       need_power = false;
     }
   } else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, bfloat16_t>) {
-    Power<T, false, pow_config>(dst_buf, src1_buf, src2, tmp_buf, block_cnt);
+    if (IsIntegerWithinUint32Magnitude(src2)) {
+      const bool is_negative = src2 < 0.0f;
+      const float abs_src2 = is_negative ? -src2 : src2;
+      uint32_t src_u32 = static_cast<uint32_t>(abs_src2);
+      Duplicate(dst_buf, static_cast<float>(1.0), block_cnt);
+      while (src_u32 > 0) {
+        if (src_u32 & 0x01) {
+          Mul(dst_buf, dst_buf, src1_buf, block_cnt);
+        }
+        src_u32 >>= 1;
+        Mul(src1_buf, src1_buf, src1_buf, block_cnt);
+      }
+      if (is_negative) {
+        Reciprocal(dst_buf, dst_buf, block_cnt);
+      }
+    } else {
+      Power<T, false, pow_config>(dst_buf, src1_buf, src2, tmp_buf, block_cnt);
+    }
     need_power = false;
   }
   if (need_power) {

@@ -233,6 +233,19 @@ bool IsStaticSchedResult(const ascir::FusedScheduledResult &fused_schedule_resul
   return true;
 }
 
+bool ShouldIgnoreDataCopyZeroAxis(bool has_non_zero_axis, size_t axis_pos,
+                                  const std::vector<af::Expression> &ub_strides) {
+  return has_non_zero_axis || axis_pos == 0U ||
+         af::SymbolicUtils::StaticCheckEq(ub_strides[axis_pos - 1U], af::ops::One) == af::TriBool::kTrue ||
+         af::SymbolicUtils::StaticCheckEq(ub_strides[axis_pos - 1U], af::ops::Zero) == af::TriBool::kTrue;
+}
+
+bool IsDataCopyAxisContinuous(const af::Expression &cur_gm_stride, const af::Expression &cur_ub_stride,
+                              const af::Expression &gm_stride, const af::Expression &ub_stride) {
+  return af::SymbolicUtils::StaticCheckEq(cur_gm_stride, gm_stride) == af::TriBool::kTrue &&
+         af::SymbolicUtils::StaticCheckEq(cur_ub_stride, ub_stride) == af::TriBool::kTrue;
+}
+
 const std::vector<af::Expression> &GetFrontendShapeVars(const ascir::FusedScheduledResult &fused_schedule_result) {
   if (fused_schedule_result.frontend_shape_vars_collected || !fused_schedule_result.frontend_shape_vars.empty()) {
     return fused_schedule_result.frontend_shape_vars;
