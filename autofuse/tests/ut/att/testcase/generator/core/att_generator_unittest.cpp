@@ -691,6 +691,7 @@ TEST(GeneratorUT, TestSchedGroupEnableGroupParallel) {
   for (const auto &[key, value] : tiling_res) {
     if (value.find("  ArrangeBlockOffsetsAscGraph0Result0(") != std::string::npos) {
       flag_arrange = true;
+      EXPECT_NE(value.find("  uint32_t actual_max_block_dim = 0U;"), std::string::npos);
     }
     if (value.find("UpdateCurPerfAndBlockByGroup(") != std::string::npos) {
       flag_parallel = true;
@@ -923,6 +924,7 @@ TEST(GeneratorUT, RootGetTilingFailuresUseWarningLogOnlyForPGOPath) {
   genImpl.tiling_func_.Reset();
   EXPECT_EQ(genImpl.GenPGOByCoreNumFusedScheduleResultsGetTilingDefine(namespace_map), af::SUCCESS);
   tiling_func_output = genImpl.tiling_func_.GetOutputStr();
+  EXPECT_NE(tiling_func_output.find("tiling_data->set_block_dim(block_dim_i);"), std::string::npos);
   EXPECT_NE(tiling_func_output.find("OP_LOGW(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("OP_LOGE(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
 
@@ -931,6 +933,24 @@ TEST(GeneratorUT, RootGetTilingFailuresUseWarningLogOnlyForPGOPath) {
   tiling_func_output = genImpl.tiling_func_.GetOutputStr();
   EXPECT_NE(tiling_func_output.find("OP_LOGW(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("OP_LOGE(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
+}
+
+TEST(GeneratorUT, PGOByCoreNumNormalizesSharedGroupBlockDim) {
+  TilingCodeGenConfig config;
+  TilingModelInfo tiling_model_info;
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl genImpl("test", config, tiling_model_info, score_funcs, false);
+  std::map<size_t, std::map<size_t, std::map<size_t, std::pair<std::string, std::string>>>> namespace_map;
+  namespace_map[0][0][0] = {"ScheduleResult0", "group0"};
+  namespace_map[0][0][1] = {"ScheduleResult0", "group1"};
+  genImpl.enable_group_parallels_[0][0] = true;
+
+  EXPECT_EQ(genImpl.GenPGOByCoreNumFusedScheduleResultsGetTilingDefine(namespace_map), af::SUCCESS);
+  const std::string output = genImpl.tiling_func_.GetOutputStr();
+  EXPECT_NE(output.find("tiling_data->set_block_dim(block_dim_i);"), std::string::npos);
+  EXPECT_NE(output.find("uint32_t result_block_dim = 0U;"), std::string::npos);
+  EXPECT_NE(output.find("result_block_dim = std::min(result_block_dim, block_dim_i);"), std::string::npos);
+  EXPECT_NE(output.find("total_block_dim = std::max(total_block_dim, result_block_dim);"), std::string::npos);
 }
 
 TEST(GeneratorUT, PGOGetTilingKeyFailureUsesWarningLog) {
@@ -1034,9 +1054,9 @@ static const std::string kExpectPGOCode =
         valid_candidates[candidate_index - candidate_begin_index0] = false;
         continue;
       }
-      uint32_t max_block_dim = tiling_data.group0_tiling_data.get_block_dim();
-      max_block_dim = Max(max_block_dim, tiling_data.group1_tiling_data.get_block_dim());
-      tiling_data.set_block_dim(max_block_dim);
+      uint32_t total_block_dim = tiling_data.group0_tiling_data.get_block_dim();
+      total_block_dim += tiling_data.group1_tiling_data.get_block_dim();
+      tiling_data.set_block_dim(total_block_dim);
       auto workspaceSizeTmp = GetWorkspaceSize(tiling_data);
       if (workspaceSizeTmp > workspaceSize) {
         workspaceSize = workspaceSizeTmp;
@@ -1074,9 +1094,9 @@ static const std::string kExpectPGOCode =
       std::unordered_map<int64_t, uint64_t> workspace_map;
       workspace_map.reserve(workspace_map_filter_use.size());
       workspace_map.insert(workspace_map_filter_use.begin(), workspace_map_filter_use.end());
-      uint32_t max_block_dim = tiling_data.group0_tiling_data.get_block_dim();
-      max_block_dim = Max(max_block_dim, tiling_data.group1_tiling_data.get_block_dim());
-      tiling_data.set_block_dim(max_block_dim);
+      uint32_t total_block_dim = tiling_data.group0_tiling_data.get_block_dim();
+      total_block_dim += tiling_data.group1_tiling_data.get_block_dim();
+      tiling_data.set_block_dim(total_block_dim);
       auto workspaceSizeTmp = GetWorkspaceSize(tiling_data);
       if (workspaceSizeTmp > workspaceSize) {
         workspaceSize = workspaceSizeTmp;

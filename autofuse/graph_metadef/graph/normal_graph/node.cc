@@ -573,6 +573,9 @@ bool Node::NodeImpl::IsAllInNodesSeen(const std::unordered_set<Node *> &nodes_se
     const auto peer_out_control_anchors = in_control_anchor_->GetPeerOutControlAnchors();
     for (const auto &out_control_anchor : peer_out_control_anchors) {
       const auto node = out_control_anchor->GetOwnerNodeBarePtr();
+      if (node == nullptr) {
+        continue;
+      }
       if ((node->GetType() == NEXTITERATION) || (node->GetType() == REFNEXTITERATION)) {
         continue;
       }

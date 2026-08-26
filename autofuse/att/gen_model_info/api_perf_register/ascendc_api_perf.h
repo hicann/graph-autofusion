@@ -12,6 +12,7 @@
 #define API_PERF_REGISTER_ASCENDC_API_PERF_H_
 
 #include <map>
+#include <mutex>
 #include <unordered_map>
 #include <sstream>
 #include "base/model_info.h"
@@ -24,23 +25,23 @@ class EvalCosts {
   static EvalCosts &Instance();
 
   void RegisterFunc(const std::string &op_type, const Perf &perf_func) {
+    std::lock_guard<std::mutex> lock(mutex_);
     func_container_[op_type] = perf_func;
   }
   void RegisterAscendCFunc(const std::string &op_type, const AscendCPerf &ascendc_perf_func) {
+    std::lock_guard<std::mutex> lock(mutex_);
     ascendc_func_container_[op_type] = ascendc_perf_func;
   }
 
   Perf GetFunc(const std::string &op_type) {
-    if (func_container_.find(op_type) == func_container_.end()) {
-      return nullptr;
-    }
-    return func_container_[op_type];
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto iter = func_container_.find(op_type);
+    return iter == func_container_.end() ? nullptr : iter->second;
   }
   AscendCPerf GetAscendCFunc(const std::string &op_type) {
-    if (ascendc_func_container_.find(op_type) == ascendc_func_container_.end()) {
-      return nullptr;
-    }
-    return ascendc_func_container_[op_type];
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto iter = ascendc_func_container_.find(op_type);
+    return iter == ascendc_func_container_.end() ? nullptr : iter->second;
   }
 
  private:
@@ -50,6 +51,7 @@ class EvalCosts {
  private:
   std::unordered_map<std::string, Perf> func_container_;
   std::unordered_map<std::string, AscendCPerf> ascendc_func_container_;
+  std::mutex mutex_;
 };
 
 class FuncRegister {

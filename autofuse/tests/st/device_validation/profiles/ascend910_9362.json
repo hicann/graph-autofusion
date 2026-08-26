@@ -1,0 +1,12 @@
+{
+  "profile": "ascend910_9362",
+  "soc_version": "Ascend910_9362",
+  "allowed_abi": "AutofuseLaunchV2,AutofuseLaunch",
+  "dtypes": ["float16", "uint8"],
+  "simulator_backend": "ascendc_simulator",
+  "real_device_backend": "ascendc_real_device",
+  "profiler": "optional",
+  "tools": {"toolkit": "ASCEND_HOME_PATH", "profiler": "msprof"},
+  "ascir": {"platform": "2201", "core_type": 40, "ub_size": 196608},
+  "resources": {"max_block_dimension": 40}
+}

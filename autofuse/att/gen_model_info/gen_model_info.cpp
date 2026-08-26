@@ -19,7 +19,6 @@
 #include "expr_gen/generate_tiling_expr.h"
 #include "tiling_data_gen/tiling_data_generator.h"
 #include "parser/ascend_graph_parser.h"
-#include "pass/pass_mgr.h"
 #include "nlohmann/json.hpp"
 #include "util/base_types_printer.h"
 #include "util/duration.h"
@@ -188,22 +187,6 @@ static af::Status GenerateSingleModelInfoWithContext(const af::AscGraph &graph, 
   att::GenerateTilingExpr tiling_expr(tuning_space);
   GE_ASSERT_SUCCESS(tiling_expr.Generate(model_info), "Get basic expr constraint failed.");
   GE_ASSERT_SUCCESS(RefreshCommonUbExprContext(graph, model_info), "Refresh common UB expr failed.");
-  // step3: call passes to get configs
-  ATTConfig att_config;
-  std::vector<PassFunc> pass_funcs;
-  ATTPassMgr::Instance().GetPassList(pass_funcs);
-  for (auto &pass_func : pass_funcs) {
-    GE_ASSERT_NOTNULL(pass_func, "Get pass func failed.");
-    std::map<std::string, std::string> config_str;
-    GE_ASSERT_TRUE(pass_func(tuning_space, config_str), "Run pass failed.");
-    for (auto &config : config_str) {
-      GELOGD("Exe pass: config[%s], value[%s].", config.first.c_str(), config.second.c_str());
-    }
-    for (auto &config : config_str) {
-      att_config.config_names.emplace_back(config.first);
-      att_config.config_value.insert(config);
-    }
-  }
   GELOGI("[DFX]End to generate model info for graph %s of tiling case id %u", graph.GetName().c_str(), tiling_case_id);
   return af::SUCCESS;
 }

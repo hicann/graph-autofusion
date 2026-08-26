@@ -16,6 +16,7 @@ else()
   message(STATUS "pytest not found")
 endif()
 add_subdirectory(optimize)
+add_subdirectory(device_validation)
 
 add_executable(test_main test_main.cpp)
 

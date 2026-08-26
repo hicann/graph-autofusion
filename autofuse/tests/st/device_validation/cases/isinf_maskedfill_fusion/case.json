@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "case_id": "isinf_maskedfill_fusion",
+  "graph_name": "isinf_maskedfill_fusion",
+  "inputs": [
+    {"shape": [1], "dtype": "float16", "dynamic": true},
+    {"shape": [1], "dtype": "uint8", "dynamic": true},
+    {"shape": [1], "dtype": "float16", "dynamic": true}
+  ],
+  "outputs": [{"shape": [1], "dtype": "float16", "dynamic": true}],
+  "verification": {
+    "functional": true,
+    "precision": true,
+    "atol": 0.001,
+    "rtol": 0.001
+  },
+  "performance": {
+    "required": false,
+    "profiler": true,
+    "metric": "runner_wall_clock",
+    "warmup_count": 10,
+    "kernel_count": 1,
+    "profiler_available": false
+  },
+  "support_matrix": [{
+    "case_id": "isinf_maskedfill_fusion",
+    "backend": "ascendc_real_device",
+    "soc": "ascend950",
+    "compile": "required",
+    "functional": "required",
+    "precision": "required",
+    "performance": "optional",
+    "dtypes": ["float16", "uint8"],
+    "input_dtypes": ["float16", "uint8", "float16"],
+    "output_dtypes": ["float16", "uint8"],
+    "shapes": [[128, 128], [128, 130], [127, 129], [512, 512]]
+  }, {
+    "case_id": "isinf_maskedfill_fusion",
+    "backend": "ascendc_real_device",
+    "soc": "ascend910_9362",
+    "compile": "required",
+    "functional": "required",
+    "precision": "required",
+    "performance": "optional",
+    "dtypes": ["float16", "uint8"],
+    "input_dtypes": ["float16", "uint8", "float16"],
+    "output_dtypes": ["float16", "uint8"],
+    "shapes": [[128, 128], [128, 130], [127, 129], [512, 512]]
+  }],
+  "variants": {
+    "fused": {"codegen_entry": "input_ascir.py", "graph": "isinf_maskedfill_fusion"},
+    "unfused": {
+      "graph": "isinf_maskedfill_unfused",
+      "steps": [
+        {"name": "isinf", "graph": "isinf_graph", "script": "steps/isinf.py",
+         "inputs": [{"file": "input_0.bin", "dtype": "float16", "shape": [1]}],
+         "outputs": [{"file": "step_0_output_0.bin", "dtype": "uint8", "shape": [1]}]},
+        {"name": "logical_or", "graph": "logical_or_graph", "script": "steps/logical_or.py",
+         "inputs": ["$previous", {"file": "input_1.bin", "dtype": "uint8", "shape": [1]}],
+         "outputs": [{"file": "step_1_output_0.bin", "dtype": "uint8", "shape": [1]}]},
+        {"name": "masked_fill", "graph": "masked_fill_graph", "script": "steps/masked_fill.py",
+         "inputs": [{"file": "input_0.bin", "dtype": "float16", "shape": [1]}, "$previous",
+                    {"file": "input_2.bin", "dtype": "float16", "shape": [1]}],
+         "outputs": [{"file": "step_2_output_0.bin", "dtype": "float16", "shape": [1]}]}
+      ]
+    },
+    "unfused_aclnn": {
+      "graph": "isinf_maskedfill_unfused_aclnn",
+      "steps": [
+        {"name": "isinf", "aclnn": "IsInf",
+         "inputs": [{"file": "input_0.bin", "dtype": "float16", "shape": [1]}],
+         "outputs": [{"file": "step_0_output_0.bin", "dtype": "uint8", "shape": [1]}]},
+        {"name": "logical_or", "aclnn": "LogicalOr",
+         "inputs": ["$previous", {"file": "input_1.bin", "dtype": "uint8", "shape": [1]}],
+         "outputs": [{"file": "step_1_output_0.bin", "dtype": "uint8", "shape": [1]}]},
+        {"name": "masked_fill", "aclnn": "MaskedFillScalar",
+         "inputs": [{"file": "input_0.bin", "dtype": "float16", "shape": [1]}, "$previous",
+                    {"file": "input_2.bin", "dtype": "float16", "shape": [1]}],
+         "outputs": [{"file": "step_2_output_0.bin", "dtype": "float16", "shape": [1]}]}
+      ]
+    }
+  }
+}

@@ -9,6 +9,7 @@
  */
 #include "ascendc_ir.h"
 #include "graph/symbolizer/symbolic_utils.h"
+#include "reduce_reuse_utils.h"
 
 namespace af {
 namespace ascir {
@@ -52,10 +53,8 @@ std::vector<std::unique_ptr<TmpBufDesc>> CalcReduceTmpSizeV2(const AscNode &node
   }
 
   bool is_reuse_source = false;
-  auto node_in_anchor = node.GetInDataAnchor(0);
-  auto peer_out_anchor = node_in_anchor->GetPeerOutAnchor();
-  const auto &in_node = std::dynamic_pointer_cast<AscNode>(peer_out_anchor->GetOwnerNode());
-  if (in_node->GetOutAllNodes().size() == 1UL) {
+  const auto &in_node = GetReduceInputNode(node);
+  if (HasSingleOutNode(in_node) && !HasUpstreamBroadcastOnReduceAxis(node)) {
     is_reuse_source = true;
   }
 

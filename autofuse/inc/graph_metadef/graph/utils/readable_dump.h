@@ -75,7 +75,11 @@ class ReadableDump {
     }
     void GenNodeToOutputsMap(const af::ComputeGraphPtr &graph) {
       for (const auto &node : graph->GetDirectNode()) {
-        if (node->GetOpDesc()->GetType() != kNetOutput) {
+        const auto op_desc = node->GetOpDesc();
+        if (op_desc == nullptr) {
+          continue;
+        }
+        if (op_desc->GetType() != kNetOutput) {
           std::shared_ptr<std::vector<std::string>> output_rets = ComGraphMakeShared<std::vector<std::string>>();
           if (output_rets == nullptr) {
             REPORT_INNER_ERR_MSG("E18888", "Initial output vector failed");

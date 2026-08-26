@@ -1024,6 +1024,10 @@ GraphUtils::ConvertFileConstToConst(const ComputeGraphPtr &graph) {
     int64_t attr_length = 0;
     GE_ASSERT_TRUE(AttrUtils::GetInt(op_desc, kLength4Recover, attr_length));
     GE_ASSERT_TRUE(attr_length > 0);
+    // Issue #276: upper bound check to prevent OOM from malformed graph files
+    constexpr int64_t kMaxFileLength = 2LL * 1024LL * 1024LL * 1024LL;
+    GE_ASSERT_TRUE(attr_length <= kMaxFileLength, "attr_length %ld exceeds maximum allowed size %ld.", attr_length,
+                   kMaxFileLength);
     GE_ASSERT_GRAPH_SUCCESS(op_desc->DelAttr(kLength4Recover));
     size_t file_length = static_cast<size_t>(attr_length);
 

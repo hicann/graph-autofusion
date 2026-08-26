@@ -21,6 +21,7 @@
 #include "codegen/expression_convert_struct.h"
 #include "reg_api_call_utils.h"
 #include "codegen_api_param/codegen_api_param.h"
+#include "ascir/reg_func/reduce_reuse_utils.h"
 
 namespace codegen {
 using namespace af::ops;
@@ -29,14 +30,9 @@ using namespace ascgen_utils;
 using namespace reduce_base;
 
 Status RegReduceApiCall::ParseAttr(const ascir::NodeView &node) {
-  GE_CHECK_NOTNULL(node);
-  auto node_in_anchor = node->GetInDataAnchor(0);
-  GE_CHECK_NOTNULL(node_in_anchor);
-  auto peer_out_anchor = node_in_anchor->GetPeerOutAnchor();
-  GE_CHECK_NOTNULL(peer_out_anchor);
-  const auto &in_node = std::dynamic_pointer_cast<af::AscNode>(peer_out_anchor->GetOwnerNode());
+  const auto &in_node = af::ascir::GetReduceInputNode(node);
   GE_CHECK_NOTNULL(in_node);
-  if (in_node->GetOutAllNodes().size() == 1UL) {
+  if (af::ascir::HasSingleOutNode(in_node) && !af::ascir::HasUpstreamBroadcastOnReduceAxis(*node)) {
     is_reuse_source_ = "true";
   }
   return af::SUCCESS;

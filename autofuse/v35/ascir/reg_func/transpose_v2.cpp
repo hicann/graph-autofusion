@@ -26,8 +26,10 @@ std::vector<std::unique_ptr<TmpBufDesc>> CalcTransposeTmpSizeV2(const AscNode &n
   auto &attr = node_outputs[0].attr;
   std::vector<Expression> output_vectorized_repeats;
   GE_ASSERT_TRUE(GetTensorVectorizedRepeats(attr, output_vectorized_repeats));
+  GE_ASSERT_TRUE(!output_vectorized_repeats.empty(), "output_vectorized_repeats is empty for node %s",
+                 node.GetNamePtr());
 
-  Expression input_size = output_vectorized_repeats[output_vectorized_repeats.size() - 1];
+  Expression input_size = output_vectorized_repeats.back();
   for (int32_t i = attr.vectorized_axis.size() - 2; i >= 0; i--) {
     af::Expression inner_axis_stride = output_vectorized_repeats[i + 1] * attr.vectorized_strides[i + 1];
     if (SymbolicUtils::StaticCheckEq(inner_axis_stride, attr.vectorized_strides[i]) == TriBool::kTrue) {

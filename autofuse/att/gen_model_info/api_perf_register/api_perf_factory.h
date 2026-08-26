@@ -21,6 +21,7 @@
 #include "common_utils.h"
 namespace att {
 using ApiPerfCreatorFun = std::function<std::unique_ptr<ApiPerf>(const std::string &)>;
+Perf GetPerfFunc(const std::string &op_type);
 class __attribute__((visibility("default"))) ApiPerfFactory {
  public:
   static ApiPerfFactory &Instance();
@@ -69,6 +70,17 @@ class ApiPerfRegister {
     ApiPerfCreatorFun creator = [perf_func, micro_perf_func, perf_param,
                                  tiling_schedule_config_table](const std::string &name) {
       return std::make_unique<T>(name, perf_func, micro_perf_func, perf_param, tiling_schedule_config_table);
+    };
+    ApiPerfFactory::Registerar(api_name, std::move(creator));
+  }
+
+  explicit ApiPerfRegister(const std::string &api_name, const std::string &perf_func_name,
+                           MicroPerfFunc micro_perf_func, const PerfParamTable *perf_param,
+                           const TilingScheduleConfigTable *tiling_schedule_config_table) {
+    ApiPerfCreatorFun creator = [perf_func_name, micro_perf_func, perf_param,
+                                 tiling_schedule_config_table](const std::string &name) {
+      return std::make_unique<T>(name, GetPerfFunc(perf_func_name), micro_perf_func, perf_param,
+                                 tiling_schedule_config_table);
     };
     ApiPerfFactory::Registerar(api_name, std::move(creator));
   }

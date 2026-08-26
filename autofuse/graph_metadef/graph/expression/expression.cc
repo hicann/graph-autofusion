@@ -177,7 +177,7 @@ uint64_t Expression::Hash() const {
 }
 
 int64_t Expression::Compare(const Expression &e) const {
-  if (impl_ != nullptr) {
+  if (impl_ != nullptr && e.impl_ != nullptr) {
     return impl_->Compare(*e.impl_);
   }
   return std::numeric_limits<int64_t>::max();

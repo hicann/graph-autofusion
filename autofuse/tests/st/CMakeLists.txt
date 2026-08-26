@@ -5,3 +5,7 @@ add_subdirectory(common)
 add_subdirectory(ascir)
 add_subdirectory(att)
 add_subdirectory(backend_e2e)
+if (ENABLE_DEVICE_VALIDATION OR ENABLE_DEVICE_VALIDATION_RUNNER OR
+    ENABLE_DEVICE_VALIDATION_REAL_CODEGEN OR ENABLE_DEVICE_VALIDATION_HARDWARE)
+    add_subdirectory(device_validation)
+endif()

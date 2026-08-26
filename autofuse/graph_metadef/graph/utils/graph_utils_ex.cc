@@ -143,9 +143,17 @@ af::Graph GeApiWrapper_CreateGraphFromComputeGraph(const af::ComputeGraphPtr &co
 }
 
 size_t GeApiWrapper_GetComputeGraphInputSize(const af::Graph &graph) {
-  return af::GraphUtilsEx::GetComputeGraph(graph)->GetInputSize();
+  const auto compute_graph = af::GraphUtilsEx::GetComputeGraph(graph);
+  if (compute_graph == nullptr) {
+    return 0;
+  }
+  return compute_graph->GetInputSize();
 }
 
 size_t GeApiWrapper_GetComputeGraphOutputSize(const af::Graph &graph) {
-  return af::GraphUtilsEx::GetComputeGraph(graph)->GetOutputSize();
+  const auto compute_graph = af::GraphUtilsEx::GetComputeGraph(graph);
+  if (compute_graph == nullptr) {
+    return 0;
+  }
+  return compute_graph->GetOutputSize();
 }
