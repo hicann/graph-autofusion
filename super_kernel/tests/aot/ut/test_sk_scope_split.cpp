@@ -2248,6 +2248,38 @@ TEST_F(SuperKernelScopeSplitterTest, ScopeBitFlags_DifferentFlagsSplit) {
   EXPECT_EQ(scopeInfos[1].scopeBitFlags_, flags1);
 }
 
+TEST_F(SuperKernelScopeSplitterTest, ScopeBitFlags_UnfusibleNodeOutsideScopeDoesNotSetBreakReason) {
+  auto *inScopeKernel = CreateKernelNode(1, 0, 2);
+  std::bitset<MAX_SCOPE_NUM> scopeFlags;
+  scopeFlags.set(0);
+  inScopeKernel->SetScopeBitFlags(scopeFlags);
+
+  CreateUnfusibleKernelNode(2, 0, INVALID_TASK_ID);
+  SetupStreams({{1, 2}});
+
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+  ASSERT_TRUE(splitter.SplitGraph());
+  ASSERT_EQ(splitter.GetScopeInfos().size(), 1U);
+  EXPECT_EQ(splitter.GetScopeInfos()[0].GetBreakInfo().GetReason(), ScopeBreakReason::NONE);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScopeBitFlags_UnfusibleNodeInsideScopeSetsBreakReason) {
+  auto *inScopeKernel = CreateKernelNode(1, 0, 2);
+  auto *unfusibleKernel = CreateUnfusibleKernelNode(2, 0, INVALID_TASK_ID);
+  std::bitset<MAX_SCOPE_NUM> scopeFlags;
+  scopeFlags.set(0);
+  inScopeKernel->SetScopeBitFlags(scopeFlags);
+  unfusibleKernel->SetScopeBitFlags(scopeFlags);
+  SetupStreams({{1, 2}});
+
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+  ASSERT_TRUE(splitter.SplitGraph());
+  ASSERT_EQ(splitter.GetScopeInfos().size(), 1U);
+  const auto &breakInfo = splitter.GetScopeInfos()[0].GetBreakInfo();
+  EXPECT_EQ(breakInfo.GetReason(), ScopeBreakReason::UNFUSIBLE_NODE);
+  EXPECT_EQ(breakInfo.GetTriggerNodeId(), 2U);
+}
+
 /**
  * @brief 无ScopeBitFlags节点只能和无ScopeBitFlags节点融合
  *

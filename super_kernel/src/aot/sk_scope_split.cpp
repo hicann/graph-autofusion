@@ -4,7 +4,7 @@
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
@@ -541,6 +541,13 @@ void InitialScopeSplitPass::TryAddNodeToHeap(uint32_t streamIdx) {
     return;
   }
 
+  // Check scopeBitFlags match
+  if (node->GetScopeBitFlags() != currentScopeBitFlags_) {
+    SK_LOGI("Stream %u: node %s scopeBitFlags mismatch, terminating stream", streamIdx, node->Format().c_str());
+    state.isTerminated = true;
+    return;
+  }
+
   // Check fusibility
   if (!node->IsFusible()) {
     SK_LOGI("Stream %u: node %s is not fusible, terminating stream", streamIdx, node->Format().c_str());
@@ -557,13 +564,6 @@ void InitialScopeSplitPass::TryAddNodeToHeap(uint32_t streamIdx) {
 
     std::string detail = "Node " + std::to_string(node->GetNodeId()) +
                          " is unfusible: " + FusionFailReasonToStr(node->GetFusionFailReasonInfo());
-    return;
-  }
-
-  // Check scopeBitFlags match
-  if (node->GetScopeBitFlags() != currentScopeBitFlags_) {
-    SK_LOGI("Stream %u: node %s scopeBitFlags mismatch, terminating stream", streamIdx, node->Format().c_str());
-    state.isTerminated = true;
     return;
   }
 
