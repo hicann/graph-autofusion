@@ -1119,16 +1119,7 @@ bool SuperKernelKernelNode::SetupLaunchKernelCfg(aclrtFuncHandle funcHandle, siz
                                                  std::vector<aclrtLaunchKernelAttr> &launchKernelAttrs,
                                                  aclrtLaunchKernelCfg &launchKernelCfg) const {
   launchKernelAttrs.clear();
-  const aclrtLaunchKernelCfg *originCfg = taskParams.kernelTaskParams.cfg;
-  if (originCfg != nullptr && originCfg->attrs != nullptr) {
-    launchKernelAttrs.reserve(originCfg->numAttrs + 1);
-    for (size_t attrIdx = 0; attrIdx < originCfg->numAttrs; ++attrIdx) {
-      const aclrtLaunchKernelAttr &originAttr = originCfg->attrs[attrIdx];
-      if (originAttr.id != ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE) {
-        launchKernelAttrs.push_back(originAttr);
-      }
-    }
-  }
+  launchKernelAttrs.reserve(1);
 
   aclrtLaunchKernelAttr dynUbufAttr{};
   dynUbufAttr.id = ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE;
@@ -1200,7 +1191,6 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
     SK_LOGE("Failed to update base node for %s", Format().c_str());
     return false;
   }
-  aclmdlRITaskParams updateParams{};
   bool hasUpdateParams = false;
 
   if (ctx.customParams != nullptr && ctx.customParams->type != 0) {
@@ -1225,11 +1215,8 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
       SK_LOGE("Failed to set kernel with custom params for %s", Format().c_str());
       return false;
     }
-    // Sync taskParams for JSON dump
-    taskParams = updateParams;
     hasUpdateParams = true;
   } else if (ctx.launchInfo != nullptr && ctx.launchInfo->entryInfo.skEntryFunc != nullptr) {
-    updateParams = taskParams;
     updateParams.type = ACL_MODEL_RI_TASK_KERNEL;
     updateParams.opInfoPtr = ctx.launchInfo->cacheInfo;
     updateParams.opInfoSize = ctx.launchInfo->cacheopInfoSize;
@@ -1238,27 +1225,21 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
     updateParams.kernelTaskParams.isHostArgs = true;
     updateParams.kernelTaskParams.funcHandle = ctx.launchInfo->entryInfo.skEntryFunc;
     updateParams.kernelTaskParams.numBlocks = ctx.launchInfo->entryInfo.numBlocks;
-    aclrtLaunchKernelCfg *originCfg = taskParams.kernelTaskParams.cfg;
-    updateParams.kernelTaskParams.cfg = originCfg;
-    std::vector<aclrtLaunchKernelAttr> launchKernelAttrs;
-    aclrtLaunchKernelCfg launchKernelCfg{};
     if (ctx.launchInfo->useSimtEntry) {
       if (!SetupLaunchKernelCfg(updateParams.kernelTaskParams.funcHandle, ctx.launchInfo->skMaxDcacheSize,
-                                launchKernelAttrs, launchKernelCfg)) {
+                                launchKernelAttrs_, launchKernelCfg_)) {
         SK_LOGE("Failed to setup dyn ubuf launch cfg for kernel node %s", Format().c_str());
         return false;
       }
-      updateParams.kernelTaskParams.cfg = &launchKernelCfg;
+      updateParams.kernelTaskParams.cfg = &launchKernelCfg_;
     }
 
     aclError aclRet = aclmdlRITaskSetParams(*originTask, &updateParams);
-    updateParams.kernelTaskParams.cfg = originCfg;
 
     if (aclRet != ACL_SUCCESS) {
       SK_LOGE("Failed to update kernel node %s", Format().c_str());
       return false;
     }
-    taskParams = updateParams;
     hasUpdateParams = true;
   } else {
     aclError aclRet = InValidateNode();
