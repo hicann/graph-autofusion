@@ -20,6 +20,7 @@
 #include "sk_scope_split.h"
 #include "super_kernel.h"
 
+#include <algorithm>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -1063,12 +1064,13 @@ bool SuperKernelGraph::InitFromModelRI() {
   SK_LOGI("Starting to initialize SuperKernel graph from modelRI");
 
   // Step 1: Initialize and get all streams
-  if (!InitStreamsFromModelRI()) {
+  std::vector<uint32_t> streamTaskNums;
+  if (!InitStreamsFromModelRI(streamTaskNums)) {
     return false;
   }
 
-  // Step 2: Process all streams and tasks (internally uses streams.size(), no parameter needed)
-  if (!ProcessAllStreamsAndTasks()) {
+  // Step 2: Process all streams and tasks
+  if (!ProcessAllStreamsAndTasks(streamTaskNums)) {
     return false;
   }
 
@@ -1086,7 +1088,7 @@ bool SuperKernelGraph::InitFromModelRI() {
  * @return true Stream initialization successful
  * @return false Stream initialization failed
  */
-bool SuperKernelGraph::InitStreamsFromModelRI() {
+bool SuperKernelGraph::InitStreamsFromModelRI(std::vector<uint32_t> &streamTaskNums) {
   uint32_t streamNum = 0;
   aclError ret = aclmdlRIGetStreams(modelRI, nullptr, &streamNum);
   if (ret != ACL_SUCCESS) {
@@ -1095,13 +1097,34 @@ bool SuperKernelGraph::InitStreamsFromModelRI() {
   }
   SK_LOGI("Get %u streams from model RI", streamNum);
 
-  streams.clear();
-  streams.resize(streamNum);
-  ret = aclmdlRIGetStreams(modelRI, streams.data(), &streamNum);
+  std::vector<aclrtStream> modelStreams(streamNum);
+  ret = aclmdlRIGetStreams(modelRI, modelStreams.data(), &streamNum);
   if (ret != ACL_SUCCESS) {
     SK_LOGE("Failed to get streams in model RI, ret=%d", ret);
     return false;
   }
+
+  std::vector<aclrtStream> validStreams;
+  std::vector<uint32_t> validStreamTaskNums;
+  validStreams.reserve(streamNum);
+  validStreamTaskNums.reserve(streamNum);
+  for (uint32_t streamIdx = 0; streamIdx < streamNum; ++streamIdx) {
+    uint32_t taskNum = 0;
+    ret = aclmdlRIGetTasksByStream(modelStreams[streamIdx], nullptr, &taskNum);
+    if (ret != ACL_SUCCESS) {
+      SK_LOGE("Failed to get number of tasks in stream %u, ret=%d", streamIdx, ret);
+      return false;
+    }
+    if (taskNum == 0) {
+      SK_LOGI("No tasks found in stream %u, skip this stream", streamIdx);
+      continue;
+    }
+    validStreams.emplace_back(modelStreams[streamIdx]);
+    validStreamTaskNums.emplace_back(taskNum);
+  }
+
+  streams = std::move(validStreams);
+  streamTaskNums = std::move(validStreamTaskNums);
   return true;
 }
 
@@ -1109,29 +1132,24 @@ bool SuperKernelGraph::InitStreamsFromModelRI() {
  * @brief Process all streams and tasks
  *
  * Iterates through all streams, gets tasks from each stream, and processes them.
- * Internally uses streams.size(), no parameter needed.
+ * @param streamTaskNums Number of tasks in each stream
  *
  * @return true Processing successful
  * @return false Processing failed
  */
-bool SuperKernelGraph::ProcessAllStreamsAndTasks() {
+bool SuperKernelGraph::ProcessAllStreamsAndTasks(const std::vector<uint32_t> &streamTaskNums) {
+  if (streamTaskNums.empty()) {
+    SK_LOGI("No tasks found in model RI, skip processing streams and tasks");
+    return true;
+  }
+
   uint32_t streamNum = static_cast<uint32_t>(streams.size());
-  auto tasks = std::make_unique<aclmdlRITask[]>(MAX_TASK_NUM);
+  uint32_t maxTaskNum = *std::max_element(streamTaskNums.begin(), streamTaskNums.end());
+  auto tasks = std::make_unique<aclmdlRITask[]>(maxTaskNum);
 
   for (uint32_t streamIdx = 0; streamIdx < streamNum; ++streamIdx) {
-    uint32_t taskNum = 0;
-    aclError ret = aclmdlRIGetTasksByStream(streams[streamIdx], nullptr, &taskNum);
-    if (ret != ACL_SUCCESS) {
-      SK_LOGE("Failed to get number of tasks in stream %u, ret=%d", streamIdx, ret);
-      return false;
-    }
-
-    if (taskNum > MAX_TASK_NUM) {
-      tasks = std::make_unique<aclmdlRITask[]>(taskNum);
-      SK_LOGI("Reallocated task array to %u tasks for stream %u", taskNum, streamIdx);
-    }
-
-    ret = aclmdlRIGetTasksByStream(streams[streamIdx], tasks.get(), &taskNum);
+    uint32_t taskNum = streamTaskNums[streamIdx];
+    aclError ret = aclmdlRIGetTasksByStream(streams[streamIdx], tasks.get(), &taskNum);
     if (ret != ACL_SUCCESS) {
       SK_LOGE("Failed to get tasks in stream %u, ret=%d", streamIdx, ret);
       return false;

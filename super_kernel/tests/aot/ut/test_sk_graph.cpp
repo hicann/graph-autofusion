@@ -785,6 +785,49 @@ TEST_F(SuperKernelGraphTest, GetStreams_WithStreams) {
   EXPECT_EQ(streams.size(), 3);
 }
 
+TEST_F(SuperKernelGraphTest, InitFromModelRI_AllStreamsEmptyReturnsTrue) {
+  SkUtResetTestControls();
+  SkUtSetModelStreamNum(2);
+  SkUtSetStreamTaskNum(0, 0);
+  SkUtSetStreamTaskNum(1, 0);
+
+  EXPECT_TRUE(graph->InitFromModelRI());
+  EXPECT_TRUE(graph->GetStreams().empty());
+  EXPECT_TRUE(graph->GetNodeSizeInStream().empty());
+  EXPECT_TRUE(graph->GetHeadNodes().empty());
+  SkUtResetTestControls();
+}
+
+TEST_F(SuperKernelGraphTest, InitFromModelRI_FiltersEmptyStreams) {
+  SkUtResetTestControls();
+  SkUtSetModelStreamNum(4);
+  SkUtSetStreamTaskNum(0, 0);
+  SkUtSetStreamTaskNum(1, 2);
+  SkUtSetStreamTaskNum(2, 0);
+  SkUtSetStreamTaskNum(3, 3);
+
+  EXPECT_TRUE(graph->InitFromModelRI());
+  ASSERT_EQ(graph->GetStreams().size(), 2U);
+  EXPECT_EQ(graph->GetStreams()[0], reinterpret_cast<aclrtStream>(2));
+  EXPECT_EQ(graph->GetStreams()[1], reinterpret_cast<aclrtStream>(4));
+  EXPECT_EQ(graph->GetNodeSizeInStream(), (std::vector<uint64_t>{2, 3}));
+  EXPECT_EQ(graph->GetHeadNodes().size(), 2U);
+  EXPECT_EQ(graph->GetSortedNodeIds().size(), 5U);
+  SkUtResetTestControls();
+}
+
+TEST_F(SuperKernelGraphTest, InitFromModelRI_TaskNumExceedsOldBufferSizeReturnsTrue) {
+  constexpr uint32_t taskNum = 1025;
+  SkUtResetTestControls();
+  SkUtSetModelStreamNum(1);
+  SkUtSetStreamTaskNum(0, taskNum);
+
+  EXPECT_TRUE(graph->InitFromModelRI());
+  EXPECT_EQ(graph->GetNodeSizeInStream(), (std::vector<uint64_t>{taskNum}));
+  EXPECT_EQ(graph->GetSortedNodeIds().size(), taskNum);
+  SkUtResetTestControls();
+}
+
 // ==================== GetHeadNodes Tests ====================
 
 TEST_F(SuperKernelGraphTest, GetHeadNodes_Empty) {
