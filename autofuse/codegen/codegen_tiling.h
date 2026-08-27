@@ -16,6 +16,10 @@
 #include "ascgen_log.h"
 
 namespace codegen {
+void AppendPgoDsoCallGuard(std::stringstream &ss, const char *handle_name, const char *initialized_name,
+                           const char *closing_name, const char *active_calls_name, const char *mutex_name,
+                           const char *condition_name);
+void AppendPgoDlopenFlags(std::stringstream &ss);
 const std::string kTilingHeadIdentify = "TilingHead";
 const std::string kTilingStateHeaderIdentify = "TilingStateHeader";
 const std::string kTilingLogHeaderIdentify = "TilingLogHeader";

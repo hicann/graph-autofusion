@@ -9,6 +9,7 @@
  */
 
 #include "tiling_code_generator.h"
+#include <algorithm>
 #include <unordered_set>
 #include "common/checker.h"
 #include "common/util/mem_utils.h"
@@ -309,28 +310,67 @@ af::Status TilingCodeGenerator::GenScheduleGroupTilingBodies(
            op_type.c_str());
     for (auto &result : asc_graph.second) {
       GELOGD("[DFX] got result(impl_graph_id): %zu, op_type[%s]", result.first, op_type.c_str());
-      // 计算当前ScheduleResult中的Group个数
-      size_t group_num = result.second.groups_tiling_model_info.size();
-      for (auto &group_graphs : result.second.groups_tiling_model_info) {
-        TilingCodeGenConfig cur_config = config;
-        cur_config.tiling_data_type_name =
-            group_graphs.second[0].schedule_group_ident.GetGroupPrefix() + kDefaultTilingDataTypeName;
-        GenTilingParams params = {op_type, group_graphs.second, cur_config, cache_reuse_info};
-        // 创建impl并设置Group个数
-        TilingCodeGenImplPtr impl =
-            CreateTilingCodeGenImpl(params.op_type, params.config, params.all_model_infos, {}, false);
-        GE_ASSERT_NOTNULL(impl, "Create tiling code gen impl failed, type[%d].", params.config.type);
-        auto key = std::make_pair(group_graphs.second[0].schedule_group_ident.asc_graph_id,
-                                  group_graphs.second[0].schedule_group_ident.impl_graph_id);
-        std::map<std::pair<size_t, size_t>, size_t> schedule_result_group_nums;
-        schedule_result_group_nums[key] = group_num;
-        impl->SetScheduleResultGroupNums(schedule_result_group_nums);
-        GE_ASSERT_SUCCESS(impl->GenTiling(tiling_res, params.cache_reuse_info, cache_capacity, enable_group_parallels),
-                          "Gen tiling body impl failed, type[%d].", params.config.type);
-        MergeGeneratedHeaders(*impl);
-        tiling_res[config.tiling_data_type_name] += tiling_res[cur_config.tiling_data_type_name];
-      }
+      GE_ASSERT_SUCCESS(GenScheduleResult(op_type, config, cache_reuse_info, cache_capacity, enable_group_parallels,
+                                          result.second, tiling_res),
+                        "Generate schedule result failed.");
     }
+  }
+  return af::SUCCESS;
+}
+
+af::Status TilingCodeGenerator::GenScheduleGroupTilingGroup(
+    const std::string &op_type, const TilingCodeGenConfig &config,
+    const std::unordered_map<std::string, std::string> &cache_reuse_info, uint32_t cache_capacity,
+    const EnableGroupParallels &enable_group_parallels, const std::unordered_set<std::string> &workspace_groups,
+    size_t group_num, const std::pair<const size_t, TilingModelInfo> &group_graphs,
+    std::map<std::string, std::string> &tiling_res) {
+  TilingCodeGenConfig cur_config = config;
+  const auto &model_infos = group_graphs.second;
+  const auto group_prefix = model_infos[0].schedule_group_ident.GetGroupPrefix();
+  cur_config.tiling_data_type_name = group_prefix + kDefaultTilingDataTypeName;
+  std::unordered_map<std::string, std::string> group_cache_reuse_info;
+  bool relation_uses_workspace = workspace_groups.find(group_prefix) != workspace_groups.end();
+  for (const auto &[source_prefix, reuse_prefix] : cache_reuse_info) {
+    const bool endpoint_match = group_prefix == source_prefix || group_prefix == reuse_prefix;
+    const bool endpoint_workspace =
+        workspace_groups.count(source_prefix) != 0U || workspace_groups.count(reuse_prefix) != 0U;
+    relation_uses_workspace = relation_uses_workspace || (endpoint_match && endpoint_workspace);
+    if (endpoint_match && !relation_uses_workspace) group_cache_reuse_info.emplace(source_prefix, reuse_prefix);
+  }
+  if (relation_uses_workspace) group_cache_reuse_info.clear();
+  GenTilingParams params = {op_type, model_infos, cur_config, std::move(group_cache_reuse_info)};
+  auto impl = CreateTilingCodeGenImpl(params.op_type, params.config, params.all_model_infos, {}, false);
+  GE_ASSERT_NOTNULL(impl, "Create tiling code gen impl failed, type[%d].", params.config.type);
+  std::map<std::pair<size_t, size_t>, size_t> group_nums;
+  group_nums[{model_infos[0].schedule_group_ident.asc_graph_id, model_infos[0].schedule_group_ident.impl_graph_id}] =
+      group_num;
+  impl->SetScheduleResultGroupNums(group_nums);
+  GE_ASSERT_SUCCESS(impl->GenTiling(tiling_res, params.cache_reuse_info, cache_capacity, enable_group_parallels),
+                    "Gen tiling body impl failed, type[%d].", params.config.type);
+  MergeGeneratedHeaders(*impl);
+  tiling_res[config.tiling_data_type_name] += tiling_res[cur_config.tiling_data_type_name];
+  return af::SUCCESS;
+}
+
+af::Status TilingCodeGenerator::GenScheduleResult(const std::string &op_type, const TilingCodeGenConfig &config,
+                                                  const std::unordered_map<std::string, std::string> &cache_reuse_info,
+                                                  uint32_t cache_capacity,
+                                                  const EnableGroupParallels &enable_group_parallels,
+                                                  const ParsedScheduleResult &result,
+                                                  std::map<std::string, std::string> &tiling_res) {
+  const size_t group_num = result.groups_tiling_model_info.size();
+  std::unordered_set<std::string> workspace_groups;
+  for (const auto &group_graphs : result.groups_tiling_model_info) {
+    if (std::any_of(group_graphs.second.cbegin(), group_graphs.second.cend(),
+                    [](const auto &model_info) { return !model_info.workspace_size_map.empty(); })) {
+      workspace_groups.insert(group_graphs.second[0].schedule_group_ident.GetGroupPrefix());
+    }
+  }
+  for (const auto &group_graphs : result.groups_tiling_model_info) {
+    GE_ASSERT_SUCCESS(
+        GenScheduleGroupTilingGroup(op_type, config, cache_reuse_info, cache_capacity, enable_group_parallels,
+                                    workspace_groups, group_num, group_graphs, tiling_res),
+        "Generate schedule group failed.");
   }
   return af::SUCCESS;
 }

@@ -526,7 +526,10 @@ class TestGenModelInfo : public ::testing::Test {
     std::cout << "Test begin." << std::endl;
   }
   void SetUp() override {
+    unsetenv("AUTOFUSE_FLAGS");
+    unsetenv("AUTOFUSE_DFX_FLAGS");
     att::AutoFuseConfig::MutableAttStrategyConfig().Reset();
+    att::AutoFuseConfig::MutablePgoStrategyConfig() = att::PgoStrategyConfig();
   }
   void TearDown() override {}
 };
@@ -950,6 +953,7 @@ TEST_F(TestGenModelInfo, gen_schedule_group_cache_success) {
   // 设置环境变量启用 OperatorCache
   setenv("AUTOFUSE_DFX_FLAGS", "--autofuse_enable_tiling_cache=true", 1);
   att::AutoFuseConfig::MutableAttStrategyConfig().Reset();
+  att::AutoFuseConfig::MutablePgoStrategyConfig() = att::PgoStrategyConfig();
 
   std::vector<af::AscGraph> graphs;
   std::string json_info;
@@ -1284,9 +1288,8 @@ TEST_F(TestGenModelInfo, op_level_cache_basic) {
 
   // 验证缓存函数定义（在TilingCacheContext类中）
   // 使用通用的类型匹配，不依赖具体的TilingData类型名称
-  EXPECT_NE(tiling_func.find("* FindOperatorCache(const std::array<uint32_t, kInputShapeSize>&"), std::string::npos);
-  EXPECT_NE(tiling_func.find("OperatorCacheSaveResult SaveOperatorCache(const std::array<uint32_t, kInputShapeSize>&"),
-            std::string::npos);
+  EXPECT_NE(tiling_func.find("* FindOperatorCache(const OperatorCacheKey&"), std::string::npos);
+  EXPECT_NE(tiling_func.find("OperatorCacheSaveResult SaveOperatorCache(const OperatorCacheKey&"), std::string::npos);
 
   // 注意：缓存查询代码(input_shapes数组构建)只在有缓存复用信息时生成
   // 这是当前设计的限制，算子级缓存类型和函数已正确生成
@@ -1343,9 +1346,8 @@ TEST_F(TestGenModelInfo, two_level_cache_generation) {
 
   // 验证两级缓存函数（在TilingCacheContext类中）
   // 使用通用的类型匹配，不依赖具体的TilingData类型名称
-  EXPECT_NE(tiling_func.find("* FindOperatorCache(const std::array<uint32_t, kInputShapeSize>&"), std::string::npos);
-  EXPECT_NE(tiling_func.find("OperatorCacheSaveResult SaveOperatorCache(const std::array<uint32_t, kInputShapeSize>&"),
-            std::string::npos);
+  EXPECT_NE(tiling_func.find("* FindOperatorCache(const OperatorCacheKey&"), std::string::npos);
+  EXPECT_NE(tiling_func.find("OperatorCacheSaveResult SaveOperatorCache(const OperatorCacheKey&"), std::string::npos);
 
   // 验证TilingCacheContext类生成（使用unique_ptr避免栈溢出）
   EXPECT_NE(tiling_func.find("class TilingCacheContext"), std::string::npos);

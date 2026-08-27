@@ -82,7 +82,7 @@ namespace optiling {
 
 // ATT缓存相关常量
 constexpr size_t kInputShapeSize = 1;
-constexpr size_t kOperatorCacheCapacity = 24;  // 算子级缓存容量
+constexpr size_t kOperatorCacheCapacity = 128;  // 算子级缓存容量
 constexpr double kLoadFactorThreshold = 0.8;   // 负载因子阈值
 
 // TilingDataCopy 结构体 - 用于 Group 级别缓存存储

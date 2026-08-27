@@ -10,12 +10,64 @@
 
 #include "codegen_tiling.h"
 
+#include <array>
+#include <cstring>
+
 #include "backend/backend_spec.h"
 #include "common_utils.h"
 #include "common/ge_common/debug/log.h"
 
 namespace codegen {
 using namespace ascgen_utils;
+void AppendPgoDlopenFlags(std::stringstream &ss) {
+  ss << R"(
+#if defined(RTLD_NODELETE)
+constexpr bool kPgoDlopenNodelete = true;
+constexpr int kPgoDlopenFlags = RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE;
+#else
+constexpr bool kPgoDlopenNodelete = true;
+constexpr int kPgoDlopenFlags = RTLD_NOW | RTLD_LOCAL;
+#endif
+)" << std::endl;
+}
+
+void AppendPgoDsoCallGuard(std::stringstream &ss, const char *handle_name, const char *initialized_name,
+                           const char *closing_name, const char *active_calls_name, const char *mutex_name,
+                           const char *condition_name) {
+  std::string code = R"(
+class PgoDsoCallGuard {
+ public:
+  PgoDsoCallGuard() {
+    std::lock_guard<std::mutex> lock(MUTEX);
+    if (CLOSING.load(std::memory_order_acquire) || HANDLE == nullptr || !INITIALIZED) { return; }
+    ACTIVE.fetch_add(1, std::memory_order_release);
+    valid_ = true;
+  }
+  ~PgoDsoCallGuard() {
+    if (valid_) { ACTIVE.fetch_sub(1, std::memory_order_release); CONDITION.notify_all(); }
+  }
+  explicit operator bool() const { return valid_; }
+  PgoDsoCallGuard(const PgoDsoCallGuard &) = delete;
+  PgoDsoCallGuard &operator=(const PgoDsoCallGuard &) = delete;
+ private:
+  bool valid_ = false;
+};
+)";
+  const std::array<std::pair<const char *, const char *>, 6> replacements = {{{"HANDLE", handle_name},
+                                                                              {"INITIALIZED", initialized_name},
+                                                                              {"CLOSING", closing_name},
+                                                                              {"ACTIVE", active_calls_name},
+                                                                              {"MUTEX", mutex_name},
+                                                                              {"CONDITION", condition_name}}};
+  for (const auto &[from, to] : replacements) {
+    size_t pos = 0U;
+    while ((pos = code.find(from, pos)) != std::string::npos) {
+      code.replace(pos, std::strlen(from), to);
+      pos += std::strlen(to);
+    }
+  }
+  ss << code << std::endl;
+}
 namespace {
 bool IsNeedFfts() {
   const auto backend_spec = optimize::BackendSpec::GetInstance();
@@ -39,6 +91,63 @@ void AppendPgoLogDefs(std::stringstream &ss) {
         "##__VA_ARGS__); } while (false)"
      << std::endl;
 }
+
+void AppendDynamicLibraryState(std::stringstream &ss) {
+  ss << R"(
+static void *handle = nullptr;
+static bool initialized = false;
+static std::atomic<uint32_t> active_calls{0};
+static std::atomic<bool> closing{false};
+static std::mutex dso_mutex;
+static std::condition_variable dso_cv;
+)" << std::endl;
+  AppendPgoDlopenFlags(ss);
+  AppendPgoDsoCallGuard(ss, "handle", "initialized", "closing", "active_calls", "dso_mutex", "dso_cv");
+}
+
+void AppendDynamicLibraryInit(std::stringstream &ss) {
+  ss << R"(
+__attribute__((constructor)) void Init() {
+  std::lock_guard<std::mutex> lock(dso_mutex);
+  if (initialized) return;
+  closing.store(false, std::memory_order_release);
+  handle = dlopen(kernel_file, kPgoDlopenFlags);
+  if (!handle) {
+    DLOGE("Failed to load %s: %s", kernel_file, dlerror());
+    return;
+  }
+  DLOGD("Kernel api lib %s load succeed", kernel_file);
+  initialized = true;
+})" << std::endl;
+}
+
+void AppendDynamicLibraryDeinit(std::stringstream &ss) {
+  ss << R"(
+__attribute__((destructor)) void DeInit() {
+  std::unique_lock<std::mutex> lock(dso_mutex);
+  closing.store(true, std::memory_order_release);
+  dso_cv.wait(lock, [] { return active_calls.load(std::memory_order_acquire) == 0; });
+  if (handle) {
+    if (!kPgoDlopenNodelete) { dlclose(handle); }
+    handle = nullptr;
+  }
+  initialized = false;
+})" << std::endl;
+}
+
+void AppendDynamicLibraryLookup(std::stringstream &ss) {
+  ss << R"(
+inline void *GetFunc(const char *func_name) {
+  if (handle == nullptr) {
+    return nullptr;
+  }
+  void *func = dlsym(handle, func_name);
+  if (func == nullptr) {
+    DLOGE("Failed to load wrapper api func: %s", dlerror());
+  }
+  return func;
+})" << std::endl;
+}
 }  // namespace
 
 void TilingLib::GenPgoHeaders(std::stringstream &ss, bool direct_link) const {
@@ -54,12 +163,12 @@ void TilingLib::GenPgoHeaders(std::stringstream &ss, bool direct_link) const {
   ss << "#include <chrono>" << std::endl;
   ss << "#include <cfloat>" << std::endl;
   ss << "#include <cstdint>" << std::endl;
+  ss << "#include <atomic>" << std::endl;
   ss << "#include <cerrno>" << std::endl;
   ss << "#include <cstring>" << std::endl;
   ss << "#include <securec.h>" << std::endl;
   ss << "#include <fstream>" << std::endl;
   if (direct_link) {
-    ss << "#include <atomic>" << std::endl;
     ss << "#include <cctype>" << std::endl;
     ss << "#include <climits>" << std::endl;
     ss << "#include <cstdio>" << std::endl;
@@ -68,6 +177,9 @@ void TilingLib::GenPgoHeaders(std::stringstream &ss, bool direct_link) const {
     ss << "#include <type_traits>" << std::endl;
   }
   ss << "#include <map>" << std::endl;
+  ss << "#include <memory>" << std::endl;
+  ss << "#include <mutex>" << std::endl;
+  ss << "#include <condition_variable>" << std::endl;
   ss << "#include <string>" << std::endl;
   ss << "#include <thread>" << std::endl;
   ss << "#include <utility>" << std::endl;
@@ -85,38 +197,10 @@ void TilingLib::GenPgoHeaders(std::stringstream &ss, bool direct_link) const {
 }
 
 void TilingLib::GenDynamicLibraryLoaderCode(std::stringstream &ss) const {
-  ss << "static void *handle = nullptr;" << std::endl;
-  ss << "static bool initialized = false;" << std::endl;
-  ss << R"(
-__attribute__((constructor)) void Init() {
-  if (initialized) return;
-  handle = dlopen(kernel_file, RTLD_NOW | RTLD_LOCAL);
-  if (!handle) {
-    DLOGE("Failed to load %s: %s", kernel_file, dlerror());
-    return;
-  }
-  DLOGD("Kernel api lib %s load succeed", kernel_file);
-  initialized = true;
-})" << std::endl;
-  ss << R"(
-__attribute__((destructor)) void DeInit() {
-  if (handle) {
-    dlclose(handle);
-    handle = nullptr;
-  }
-  initialized = false;
-})" << std::endl;
-  ss << R"(
-inline void *GetFunc(const char *func_name) {
-  if (handle == nullptr) {
-    return nullptr;
-  }
-  void *func = dlsym(handle, func_name);
-  if (func == nullptr) {
-    DLOGE("Failed to load wrapper api func: %s", dlerror());
-  }
-  return func;
-})" << std::endl;
+  AppendDynamicLibraryState(ss);
+  AppendDynamicLibraryInit(ss);
+  AppendDynamicLibraryDeinit(ss);
+  AppendDynamicLibraryLookup(ss);
 }
 
 void TilingLib::GenPgoCardLock(std::stringstream &ss) const {
@@ -505,6 +589,10 @@ void TilingLib::GenPgoWrapperInit(std::stringstream &ss, bool direct_link) const
     ss << "static aclrtBinHandle g_pgo_bin_handle = nullptr;" << std::endl;
   }
   ss << "int WrapperOnlyLaunch(uint32_t workspace_size, AutofuseTilingData *tiling_data) {" << std::endl;
+  if (!direct_link) {
+    ss << "  PgoDsoCallGuard dso_guard;" << std::endl;
+    ss << "  if (!dso_guard) { return FAILED; }" << std::endl;
+  }
   if (direct_link) {
     ss << "  (void)workspace_size;" << std::endl;
   }
@@ -954,6 +1042,10 @@ void TilingLib::GenPgoGetProfilingBatch(const ascir::FusedScheduledResult &fused
                                         bool direct_link) const {
   ss << "extern \"C\" long int PGOGetProfilingBatch(" << PGOSearchFuncInputOutputCallBackDef(fused_schedule_result)
      << "void* stream, uint32_t workspace_size, std::vector<AutofuseTilingDataPerf> *profiles) {" << std::endl;
+  if (!direct_link) {
+    ss << "  PgoDsoCallGuard dso_guard;" << std::endl;
+    ss << "  if (!dso_guard) { return FAILED; }" << std::endl;
+  }
   GenPgoProfilingBatchSetup(ss, direct_link);
   ss << "  int64_t result = 0;" << std::endl;
   ss << "  auto it = profiles->begin();" << std::endl;
@@ -1153,6 +1245,10 @@ void TilingLib::GenPgoGetProfiling(const ascir::FusedScheduledResult &fused_sche
                                    bool direct_link) const {
   ss << "extern \"C\" long int PGOGetProfiling(" << PGOSearchFuncInputOutputCallBackDef(fused_schedule_result)
      << "void *stream, uint32_t workspace_size, AutofuseTilingData *tiling_data, double *outCostTime) {" << std::endl;
+  if (!direct_link) {
+    ss << "  PgoDsoCallGuard dso_guard;" << std::endl;
+    ss << "  if (!dso_guard) { return FAILED; }" << std::endl;
+  }
   GenPgoProfilingSetup(ss, direct_link);
   GenPgoProfilingLaunch(ss, direct_link);
   GenPgoProfilingWorkspaceCleanup(ss, direct_link);
@@ -1163,6 +1259,8 @@ void TilingLib::GenPgoGetProfiling(const ascir::FusedScheduledResult &fused_sche
 
 void TilingLib::GenPgoFunc(const ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss) const {
   ss << "int pgo() {" << std::endl;
+  ss << "  PgoDsoCallGuard dso_guard;" << std::endl;
+  ss << "  if (!dso_guard) { return FAILED; }" << std::endl;
   ss << "  AutofuseTilingData tiling_data = {0};" << std::endl;
   ss << "  PgoTensorArgs *tensor_args = &g_pgo_tensor_args;" << std::endl;
   ss << "  uint32_t workspace_size = 0;" << std::endl;
@@ -1187,6 +1285,8 @@ void TilingLib::GenPgoFunc(const ascir::FusedScheduledResult &fused_schedule_res
 void TilingLib::GenPgoStaticFunc(const ascir::FusedScheduledResult &fused_schedule_result,
                                  std::stringstream &ss) const {
   ss << "int static_pgo(const char* config_file) {" << std::endl;
+  ss << "  PgoDsoCallGuard dso_guard;" << std::endl;
+  ss << "  if (!dso_guard) { return FAILED; }" << std::endl;
   ss << "  if (autofuse_tiling_with_config_fn == nullptr) {" << std::endl;
   ss << "    DLOGE(\"autofuse tiling with config func not found\");" << std::endl;
   ss << "    return -1;" << std::endl;

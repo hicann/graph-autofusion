@@ -17,7 +17,7 @@ void TilingCacheCodeGen::GenConstantDefs(ge::CodePrinter &code_printer, size_t i
   // 直接定义常量值，避免optiling命名空间访问问题
   code_printer.AddLine("// ATT缓存相关常量");
   code_printer.AddLine("constexpr size_t kInputShapeSize = " + std::to_string(input_vars_size) + ";");
-  code_printer.AddLine("constexpr size_t kOperatorCacheCapacity = 24;  // 算子级缓存容量");
+  code_printer.AddLine("constexpr size_t kOperatorCacheCapacity = 128;  // 算子级缓存容量");
   code_printer.AddLine("constexpr double kLoadFactorThreshold = 0.8;   // 负载因子阈值");
   code_printer.AddLine("");
 }
@@ -25,7 +25,8 @@ void TilingCacheCodeGen::GenConstantDefs(ge::CodePrinter &code_printer, size_t i
 std::string TilingCacheCodeGen::GenHashMapTemplate() {
   std::stringstream ss;
 
-  ss << "template <size_t KEY_SIZE, size_t CAPACITY, typename VALUE_TYPE>\n";
+  ss << "template <size_t KEY_SIZE, size_t CAPACITY, typename VALUE_TYPE, "
+        "typename KEY_TYPE = std::array<uint32_t, KEY_SIZE>>\n";
   ss << "class FixedSizeHashMap {\n";
   ss << GenHashMapClassStructure();
   ss << GenHashMapConstructor();
@@ -39,7 +40,7 @@ std::string TilingCacheCodeGen::GenHashMapClassStructure() {
   std::stringstream ss;
 
   ss << "private:\n";
-  ss << "  using Key = std::array<uint32_t, KEY_SIZE>;\n";
+  ss << "  using Key = KEY_TYPE;\n";
   ss << "  using Value = VALUE_TYPE;\n";
   ss << "\n";
   ss << "  enum BucketState { kEmpty, kOccupied, kDeleted };\n";
@@ -168,9 +169,17 @@ std::string TilingCacheCodeGen::GenHashFunction() {
 
   ss << "  size_t Hash(const Key &key) const {\n";
   ss << "    size_t hash = 0;\n";
-  ss << "    for (const auto& value : key) {\n";
-  ss << "      constexpr uint32_t kHashPrime = 0x9e3779b9;  // 黄金比例的整数表示，用于hash混合\n";
-  ss << "      hash ^= value + kHashPrime + (hash << 6) + (hash >> 2);\n";
+  ss << "    constexpr uint32_t kHashPrime = 0x9e3779b9;  // 黄金比例的整数表示，用于hash混合\n";
+  ss << "    if constexpr (std::is_same_v<Key, std::array<uint32_t, KEY_SIZE>>) {\n";
+  ss << "      for (const auto& value : key) {\n";
+  ss << "        hash ^= value + kHashPrime + (hash << 6) + (hash >> 2);\n";
+  ss << "      }\n";
+  ss << "    } else {\n";
+  ss << "      for (const auto& value : key.input_shapes) {\n";
+  ss << "        hash ^= value + kHashPrime + (hash << 6) + (hash >> 2);\n";
+  ss << "      }\n";
+  ss << "      hash ^= key.request_block_dim + kHashPrime + (hash << 6) + (hash >> 2);\n";
+  ss << "      hash ^= key.request_ub_size + kHashPrime + (hash << 6) + (hash >> 2);\n";
   ss << "    }\n";
   ss << "    return hash;\n";
   ss << "  }\n";
