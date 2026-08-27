@@ -93,6 +93,39 @@ TEST_F(TestSkLogContext, LogContextGuard_DisabledLoggerLeavesContextUnchanged) {
   EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelId(), "model_disabled_original");
 }
 
+TEST_F(TestSkLogContext, LogContextGuard_InitializationFailureDoesNotWriteToPreviousModel) {
+  const std::string originalModelId = "model_init_failure_original";
+  const std::string targetModelId = "model_init_failure_target";
+  const std::string logMarker = "target model log must not reach the previous model";
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelId = originalModelId;
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+  sk::logger::FileLogger::SetCurrentModelId(originalModelId);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
+  const std::string targetPath = GetSkMetaPath(targetModelId);
+  std::ofstream blockedTargetPath(targetPath);
+  ASSERT_TRUE(blockedTargetPath.good());
+  blockedTargetPath.close();
+
+  {
+    sk::logger::LogContextGuard context(targetModelId);
+    EXPECT_TRUE(context.IsActive());
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelId(), targetModelId);
+    EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+    SK_LOGI("%s", logMarker.c_str());
+  }
+
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelId(), originalModelId);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+
+  std::ifstream originalLog(GetSkMetaPath(originalModelId) + "/super_kernel.log");
+  ASSERT_TRUE(originalLog.good());
+  std::string content((std::istreambuf_iterator<char>(originalLog)), std::istreambuf_iterator<char>());
+  EXPECT_EQ(content.find(logMarker), std::string::npos);
+}
+
 TEST_F(TestSkLogContext, LogContextGuard_ConcurrentThreadsKeepModelIdsIsolated) {
   sk::logger::LoggerConfig config;
   config.enabled = true;

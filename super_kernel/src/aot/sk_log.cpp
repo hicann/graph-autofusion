@@ -179,16 +179,15 @@ LogContextGuard::LogContextGuard(const std::string &modelId) {
     return;
   }
 
-  if (!FileHandleManager::Instance().InitializeDefault(modelId)) {
-    SK_DLOGE("Failed to initialize default log file for model: %s", modelId.c_str());
-    return;
-  }
-
   previousModelId_ = FileLogger::GetCurrentModelId();
   previousHandle_ = FileHandleManager::Instance().GetCurrentHandle();
   FileLogger::SetCurrentModelId(modelId);
   FileHandleManager::Instance().SwitchToDefault();
   active_ = true;
+
+  if (!FileHandleManager::Instance().InitializeDefault(modelId)) {
+    SK_DLOGE("Failed to initialize default log file for model: %s", modelId.c_str());
+  }
 }
 
 LogContextGuard::LogContextGuard(const std::string &handleName, const std::string &filePath)
