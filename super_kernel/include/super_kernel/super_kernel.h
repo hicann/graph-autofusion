@@ -45,7 +45,6 @@ enum class aclskOptionType : uint32_t {
   DCCI_DISABLE_ON_KERNEL = 3,
   DEBUG_SYNC_ALL = 4,
   KERNEL_MAP = 5,
-  CONSTANT_CODEGEN = 6,
   AUTO_OP_PARALLEL = 7,
   DCCI_BEFORE_KERNEL_START = 8,
   DEBUG_OP_EXEC_TRACE = 9,
@@ -60,12 +59,7 @@ enum class aclskOptionType : uint32_t {
   SK_OPTION_MAX
 };
 
-enum class SkInnerOptionType : uint32_t {
-  ENABLE_MIX_KERNEL_SPLIT = 0,
-  ENABLE_SIMT_OP_CHECK = 1,
-  ENABLE_SET_DYN_UBUF_SIZE = 2,
-  SK_INNER_OPTION_MAX
-};
+enum class SkInnerOptionType : uint32_t { MIX_KERNEL_SPLIT = 0, SIMT_OP_SUPPORT = 1, SK_INNER_OPTION_MAX };
 
 typedef struct aclskPreloadOption {
   uint32_t preloadMode;
@@ -144,14 +138,6 @@ typedef struct aclskUbufLockIgnoreKernelOption {
   char **ubufLockIgnoreKernel;
 } aclskUbufLockIgnoreKernelOption;
 
-/**
- * 常量化代码生成选项
- * enableConstant: 1 启用常量化, 0 禁用常量化
- */
-typedef struct aclskConstantCodegenOption {
-  uint32_t enableConstant;
-} aclskConstantCodegenOption;
-
 enum aclskEarlyStartValue : uint32_t {
   ACLSK_EARLY_START_DISABLED = 0U,  // 默认值，表示不启用early start
   ACLSK_EARLY_START_ENABLED = 1U,   // 启用early start
@@ -173,7 +159,6 @@ struct aclskOption {
     aclskDcciOption disableKernelDcci;
     aclskDebugSyncAllOption debugSync;
     aclskKernelMapOption kernelMap;
-    aclskConstantCodegenOption constantCodegen;
     aclskAutoOpParallelOption autoOpParallel;
     aclskDcciOption dcciBeforeKernelStart;
     aclskDebugOpExecTraceOption debugOpExecTrace;
@@ -193,6 +178,60 @@ typedef struct aclskOptions {
   size_t numOptions;
 } aclskOptions;
 
+typedef enum {
+  ACLSK_SCOPE_VERIFY_NODE_WAIT = 0,
+  ACLSK_SCOPE_VERIFY_NODE_NOTIFY = 1,
+  ACLSK_SCOPE_VERIFY_NODE_COMPUTE = 2,
+} aclskScopeVerifyNodeType;
+
+typedef enum {
+  ACLSK_SCOPE_VERIFY_KERNEL_NO_AICORE = 0,
+  ACLSK_SCOPE_VERIFY_KERNEL_CUBE = 1,    // AI CUBE CORE
+  ACLSK_SCOPE_VERIFY_KERNEL_VECTOR = 2,  // AI VECTOR CORE
+  ACLSK_SCOPE_VERIFY_KERNEL_MIX = 3,
+} aclskScopeVerifyKernelType;
+
+typedef struct aclskScopeVerifyNodeInfo {
+  int64_t taskId;
+  int64_t streamId;
+  int64_t eventId;
+  int32_t scopeId;
+  aclskScopeVerifyNodeType taskType;
+  aclskScopeVerifyKernelType kernelType;
+  uint32_t numBlocks;
+  uint32_t taskRatio[2];
+  int32_t scheMode;
+  uint32_t flag;  // bit 0：是否动态，0表示静态，1表示动态；其余bit预留
+  int32_t coreLimit[2];
+  int32_t extendType;  // 当前必须是0
+  void *extendInfo;    // 当前必须是nullptr
+} aclskScopeVerifyNodeInfo;
+
+typedef struct aclskScopeVerifyGraphInfo {
+  aclskScopeVerifyNodeInfo *nodes;
+  size_t nodeCount;
+  int32_t extendType;  // 当前必须是0
+  void *extendInfo;    // 当前必须是nullptr
+} aclskScopeVerifyGraphInfo;
+
+typedef enum {
+  ACLSK_SCOPE_VERIFY_SPLIT_BEFORE_NODE = 0,  // scope 在 current node 前断开（全核同步）
+  ACLSK_SCOPE_VERIFY_SPLIT_EXCLUDE_NODE = 2,  // scope 在 current node 前断开，且current node不参与scope融合（死锁）
+} aclskScopeVerifySplitType;
+
+typedef enum {
+  ACLSK_SCOPE_VERIFY_DEADLOCK_DETECTED = 0,
+  ACLSK_SCOPE_VERIFY_SYNCALL_OP_DROP = 1,
+} aclskScopeVerifySplitReason;
+
+typedef struct aclskScopeVerifySplitResult {
+  aclskScopeVerifyNodeInfo *splitNode;
+  aclskScopeVerifySplitType splitType;
+  aclskScopeVerifySplitReason splitReason;
+  int32_t extendType;  // 当前必须是0
+  void *extendInfo;    // 当前必须是nullptr
+} aclskScopeVerifySplitResult;
+
 /**
  * @ingroup AscendCL
  * @brief Optimize model with super kernel
@@ -209,6 +248,20 @@ typedef struct aclskOptions {
 ACL_FUNC_VISIBILITY aclError aclskOptimize(aclmdlRI model, aclskOptions *options);
 ACL_FUNC_VISIBILITY aclError aclskScopeBegin(const char *scopeName, aclrtStream stream);
 ACL_FUNC_VISIBILITY aclError aclskScopeEnd(const char *scopeName, aclrtStream stream);
+/**
+ * @ingroup AscendCL
+ * @brief
+ *
+ * @param verifyGraph             传入的图
+ * @param maxSplitResultCount     传入的splitResults数组的最大长度
+ * @param splitResults            导致scope断开的node列表
+ * @param realSplitResultCount    导致scope断开的node数量
+ * @retval ACL_SUCCESS 接口调用成功
+ * @retval ACL_ERROR_INVALID_PARAM 参数校验失败
+ * @retval ACL_ERROR_FAILURE 接口调用失败
+ */
+ACL_FUNC_VISIBILITY aclError aclskScopeVerify(const aclskScopeVerifyGraphInfo *verifyGraph, size_t maxSplitResultCount,
+                                              aclskScopeVerifySplitResult *splitResults, size_t *realSplitResultCount);
 
 #ifdef __cplusplus
 }

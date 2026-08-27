@@ -19,7 +19,6 @@ add_executable(super_kernel_aot_utest
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_graph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_node.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_common.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_constant_codegen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_scope_split.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_node_scope_tagging.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_scope_range.cpp
@@ -45,11 +44,11 @@ add_executable(super_kernel_aot_utest
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_common.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_options_manager.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_graph.cpp
+    ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_scope_launch.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_scope_split.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_lock_detector.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_node.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_optimizer.cpp
-    ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_scope_launch.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_task_builder.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_candidate_heap.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_log.cpp
@@ -59,7 +58,6 @@ add_executable(super_kernel_aot_utest
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_resource_manager.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_scope_postprocess.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_event_recorder.cpp
-    ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_constant_codegen.cpp
 )
 
 target_include_directories(super_kernel_aot_utest PRIVATE

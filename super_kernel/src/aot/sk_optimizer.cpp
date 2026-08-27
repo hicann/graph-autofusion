@@ -281,8 +281,11 @@ bool SuperKernelOptimizer::Schedule(SuperKernelScopeInfo &scopeInfo, SuperKernel
     SK_LOGE("schedule failed: build launch info failed");
     return false;
   }
-  SK_LOGI("schedule scope: build finished, entryType=%s, entryFuncHandle=%p, skFuncName=%s",
-          to_string(launchInfo.entryInfo.entryType), launchInfo.entryInfo.skEntryFunc, launchInfo.skFuncName.c_str());
+  SK_LOGI(
+      "schedule scope: build finished, entryType=%s, entryFuncHandle=%p, skFuncName=%s, useSimtEntry=%d, "
+      "skMaxDcacheSize=%zu",
+      to_string(launchInfo.entryInfo.entryType), launchInfo.entryInfo.skEntryFunc, launchInfo.skFuncName.c_str(),
+      static_cast<int>(launchInfo.useSimtEntry), launchInfo.skMaxDcacheSize);
 
   if (!Update(scopeInfo, graph, launchInfo)) {
     SK_LOGE("schedule failed: scope update failed");

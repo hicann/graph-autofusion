@@ -12,7 +12,6 @@
 #include "sk_graph.h"
 #include "sk_dump_json.h"
 #include "sk_log.h"
-#include "sk_constant_codegen.h"
 #include "sk_common.h"
 #include <algorithm>
 #include <cstring>
@@ -20,9 +19,9 @@
 #include <memory>
 #include <new>
 #include <string>
-#include <tuple>
 #include "securec.h"
 #include "sk_event_recorder.h"
+#include "runtime/rt_external_kernel.h"
 #include "runtime/kernel.h"
 
 extern "C" aclrtBinHandle AscendGetEntryBinHandle();
@@ -131,15 +130,15 @@ SkQueueType InferFirstKernelEventQueueType(const std::vector<SuperKernelBaseNode
   return SkQueueType::UNKNOWN;
 }
 
-struct SimtAvailableUbufInfo {
-  bool success = true;
-  bool hasMinAvailableUbufSize = false;
-  size_t minAvailableUbufSize = 0;
+struct SimtDcacheSizeResult {
+  bool isValid = true;
+  bool hasSimtTask = false;
+  size_t skMaxDcacheSize = 0;
 };
 
-SimtAvailableUbufInfo GetMinSimtAvailableUbufSize(const std::vector<SuperKernelBaseNode *> &tasks) {
-  SimtAvailableUbufInfo availableUbufInfo;
-  size_t minAvailableUbufSize = SK_TOTAL_UB_SIZE;
+SimtDcacheSizeResult CalculateSimtDcacheSize(const std::vector<SuperKernelBaseNode *> &tasks) {
+  SimtDcacheSizeResult dcacheSizeResult;
+  size_t skMaxDcacheSize = SK_TOTAL_UB_SIZE;
   for (const auto *task : tasks) {
     if (task == nullptr || task->GetNodeType() != SkNodeType::NODE_KERNEL) {
       continue;
@@ -148,11 +147,12 @@ SimtAvailableUbufInfo GetMinSimtAvailableUbufSize(const std::vector<SuperKernelB
     if (!kernelInfo.isSimtOp) {
       continue;
     }
+    dcacheSizeResult.hasSimtTask = true;
     if (!kernelInfo.hasDynUbufSize || !kernelInfo.hasAllocUbufSize) {
       SK_LOGE("SIMT kernel lacks ubuf size info, nodeId=%lu, hasDynUbufSize=%d, hasAllocUbufSize=%d", task->GetNodeId(),
               kernelInfo.hasDynUbufSize, kernelInfo.hasAllocUbufSize);
-      availableUbufInfo.success = false;
-      return availableUbufInfo;
+      dcacheSizeResult.isValid = false;
+      return dcacheSizeResult;
     }
     if (kernelInfo.dynUbufSize > SK_TOTAL_UB_SIZE ||
         kernelInfo.allocUbufSize > SK_TOTAL_UB_SIZE - kernelInfo.dynUbufSize) {
@@ -160,17 +160,16 @@ SimtAvailableUbufInfo GetMinSimtAvailableUbufSize(const std::vector<SuperKernelB
           "SIMT kernel ubuf size exceeds total ub size, nodeId=%lu, dynUbufSize=%zu, "
           "allocUbufSize=%zu, totalUbSize=%zu",
           task->GetNodeId(), kernelInfo.dynUbufSize, kernelInfo.allocUbufSize, SK_TOTAL_UB_SIZE);
-      availableUbufInfo.success = false;
-      return availableUbufInfo;
+      dcacheSizeResult.isValid = false;
+      return dcacheSizeResult;
     }
-    availableUbufInfo.hasMinAvailableUbufSize = true;
-    minAvailableUbufSize =
-        std::min(minAvailableUbufSize, SK_TOTAL_UB_SIZE - kernelInfo.dynUbufSize - kernelInfo.allocUbufSize);
+    size_t taskMaxDcacheSize = SK_TOTAL_UB_SIZE - kernelInfo.dynUbufSize - kernelInfo.allocUbufSize;
+    skMaxDcacheSize = std::min(skMaxDcacheSize, taskMaxDcacheSize);
   }
-  if (availableUbufInfo.hasMinAvailableUbufSize) {
-    availableUbufInfo.minAvailableUbufSize = minAvailableUbufSize;
+  if (dcacheSizeResult.hasSimtTask) {
+    dcacheSizeResult.skMaxDcacheSize = skMaxDcacheSize;
   }
-  return availableUbufInfo;
+  return dcacheSizeResult;
 }
 
 bool MatchKernelOption(const SuperKernelOptionsManager &opts, const std::vector<std::string> &kernelList,
@@ -253,10 +252,11 @@ void DumpTaskQueDetail(const TaskQue *que, const char *name, const std::vector<S
     const TaskInfo &ti = que->taskInfos[i];
     const uint64_t nodeId = GetDumpTaskNodeId(ti.index, tasks);
     SK_LOGD(
-        "[%u] type=%s, idx=%u, nodeId=%lu, relatedType=%s, blk=%u, entries=%u, args=0x%llx, "
+        "[%u] type=%s, idx=%u, nodeId=%lu, relatedType=%s, blk=%u, entries=%u, args=0x%llx, argsSize=%u, "
         "debugOptions=0x%llx, extraInfo=0x%llx",
         i, to_string(ti.type), ti.index, nodeId, to_string(ti.relatedType), ti.numBlocks, ti.entryCnt,
-        (unsigned long long)ti.args, (unsigned long long)ti.debugOptions, (unsigned long long)ti.extraInfo);
+        (unsigned long long)ti.args, ti.argsSize, (unsigned long long)ti.debugOptions,
+        (unsigned long long)ti.extraInfo);
     for (uint32_t j = 0; j < ti.entryCnt; ++j) {
       SK_LOGD("   entry[%u]=0x%llx", j, (unsigned long long)ti.entry[j]);
     }
@@ -2194,7 +2194,58 @@ bool SkTaskBuilder::ApplyPerOpMaxCoreNum(const std::vector<SuperKernelBaseNode *
   return true;
 }
 
-SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, bool useSimtEntry) {
+void SkTaskBuilder::ApplyBlockDimScaleUp(SkTask &skTaskCube, SkTask &skTaskVec,
+                                         const std::vector<SuperKernelBaseNode *> &tasks) {
+  auto updateTaskQue = [&](SkTask &skTask, SkQueueType queueType) {
+    SK_LOGI("ApplyBlockDimScaleUp: update %s task queue, numBlocks=%u", to_string(queueType), skTask.numBlocks);
+    TaskQue *taskQue = skTask.GetTaskQue();
+    for (uint32_t i = 0; i < taskQue->taskCnt; ++i) {
+      TaskInfo &taskInfo = taskQue->taskInfos[i];
+      const SuperKernelBaseNode *relatedNode = nullptr;
+      if (taskInfo.type == SkTaskType::TYPE_FUNC || taskInfo.type == SkTaskType::TYPE_PRELOAD) {
+        relatedNode = tasks[taskInfo.index];
+      } else if (taskInfo.type == SkTaskType::TYPE_SYNC) {
+        const EarlyStartInfo &earlyStartInfo = taskSyncInfos_[taskInfo.index].earlyStartInfo;
+        switch (static_cast<SkEarlyStartMask>(taskInfo.extraInfo)) {
+          case SkEarlyStartMask::AIV_TO_AIC_WAIT:
+          case SkEarlyStartMask::AIC_TO_AIV_WAIT:
+            relatedNode = earlyStartInfo.relatedWaitNode;
+            break;
+          case SkEarlyStartMask::AIC_TO_AIC_SET:
+          case SkEarlyStartMask::AIV_TO_AIV_SET:
+            relatedNode = earlyStartInfo.relatedSetNode;
+            break;
+          case SkEarlyStartMask::AIC_TO_AIC_WAIT:
+          case SkEarlyStartMask::AIC_TO_AIV_SET:
+            relatedNode = earlyStartInfo.nextAicRelatedNode;
+            break;
+          case SkEarlyStartMask::AIV_TO_AIV_WAIT:
+          case SkEarlyStartMask::AIV_TO_AIC_SET:
+            relatedNode = earlyStartInfo.nextAivRelatedNode;
+            break;
+          default:
+            break;
+        }
+      }
+      if (relatedNode != nullptr && relatedNode->GetNodeType() == SkNodeType::NODE_KERNEL &&
+          GetKernelInfos(relatedNode).capBits.blockDimScaleUp) {
+        const uint32_t originNumBlocks = taskInfo.numBlocks;
+        taskInfo.numBlocks = skTask.numBlocks;
+        SK_LOGI(
+            "ApplyBlockDimScaleUp: funcName=%s, taskQueue=%s, taskType=%s, taskIndex=%u, numBlocks changed from %u "
+            "to %u",
+            GetKernelInfos(relatedNode).funcName.c_str(), to_string(queueType), to_string(taskInfo.type),
+            taskInfo.index, originNumBlocks, taskInfo.numBlocks);
+      }
+    }
+  };
+
+  updateTaskQue(skTaskCube, SkQueueType::AIC);
+  updateTaskQue(skTaskVec, SkQueueType::AIV);
+}
+
+SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, bool useSimtEntry,
+                                            const std::vector<SuperKernelBaseNode *> &tasks) {
   SkHostEntryInfo entryInfo;
   bool enableDebug = opts.EnableDebug();
   // ========== 读取环境变量配置 ==========
@@ -2219,58 +2270,6 @@ SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVe
       "GenEntryInfo: enableDebug=%d, enableProfiling=%d, enableOpTrace=%d, enableEarlyStart=%d, "
       "useSimtEntry=%d",
       enableDebug, enableProfiling, enableOpTrace, enableEarlyStart, useSimtEntry);
-
-  // ========== 1. 首先尝试常量化代码生成 ==========
-  if (!useSimtEntry) {
-    auto [constantFunc, constantType] =
-        TryGenerateConstantFuncHandle(skTaskCube, skTaskVec, opts, graph_.GetModelLabel());
-
-    if (constantFunc != nullptr) {
-      // 常量化成功，直接使用特化的 funcHandle
-      entryInfo.skEntryFunc = constantFunc;
-      entryInfo.entryType = constantType;
-
-      // 根据 kernelType 设置 numBlocks
-      bool isMix12 = false;
-      if (constantType == SkKernelType::AIV_ONLY) {
-        entryInfo.numBlocks = skTaskVec.numBlocks;
-        skTaskCube.numBlocks = 0;
-      } else if (constantType == SkKernelType::AIC_ONLY) {
-        entryInfo.numBlocks = skTaskCube.numBlocks;
-        skTaskVec.numBlocks = 0;
-      } else if (constantType == SkKernelType::MIX_AIC_1_2) {
-        uint32_t mix_1_2_aiv_numBlocks = (skTaskVec.numBlocks + 1) / 2;
-        entryInfo.numBlocks = std::max(skTaskCube.numBlocks, mix_1_2_aiv_numBlocks);
-        skTaskCube.numBlocks = entryInfo.numBlocks;
-        skTaskVec.numBlocks = entryInfo.numBlocks * 2;
-        isMix12 = true;
-      } else {  // MIX_AIC_1_1
-        entryInfo.numBlocks = skTaskCube.numBlocks;
-        skTaskVec.numBlocks = skTaskCube.numBlocks;
-      }
-
-      SK_LOGI("sk entry resolved via CONSTANT_CODEGEN: type=%s, funcHandle=%p, numBlocks=%u",
-              to_string(entryInfo.entryType), entryInfo.skEntryFunc, entryInfo.numBlocks);
-
-      // 处理 MIX_AIC_1_2 的 numBlocks 调整
-      if (isMix12) {
-        auto *taskQue = skTaskVec.GetTaskQue();
-        for (auto i = 0; i < taskQue->taskCnt; i++) {
-          TaskInfo &taskInfo = taskQue->taskInfos[i];
-          if (taskInfo.relatedType == SkKernelType::MIX_AIC_1_1) {
-            taskInfo.numBlocks = taskInfo.numBlocks * 2;
-          }
-        }
-      }
-
-      return entryInfo;
-    }
-  } else {
-    SK_LOGI("Skip constant codegen because SIMT ubuf constraint requires SIMT sk entry");
-  }
-
-  // ========== 2. 常量化失败，回退到原有逻辑 ==========
-  SK_LOGI("Constant codegen disabled or unsuccessful, falling back to default entry resolution");
 
   // 根据 task 分布确定 kernel 类型和 numBlocks
   SkKernelType kernelType = SkKernelType::AIC_ONLY;
@@ -2321,7 +2320,7 @@ SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVe
 
   entryInfo.entryType = kernelType;
 
-  // ========== 3. 根据配置构建 entryFuncName ==========
+  // ========== 根据配置构建 entryFuncName ==========
   uint8_t flags = static_cast<uint8_t>(EntryFuncFlag::NONE);
   if (enableDebug) {
     flags = flags | static_cast<uint8_t>(EntryFuncFlag::DEBUG);
@@ -2349,7 +2348,7 @@ SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVe
     return {};
   }
 
-  // ========== 4. 处理 MIX_AIC_1_2 的 numBlocks 调整 ==========
+  // ========== 处理 MIX_AIC_1_2 的 numBlocks 调整 ==========
   if (isMix12) {
     auto *taskQue = skTaskVec.GetTaskQue();
     for (auto i = 0; i < taskQue->taskCnt; i++) {
@@ -2358,6 +2357,9 @@ SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVe
         taskInfo.numBlocks = taskInfo.numBlocks * 2;
       }
     }
+  }
+  if (!tasks.empty()) {
+    ApplyBlockDimScaleUp(skTaskCube, skTaskVec, tasks);
   }
 
   SK_LOGI("sk entry resolved: type=%s, funcName=%s, funcHandle=%p, numBlocks=%d", to_string(entryInfo.entryType),
@@ -2411,8 +2413,7 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
     splitBinCount = splitOptions->GetIntValue();
   }
 
-  auto *mixSplitOpt = opts.GetOption(SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT);
-  if (mixSplitOpt != nullptr && mixSplitOpt->GetIntValue() == 1) {
+  if (opts.IsInnerOptionEnabled(SkInnerOptionType::MIX_KERNEL_SPLIT)) {
     if (!PrecomputeSyncRelationsByMixGroups(tasks)) {
       SK_LOGE("Build failed: precompute sync relations with mix kernel split failed");
       return {};
@@ -2643,20 +2644,19 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
   }
 
   bool useSimtEntry = false;
-  size_t minAvailableUbufSize = 0;
-  const auto *setDynUbufSizeOpt = opts.GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
-  if (setDynUbufSizeOpt != nullptr && setDynUbufSizeOpt->GetIntValue() == 1) {
-    const SimtAvailableUbufInfo availableUbufInfo = GetMinSimtAvailableUbufSize(tasks);
-    if (!availableUbufInfo.success) {
-      SK_LOGE("Build failed: get SIMT min available ubuf size failed");
+  size_t skMaxDcacheSize = 0;
+  if (opts.IsInnerOptionEnabled(SkInnerOptionType::SIMT_OP_SUPPORT)) {
+    const SimtDcacheSizeResult dcacheSizeResult = CalculateSimtDcacheSize(tasks);
+    if (!dcacheSizeResult.isValid) {
+      SK_LOGE("Build failed: SIMT ubuf size validation failed");
       return {};
     }
-    useSimtEntry = availableUbufInfo.hasMinAvailableUbufSize;
-    minAvailableUbufSize = availableUbufInfo.minAvailableUbufSize;
+    useSimtEntry = dcacheSizeResult.hasSimtTask;
+    skMaxDcacheSize = dcacheSizeResult.skMaxDcacheSize;
   }
 
   SK_LOGI("Get entry info...");
-  SkHostEntryInfo entryInfo = GenEntryInfo(aicTask, aivTask, useSimtEntry);
+  SkHostEntryInfo entryInfo = GenEntryInfo(aicTask, aivTask, useSimtEntry, tasks);
   if (entryInfo.skEntryFunc == nullptr) {
     SK_LOGE("Build failed: GenEntryInfo failed");
     return {};
@@ -2676,11 +2676,8 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
   launchInfo.entryInfo = std::move(entryInfo);
   launchInfo.devArgs = std::move(devArgs);
   launchInfo.skFuncName = skFuncName;
-  launchInfo.hasMinAvailableUbufSize = useSimtEntry;
-  launchInfo.minAvailableUbufSize = minAvailableUbufSize;
-  if (useSimtEntry) {
-    SK_LOGI("Build launch info with SIMT min available ubuf size, minAvailableUbufSize=%zu", minAvailableUbufSize);
-  }
+  launchInfo.useSimtEntry = useSimtEntry;
+  launchInfo.skMaxDcacheSize = skMaxDcacheSize;
 
   // Generate task queue JSON for aggregation
   SK_LOGI("SkTaskToQueueJson: generating task queue JSON for scopeId=%u", scopeId);

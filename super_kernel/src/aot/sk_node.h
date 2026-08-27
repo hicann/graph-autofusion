@@ -70,9 +70,8 @@ enum class FusionFailReason {
   MEMORY_WAIT_NODE_ONLY,   // 12: No memory write exists, meaning the memory write is outside modelRI,
   MEMORY_WRITE_NODE_ONLY,  // 13: only exists memory write nodes, mask it as unfusible
   DEFAULT_NODE,            // 14: default node uses aicpu resources, mask it as unfusible
-  SIMT_OP_UNSUPPORT,       // 15: SIMT operator is not supported for SuperKernel fusion
-  KERNEL_ATTR_GET_FAILED,  // 16: Failed to get kernel attribute for SuperKernel fusion
-  EXCEED_SCOPE_MAX,        // 17: Exceeded maximum scope number limit for SuperKernel fusion
+  KERNEL_ATTR_GET_FAILED,  // 15: Failed to get kernel attribute for SuperKernel fusion
+  EXCEED_SCOPE_MAX,        // 16: Exceeded maximum scope number limit for SuperKernel fusion
 };
 
 // Bindmap related fail reason detail
@@ -184,8 +183,6 @@ inline const char *to_string(FusionFailReason reason) {
       return "MEMORY_WRITE_NODE_ONLY";
     case FusionFailReason::DEFAULT_NODE:
       return "DEFAULT_NODE";
-    case FusionFailReason::SIMT_OP_UNSUPPORT:
-      return "SIMT_OP_UNSUPPORT";
     case FusionFailReason::KERNEL_ATTR_GET_FAILED:
       return "KERNEL_ATTR_GET_FAILED";
     case FusionFailReason::EXCEED_SCOPE_MAX:
@@ -227,6 +224,7 @@ enum class KernelCapBitOffset : uint8_t {
   EARLY_START_SET_FLAG = 1,   // Bit 1: early start set flag
   DCCI = 2,                   // Bit 2: DCCI flag
   DISABLE_SCHEMODE = 3,       // Bit 3: disable ScheMode flag
+  BLOCKDIM_SCALE_UP = 4,      // Bit 4: scale up operator blockDim to SK blockDim
 };
 
 struct KernelCapBits {
@@ -234,9 +232,11 @@ struct KernelCapBits {
   bool earlyStartSetFlag = false;
   bool disableDcci = false;
   bool disableScheMode = false;
+  bool blockDimScaleUp = false;
 };
 
 KernelCapBits ParseKernelCapBits(uint64_t cap);
+bool ShouldDisableScheMode(const KernelCapBits &capBits);
 
 struct KernelInfos {
   SkKernelType kernelType = SkKernelType::DEFAULT;
@@ -513,7 +513,7 @@ class SuperKernelBaseNode {
     return fusionFailReason_;
   }
 
-  // Task params accessor (for dump after update)
+  // Original task params captured during node initialization.
   const aclmdlRITaskParams &GetTaskParams() const {
     return taskParams;
   }
@@ -537,7 +537,7 @@ class SuperKernelBaseNode {
 
  protected:
   aclmdlRITaskParams taskParams;
-  void LogNodeUpdateResult(const aclmdlRITaskParams *resultParams) const;
+  void LogNodeUpdateResult(const aclmdlRITaskParams *paramsToLog) const;
   const char *GetUpdateTargetTypeName(aclmdlRITaskType type) const;
   uint32_t notifyExpandVecNum;
   uint32_t notifyExpandCubeNum;
@@ -594,15 +594,21 @@ class SuperKernelKernelNode : public SuperKernelBaseNode {
   bool IsScheModeOn() const override {
     return nodeInfos.kernelInfos.isScheModeOn;
   }
+  const aclmdlRITaskParams &GetUpdateParams() const {
+    return updateParams;
+  }
 
  private:
   void IdentifyAndHandleSimtKernel(const SuperKernelOptionsManager *opts);
-  bool SetupLaunchKernelCfgWithDynUbuf(size_t minAvailableUbufSize);
+  bool SetupLaunchKernelCfg(aclrtFuncHandle funcHandle, size_t skMaxDcacheSize,
+                            std::vector<aclrtLaunchKernelAttr> &launchKernelAttrs,
+                            aclrtLaunchKernelCfg &launchKernelCfg) const;
 
   bool isScopeBegin = false;
   bool isScopeEnd = false;
   bool isPlaceholder = false;
   std::string scopeName;
+  aclmdlRITaskParams updateParams{};
   std::vector<aclrtLaunchKernelAttr> launchKernelAttrs_;
   aclrtLaunchKernelCfg launchKernelCfg_{};
 };

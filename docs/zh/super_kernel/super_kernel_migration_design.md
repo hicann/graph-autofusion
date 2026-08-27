@@ -59,7 +59,7 @@
 | OptionParser | 同上 |super_kernel_options.py |
 | ParserFactory | 同上 |super_kernel_options.py |
 | CodeTextAlignParser | 同上 |super_kernel_options.py |
-| EunmParser | 同上 |super_kernel_options.py |
+| EnumParser | 同上 |super_kernel_options.py |
 | BinaryParser | 同上 |super_kernel_options.py |
 | NumberParser | 同上 |super_kernel_options.py |
 | NonEmptyParser | 同上 |super_kernel_options.py |
@@ -79,7 +79,7 @@
 | ascendc_compile_base.gen_super_kernel_compile_info | 生成SuperKernel的compile info |super_kernel_compile.py|
 | ascendc_compile_base.gen_sub_super_kernel_early_start_compile_options | 处理子kernel early-start特性的编译选项 |super_kernel_compile.py  |
 | ascendc_compile_base.gen_sub_super_kernel_compile_options | 处理子kernel编译选项 |super_kernel_compile.py |
-| ascendc_compile_base.split_sub_kernel_obbjs | 子kernel拆分成四个object文件 |super_kernel_compile.py |
+| ascendc_compile_base.split_sub_kernel_objs | 子kernel拆分成四个object文件 |super_kernel_compile.py |
 | ascendc_compile_base.split_kernel_arch_str | 同上 |super_kernel_compile.py |
 | ascendc_compile_base.split_kernel | 同上 |super_kernel_compile.py |
 | ascendc_compile_base.gen_super_kernel_link_obj_sequence | 获取所有子kernel的二进制 |super_kernel_compile.py |

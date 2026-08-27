@@ -171,9 +171,9 @@ class SuperKernelGraph {
   bool PostProcessMemoryNode();
   bool ProcessMemoryWriteNodes(const uint64_t eventId, const MemoryInfos &memoryInfo, const uint64_t memoryWaitValue,
                                const uint32_t waitFlag);
-  void UpdateNodeScopeBitFlags();
-  bool InitStreamsFromModelRI();
-  bool ProcessAllStreamsAndTasks();
+  bool UpdateNodeScopeBitFlags();
+  bool InitStreamsFromModelRI(std::vector<uint32_t> &streamTaskNums);
+  bool ProcessAllStreamsAndTasks(const std::vector<uint32_t> &streamTaskNums);
   bool ProcessSingleTask(aclmdlRITask &task, uint32_t streamIdx, uint32_t taskIdx, uint64_t &preNodeId);
   void RegisterFusibleScope(const std::unique_ptr<SuperKernelBaseNode> &node);
   void UpdateNodeRelations(uint64_t nodeId, uint32_t streamIdx, uint32_t taskIdx, uint64_t &preNodeId);

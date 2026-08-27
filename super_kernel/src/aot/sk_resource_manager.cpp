@@ -12,33 +12,6 @@
 #include "sk_log.h"
 #include "sk_model_context.h"
 
-#include <string>
-
-namespace {
-class ScopedModelLogContext {
- public:
-  explicit ScopedModelLogContext(const std::string &modelLabel)
-      : previousModelLabel_(sk::logger::FileLogger::GetCurrentModelLabel()),
-        previousHandle_(sk::logger::FileHandleManager::Instance().GetCurrentHandle()) {
-    sk::logger::FileLogger::SetCurrentModelLabel(modelLabel);
-    sk::logger::FileHandleManager::Instance().SwitchToDefault();
-  }
-
-  ~ScopedModelLogContext() {
-    sk::logger::FileLogger::SetCurrentModelLabel(previousModelLabel_);
-    if (previousHandle_ == "default") {
-      sk::logger::FileHandleManager::Instance().SwitchToDefault();
-      return;
-    }
-    sk::logger::FileHandleManager::Instance().SwitchToFile(previousHandle_);
-  }
-
- private:
-  std::string previousModelLabel_;
-  std::string previousHandle_;
-};
-}  // namespace
-
 std::mutex SkResourceManager::resourceMutex_;
 std::unordered_map<aclmdlRI, SkResourceManager::ModelResourceContext> SkResourceManager::modelContexts_;
 thread_local aclmdlRI SkResourceManager::currentModel_ = nullptr;
@@ -176,7 +149,7 @@ void SkResourceManager::OnModelDestroy(void *userData) {
     modelContexts_.erase(it);
   }
 
-  ScopedModelLogContext logContext(context.modelLabel);
+  sk::logger::LogContextGuard logContext(context.modelLabel);
   SK_LOGI("sk resource manager OnModelDestroy called: modelLabel=%s, modelId=%s", context.modelLabel.c_str(),
           context.modelId.c_str());
 

@@ -25,7 +25,6 @@
 #define protected public
 #include "sk_graph.h"
 #include "sk_node.h"
-#include "sk_scope_launch.h"
 #include "sk_common.h"
 #include "sk_options_manager.h"
 #include "ut_common_stubs.h"
@@ -46,6 +45,10 @@ struct TestRITask {
 
 std::unique_ptr<aclmdlRITask> MakeTaskHandle(TestRITask &task) {
   return std::make_unique<aclmdlRITask>(reinterpret_cast<aclmdlRITask>(&task));
+}
+
+void SetSimtOpSupportCapability(SuperKernelOptionsManager &options, uint32_t value) {
+  options.innerOptionMap[SkInnerOptionType::SIMT_OP_SUPPORT]->SetValue(value);
 }
 
 }  // namespace
@@ -72,14 +75,16 @@ struct JudgeTaskKernelInfo {
   std::unique_ptr<char[]> scopeName;
 };
 
-extern bool IsScopeKernel(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info);
+extern bool GetScopeKernelInfo(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info);
 extern bool DumpSingleKernelBinary(const KernelInfos &kernelInfo, const std::string &kernelBinsDir);
+aclError FakeAclrtGetFunctionNameFailure(aclrtFuncHandle funcHandle, uint32_t maxLen, char *name);
 
-TEST_F(SkNodeTest, IsScopeKernel_GetFunctionName_Failed) {
+TEST_F(SkNodeTest, GetScopeKernelInfo_GetFunctionName_Failed) {
   aclmdlRIKernelTaskParams params{};
   params.funcHandle = nullptr;
   JudgeTaskKernelInfo info;
-  bool ret = IsScopeKernel(params, &info);
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameFailure));
+  bool ret = GetScopeKernelInfo(params, &info);
   EXPECT_EQ(ret, false);
 }
 
@@ -109,59 +114,74 @@ int Fake_aclrtGetFunctionNameBeginWithoutSuffix(void *funcHandle, size_t size, c
 
 int Fake_aclrtMemcpy(void *dst, size_t dstSize, const void *src, size_t count, aclrtMemcpyKind kind) {
   ScopeKernelArgs fakeArgs;
-  const char *defaultName = "default_sk_scope_name";
-  snprintf_s(fakeArgs.name, sizeof(fakeArgs.name), sizeof(fakeArgs.name), "%s", defaultName);
+  snprintf_s(fakeArgs.name, sizeof(fakeArgs.name), sizeof(fakeArgs.name), "%s", DEFAULT_SK_SCOPE_NAME);
   fakeArgs.name[MAX_SCOPE_NAME_LEN - 1] = '\0';
   memcpy_s(dst, sizeof(ScopeKernelArgs), &fakeArgs, sizeof(ScopeKernelArgs));
   return 0;
 }
 
-TEST_F(SkNodeTest, IsScopeKernel_Normal_ScopeName) {
+int Fake_aclrtMemcpyFailed(void *dst, size_t dstSize, const void *src, size_t count, aclrtMemcpyKind kind) {
+  return ACL_ERROR_FAILURE;
+}
+
+TEST_F(SkNodeTest, GetScopeKernelInfo_CopyScopeArgsFailed) {
+  aclmdlRIKernelTaskParams params{};
+  params.funcHandle = nullptr;
+  JudgeTaskKernelInfo info;
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(Fake_aclrtGetFunctionNameBeginDav2201));
+  MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpyFailed));
+  EXPECT_FALSE(GetScopeKernelInfo(params, &info));
+}
+
+TEST_F(SkNodeTest, GetScopeKernelInfo_Normal_ScopeName) {
   aclmdlRIKernelTaskParams params{};
   params.funcHandle = nullptr;
   JudgeTaskKernelInfo info;
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(Fake_aclrtGetFunctionNameBeginDav2201));
   MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpy));
-  bool ret = IsScopeKernel(params, &info);
+  bool ret = GetScopeKernelInfo(params, &info);
   EXPECT_EQ(ret, true);
   EXPECT_TRUE(info.isBegin);
   EXPECT_FALSE(info.isEnd);
   EXPECT_FALSE(info.isPlaceholder);
 }
 
-TEST_F(SkNodeTest, IsScopeKernel_Dav3510EndScopeName) {
+TEST_F(SkNodeTest, GetScopeKernelInfo_Dav3510EndScopeName) {
   aclmdlRIKernelTaskParams params{};
   params.funcHandle = nullptr;
   JudgeTaskKernelInfo info;
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(Fake_aclrtGetFunctionNameEndDav3510));
   MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpy));
-  bool ret = IsScopeKernel(params, &info);
+  bool ret = GetScopeKernelInfo(params, &info);
   EXPECT_EQ(ret, true);
   EXPECT_FALSE(info.isBegin);
   EXPECT_TRUE(info.isEnd);
   EXPECT_FALSE(info.isPlaceholder);
 }
 
-TEST_F(SkNodeTest, IsScopeKernel_PlaceholderScopeName) {
+TEST_F(SkNodeTest, GetScopeKernelInfo_PlaceholderScopeName) {
   aclmdlRIKernelTaskParams params{};
   params.funcHandle = nullptr;
   JudgeTaskKernelInfo info;
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(Fake_aclrtGetFunctionNamePlaceholderDav2201));
   MOCKER(aclrtMemcpy).stubs().will(invoke(Fake_aclrtMemcpy));
-  bool ret = IsScopeKernel(params, &info);
+  bool ret = GetScopeKernelInfo(params, &info);
   EXPECT_EQ(ret, true);
   EXPECT_FALSE(info.isBegin);
   EXPECT_FALSE(info.isEnd);
   EXPECT_TRUE(info.isPlaceholder);
 }
 
-TEST_F(SkNodeTest, IsScopeKernel_WithoutArchSuffix_ReturnsFalse) {
+TEST_F(SkNodeTest, GetScopeKernelInfo_WithoutArchSuffix_ReturnsRegularKernelInfo) {
   aclmdlRIKernelTaskParams params{};
   params.funcHandle = nullptr;
   JudgeTaskKernelInfo info;
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(Fake_aclrtGetFunctionNameBeginWithoutSuffix));
-  bool ret = IsScopeKernel(params, &info);
-  EXPECT_EQ(ret, false);
+  bool ret = GetScopeKernelInfo(params, &info);
+  EXPECT_TRUE(ret);
+  EXPECT_FALSE(info.isBegin);
+  EXPECT_FALSE(info.isEnd);
+  EXPECT_FALSE(info.isPlaceholder);
 }
 
 namespace {
@@ -235,8 +255,10 @@ aclError FakeAclrtFunctionGetBinaryForBindmapReason(aclrtFuncHandle funcHandle, 
     *binHandle = reinterpret_cast<aclrtBinHandle>(0x5103);
   } else if (funcHandle == reinterpret_cast<aclrtFuncHandle>(0x6104)) {
     *binHandle = reinterpret_cast<aclrtBinHandle>(0x5104);
-  } else {
+  } else if (funcHandle == reinterpret_cast<aclrtFuncHandle>(0x6105)) {
     *binHandle = reinterpret_cast<aclrtBinHandle>(0x5105);
+  } else {
+    *binHandle = reinterpret_cast<aclrtBinHandle>(funcHandle);
   }
   return ACL_SUCCESS;
 }
@@ -519,8 +541,7 @@ TEST_F(SkNodeTest, FusionFailReasonStrings_CoverAllEnumNamesAndDetails) {
   };
   const std::vector<FusionReasonCase> fusionReasonCases = {
       {FusionFailReason::CAN_FUSE, "CAN_FUSE", "node can fuse"},
-      {FusionFailReason::OP_UNSUPPORT, "OP_UNSUPPORT",
-       "Failed to resolve SuperKernel bind map for the operator"},
+      {FusionFailReason::OP_UNSUPPORT, "OP_UNSUPPORT", "Failed to resolve SuperKernel bind map for the operator"},
       {FusionFailReason::DYNAMIC_TASK_UNSUPPORT, "DYNAMIC_TASK_UNSUPPORT",
        "The operator will refresh task information at runtime"},
       {FusionFailReason::NOT_IN_SCOPE, "NOT_IN_SCOPE", "The user actively marked that this operator is not fused"},
@@ -537,8 +558,6 @@ TEST_F(SkNodeTest, FusionFailReasonStrings_CoverAllEnumNamesAndDetails) {
       {FusionFailReason::MEMORY_WAIT_NODE_ONLY, "MEMORY_WAIT_NODE_ONLY", "No memory write exists"},
       {FusionFailReason::MEMORY_WRITE_NODE_ONLY, "MEMORY_WRITE_NODE_ONLY", "only exists memory write nodes"},
       {FusionFailReason::DEFAULT_NODE, "DEFAULT_NODE", "default node uses aicpu resources"},
-      {FusionFailReason::SIMT_OP_UNSUPPORT, "SIMT_OP_UNSUPPORT",
-       "SIMT operator is not supported for SuperKernel fusion"},
       {FusionFailReason::KERNEL_ATTR_GET_FAILED, "KERNEL_ATTR_GET_FAILED",
        "Failed to get kernel attribute for SuperKernel fusion"},
       {FusionFailReason::EXCEED_SCOPE_MAX, "EXCEED_SCOPE_MAX", "Exceeded maximum scope number limit"},
@@ -578,14 +597,20 @@ TEST_F(SkNodeTest, InValidateNode_SetsInvalidatedFlag) {
   EXPECT_TRUE(node.IsInvalidated());
 }
 
-TEST_F(SkNodeTest, KernelUpdate_CustomParamsSyncTaskParamsForDump) {
+TEST_F(SkNodeTest, KernelUpdate_CustomParamsStoredSeparatelyForDump) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 8;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
   task.params.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x3008);
+  task.params.kernelTaskParams.numBlocks = 1;
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   node.SetNodeId(8);
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
+  MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix11));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
+  ASSERT_TRUE(node.InitNode());
 
   int value = 0;
   aclmdlRITaskParams custom{};
@@ -597,18 +622,22 @@ TEST_F(SkNodeTest, KernelUpdate_CustomParamsSyncTaskParamsForDump) {
   ctx.customParams = &custom;
   EXPECT_TRUE(node.Update(ctx));
   EXPECT_TRUE(node.IsUpdated());
-  EXPECT_EQ(node.GetTaskParams().type, ACL_MODEL_RI_TASK_VALUE_WRITE);
-  EXPECT_EQ(node.GetTaskParams().valueWriteTaskParams.devAddr, &value);
-  EXPECT_EQ(node.GetTaskParams().valueWriteTaskParams.value, 0x1234U);
+  EXPECT_EQ(node.GetTaskParams().type, ACL_MODEL_RI_TASK_KERNEL);
+  EXPECT_EQ(node.GetUpdateParams().type, ACL_MODEL_RI_TASK_VALUE_WRITE);
+  EXPECT_EQ(node.GetUpdateParams().valueWriteTaskParams.devAddr, &value);
+  EXPECT_EQ(node.GetUpdateParams().valueWriteTaskParams.value, 0x1234U);
 }
 
-TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDynUbufAppendsLaunchCfg) {
+TEST_F(SkNodeTest, KernelUpdate_LaunchInfoBuildsIndependentDynUbufCfg) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 18;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
   task.params.type = ACL_MODEL_RI_TASK_KERNEL;
   task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x3018);
   task.params.kernelTaskParams.numBlocks = 1;
+  task.params.reserved0[0] = 0x12;
+  task.params.reserved1[0] = 0x34;
+  task.params.kernelTaskParams.rsv[0] = 0x56;
 
   aclrtLaunchKernelAttr originAttr{};
   originAttr.id = ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE;
@@ -629,22 +658,94 @@ TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDynUbufAppendsLaunchCfg) {
   launchInfo.entryInfo.numBlocks = 2;
   ASSERT_TRUE(launchInfo.devArgs.Init(sizeof(SkDeviceEntryArgs)));
   launchInfo.devArgs.Get()->skHeader.totalSize = sizeof(SkDeviceEntryArgs);
-  launchInfo.hasMinAvailableUbufSize = true;
-  launchInfo.minAvailableUbufSize = 32768;
+  launchInfo.useSimtEntry = true;
+  launchInfo.skMaxDcacheSize = 32768;
   SetFunctionAllocUbufSize(4096);
+
+  std::vector<aclrtLaunchKernelAttr> launchKernelAttrs;
+  aclrtLaunchKernelCfg launchKernelCfg{};
+  ASSERT_TRUE(node.SetupLaunchKernelCfg(task.params.kernelTaskParams.funcHandle, launchInfo.skMaxDcacheSize,
+                                        launchKernelAttrs, launchKernelCfg));
+  ASSERT_EQ(launchKernelCfg.numAttrs, 1U);
+  ASSERT_NE(launchKernelCfg.attrs, nullptr);
+  EXPECT_EQ(launchKernelCfg.attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
+  EXPECT_EQ(launchKernelCfg.attrs[0].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
 
   UpdateContext ctx{};
   ctx.launchInfo = &launchInfo;
   EXPECT_TRUE(node.Update(ctx));
 
-  const auto &params = node.GetTaskParams();
+  const auto &params = node.GetUpdateParams();
   ASSERT_NE(params.kernelTaskParams.cfg, nullptr);
-  ASSERT_EQ(params.kernelTaskParams.cfg->numAttrs, 2U);
+  ASSERT_EQ(params.kernelTaskParams.cfg->numAttrs, 1U);
   ASSERT_NE(params.kernelTaskParams.cfg->attrs, nullptr);
-  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE);
-  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].value.schemMode, 1U);
-  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[1].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
-  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[1].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
+  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
+  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
+  EXPECT_EQ(params.reserved0[0], 0U);
+  EXPECT_EQ(params.reserved1[0], 0);
+  EXPECT_EQ(params.kernelTaskParams.rsv[0], 0U);
+  EXPECT_EQ(node.GetTaskParams().kernelTaskParams.cfg, &originCfg);
+  EXPECT_EQ(node.GetTaskParams().reserved0[0], 0x12U);
+  EXPECT_EQ(node.GetTaskParams().reserved1[0], 0x34U);
+  EXPECT_EQ(node.GetTaskParams().kernelTaskParams.rsv[0], 0x56U);
+  EXPECT_EQ(task.params.reserved0[0], 0U);
+  EXPECT_EQ(task.params.reserved1[0], 0U);
+  EXPECT_EQ(task.params.kernelTaskParams.rsv[0], 0U);
+  ASSERT_NE(task.params.kernelTaskParams.cfg, nullptr);
+  EXPECT_EQ(task.params.kernelTaskParams.cfg->numAttrs, 1U);
+}
+
+TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDoesNotInheritOriginParams) {
+  UtSkNodeRITaskInternal task{};
+  task.taskId = 19;
+  task.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.reserved0[0] = 0x12;
+  task.params.reserved1[0] = 0x34;
+  task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x3019);
+  task.params.kernelTaskParams.numBlocks = 1;
+  task.params.kernelTaskParams.rsv[0] = 0x56;
+  aclrtLaunchKernelCfg originCfg{};
+  task.params.kernelTaskParams.cfg = &originCfg;
+
+  SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
+  MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix11));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
+  ASSERT_TRUE(node.InitNode());
+
+  SkLaunchInfo launchInfo{};
+  launchInfo.entryInfo.skEntryFunc = reinterpret_cast<aclrtFuncHandle>(0x4019);
+  launchInfo.entryInfo.numBlocks = 2;
+  ASSERT_TRUE(launchInfo.devArgs.Init(sizeof(SkDeviceEntryArgs)));
+  launchInfo.devArgs.Get()->skHeader.totalSize = sizeof(SkDeviceEntryArgs);
+
+  UpdateContext ctx{};
+  ctx.launchInfo = &launchInfo;
+  EXPECT_TRUE(node.Update(ctx));
+
+  const auto &params = node.GetUpdateParams();
+  EXPECT_EQ(params.type, ACL_MODEL_RI_TASK_KERNEL);
+  EXPECT_EQ(params.taskGrp, nullptr);
+  EXPECT_EQ(params.opInfoPtr, nullptr);
+  EXPECT_EQ(params.opInfoSize, 0U);
+  EXPECT_EQ(params.kernelTaskParams.funcHandle, launchInfo.entryInfo.skEntryFunc);
+  EXPECT_EQ(params.kernelTaskParams.args, launchInfo.devArgs.Get());
+  EXPECT_EQ(params.kernelTaskParams.argsSize, sizeof(SkDeviceEntryArgs));
+  EXPECT_EQ(params.kernelTaskParams.isHostArgs, 1U);
+  EXPECT_EQ(params.kernelTaskParams.numBlocks, launchInfo.entryInfo.numBlocks);
+  EXPECT_EQ(params.kernelTaskParams.cfg, nullptr);
+  EXPECT_EQ(params.reserved0[0], 0U);
+  EXPECT_EQ(params.reserved1[0], 0);
+  EXPECT_EQ(params.kernelTaskParams.rsv[0], 0U);
+  EXPECT_EQ(node.GetTaskParams().kernelTaskParams.cfg, &originCfg);
+  EXPECT_EQ(node.GetTaskParams().reserved0[0], 0x12U);
+  EXPECT_EQ(node.GetTaskParams().reserved1[0], 0x34U);
+  EXPECT_EQ(node.GetTaskParams().kernelTaskParams.rsv[0], 0x56U);
+  EXPECT_EQ(task.params.reserved0[0], 0U);
+  EXPECT_EQ(task.params.reserved1[0], 0U);
+  EXPECT_EQ(task.params.kernelTaskParams.rsv[0], 0U);
+  EXPECT_EQ(task.params.kernelTaskParams.cfg, nullptr);
 }
 
 TEST_F(SkNodeTest, MemoryUpdate_CustomParamsSyncTaskParamsForDump) {
@@ -1626,6 +1727,7 @@ TEST_F(SkNodeTest, KernelCapBits_DefaultValues) {
   EXPECT_FALSE(bits.earlyStartSetFlag);
   EXPECT_FALSE(bits.disableDcci);
   EXPECT_FALSE(bits.disableScheMode);
+  EXPECT_FALSE(bits.blockDimScaleUp);
 }
 
 TEST_F(SkNodeTest, KernelCapBits_SetDisableDcci) {
@@ -1635,6 +1737,7 @@ TEST_F(SkNodeTest, KernelCapBits_SetDisableDcci) {
   EXPECT_FALSE(bits.earlyStartWaitFlag);
   EXPECT_FALSE(bits.earlyStartSetFlag);
   EXPECT_FALSE(bits.disableScheMode);
+  EXPECT_FALSE(bits.blockDimScaleUp);
 }
 
 // ==================== ParseKernelCapBits 函数测试 ====================
@@ -1645,6 +1748,7 @@ TEST_F(SkNodeTest, ParseKernelCapBits_AllBitsZero) {
   EXPECT_FALSE(bits.earlyStartSetFlag);
   EXPECT_FALSE(bits.disableDcci);
   EXPECT_FALSE(bits.disableScheMode);
+  EXPECT_FALSE(bits.blockDimScaleUp);
 }
 
 TEST_F(SkNodeTest, ParseKernelCapBits_Bit0Set) {
@@ -1653,6 +1757,7 @@ TEST_F(SkNodeTest, ParseKernelCapBits_Bit0Set) {
   EXPECT_FALSE(bits.earlyStartSetFlag);
   EXPECT_FALSE(bits.disableDcci);
   EXPECT_FALSE(bits.disableScheMode);
+  EXPECT_FALSE(bits.blockDimScaleUp);
 }
 
 TEST_F(SkNodeTest, ParseKernelCapBits_Bit1Set) {
@@ -1661,6 +1766,7 @@ TEST_F(SkNodeTest, ParseKernelCapBits_Bit1Set) {
   EXPECT_TRUE(bits.earlyStartSetFlag);
   EXPECT_FALSE(bits.disableDcci);
   EXPECT_FALSE(bits.disableScheMode);
+  EXPECT_FALSE(bits.blockDimScaleUp);
 }
 
 TEST_F(SkNodeTest, ParseKernelCapBits_Bit2Set_DisableDcci) {
@@ -1669,6 +1775,7 @@ TEST_F(SkNodeTest, ParseKernelCapBits_Bit2Set_DisableDcci) {
   EXPECT_FALSE(bits.earlyStartSetFlag);
   EXPECT_TRUE(bits.disableDcci);
   EXPECT_FALSE(bits.disableScheMode);
+  EXPECT_FALSE(bits.blockDimScaleUp);
 }
 
 TEST_F(SkNodeTest, ParseKernelCapBits_Bit3Set_DisableScheMode) {
@@ -1677,14 +1784,25 @@ TEST_F(SkNodeTest, ParseKernelCapBits_Bit3Set_DisableScheMode) {
   EXPECT_FALSE(bits.earlyStartSetFlag);
   EXPECT_FALSE(bits.disableDcci);
   EXPECT_TRUE(bits.disableScheMode);
+  EXPECT_FALSE(bits.blockDimScaleUp);
+}
+
+TEST_F(SkNodeTest, ParseKernelCapBits_Bit4Set_BlockDimScaleUp) {
+  KernelCapBits bits = ParseKernelCapBits(0x10);
+  EXPECT_FALSE(bits.earlyStartWaitFlag);
+  EXPECT_FALSE(bits.earlyStartSetFlag);
+  EXPECT_FALSE(bits.disableDcci);
+  EXPECT_FALSE(bits.disableScheMode);
+  EXPECT_TRUE(bits.blockDimScaleUp);
 }
 
 TEST_F(SkNodeTest, ParseKernelCapBits_MultipleBitsSet) {
-  KernelCapBits bits = ParseKernelCapBits(0xF);
+  KernelCapBits bits = ParseKernelCapBits(0x1F);
   EXPECT_TRUE(bits.earlyStartWaitFlag);
   EXPECT_TRUE(bits.earlyStartSetFlag);
   EXPECT_TRUE(bits.disableDcci);
   EXPECT_TRUE(bits.disableScheMode);
+  EXPECT_TRUE(bits.blockDimScaleUp);
 }
 
 TEST_F(SkNodeTest, ParseKernelCapBits_OnlyDisableDcciAndDisableScheMode) {
@@ -1701,6 +1819,18 @@ TEST_F(SkNodeTest, ParseKernelCapBits_LargeValue) {
   EXPECT_TRUE(bits.earlyStartSetFlag);
   EXPECT_TRUE(bits.disableDcci);
   EXPECT_TRUE(bits.disableScheMode);
+  EXPECT_TRUE(bits.blockDimScaleUp);
+}
+
+TEST_F(SkNodeTest, ShouldDisableScheMode_Bit3OrBit4Set) {
+  EXPECT_FALSE(ShouldDisableScheMode(ParseKernelCapBits(0)));
+  EXPECT_TRUE(
+      ShouldDisableScheMode(ParseKernelCapBits(1ULL << static_cast<uint8_t>(KernelCapBitOffset::DISABLE_SCHEMODE))));
+  EXPECT_TRUE(
+      ShouldDisableScheMode(ParseKernelCapBits(1ULL << static_cast<uint8_t>(KernelCapBitOffset::BLOCKDIM_SCALE_UP))));
+  EXPECT_TRUE(
+      ShouldDisableScheMode(ParseKernelCapBits((1ULL << static_cast<uint8_t>(KernelCapBitOffset::DISABLE_SCHEMODE)) |
+                                               (1ULL << static_cast<uint8_t>(KernelCapBitOffset::BLOCKDIM_SCALE_UP)))));
 }
 
 TEST_F(SkNodeTest, KernelInfos_IsSimtOpFlag) {
@@ -1894,7 +2024,7 @@ aclError FakeAclrtGetFunctionNameFailure(aclrtFuncHandle funcHandle, uint32_t ma
   return ACL_ERROR_FAILURE;
 }
 
-TEST_F(SkNodeTest, KernelInitNode_FunctionNameGetFailed_RecordsKernelAttrFailed) {
+TEST_F(SkNodeTest, KernelInitNode_FunctionNameGetFailed_ReturnsFalse) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 1103;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
@@ -1903,12 +2033,10 @@ TEST_F(SkNodeTest, KernelInitNode_FunctionNameGetFailed_RecordsKernelAttrFailed)
   task.params.kernelTaskParams.numBlocks = 4;
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameFailure));
-  MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix11));
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   EXPECT_FALSE(node.InitNode());
   EXPECT_FALSE(node.IsFusible());
-  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::KERNEL_ATTR_GET_FAILED);
 }
 
 // ==================== IdentifyAndHandleSimtKernel Tests ====================
@@ -1985,7 +2113,7 @@ aclError FakeAclrtGetFunctionAttributeMix12(aclrtFuncHandle funcHandle, aclrtFun
   return ACL_SUCCESS;
 }
 
-TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_NullOpts_SkipCheck) {
+TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_NullOptions_SkipCheck) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 2001;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
@@ -2002,7 +2130,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_NullOpts_SkipCheck) {
   EXPECT_FALSE(node.nodeInfos.kernelInfos.isSimtOp);
 }
 
-TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_SimtCheckDisabled_SkipCheck) {
+TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_SimtOpSupportDisabled_SkipAnalysis) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 2002;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
@@ -2012,9 +2140,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_SimtCheckDisabled_SkipCheck) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(0);
+  SetSimtOpSupportCapability(opts, 0);
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeAivOnly));
@@ -2035,10 +2161,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AicOnly_SkipCheck) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeAicOnly));
   MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
@@ -2059,10 +2182,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_MixAic10_SkipCheck) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMixAic10));
   MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
@@ -2083,10 +2203,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_NotSimtType) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(0);
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
@@ -2109,17 +2226,19 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_SimtType3) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(3);
   SkUtSetAclrtFunctionAvailDynUbufSize(4096);
   SetFunctionAllocUbufSize(1024);
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeAivOnly));
-  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferEmptyForSkNode));
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   EXPECT_TRUE(node.InitNode(&opts));
@@ -2129,8 +2248,8 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_SimtType3) {
   EXPECT_TRUE(node.nodeInfos.kernelInfos.hasAllocUbufSize);
   EXPECT_EQ(node.nodeInfos.kernelInfos.dynUbufSize, 4096U);
   EXPECT_EQ(node.nodeInfos.kernelInfos.allocUbufSize, 1024U);
-  EXPECT_FALSE(node.IsFusible());
-  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::SIMT_OP_UNSUPPORT);
+  EXPECT_TRUE(node.IsFusible());
+  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::CAN_FUSE);
 }
 
 TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_SimtType4) {
@@ -2143,17 +2262,19 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_SimtType4) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(4);
   SkUtSetAclrtFunctionAvailDynUbufSize(8192);
   SetFunctionAllocUbufSize(2048);
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeAivOnly));
-  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferEmptyForSkNode));
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   EXPECT_TRUE(node.InitNode(&opts));
@@ -2163,8 +2284,8 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AivOnly_SimtType4) {
   EXPECT_TRUE(node.nodeInfos.kernelInfos.hasAllocUbufSize);
   EXPECT_EQ(node.nodeInfos.kernelInfos.dynUbufSize, 8192U);
   EXPECT_EQ(node.nodeInfos.kernelInfos.allocUbufSize, 2048U);
-  EXPECT_FALSE(node.IsFusible());
-  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::SIMT_OP_UNSUPPORT);
+  EXPECT_TRUE(node.IsFusible());
+  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::CAN_FUSE);
 }
 
 TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_Mix11_SimtType) {
@@ -2177,17 +2298,19 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_Mix11_SimtType) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(3);
   SkUtSetAclrtFunctionAvailDynUbufSize(12288);
   SetFunctionAllocUbufSize(4096);
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix11));
-  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferEmptyForSkNode));
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   EXPECT_TRUE(node.InitNode(&opts));
@@ -2197,8 +2320,8 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_Mix11_SimtType) {
   EXPECT_TRUE(node.nodeInfos.kernelInfos.hasAllocUbufSize);
   EXPECT_EQ(node.nodeInfos.kernelInfos.dynUbufSize, 12288U);
   EXPECT_EQ(node.nodeInfos.kernelInfos.allocUbufSize, 4096U);
-  EXPECT_FALSE(node.IsFusible());
-  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::SIMT_OP_UNSUPPORT);
+  EXPECT_TRUE(node.IsFusible());
+  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::CAN_FUSE);
 }
 
 TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_Mix12_SimtType) {
@@ -2211,17 +2334,19 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_Mix12_SimtType) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(4);
   SkUtSetAclrtFunctionAvailDynUbufSize(16384);
   SetFunctionAllocUbufSize(8192);
 
   MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
   MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix12));
-  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferEmptyForSkNode));
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
   EXPECT_TRUE(node.InitNode(&opts));
@@ -2231,8 +2356,8 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_Mix12_SimtType) {
   EXPECT_TRUE(node.nodeInfos.kernelInfos.hasAllocUbufSize);
   EXPECT_EQ(node.nodeInfos.kernelInfos.dynUbufSize, 16384U);
   EXPECT_EQ(node.nodeInfos.kernelInfos.allocUbufSize, 8192U);
-  EXPECT_FALSE(node.IsFusible());
-  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::SIMT_OP_UNSUPPORT);
+  EXPECT_TRUE(node.IsFusible());
+  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::CAN_FUSE);
 }
 
 TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_DynUbufQueryFailed) {
@@ -2245,10 +2370,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_DynUbufQueryFailed) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(3);
   SkUtSetAclrtFunctionGetAvailDynUbufPerBlockRet(ACL_ERROR_FAILURE);
 
@@ -2274,10 +2396,7 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AllocUbufQueryFailed) {
 
   SuperKernelOptionsManager opts;
   opts.RegisterDefaultOptions();
-  auto *simtOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(simtOpt, nullptr);
-  simtOpt->SetValue(1);
-
+  SetSimtOpSupportCapability(opts, 1);
   SetSimtAivType(3);
   SkUtSetAclrtFunctionAvailDynUbufSize(4096);
   SetRtFunctionGetMetaInfoRet(-1);

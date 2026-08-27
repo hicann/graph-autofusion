@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -8,18 +8,10 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-/*!
- * \file sk_scope_kernel_types.h
- * \brief Scope kernel common types (usable in both ASC and C++ compilation)
- */
+#ifndef __RUNTIME_RT_EXTERNAL_KERNEL_H_STUB__
+#define __RUNTIME_RT_EXTERNAL_KERNEL_H_STUB__
 
-#pragma once
+#include "base.h"
+#include "kernel.h"
 
-#include <cstdint>
-#include <memory>
-
-constexpr uint32_t MAX_SCOPE_NAME_LEN = 256;
-
-struct ScopeKernelArgs {
-  char name[MAX_SCOPE_NAME_LEN] = "";
-};
+#endif  // __RUNTIME_RT_EXTERNAL_KERNEL_H_STUB__

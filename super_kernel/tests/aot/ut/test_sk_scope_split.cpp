@@ -1,6 +1,6 @@
 /**
  * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under terms and conditions of
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
@@ -251,7 +251,7 @@ class SuperKernelScopeSplitterTest : public testing::Test {
     node->nodeInfos.kernelInfos.cubeNum = 1;
     node->nodeInfos.kernelInfos.vecNum = 0;
     SuperKernelKernelNode *kernelNode = static_cast<SuperKernelKernelNode *>(node.get());
-    kernelNode->scopeName = "default_sk_scope_name";
+    kernelNode->scopeName = DEFAULT_SK_SCOPE_NAME;
     kernelNode->isScopeBegin = true;
     SuperKernelBaseNode *ptr = node.get();
     graph->graphMap[nodeId] = std::move(node);
@@ -273,7 +273,7 @@ class SuperKernelScopeSplitterTest : public testing::Test {
     node->nodeInfos.kernelInfos.cubeNum = 1;
     node->nodeInfos.kernelInfos.vecNum = 0;
     SuperKernelKernelNode *kernelNode = static_cast<SuperKernelKernelNode *>(node.get());
-    kernelNode->scopeName = "default_sk_scope_name";
+    kernelNode->scopeName = DEFAULT_SK_SCOPE_NAME;
     kernelNode->isScopeBegin = false;
     kernelNode->isScopeEnd = true;
     SuperKernelBaseNode *ptr = node.get();
@@ -1750,22 +1750,19 @@ TEST_F(SuperKernelScopeSplitterTest, Scope_WithUnfusibleNodes) {
  *
  * 预期结果:
  *   - UpdateNodeScopeBitFlags检测到未关闭scope
- *   - K2/K3仍被标记为属于scope_A
+ *   - Scope bit flag更新失败
  */
 TEST_F(SuperKernelScopeSplitterTest, Scope_UnpairedScopeBegin) {
-  auto *k1 = CreateKernelNode(1, 0, 2);
-  auto *scopeBegin = CreateScopeBeginNode(2, 0, "scope_A", 3);
-  auto *k2 = CreateKernelNode(3, 0, 4);
-  auto *k3 = CreateKernelNode(4, 0, INVALID_TASK_ID);
+  CreateKernelNode(1, 0, 2);
+  CreateScopeBeginNode(2, 0, "scope_A", 3);
+  CreateKernelNode(3, 0, 4);
+  CreateKernelNode(4, 0, INVALID_TASK_ID);
 
   SetupStreams({{1, 2, 3, 4}});
 
   graph->scopeNameToIdx["scope_A"] = 0;
 
-  graph->UpdateNodeScopeBitFlags();
-
-  EXPECT_TRUE(k2->GetScopeBitFlags().test(0));
-  EXPECT_TRUE(k3->GetScopeBitFlags().test(0));
+  EXPECT_FALSE(graph->UpdateNodeScopeBitFlags());
 }
 
 /**
@@ -1777,21 +1774,19 @@ TEST_F(SuperKernelScopeSplitterTest, Scope_UnpairedScopeBegin) {
  *
  * 预期结果:
  *   - UpdateNodeScopeBitFlags检测到没有匹配begin的scope end
- *   - K1/K2/K3不属于scope_A
+ *   - Scope bit flag更新失败
  */
 TEST_F(SuperKernelScopeSplitterTest, Scope_UnpairedScopeEnd) {
-  auto *k1 = CreateKernelNode(1, 0, 2);
-  auto *scopeEnd = CreateScopeEndNode(2, 0, "scope_A", 3);
-  auto *k2 = CreateKernelNode(3, 0, 4);
-  auto *k3 = CreateKernelNode(4, 0, INVALID_TASK_ID);
+  CreateKernelNode(1, 0, 2);
+  CreateScopeEndNode(2, 0, "scope_A", 3);
+  CreateKernelNode(3, 0, 4);
+  CreateKernelNode(4, 0, INVALID_TASK_ID);
 
   SetupStreams({{1, 2, 3, 4}});
 
   graph->scopeNameToIdx["scope_A"] = 0;
 
-  graph->UpdateNodeScopeBitFlags();
-
-  EXPECT_FALSE(k1->GetScopeBitFlags().test(0));
+  EXPECT_FALSE(graph->UpdateNodeScopeBitFlags());
 }
 
 /**
@@ -1802,23 +1797,21 @@ TEST_F(SuperKernelScopeSplitterTest, Scope_UnpairedScopeEnd) {
  *   scope_A有两个ScopeBegin节点
  *
  * 预期结果:
- *   - UpdateNodeScopeBitFlags检测到重复scope begin
- *   - K1属于第一个scope begin的范围
+ *   - UpdateNodeScopeBitFlags检测到未关闭的scope begin
+ *   - Scope bit flag更新失败
  */
 TEST_F(SuperKernelScopeSplitterTest, Scope_DuplicateScopeBegin) {
-  auto *scopeBegin1 = CreateScopeBeginNode(1, 0, "scope_A", 2);
-  auto *k1 = CreateKernelNode(2, 0, 3);
-  auto *scopeBegin2 = CreateScopeBeginNode(3, 0, "scope_A", 4);
-  auto *k2 = CreateKernelNode(4, 0, 5);
-  auto *scopeEnd = CreateScopeEndNode(5, 0, "scope_A", INVALID_TASK_ID);
+  CreateScopeBeginNode(1, 0, "scope_A", 2);
+  CreateKernelNode(2, 0, 3);
+  CreateScopeBeginNode(3, 0, "scope_A", 4);
+  CreateKernelNode(4, 0, 5);
+  CreateScopeEndNode(5, 0, "scope_A", INVALID_TASK_ID);
 
   SetupStreams({{1, 2, 3, 4, 5}});
 
   graph->scopeNameToIdx["scope_A"] = 0;
 
-  graph->UpdateNodeScopeBitFlags();
-
-  EXPECT_TRUE(k1->GetScopeBitFlags().test(0));
+  EXPECT_FALSE(graph->UpdateNodeScopeBitFlags());
 }
 
 /**
@@ -1851,7 +1844,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScopeBitFlags_MultipleScopeBitFlags) {
   graph->scopeNameToIdx["scope_A"] = 0;
   graph->scopeNameToIdx["scope_B"] = 1;
 
-  graph->UpdateNodeScopeBitFlags();
+  EXPECT_TRUE(graph->UpdateNodeScopeBitFlags());
 
   EXPECT_EQ(k1->GetScopeBitFlags().count(), 0);
 
@@ -2175,23 +2168,18 @@ TEST_F(SuperKernelScopeSplitterTest, Scope_UnfusibleFusibleSideBySide) {
  *   Unfusible Scope缺少End节点
  *
  * 预期结果:
- *   - K1可融合（在scope外）
- *   - K2/K3不可融合（在未关闭的unfusible scope中）
+ *   - UpdateNodeScopeBitFlags检测到未关闭scope
+ *   - Scope bit flag更新失败
  */
 TEST_F(SuperKernelScopeSplitterTest, Scope_UnclosedUnfusibleScope) {
-  auto *k1 = CreateKernelNode(1, 0, 2);
-  auto *unfusibleBegin = CreateUnfusibleScopeBeginNode(2, 0, 3);
-  auto *k2 = CreateKernelNode(3, 0, 4);
-  auto *k3 = CreateKernelNode(4, 0, INVALID_TASK_ID);
+  CreateKernelNode(1, 0, 2);
+  CreateUnfusibleScopeBeginNode(2, 0, 3);
+  CreateKernelNode(3, 0, 4);
+  CreateKernelNode(4, 0, INVALID_TASK_ID);
 
   SetupStreams({{1, 2, 3, 4}});
 
-  graph->UpdateNodeScopeBitFlags();
-
-  EXPECT_TRUE(k1->IsFusible());
-
-  EXPECT_FALSE(k2->IsFusible());
-  EXPECT_FALSE(k3->IsFusible());
+  EXPECT_FALSE(graph->UpdateNodeScopeBitFlags());
 }
 
 /**
@@ -2258,6 +2246,38 @@ TEST_F(SuperKernelScopeSplitterTest, ScopeBitFlags_DifferentFlagsSplit) {
 
   EXPECT_EQ(scopeInfos[0].scopeBitFlags_, flags0);
   EXPECT_EQ(scopeInfos[1].scopeBitFlags_, flags1);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScopeBitFlags_UnfusibleNodeOutsideScopeDoesNotSetBreakReason) {
+  auto *inScopeKernel = CreateKernelNode(1, 0, 2);
+  std::bitset<MAX_SCOPE_NUM> scopeFlags;
+  scopeFlags.set(0);
+  inScopeKernel->SetScopeBitFlags(scopeFlags);
+
+  CreateUnfusibleKernelNode(2, 0, INVALID_TASK_ID);
+  SetupStreams({{1, 2}});
+
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+  ASSERT_TRUE(splitter.SplitGraph());
+  ASSERT_EQ(splitter.GetScopeInfos().size(), 1U);
+  EXPECT_EQ(splitter.GetScopeInfos()[0].GetBreakInfo().GetReason(), ScopeBreakReason::NONE);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScopeBitFlags_UnfusibleNodeInsideScopeSetsBreakReason) {
+  auto *inScopeKernel = CreateKernelNode(1, 0, 2);
+  auto *unfusibleKernel = CreateUnfusibleKernelNode(2, 0, INVALID_TASK_ID);
+  std::bitset<MAX_SCOPE_NUM> scopeFlags;
+  scopeFlags.set(0);
+  inScopeKernel->SetScopeBitFlags(scopeFlags);
+  unfusibleKernel->SetScopeBitFlags(scopeFlags);
+  SetupStreams({{1, 2}});
+
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+  ASSERT_TRUE(splitter.SplitGraph());
+  ASSERT_EQ(splitter.GetScopeInfos().size(), 1U);
+  const auto &breakInfo = splitter.GetScopeInfos()[0].GetBreakInfo();
+  EXPECT_EQ(breakInfo.GetReason(), ScopeBreakReason::UNFUSIBLE_NODE);
+  EXPECT_EQ(breakInfo.GetTriggerNodeId(), 2U);
 }
 
 /**

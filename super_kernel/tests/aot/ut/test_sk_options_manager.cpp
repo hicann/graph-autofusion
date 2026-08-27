@@ -41,6 +41,16 @@ class SuperKernelOptionsManagerTest : public testing::Test {
   std::unique_ptr<SuperKernelOptionsManager> opts_test;
 };
 
+namespace {
+SkKernelArch FakeGetCurrentSkKernelArchDav3510() {
+  return SkKernelArch::DAV_3510;
+}
+
+SkKernelArch FakeGetCurrentSkKernelArchDav2201() {
+  return SkKernelArch::DAV_2201;
+}
+}  // namespace
+
 // ==================== OptOptionBase 基类测试 ====================
 
 TEST_F(SuperKernelOptionsManagerTest, OptOptionBase_GetName) {
@@ -1260,50 +1270,63 @@ TEST_F(SuperKernelOptionsManagerTest, ToJson_AfterParseOptions) {
   opts_test->ParseOptions(&optList);
 
   nlohmann::ordered_json json = opts_test->ToJson();
-  size_t expectedSize = static_cast<size_t>(aclskOptionType::SK_OPTION_MAX) + 1;
+  size_t expectedSize = static_cast<size_t>(aclskOptionType::SK_OPTION_MAX);
   EXPECT_EQ(json.size(), expectedSize);
   EXPECT_TRUE(json.contains("preload_code"));
   EXPECT_TRUE(json.contains("split_mode"));
   EXPECT_TRUE(json.contains("debug_sync_all"));
   EXPECT_TRUE(json.contains("kernel_map"));
+  EXPECT_FALSE(json.contains("constant_codegen"));
+  EXPECT_EQ(opts_test->GetOption(static_cast<aclskOptionType>(6U)), nullptr);
   EXPECT_TRUE(json.contains("inner_options"));
 }
 
+TEST_F(SuperKernelOptionsManagerTest, ParseOptions_IgnoresRemovedConstantCodegenOption) {
+  aclskOption option{};
+  option.optionType = static_cast<aclskOptionType>(6U);
+
+  aclskOptions optList;
+  optList.options = &option;
+  optList.numOptions = 1;
+
+  opts_test->ParseOptions(&optList);
+
+  EXPECT_EQ(opts_test->GetOption(static_cast<aclskOptionType>(6U)), nullptr);
+  EXPECT_FALSE(opts_test->ToJson().contains("constant_codegen"));
+}
+
 TEST_F(SuperKernelOptionsManagerTest, ToJson_NewIntegerOptions) {
-  aclskOption options[7]{};
+  aclskOption options[6]{};
   options[0].optionType = aclskOptionType::STREAM_FUSION;
   options[0].streamFusion.streamFusion = 0;
 
-  options[1].optionType = aclskOptionType::CONSTANT_CODEGEN;
-  options[1].constantCodegen.enableConstant = 1;
+  options[1].optionType = aclskOptionType::AUTO_OP_PARALLEL;
+  options[1].autoOpParallel.enableAutoOpParallel = 1;
 
-  options[2].optionType = aclskOptionType::AUTO_OP_PARALLEL;
-  options[2].autoOpParallel.enableAutoOpParallel = 1;
+  options[2].optionType = aclskOptionType::DEBUG_CROSS_CORE_SYNC_CHECK;
+  options[2].debugCrossCoreSyncCheck.enableCrossCoreSyncCheck = 1;
 
-  options[3].optionType = aclskOptionType::DEBUG_CROSS_CORE_SYNC_CHECK;
-  options[3].debugCrossCoreSyncCheck.enableCrossCoreSyncCheck = 1;
+  options[3].optionType = aclskOptionType::DEBUG_OP_EXEC_TRACE;
+  options[3].debugOpExecTrace.enableOpExecTrace = 1;
 
-  options[4].optionType = aclskOptionType::DEBUG_OP_EXEC_TRACE;
-  options[4].debugOpExecTrace.enableOpExecTrace = 1;
+  options[4].optionType = aclskOptionType::EARLY_START;
+  options[4].earlyStart.enableEarlyStart = 1;
 
-  options[5].optionType = aclskOptionType::EARLY_START;
-  options[5].earlyStart.enableEarlyStart = 1;
-
-  options[6].optionType = aclskOptionType::DEBUG_PER_OP_MAX_CORE_NUM;
-  options[6].debugPerOpMaxCoreNum.enableDebugPerOpMaxCoreNum = 1;
+  options[5].optionType = aclskOptionType::DEBUG_PER_OP_MAX_CORE_NUM;
+  options[5].debugPerOpMaxCoreNum.enableDebugPerOpMaxCoreNum = 1;
 
   aclskOptions optList;
   optList.options = options;
-  optList.numOptions = 7;
+  optList.numOptions = 6;
 
   opts_test->ParseOptions(&optList);
 
   nlohmann::ordered_json json = opts_test->ToJson();
-  size_t expectedSize = static_cast<size_t>(aclskOptionType::SK_OPTION_MAX) + 1;
+  size_t expectedSize = static_cast<size_t>(aclskOptionType::SK_OPTION_MAX);
   ASSERT_EQ(json.size(), expectedSize);
   ASSERT_TRUE(json.contains("inner_options"));
   ASSERT_TRUE(json.contains("stream_fusion"));
-  ASSERT_TRUE(json.contains("constant_codegen"));
+  ASSERT_FALSE(json.contains("constant_codegen"));
   ASSERT_TRUE(json.contains("auto_op_parallel"));
   ASSERT_TRUE(json.contains("debug_cross_core_sync_check"));
   ASSERT_TRUE(json.contains("debug_op_exec_trace"));
@@ -1311,8 +1334,9 @@ TEST_F(SuperKernelOptionsManagerTest, ToJson_NewIntegerOptions) {
   ASSERT_TRUE(json.contains("debug_per_op_max_core_num"));
   EXPECT_EQ(json["stream_fusion"]["type"], static_cast<int>(aclskOptionType::STREAM_FUSION));
   EXPECT_EQ(json["stream_fusion"]["value"], 0);
-  EXPECT_EQ(json["constant_codegen"]["type"], static_cast<int>(aclskOptionType::CONSTANT_CODEGEN));
-  EXPECT_EQ(json["constant_codegen"]["value"], 1);
+  EXPECT_EQ(static_cast<uint32_t>(aclskOptionType::AUTO_OP_PARALLEL), 7U);
+  EXPECT_EQ(static_cast<uint32_t>(aclskOptionType::DEBUG_PER_OP_MAX_CORE_NUM), 17U);
+  EXPECT_EQ(opts_test->GetOption(static_cast<aclskOptionType>(6U)), nullptr);
   EXPECT_EQ(json["auto_op_parallel"]["type"], static_cast<int>(aclskOptionType::AUTO_OP_PARALLEL));
   EXPECT_EQ(json["auto_op_parallel"]["value"], 1);
   EXPECT_EQ(json["debug_cross_core_sync_check"]["type"],
@@ -1409,129 +1433,31 @@ TEST_F(SuperKernelOptionsManagerTest, ToJson_UbufLockIgnoreKernelNullKernelList)
   EXPECT_TRUE(json["ubuf_lock_ignore_kernel"]["value"].empty());
 }
 
-TEST_F(SuperKernelOptionsManagerTest, GetInnerOption_EnableMixKernelSplit) {
+TEST_F(SuperKernelOptionsManagerTest, InnerOptions_Dav2201Disabled) {
+  MOCKER(GetCurrentSkKernelArch).stubs().will(invoke(FakeGetCurrentSkKernelArchDav2201));
   opts_test->RegisterDefaultOptions();
-  auto *opt = opts_test->GetOption(SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT);
-  ASSERT_NE(opt, nullptr);
-  EXPECT_EQ(opt->GetName(), "enable_mix_kernel_split");
-  EXPECT_EQ(opt->GetIntValue(), 0);
-}
 
-TEST_F(SuperKernelOptionsManagerTest, GetInnerOption_EnableSimtOpCheck) {
-  opts_test->RegisterDefaultOptions();
-  auto *opt = opts_test->GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  ASSERT_NE(opt, nullptr);
-  EXPECT_EQ(opt->GetName(), "enable_simt_op_check");
-  EXPECT_EQ(opt->GetIntValue(), 0);
-}
+  EXPECT_FALSE(opts_test->IsInnerOptionEnabled(SkInnerOptionType::MIX_KERNEL_SPLIT));
+  EXPECT_FALSE(opts_test->IsInnerOptionEnabled(SkInnerOptionType::SIMT_OP_SUPPORT));
+  EXPECT_FALSE(opts_test->IsInnerOptionEnabled(static_cast<SkInnerOptionType>(100)));
 
-TEST_F(SuperKernelOptionsManagerTest, GetInnerOption_EnableSetDynUbufSize) {
-  opts_test->RegisterDefaultOptions();
-  auto *opt = opts_test->GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
-  ASSERT_NE(opt, nullptr);
-  EXPECT_EQ(opt->GetName(), "enable_set_dyn_ubuf_size");
-  EXPECT_EQ(opt->GetIntValue(), 0);
-}
-
-TEST_F(SuperKernelOptionsManagerTest, GetInnerOption_InvalidType) {
-  opts_test->RegisterDefaultOptions();
-  auto *opt = opts_test->GetOption(static_cast<SkInnerOptionType>(100));
-  EXPECT_EQ(opt, nullptr);
-}
-
-TEST_F(SuperKernelOptionsManagerTest, ToJson_InnerOptionsContent) {
-  opts_test->RegisterDefaultOptions();
   nlohmann::ordered_json json = opts_test->ToJson();
   ASSERT_TRUE(json.contains("inner_options"));
-  EXPECT_TRUE(json["inner_options"].contains("enable_mix_kernel_split"));
-  EXPECT_TRUE(json["inner_options"].contains("enable_simt_op_check"));
-  EXPECT_TRUE(json["inner_options"].contains("enable_set_dyn_ubuf_size"));
-  EXPECT_EQ(json["inner_options"]["enable_mix_kernel_split"]["value"], 0);
-  EXPECT_EQ(json["inner_options"]["enable_simt_op_check"]["value"], 0);
-  EXPECT_EQ(json["inner_options"]["enable_set_dyn_ubuf_size"]["value"], 0);
+  EXPECT_FALSE(json["inner_options"]["mix_kernel_split"]["value"]);
+  EXPECT_FALSE(json["inner_options"]["simt_op_support"]["value"]);
 }
 
-TEST_F(SuperKernelOptionsManagerTest, ApplySoCSpecificOptions_NonAscend950) {
+TEST_F(SuperKernelOptionsManagerTest, InnerOptions_Dav3510Enabled) {
+  MOCKER(GetCurrentSkKernelArch).stubs().will(invoke(FakeGetCurrentSkKernelArchDav3510));
   opts_test->RegisterDefaultOptions();
-  auto *mixSplitOpt = opts_test->GetOption(SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT);
-  auto *simtCheckOpt = opts_test->GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  auto *setDynUbufSizeOpt = opts_test->GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
-  ASSERT_NE(mixSplitOpt, nullptr);
-  ASSERT_NE(simtCheckOpt, nullptr);
-  ASSERT_NE(setDynUbufSizeOpt, nullptr);
-  EXPECT_EQ(mixSplitOpt->GetIntValue(), 0);
-  EXPECT_EQ(simtCheckOpt->GetIntValue(), 0);
-  EXPECT_EQ(setDynUbufSizeOpt->GetIntValue(), 0);
-}
 
-namespace {
-const char *FakeSocName_Ascend950ForOptions() {
-  return "Ascend950";
-}
-const char *FakeSocName_Ascend950Variant() {
-  return "Ascend950PG";
-}
-
-void ExpectAscend950OptionsEnabled(const char *(*socNameStub)()) {
-  MOCKER(aclrtGetSocName).stubs().will(invoke(socNameStub));
-  InitSkRuntimeConfig();
-
-  SuperKernelOptionsManager opts;
-  opts.RegisterDefaultOptions();
-  auto *mixSplitOpt = opts.GetOption(SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT);
-  auto *simtCheckOpt = opts.GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  auto *setDynUbufSizeOpt = opts.GetOption(SkInnerOptionType::ENABLE_SET_DYN_UBUF_SIZE);
-  ASSERT_NE(mixSplitOpt, nullptr);
-  ASSERT_NE(simtCheckOpt, nullptr);
-  ASSERT_NE(setDynUbufSizeOpt, nullptr);
-  EXPECT_EQ(mixSplitOpt->GetIntValue(), 1);
-  EXPECT_EQ(simtCheckOpt->GetIntValue(), 1);
-  EXPECT_EQ(setDynUbufSizeOpt->GetIntValue(), 1);
-
-  nlohmann::ordered_json json = opts.ToJson();
-  ASSERT_TRUE(json.contains("inner_options"));
-  EXPECT_EQ(json["inner_options"]["enable_mix_kernel_split"]["value"], 1);
-  EXPECT_EQ(json["inner_options"]["enable_simt_op_check"]["value"], 1);
-  EXPECT_EQ(json["inner_options"]["enable_set_dyn_ubuf_size"]["value"], 1);
-}
-
-void ExitIsolatedOptionsTest() {
-  GlobalMockObject::verify();
-  fflush(nullptr);
-  _exit(::testing::Test::HasFailure() ? 1 : 0);
-}
-}  // namespace
-
-TEST_F(SuperKernelOptionsManagerTest, ApplySoCSpecificOptions_Ascend950EnablesDav3510InnerOptions) {
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
-  ASSERT_EXIT(
-      {
-        ExpectAscend950OptionsEnabled(FakeSocName_Ascend950ForOptions);
-        ExitIsolatedOptionsTest();
-      },
-      ::testing::ExitedWithCode(0), "");
-}
-
-TEST_F(SuperKernelOptionsManagerTest, ApplySoCSpecificOptions_Ascend950SuffixVariantStillEnables) {
-  // 防回归：未来如果 GetSocName 返回带后缀的 "Ascend950XXX"，仍应命中
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
-  ASSERT_EXIT(
-      {
-        ExpectAscend950OptionsEnabled(FakeSocName_Ascend950Variant);
-        ExitIsolatedOptionsTest();
-      },
-      ::testing::ExitedWithCode(0), "");
-}
-
-TEST_F(SuperKernelOptionsManagerTest, SetInnerOptionValue) {
-  opts_test->RegisterDefaultOptions();
-  auto *opt = opts_test->GetOption(SkInnerOptionType::ENABLE_MIX_KERNEL_SPLIT);
-  ASSERT_NE(opt, nullptr);
-  opt->SetValue(1);
-  EXPECT_EQ(opt->GetIntValue(), 1);
+  EXPECT_TRUE(opts_test->IsInnerOptionEnabled(SkInnerOptionType::MIX_KERNEL_SPLIT));
+  EXPECT_TRUE(opts_test->IsInnerOptionEnabled(SkInnerOptionType::SIMT_OP_SUPPORT));
 
   nlohmann::ordered_json json = opts_test->ToJson();
-  EXPECT_EQ(json["inner_options"]["enable_mix_kernel_split"]["value"], 1);
+  ASSERT_TRUE(json.contains("inner_options"));
+  EXPECT_TRUE(json["inner_options"]["mix_kernel_split"]["value"]);
+  EXPECT_TRUE(json["inner_options"]["simt_op_support"]["value"]);
 }
 
 // ==================== SetOptOptionValue: DEBUG_PER_OP_MAX_CORE_NUM 测试 ====================

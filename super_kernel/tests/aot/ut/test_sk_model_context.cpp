@@ -14,6 +14,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <array>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdio>
@@ -22,11 +23,14 @@
 #include <vector>
 #include <atomic>
 #include <fstream>
+#include <future>
 #include <string>
 #include <set>
 #include <mutex>
 
+#define private public
 #include "sk_log.h"
+#undef private
 #include "sk_model_context.h"
 
 namespace {
@@ -378,6 +382,306 @@ TEST_F(TestSkModelContext, GuardedScope_PathStaysStableAcrossCalls) {
 
   EXPECT_EQ(id1, id2);
   EXPECT_EQ(path1, path2);
+}
+
+TEST_F(TestSkModelContext, BuildModelLabel_UsesCanonicalPrefixAndUnknownFallback) {
+  EXPECT_EQ(BuildModelLabel("12_3"), "model_12_3");
+  EXPECT_EQ(BuildModelLabel(""), UnknownModelLabel());
+}
+
+TEST_F(TestSkModelContext, LogContextGuard_RoutesNestedModelsAndRestoresPreviousState) {
+  const std::string originalLabel = "model_route_original";
+  const std::string outerLabel = "model_route_outer";
+  const std::string innerLabel = "model_route_inner";
+
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = originalLabel;
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+
+  const std::string originalHandle = "model_" + originalLabel;
+  sk::logger::FileLogger::SetCurrentModelLabel(originalLabel);
+  ASSERT_TRUE(sk::logger::FileHandleManager::Instance().SwitchToFile(originalHandle));
+
+  {
+    sk::logger::LogContextGuard outerContext(outerLabel);
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), outerLabel);
+    EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+
+    {
+      sk::logger::LogContextGuard innerContext(innerLabel);
+      EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), innerLabel);
+      EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+    }
+
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), outerLabel);
+    EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  }
+
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), originalHandle);
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+}
+
+TEST_F(TestSkModelContext, LogContextGuard_LoggerDisabledDoesNotChangeModelContext) {
+  const std::string originalLabel = "model_route_disabled_original";
+  sk::logger::FileLogger::SetCurrentModelLabel(originalLabel);
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
+  {
+    sk::logger::LogContextGuard logContext("model_route_disabled_target");
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+    EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  }
+
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+}
+
+TEST_F(TestSkModelContext, LogContextGuard_ConcurrentThreadsKeepModelContextsIsolated) {
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = "model_route_thread_config";
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+
+  std::atomic<uint32_t> readyCount{0U};
+  std::array<bool, 2> routeChecks{false, false};
+  std::array<bool, 2> restoreChecks{false, false};
+  std::vector<std::thread> workers;
+  workers.reserve(routeChecks.size());
+  for (size_t i = 0; i < routeChecks.size(); ++i) {
+    workers.emplace_back([i, &readyCount, &routeChecks, &restoreChecks]() {
+      const std::string previousLabel = "model_route_thread_previous_" + std::to_string(i);
+      const std::string targetLabel = "model_route_thread_target_" + std::to_string(i);
+      sk::logger::FileLogger::SetCurrentModelLabel(previousLabel);
+      sk::logger::FileHandleManager::Instance().SwitchToDefault();
+      {
+        sk::logger::LogContextGuard logContext(targetLabel);
+        readyCount.fetch_add(1U, std::memory_order_release);
+        while (readyCount.load(std::memory_order_acquire) < routeChecks.size()) {
+          std::this_thread::yield();
+        }
+        routeChecks[i] = sk::logger::FileLogger::GetCurrentModelLabel() == targetLabel &&
+                         sk::logger::FileHandleManager::Instance().GetCurrentHandle() == "default";
+      }
+      restoreChecks[i] = sk::logger::FileLogger::GetCurrentModelLabel() == previousLabel &&
+                         sk::logger::FileHandleManager::Instance().GetCurrentHandle() == "default";
+    });
+  }
+
+  for (auto &worker : workers) {
+    worker.join();
+  }
+  EXPECT_TRUE(routeChecks[0]);
+  EXPECT_TRUE(routeChecks[1]);
+  EXPECT_TRUE(restoreChecks[0]);
+  EXPECT_TRUE(restoreChecks[1]);
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+}
+
+TEST_F(TestSkModelContext, FileLoggerConcurrentConfigurationAccessCompletesWithFinalState) {
+  sk::logger::LoggerConfig config;
+  config.enabled = false;
+  config.modelLabel = "concurrent_config";
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+
+  constexpr uint32_t threadCount = 8;
+  constexpr uint32_t iterations = 1000;
+  std::atomic<uint32_t> ready{0};
+  std::atomic<bool> start{false};
+  std::vector<std::thread> threads;
+  for (uint32_t threadIndex = 0; threadIndex < threadCount; ++threadIndex) {
+    threads.emplace_back([&, threadIndex]() {
+      ready.fetch_add(1, std::memory_order_relaxed);
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (uint32_t i = 0; i < iterations; ++i) {
+        sk::logger::FileLogger::Instance().SetEnabled((i + threadIndex) % 2U == 0U);
+        sk::logger::FileLogger::Instance().SetMinLevel((i % 2U == 0U) ? sk::logger::LogLevel::DEBUG
+                                                                      : sk::logger::LogLevel::WARNING);
+        sk::logger::FileLogger::Instance().SetModelLabel("concurrent_model_" + std::to_string(threadIndex));
+        (void)sk::logger::FileLogger::Instance().IsEnabled();
+        sk::logger::FileLogger::Instance().WriteLogIfEnabled(sk::logger::LogLevel::INFO, __FUNCTION__, __FILE__,
+                                                             __LINE__, "iteration=%u", i);
+      }
+    });
+  }
+
+  while (ready.load(std::memory_order_acquire) != threadCount) {
+    std::this_thread::yield();
+  }
+  start.store(true, std::memory_order_release);
+  for (auto &thread : threads) {
+    thread.join();
+  }
+
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+  EXPECT_FALSE(sk::logger::FileLogger::Instance().IsEnabled());
+  sk::logger::FileLogger::Instance().SetEnabled(true);
+  EXPECT_TRUE(sk::logger::FileLogger::Instance().IsEnabled());
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+}
+
+TEST_F(TestSkModelContext, FileLoggerInitializationLockDoesNotBlockLogConfigSnapshot) {
+  auto &logger = sk::logger::FileLogger::Instance();
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = "initialization_lock_snapshot";
+  ASSERT_TRUE(logger.Initialize(config));
+
+  std::unique_lock<std::mutex> initializationLock(logger.initializationMutex_);
+  auto writeFuture = std::async(std::launch::async, [&logger]() {
+    logger.WriteLogIfEnabled(sk::logger::LogLevel::INFO, __FUNCTION__, __FILE__, __LINE__,
+                             "log while initialization is serialized");
+  });
+
+  EXPECT_EQ(writeFuture.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  initializationLock.unlock();
+  writeFuture.get();
+  logger.SetEnabled(false);
+}
+
+TEST_F(TestSkModelContext, FileHandleManagerRegisterFailureDoesNotReenterMutex) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  EXPECT_EXIT(
+      {
+        alarm(1);
+        sk::logger::FileLogger::Instance().SetEnabled(true);
+        sk::logger::FileLogger::Instance().SetMinLevel(sk::logger::LogLevel::ERROR);
+        bool registered = sk::logger::FileHandleManager::Instance().RegisterFile(
+            "reentrant_register_failure", "/proc/graph_autofusion_missing/super_kernel.log");
+        _exit(registered ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(TestSkModelContext, FileHandleManagerSwitchFailureDoesNotReenterMutex) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  EXPECT_EXIT(
+      {
+        alarm(1);
+        sk::logger::FileLogger::Instance().SetEnabled(true);
+        sk::logger::FileLogger::Instance().SetMinLevel(sk::logger::LogLevel::ERROR);
+        bool switched = sk::logger::FileHandleManager::Instance().SwitchToFile("missing_handle_for_reentrant_log");
+        _exit(switched ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(TestSkModelContext, FileHandleManagerLogDoesNotAcquireLoggerConfigMutex) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  EXPECT_EXIT(
+      {
+        alarm(1);
+        auto &logger = sk::logger::FileLogger::Instance();
+        auto &handleManager = sk::logger::FileHandleManager::Instance();
+        logger.SetEnabled(true);
+        logger.SetMinLevel(sk::logger::LogLevel::ERROR);
+        std::lock_guard<decltype(handleManager.mutex_)> managerLock(handleManager.mutex_);
+        std::lock_guard<std::mutex> configLock(logger.mutex_);
+        logger.WriteLogIfEnabled(sk::logger::LogLevel::ERROR, __FUNCTION__, __FILE__, __LINE__,
+                                 "log while manager and config are locked");
+        _exit(0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(TestSkModelContext, FileHandleManagerFailureIsWrittenToFileAfterUnlock) {
+  const std::string modelLabel = "file_handle_failure_file_sink";
+  const std::string handleName = "model_" + modelLabel;
+  const std::string logPath = GetSkMetaBasePath() + "/" + modelLabel + "/super_kernel.log";
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = modelLabel;
+  sk::logger::FileLogger::SetCurrentModelLabel(modelLabel);
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+
+  EXPECT_FALSE(sk::logger::FileHandleManager::Instance().SwitchToFile("missing_handle_for_file_sink"));
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+  sk::logger::FileHandleManager::Instance().CloseFile(handleName);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
+  std::ifstream file(logPath);
+  ASSERT_TRUE(file.good());
+  bool foundError = false;
+  std::string line;
+  while (std::getline(file, line)) {
+    if (line.find("File handle not found: missing_handle_for_file_sink") != std::string::npos) {
+      foundError = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(foundError);
+  file.close();
+  std::remove(logPath.c_str());
+  rmdir((GetSkMetaBasePath() + "/" + modelLabel).c_str());
+  sk::logger::FileLogger::SetCurrentModelLabel("");
+}
+
+TEST_F(TestSkModelContext, LogContextGuard_FileAndModelContextsRestoreInNestedOrder) {
+  const std::string originalLabel = "model_context_original";
+  const std::string nestedLabel = "model_context_nested";
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = originalLabel;
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+  sk::logger::FileLogger::SetCurrentModelLabel(originalLabel);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
+  auto fileContext = sk::logger::FileLogger::Instance().CreateContext("nested_context.log", originalLabel);
+  ASSERT_NE(fileContext, nullptr);
+  const std::string fileHandle = sk::logger::FileHandleManager::Instance().GetCurrentHandle();
+  EXPECT_NE(fileHandle, "default");
+
+  {
+    sk::logger::LogContextGuard modelContext(nestedLabel);
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), nestedLabel);
+    EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  }
+
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), fileHandle);
+  fileContext.reset();
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  sk::logger::FileLogger::Instance().SetEnabled(false);
+}
+
+TEST_F(TestSkModelContext, LogContextGuard_MoveTransfersContextOwnership) {
+  const std::string originalLabel = "model_move_original";
+  const std::string targetLabel = "model_move_target";
+  sk::logger::LoggerConfig config;
+  config.enabled = true;
+  config.modelLabel = originalLabel;
+  ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
+  sk::logger::FileLogger::SetCurrentModelLabel(originalLabel);
+  sk::logger::FileHandleManager::Instance().SwitchToDefault();
+
+  {
+    sk::logger::LogContextGuard source(targetLabel);
+    sk::logger::LogContextGuard moved(std::move(source));
+    EXPECT_FALSE(source.IsActive());
+    EXPECT_TRUE(moved.IsActive());
+    EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), targetLabel);
+  }
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+
+  {
+    sk::logger::FileLogger::Instance().SetEnabled(false);
+    sk::logger::LogContextGuard moved("model_move_inactive");
+    sk::logger::FileLogger::Instance().SetEnabled(true);
+    sk::logger::LogContextGuard source(targetLabel);
+    moved = std::move(source);
+    EXPECT_FALSE(source.IsActive());
+    EXPECT_TRUE(moved.IsActive());
+  }
+  EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelLabel(), originalLabel);
+  EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  sk::logger::FileLogger::Instance().SetEnabled(false);
 }
 
 TEST_F(TestSkModelContext, LogContextUsesExplicitModelLabel) {

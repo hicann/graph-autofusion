@@ -4,7 +4,7 @@
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
@@ -16,6 +16,7 @@
 #ifndef __SK_SCOPE_INFO_H__
 #define __SK_SCOPE_INFO_H__
 
+#include <atomic>
 #include <bitset>
 #include <cstdint>
 #include <memory>
@@ -257,19 +258,19 @@ class ScopeIdGenerator {
   }
 
   uint16_t NextId() {
-    uint16_t id = nextId_++;
-    if (nextId_ == 0) {
+    uint16_t id = nextId_.fetch_add(1, std::memory_order_relaxed);
+    if (static_cast<uint16_t>(id + 1U) == 0U) {
       SK_LOGI("ScopeId wraparound detected: scope ID counter reset to 0 after reaching maximum");
     }
     return id;
   }
 
  private:
-  ScopeIdGenerator() : nextId_(0) {}
+  ScopeIdGenerator() = default;
   ScopeIdGenerator(const ScopeIdGenerator &) = delete;
   ScopeIdGenerator &operator=(const ScopeIdGenerator &) = delete;
 
-  uint16_t nextId_;
+  std::atomic<uint16_t> nextId_{0};
 };
 
 /*!

@@ -1,11 +1,10 @@
 /**
  * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it
- * under the terms of CANN Open Software License Agreement Version 2.0 (the "License").
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
@@ -116,7 +115,7 @@ void ReportErrorMessageInner(const std::string &code, const char *fmt, ...);
 std::string GetCurrentModelLabel();
 
 template <typename... Arguments>
-void ReportErrorMessage(const char *fmt, Arguments &&... args) {
+void ReportErrorMessage(const char *fmt, Arguments &&...args) {
   std::string errorCode = "EZ9999";
   return ReportErrorMessageInner(errorCode, fmt, std::forward<Arguments>(args)...);
 }
@@ -242,15 +241,41 @@ class FileHandleManager {
   bool InitializeDefault(const std::string &baseDir, pid_t pid, const std::string &modelLabel);
 
  private:
+  class ThreadAwareMutex {
+   public:
+    void lock() {
+      mutex_.lock();
+      heldByCurrentThread_ = true;
+    }
+
+    void unlock() {
+      heldByCurrentThread_ = false;
+      mutex_.unlock();
+    }
+
+    bool IsHeldByCurrentThread() const {
+      return heldByCurrentThread_;
+    }
+
+   private:
+    std::mutex mutex_;
+    inline static thread_local bool heldByCurrentThread_ = false;
+  };
+
   FileHandleManager();
   ~FileHandleManager();
 
   FileHandleManager(const FileHandleManager &) = delete;
   FileHandleManager &operator=(const FileHandleManager &) = delete;
 
- private:
+  bool IsLockedByCurrentThread() const {
+    return mutex_.IsHeldByCurrentThread();
+  }
+
+  friend class FileLogger;
+
   std::unordered_map<std::string, FileHandleInfo> handles_;
-  mutable std::mutex mutex_;
+  mutable ThreadAwareMutex mutex_;
 
   // Thread-local current handle to avoid multi-threading conflicts
   static thread_local std::string currentHandle_;
@@ -259,7 +284,10 @@ class FileHandleManager {
 // ==================== RAII Log Context Manager ====================
 class LogContextGuard {
  public:
-  explicit LogContextGuard(const std::string &fileName, const std::string &filePath);
+  // Route to a model's default log without creating a file.
+  explicit LogContextGuard(const std::string &modelLabel);
+  // Register and route to a specific log file.
+  explicit LogContextGuard(const std::string &handleName, const std::string &filePath);
   ~LogContextGuard();
 
   // Disable copy
@@ -275,8 +303,11 @@ class LogContextGuard {
   }
 
  private:
+  void Restore();
+
+  std::string previousModelLabel_;
   std::string previousHandle_;
-  bool active_;
+  bool active_ = false;
 };
 
 // ==================== Main Logger Class ====================
@@ -290,10 +321,19 @@ class FileLogger {
   // Write log to file if enabled (called by SK_LOG* macros after passthrough)
   template <typename... Args>
   void WriteLogIfEnabled(LogLevel level, const char *funcName, const char *fileName, int lineNum, const char *format,
-                         Args &&... args) {
-    if (config_.enabled && level >= config_.minLevel) {
-      std::string message = FormatMessage(level, funcName, fileName, lineNum, format, std::forward<Args>(args)...);
-      WriteLog(message);
+                         Args &&...args) {
+    if (enabled_.load(std::memory_order_relaxed) && level >= minLevel_.load(std::memory_order_relaxed)) {
+      // SK_LOG* has already emitted its passthrough log. Skip the file sink when re-entered by its manager.
+      if (FileHandleManager::Instance().IsLockedByCurrentThread()) {
+        return;
+      }
+      LoggerConfig config = GetConfigSnapshot();
+      if (!config.enabled || level < config.minLevel) {
+        return;
+      }
+      std::string message =
+          FormatMessage(config, level, funcName, fileName, lineNum, format, std::forward<Args>(args)...);
+      WriteLog(message, config);
     }
   }
 
@@ -327,18 +367,23 @@ class FileLogger {
   FileLogger &operator=(const FileLogger &) = delete;
 
   // Format message (using variadic arguments to avoid format-security warning)
-  std::string FormatMessage(LogLevel level, const char *funcName, const char *fileName, int lineNum, const char *format,
-                            ...);
+  std::string FormatMessage(const LoggerConfig &config, LogLevel level, const char *funcName, const char *fileName,
+                            int lineNum, const char *format, ...);
 
-  void WriteLog(const std::string &message);
+  void WriteLog(const std::string &message, const LoggerConfig &config);
 
   // Get the effective model label. Prefer the thread-local label and fall back to config_.
   std::string GetEffectiveModelLabel() const;
+  LoggerConfig GetConfigSnapshot() const;
 
  private:
   LoggerConfig config_;
+  std::atomic<bool> enabled_{false};
+  std::atomic<LogLevel> minLevel_{LogLevel::INFO};
   std::atomic<bool> initialized_{false};
-  pid_t pid_{0};
+  std::atomic<pid_t> pid_{0};
+  // Serialize initialization without preventing log calls from taking a configuration snapshot.
+  std::mutex initializationMutex_;
   mutable std::mutex mutex_;
 
   // Thread-local model label, used to isolate concurrent aclskOptimize calls.

@@ -211,6 +211,8 @@ class SkTaskBuilder {
   // ========== DEBUG mode helpers ==========
   bool ApplyPerOpMaxCoreNum(const std::vector<SuperKernelBaseNode *> &tasks, SkTask &aicTask, SkTask &aivTask);
 
+  void ApplyBlockDimScaleUp(SkTask &skTaskCube, SkTask &skTaskVec, const std::vector<SuperKernelBaseNode *> &tasks);
+
   // Helper: determine whether crossed sync can be removed
   bool JudgeRemoveCrossSync(size_t sendIdx, size_t recvIdx, bool isCubToVec);
 
@@ -220,7 +222,8 @@ class SkTaskBuilder {
   // Print sync metadata (debug only)
   void PrintSyncInfo(const char *stage) const;
 
-  SkHostEntryInfo GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, bool useSimtEntry = false);
+  SkHostEntryInfo GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, bool useSimtEntry = false,
+                               const std::vector<SuperKernelBaseNode *> &tasks = {});
   DeviceArgsPtr GenEntryArgs(const SkTask &skTaskCube, const SkTask &skTaskVec, const SkDfxInfo *dfxInfos,
                              uint32_t dfxCount, const SkEventConfig *eventConfig = nullptr);
 

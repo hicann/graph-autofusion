@@ -38,7 +38,6 @@ constexpr uint32_t K_TYPE_AIV_ROLLBACK = 7;
 // Super Kernel Configuration Constants
 constexpr uint32_t TASK_QUE_EXPAND_FACTOR = 2;  // TaskQue扩容因子
 
-constexpr uint32_t MAX_TASK_NUM = 1024;
 constexpr uint32_t MAX_SCOPE_NUM = 1024;
 constexpr size_t SK_TOTAL_UB_SIZE = 256U * 1024U;
 constexpr uint16_t INVALID_SCOPE_ID = std::numeric_limits<uint16_t>::max();
@@ -212,7 +211,7 @@ struct SkTask {
     return sizeof(TaskQue) + queue->taskCnt * sizeof(TaskInfo);
   }
 
-  SkTask() : numBlocks(0), funcCnt(0){};
+  SkTask() : numBlocks(0), funcCnt(0) {};
   SkTask(const SkTask &) = delete;
   SkTask &operator=(const SkTask &) = delete;
   SkTask(SkTask &&) = default;
@@ -258,11 +257,11 @@ struct SkHostEntryInfo {
 struct CacheopInfoBasic {
   uint32_t taskType;     // 算子的任务类型
   uint32_t numBlocks;    // blockdim
-  uint64_t nodeId;       //算子名的hashid
-  uint64_t opType;       //算子类型的hashid
+  uint64_t nodeId;       // 算子名的hashid
+  uint64_t opType;       // 算子类型的hashid
   uint64_t attrId{0};    // 本次attr拼接放这里
   uint64_t reserve2{0};  // 不做处理
-  uint32_t opFlag;       //记录op属性标记的bitmap，bit0代表是否使能了HF32
+  uint32_t opFlag;       // 记录op属性标记的bitmap，bit0代表是否使能了HF32
   uint32_t tensorNum;    // tensor个数
   MsrofTensorData tensorData[0];
 };
@@ -273,8 +272,8 @@ struct SkLaunchInfo {
   void *
       cacheInfo;  // sk融合算子的shape信息，由sk_optimizer.cpp在构建launchInfo时填充，实际类型是CacheopInfoBasic，包含一个可变长度的tensorData数组
   size_t cacheopInfoSize;
-  size_t minAvailableUbufSize = 0;
-  bool hasMinAvailableUbufSize = false;
+  size_t skMaxDcacheSize = 0;          // 所有 SIMT 子任务共同允许的最大 DCache 大小
+  bool useSimtEntry = false;           // 是否选择 SIMT entry 并配置对应的动态 UBUF
   void *eventGmAddr;                   // 事件记录 GM 地址
   uint64_t modelIdIndex{0};            // modelId index registered on host
   uint32_t skId;                       // SK 标识

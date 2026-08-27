@@ -14,7 +14,7 @@
 #include <string>
 
 #include "super_kernel.h"
-#include "sk_scope_kernel_types.h"
+#include "sk_common.h"
 #include "securec.h"
 #include "stub/ut_common_stubs.h"
 
@@ -53,6 +53,18 @@ aclError FakeAclmdlRIGetTasksByStream(aclrtStream stream, aclmdlRITask *tasks, u
   }
   tasks[0] = reinterpret_cast<aclmdlRITask>(&g_scopeTasks[0]);
   tasks[1] = reinterpret_cast<aclmdlRITask>(&g_scopeTasks[1]);
+  return ACL_SUCCESS;
+}
+
+aclError FakeAclmdlRIGetSingleTaskByStream(aclrtStream stream, aclmdlRITask *tasks, uint32_t *numTasks) {
+  (void)stream;
+  if (numTasks == nullptr) {
+    return ACL_ERROR_INVALID_PARAM;
+  }
+  *numTasks = 1;
+  if (tasks != nullptr) {
+    tasks[0] = reinterpret_cast<aclmdlRITask>(&g_scopeTasks[0]);
+  }
   return ACL_SUCCESS;
 }
 
@@ -109,6 +121,16 @@ TEST_F(SuperKernelApiTest, Optimize_GraphUpdateFailure_ReturnsError) {
   MOCKER(aclrtMemcpy).stubs().will(invoke(FakeAclrtMemcpy));
 
   EXPECT_EQ(aclskOptimize(model_, nullptr), ACL_ERROR_FAILURE);
+}
+
+TEST_F(SuperKernelApiTest, Optimize_UnpairedScopeBegin_ReturnsError) {
+  SkUtSetModelStreamNum(1);
+  MOCKER(aclmdlRIGetTasksByStream).stubs().will(invoke(FakeAclmdlRIGetSingleTaskByStream));
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionName));
+  MOCKER(aclrtMemcpy).stubs().will(invoke(FakeAclrtMemcpy));
+
+  EXPECT_EQ(aclskOptimize(model_, nullptr), ACL_ERROR_FAILURE);
+  EXPECT_EQ(SkUtGetDebugJsonPrintCallCount(), 0U);
 }
 
 TEST_F(SuperKernelApiTest, Optimize_SuccessDumpsAfterUpdateRtsJson) {

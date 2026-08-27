@@ -189,7 +189,7 @@ aclError aclskOptimize(aclmdlRI model, aclskOptions *options) {
 aclError aclskScopeBegin(const char *scopeName, aclrtStream stream) {
   InitSkRuntimeConfig();
   if (scopeName != nullptr && scopeName[0] == '\0') {
-    SK_LOGE("Invalid scopeName: name is empty.");
+    SK_DLOGE("Invalid scopeName: name is empty.");
     return ACL_ERROR_INVALID_PARAM;
   }
   return LaunchScopeKernel(scopeName, stream, true);
@@ -198,10 +198,21 @@ aclError aclskScopeBegin(const char *scopeName, aclrtStream stream) {
 aclError aclskScopeEnd(const char *scopeName, aclrtStream stream) {
   InitSkRuntimeConfig();
   if (scopeName != nullptr && scopeName[0] == '\0') {
-    SK_LOGE("Invalid scopeName: name is empty.");
+    SK_DLOGE("Invalid scopeName: name is empty.");
     return ACL_ERROR_INVALID_PARAM;
   }
   return LaunchScopeKernel(scopeName, stream, false);
+}
+
+aclError aclskScopeVerify(const aclskScopeVerifyGraphInfo *verifyGraph, size_t maxSplitResultCount,
+                          aclskScopeVerifySplitResult *splitResults, size_t *realSplitResultCount) {
+  (void)verifyGraph;
+  (void)maxSplitResultCount;
+  (void)splitResults;
+  if (realSplitResultCount != nullptr) {
+    *realSplitResultCount = 0;
+  }
+  return ACL_SUCCESS;
 }
 
 #ifdef __cplusplus

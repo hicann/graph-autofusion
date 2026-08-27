@@ -18,6 +18,7 @@
 #include <unordered_set>
 #include <array>
 #include <memory>
+#include <mutex>
 #include <limits>
 #include <cstdint>
 #include <stdexcept>
@@ -29,12 +30,12 @@
 
 #include "sk_node.h"
 #include "sk_log.h"
-#include "sk_scope_launch.h"
 #include "sk_scope_info.h"
 #include "sk_lock_detector.h"
 #include "sk_common.h"
 #include "sk_model_context.h"
 #include "sk_options_manager.h"
+#include "runtime/rt_external_kernel.h"
 #include "kernel.h"
 #include "base.h"
 
@@ -91,8 +92,6 @@ const char *FusionFailReasonDetail(FusionFailReason reason) {
       return "only exists memory write nodes, mask it as unfusible";
     case FusionFailReason::DEFAULT_NODE:
       return "default node uses aicpu resources, mask it as unfusible";
-    case FusionFailReason::SIMT_OP_UNSUPPORT:
-      return "SIMT operator is not supported for SuperKernel fusion";
     case FusionFailReason::KERNEL_ATTR_GET_FAILED:
       return "Failed to get kernel attribute for SuperKernel fusion";
     case FusionFailReason::EXCEED_SCOPE_MAX:
@@ -114,7 +113,12 @@ KernelCapBits ParseKernelCapBits(uint64_t cap) {
   bits.earlyStartSetFlag = getBit(KernelCapBitOffset::EARLY_START_SET_FLAG);
   bits.disableDcci = getBit(KernelCapBitOffset::DCCI);
   bits.disableScheMode = getBit(KernelCapBitOffset::DISABLE_SCHEMODE);
+  bits.blockDimScaleUp = getBit(KernelCapBitOffset::BLOCKDIM_SCALE_UP);
   return bits;
+}
+
+bool ShouldDisableScheMode(const KernelCapBits &capBits) {
+  return capBits.disableScheMode || capBits.blockDimScaleUp;
 }
 
 // Implementation of FusionFailReasonInfo methods (requires complete ScopeProcessStatus/DeadlockFailReason definition)
@@ -418,12 +422,13 @@ ScheModeState GetScheModeFromKernelTask(aclmdlRITask kernelTask) {
 
 const SkBindMap &GetSkBindMap(aclrtBinHandle binHdl) {
   static SkAllBinMap allBinMap;
+  static std::mutex allBinMapMutex;
+  std::lock_guard<std::mutex> lock(allBinMapMutex);
   auto it = allBinMap.find(binHdl);
   if (it != allBinMap.end()) {
     return it->second;
   }
-  allBinMap[binHdl] = InitSuperKernelBindMap(binHdl);
-  return allBinMap[binHdl];
+  return allBinMap.emplace(binHdl, InitSuperKernelBindMap(binHdl)).first->second;
 }
 
 template <SkNodeCoreType coreType>
@@ -570,10 +575,10 @@ bool InitKernelResolvedFuncs(KernelInfos &kernelInfos) {
   kernelInfos.capBits = capBits;
   SK_LOGI(
       "bindMap size=%lu, aicFound=%d, aivFound=%d, earlyStartWaitFlag=%d, "
-      "earlyStartSetFlag=%d, disableDcci=%d, disableScheMode=%d",
+      "earlyStartSetFlag=%d, disableDcci=%d, disableScheMode=%d, blockDimScaleUp=%d",
       bindMap.size(), aicItor != bindMap.end(), aivItor != bindMap.end(), capBits.earlyStartWaitFlag,
-      capBits.earlyStartSetFlag, capBits.disableDcci, capBits.disableScheMode);
-  if (capBits.disableScheMode == true) {
+      capBits.earlyStartSetFlag, capBits.disableDcci, capBits.disableScheMode, capBits.blockDimScaleUp);
+  if (ShouldDisableScheMode(capBits)) {
     const bool originScheModeOn = kernelInfos.isScheModeOn;
     kernelInfos.isScheModeOn = false;
     SK_LOGI(
@@ -826,32 +831,30 @@ bool SuperKernelBaseNode::Update(const UpdateContext &ctx) {
   return true;
 }
 
-void SuperKernelBaseNode::LogNodeUpdateResult(const aclmdlRITaskParams *resultParams) const {
+void SuperKernelBaseNode::LogNodeUpdateResult(const aclmdlRITaskParams *paramsToLog) const {
   std::ostringstream oss;
   oss << "node update result: nodeId=" << nodeId;
-  if (resultParams == nullptr) {
+  if (paramsToLog == nullptr) {
     oss << ", type=INVALID";
     SK_LOGI("%s", oss.str().c_str());
     return;
   }
 
-  oss << ", type=" << GetUpdateTargetTypeName(resultParams->type);
-  switch (resultParams->type) {
+  oss << ", type=" << GetUpdateTargetTypeName(paramsToLog->type);
+  switch (paramsToLog->type) {
     case ACL_MODEL_RI_TASK_KERNEL:
-      oss << ", opInfoPtr=" << resultParams->opInfoPtr << ", opInfoSize=" << resultParams->opInfoSize
-          << ", funcHandle=" << resultParams->kernelTaskParams.funcHandle
-          << ", args=" << resultParams->kernelTaskParams.args
-          << ", argsSize=" << resultParams->kernelTaskParams.argsSize
-          << ", numBlocks=" << static_cast<uint32_t>(resultParams->kernelTaskParams.numBlocks);
+      oss << ", opInfoPtr=" << paramsToLog->opInfoPtr << ", opInfoSize=" << paramsToLog->opInfoSize
+          << ", funcHandle=" << paramsToLog->kernelTaskParams.funcHandle
+          << ", args=" << paramsToLog->kernelTaskParams.args << ", argsSize=" << paramsToLog->kernelTaskParams.argsSize
+          << ", numBlocks=" << static_cast<uint32_t>(paramsToLog->kernelTaskParams.numBlocks);
       break;
     case ACL_MODEL_RI_TASK_VALUE_WRITE:
-      oss << ", addr=" << resultParams->valueWriteTaskParams.devAddr << ", value=0x" << std::hex
-          << resultParams->valueWriteTaskParams.value << std::dec;
+      oss << ", addr=" << paramsToLog->valueWriteTaskParams.devAddr << ", value=0x" << std::hex
+          << paramsToLog->valueWriteTaskParams.value << std::dec;
       break;
     case ACL_MODEL_RI_TASK_VALUE_WAIT:
-      oss << ", addr=" << resultParams->valueWaitTaskParams.devAddr << ", value=0x" << std::hex
-          << resultParams->valueWaitTaskParams.value << ", flag=0x" << resultParams->valueWaitTaskParams.flag
-          << std::dec;
+      oss << ", addr=" << paramsToLog->valueWaitTaskParams.devAddr << ", value=0x" << std::hex
+          << paramsToLog->valueWaitTaskParams.value << ", flag=0x" << paramsToLog->valueWaitTaskParams.flag << std::dec;
       break;
     default:
       break;
@@ -879,20 +882,19 @@ struct JudgeTaskKernelInfo {
   std::unique_ptr<char[]> scopeName;
 };
 
-bool IsScopeKernel(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info) {
-  const char *defaultScopeName = "default_sk_scope_name";
+bool GetScopeKernelInfo(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info) {
   char kernelName[MAX_SCOPE_NAME_LEN] = {0};
   int32_t ret = aclrtGetFunctionName(params.funcHandle, sizeof(kernelName), kernelName);
   if (ret != ACL_SUCCESS) {
     SK_LOGE("Failed to get kernel name for funcHandle, ret: %d", ret);
     return false;
   }
-  bool isBegin = IsScopeKernelNameWithSupportedArch(kernelName, "sk_scope_kernel_begin");
-  bool isEnd = IsScopeKernelNameWithSupportedArch(kernelName, "sk_scope_kernel_end");
-  bool isPlaceholder = IsScopeKernelNameWithSupportedArch(kernelName, "sk_placeholder_kernel");
-  if (!isBegin && !isEnd && !isPlaceholder) {
-    SK_LOGD("Current kernel is not a scope kernel or uses unsupported arch suffix, kernelName=%s", kernelName);
-    return false;
+  info->isBegin = IsScopeKernelNameWithSupportedArch(kernelName, "sk_scope_kernel_begin");
+  info->isEnd = IsScopeKernelNameWithSupportedArch(kernelName, "sk_scope_kernel_end");
+  info->isPlaceholder = IsScopeKernelNameWithSupportedArch(kernelName, "sk_placeholder_kernel");
+  if (!info->isBegin && !info->isEnd && !info->isPlaceholder) {
+    SK_LOGD("Kernel task is not recognized as a valid scope kernel task, kernelName=%s", kernelName);
+    return true;
   }
   auto parseArgsAddr = std::make_unique<ScopeKernelArgs>();
   ret = aclrtMemcpy((void *)parseArgsAddr.get(), sizeof(ScopeKernelArgs), params.args, sizeof(ScopeKernelArgs),
@@ -909,10 +911,7 @@ bool IsScopeKernel(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info) {
     SK_LOGE("Failed to copy scope name '%s', memcpy_s error code: %d", parseArgsAddr->name, res);
     return false;
   }
-  info->isBegin = isBegin;
-  info->isEnd = isEnd;
-  info->isPlaceholder = isPlaceholder;
-  if (strcmp(info->scopeName.get(), defaultScopeName) == 0) {
+  if (strcmp(info->scopeName.get(), DEFAULT_SK_SCOPE_NAME) == 0) {
     info->isFuseEnable = false;
   }
   SK_LOGI(
@@ -935,7 +934,11 @@ bool SuperKernelKernelNode::InitNode(const SuperKernelOptionsManager *opts) {
   }
   JudgeTaskKernelInfo scopeKernelInfo;
   auto &kernelParams = taskParams.kernelTaskParams;
-  if (IsScopeKernel(kernelParams, &scopeKernelInfo)) {
+  if (!GetScopeKernelInfo(kernelParams, &scopeKernelInfo)) {
+    SK_LOGE("Failed to get scope kernel information for kernel node %lu", nodeId);
+    return false;
+  }
+  if (scopeKernelInfo.isBegin || scopeKernelInfo.isEnd || scopeKernelInfo.isPlaceholder) {
     SK_LOGI("Kernel node %lu is a scope kernel node.", nodeId);
     isScopeNode = true;
     isFusible = scopeKernelInfo.isFuseEnable;
@@ -947,7 +950,7 @@ bool SuperKernelKernelNode::InitNode(const SuperKernelOptionsManager *opts) {
       scopeName = std::string(rawPtr);
     }
   } else {
-    SK_LOGI("Kernel node %lu is a regular kernel node.", nodeId);
+    SK_LOGD("Kernel node %lu is a regular kernel node.", nodeId);
   }
 
   int64_t kernelType = 0;
@@ -1065,22 +1068,18 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
   nodeInfos.kernelInfos.hasAllocUbufSize = false;
   nodeInfos.kernelInfos.dynUbufSize = 0;
   nodeInfos.kernelInfos.allocUbufSize = 0;
-  if (opts == nullptr) {
-    return;
-  }
-  const auto *simtCheckOpt = opts->GetOption(SkInnerOptionType::ENABLE_SIMT_OP_CHECK);
-  if (simtCheckOpt == nullptr || simtCheckOpt->GetIntValue() != 1) {
+  if (opts == nullptr || !opts->IsInnerOptionEnabled(SkInnerOptionType::SIMT_OP_SUPPORT)) {
     return;
   }
   SkKernelType kernelType = nodeInfos.kernelInfos.kernelType;
   bool hasAivSection = (kernelType == SkKernelType::AIV_ONLY || kernelType == SkKernelType::MIX_AIV_1_0 ||
                         kernelType == SkKernelType::MIX_AIC_1_1 || kernelType == SkKernelType::MIX_AIC_1_2);
   if (!hasAivSection) {
-    SK_LOGI("IdentifyAndHandleSimtKernel: %s has no AIV section (kernelType=%s), skip SIMT check", Format().c_str(),
+    SK_LOGI("IdentifyAndHandleSimtKernel: %s has no AIV section (kernelType=%s), skip SIMT analysis", Format().c_str(),
             to_string(kernelType));
     return;
   }
-  SK_LOGI("IdentifyAndHandleSimtKernel: checking for %s, kernelType=%s, nodeId=%lu", Format().c_str(),
+  SK_LOGI("IdentifyAndHandleSimtKernel: analyzing %s, kernelType=%s, nodeId=%lu", Format().c_str(),
           to_string(kernelType), nodeId);
   uint32_t aivType = 0;
   rtError_t ret = rtFunctionGetMetaInfo(taskParams.kernelTaskParams.funcHandle, RT_FUNCTION_TYPE_AIV_TYPE_FLAG,
@@ -1091,10 +1090,6 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
   }
   bool isSimt = (aivType == AIV_TYPE_SIMT_VF_ONLY || aivType == AIV_TYPE_SIMD_SIMT_MIX_VF);
   if (isSimt) {
-    isFusible = false;
-    SetFusionFailReason(FusionFailReason::SIMT_OP_UNSUPPORT);
-    SK_LOGI("%s is SIMT type, aivType=%u, not fusible", Format().c_str(), aivType);
-
     nodeInfos.kernelInfos.isSimtOp = true;
     size_t dynUbufSize = 0;
     aclError aclRet = aclrtFunctionGetAvailDynUbufPerBlock(taskParams.kernelTaskParams.funcHandle, 0, &dynUbufSize);
@@ -1120,47 +1115,35 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
   return;
 }
 
-bool SuperKernelKernelNode::SetupLaunchKernelCfgWithDynUbuf(size_t minAvailableUbufSize) {
-  launchKernelAttrs_.clear();
-  const aclrtLaunchKernelCfg *originCfg = taskParams.kernelTaskParams.cfg;
-  if (originCfg != nullptr && originCfg->attrs != nullptr) {
-    launchKernelAttrs_.reserve(originCfg->numAttrs + 1);
-    for (size_t attrIdx = 0; attrIdx < originCfg->numAttrs; ++attrIdx) {
-      const aclrtLaunchKernelAttr &originAttr = originCfg->attrs[attrIdx];
-      if (originAttr.id != ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE) {
-        launchKernelAttrs_.push_back(originAttr);
-      }
-    }
-  }
+bool SuperKernelKernelNode::SetupLaunchKernelCfg(aclrtFuncHandle funcHandle, size_t skMaxDcacheSize,
+                                                 std::vector<aclrtLaunchKernelAttr> &launchKernelAttrs,
+                                                 aclrtLaunchKernelCfg &launchKernelCfg) const {
+  launchKernelAttrs.clear();
+  launchKernelAttrs.reserve(1);
 
   aclrtLaunchKernelAttr dynUbufAttr{};
   dynUbufAttr.id = ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE;
   size_t skAllocUbufSize = 0;
-  if (!GetFunctionAllocUbufSize(taskParams.kernelTaskParams.funcHandle, skAllocUbufSize, Format())) {
+  if (!GetFunctionAllocUbufSize(funcHandle, skAllocUbufSize, Format())) {
     return false;
   }
-  if (minAvailableUbufSize > SK_TOTAL_UB_SIZE || skAllocUbufSize > SK_TOTAL_UB_SIZE - minAvailableUbufSize) {
+  if (skMaxDcacheSize > SK_TOTAL_UB_SIZE || skAllocUbufSize > SK_TOTAL_UB_SIZE - skMaxDcacheSize) {
     SK_LOGE(
-        "invalid dyn ubuf calculation for %s, totalUbSize=%zu, minAvailableUbufSize=%zu, "
+        "invalid dyn ubuf calculation for %s, totalUbSize=%zu, skMaxDcacheSize=%zu, "
         "skAllocUbufSize=%zu",
-        Format().c_str(), SK_TOTAL_UB_SIZE, minAvailableUbufSize, skAllocUbufSize);
+        Format().c_str(), SK_TOTAL_UB_SIZE, skMaxDcacheSize, skAllocUbufSize);
     return false;
   }
-  size_t finalDynUbufSize = SK_TOTAL_UB_SIZE - minAvailableUbufSize - skAllocUbufSize;
-  if (finalDynUbufSize > std::numeric_limits<uint32_t>::max()) {
-    SK_LOGE("dynUbufSize exceeds uint32_t range for %s, dynUbufSize=%zu", Format().c_str(), finalDynUbufSize);
-    return false;
-  }
-  dynUbufAttr.value.dynUBufSize = static_cast<uint32_t>(finalDynUbufSize);
-  launchKernelAttrs_.push_back(dynUbufAttr);
+  size_t skEntryDynUbufSize = SK_TOTAL_UB_SIZE - skMaxDcacheSize - skAllocUbufSize;
+  dynUbufAttr.value.dynUBufSize = static_cast<uint32_t>(skEntryDynUbufSize);
+  launchKernelAttrs.push_back(dynUbufAttr);
 
-  launchKernelCfg_.attrs = launchKernelAttrs_.data();
-  launchKernelCfg_.numAttrs = launchKernelAttrs_.size();
-  taskParams.kernelTaskParams.cfg = &launchKernelCfg_;
+  launchKernelCfg.attrs = launchKernelAttrs.data();
+  launchKernelCfg.numAttrs = launchKernelAttrs.size();
   SK_LOGI(
-      "Set dyn ubuf launch cfg for %s, minAvailableUbufSize=%zu, skAllocUbufSize=%zu, "
-      "finalDynUbufSize=%zu, attrCount=%zu",
-      Format().c_str(), minAvailableUbufSize, skAllocUbufSize, finalDynUbufSize, launchKernelCfg_.numAttrs);
+      "Set dyn ubuf launch cfg for %s, skMaxDcacheSize=%zu, skAllocUbufSize=%zu, "
+      "skEntryDynUbufSize=%zu, attrCount=%zu",
+      Format().c_str(), skMaxDcacheSize, skAllocUbufSize, skEntryDynUbufSize, launchKernelCfg.numAttrs);
   return true;
 }
 
@@ -1208,7 +1191,7 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
     SK_LOGE("Failed to update base node for %s", Format().c_str());
     return false;
   }
-  const aclmdlRITaskParams *resultParams = nullptr;
+  bool hasUpdateParams = false;
 
   if (ctx.customParams != nullptr && ctx.customParams->type != 0) {
     // check update value
@@ -1225,38 +1208,39 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
                 Format().c_str());
         break;
     }
+    updateParams = *ctx.customParams;
     // update kernel with custom params for stream sync
-    aclError aclRet = aclmdlRITaskSetParams(*originTask, ctx.customParams);
+    aclError aclRet = aclmdlRITaskSetParams(*originTask, &updateParams);
     if (aclRet != ACL_SUCCESS) {
       SK_LOGE("Failed to set kernel with custom params for %s", Format().c_str());
       return false;
     }
-    // Sync taskParams for JSON dump
-    taskParams = *ctx.customParams;
-    resultParams = &taskParams;
+    hasUpdateParams = true;
   } else if (ctx.launchInfo != nullptr && ctx.launchInfo->entryInfo.skEntryFunc != nullptr) {
-    taskParams.kernelTaskParams.args = static_cast<void *>(ctx.launchInfo->devArgs.Get());
-    taskParams.kernelTaskParams.argsSize = ctx.launchInfo->devArgs.Get()->skHeader.totalSize;
-    taskParams.kernelTaskParams.isHostArgs = true;
-
-    taskParams.kernelTaskParams.funcHandle = ctx.launchInfo->entryInfo.skEntryFunc;
-    taskParams.kernelTaskParams.numBlocks = ctx.launchInfo->entryInfo.numBlocks;
-    taskParams.type = ACL_MODEL_RI_TASK_KERNEL;
-    taskParams.opInfoPtr = ctx.launchInfo->cacheInfo;
-    taskParams.opInfoSize = ctx.launchInfo->cacheopInfoSize;
-    if (ctx.launchInfo->hasMinAvailableUbufSize &&
-        !SetupLaunchKernelCfgWithDynUbuf(ctx.launchInfo->minAvailableUbufSize)) {
-      SK_LOGE("Failed to setup dyn ubuf launch cfg for kernel node %s", Format().c_str());
-      return false;
+    updateParams.type = ACL_MODEL_RI_TASK_KERNEL;
+    updateParams.opInfoPtr = ctx.launchInfo->cacheInfo;
+    updateParams.opInfoSize = ctx.launchInfo->cacheopInfoSize;
+    updateParams.kernelTaskParams.args = static_cast<void *>(ctx.launchInfo->devArgs.Get());
+    updateParams.kernelTaskParams.argsSize = ctx.launchInfo->devArgs.Get()->skHeader.totalSize;
+    updateParams.kernelTaskParams.isHostArgs = true;
+    updateParams.kernelTaskParams.funcHandle = ctx.launchInfo->entryInfo.skEntryFunc;
+    updateParams.kernelTaskParams.numBlocks = ctx.launchInfo->entryInfo.numBlocks;
+    if (ctx.launchInfo->useSimtEntry) {
+      if (!SetupLaunchKernelCfg(updateParams.kernelTaskParams.funcHandle, ctx.launchInfo->skMaxDcacheSize,
+                                launchKernelAttrs_, launchKernelCfg_)) {
+        SK_LOGE("Failed to setup dyn ubuf launch cfg for kernel node %s", Format().c_str());
+        return false;
+      }
+      updateParams.kernelTaskParams.cfg = &launchKernelCfg_;
     }
 
-    aclError aclRet = aclmdlRITaskSetParams(*originTask, &taskParams);
+    aclError aclRet = aclmdlRITaskSetParams(*originTask, &updateParams);
 
     if (aclRet != ACL_SUCCESS) {
       SK_LOGE("Failed to update kernel node %s", Format().c_str());
       return false;
     }
-    resultParams = &taskParams;
+    hasUpdateParams = true;
   } else {
     aclError aclRet = InValidateNode();
     if (aclRet != ACL_SUCCESS) {
@@ -1264,7 +1248,7 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
     }
   }
 
-  LogNodeUpdateResult(resultParams);
+  LogNodeUpdateResult(hasUpdateParams ? &updateParams : nullptr);
   return true;
 }
 
@@ -1368,7 +1352,8 @@ bool SuperKernelMemoryNode::Update(const UpdateContext &ctx) {
     SK_LOGE("Failed to update base node for %s", Format().c_str());
     return false;
   }
-  const aclmdlRITaskParams *resultParams = nullptr;
+  aclmdlRITaskParams updateParams{};
+  bool hasUpdateParams = false;
 
   if (ctx.customParams != nullptr && ctx.customParams->type != 0) {
     // check update value
@@ -1385,15 +1370,16 @@ bool SuperKernelMemoryNode::Update(const UpdateContext &ctx) {
                 Format().c_str());
         break;
     }
+    updateParams = *ctx.customParams;
     // update memory node with custom params for stream sync
-    aclError aclRet = aclmdlRITaskSetParams(*originTask, ctx.customParams);
+    aclError aclRet = aclmdlRITaskSetParams(*originTask, &updateParams);
     if (aclRet != ACL_SUCCESS) {
       SK_LOGE("Failed to set custom params on memory node %s", Format().c_str());
       return false;
     }
     // Sync taskParams for JSON dump
-    taskParams = *ctx.customParams;
-    resultParams = &taskParams;
+    taskParams = updateParams;
+    hasUpdateParams = true;
   } else {
     aclError aclRet = InValidateNode();
     if (aclRet != ACL_SUCCESS) {
@@ -1401,7 +1387,7 @@ bool SuperKernelMemoryNode::Update(const UpdateContext &ctx) {
     }
   }
 
-  LogNodeUpdateResult(resultParams);
+  LogNodeUpdateResult(hasUpdateParams ? &updateParams : nullptr);
   return true;
 }
 

@@ -23,6 +23,8 @@
 #include "sk_types.h"
 #include "sk_common.h"
 #include "sk_event_recorder.h"
+#include "sk_model_context.h"
+#include "runtime/rt_external_kernel.h"
 #include "runtime/kernel.h"
 
 // COND register index in errReg[] for different architectures
@@ -48,19 +50,20 @@ SuperKernelExceptionHandler::SuperKernelExceptionHandler()
 
 void SuperKernelExceptionHandler::HandleException(aclrtExceptionInfo *exceptionInfo) {
   if (exceptionInfo == nullptr) {
-    SK_LOGE("Exception info is null");
+    SK_DLOGE("Exception info is null");
     return;
   }
 
   // Check if the exception is from sk_entry operator
   if (!IsSuperKernelException(exceptionInfo)) {
-    SK_LOGD("Exception is not from sk_entry, skip handling.");
+    SK_DLOGD("Exception is not from sk_entry, skip handling.");
     return;
   }
 
-  SK_LOGD("Aclgraph superkernel aicore exception occurred, callback function.");
+  SK_DLOGD("Aclgraph superkernel aicore exception occurred, callback function.");
 
-  if (!ExtractSkEntryArgs(exceptionInfo)) {
+  std::unique_ptr<sk::logger::LogContextGuard> logContext;
+  if (!ExtractSkEntryArgs(exceptionInfo, logContext)) {
     FreeResources();
     return;
   }
@@ -88,22 +91,32 @@ void SuperKernelExceptionHandler::HandleException(aclrtExceptionInfo *exceptionI
   FreeResources();
 }
 
-bool SuperKernelExceptionHandler::ExtractSkEntryArgs(aclrtExceptionInfo *exceptionInfo) {
+bool SuperKernelExceptionHandler::ExtractSkEntryArgs(aclrtExceptionInfo *exceptionInfo,
+                                                     std::unique_ptr<sk::logger::LogContextGuard> &logContext) {
   if (!ExtractSkDeviceEntryArgsPtr(exceptionInfo)) {
     return false;
   }
 
-  if (!CopySkDeviceEntryArgsToHost()) {
+  if (!CopySkDeviceEntryArgsToHost(logContext)) {
     return false;
   }
 
   return true;
 }
 
-bool SuperKernelExceptionHandler::CopySkDeviceEntryArgsToHost() {
+bool SuperKernelExceptionHandler::CopySkDeviceEntryArgsToHost(
+    std::unique_ptr<sk::logger::LogContextGuard> &logContext) {
   // Step 1: First copy SkHeaderInfo to get totalSize
   if (!ExtractSkHeaderInfo()) {
     return false;
+  }
+
+  logContext = std::make_unique<sk::logger::LogContextGuard>(BuildModelLabel(""));
+  uint16_t modelIdIdx = static_cast<uint16_t>((skHeaderInfoHost->modelIdIndexAndSkScopeId >> 32) & 0xFFFF);
+  std::string modelId = SkEventRecorder::Instance().GetModelIdByIndex(modelIdIdx);
+  if (!modelId.empty()) {
+    logContext.reset();
+    logContext = std::make_unique<sk::logger::LogContextGuard>(BuildModelLabel(modelId));
   }
 
   // Step 2: Now that we know totalSize, copy all SkDeviceEntryArgs data to host at once
@@ -153,16 +166,16 @@ bool SuperKernelExceptionHandler::CopySkDeviceEntryArgsToHost() {
 
 bool SuperKernelExceptionHandler::ExtractSkDeviceEntryArgsPtr(aclrtExceptionInfo *exceptionInfo) {
   auto ret = aclrtGetArgsFromExceptionInfo(exceptionInfo, &skDeviceEntryArgsDev, &skDeviceEntryArgsPtrLen);
-  SK_LOGI("---skDeviceEntryArgsDev: %p", skDeviceEntryArgsDev);
-  SK_LOGI("---skDeviceEntryArgsPtrLen: %d", skDeviceEntryArgsPtrLen);
+  SK_DLOGI("---skDeviceEntryArgsDev: %p", skDeviceEntryArgsDev);
+  SK_DLOGI("---skDeviceEntryArgsPtrLen: %d", skDeviceEntryArgsPtrLen);
 
   if (ret != ACL_SUCCESS) {
-    SK_LOGE("aclrtGetArgsFromExceptionInfo failed, ret=%d", ret);
+    SK_DLOGE("aclrtGetArgsFromExceptionInfo failed, ret=%d", ret);
     return false;
   }
 
   if (skDeviceEntryArgsPtrLen < 8 || skDeviceEntryArgsDev == nullptr) {
-    SK_LOGI("no args, callback return");
+    SK_DLOGI("no args, callback return");
     return false;
   }
   return true;
@@ -171,14 +184,16 @@ bool SuperKernelExceptionHandler::ExtractSkDeviceEntryArgsPtr(aclrtExceptionInfo
 bool SuperKernelExceptionHandler::ExtractSkHeaderInfo() {
   // SkHeaderInfo is at the beginning of SkDeviceEntryArgs, allocate temporary memory to copy
   SkHeaderInfo *tempHeader = nullptr;
-  if (CheckError(aclrtMallocHost((void **)(&tempHeader), sizeof(SkHeaderInfo)),
-                 "aclrtMallocHost for temp SkHeaderInfo") != ACL_SUCCESS) {
+  aclError ret = aclrtMallocHost((void **)(&tempHeader), sizeof(SkHeaderInfo));
+  if (ret != ACL_SUCCESS) {
+    SK_DLOGE("aclrtMallocHost for temp SkHeaderInfo failed, ret=%d", ret);
     return false;
   }
 
-  if (CheckError(aclrtMemcpy(tempHeader, sizeof(SkHeaderInfo), skDeviceEntryArgsDev, sizeof(SkHeaderInfo),
-                             ACL_MEMCPY_DEVICE_TO_HOST),
-                 "aclrtMemcpy for SkHeaderInfo") != ACL_SUCCESS) {
+  ret = aclrtMemcpy(tempHeader, sizeof(SkHeaderInfo), skDeviceEntryArgsDev, sizeof(SkHeaderInfo),
+                    ACL_MEMCPY_DEVICE_TO_HOST);
+  if (ret != ACL_SUCCESS) {
+    SK_DLOGE("aclrtMemcpy for SkHeaderInfo failed, ret=%d", ret);
     aclrtFreeHost(tempHeader);
     return false;
   }
@@ -854,28 +869,28 @@ bool SuperKernelExceptionHandler::IsSuperKernelException(aclrtExceptionInfo *exc
   aclrtFuncHandle funcHandle = nullptr;
   auto ret = aclrtGetFuncHandleFromExceptionInfo(exceptionInfo, &funcHandle);
   if (ret != ACL_SUCCESS) {
-    SK_LOGE("Failed to get func handle from exception info, ret=%d", ret);
+    SK_DLOGE("Failed to get func handle from exception info, ret=%d", ret);
     return false;
   }
 
   // Get function name
   ret = aclrtGetFunctionName(funcHandle, MAX_FUNC_NAME_LEN, funcName);
   if (ret != ACL_SUCCESS) {
-    SK_LOGE("Failed to get function name, ret=%d", ret);
+    SK_DLOGE("Failed to get function name, ret=%d", ret);
     return false;
   }
 
   // Check if function name starts with sk_entry (e.g., sk_entry, sk_entry_aiv, sk_entry_mix11, etc.)
   if (!StartsWith(funcName, "sk_entry")) {
-    SK_LOGD("fault kernel_name '%s' does not start with 'sk_entry', skipping", funcName);
+    SK_DLOGD("fault kernel_name '%s' does not start with 'sk_entry', skipping", funcName);
     return false;
   }
 
   // Check if function name contains "op_trace" for additional symbol printing
   hasOpTrace_ = (strstr(funcName, "op_trace") != nullptr);
 
-  SK_LOGE("Exception is from superkernel function '%s', op_trace=%s, proceeding with handling", funcName,
-          hasOpTrace_ ? "true" : "false");
+  SK_DLOGE("Exception is from superkernel function '%s', op_trace=%s, proceeding with handling", funcName,
+           hasOpTrace_ ? "true" : "false");
   return true;
 }
 
@@ -886,11 +901,17 @@ bool SuperKernelExceptionHandler::IsSuperKernelException(aclrtExceptionInfo *exc
  * \return aclError ACL_SUCCESS on success, error code on failure
  */
 aclError SuperKernelExceptionHandler::PrepareExceptionDump(aclrtExceptionInfo *exceptionInfo,
-                                                           ExceptionRegInfo &exceptionRegInfo) {
+                                                           ExceptionRegInfo &exceptionRegInfo,
+                                                           std::unique_ptr<sk::logger::LogContextGuard> &logContext) {
   // Extract SK entry arguments from device to host and parse task queue
-  if (!ExtractSkEntryArgs(exceptionInfo) || !ExtractTaskQueue()) {
+  if (!ExtractSkEntryArgs(exceptionInfo, logContext)) {
     FreeResources();
-    SK_LOGE("Failed to extract SK entry args or task queue");
+    SK_DLOGE("Failed to extract SK entry args");
+    return ACL_ERROR_FAILURE;
+  }
+  if (!ExtractTaskQueue()) {
+    FreeResources();
+    SK_LOGE("Failed to extract SK task queue");
     return ACL_ERROR_FAILURE;
   }
 
@@ -1075,12 +1096,13 @@ aclError SuperKernelExceptionHandler::PopulateDumpInfoFields(Adx::ExceptionDumpI
 aclError SuperKernelExceptionHandler::FillExceptionDumpInfo(Adx::ExceptionDumpInfo &dumpInfo,
                                                             aclrtExceptionInfo *exceptionInfo) {
   if (exceptionInfo == nullptr) {
-    SK_LOGE("FillExceptionDumpInfo: no exception info");
+    SK_DLOGE("FillExceptionDumpInfo: no exception info");
     return ACL_ERROR_INVALID_PARAM;
   }
 
   ExceptionRegInfo exceptionRegInfo{0, nullptr};
-  aclError ret = PrepareExceptionDump(exceptionInfo, exceptionRegInfo);
+  std::unique_ptr<sk::logger::LogContextGuard> logContext;
+  aclError ret = PrepareExceptionDump(exceptionInfo, exceptionRegInfo, logContext);
   if (ret != ACL_SUCCESS) {
     return ret;
   }
@@ -1263,7 +1285,7 @@ uint32_t SuperKernelExceptionHandler::ProcessExceptionDump(aclrtExceptionInfo *e
                                                            uint32_t exceptionDumpSize, uint32_t *exceptionDumpRealSize,
                                                            Adx::ExceptionDumpMode *mode) {
   if (exceptionDumpSize < 1) {
-    SK_LOGE("ExceptionDumpCallBack: exceptionDumpSize too small");
+    SK_DLOGE("ExceptionDumpCallBack: exceptionDumpSize too small");
     return ACL_ERROR_INVALID_PARAM;
   }
 
@@ -1272,17 +1294,18 @@ uint32_t SuperKernelExceptionHandler::ProcessExceptionDump(aclrtExceptionInfo *e
            exceptionDumpSize * sizeof(Adx::ExceptionDumpInfo));
 
   if (!IsSuperKernelException(exceptionInfo)) {
-    SK_LOGD("Not superkernel exception, skip dump");
+    SK_DLOGD("Not superkernel exception, skip dump");
     *exceptionDumpRealSize = 0;
     *mode = Adx::ExceptionDumpMode::DUMP_MODE_NONE;
     return ACL_SUCCESS;
   }
-  SK_LOGI("Exception is in SuperKernel");
   ExceptionRegInfo exceptionRegInfo{0, nullptr};
-  aclError ret = PrepareExceptionDump(exceptionInfo, exceptionRegInfo);
+  std::unique_ptr<sk::logger::LogContextGuard> logContext;
+  aclError ret = PrepareExceptionDump(exceptionInfo, exceptionRegInfo, logContext);
   if (ret != ACL_SUCCESS) {
     return ret;
   }
+  SK_LOGI("Exception is in SuperKernel");
 
   uint32_t validDumpNum =
       FillUniqueExceptionDumpInfos(exceptionInfo, exceptionRegInfo, exceptionDumpInfo, exceptionDumpSize);
@@ -1305,16 +1328,16 @@ uint32_t ExceptionDumpInfoCallBack(void *exceptionInfo, Adx::ExceptionDumpInfo *
                                    uint32_t exceptionDumpSize, uint32_t *exceptionDumpRealSize,
                                    Adx::ExceptionDumpMode *mode) {
   if (exceptionInfo == nullptr || exceptionDumpInfo == nullptr || exceptionDumpRealSize == nullptr) {
-    SK_LOGE("ExceptionDumpCallBack: invalid null params");
+    SK_DLOGE("ExceptionDumpCallBack: invalid null params");
     return ACL_ERROR_INVALID_PARAM;
   }
   if (IsValidCommonException(static_cast<aclrtExceptionInfo *>(exceptionInfo)->expandInfo.type)) {
-    SK_LOGI("Not superkernel exception, skip dump");
+    SK_DLOGI("Not superkernel exception, skip dump");
     *exceptionDumpRealSize = 0;
     *mode = Adx::ExceptionDumpMode::DUMP_MODE_NONE;
     return ACL_SUCCESS;
   }
-  SK_LOGI("Start SuperKernelExceptionHandler::ProcessExceptionDump");
+  SK_DLOGI("Start SuperKernelExceptionHandler::ProcessExceptionDump");
   SuperKernelExceptionHandler handler;
   return handler.ProcessExceptionDump(static_cast<aclrtExceptionInfo *>(exceptionInfo), exceptionDumpInfo,
                                       exceptionDumpSize, exceptionDumpRealSize, mode);

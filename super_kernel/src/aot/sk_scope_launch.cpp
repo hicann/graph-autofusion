@@ -16,7 +16,6 @@
 #include "sk_scope_launch.h"
 
 #include <cstring>
-#include <cstdlib>
 
 #include "securec.h"
 #include "sk_common.h"
@@ -41,8 +40,8 @@ struct ScopeKernelImpls {
 
 ScopeKernelImpls GetScopeKernelImpls() {
   const SkKernelArch arch = GetCurrentSkKernelArch();
-  SK_LOGI("Scope kernel implementation selected: arch=%s, symbolSuffix=%s", to_string(arch),
-          GetSkKernelArchSymbolSuffix(arch));
+  SK_DLOGI("Scope kernel implementation selected: arch=%s, symbolSuffix=%s", to_string(arch),
+           GetSkKernelArchSymbolSuffix(arch));
   switch (arch) {
     case SkKernelArch::DAV_3510:
       return {sk_scope_kernel_begin_do_dav_3510, sk_scope_kernel_end_do_dav_3510, sk_placeholder_kernel_do_dav_3510};
@@ -52,24 +51,26 @@ ScopeKernelImpls GetScopeKernelImpls() {
   }
 }
 
-aclError LaunchScopeKernelImpl(const char *scopeName, aclrtStream stream, ScopeFuncImpl scopeKernelImpl) {
+aclError LaunchScopeKernelImpl(const char *scopeName, aclrtStream stream, ScopeFuncImpl scopeKernelImpl,
+                               const char *markerType) {
   ScopeKernelArgs args;
   if (scopeName == nullptr) {
-    scopeName = "default_sk_scope_name";
+    scopeName = DEFAULT_SK_SCOPE_NAME;
   }
   size_t len = strlen(scopeName);
   size_t maxLen = MAX_SCOPE_NAME_LEN - 1;
   if (len > maxLen) {
-    SK_LOGE("scope name length: %zu exceeds maximum allowed size: %zu", len, maxLen);
+    SK_DLOGE("Failed to prepare scope kernel arguments: markerType=%s, scopeNameLength=%zu, maxLength=%zu", markerType,
+             len, maxLen);
     return ACL_ERROR_INVALID_PARAM;
   }
   errno_t ret = memcpy_s(args.name, maxLen, scopeName, len);
   if (ret != 0) {
-    SK_LOGE("memcpy_s failed, ret: %d", ret);
+    SK_DLOGE("Failed to prepare scope kernel arguments: markerType=%s, memcpy_s ret=%d", markerType, ret);
     return ACL_ERROR_INVALID_PARAM;
   }
   args.name[len] = '\0';
-  SK_LOGD("Call scopeKernelImpl, scopeName: %s", scopeName);
+  SK_DLOGI("Dispatch scope kernel: markerType=%s, scopeName=%s, stream=%p", markerType, scopeName, stream);
   scopeKernelImpl(stream, args);
   return ACL_SUCCESS;
 }
@@ -79,42 +80,42 @@ aclError LaunchScopeKernelImpl(const char *scopeName, aclrtStream stream, ScopeF
 aclError LaunchScopeKernel(const char *scopeName, aclrtStream stream, bool isBegin) {
   ScopeKernelImpls impls = GetScopeKernelImpls();
   if (isBegin) {
-    SK_LOGI("aclskScopeBegin kernel and placeholder kernel launch start!");
-    aclError ret = LaunchScopeKernelImpl(scopeName, stream, impls.begin);
+    SK_DLOGI("Scope begin marker kernel dispatch started");
+    aclError ret = LaunchScopeKernelImpl(scopeName, stream, impls.begin, "begin");
     if (ret != ACL_SUCCESS) {
-      SK_LOGE("LaunchScopeKernelImpl failed, scopeBegin kernel launch failed, ret: %d", ret);
+      SK_DLOGE("Scope marker kernel processing failed: markerType=begin, ret=%d", ret);
       return ret;
     }
-    ret = LaunchScopeKernelImpl(scopeName, stream, impls.placeholder);
+    ret = LaunchScopeKernelImpl(scopeName, stream, impls.placeholder, "placeholder");
     if (ret != ACL_SUCCESS) {
-      SK_LOGE("LaunchScopeKernelImpl failed, placeholder kernel launch failed, ret: %d", ret);
+      SK_DLOGE("Scope marker kernel processing failed: markerType=placeholder, ret=%d", ret);
       return ret;
     }
-    ret = LaunchScopeKernelImpl(scopeName, stream, impls.placeholder);
+    ret = LaunchScopeKernelImpl(scopeName, stream, impls.placeholder, "placeholder");
     if (ret != ACL_SUCCESS) {
-      SK_LOGE("LaunchScopeKernelImpl failed, placeholder kernel launch failed, ret: %d", ret);
+      SK_DLOGE("Scope marker kernel processing failed: markerType=placeholder, ret=%d", ret);
       return ret;
     }
-    SK_LOGI("aclskScopeBegin kernel and placeholder kernel launch success! ");
+    SK_DLOGI("Scope begin marker kernels dispatched");
     return ret;
   } else {
-    SK_LOGI("aclskScopeEnd kernel and placeholder kernel launch start! ");
-    aclError ret = LaunchScopeKernelImpl(scopeName, stream, impls.placeholder);
+    SK_DLOGI("Scope end marker kernel dispatch started");
+    aclError ret = LaunchScopeKernelImpl(scopeName, stream, impls.placeholder, "placeholder");
     if (ret != ACL_SUCCESS) {
-      SK_LOGE("LaunchScopeKernelImpl failed, placeholder kernel launch failed, ret: %d", ret);
+      SK_DLOGE("Scope marker kernel processing failed: markerType=placeholder, ret=%d", ret);
       return ret;
     }
-    ret = LaunchScopeKernelImpl(scopeName, stream, impls.placeholder);
+    ret = LaunchScopeKernelImpl(scopeName, stream, impls.placeholder, "placeholder");
     if (ret != ACL_SUCCESS) {
-      SK_LOGE("LaunchScopeKernelImpl failed, placeholder kernel launch failed, ret: %d", ret);
+      SK_DLOGE("Scope marker kernel processing failed: markerType=placeholder, ret=%d", ret);
       return ret;
     }
-    ret = LaunchScopeKernelImpl(scopeName, stream, impls.end);
+    ret = LaunchScopeKernelImpl(scopeName, stream, impls.end, "end");
     if (ret != ACL_SUCCESS) {
-      SK_LOGE("LaunchScopeKernelImpl failed, scopeEnd kernel launch failed, ret: %d", ret);
+      SK_DLOGE("Scope marker kernel processing failed: markerType=end, ret=%d", ret);
       return ret;
     }
-    SK_LOGI("aclskScopeEnd kernel and placeholder kernel launch success! ");
+    SK_DLOGI("Scope end marker kernels dispatched");
     return ret;
   }
 }

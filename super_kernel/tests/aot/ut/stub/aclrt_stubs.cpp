@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <vector>
 
 extern "C" {
 
@@ -493,9 +494,31 @@ aclError aclmdlRIGetTasksByStream(aclrtStream stream, aclmdlRITask *tasks, uint3
   if (numTasks == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
-  if (tasks != nullptr) {
-    *numTasks = 0;
+
+  uint32_t streamIdx = 0;
+  if (stream != nullptr) {
+    streamIdx = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(stream) - 1U);
   }
+  uint32_t taskNum = SkUtGetStreamTaskNum(streamIdx);
+  if (tasks == nullptr) {
+    *numTasks = taskNum;
+    return ACL_ERROR_NONE;
+  }
+
+  static std::vector<std::vector<AclmdlRITaskInternal>> modelRiTasks;
+  if (modelRiTasks.size() <= streamIdx) {
+    modelRiTasks.resize(streamIdx + 1U);
+  }
+  auto &streamTasks = modelRiTasks[streamIdx];
+  streamTasks.resize(taskNum);
+  for (uint32_t taskIdx = 0; taskIdx < taskNum; ++taskIdx) {
+    auto &task = streamTasks[taskIdx];
+    task.task_id = (streamIdx << 16U) + taskIdx;
+    task.type = ACL_MODEL_RI_TASK_DEFAULT;
+    task.params = {};
+    tasks[taskIdx] = reinterpret_cast<aclmdlRITask>(&task);
+  }
+  *numTasks = taskNum;
   return ACL_ERROR_NONE;
 }
 
