@@ -714,7 +714,8 @@ void BuildOutputPostChain(af::AscGraph &graph, OutputPostTopology topology, cons
 }
 
 af::AscGraph BuildPostReduceGraph(const std::string &suffix, bool reduce_outer = false,
-                                  OutputPostTopology topology = OutputPostTopology::kSum) {
+                                  OutputPostTopology topology = OutputPostTopology::kSum,
+                                  bool cast_reduce_output = false, bool invalid_reduce_successor = false) {
   af::AscGraph graph("indirect_load_post_reduce_ut_graph");
   const af::Expression s0 = graph.CreateSizeVar(2);
   const af::Expression s1 = suffix[0] == 'B' ? af::Expression(af::sym::kSymbolOne) : graph.CreateSizeVar(3);
@@ -786,7 +787,15 @@ af::AscGraph BuildPostReduceGraph(const std::string &suffix, bool reduce_outer =
     sum.attr.api.compute_type = af::ComputeType::kComputeReduce;
     sum.attr.sched.axis = output_axes;
     SetNodeView(sum, post_dtype, output_axes, reduce_repeats, reduce_strides);
-    store.x = sum.y;
+    if (cast_reduce_output) {
+      // Model the Cast inserted by DtypeConsistency between Reduce and Store.
+      af::ascir_op::Cast reduce_cast("reduce_cast");
+      reduce_cast.x = sum.y;
+      SetNodeView(reduce_cast, post_dtype, output_axes, reduce_repeats, reduce_strides);
+      store.x = reduce_cast.y;
+    } else {
+      store.x = sum.y;
+    }
   }
   const auto &store_repeats = direct_output ? output_repeats : reduce_repeats;
   const auto &store_strides = direct_output ? output_strides : reduce_strides;
@@ -795,6 +804,22 @@ af::AscGraph BuildPostReduceGraph(const std::string &suffix, bool reduce_outer =
   output.x = store.y;
   output.ir_attr.SetIndex(0);
   SetNodeView(output, post_dtype, output_axes, store_repeats, store_strides);
+  if (invalid_reduce_successor) {
+    af::ascir_op::Abs invalid_successor("invalid_reduce_successor");
+    invalid_successor.x = sum.y;
+    SetNodeView(invalid_successor, post_dtype, output_axes, reduce_repeats, reduce_strides);
+    const auto sum_node = graph.FindNode("sum");
+    const auto store_node = graph.FindNode("store");
+    const auto invalid_node = graph.FindNode("invalid_reduce_successor");
+    EXPECT_NE(sum_node, nullptr);
+    EXPECT_NE(store_node, nullptr);
+    EXPECT_NE(invalid_node, nullptr);
+    if (sum_node != nullptr && store_node != nullptr && invalid_node != nullptr) {
+      EXPECT_EQ(af::GraphUtils::ReplaceEdgeSrc(sum_node->GetOutDataAnchor(0), store_node->GetInDataAnchor(0),
+                                               invalid_node->GetOutDataAnchor(0)),
+                af::GRAPH_SUCCESS);
+    }
+  }
   return graph;
 }
 
@@ -944,6 +969,15 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsMixedZeroStrideAndPhysicalGap
   ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
   ASSERT_EQ(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, layout), af::SUCCESS);
   EXPECT_EQ(layout.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, ClassifiesMixedZeroStrideAndPhysicalGapLayoutForSimt) {
+  const ascgen_utils::indirect_load::LogicalTensorView view = {
+      {0, 1, 2}, {af::Symbol(2), af::Symbol(3), af::Symbol(4)}, {af::Symbol(8), af::Symbol(0), af::Symbol(1)}};
+  ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
+  ASSERT_EQ(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, layout, true), af::SUCCESS);
+  EXPECT_EQ(layout.kind, ascgen_utils::indirect_load::IndirectLoadLayoutKind::kStrided);
+  EXPECT_EQ(layout.physical_repeats, view.sizes);
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, RejectsInvalidLogicalLayout) {
@@ -1502,6 +1536,27 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceRejectsMultipleReduceSegme
   EXPECT_EQ(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd), graphs.end());
   EXPECT_EQ(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt), graphs.end());
   EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSK), graphs.end());
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceAllowsDtypeCastBeforeStore) {
+  auto graph = BuildPostReduceGraph("R", false, OutputPostTopology::kSum, true);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt), graphs.end());
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceRejectsNonCastSuccessor) {
+  auto graph = BuildPostReduceGraph("R", false, OutputPostTopology::kSum, false, true);
+
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  EXPECT_NE(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  EXPECT_TRUE(graphs.empty());
+  EXPECT_TRUE(score_functions.empty());
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceSkipsCommonZeroStrideAxes) {

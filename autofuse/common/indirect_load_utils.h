@@ -31,6 +31,7 @@ enum class TemplateRole : int64_t {
   kSimtInputBoundary,
   kSimtDirectGmBoundary,
   kSimtInlineTransform,
+  kSimtFanoutBranch,
   kSimtOp,
   kSkInputBoundary,
   kStridedUbPath,
@@ -100,7 +101,8 @@ af::Status SetTemplateLogicalView(const af::AscNodePtr &node, const TemplateLogi
 af::Status GetTemplateLogicalView(const af::AscNodePtr &node, TemplateLogicalView &view);
 af::Status SetImplementation(const af::AscNodePtr &node, Implementation implementation);
 af::Status GetImplementation(const af::AscNodePtr &node, Implementation &implementation);
-af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout);
+af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout,
+                                      bool allow_non_overlapping_zero_stride = false);
 af::Status ValidateIndirectLoadOutputLayout(const LogicalTensorView &output);
 bool ShouldApplyInputInnerVectorization(const af::AscNodePtr &node);
 af::AscNodePtr GetInputProducer(const af::AscNodePtr &node, size_t input_index);

@@ -3659,8 +3659,8 @@ class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return false;
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"indirect_load_simd_policy_reg_base.h", "indirect_load_simd_reg_base.h", "indirect_load_sk_reg_base.h",
-            "indirect_load_simt_reg_base.h"};
+    return {"datacopy_reg_base.h", "indirect_load_simd_policy_reg_base.h", "indirect_load_simd_reg_base.h",
+            "indirect_load_sk_reg_base.h", "indirect_load_simt_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {"basic_api/kernel_operator_vec_gather_intf.h", "basic_api/reg_compute/kernel_reg_compute_intf.h",

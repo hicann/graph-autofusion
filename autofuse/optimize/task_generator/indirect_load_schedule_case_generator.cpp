@@ -197,8 +197,8 @@ af::Status BuildBroadcastLogicalView(const af::AscTensorAttr &logical_attr, cons
   return af::SUCCESS;
 }
 
-af::Status ApplyZeroStrideCompactView(const NodePath &path,
-                                      const ascgen_utils::indirect_load::IndirectLoadTensorLayout &layout) {
+af::Status ApplyPhysicalView(const NodePath &path,
+                             const ascgen_utils::indirect_load::IndirectLoadTensorLayout &layout) {
   GE_ASSERT_TRUE(
       layout.axis_ids.size() == layout.physical_repeats.size() && layout.axis_ids.size() == layout.strides.size(),
       "IndirectLoad physical execution view rank mismatch.");
@@ -255,7 +255,18 @@ af::Status ApplyIndirectLoadPathLayout(const NodePath &path,
                                        const ascgen_utils::indirect_load::IndirectLoadTensorLayout &layout,
                                        bool needs_alignment) {
   if (layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kZeroStrideCompact) {
-    return ApplyZeroStrideCompactView(path, layout);
+    return ApplyPhysicalView(path, layout);
+  }
+  // Use the rewritten path as the source of truth; Broadcast may have been folded before this point.
+  const auto broadcast =
+      std::find_if(path.begin(), path.end(), [](const af::AscNodePtr &node) { return IsBroadcastNode(node); });
+  const bool has_dynamic_shape = std::any_of(layout.sizes.begin(), layout.sizes.end(),
+                                             [](const af::Expression &size) { return !size.IsConstExpr(); });
+  if (layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kStrided && has_dynamic_shape &&
+      broadcast != path.end()) {
+    // Keep the upstream producer view intact; only the rewritten producer-to-Broadcast segment is normalized.
+    const NodePath broadcast_path(path.begin(), broadcast + 1);
+    GE_ASSERT_SUCCESS(ApplyPhysicalView(broadcast_path, layout));
   }
   if (needs_alignment) {
     return AnnotateStridedUbPath(path);
@@ -779,6 +790,13 @@ af::Status NormalizeAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &i
     GE_ASSERT_NOTNULL(inner, "IndirectLoad inner axis %ld is not found.", inner_axis);
     vectorized_axes =
         inner->type == ascir::Axis::Type::kAxisTypeMerged ? inner->from : std::vector<af::AxisId>{inner_axis};
+  } else {
+    // A SIMT candidate without post Reduce uses the complete output view as
+    // the outer view.  The IndirectLoad/its fused direct-GM path intentionally
+    // keeps an empty vectorized view, while ordinary fan-out branches still
+    // need the tile-inner axis for alignment and vector-function partitioning.
+    GE_ASSERT_TRUE(tile_inner_axis != af::kIdNone, "IndirectLoad tile inner axis is missing.");
+    vectorized_axes.emplace_back(tile_inner_axis);
   }
   ascgen_utils::indirect_load::TemplateAxes axes;
   axes.outer_axis = outer_axis;
@@ -790,6 +808,28 @@ af::Status NormalizeAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &i
   axes.vectorized_axes = std::move(vectorized_axes);
   axes.synthetic_outer = synthetic_outer;
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateAxes(indirect_load, axes));
+  return af::SUCCESS;
+}
+
+af::Status SeedPostReduceInputVectorizedView(const af::AscNodePtr &indirect_load, const af::AscNodePtr &reduce) {
+  if (reduce == nullptr) {
+    return af::SUCCESS;
+  }
+  ascgen_utils::indirect_load::TemplateAxes axes;
+  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, axes));
+  GE_ASSERT_TRUE(!axes.vectorized_axes.empty(), "IndirectLoad post Reduce vectorized axes are empty.");
+  GE_ASSERT_TRUE(reduce->inputs.Size() == 1UL, "IndirectLoad post Reduce must have one input.");
+  auto &input = reduce->inputs[0].attr;
+  GE_ASSERT_TRUE(input.axis.size() == input.strides.size(), "IndirectLoad post Reduce input view is invalid.");
+  input.vectorized_axis = axes.vectorized_axes;
+  input.vectorized_strides.clear();
+  input.vectorized_strides.reserve(input.vectorized_axis.size());
+  for (const auto axis : input.vectorized_axis) {
+    const auto axis_it = std::find(input.axis.begin(), input.axis.end(), axis);
+    GE_ASSERT_TRUE(axis_it != input.axis.end(), "IndirectLoad post Reduce input axis[%ld] is missing.", axis);
+    input.vectorized_strides.emplace_back(
+        input.strides[static_cast<size_t>(std::distance(input.axis.begin(), axis_it))]);
+  }
   return af::SUCCESS;
 }
 
@@ -869,27 +909,104 @@ af::Status NormalizeSimtAxesForTemplate(af::AscGraph &graph, const af::AscNodePt
   return NormalizeAxesForTemplate(graph, indirect_load, boundary, af::kIdNone, af::kIdNone);
 }
 
+// SIMT direct-GM nodes deliberately preserve their vectorized view through the
+// scheduler.  User graphs, however, do not necessarily initialize that view;
+// fill it from the node's physical strides before VF partitioning consumes it.
+af::Status CompletePreservedVectorizedViews(const af::AscGraph &graph, const af::AscNodePtr &indirect_load) {
+  for (const auto &node : graph.GetAllNodes()) {
+    if (node == nullptr || node == indirect_load ||
+        !ascgen_utils::indirect_load::GetTemplateBehavior(node).preserves_vectorized_axis) {
+      continue;
+    }
+    for (const auto &output : node->outputs()) {
+      if (output == nullptr || !output->attr.vectorized_axis.empty()) {
+        continue;
+      }
+      const auto &axes = output->attr.axis;
+      const auto &strides = output->attr.strides;
+      GE_ASSERT_TRUE(!axes.empty() && axes.size() == strides.size(),
+                     "IndirectLoad preserved node[%s] has invalid tensor view.", node->GetNamePtr());
+      size_t vectorized_index = axes.size() - 1UL;
+      for (size_t index = axes.size(); index > 0UL; --index) {
+        const auto stride = strides[index - 1UL];
+        if (af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolOne) == af::TriBool::kTrue) {
+          vectorized_index = index - 1UL;
+          break;
+        }
+        if (af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) != af::TriBool::kTrue) {
+          vectorized_index = index - 1UL;
+        }
+      }
+      output->attr.vectorized_axis = {axes[vectorized_index]};
+      output->attr.vectorized_strides = {strides[vectorized_index]};
+      GELOGD("[IndirectLoad] Seed preserved vectorized view for node[%s], axis[%ld].", node->GetNamePtr(),
+             axes[vectorized_index]);
+    }
+  }
+  return af::SUCCESS;
+}
+
 bool CanEmitSimtScalar(const af::AscNodePtr &node) {
   const auto impl = ascgen_utils::GetAscIrCodegenImpl(node->GetType());
   const auto *v2_impl = impl == nullptr ? nullptr : dynamic_cast<af::ascir::AscIrCodegenV2 *>(impl.get());
   return v2_impl != nullptr && v2_impl->IsSimtScalarSupported(*node);
 }
 
-// 一次下游行走同时拿输出链上的 Store 与 Reduce；多于一个 Reduce 时没有任何模板能支持，直接断言报错。
+af::Status ValidateReduceOutput(const af::AscNodePtr &reduce) {
+  const auto reduce_outputs = reduce->GetOutDataNodes();
+  GE_ASSERT_TRUE(reduce_outputs.size() == 1UL, "[IndirectLoad] Reduce[%s] must have one Store output, got %zu.",
+                 reduce->GetNamePtr(), reduce_outputs.size());
+  const auto successor = std::dynamic_pointer_cast<af::AscNode>(*reduce_outputs.begin());
+  GE_ASSERT_NOTNULL(successor, "IndirectLoad Reduce output node is invalid.");
+  if (ScheduleUtils::IsStore(successor)) {
+    return af::SUCCESS;
+  }
+  GE_ASSERT_TRUE(af::ops::IsOps<af::ascir_op::Cast>(successor),
+                 "[IndirectLoad] Reduce[%s] output must be Store or Cast, got node[%s] type[%s].", reduce->GetNamePtr(),
+                 successor->GetNamePtr(), successor->GetTypePtr());
+  const auto cast_outputs = successor->GetOutDataNodes();
+  GE_ASSERT_TRUE(cast_outputs.size() == 1UL, "[IndirectLoad] Reduce[%s] Cast must have one Store output, got %zu.",
+                 reduce->GetNamePtr(), cast_outputs.size());
+  const auto cast_successor = std::dynamic_pointer_cast<af::AscNode>(*cast_outputs.begin());
+  GE_ASSERT_NOTNULL(cast_successor, "IndirectLoad Reduce Cast output node is invalid.");
+  GE_ASSERT_TRUE(ScheduleUtils::IsStore(cast_successor),
+                 "[IndirectLoad] Reduce[%s] Cast output must be Store, got node[%s] type[%s].", reduce->GetNamePtr(),
+                 cast_successor->GetNamePtr(), cast_successor->GetTypePtr());
+  return af::SUCCESS;
+}
+
+// Traverse all output branches once, collecting Store/Reduce boundaries and validating each Reduce successor.
 af::Status CollectOutputBoundaries(const af::AscNodePtr &indirect_load, RewrittenGraphAnalysis &analysis) {
-  for (af::AscNodePtr current = ascgen_utils::indirect_load::GetOnlyOutputConsumer(indirect_load); current != nullptr;
-       current = ascgen_utils::indirect_load::GetOnlyOutputConsumer(current)) {
-    if (analysis.output_store == nullptr && af::ops::IsOps<af::ascir_op::Store>(current)) {
-      analysis.output_store = current;
+  NodePath pending;
+  NodeSet visited{indirect_load.get()};
+  for (const auto &out_node : indirect_load->GetOutDataNodes()) {
+    const auto out_asc_node = std::dynamic_pointer_cast<af::AscNode>(out_node);
+    GE_ASSERT_NOTNULL(out_asc_node, "IndirectLoad output successor is invalid.");
+    if (visited.emplace(out_asc_node.get()).second) {
+      pending.emplace_back(out_asc_node);
     }
-    if (!ScheduleUtils::IsReduce(current)) {
+  }
+  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
+    const auto &current = pending[cursor];
+    if (ScheduleUtils::IsStore(current)) {
+      if (analysis.output_store == nullptr) {
+        analysis.output_store = current;
+      }
       continue;
     }
-    GE_ASSERT_TRUE(
-        analysis.post_reduce == nullptr,
-        "[IndirectLoad] IndirectLoad node[%s] post chain contains more than one Reduce: node[%s] and node[%s].",
-        indirect_load->GetNamePtr(), analysis.post_reduce->GetNamePtr(), current->GetNamePtr());
-    analysis.post_reduce = current;
+    if (ScheduleUtils::IsReduce(current)) {
+      GE_ASSERT_SUCCESS(ValidateReduceOutput(current));
+      GE_ASSERT_TRUE(analysis.post_reduce == nullptr);
+      analysis.post_reduce = current;
+      continue;
+    }
+    for (const auto &out_node : current->GetOutDataNodes()) {
+      const auto out_asc_node = std::dynamic_pointer_cast<af::AscNode>(out_node);
+      GE_ASSERT_NOTNULL(out_asc_node, "IndirectLoad output successor is invalid.");
+      if (visited.emplace(out_asc_node.get()).second) {
+        pending.emplace_back(out_asc_node);
+      }
+    }
   }
   return af::SUCCESS;
 }
@@ -1131,7 +1248,9 @@ af::Status AnalyzeInputPath(const af::AscNodePtr &indirect_load, size_t input_id
     GE_ASSERT_SUCCESS(BuildBroadcastLogicalView(logical_attr, physical_attr, template_id, view));
   }
 
-  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, plan.layout));
+  const bool allow_simt_strided_broadcast = template_id == ascir::TemplateId::kIndirectLoadSimt && has_broadcast;
+  GE_ASSERT_SUCCESS(
+      ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, plan.layout, allow_simt_strided_broadcast));
   if (plan.layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported) {
     GELOGI("[IndirectLoad] Reject candidate[%d]: input path layout%s is unsupported.",
            static_cast<int32_t>(template_id), has_broadcast ? " with Broadcast source view" : "");
@@ -1309,10 +1428,9 @@ af::Status ValidateSimtTemplateRegion(const RewrittenGraphAnalysis &analysis, bo
     return af::SUCCESS;
   }
   for (const af::AscNodePtr &node : analysis.index_region) {
-    if (af::ops::IsOps<af::ascir_op::ScalarData>(node) || af::ops::IsOps<af::ascir_op::Scalar>(node)) {
-      return af::SUCCESS;
-    }
-    if (HasControlEdge(node) || af::ops::IsOps<af::ascir_op::VectorFunc>(node)) {
+    // Compile-time Scalar values are emitted as local constants by the SIMT evaluator.
+    // ScalarData is runtime input and still requires an explicit context/GM binding.
+    if (af::ops::IsOps<af::ascir_op::ScalarData>(node) || HasControlEdge(node)) {
       return af::SUCCESS;
     }
     const bool is_gm_boundary = af::ops::IsOps<af::ascir_op::Load>(node) || af::ops::IsOps<af::ascir_op::Store>(node);
@@ -1336,6 +1454,48 @@ af::Status AnnotateSimtTemplateRoles(const af::AscNodePtr &indirect_load, const 
                           ? ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary
                           : ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform;
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(node, role));
+  }
+  return af::SUCCESS;
+}
+
+af::Status AnnotateSimtFanoutBranches(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis) {
+  const af::AscNodePtr selected_root = analysis.post_reduce == nullptr
+                                           ? analysis.output_store
+                                           : ascgen_utils::indirect_load::GetInputProducer(analysis.post_reduce, 0UL);
+  if (selected_root == nullptr) {
+    return af::SUCCESS;
+  }
+  NodeSet selected;
+  const bool selected_ok = CollectSimtBackwardRegion({selected_root}, indirect_load, selected);
+  if (!selected_ok) {
+    GELOGW("[IndirectLoad] Cannot identify SIMT main output chain from root[%s]; keep existing roles.",
+           selected_root->GetNamePtr());
+    return af::SUCCESS;
+  }
+
+  NodePath pending;
+  NodeSet visited{indirect_load.get()};
+  for (const auto &out_node : indirect_load->GetOutDataNodes()) {
+    const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out_node);
+    if (consumer != nullptr && visited.emplace(consumer.get()).second) {
+      pending.emplace_back(consumer);
+    }
+  }
+  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
+    const auto &node = pending[cursor];
+    if (selected.count(node.get()) == 0UL && !IsInputRegionBoundary(node) && !ScheduleUtils::IsReduce(node)) {
+      GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
+          node, ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch));
+    }
+    if (ScheduleUtils::IsStore(node) || ScheduleUtils::IsReduce(node)) {
+      continue;
+    }
+    for (const auto &out_node : node->GetOutDataNodes()) {
+      const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out_node);
+      if (consumer != nullptr && visited.emplace(consumer.get()).second) {
+        pending.emplace_back(consumer);
+      }
+    }
   }
   return af::SUCCESS;
 }
@@ -1367,10 +1527,11 @@ af::Status NormalizeTemplateAxes(af::AscGraph &graph, const af::AscNodePtr &indi
                                  ascir::TemplateId template_id, const RewrittenGraphAnalysis &analysis,
                                  size_t boundary) {
   if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
-    return NormalizeSimdAxesForTemplate(graph, indirect_load, analysis);
+    GE_ASSERT_SUCCESS(NormalizeSimdAxesForTemplate(graph, indirect_load, analysis));
   } else {
-    return NormalizeSimtAxesForTemplate(graph, indirect_load, boundary);
+    GE_ASSERT_SUCCESS(NormalizeSimtAxesForTemplate(graph, indirect_load, boundary));
   }
+  return SeedPostReduceInputVectorizedView(indirect_load, analysis.post_reduce);
 }
 
 af::Status FinalizeTemplate(const af::AscNodePtr &indirect_load, ascir::TemplateId template_id) {
@@ -1434,7 +1595,11 @@ af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_lo
     return af::SUCCESS;
   }
   GE_ASSERT_SUCCESS(AnnotateTemplate(indirect_load, template_id, analysis));
+  if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
+    GE_ASSERT_SUCCESS(AnnotateSimtFanoutBranches(indirect_load, analysis));
+  }
   GE_ASSERT_SUCCESS(NormalizeTemplateAxes(graph, indirect_load, template_id, analysis, boundary));
+  GE_ASSERT_SUCCESS(CompletePreservedVectorizedViews(graph, indirect_load));
   return FinalizeTemplate(indirect_load, template_id);
 }
 

@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <string>
+#include <unordered_set>
 
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
@@ -52,6 +53,11 @@ bool TryClassifyDynamicShapeLayout(const LogicalTensorView &logical, IndirectLoa
   if (!has_dynamic_shape) {
     return false;
   }
+  // A dynamic outer dimension does not prevent proving a compact zero-stride
+  // view when all non-broadcast dimensions are contiguous. Preserve this
+  // producer-side layout so Broadcast and its source use the same tensor view.
+  bool has_zero_stride = false;
+  af::Expression physical_span = af::sym::kSymbolOne;
   for (size_t dim = 0UL; dim < logical.sizes.size(); ++dim) {
     const auto dim_kind = ClassifyTensorDim(logical.sizes[dim], logical.strides[dim]);
     if (dim_kind == TensorDimKind::kIllegal) {
@@ -59,7 +65,24 @@ bool TryClassifyDynamicShapeLayout(const LogicalTensorView &logical, IndirectLoa
     }
     if (dim_kind == TensorDimKind::kZeroStride) {
       layout.physical_repeats[dim] = af::sym::kSymbolOne;
+      has_zero_stride = true;
     }
+  }
+  if (has_zero_stride) {
+    physical_span = af::sym::kSymbolOne;
+    for (size_t index = logical.sizes.size(); index > 0UL; --index) {
+      const size_t dim = index - 1UL;
+      if (ClassifyTensorDim(logical.sizes[dim], logical.strides[dim]) == TensorDimKind::kZeroStride) {
+        continue;
+      }
+      if (af::SymbolicUtils::StaticCheckEq(logical.strides[dim], physical_span) != af::TriBool::kTrue) {
+        layout.kind = IndirectLoadLayoutKind::kStrided;
+        return true;
+      }
+      physical_span = physical_span + (logical.sizes[dim] - af::sym::kSymbolOne) * logical.strides[dim];
+    }
+    layout.kind = IndirectLoadLayoutKind::kZeroStrideCompact;
+    return true;
   }
   layout.kind = IndirectLoadLayoutKind::kStrided;
   return true;
@@ -111,6 +134,12 @@ TemplateBehavior GetBehavior(TemplateRole role) {
       behavior.uses_direct_gm_pipeline = true;
       behavior.preserves_vectorized_axis = true;
       break;
+    case TemplateRole::kSimtFanoutBranch:
+      behavior.excludes_tiling_group = true;
+      behavior.skips_main_schedule_tiling = true;
+      behavior.uses_direct_gm_pipeline = true;
+      behavior.preserves_vectorized_axis = true;
+      break;
     case TemplateRole::kSimtOp:
       behavior.uses_direct_gm_pipeline = true;
       behavior.skips_ub_lifecycle = true;
@@ -158,18 +187,39 @@ struct PostReduceChain {
 };
 
 PostReduceChain FindPostReduceChain(const af::AscNodePtr &node) {
-  af::AscNodePtr producer = node;
-  while (producer != nullptr) {
-    const af::AscNodePtr consumer = GetOnlyOutputConsumer(producer);
-    if (consumer == nullptr) {
-      return {};
-    }
-    if (consumer->attr.api.compute_type == af::ComputeType::kComputeReduce) {
-      return {producer, consumer};
-    }
-    producer = consumer;
+  if (node == nullptr) {
+    return {};
   }
-  return {};
+  std::vector<af::AscNodePtr> pending;
+  std::unordered_set<af::AscNode *> visited;
+  for (const auto &out_node : node->GetOutDataNodes()) {
+    const auto out_asc_node = std::dynamic_pointer_cast<af::AscNode>(out_node);
+    if (out_asc_node != nullptr && visited.emplace(out_asc_node.get()).second) {
+      pending.emplace_back(out_asc_node);
+    }
+  }
+
+  af::AscNodePtr reduce;
+  for (size_t index = 0UL; index < pending.size(); ++index) {
+    const auto &current = pending[index];
+    if (current->attr.api.compute_type == af::ComputeType::kComputeReduce) {
+      if (reduce != nullptr && reduce != current) {
+        return {};
+      }
+      reduce = current;
+      continue;
+    }
+    for (const auto &out_node : current->GetOutDataNodes()) {
+      const auto out_asc_node = std::dynamic_pointer_cast<af::AscNode>(out_node);
+      if (out_asc_node != nullptr && visited.emplace(out_asc_node.get()).second) {
+        pending.emplace_back(out_asc_node);
+      }
+    }
+  }
+  if (reduce == nullptr) {
+    return {};
+  }
+  return {GetInputProducer(reduce, 0UL), reduce};
 }
 }  // namespace
 
@@ -182,6 +232,38 @@ af::AscNodePtr GetPostReduceInputProducer(const af::AscNodePtr &node) {
 }
 
 bool ShouldSkipTpipeTensorCollection(const af::AscNodePtr &node) {
+  // A SIMT IndirectLoad normally bypasses the TPipe because its direct-GM
+  // chain consumes the value in registers.  With a user fan-out, however,
+  // an ordinary scheduled branch may consume the IndirectLoad result as a
+  // UB tensor (for example through a VectorFunc), so keep that output in the
+  // tensor table for the branch while retaining the direct-GM path.
+  if (node != nullptr && af::ops::IsOps<af::ascir_op::IndirectLoad>(node)) {
+    std::vector<af::AscNodePtr> pending;
+    std::unordered_set<const af::AscNode *> visited;
+    for (const auto &out : node->GetOutDataNodes()) {
+      const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out);
+      if (consumer != nullptr && visited.emplace(consumer.get()).second) {
+        pending.emplace_back(consumer);
+      }
+    }
+    size_t store_count = 0UL;
+    for (size_t i = 0UL; i < pending.size(); ++i) {
+      const auto &current = pending[i];
+      if (af::ops::IsOps<af::ascir_op::Store>(current)) {
+        ++store_count;
+        if (store_count > 1UL) {
+          return false;
+        }
+        continue;
+      }
+      for (const auto &out : current->GetOutDataNodes()) {
+        const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out);
+        if (consumer != nullptr && visited.emplace(consumer.get()).second) {
+          pending.emplace_back(consumer);
+        }
+      }
+    }
+  }
   const TemplateBehavior behavior = GetTemplateBehavior(node);
   const af::AscNodePtr consumer = GetOnlyOutputConsumer(node);
   return (behavior.skips_api_emit || behavior.skips_ub_lifecycle) &&
@@ -258,7 +340,8 @@ af::Status GetTemplateLogicalView(const af::AscNodePtr &node, TemplateLogicalVie
   return af::SUCCESS;
 }
 
-af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout) {
+af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout,
+                                      bool allow_non_overlapping_zero_stride) {
   GE_ASSERT_TRUE(IsValidLogicalTensorView(logical), "IndirectLoad input layout rank is invalid.");
   static_cast<LogicalTensorView &>(layout) = logical;
   layout.kind = IndirectLoadLayoutKind::kUnsupported;
@@ -289,6 +372,10 @@ af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, Indirect
     physical_span = physical_span + (logical.sizes[dim] - af::sym::kSymbolOne) * logical.strides[dim];
   }
   if (has_zero_stride && has_physical_gap) {
+    if (allow_non_overlapping_zero_stride) {
+      layout.kind = IndirectLoadLayoutKind::kStrided;
+      layout.physical_repeats = logical.sizes;
+    }
     return af::SUCCESS;
   }
   layout.kind = has_zero_stride
