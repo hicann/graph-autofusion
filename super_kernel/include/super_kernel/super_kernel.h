@@ -201,6 +201,8 @@ typedef struct aclskScopeVerifyNodeInfo {
   uint32_t numBlocks;
   uint32_t taskRatio[2];
   int32_t scheMode;
+  uint32_t flag;  // bit 0：是否动态，0表示静态，1表示动态；其余bit预留
+  int32_t coreLimit[2];
   int32_t extendType;  // 当前必须是0
   void *extendInfo;    // 当前必须是nullptr
 } aclskScopeVerifyNodeInfo;
