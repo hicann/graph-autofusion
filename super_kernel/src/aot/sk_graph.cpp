@@ -1229,19 +1229,20 @@ bool SuperKernelGraph::ProcessSingleTask(aclmdlRITask &task, uint32_t streamIdx,
 void SuperKernelGraph::RegisterFusibleScope(const std::unique_ptr<SuperKernelBaseNode> &node) {
   if (node->GetNodeType() == SkNodeType::NODE_KERNEL && node->IsScopeNode()) {
     if (node->GetScopeName().length() > 0 && node->IsFusible()) {
+      const auto &scopeName = node->GetScopeName();
+      if (scopeNameToIdx.find(scopeName) != scopeNameToIdx.end()) {
+        return;
+      }
       if (scopeNameToIdx.size() >= MAX_SCOPE_NUM) {
-        SK_LOGE("Exceeded maximum scope limit %u, marking scope '%s' as unfusible", MAX_SCOPE_NUM,
-                node->GetScopeName().c_str());
+        SK_LOGW("Exceeded maximum scope limit %u, marking scope '%s' as unfusible", MAX_SCOPE_NUM, scopeName.c_str());
         node->SetIsFusible(false);
         node->SetFusionFailReason(FusionFailReason::EXCEED_SCOPE_MAX);
-      } else {
-        if (scopeNameToIdx.find(node->GetScopeName()) == scopeNameToIdx.end()) {
-          uint32_t scopeIdx = static_cast<uint32_t>(scopeNameToIdx.size());
-          scopeNameToIdx[node->GetScopeName()] = scopeIdx;
-          scopeIdxToName[scopeIdx] = node->GetScopeName();
-          SK_LOGI("Registered fusible scope '%s' with index %u", node->GetScopeName().c_str(), scopeIdx);
-        }
+        return;
       }
+      uint32_t scopeIdx = static_cast<uint32_t>(scopeNameToIdx.size());
+      scopeNameToIdx[scopeName] = scopeIdx;
+      scopeIdxToName[scopeIdx] = scopeName;
+      SK_LOGI("Registered fusible scope '%s' with index %u", scopeName.c_str(), scopeIdx);
     }
   }
 }
