@@ -1722,7 +1722,140 @@ def is_matmul_relu_fixpip(tiling_info, cube_info):
     return has_relu and (cube_tiling_key_fixpip == 1)
 
 
-def template_decider(compile_context, tiling_info, cube_info, is_conv=False):
+def _is_fp32_large_k(a_trans, a_shape, cube_output_type_size, enable_hf32):
+    """fp32类型且K轴>2048且未启用hf32时, CV融合不能选择UB模板(精度问题), 需走common兜底"""
+    if cube_output_type_size != 4:  # 非fp32
+        return False
+    if enable_hf32:  # 启用hf32时不走common兜底
+        return False
+    if not a_shape or len(a_shape) < 2:
+        return False
+    k_value = a_shape[-2] if a_trans else a_shape[-1]
+    logger.info(
+        "CV fusion op, fp32 large K check, a_trans=%s, k_value=%s", a_trans, k_value
+    )
+    return k_value > 2048
+
+
+def is_fp32_large_k_matmul(tiling_info, cube_info, enable_hf32=False):
+    """静态场景: 从 tiling_key bit4-5 解码 A_TRANS"""
+    if tiling_info is None or len(cube_info) <= 5:
+        return False
+    origin_inputs = cube_info[5]
+    if not origin_inputs or not isinstance(origin_inputs[0], dict):
+        return False
+    a_trans = (tiling_info.tiling_key >> 4) & 0x3
+    return _is_fp32_large_k(
+        a_trans, origin_inputs[0].get("shape"), cube_info[0], enable_hf32
+    )
+
+
+def is_fp32_large_k_matmul_dynamic(cube_info, a_trans, enable_hf32=False):
+    """动态场景: 直接传入 a_trans, origin_inputs 在 cube_info[4]"""
+    if len(cube_info) <= 4:
+        return False
+    origin_inputs = cube_info[4]
+    if not origin_inputs or not isinstance(origin_inputs[0], dict):
+        return False
+    return _is_fp32_large_k(
+        a_trans, origin_inputs[0].get("shape"), cube_info[0], enable_hf32
+    )
+
+
+def _apply_fixpip_fusion(tiling_info, cube_block_dim):
+    """fixpip融合模式: relu + fixpip场景, 走UB无db模板"""
+    content = f"#define CUBE_BLOCK_DIM {cube_block_dim}\n"
+    logger.info("CV fusion op, entering fixpip fusion mode.")
+    tiling_info.file_content += "\n#define CV_UB_NO_DB 1\n"  # 防止编译问题
+    return content
+
+
+SafetyFusionCtx = namedtuple(
+    "SafetyFusionCtx",
+    [
+        "compile_kwargs",
+        "cross_info",
+        "tiling_info",
+        "is_batch",
+        "cube_block_dim",
+        "tiling_key",
+        "use_cv_common",
+    ],
+)
+
+
+def _should_use_safety_fusion(
+    tiling_key, cube_tiling_key_ub, tiling_info, cube_info, enable_hf32
+):
+    """判断是否需要走safety兜底模式"""
+    if tiling_key == -1:
+        return True
+    if cube_tiling_key_ub != 1:
+        return True
+    return is_fp32_large_k_matmul(tiling_info, cube_info, enable_hf32)
+
+
+def _apply_safety_fusion(ctx):
+    """safety兜底融合模式: 走common模板"""
+    tiling_info = ctx.tiling_info
+    is_in_mix_white_list = (
+        ctx.is_batch and tiling_info.tiling_key in CV_COMMON_BMM_MIX_WHITE_LIST
+    ) or (not ctx.is_batch and tiling_info.tiling_key in CV_COMMON_MIX_WHITE_LIST)
+    if is_in_mix_white_list:
+        tiling_info.file_content += "\n#define CV_SAFETY_FUSION_MIX_MODE 1\n"
+    logger.info(
+        "CV fusion op, entering safety fusion mode. vector_tiling_key=%s, is_batch=%s, cube_tiling_key=%s",
+        ctx.tiling_key,
+        ctx.is_batch,
+        tiling_info.tiling_key,
+    )
+    tiling_info.file_content += "\n#define CV_SAFETY_FUSION 1\n"
+    ctx.use_cv_common[0] = True
+    vec_block_dim, wss = static_shape_cv_common_compile(
+        **ctx.compile_kwargs, cross_info=ctx.cross_info
+    )
+    logger.info(
+        "CV fusion op, CV_AIC_NUM=[%s] CV_AIV_NUM=[%s] CV_VEC_WSS=[%s]",
+        str(ctx.cube_block_dim),
+        str(vec_block_dim),
+        str(wss),
+    )
+    for name, value in [
+        ("CV_AIC_NUM", ctx.cube_block_dim),
+        ("CV_AIV_NUM", vec_block_dim),
+        ("CV_VEC_WSS", wss),
+    ]:
+        if value >= 0:
+            tiling_info.file_content += f"\n#define {name} {value}\n"
+    new_block_dim = (
+        (vec_block_dim + 1) // 2
+        if ctx.cube_block_dim * 2 < vec_block_dim
+        else ctx.cube_block_dim
+    )
+    return f"#define CUBE_BLOCK_DIM {new_block_dim}\n"
+
+
+def _apply_ub_fusion(tiling_info, tiling_key, cube_block_dim):
+    """UB融合模式: 走UB复用模板"""
+    content = f"#define CUBE_BLOCK_DIM {cube_block_dim}\n"
+    logger.info(
+        "CV fusion op, entering UB fusion mode, cube_tiling_key=%s, vector tilingkey=%s.",
+        tiling_info.tiling_key,
+        tiling_key,
+    )
+    tiling_info.file_content += "\n#define CV_UB_FUSION 1\n"
+    if tiling_key == 0:
+        logger.info("CV fusion op, entering UB fusion mode with no db.")
+        tiling_info.file_content += "\n#define CV_UB_NO_DB 1\n"
+    else:  # tiling_key 为1表示UB复用循环模板(非全载模板)
+        logger.info("CV fusion op, entering UB fusion mode with db.")
+        tiling_info.file_content += "\n#define CV_UB_DB 1\n"
+    return content
+
+
+def template_decider(
+    compile_context, tiling_info, cube_info, is_conv=False, enable_hf32=False
+):
     _, is_batch, cube_block_dim, use_cv_common, has_relu = cube_info[:5]
     compile_kwargs = {
         "kernel_name": compile_context.kernel_name,
@@ -1739,62 +1872,29 @@ def template_decider(compile_context, tiling_info, cube_info, is_conv=False):
     host_tiling_content = f"#define CUBE_TILING_KEY {tiling_key}\n"
     logger.info("CV fusion op, get vector tilingkey(%s)", tiling_key)
     use_cv_common = use_cv_common or [False]
-    tiling_key_transpose_mask = 0xF0
-    cube_tiling_key_ub = tiling_info.tiling_key & ~tiling_key_transpose_mask
+    cube_tiling_key_ub = tiling_info.tiling_key & ~0xF0
+
+    # 分支1: fixpip融合模式
     if is_matmul_relu_fixpip(tiling_info, cube_info) and not is_conv:
-        host_tiling_content += f"#define CUBE_BLOCK_DIM {cube_block_dim}\n"
-        logger.info("CV fusion op, entering fixpip fusion mode.")
-        tiling_info.file_content += "\n#define CV_UB_NO_DB 1\n"  # 防止编译问题
-    elif (tiling_key == -1 or cube_tiling_key_ub != 1) and not is_conv:
-        is_in_mix_white_list = (
-            is_batch and tiling_info.tiling_key in CV_COMMON_BMM_MIX_WHITE_LIST
-        ) or (not is_batch and tiling_info.tiling_key in CV_COMMON_MIX_WHITE_LIST)
-        if is_in_mix_white_list:
-            tiling_info.file_content += "\n#define CV_SAFETY_FUSION_MIX_MODE 1\n"
-        logger.info(
-            "CV fusion op, entering safety fusion mode. vector_tiling_key=%s, is_batch=%s, cube_tiling_key=%s",
-            tiling_key,
-            is_batch,
-            tiling_info.tiling_key,
+        host_tiling_content += _apply_fixpip_fusion(tiling_info, cube_block_dim)
+    # 分支2: safety兜底模式(非UB key/无UB模板/fp32大K)
+    elif not is_conv and _should_use_safety_fusion(
+        tiling_key, cube_tiling_key_ub, tiling_info, cube_info, enable_hf32
+    ):
+        host_tiling_content += _apply_safety_fusion(
+            SafetyFusionCtx(
+                compile_kwargs=compile_kwargs,
+                cross_info=cross_info,
+                tiling_info=tiling_info,
+                is_batch=is_batch,
+                cube_block_dim=cube_block_dim,
+                tiling_key=tiling_key,
+                use_cv_common=use_cv_common,
+            )
         )
-        tiling_info.file_content += "\n#define CV_SAFETY_FUSION 1\n"
-        use_cv_common[0] = True
-        vec_block_dim, wss = static_shape_cv_common_compile(
-            **compile_kwargs, cross_info=cross_info
-        )
-        logger.info(
-            "CV fusion op, CV_AIC_NUM=[%s] CV_AIV_NUM=[%s] CV_VEC_WSS=[%s]",
-            str(cube_block_dim),
-            str(vec_block_dim),
-            str(wss),
-        )
-        for name, value in [
-            ("CV_AIC_NUM", cube_block_dim),
-            ("CV_AIV_NUM", vec_block_dim),
-            ("CV_VEC_WSS", wss),
-        ]:
-            if value >= 0:
-                tiling_info.file_content += f"\n#define {name} {value}\n"
-        new_block_dim = (
-            (vec_block_dim + 1) // 2
-            if cube_block_dim * 2 < vec_block_dim
-            else cube_block_dim
-        )
-        host_tiling_content += f"#define CUBE_BLOCK_DIM {new_block_dim}\n"
+    # 分支3: UB融合模式
     else:
-        host_tiling_content += f"#define CUBE_BLOCK_DIM {cube_block_dim}\n"
-        logger.info(
-            "CV fusion op, entering UB fusion mode, cube_tiling_key=%s, vector tilingkey=%s.",
-            tiling_info.tiling_key,
-            tiling_key,
-        )
-        tiling_info.file_content += "\n#define CV_UB_FUSION 1\n"
-        if tiling_key == 0:
-            logger.info("CV fusion op, entering UB fusion mode with no db.")
-            tiling_info.file_content += "\n#define CV_UB_NO_DB 1\n"
-        else:  # tiling_key 为1表示UB复用循环模板(非全载模板)
-            logger.info("CV fusion op, entering UB fusion mode with db.")
-            tiling_info.file_content += "\n#define CV_UB_DB 1\n"
+        host_tiling_content += _apply_ub_fusion(tiling_info, tiling_key, cube_block_dim)
     return host_tiling_content
 
 
@@ -1819,10 +1919,48 @@ def create_matmul_tiling_undef_header():
 """
 
 
-def create_matmul_tiling_data(compile_context, tiling_info, cube_info):
-    cube_output_type_size, is_batch, _, _, has_relu, origin_inputs, origin_outputs = (
-        cube_info[:7]
+def _write_matmul_host_tiling_files(
+    compile_context, tiling_info, cube_info, enable_hf32, host_tiling_content_old
+):
+    """写入matmul静态场景host端tiling文件(含cv_common兜底目录)"""
+    host_tiling_content_old += template_decider(
+        compile_context, tiling_info, cube_info, enable_hf32=enable_hf32
     )
+    for sub in ("", "cv_common"):
+        generate_file(
+            os.path.join(compile_context.temp_dir, "host", sub),
+            "autofuse_cube_tiling_data.h",
+            host_tiling_content_old,
+        )
+
+
+def _write_matmul_device_tiling_files(compile_context, tiling_info, cube_info):
+    """写入matmul静态场景device端tiling文件(含cv_common兜底目录)"""
+    _, _, _, _, has_relu, origin_inputs, origin_outputs = cube_info[:7]
+    device_tiling_data = f"""\n#include "arch35/mat_mul_tiling_data.h"
+#define IS_ENABLE_RELU {str(has_relu).lower()}
+#define OP_TYPE_RELU_VALUE {5 if has_relu else 0}UL // 自动融合新增
+#define DTYPE_X1 {map_dtype_to_string(origin_inputs[-1]["dtype"])}
+#define DTYPE_X2 {map_dtype_to_string(origin_inputs[-1]["dtype"])}
+#define DTYPE_Y {map_dtype_to_string(origin_outputs[-1]["dtype"])}
+#define DTYPE_BIAS {map_dtype_to_string(origin_outputs[-1]["dtype"])}
+"""
+    tiling_info_undef = create_matmul_tiling_undef_header()
+    tiling_info.file_content += device_tiling_data
+    device_tiling_content = tiling_info_undef + tiling_info.file_content
+    for sub in ("", "cv_common"):
+        generate_file(
+            os.path.join(compile_context.temp_dir, "device", sub),
+            "autofuse_cube_tiling_data.h",
+            device_tiling_content,
+        )
+
+
+def create_matmul_tiling_data(
+    compile_context, tiling_info, cube_info, enable_hf32=False
+):
+    cube_output_type_size = cube_info[0]
+    is_batch = cube_info[1]
 
     # 根据is_batch设置结构体名称和数据访问路径
     struct_name = (
@@ -1847,62 +1985,30 @@ GET_TILING_DATA_PTR_WITH_STRUCT({struct_name}, tmpTilingData, tmpTilingGM);
     if is_matmul_relu_fixpip(tiling_info, cube_info):
         class_body += "#define CV_RELU_FIXPIP_MODE 1\n"
 
-    # 写入host端文件
+    # 写入host端文件(空tiling_key/cube_block_dim占位)
     host_tiling_content = tiling_info.file_content + host_tiling_data + class_body
     host_tiling_content_old = host_tiling_content
     host_tiling_content += "#define CUBE_TILING_KEY 0\n"
     host_tiling_content += "#define CUBE_BLOCK_DIM 0\n"
-    generate_file(
-        os.path.join(compile_context.temp_dir, "host"),
-        "autofuse_cube_tiling_data.h",
-        host_tiling_content,
+    for sub in ("", "cv_common"):
+        generate_file(
+            os.path.join(compile_context.temp_dir, "host", sub),
+            "autofuse_cube_tiling_data.h",
+            host_tiling_content,
+        )
+    # 写入host端文件(带vector模板选择宏)
+    _write_matmul_host_tiling_files(
+        compile_context, tiling_info, cube_info, enable_hf32, host_tiling_content_old
     )
-    generate_file(
-        os.path.join(compile_context.temp_dir, "host", "cv_common"),
-        "autofuse_cube_tiling_data.h",
-        host_tiling_content,
-    )
-    # 生成决定走哪一个vector模板的宏
-    host_tiling_content_old += template_decider(compile_context, tiling_info, cube_info)
-    generate_file(
-        os.path.join(compile_context.temp_dir, "host"),
-        "autofuse_cube_tiling_data.h",
-        host_tiling_content_old,
-    )
-    generate_file(
-        os.path.join(compile_context.temp_dir, "host", "cv_common"),
-        "autofuse_cube_tiling_data.h",
-        host_tiling_content_old,
-    )
-
     # 写入device端文件
-    device_tiling_data = f"""\n#include "arch35/mat_mul_tiling_data.h"
-#define IS_ENABLE_RELU {str(has_relu).lower()}
-#define OP_TYPE_RELU_VALUE {5 if has_relu else 0}UL // 自动融合新增
-#define DTYPE_X1 {map_dtype_to_string(origin_inputs[-1]["dtype"])}
-#define DTYPE_X2 {map_dtype_to_string(origin_inputs[-1]["dtype"])}
-#define DTYPE_Y {map_dtype_to_string(origin_outputs[-1]["dtype"])}
-#define DTYPE_BIAS {map_dtype_to_string(origin_outputs[-1]["dtype"])}
-"""
-
-    tiling_info_undef = create_matmul_tiling_undef_header()
-    tiling_info.file_content += device_tiling_data
-    device_tiling_content = tiling_info_undef
-    device_tiling_content += tiling_info.file_content
-    generate_file(
-        os.path.join(compile_context.temp_dir, "device"),
-        "autofuse_cube_tiling_data.h",
-        device_tiling_content,
-    )
-    generate_file(
-        os.path.join(compile_context.temp_dir, "device", "cv_common"),
-        "autofuse_cube_tiling_data.h",
-        device_tiling_content,
-    )
+    _write_matmul_device_tiling_files(compile_context, tiling_info, cube_info)
 
 
 def create_matmul_dynamic_tiling_data(temp_dir, cube_info):
-    _, is_batch, _, has_relu, origin_inputs, origin_outputs = cube_info[:7]
+    _, is_batch, use_cv_common, has_relu, origin_inputs, origin_outputs = cube_info[:7]
+    use_cv_common_flag = (
+        use_cv_common[0] if isinstance(use_cv_common, list) else bool(use_cv_common)
+    )
     # 生成host端tiling数据
     struct_name = (
         "BatchMatMulV3BasicTilingData" if is_batch else "MatMulV3BasicTilingData"
@@ -1942,10 +2048,13 @@ struct CVAutofuseTilingData {{
     )
 
     # 写入device端文件
+    if use_cv_common_flag:
+        fusion_mode_define = "#define CV_SAFETY_FUSION 1\n"
+    else:
+        fusion_mode_define = "#define CV_UB_FUSION 1\n#define CV_UB_NO_DB 1\n"
     device_tiling_data = head_tiling_data
     device_tiling_data += f"""
-#define CV_UB_FUSION 1
-#define CV_UB_NO_DB 1
+{fusion_mode_define}
 #define IS_ENABLE_RELU {str(has_relu).lower()}
 #define OP_TYPE_RELU_VALUE {5 if has_relu else 0}UL // 自动融合新增
 #define DTYPE_X1 {map_dtype_to_string(origin_inputs[-1]["dtype"])}
@@ -2313,7 +2422,12 @@ def ascbc_matmul_kernel_tiling_pro(
         cross_compiler_prefix,
         target_machine,
     )
-    create_matmul_tiling_data(compile_context, tiling_info, cube_info)
+    create_matmul_tiling_data(
+        compile_context,
+        tiling_info,
+        cube_info,
+        enable_hf32=cube_attributes.get("enable_hf32", False),
+    )
 
 
 def ascbc_matmul_kernel_dynamic_tiling_pro(
@@ -2364,6 +2478,7 @@ def ascbc_matmul_kernel_dynamic_tiling_pro(
     )
 
     cube_output_type_size = cube_attributes.get("type_size", 4)
+    use_cv_common = use_cv_common or [False]
     cube_info = [
         cube_output_type_size,
         is_batch,
@@ -2372,6 +2487,11 @@ def ascbc_matmul_kernel_dynamic_tiling_pro(
         _origin_inputs_,
         _origin_outputs_,
     ]
+    a_trans = 1 if cube_attributes.get("transpose_x1", False) else 0
+    enable_hf32 = cube_attributes.get("enable_hf32", False)
+    if is_fp32_large_k_matmul_dynamic(cube_info, a_trans, enable_hf32):
+        use_cv_common[0] = True
+        logger.info("CV fusion op, fp32 large K dynamic, force use_cv_common")
     create_matmul_dynamic_tiling_data(temp_dir, cube_info)
 
 

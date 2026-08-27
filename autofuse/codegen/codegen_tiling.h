@@ -446,6 +446,7 @@ class TilingLib {
   std::string GenCubeFusionTilingBodyInductor(const ::ascir::FusedScheduledResult &fused_schedule_result,
                                               const ::ascir::FusedScheduledResult &elemwise_schedule_result,
                                               const std::string &shape_dim_param) const;
+  std::string GenFp32LargeKCondition(const MatMulCubeInfo &cube_info) const;
   TilingLibCodegenFunc codegen_func_{nullptr};
   bool enable_autofuse_pgo_{false};
 };
