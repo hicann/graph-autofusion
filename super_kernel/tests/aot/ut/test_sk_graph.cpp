@@ -22,6 +22,7 @@
 #include "sk_lock_detector.h"
 #include "sk_options_manager.h"
 #include "stub/dlog_pub.h"
+#include "stub/ut_common_stubs.h"
 
 namespace {
 
