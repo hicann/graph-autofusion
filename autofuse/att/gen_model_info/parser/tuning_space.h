@@ -206,7 +206,7 @@ struct NodeInfo {
 
 struct Container {
   explicit Container(const std::string &name) : name(name) {}
-  std::vector<std::vector<TensorPtr>> GetCoTensors() {
+  std::vector<std::vector<TensorPtr>> GetCoTensors() const {
     return coexist_tensors;
   }
   virtual int64_t GetBufferNum() const = 0;
