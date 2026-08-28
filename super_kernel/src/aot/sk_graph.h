@@ -18,6 +18,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include <memory>
 #include <algorithm>
@@ -63,21 +64,18 @@ class SuperKernelGraph {
   SuperKernelGraph &operator=(const SuperKernelGraph &) = delete;
   SuperKernelGraph(SuperKernelGraph &&) = default;
   SuperKernelGraph &operator=(SuperKernelGraph &&) = default;
-  SuperKernelGraph(aclmdlRI modelRI) : modelRI(modelRI) {}
-  SuperKernelGraph(aclmdlRI modelRI, const SuperKernelOptionsManager &opts) : modelRI(modelRI), opts_(&opts) {}
+  SuperKernelGraph(aclmdlRI modelRI, std::string modelId = {}) : modelRI(modelRI), modelId(std::move(modelId)) {}
+  SuperKernelGraph(aclmdlRI modelRI, const SuperKernelOptionsManager &opts, std::string modelId = {})
+      : modelRI(modelRI), modelId(std::move(modelId)), opts_(&opts) {}
   bool InitSKGraph();
-  void CaptureCurrentModelContext();
 
   SuperKernelBaseNode *GetNodeById(uint64_t nodeId) const;
   aclmdlRI GetModelRI() const {
     return modelRI;
   }
 
-  const std::string &GetModelIdCallCount() const {
+  const std::string &GetModelId() const {
     return modelId;
-  }
-  const std::string &GetModelLabel() const {
-    return modelLabel;
   }
   const std::vector<uint64_t> &GetHeadNodes() const {
     return headNodes;
@@ -185,7 +183,6 @@ class SuperKernelGraph {
   std::vector<aclrtStream> streams;
   aclmdlRI modelRI;
   std::string modelId;
-  std::string modelLabel;
   friend class SuperKernelOptimizer;
   std::unordered_map<std::string, uint32_t> scopeNameToIdx;  ///< scopeName -> scopeIdx
   std::unordered_map<uint32_t, std::string> scopeIdxToName;  ///< scopeIdx -> scopeName (reverse mapping)

@@ -23,7 +23,6 @@
 #include "sk_types.h"
 #include "sk_common.h"
 #include "sk_event_recorder.h"
-#include "sk_model_context.h"
 #include "runtime/rt_external_kernel.h"
 #include "runtime/kernel.h"
 
@@ -111,12 +110,12 @@ bool SuperKernelExceptionHandler::CopySkDeviceEntryArgsToHost(
     return false;
   }
 
-  logContext = std::make_unique<sk::logger::LogContextGuard>(BuildModelLabel(""));
+  logContext = std::make_unique<sk::logger::LogContextGuard>(UNKNOWN_MODEL_ID);
   uint16_t modelIdIdx = static_cast<uint16_t>((skHeaderInfoHost->modelIdIndexAndSkScopeId >> 32) & 0xFFFF);
   std::string modelId = SkEventRecorder::Instance().GetModelIdByIndex(modelIdIdx);
   if (!modelId.empty()) {
     logContext.reset();
-    logContext = std::make_unique<sk::logger::LogContextGuard>(BuildModelLabel(modelId));
+    logContext = std::make_unique<sk::logger::LogContextGuard>(modelId);
   }
 
   // Step 2: Now that we know totalSize, copy all SkDeviceEntryArgs data to host at once

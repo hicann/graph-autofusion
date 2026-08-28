@@ -9,8 +9,26 @@
  */
 
 #include "sk_resource_manager.h"
+
+#include <map>
+
 #include "sk_log.h"
-#include "sk_model_context.h"
+
+namespace {
+
+constexpr const char *MODEL_ID_PREFIX = "model_";
+
+struct ModelIdCounterState {
+  std::mutex mutex;
+  std::map<uint32_t, uint64_t> counters;
+};
+
+ModelIdCounterState &GetModelIdCounterState() {
+  static ModelIdCounterState state;
+  return state;
+}
+
+}  // namespace
 
 std::mutex SkResourceManager::resourceMutex_;
 std::unordered_map<aclmdlRI, SkResourceManager::ModelResourceContext> SkResourceManager::modelContexts_;
@@ -21,6 +39,27 @@ SkResourceManager &SkResourceManager::GetInstance() {
   return instance;
 }
 
+aclError SkResourceManager::GenerateModelId(aclmdlRI model, std::string &modelId) {
+  modelId.clear();
+  if (model == nullptr) {
+    SK_DLOGE("Failed to generate model id: model is nullptr");
+    return ACL_ERROR_INVALID_PARAM;
+  }
+
+  uint32_t rtsModelId = 0U;
+  aclError ret = aclmdlRIGetId(model, &rtsModelId);
+  if (ret != ACL_SUCCESS) {
+    SK_DLOGE("Failed to get model id, ret=%d", ret);
+    return ret;
+  }
+
+  auto &counterState = GetModelIdCounterState();
+  std::lock_guard<std::mutex> lock(counterState.mutex);
+  uint64_t callCount = ++counterState.counters[rtsModelId];
+  modelId = std::string(MODEL_ID_PREFIX) + std::to_string(rtsModelId) + "_" + std::to_string(callCount);
+  return ACL_SUCCESS;
+}
+
 void SkResourceManager::SetCurrentModel(aclmdlRI model) {
   currentModel_ = model;
 }
@@ -29,37 +68,27 @@ aclError SkResourceManager::ValueMemory(void **addr, size_t bytes) {
   return GetInstance().AllocForModel(currentModel_, addr, bytes);
 }
 
-aclError SkResourceManager::CallbackRegister(aclmdlRI model) {
-  if (model == nullptr) {
-    SK_LOGE("ensure destroy callback failed: current model is null");
+aclError SkResourceManager::CallbackRegister(aclmdlRI model, const std::string &modelId) {
+  if (model == nullptr || modelId.empty()) {
+    SK_LOGE("ensure destroy callback failed: model=%p, modelId=%s", model, modelId.c_str());
     return ACL_ERROR_INVALID_PARAM;
-  }
-
-  const std::string modelId = GetCurrentModelId();
-  const std::string modelLabel = GetCurrentModelLabel();
-  if (modelId.empty() || modelLabel.empty()) {
-    SK_LOGE("ensure destroy callback failed: no active model context, model=%p", model);
-    return ACL_ERROR_FAILURE;
   }
 
   std::lock_guard<std::mutex> lock(resourceMutex_);
   if (modelContexts_.count(model) != 0U) {
-    SK_LOGE(
-        "model resource context already exists before model destroy callback: "
-        "model=%p, modelLabel=%s, modelId=%s",
-        model, modelLabel.c_str(), modelId.c_str());
+    SK_LOGE("model resource context already exists before model destroy callback: model=%p, modelId=%s", model,
+            modelId.c_str());
     return ACL_ERROR_FAILURE;
   }
 
   aclError ret = aclmdlRIDestroyRegisterCallback(model, OnModelDestroy, model);
   if (ret != ACL_SUCCESS) {
-    SK_LOGE("register model destroy callback failed: modelLabel=%s, modelId=%s, ret=%d", modelLabel.c_str(),
-            modelId.c_str(), ret);
+    SK_LOGE("register model destroy callback failed: modelId=%s, ret=%d", modelId.c_str(), ret);
     return ret;
   }
 
-  modelContexts_.emplace(model, ModelResourceContext{model, modelId, modelLabel, {}});
-  SK_LOGI("register model destroy callback success: modelLabel=%s, modelId=%s", modelLabel.c_str(), modelId.c_str());
+  modelContexts_.emplace(model, ModelResourceContext{model, modelId, {}});
+  SK_LOGI("register model destroy callback success: modelId=%s", modelId.c_str());
   return ACL_SUCCESS;
 }
 
@@ -93,8 +122,7 @@ aclError SkResourceManager::AllocForModel(aclmdlRI model, void **addr, size_t by
 
   auto &context = it->second;
   context.resources.push_back(ResourceRecord{ResourceKind::kDeviceMemory, *addr, bytes});
-  SK_LOGI("resource alloc success: modelLabel=%s, modelId=%s, addr=%p, bytes=%zu", context.modelLabel.c_str(),
-          context.modelId.c_str(), *addr, bytes);
+  SK_LOGI("resource alloc success: modelId=%s, addr=%p, bytes=%zu", context.modelId.c_str(), *addr, bytes);
   return ACL_SUCCESS;
 }
 
@@ -149,17 +177,14 @@ void SkResourceManager::OnModelDestroy(void *userData) {
     modelContexts_.erase(it);
   }
 
-  sk::logger::LogContextGuard logContext(context.modelLabel);
-  SK_LOGI("sk resource manager OnModelDestroy called: modelLabel=%s, modelId=%s", context.modelLabel.c_str(),
-          context.modelId.c_str());
+  sk::logger::LogContextGuard logContext(context.modelId);
+  SK_LOGI("sk resource manager OnModelDestroy called: modelId=%s", context.modelId.c_str());
 
   bool releaseSuccess = ReleaseModelResources(context.resources);
   if (!releaseSuccess) {
-    SK_LOGE("release some resources during model destroy failed: modelLabel=%s, modelId=%s", context.modelLabel.c_str(),
-            context.modelId.c_str());
+    SK_LOGE("release some resources during model destroy failed: modelId=%s", context.modelId.c_str());
     return;
   }
 
-  SK_LOGI("sk resource manager OnModelDestroy completed: modelLabel=%s, modelId=%s", context.modelLabel.c_str(),
-          context.modelId.c_str());
+  SK_LOGI("sk resource manager OnModelDestroy completed: modelId=%s", context.modelId.c_str());
 }

@@ -37,6 +37,7 @@ aclError g_aclrtTaskGetTypeRet = ACL_SUCCESS;
 aclError g_aclrtGetDeviceRet = ACL_SUCCESS;
 aclError g_aclrtGetDeviceInfoRet = ACL_SUCCESS;
 aclError g_aclmdlRIUpdateRet = ACL_SUCCESS;
+aclError g_aclmdlRIGetIdRet = ACL_SUCCESS;
 aclError g_aclmdlRIDestroyRegisterCallbackRet = ACL_SUCCESS;
 aclError g_aclrtMallocRet = ACL_SUCCESS;
 aclError g_aclrtFreeRet = ACL_SUCCESS;
@@ -93,6 +94,7 @@ void SkUtResetCommonStubControls() {
   g_aclrtGetDeviceRet = ACL_SUCCESS;
   g_aclrtGetDeviceInfoRet = ACL_SUCCESS;
   g_aclmdlRIUpdateRet = ACL_SUCCESS;
+  g_aclmdlRIGetIdRet = ACL_SUCCESS;
   g_aclmdlRIDestroyRegisterCallbackRet = ACL_SUCCESS;
   g_aclrtMallocRet = ACL_SUCCESS;
   g_aclrtFreeRet = ACL_SUCCESS;
@@ -149,6 +151,10 @@ void SkUtSetAclrtGetDeviceInfoRet(aclError ret) {
 
 void SkUtSetAclmdlRIUpdateRet(aclError ret) {
   g_aclmdlRIUpdateRet = ret;
+}
+
+void SkUtSetAclmdlRIGetIdRet(aclError ret) {
+  g_aclmdlRIGetIdRet = ret;
 }
 
 void SkUtSetAclmdlRIDestroyRegisterCallbackRet(aclError ret) {
@@ -215,6 +221,10 @@ aclError SkUtGetAclrtGetDeviceInfoRet() {
 
 aclError SkUtGetAclmdlRIUpdateRet() {
   return g_aclmdlRIUpdateRet;
+}
+
+aclError SkUtGetAclmdlRIGetIdRet() {
+  return g_aclmdlRIGetIdRet;
 }
 
 aclError SkUtGetAclmdlRIDestroyRegisterCallbackRet() {

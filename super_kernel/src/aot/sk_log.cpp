@@ -15,7 +15,6 @@
 
 #include "sk_log.h"
 #include "sk_common.h"
-#include "sk_model_context.h"
 #include "securec.h"
 #include "base/err_mgr.h"
 #include <iostream>
@@ -143,13 +142,13 @@ void FileHandleManager::CloseFile(const std::string &name) {
   }
 }
 
-bool FileHandleManager::InitializeDefault(const std::string &baseDir, pid_t pid, const std::string &modelLabel) {
-  std::string dirPath = GetSkMetaBasePath() + "/" + SanitizePathComponent(modelLabel);
+bool FileHandleManager::InitializeDefault(const std::string &modelId) {
+  std::string dirPath = GetSkMetaPath(modelId);
   if (!CreateDirectoryRecursive(dirPath)) {
     return false;
   }
 
-  std::string handleName = "model_" + SanitizePathComponent(modelLabel);
+  std::string handleName = SanitizePathComponent(modelId);
 
   std::string defaultPath = dirPath + "/super_kernel.log";
   return RegisterFile(handleName, defaultPath);
@@ -158,8 +157,8 @@ bool FileHandleManager::InitializeDefault(const std::string &baseDir, pid_t pid,
 // Thread-local current handle initialization
 thread_local std::string FileHandleManager::currentHandle_ = "default";
 
-// Thread-local current model label
-thread_local std::string FileLogger::currentModelLabel_;
+// Thread-local current model ID
+thread_local std::string FileLogger::currentModelId_;
 
 FileHandleManager::FileHandleManager() {}
 
@@ -174,21 +173,25 @@ FileHandleManager::~FileHandleManager() {
 }
 
 // ==================== LogContextGuard Implementation ====================
-LogContextGuard::LogContextGuard(const std::string &modelLabel) {
+LogContextGuard::LogContextGuard(const std::string &modelId) {
   auto &logger = FileLogger::Instance();
   if (!logger.IsInitialized() || !logger.IsEnabled()) {
     return;
   }
 
-  previousModelLabel_ = FileLogger::GetCurrentModelLabel();
+  previousModelId_ = FileLogger::GetCurrentModelId();
   previousHandle_ = FileHandleManager::Instance().GetCurrentHandle();
-  FileLogger::SetCurrentModelLabel(modelLabel);
+  FileLogger::SetCurrentModelId(modelId);
   FileHandleManager::Instance().SwitchToDefault();
   active_ = true;
+
+  if (!FileHandleManager::Instance().InitializeDefault(modelId)) {
+    SK_DLOGE("Failed to initialize default log file for model: %s", modelId.c_str());
+  }
 }
 
 LogContextGuard::LogContextGuard(const std::string &handleName, const std::string &filePath)
-    : previousModelLabel_(FileLogger::GetCurrentModelLabel()),
+    : previousModelId_(FileLogger::GetCurrentModelId()),
       previousHandle_(FileHandleManager::Instance().GetCurrentHandle()) {
   if (!FileHandleManager::Instance().RegisterFile(handleName, filePath)) {
     SK_DLOGE("Failed to register log file: %s", handleName.c_str());
@@ -208,7 +211,7 @@ LogContextGuard::~LogContextGuard() {
 }
 
 LogContextGuard::LogContextGuard(LogContextGuard &&other) noexcept
-    : previousModelLabel_(std::move(other.previousModelLabel_)),
+    : previousModelId_(std::move(other.previousModelId_)),
       previousHandle_(std::move(other.previousHandle_)),
       active_(other.active_) {
   other.active_ = false;
@@ -217,7 +220,7 @@ LogContextGuard::LogContextGuard(LogContextGuard &&other) noexcept
 LogContextGuard &LogContextGuard::operator=(LogContextGuard &&other) noexcept {
   if (this != &other) {
     Restore();
-    previousModelLabel_ = std::move(other.previousModelLabel_);
+    previousModelId_ = std::move(other.previousModelId_);
     previousHandle_ = std::move(other.previousHandle_);
     active_ = other.active_;
     other.active_ = false;
@@ -230,7 +233,7 @@ void LogContextGuard::Restore() {
     return;
   }
 
-  FileLogger::SetCurrentModelLabel(previousModelLabel_);
+  FileLogger::SetCurrentModelId(previousModelId_);
   if (previousHandle_ == "default") {
     FileHandleManager::Instance().SwitchToDefault();
   } else if (!previousHandle_.empty()) {
@@ -249,12 +252,12 @@ bool FileLogger::Initialize(const LoggerConfig &config) {
   std::lock_guard<std::mutex> initializationLock(initializationMutex_);
 
   LoggerConfig effectiveConfig = config;
-  if (effectiveConfig.modelLabel.empty()) {
-    effectiveConfig.modelLabel = GetCurrentModelLabel();
+  if (effectiveConfig.modelId.empty()) {
+    effectiveConfig.modelId = GetCurrentModelId();
   }
-  if (effectiveConfig.modelLabel.empty()) {
+  if (effectiveConfig.modelId.empty()) {
     std::lock_guard<std::mutex> lock(mutex_);
-    effectiveConfig.modelLabel = config_.modelLabel;
+    effectiveConfig.modelId = config_.modelId;
   }
 
   initialized_.store(false, std::memory_order_relaxed);
@@ -270,11 +273,8 @@ bool FileLogger::Initialize(const LoggerConfig &config) {
     return true;
   }
 
-  // Use the current model label to create sk_meta directory structure.
-  std::string logDir = GetSkMetaBasePath() + "/" + SanitizePathComponent(effectiveConfig.modelLabel);
-  if (!CreateDirectoryRecursive(logDir)) {
-    logDir.clear();
-  }
+  // Use the current model ID to create sk_meta directory structure.
+  std::string logDir = CreateSkMetaDirectory(effectiveConfig.modelId);
   if (logDir.empty()) {
     SK_DLOGE("Failed to create sk_meta directory");
     return false;
@@ -283,13 +283,13 @@ bool FileLogger::Initialize(const LoggerConfig &config) {
   // Extract PID from created directory
   pid_.store(getpid(), std::memory_order_relaxed);
 
-  // 为新 model label 注册日志文件
-  std::string modelLabelForLog = effectiveConfig.modelLabel;
-  std::string handleName = "model_" + SanitizePathComponent(modelLabelForLog);
+  // 为新 model ID 注册日志文件
+  std::string modelIdForLog = effectiveConfig.modelId;
+  std::string handleName = SanitizePathComponent(modelIdForLog);
   std::string defaultPath = logDir + "/super_kernel.log";
 
   if (!FileHandleManager::Instance().RegisterFile(handleName, defaultPath)) {
-    SK_DLOGE("Failed to register log file for model: %s", modelLabelForLog.c_str());
+    SK_DLOGE("Failed to register log file for model: %s", modelIdForLog.c_str());
     return false;
   }
 
@@ -304,19 +304,19 @@ bool FileLogger::Initialize(const LoggerConfig &config) {
   if (realpath(logDir.c_str(), absPath) != nullptr) {
     // Ensure null termination
     absPath[PATH_MAX - 1] = '\0';
-    SK_DLOGI("File logger initialized: dir=%s, model=%s", absPath, modelLabelForLog.c_str());
+    SK_DLOGI("File logger initialized: dir=%s, model=%s", absPath, modelIdForLog.c_str());
   } else {
-    SK_DLOGI("File logger initialized: dir=%s, model=%s", logDir.c_str(), modelLabelForLog.c_str());
+    SK_DLOGI("File logger initialized: dir=%s, model=%s", logDir.c_str(), modelIdForLog.c_str());
   }
   return true;
 }
 
-std::string FileLogger::GetEffectiveModelLabel() const {
-  if (!currentModelLabel_.empty()) {
-    return currentModelLabel_;
+std::string FileLogger::GetEffectiveModelId() const {
+  if (!currentModelId_.empty()) {
+    return currentModelId_;
   }
   std::lock_guard<std::mutex> lock(mutex_);
-  return config_.modelLabel;
+  return config_.modelId;
 }
 
 LoggerConfig FileLogger::GetConfigSnapshot() const {
@@ -332,12 +332,12 @@ bool FileLogger::RegisterLogFile(const std::string &name, const std::string &sub
     return false;
   }
 
-  std::string modelLabel = GetEffectiveModelLabel();
-  if (modelLabel.empty()) {
+  std::string modelId = GetEffectiveModelId();
+  if (modelId.empty()) {
     return false;
   }
 
-  std::string basePath = GetSkMetaBasePath() + "/" + SanitizePathComponent(modelLabel);
+  std::string basePath = GetSkMetaPath(modelId);
   std::string filePath = basePath + "/" + name;
 
   // If subPath provided, insert it before filename
@@ -354,7 +354,7 @@ bool FileLogger::RegisterLogFile(const std::string &name, const std::string &sub
     }
   }
 
-  std::string handleName = "model_" + SanitizePathComponent(modelLabel) + "_" + name;
+  std::string handleName = SanitizePathComponent(modelId) + "_" + name;
 
   return FileHandleManager::Instance().RegisterFile(handleName, filePath);
 }
@@ -370,24 +370,24 @@ void FileLogger::SwitchToDefault() {
   FileHandleManager::Instance().SwitchToDefault();
 }
 
-std::unique_ptr<LogContextGuard> FileLogger::CreateContext(const std::string &fileName, const std::string &modelLabel) {
+std::unique_ptr<LogContextGuard> FileLogger::CreateContext(const std::string &fileName, const std::string &modelId) {
   if (!initialized_.load() || !enabled_.load(std::memory_order_relaxed)) {
     return nullptr;
   }
 
-  if (modelLabel.empty()) {
+  if (modelId.empty()) {
     return nullptr;
   }
 
-  std::string sanitizedModelLabel = SanitizePathComponent(modelLabel);
-  std::string dirPath = GetSkMetaBasePath() + "/" + sanitizedModelLabel;
+  std::string sanitizedModelId = SanitizePathComponent(modelId);
+  std::string dirPath = GetSkMetaBasePath() + "/" + sanitizedModelId;
   if (!CreateDirectoryRecursive(dirPath)) {
     SK_DLOGE("Failed to create directory for context");
     return nullptr;
   }
 
   std::string filePath = dirPath + "/" + fileName;
-  std::string handleName = "model_" + sanitizedModelLabel + "_" + fileName;
+  std::string handleName = sanitizedModelId + "_" + fileName;
 
   return std::make_unique<LogContextGuard>(handleName, filePath);
 }
@@ -404,18 +404,18 @@ void FileLogger::SetMinLevel(LogLevel level) {
   minLevel_.store(level, std::memory_order_relaxed);
 }
 
-void FileLogger::SetModelLabel(const std::string &modelLabel) {
+void FileLogger::SetModelId(const std::string &modelId) {
   std::lock_guard<std::mutex> initializationLock(initializationMutex_);
   std::lock_guard<std::mutex> lock(mutex_);
-  config_.modelLabel = modelLabel;
+  config_.modelId = modelId;
 }
 
 bool FileLogger::IsInitialized() const {
   return initialized_.load();
 }
 
-const std::string &FileLogger::GetCurrentModelLabel() {
-  return currentModelLabel_;
+const std::string &FileLogger::GetCurrentModelId() {
+  return currentModelId_;
 }
 
 std::string FileLogger::FormatMessage(const LoggerConfig &config, LogLevel level, const char *funcName,
@@ -488,12 +488,10 @@ void FileLogger::WriteLog(const std::string &message, const LoggerConfig &config
   std::string currentHandle = handleManager.GetCurrentHandle();
   std::string targetHandle;
 
-  // 如果当前 handle 是 "default" 或以 "model_" 开头但没有额外后缀，
-  // 说明没有通过 LogContextGuard 切换到非 default 日志
-  // 此时需要根据当前 model label 计算正确的 handle
-  if (currentHandle == "default" || currentHandle.find('_') == currentHandle.rfind('_')) {
-    std::string modelLabel = currentModelLabel_.empty() ? config.modelLabel : currentModelLabel_;
-    targetHandle = "model_" + SanitizePathComponent(modelLabel);
+  // "default" 表示模型级日志上下文，按当前 model ID 选择对应 handle。
+  if (currentHandle == "default") {
+    const std::string &modelId = currentModelId_.empty() ? config.modelId : currentModelId_;
+    targetHandle = SanitizePathComponent(modelId);
   } else {
     // 在 LogContextGuard 上下文中，使用当前 handle
     targetHandle = currentHandle;
@@ -528,11 +526,11 @@ void FileLogger::WriteLog(const std::string &message, const LoggerConfig &config
 
 // ==================== Global Initialization Helper Functions ====================
 
-bool InitializeSkFileLogger(bool enabled, const std::string &modelLabel, sk::logger::LogLevel minLevel) {
-  sk::logger::FileLogger::Instance().SetCurrentModelLabel(modelLabel);
+bool InitializeSkFileLogger(bool enabled, const std::string &modelId, sk::logger::LogLevel minLevel) {
+  sk::logger::FileLogger::Instance().SetCurrentModelId(modelId);
   sk::logger::LoggerConfig config;
   config.enabled = enabled;
-  config.modelLabel = modelLabel;
+  config.modelId = modelId;
   config.minLevel = minLevel;
 
   if (!sk::logger::FileLogger::Instance().Initialize(config)) {

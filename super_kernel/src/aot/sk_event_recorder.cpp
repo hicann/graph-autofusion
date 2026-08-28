@@ -18,7 +18,6 @@
 #include <fstream>
 #include "acl/acl.h"
 #include "sk_log.h"
-#include "sk_model_context.h"
 #include "aprof_pub.h"
 #include "sk_file_guard.h"
 
@@ -131,7 +130,7 @@ std::string SkEventRecorder::CreateOutputDir() {
   struct stat st;
   if (stat(skMetaDir, &st) != 0) {
     // sk_meta 不存在，创建它
-    if (mkdir(skMetaDir, 0755) != 0 && errno != EEXIST) {
+    if (mkdir(skMetaDir, SK_DIRECTORY_MODE) != 0 && errno != EEXIST) {
       SK_LOGE("[sk time profiling] Failed to create sk_meta directory, errno=%d\n", errno);
       return "";
     }
@@ -148,7 +147,7 @@ std::string SkEventRecorder::CreateOutputDir() {
 
   if (stat(pidDir, &st) != 0) {
     // sk_meta/<pid> 不存在，创建它
-    if (mkdir(pidDir, 0755) != 0 && errno != EEXIST) {
+    if (mkdir(pidDir, SK_DIRECTORY_MODE) != 0 && errno != EEXIST) {
       SK_LOGE("[sk time profiling] Failed to create pid directory %s, errno=%d\n", pidDir, errno);
       return "";
     }
@@ -759,7 +758,7 @@ bool SkProfiling(const SuperKernelScopeInfo &scopeInfo, SkLaunchInfo &launchInfo
   SK_LOGI("[sk shape profiling] =============== Start shape profiling ===================");
   SkHostEntryInfo &skEntryInfo = launchInfo.entryInfo;
 
-  uint32_t opFlag = 0;  //记录op属性标记的bitmap，bit0代表是否使能了HF32
+  uint32_t opFlag = 0;  // 记录op属性标记的bitmap，bit0代表是否使能了HF32
   std::string combinedAttrIdStr;
   uint32_t maxTensorNum = SHAPE_MAX_TENSOR_NUM;
 
@@ -903,7 +902,7 @@ bool DumpProfilingDetail(const std::vector<SuperKernelBaseNode *> &taskNodes, Sk
                          const SuperKernelScopeInfo &scopeInfo, const SuperKernelGraph &graph) {
   // 获取事件记录 GM 地址并更新 devArgs 中的事件配置
   // 填充 devArgs 中的 modelIdIndexAndSkScopeId（不依赖 profiling 开关）
-  const std::string &modelId = graph.GetModelIdCallCount();
+  const std::string &modelId = graph.GetModelId();
   SetupProfilingModelContext(launchInfo, scopeInfo, modelId);
 
   // skName 映射不依赖 profiling 开关：异常 handler 在 profiling 关闭时也要靠这张表。
