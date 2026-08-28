@@ -64,6 +64,17 @@ CMake >= 3.16.0
 GCC >= 7.3.0
 ```
 
+To switch to gcc15/gcc16, explicitly set `CC/CXX` before building, for example:
+
+```bash
+export CC=gcc-15
+export CXX=g++-15
+```
+
+You can also set `GCC_VERSION=15` or `GCC_VERSION=16` and let the scripts generate the matching compiler commands. Do not use `update-alternatives` to change the system default gcc.
+
+After switching compilers, clean `build/` before reconfiguring so CMake does not reuse the old compiler cache.
+
 On openEuler systems, run the following command:
 
 ```bash

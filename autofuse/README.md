@@ -58,6 +58,14 @@ pip3 install torch_npu==2.10.0  # torch_npu版本应为 2.9.0 及以上。通过
 CMake >= 3.16.0
 GCC >= 7.3.0
 ```
+如需切换到 gcc15/gcc16，请在执行构建前显式设置 `CC/CXX`，例如：
+```bash
+export CC=gcc-15
+export CXX=g++-15
+```
+也可以设置 `GCC_VERSION=15` 或 `GCC_VERSION=16` 交给脚本生成对应编译器命令。请不要使用 `update-alternatives` 修改系统默认 gcc。
+
+切换编译器后请先清理 `build/`，避免 CMake 缓存继续使用旧的编译器配置。
 在 openEuler 系统上，您可以通过以下命令安装：
 ```bash
 sudo yum install cmake gcc

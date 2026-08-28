@@ -96,8 +96,8 @@ TEST_F(TestBackendMatmulEleBrc, MatmulEleBrcCodegen) {
   std::string kernel_src_file_name =
       "matmul_elemwise_brc_test_kernel_ub.cpp";  // matmul_elemwise_brc_test_kernel_ub.cpp
   std::string tiling_src_file_name =
-      "matmul_elemwise_brc_test_tiling_ub.cpp";      // matmul_elemwise_brc_test_tiling_ub.cpp
-  std::string tiling_data_src_file_name = parts[2];  // autofuse_tiling_data.h
+      "matmul_elemwise_brc_test_tiling_ub.cpp";          // matmul_elemwise_brc_test_tiling_ub.cpp
+  std::string tiling_data_src_file_name = parts.back();  // autofuse_tiling_data.h
 
   try {
     optimize::Optimizer optimizer(optimize::OptimizerOptions{});
@@ -133,7 +133,7 @@ TEST_F(TestBackendMatmulEleBrc, MatmulEleBrcCodegen) {
 
     kernel_src_file_name = "matmul_elemwise_brc_test_kernel_common.cpp";  // matmul_elemwise_brc_test_kernel_common.cpp
     tiling_src_file_name = "matmul_elemwise_brc_test_tiling_common.cpp";  // matmul_elemwise_brc_test_tiling_common.cpp
-    tiling_data_src_file_name = parts[2];                                 // autofuse_tiling_data.h
+    tiling_data_src_file_name = parts.back();                             // autofuse_tiling_data.h
     std::fstream kernel_file_common(kernel_src_file_name, std::ios::out);
     std::fstream tiling_file_common(tiling_src_file_name, std::ios::out);
     std::fstream tiling_data_file_common(tiling_data_src_file_name, std::ios::out);

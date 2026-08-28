@@ -1668,7 +1668,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, OutputPostTopologySelectsEligibleTem
       {OutputPostTopology::kBesselK0, {"output_modified_bessel_k0"}, false, af::DT_FLOAT16, true},
   };
   for (const auto &test_case : cases) {
-    auto graph = BuildPostReduceGraph("R", false, test_case.topology);
+    auto graph = BuildPostReduceGraph("RRR", false, test_case.topology);
     ExpectPostTopologyGraph(graph, test_case);
 
     optimize::IndirectLoadScheduleCaseGenerator generator;

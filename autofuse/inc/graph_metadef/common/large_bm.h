@@ -11,6 +11,8 @@
 #ifndef INC_COMMON_LARGE_BM_H_
 #define INC_COMMON_LARGE_BM_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 #include <memory>
 

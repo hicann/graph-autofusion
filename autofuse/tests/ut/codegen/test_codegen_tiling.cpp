@@ -23,6 +23,34 @@
 #include "runtime_stub.h"
 #include "platform_context.h"
 #include "ascgraph_info_complete.h"
+#if defined(FALSE)
+#pragma push_macro("FALSE")
+#undef FALSE
+#define AUTOFUSE_TEST_PUSHED_FALSE 1
+#endif
+#if defined(TRUE)
+#pragma push_macro("TRUE")
+#undef TRUE
+#define AUTOFUSE_TEST_PUSHED_TRUE 1
+#endif
+#if defined(FAILED)
+#pragma push_macro("FAILED")
+#undef FAILED
+#define AUTOFUSE_TEST_PUSHED_FAILED 1
+#endif
+#include "transpose/transpose_api_call.h"
+#ifdef AUTOFUSE_TEST_PUSHED_FAILED
+#pragma pop_macro("FAILED")
+#undef AUTOFUSE_TEST_PUSHED_FAILED
+#endif
+#ifdef AUTOFUSE_TEST_PUSHED_TRUE
+#pragma pop_macro("TRUE")
+#undef AUTOFUSE_TEST_PUSHED_TRUE
+#endif
+#ifdef AUTOFUSE_TEST_PUSHED_FALSE
+#pragma pop_macro("FALSE")
+#undef AUTOFUSE_TEST_PUSHED_FALSE
+#endif
 #include "optimize/optimize.h"
 #include "share_graph.h"
 #include "tests/common/inductor_pgo_codegen_test_utils.h"
@@ -5134,4 +5162,34 @@ TEST_F(TestCodegenTiling, TilingLibGenerateForInductorShouldNotEmitSplitMarkers)
     EXPECT_EQ(content.find("AUTOFUSE_SPLIT_FILE_BEGIN"), std::string::npos) << key;
     EXPECT_EQ(content.find("AUTOFUSE_SPLIT_FILE_END"), std::string::npos) << key;
   }
+}
+
+TEST_F(TestCodegenTiling, TransposeApiCallGetTransposeTypeInvalid) {
+  af::AscGraph graph("test_graph");
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+  auto s2 = graph.CreateSizeVar("s2");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  auto z2 = graph.CreateAxis("z2", s2);
+
+  af::ascir_op::Data x("x", graph);
+  af::ascir_op::Data y("y", graph);
+  auto node0 = graph.FindNode("x");
+  auto node1 = graph.FindNode("y");
+  af::AscTensor input_tensor = node0->outputs[0];
+  af::AscTensor out_tensor = node1->outputs[0];
+
+  input_tensor.attr.vectorized_axis = {z0.id, z1.id, z2.id};
+  out_tensor.attr.vectorized_axis = {z0.id, z1.id, z2.id};
+
+  std::string dtype_name;
+  codegen::Tensor::DtypeName(input_tensor.attr.dtype, dtype_name);
+  codegen::Tensor input(input_tensor, dtype_name);
+  codegen::Tensor output(out_tensor, dtype_name);
+
+  codegen::TransposeApiCall call("Transpose");
+  AutoFuseTransposeType transpose_type;
+  call.CodeGenGetTransposeType(input, output, transpose_type);
+  EXPECT_EQ(transpose_type, AutoFuseTransposeType::TRANSPOSE_INVALID);
 }

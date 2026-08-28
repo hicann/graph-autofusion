@@ -6,6 +6,8 @@ set(INDUCTOR_MATMUL_ELEMWISE_OUTPUT_DIR ${INDUCTOR_MATMUL_ELEMWISE_WORKDIR}/spli
 
 set(PYAUTOFUSE_DIR ${CMAKE_BINARY_DIR}/autofuse/tests)
 set(AUTOFUSE_PYTHON_DIR ${CODE_ROOT_DIR}/compiler/python)
+set(INDUCTOR_MATMUL_ELEMWISE_RUNTIME_LD_LIBRARY_PATH
+    "${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/ascendc_ir/generator:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/ascendc_ir:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/expression:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph:${CMAKE_BINARY_DIR}/autofuse/tests:${CMAKE_BINARY_DIR}/autofuse/tests/depends/common:${CMAKE_BINARY_DIR}/autofuse/tests/depends/slog:${CMAKE_BINARY_DIR}/autofuse/tests/depends/trace:${CMAKE_BINARY_DIR}/autofuse/tests/depends/runtime:${CMAKE_BINARY_DIR}/autofuse/ascir/generator:${CMAKE_BINARY_DIR}/autofuse/ascir/meta:${ASCEND_INSTALL_PATH}/${CMAKE_SYSTEM_PROCESSOR}-linux/lib64:$ENV{LD_LIBRARY_PATH}")
 string(CONCAT INDUCTOR_MATMUL_ELEMWISE_KERNEL_SRC_LIST
     "${INDUCTOR_MATMUL_ELEMWISE_TILING_DEF}:"
     "${INDUCTOR_MATMUL_ELEMWISE_HOST_CODE}:"
@@ -23,7 +25,9 @@ target_compile_definitions(inductor_matmul_elemwise_test_codegen PRIVATE
     KERNEL_SRC_LIST="${INDUCTOR_MATMUL_ELEMWISE_KERNEL_SRC_LIST}"
 )
 add_test(NAME inductor_matmul_elemwise_test_codegen
-    COMMAND inductor_matmul_elemwise_test_codegen
+    COMMAND ${CMAKE_COMMAND} -E env
+            "LD_LIBRARY_PATH=${INDUCTOR_MATMUL_ELEMWISE_RUNTIME_LD_LIBRARY_PATH}"
+            inductor_matmul_elemwise_test_codegen
             --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/inductor_matmul_elemwise_test_codegen.xml)
 set_tests_properties(inductor_matmul_elemwise_test_codegen PROPERTIES
     LABELS "st;build_backend_test1;inductor_matmul_elemwise_test_codegen")
@@ -55,7 +59,9 @@ get_filename_component(MATMUL_TILING_DATA_INCLUDE_DIR ${MATMUL_TILING_DATA_INCLU
 file(MAKE_DIRECTORY ${INDUCTOR_MATMUL_ELEMWISE_OUTPUT_DIR})
 add_custom_command(
     OUTPUT ${INDUCTOR_MATMUL_ELEMWISE_TILING_DEF} ${INDUCTOR_MATMUL_ELEMWISE_HOST_CODE} ${INDUCTOR_MATMUL_ELEMWISE_DEVICE_CODE}
-    COMMAND $<TARGET_FILE:inductor_matmul_elemwise_test_codegen>
+    COMMAND ${CMAKE_COMMAND} -E env
+            "LD_LIBRARY_PATH=${INDUCTOR_MATMUL_ELEMWISE_RUNTIME_LD_LIBRARY_PATH}"
+            $<TARGET_FILE:inductor_matmul_elemwise_test_codegen>
             --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/inductor_matmul_elemwise_test_codegen.xml
     DEPENDS inductor_matmul_elemwise_test_codegen
     VERBATIM)

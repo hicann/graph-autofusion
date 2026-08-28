@@ -12,7 +12,9 @@
 #define GRAPH_AUTOFUSION_ATRACE_TYPES_H
 
 #include <stdint.h>
+#ifndef __cplusplus
 #include <stdbool.h>
+#endif
 
 typedef int32_t TraStatus;
 typedef intptr_t TraHandle;

@@ -28,6 +28,10 @@ function(do_add_codegen_e2e_st_test)
     target_link_libraries(${ATT_SO_NAME} codegen)
 
     add_executable(${E2E_ST1_GENERATOR_EXE_NAME} ${ARG_CODEGEN})
+    set_target_properties(${E2E_ST1_GENERATOR_EXE_NAME} PROPERTIES
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph"
+    )
+    target_link_options(${E2E_ST1_GENERATOR_EXE_NAME} PRIVATE -Wl,--disable-new-dtags)
     target_link_libraries(${E2E_ST1_GENERATOR_EXE_NAME}
                           ${ATT_SO_NAME}
                           codegen
@@ -50,11 +54,20 @@ function(do_add_codegen_e2e_st_test)
        KERNEL_SRC_LIST=\"${KERNEL_SRC_LIST}\"
     )
 
-    add_test(NAME ${E2E_ST1_GENERATOR_EXE_NAME} COMMAND ${E2E_ST1_GENERATOR_EXE_NAME} --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/${E2E_ST1_GENERATOR_EXE_NAME}.xml)
+    set(CODEGEN_RUNTIME_LD_LIBRARY_PATH
+        "${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/ascendc_ir/generator:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/ascendc_ir:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/expression:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph:${CMAKE_BINARY_DIR}/autofuse/tests:${CMAKE_BINARY_DIR}/autofuse/tests/depends/common:${CMAKE_BINARY_DIR}/autofuse/tests/depends/slog:${CMAKE_BINARY_DIR}/autofuse/tests/depends/trace:${CMAKE_BINARY_DIR}/autofuse/tests/depends/runtime:${CMAKE_BINARY_DIR}/autofuse/ascir/generator:${CMAKE_BINARY_DIR}/autofuse/ascir/meta:${ASCEND_INSTALL_PATH}/${CMAKE_SYSTEM_PROCESSOR}-linux/lib64:$ENV{LD_LIBRARY_PATH}")
+
+    add_test(NAME ${E2E_ST1_GENERATOR_EXE_NAME}
+             COMMAND ${CMAKE_COMMAND} -E env
+                     "LD_LIBRARY_PATH=${CODEGEN_RUNTIME_LD_LIBRARY_PATH}"
+                     $<TARGET_FILE:${E2E_ST1_GENERATOR_EXE_NAME}>
+                     --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/${E2E_ST1_GENERATOR_EXE_NAME}.xml)
     set_tests_properties(${E2E_ST1_GENERATOR_EXE_NAME} PROPERTIES LABELS "st;codegen_e2e_st_test1;${E2E_ST1_GENERATOR_EXE_NAME}")
 
     add_custom_target(${TEST_NAME}_generated_sources
-                      COMMAND $<TARGET_FILE:${E2E_ST1_GENERATOR_EXE_NAME}>
+                      COMMAND ${CMAKE_COMMAND} -E env
+                              "LD_LIBRARY_PATH=${CODEGEN_RUNTIME_LD_LIBRARY_PATH}"
+                              $<TARGET_FILE:${E2E_ST1_GENERATOR_EXE_NAME}>
                       WORKING_DIRECTORY ${ARG_WORKDIR}
                       BYPRODUCTS ${KERNEL_SRC}
                       DEPENDS ${E2E_ST1_GENERATOR_EXE_NAME})

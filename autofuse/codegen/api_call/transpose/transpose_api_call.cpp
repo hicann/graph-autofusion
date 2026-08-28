@@ -106,9 +106,8 @@ Status TransposeApiCall::CodeGenGetTransposeType(const Tensor &inputs, const Ten
       if (i != 0) oss << ", ";
       oss << output_vectorized_axis[i];
     }
-    GELOGE(af::FAILED, "Transpose convert permute to transposetype failed, sizes = %d, %d_%d_%d_%d\n",
-           output_vectorized_axis.size(), output_vectorized_axis[Axis_0], output_vectorized_axis[Axis_1],
-           output_vectorized_axis[Axis_2], output_vectorized_axis[Axis_3]);
+    GELOGE(af::FAILED, "Transpose convert permute to transposetype failed, sizes = %zu, permute = [%s]",
+           output_vectorized_axis.size(), oss.str().c_str());
     return af::FAILED;
   }
   return af::SUCCESS;

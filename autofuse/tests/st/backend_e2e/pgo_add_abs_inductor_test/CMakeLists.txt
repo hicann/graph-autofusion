@@ -13,6 +13,8 @@ set(AUTOFUSE_TEST_MSPTI_DIR "$ENV{AUTOFUSE_MSPTI_PATH}")
 if(AUTOFUSE_TEST_MSPTI_DIR STREQUAL "")
     set(AUTOFUSE_TEST_MSPTI_DIR "${ASCEND_INSTALL_PATH}/tools/mspti")
 endif()
+set(PGO_ADD_ABS_INDUCTOR_RUNTIME_LD_LIBRARY_PATH
+    "${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/ascendc_ir/generator:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/ascendc_ir:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/expression:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph:${CMAKE_BINARY_DIR}/autofuse/tests:${CMAKE_BINARY_DIR}/autofuse/tests/depends/common:${CMAKE_BINARY_DIR}/autofuse/tests/depends/slog:${CMAKE_BINARY_DIR}/autofuse/tests/depends/trace:${CMAKE_BINARY_DIR}/autofuse/tests/depends/runtime:${CMAKE_BINARY_DIR}/autofuse/ascir/generator:${CMAKE_BINARY_DIR}/autofuse/ascir/meta:${ASCEND_INSTALL_PATH}/${CMAKE_SYSTEM_PROCESSOR}-linux/lib64:$ENV{LD_LIBRARY_PATH}")
 
 add_executable(pgo_add_abs_inductor_test_codegen pgo_add_abs_inductor_backend_generate.cpp)
 target_link_options(pgo_add_abs_inductor_test_codegen PRIVATE -Wl,--no-as-needed)
@@ -26,7 +28,9 @@ target_compile_definitions(pgo_add_abs_inductor_test_codegen PRIVATE
     PGO_KERNEL_SRC_LIST="${PGO_ADD_ABS_INDUCTOR_PGO_TILING_DEF}:${PGO_ADD_ABS_INDUCTOR_PGO_HOST_CODE}:${PGO_ADD_ABS_INDUCTOR_PGO_DEVICE_CODE}"
 )
 add_test(NAME pgo_add_abs_inductor_test_codegen
-    COMMAND ${CMAKE_COMMAND} -E env LD_PRELOAD=$<TARGET_FILE:ascgen_common>
+    COMMAND ${CMAKE_COMMAND} -E env
+            "LD_LIBRARY_PATH=${PGO_ADD_ABS_INDUCTOR_RUNTIME_LD_LIBRARY_PATH}"
+            LD_PRELOAD=$<TARGET_FILE:ascgen_common>
             $<TARGET_FILE:pgo_add_abs_inductor_test_codegen>
             --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/pgo_add_abs_inductor_test_codegen.xml)
 set_tests_properties(pgo_add_abs_inductor_test_codegen PROPERTIES LABELS "st;build_backend_test1;pgo_add_abs_inductor_test_codegen")
@@ -37,7 +41,9 @@ add_custom_command(
            ${PGO_ADD_ABS_INDUCTOR_PGO_TILING_DEF} ${PGO_ADD_ABS_INDUCTOR_PGO_HOST_CODE}
            ${PGO_ADD_ABS_INDUCTOR_PGO_DEVICE_CODE}
     # common_stub fixes CanUseTilingKey to false; preload the production implementation for the PGO codegen path.
-    COMMAND ${CMAKE_COMMAND} -E env LD_PRELOAD=$<TARGET_FILE:ascgen_common>
+    COMMAND ${CMAKE_COMMAND} -E env
+            "LD_LIBRARY_PATH=${PGO_ADD_ABS_INDUCTOR_RUNTIME_LD_LIBRARY_PATH}"
+            LD_PRELOAD=$<TARGET_FILE:ascgen_common>
             $<TARGET_FILE:pgo_add_abs_inductor_test_codegen>
             --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/pgo_add_abs_inductor_test_codegen.xml
     DEPENDS pgo_add_abs_inductor_test_codegen

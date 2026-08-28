@@ -4387,7 +4387,6 @@ af::Status TilingCodeGenImpl::GenPGOByCoreNumFusedScheduleResultsGetTilingDefine
   auto core_num = BaseTypeUtils::DumpHardware(HardwareDef::CORENUM);
   tiling_func_.AddLine("    tiling_data->set_block_dim(block_dim_i);");
   tiling_func_.AddLine("    tiling_data->set_" + core_num + "(block_dim_i);");
-  size_t asc_graph_id = 0UL;
   for (const auto &asc_graph_namespace_map : namespace_map) {
     const std::string &asc_graph_namespace = "AscGraph" + std::to_string(asc_graph_namespace_map.first);
     tiling_func_.AddLine("    if (!" + asc_graph_namespace + "::PGOByCoreNumSearchTilingKey(vec" +
@@ -4395,7 +4394,6 @@ af::Status TilingCodeGenImpl::GenPGOByCoreNumFusedScheduleResultsGetTilingDefine
     tiling_func_.AddLine("      OP_LOGW(OP_NAME, \"Failed to get tiling of " + asc_graph_namespace + ".\");");
     tiling_func_.AddLine("      continue;");
     tiling_func_.AddLine("    }");
-    asc_graph_id++;
   }
   GenPGOByCoreNumSearchTilingKeyCollectTilingData(namespace_map);
   tiling_func_.AddLine("  }");
@@ -4412,7 +4410,6 @@ af::Status TilingCodeGenImpl::GenPGOFusedScheduleResultsGetTilingDefine(const Fu
                        config_.tiling_data_type_name + " &tiling_data, " +
                        " int32_t tiling_case_id, AutofuseTilingData* tilingData," + GenPgoTensorArgsDef() +
                        "void* stream, uint32_t workspaceSize, double& best_perf, const SearchConfig *search_cfg) {");
-  size_t asc_graph_id = 0UL;
   tiling_func_.AddLine("  OP_LOGI(OP_NAME, \"Start PGOSearchTilingKey root.\");");
   tiling_func_.AddLine("  (void)tilingData;");
   tiling_func_.AddLine("  PgoConfig::Instance().tensor_args = tensor_args;");
@@ -4424,7 +4421,6 @@ af::Status TilingCodeGenImpl::GenPGOFusedScheduleResultsGetTilingDefine(const Fu
   std::string block_dim_list_arg = "multi_group_block_dim_list";
   GenPGOMultiGroupBlockDimList(namespace_map, block_dim_list_arg);
 
-  asc_graph_id = 0UL;
   for (const auto &asc_graph_namespace_map : namespace_map) {
     const std::string &asc_graph_namespace = "AscGraph" + std::to_string(asc_graph_namespace_map.first);
     tiling_func_.AddLine("  if (!" + asc_graph_namespace +
@@ -4437,7 +4433,6 @@ af::Status TilingCodeGenImpl::GenPGOFusedScheduleResultsGetTilingDefine(const Fu
     tiling_func_.AddLine("    tiling_data = tilingTmp;");
     tiling_func_.AddLine("    best_perf = cur_perf;");
     tiling_func_.AddLine("  }");
-    asc_graph_id++;
   }
 
   tiling_func_.AddLine("  OP_LOGI(OP_NAME, \"End PGOSearchTilingKey root.\");");

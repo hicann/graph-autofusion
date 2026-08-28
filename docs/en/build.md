@@ -122,6 +122,14 @@ The following lists dependencies used for source code compilation. Pay attention
    sudo apt-get install cmake
    ```
 
+- GCC >= 7.3.0
+
+  > [!NOTE] Note
+  > - The default build uses the gcc/g++ already installed in the environment and does not change the system default compiler.
+  > - To switch to gcc15/gcc16, explicitly set `CC/CXX` before building, for example `export CC=gcc-15 CXX=g++-15`.
+  > - You can also set `GCC_VERSION=15` or `GCC_VERSION=16`; the scripts will generate the matching compiler commands.
+  > - After switching compilers, clean `build/` before reconfiguring so CMake does not reuse the old compiler cache.
+
 #### 4.2.2 Check Compilation Environment
 
 After environment preparation, execute the environment check script. Confirm whether the current environment meets compilation requirements.
