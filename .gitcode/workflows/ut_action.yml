@@ -9,6 +9,10 @@ on:
       ut_package:
         type: string
         default: 'ut_cov_*.tar.gz'
+      spec_size:
+        required: false
+        type: string
+        default: 'xlarge'
       repo_name:
         type: string
         default: 'graph-autofusion'
@@ -78,6 +82,9 @@ jobs:
             ${{ steps.process_checkout.outputs.path }}/test*.log
           object-prefix: ${{ env.obs_path }}/
     if: "${{ default() }}"
-    runs-on: ['self-hosted', 'arch=x64', 'spec=xlarge']
+    runs-on:
+      - self-hosted
+      - arch=x64
+      - spec=${{ inputs.spec_size }}
     container:
       image: swr.cn-north-4.myhuaweicloud.com/ci_cann/${{ inputs.image_version }}
