@@ -550,6 +550,19 @@ Status ApplyIndirectLoadTemplateMerge(ascir::ImplGraph &graph, const af::AscNode
   return af::SUCCESS;
 }
 
+Status SetOuterRepeatsToOne(const af::AscNodePtr &node, const std::vector<ascir::AxisId> &vectorized_axes) {
+  if (node->attr.api.compute_type != af::ComputeType::kComputeReduce) {
+    return af::SUCCESS;
+  }
+  GE_ASSERT_TRUE(!vectorized_axes.empty(), "Node[%s] has no IndirectLoad vector axes.", node->GetNamePtr());
+  for (const auto &output : node->outputs()) {
+    GE_ASSERT_TRUE(output->attr.axis.size() == output->attr.repeats.size());
+    GE_ASSERT_TRUE(output->attr.axis.size() >= vectorized_axes.size());
+    std::fill_n(output->attr.repeats.begin(), output->attr.axis.size() - vectorized_axes.size(), af::sym::kSymbolOne);
+  }
+  return af::SUCCESS;
+}
+
 Status SetInputInnerVectorizedView(const af::AscNodePtr &node, const ascir::Axis &input_inner_axis,
                                    af::AscTensorAttr &attr) {
   GE_ASSERT_TRUE(attr.axis.size() == attr.repeats.size() && attr.axis.size() == attr.strides.size(),
@@ -607,40 +620,6 @@ Status ApplyInputInnerVectorizedAxis(ascir::ImplGraph &graph, const af::AscNodeP
   return af::SUCCESS;
 }
 
-Status SetOuterRepeatsToOne(const af::AscNodePtr &node, const std::vector<ascir::AxisId> &vectorized_axes) {
-  GE_ASSERT_TRUE(!vectorized_axes.empty(), "Node[%s] has no IndirectLoad vector axes.", node->GetNamePtr());
-  for (const auto &output : node->outputs()) {
-    GE_ASSERT_TRUE(output->attr.axis.size() == output->attr.repeats.size());
-    GE_ASSERT_TRUE(output->attr.axis.size() >= vectorized_axes.size());
-    std::fill_n(output->attr.repeats.begin(), output->attr.axis.size() - vectorized_axes.size(), af::sym::kSymbolOne);
-  }
-  return af::SUCCESS;
-}
-
-Status SetReduceInputVectorizedView(const af::AscNodePtr &reduce, const af::AscNodePtr &input_producer,
-                                    const std::vector<ascir::AxisId> &vectorized_axes) {
-  GE_ASSERT_TRUE(!vectorized_axes.empty(), "Reduce node[%s] has no IndirectLoad vector axes.", reduce->GetNamePtr());
-  for (size_t i = 0UL; i < reduce->inputs.Size(); ++i) {
-    if (ascgen_utils::indirect_load::GetInputProducer(reduce, i) != input_producer) {
-      continue;
-    }
-    auto &input = reduce->inputs[i].attr;
-    GE_ASSERT_TRUE(input.axis.size() == input.strides.size());
-    input.vectorized_axis = vectorized_axes;
-    input.vectorized_strides.clear();
-    input.vectorized_strides.reserve(vectorized_axes.size());
-    for (ascir::AxisId axis : vectorized_axes) {
-      const auto iter = std::find(input.axis.begin(), input.axis.end(), axis);
-      GE_ASSERT_TRUE(iter != input.axis.end(), "Reduce node[%s] has no IndirectLoad vector axis[%ld].",
-                     reduce->GetNamePtr(), axis);
-      input.vectorized_strides.emplace_back(
-          input.strides[static_cast<size_t>(std::distance(input.axis.begin(), iter))]);
-    }
-    return af::SUCCESS;
-  }
-  GELOGE(af::FAILED, "Reduce node[%s] is not connected to IndirectLoad output path.", reduce->GetNamePtr());
-  return af::FAILED;
-}
 }  // namespace
 
 Status Scheduler::InitIndirectLoadScheduleCase() {
@@ -659,11 +638,6 @@ Status Scheduler::InitIndirectLoadScheduleCase() {
   }
   GE_ASSERT_NOTNULL(tiling_case_.ub_tiling_y.first);
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, indirect_load_info_.axes));
-  indirect_load_info_.reduce = ascgen_utils::indirect_load::GetPostReduceConsumer(indirect_load);
-  if (indirect_load_info_.reduce != nullptr) {
-    indirect_load_info_.reduce_input = ascgen_utils::indirect_load::GetPostReduceInputProducer(indirect_load);
-    GE_ASSERT_NOTNULL(indirect_load_info_.reduce_input, "IndirectLoad post Reduce input producer is missing.");
-  }
   indirect_load_info_.active = true;
   return af::SUCCESS;
 }
@@ -694,11 +668,7 @@ Status Scheduler::ApplyIndirectLoadNodeAxes(const af::AscNodePtr &node, bool &sk
     return af::SUCCESS;
   }
   GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_info_.axes.inner_axis, false));
-  if (node == indirect_load_info_.reduce) {
-    GE_ASSERT_SUCCESS(SetOuterRepeatsToOne(node, indirect_load_info_.axes.vectorized_axes));
-    GE_ASSERT_SUCCESS(
-        SetReduceInputVectorizedView(node, indirect_load_info_.reduce_input, indirect_load_info_.axes.vectorized_axes));
-  }
+  GE_ASSERT_SUCCESS(SetOuterRepeatsToOne(node, indirect_load_info_.axes.vectorized_axes));
   return af::SUCCESS;
 }
 

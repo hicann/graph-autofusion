@@ -20,6 +20,7 @@
 #include "platform_context.h"
 #include "runtime_stub.h"
 #include "utils/api_call_factory.h"
+#include "v35/ascir/generator/v2_ascir_codegen_impl.h"
 #include "v35/codegen/reg_api_call/reg_indirect_load_api_call.h"
 
 using namespace af::ops;
@@ -28,6 +29,14 @@ using namespace codegen;
 using namespace ascgen_utils::indirect_load;
 
 namespace {
+
+TEST(IndirectLoadCodegenImplTest, LoadsApiHeadersInDeclarationOrder) {
+  const auto headers = af::ascir::IndirectLoadAscIrCodegenImplV2().LoadApiHeaderFiles(false);
+  const std::vector<std::string> expected = {"datacopy_reg_base.h", "indirect_load_simd_policy_reg_base.h",
+                                             "indirect_load_simd_reg_base.h", "indirect_load_sk_reg_base.h",
+                                             "indirect_load_simt_reg_base.h"};
+  EXPECT_EQ(headers, expected);
+}
 
 struct ILTestGraph {
   af::AscGraph graph;
@@ -871,15 +880,17 @@ TEST(IndirectLoadApiCallTest, GenerateSimdProducesIndirectLoadSimdCall) {
   std::string result;
   GenerateSimdCall(ge::DT_FLOAT16, result);
   EXPECT_NE(result.find("// IndirectLoad SIMD"), std::string::npos);
-  EXPECT_NE(result.find("IndirectLoadSimd<half, int32_t, 2, 1>"), std::string::npos);
+  EXPECT_NE(result.find("IndirectLoadSimdStrided<half, int32_t, 2, 1>"), std::string::npos);
   // Symbolic sizes are dynamic shapes, which use the strided path and require a temporary UB buffer.
   EXPECT_NE(result.find("tmp_buf_0"), std::string::npos);
+  EXPECT_NE(result.find("indirect_load_simd_params{static_cast<uint32_t>("), std::string::npos);
+  EXPECT_NE(result.find("), static_cast<uint32_t>("), std::string::npos);
 }
 
 TEST(IndirectLoadApiCallTest, GenerateSimdUint32InputProducesTypedCall) {
   std::string result;
   GenerateSimdCall(ge::DT_UINT32, result);
-  EXPECT_NE(result.find("IndirectLoadSimd<uint32_t, int32_t, 2, 1>"), std::string::npos);
+  EXPECT_NE(result.find("IndirectLoadSimdStrided<uint32_t, int32_t, 2, 1>"), std::string::npos);
 }
 
 // ==================== SIMT Init + GenerateFuncDefinition ====================

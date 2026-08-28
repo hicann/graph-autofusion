@@ -22,6 +22,7 @@ struct SimtGmTensor {
   ascir::TensorId value_tensor_id;
   ascir::TensorId gm_tensor_id;
   af::DataType dtype;
+  bool is_scalar{false};
 };
 
 class IndirectLoadRegApiCall final : public ApiCall {

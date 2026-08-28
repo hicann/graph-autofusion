@@ -41,6 +41,19 @@ constexpr char kTilingStub[] = R"(
 #define GET_TILING_DATA(t, tiling) AutofuseTilingData t = *(AutofuseTilingData *)tiling;
 )";
 
+inline bool HasSimdApi(const std::string &kernel) {
+  return kernel.find("IndirectLoadSimd<") != std::string::npos ||
+         kernel.find("IndirectLoadSimdStrided<") != std::string::npos;
+}
+
+inline bool HasSimtApi(const std::string &kernel) {
+  // The generated source always emits the API call with the AscendC namespace.
+  // Do not match the unqualified helper calls (e.g. LaunchIndirectLoadSimt<)
+  // from indirect_load_simt_reg_base.h, which is included unconditionally.
+  return kernel.find("AscendC::IndirectLoadSimt<") != std::string::npos ||
+         kernel.find("AscendC::IndirectLoadSimtMulti<") != std::string::npos;
+}
+
 template <typename Op>
 void SetView(Op &op, const std::vector<af::AxisId> &axes, const std::vector<af::Expression> &repeats,
              const std::vector<af::Expression> &strides, af::DataType dtype) {
@@ -468,6 +481,15 @@ std::vector<std::string> GetCallArguments(const std::string &function, const cha
   return arguments;
 }
 
+const char *GetSimdApiName(const std::string &kernel) {
+  return kernel.find("IndirectLoadSimdStrided<") != std::string::npos ? "IndirectLoadSimdStrided<"
+                                                                      : "IndirectLoadSimd<";
+}
+
+const char *GetSimtApiName(const std::string &kernel) {
+  return kernel.find("IndirectLoadSimtMulti<") != std::string::npos ? "IndirectLoadSimtMulti<" : "IndirectLoadSimt<";
+}
+
 void ExpectBlockSplitFramework(const std::string &function, const char *outer_axes) {
   EXPECT_NE(function.find(outer_axes), std::string::npos);
   EXPECT_TRUE(ContainsInOrder(function, {"indirect_load_outerTb_axis_size = t->indirect_load_outerTb_size",
@@ -481,12 +503,16 @@ void ExpectSimdFramework(const std::string &kernel) {
   const std::string function = GetFunctionContaining(kernel, "// IndirectLoad SIMD");
   ExpectBlockSplitFramework(function, "indirect_load_outer_axis_size = z4_loop_size * z5_loop_size * 1");
   EXPECT_NE(function.find("indirect_load_outert_axis_size = 1"), std::string::npos);
-  EXPECT_TRUE(
-      ContainsInOrder(function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert", "CopySignExtend(",
-                                 "// IndirectLoad SIMD", "IndirectLoadSimd<", "CopySignExtend("}));
+  const char *simd_api = GetSimdApiName(function);
+  EXPECT_TRUE(ContainsInOrder(function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert",
+                                         "CopySignExtend(", "// IndirectLoad SIMD", simd_api, "CopySignExtend("}));
   EXPECT_TRUE(ContainsInOrder(function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert", "VfNode_0",
                                          "// IndirectLoad SIMD"}));
-  const std::vector<std::string> arguments = GetCallArguments(function, "IndirectLoadSimd<");
+  if (std::string(simd_api) == "IndirectLoadSimdStrided<") {
+    EXPECT_NE(function.find("indirect_load_simd_params"), std::string::npos);
+    return;
+  }
+  const std::vector<std::string> arguments = GetCallArguments(function, simd_api);
   ASSERT_GT(arguments.size(), 4UL);
   const std::string &actual_size = arguments[3UL];
   EXPECT_NE(
@@ -508,25 +534,27 @@ void ExpectPostReduceSimtFramework(const std::string &kernel) {
   const std::string vector_size = std::to_string(IL_INDEX_S2 * IL_INDEX_S3);
   const std::string actual_size = "static_cast<uint32_t>(" + vector_size + ")";
   const std::string offset_scale = "* " + vector_size;
-  const std::vector<std::string> arguments = GetCallArguments(function, "IndirectLoadSimt<");
+  const char *simt_api = GetSimtApiName(function);
+  const std::vector<std::string> arguments = GetCallArguments(function, simt_api);
   ASSERT_GT(arguments.size(), 5UL);
   EXPECT_EQ(arguments[3UL], actual_size);
   EXPECT_TRUE(ContainsInOrder(arguments[4UL], {"block_dim_offset", "indirect_load_outerTb", offset_scale.c_str()}));
   EXPECT_TRUE(ContainsInOrder(
-      function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert", "// IndirectLoad SIMT",
-                 "IndirectLoadSimt<", actual_size.c_str(), "PipeBarrier<PIPE_V>", "ReduceSum", "DataCopyPadExtend"}));
+      function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert", "// IndirectLoad SIMT", simt_api,
+                 actual_size.c_str(), "PipeBarrier<PIPE_V>", "ReduceSum", "DataCopyPadExtend"}));
 }
 
 void ExpectNoReduceSimtFramework(const std::string &kernel) {
   const std::string function = GetFunctionContaining(kernel, "// IndirectLoad SIMT");
   ExpectBlockSplitFramework(
       function, "indirect_load_outer_axis_size = z4_loop_size * z5_loop_size * z6_loop_size * z7_loop_size * 1");
-  const std::vector<std::string> arguments = GetCallArguments(function, "IndirectLoadSimt<");
+  const char *simt_api = GetSimtApiName(function);
+  const std::vector<std::string> arguments = GetCallArguments(function, simt_api);
   ASSERT_GT(arguments.size(), 5UL);
   EXPECT_EQ(arguments[3UL], "static_cast<uint32_t>(indirect_load_outerTb_loop_size)");
   EXPECT_NE(arguments[4UL].find("block_dim_offset"), std::string::npos);
   EXPECT_TRUE(
-      ContainsInOrder(function, {"block_dim_offset", "// IndirectLoad SIMT", "IndirectLoadSimt<",
+      ContainsInOrder(function, {"block_dim_offset", "// IndirectLoad SIMT", simt_api,
                                  "static_cast<uint32_t>(indirect_load_outerTb_loop_size)", "block_dim_offset"}));
   EXPECT_EQ(function.find("for (int indirect_load_outerTb"), std::string::npos);
   EXPECT_EQ(function.find("ReduceSum"), std::string::npos);
@@ -1116,7 +1144,13 @@ void ExpectGeneratedTemplates(const std::string &kernel) {
     const bool is_expected = (kExpectedTemplates & TemplateMask(kIndirectLoadTemplates[i])) != 0U;
     if (is_expected) {
       EXPECT_NE(kernel.find(kMarkers[i]), std::string::npos) << kMarkers[i];
-      EXPECT_NE(kernel.find(apis[i]), std::string::npos) << apis[i];
+      if (kIndirectLoadTemplates[i] == ascir::TemplateId::kIndirectLoadSimd) {
+        EXPECT_TRUE(indirect_load_test::HasSimdApi(kernel));
+      } else if (kIndirectLoadTemplates[i] == ascir::TemplateId::kIndirectLoadSimt) {
+        EXPECT_TRUE(indirect_load_test::HasSimtApi(kernel));
+      } else {
+        EXPECT_NE(kernel.find(apis[i]), std::string::npos) << apis[i];
+      }
       if (kIndirectLoadTemplates[i] == ascir::TemplateId::kIndirectLoadSimd) {
 #if defined(IL_INPUT_OUTER_STRIDE) || !defined(IL_STATIC_SHAPE)
         EXPECT_EQ(kernel.find("IndirectLoadSimdGatherApi<"), std::string::npos);
@@ -1126,7 +1160,13 @@ void ExpectGeneratedTemplates(const std::string &kernel) {
       }
     } else {
       EXPECT_EQ(kernel.find(kMarkers[i]), std::string::npos) << kMarkers[i];
-      EXPECT_EQ(kernel.find(apis[i]), std::string::npos) << apis[i];
+      if (kIndirectLoadTemplates[i] == ascir::TemplateId::kIndirectLoadSimd) {
+        EXPECT_FALSE(indirect_load_test::HasSimdApi(kernel));
+      } else if (kIndirectLoadTemplates[i] == ascir::TemplateId::kIndirectLoadSimt) {
+        EXPECT_FALSE(indirect_load_test::HasSimtApi(kernel));
+      } else {
+        EXPECT_EQ(kernel.find(apis[i]), std::string::npos) << apis[i];
+      }
       if (kIndirectLoadTemplates[i] == ascir::TemplateId::kIndirectLoadSimd) {
         EXPECT_EQ(kernel.find("IndirectLoadSimdGatherApi<"), std::string::npos);
       }
@@ -1211,7 +1251,7 @@ void CheckGeneratedKernel(const std::string &kernel) {
 #ifdef IL_POST_REDUCE
 #if defined(IL_EXPECT_ONLY_SIMT) || defined(IL_EXPECT_SIMT_ONLY)
   EXPECT_EQ(kernel.find("// IndirectLoad SIMD"), std::string::npos);
-  EXPECT_EQ(kernel.find("IndirectLoadSimd<"), std::string::npos);
+  EXPECT_FALSE(indirect_load_test::HasSimdApi(kernel));
   ExpectPostReduceSimtFramework(kernel);
   const size_t simt_body = kernel.find("struct IndirectLoadSimtBody");
   const size_t index_func = kernel.find(" Index(", simt_body);
@@ -1234,7 +1274,7 @@ void CheckGeneratedKernel(const std::string &kernel) {
 #else
   EXPECT_NE(kernel.find("// IndirectLoad SIMD"), std::string::npos);
   EXPECT_NE(kernel.find("// IndirectLoad SIMT"), std::string::npos);
-  EXPECT_NE(kernel.find("IndirectLoadSimt<"), std::string::npos);
+  EXPECT_TRUE(indirect_load_test::HasSimtApi(kernel));
 #ifdef IL_POST_REDUCE_EXP2
   EXPECT_NE(kernel.find("Simt::Exp2("), std::string::npos);
 #endif
@@ -1256,10 +1296,12 @@ void CheckGeneratedKernel(const std::string &kernel) {
     EXPECT_EQ(kernel.find("IndirectLoadSimtKernel_"), std::string::npos);
   }
 #ifdef IL_DATA_BF16
-  EXPECT_NE(kernel.find("IndirectLoadSimt<bfloat16_t, bfloat16_t"), std::string::npos);
+  EXPECT_TRUE(kernel.find("IndirectLoadSimt<bfloat16_t, bfloat16_t") != std::string::npos ||
+              kernel.find("IndirectLoadSimtMulti<bfloat16_t") != std::string::npos);
 #endif
 #ifdef IL_DATA_UINT32
-  EXPECT_NE(kernel.find("IndirectLoadSimd<uint32_t, int32_t"), std::string::npos);
+  EXPECT_TRUE(kernel.find("IndirectLoadSimd<uint32_t, int32_t") != std::string::npos ||
+              kernel.find("IndirectLoadSimdStrided<uint32_t, int32_t") != std::string::npos);
 #endif
 #ifdef IL_MIXED_ELEMENTWISE
 #if !IL_EXPECT_SIMT
@@ -1975,9 +2017,8 @@ void BuildOutputPath(const BroadcastGraphView &view, af::ascir_op::IndirectLoad 
 }
 
 void BuildComplexIndexPath(const BroadcastGraphView &view, af::ascir_op::IndirectLoad &indirect_load) {
-  af::ascir_op::Data index("index");
+  af::ascir_op::Data index("index", *view.graph);
   af::ascir_op::Load index_load("index_load");
-  view.graph->AddNode(index);
   view.graph->AddNode(index_load);
   index.ir_attr.SetIndex(1);
   index_load.x = index.y;
@@ -2006,8 +2047,16 @@ void BuildComplexIndexPath(const BroadcastGraphView &view, af::ascir_op::Indirec
   broadcast1.x = scalar1.y;
   scalar_add.x1 = broadcast0.y;
   scalar_add.x2 = broadcast1.y;
-  const auto index_add = ConnectBinaryElement(view.graph, "index_add", index_load.y, scalar_add.y, view.index_source);
-  final_broadcast.x = index_add;
+  // Keep the temporary operator alive while wiring its output. Returning an
+  // AscOpOutput from a helper that owns a stack-allocated operator leaves a
+  // dangling operator pointer and crashes when the output is consumed.
+  af::ascir_op::Add index_add("index_add");
+  view.graph->AddNode(index_add);
+  index_add.x1 = index_load.y;
+  index_add.x2 = scalar_add.y;
+  index_add.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  SetView(index_add, view.index_source);
+  final_broadcast.x = index_add.y;
   SetView(scalar_add, view.index_source);
   SetView(final_broadcast, view.index_broadcast);
   indirect_load.x2 = final_broadcast.y;
@@ -2068,9 +2117,15 @@ void BuildComplexInputPath(const BroadcastGraphView &view, af::ascir_op::Indirec
   broadcast1.x = scalar1.y;
   scalar_add.x1 = broadcast0.y;
   scalar_add.x2 = broadcast1.y;
-  const auto input_add =
-      ConnectBinaryElement(view.graph, "input_source_add", input_load.y, scalar_add.y, view.input_source);
-  final_broadcast.x = input_add;
+  // Wire the temporary add while its operator object is still alive; an
+  // AscOpOutput returned from a helper would retain a dangling stack pointer.
+  af::ascir_op::Add input_add("input_source_add");
+  view.graph->AddNode(input_add);
+  input_add.x1 = input_load.y;
+  input_add.x2 = scalar_add.y;
+  input_add.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  SetView(input_add, view.input_source);
+  final_broadcast.x = input_add.y;
   SetView(scalar_add, view.input_source);
   SetView(final_broadcast, view.input_broadcast);
   indirect_load.x1 = final_broadcast.y;
@@ -2150,7 +2205,7 @@ void CheckSkKernel(const std::string &kernel) {
 
 void CheckSimtKernel(const std::string &kernel) {
   EXPECT_NE(kernel.find("// IndirectLoad SIMT"), std::string::npos);
-  EXPECT_NE(kernel.find("IndirectLoadSimt<"), std::string::npos);
+  EXPECT_TRUE(indirect_load_test::HasSimtApi(kernel));
   EXPECT_EQ(kernel.find("// IndirectLoad SIMD"), std::string::npos);
   if constexpr (kOutputS0 == 4 && kOutputS1 == 5 && kOutputS2 == 4 && kOutputS3 == 16) {
     EXPECT_NE(kernel.find(MakeShapeArgs(false)), std::string::npos);
@@ -2174,7 +2229,7 @@ void CheckSimdElements(const std::string &kernel) {
 
 void CheckSimdKernel(const std::string &kernel) {
   EXPECT_NE(kernel.find("// IndirectLoad SIMD"), std::string::npos);
-  EXPECT_NE(kernel.find("IndirectLoadSimd<"), std::string::npos);
+  EXPECT_TRUE(indirect_load_test::HasSimdApi(kernel));
   if constexpr (kDegenerateBroadcast) {
     EXPECT_NE(kernel.find(", 20, 10, 10, 20, 20, 4000, 400, 20, 1);"), std::string::npos);
     EXPECT_NE(kernel.find("Duplicate(local_7[0], local_6.GetValue(0), local_7_actual_size);"), std::string::npos);
@@ -2186,7 +2241,8 @@ void CheckSimdKernel(const std::string &kernel) {
     EXPECT_NE(kernel.find("ReduceSum"), std::string::npos);
 #else
     if constexpr (!(kIndexBroadcast && kBroadcastAxesMask == 0U) && !kIndexBinarySameView) {
-      EXPECT_NE(kernel.find(MakeShapeArgs(false)), std::string::npos);
+      EXPECT_TRUE(kernel.find(MakeShapeArgs(false)) != std::string::npos ||
+                  kernel.find("IndirectLoadSimdStridedParams<") != std::string::npos);
     }
 #endif
   }
@@ -2361,7 +2417,7 @@ TEST_F(TestBackendIndirectLoadBroadcastE2e, IndirectLoadBroadcastCodegen) {
     codegen::Codegen codegen(codegen::CodegenOptions{});
     codegen::CodegenResult result;
     ASSERT_EQ(codegen.Generate(shape_info, scheduled_result, result), af::SUCCESS);
-    EXPECT_NE(result.kernel.find(kExpectSimt ? "IndirectLoadSimt<" : "IndirectLoadSimd<"), std::string::npos);
+    EXPECT_NE(result.kernel.find(kExpectSimt ? "IndirectLoadSimt" : "IndirectLoadSimd"), std::string::npos);
     if constexpr (kExpectSimt) {
       EXPECT_EQ(result.kernel.find("BroadcastExtend<"), std::string::npos);
     } else {
@@ -2393,9 +2449,11 @@ TEST_F(TestBackendIndirectLoadBroadcastE2e, IndirectLoadBroadcastCodegen) {
     codegen::Codegen codegen(codegen::CodegenOptions{});
     codegen::CodegenResult result;
     ASSERT_EQ(codegen.Generate(shape_info, scheduled_result, result), af::SUCCESS);
-    EXPECT_NE(result.kernel.find(expected_template == ascir::TemplateId::kIndirectLoadSimd ? "IndirectLoadSimd<"
-                                                                                           : "IndirectLoadSimt<"),
-              std::string::npos);
+    if (expected_template == ascir::TemplateId::kIndirectLoadSimd) {
+      EXPECT_TRUE(indirect_load_test::HasSimdApi(result.kernel));
+    } else {
+      EXPECT_TRUE(indirect_load_test::HasSimtApi(result.kernel));
+    }
     const bool has_binary_element =
         result.kernel.find("Add(") != std::string::npos || result.kernel.find("Mul(") != std::string::npos ||
         result.kernel.find("Sub(") != std::string::npos || result.kernel.find("Maximum(") != std::string::npos;
@@ -2422,7 +2480,9 @@ TEST_F(TestBackendIndirectLoadBroadcastE2e, IndirectLoadBroadcastCodegen) {
 
 #endif
 
-#if defined(IL_CASE_BROADCAST_WHERE)
+#if defined(IL_USER_FANOUT) || defined(IL_CASE_BROADCAST_WHERE) || defined(IL_GRAPH_HINT_REDUCE) ||   \
+    defined(IL_USER_EMBEDDING_SUM) || defined(IL_USER_EMBEDDING_MUL) || defined(IL_USER_LAYERNORM) || \
+    defined(IL_USER_LAYERNORM_SIMD) || defined(IL_USER_EMBEDDING_EXP_ABS_ADD) || defined(IL_DUAL_IL_GATHER)
 /**
  * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
@@ -2436,8 +2496,794 @@ TEST_F(TestBackendIndirectLoadBroadcastE2e, IndirectLoadBroadcastCodegen) {
 namespace {
 using indirect_load_test::SetView;
 
+#if defined(IL_USER_FANOUT)
+constexpr int64_t kUserFanoutRows = 2;
+constexpr int64_t kUserFanoutDim = 16;
+constexpr int64_t kUserFanoutTableRows = 32;
+constexpr char kUserFanoutGraphName[] = "user_fanout";
+
+std::shared_ptr<af::AscGraph> CreateUserFanoutSubGraph() {
+  auto graph = std::make_shared<af::AscGraph>(kUserFanoutGraphName);
+  const auto rows = graph->CreateSizeVar(kUserFanoutRows);
+  const auto dim = graph->CreateSizeVar(kUserFanoutDim);
+  const auto table_rows = graph->CreateSizeVar(kUserFanoutTableRows);
+  const auto a0 = graph->CreateAxis("a0", rows).id;
+  const auto a1 = graph->CreateAxis("a1", dim).id;
+  const std::vector<af::AxisId> axes = {a0, a1};
+  const std::vector<af::Expression> full = {rows, dim};
+  const std::vector<af::Expression> full_strides = {dim, af::ops::One};
+  const std::vector<af::Expression> row = {rows, af::ops::One};
+  const std::vector<af::Expression> row_strides = {af::ops::One, af::ops::Zero};
+
+  af::ascir_op::Data indices("indices", *graph);
+  indices.ir_attr.SetIndex(0);
+  indices.y.dtype = af::DT_INT64;
+  af::ascir_op::Load index_load("index_load");
+  graph->AddNode(index_load);
+  index_load.x = indices.y;
+  index_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(index_load, axes, row, row_strides, af::DT_INT64);
+  af::ascir_op::Broadcast index_broadcast("index_broadcast");
+  graph->AddNode(index_broadcast);
+  index_broadcast.x = index_load.y;
+  SetView(index_broadcast, axes, full, full_strides, af::DT_INT64);
+
+  af::ascir_op::Data embedding("embedding", *graph);
+  embedding.ir_attr.SetIndex(1);
+  embedding.y.dtype = af::DT_BF16;
+  af::ascir_op::Load embedding_load("embedding_load");
+  graph->AddNode(embedding_load);
+  embedding_load.x = embedding.y;
+  embedding_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(embedding_load, axes, {table_rows, dim}, full_strides, af::DT_BF16);
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  graph->AddNode(indirect_load);
+  indirect_load.x1 = embedding_load.y;
+  indirect_load.x2 = index_broadcast.y;
+  indirect_load.ir_attr.SetAxis(0);
+  indirect_load.ir_attr.SetNegative_index_support(true);
+  indirect_load.ir_attr.SetNeed_check_bound(true);
+  indirect_load.ir_attr.SetMax(table_rows);
+  SetView(indirect_load, axes, full, full_strides, af::DT_BF16);
+
+  // Keep the third fused-graph input slot required by the two-output backend
+  // descriptor; this input is intentionally unused by the fan-out paths.
+  af::ascir_op::Data weight("weight", *graph);
+  weight.ir_attr.SetIndex(2);
+  weight.y.dtype = af::DT_BF16;
+
+#if defined(IL_USER_FANOUT_POST)
+  af::ascir_op::Abs shared("shared");
+  graph->AddNode(shared);
+  shared.x = indirect_load.y;
+  SetView(shared, axes, full, full_strides, af::DT_BF16);
+  const auto *source = &shared.y;
+#else
+  const auto *source = &indirect_load.y;
+#endif
+
+  af::ascir_op::Exp first("first");
+  graph->AddNode(first);
+  first.x = *source;
+  SetView(first, axes, full, full_strides, af::DT_BF16);
+  af::ascir_op::Store first_store("first_store");
+  graph->AddNode(first_store);
+  first_store.x = first.y;
+  SetView(first_store, axes, full, full_strides, af::DT_BF16);
+  af::ascir_op::Output first_output("first_output");
+  graph->AddNode(first_output);
+  first_output.ir_attr.SetIndex(0);
+  first_output.x = first_store.y;
+  SetView(first_output, axes, full, full_strides, af::DT_BF16);
+
+#if defined(IL_USER_FANOUT_REDUCE)
+  // Keep the reduction path in FP32, matching the backend's reduce contract.
+  af::ascir_op::Cast reduce_input("reduce_input");
+  graph->AddNode(reduce_input);
+  reduce_input.x = *source;
+  SetView(reduce_input, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Mul square("square");
+  graph->AddNode(square);
+  square.x1 = reduce_input.y;
+  square.x2 = reduce_input.y;
+  SetView(square, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Sum reduce("reduce");
+  graph->AddNode(reduce);
+  reduce.attr.api.compute_type = af::ComputeType::kComputeReduce;
+  reduce.attr.sched.axis = axes;
+  reduce.x = square.y;
+  SetView(reduce, axes, row, row_strides, af::DT_FLOAT);
+  af::ascir_op::Cast reduced_bf16("reduced_bf16");
+  graph->AddNode(reduced_bf16);
+  reduced_bf16.x = reduce.y;
+  SetView(reduced_bf16, axes, row, row_strides, af::DT_BF16);
+  af::ascir_op::Store second_store("second_store");
+  graph->AddNode(second_store);
+  second_store.x = reduced_bf16.y;
+  SetView(second_store, axes, row, row_strides, af::DT_BF16);
+#else
+  af::ascir_op::Abs second("second");
+  graph->AddNode(second);
+  second.x = *source;
+  SetView(second, axes, full, full_strides, af::DT_BF16);
+  af::ascir_op::Store second_store("second_store");
+  graph->AddNode(second_store);
+  second_store.x = second.y;
+  SetView(second_store, axes, full, full_strides, af::DT_BF16);
+#endif
+  af::ascir_op::Output second_output("second_output");
+  graph->AddNode(second_output);
+  second_output.ir_attr.SetIndex(1);
+  second_output.x = second_store.y;
+#if defined(IL_USER_FANOUT_REDUCE)
+  SetView(second_output, axes, row, row_strides, af::DT_BF16);
+#else
+  SetView(second_output, axes, full, full_strides, af::DT_BF16);
+#endif
+  return graph;
+}
+#endif
+
 #ifndef IL_ADD_IL_REDUCE
-#ifdef IL_EMBEDDING_REDUCE
+#if defined(IL_USER_EMBEDDING_SUM)
+constexpr int64_t kUserEmbeddingSumLookups = 4;
+constexpr int64_t kUserEmbeddingSumDim = 16;
+constexpr int64_t kUserEmbeddingSumTableRows = 100;
+constexpr char kUserEmbeddingSumGraphName[] = "user_embedding_sum";
+
+std::shared_ptr<af::AscGraph> CreateUserEmbeddingSumSubGraph() {
+  auto graph = std::make_shared<af::AscGraph>(kUserEmbeddingSumGraphName);
+  const auto rows = graph->CreateSizeVar("ks0");
+  const auto dim = graph->CreateSizeVar(kUserEmbeddingSumDim);
+  const auto lookups = graph->CreateSizeVar(kUserEmbeddingSumLookups);
+  const auto table_rows = graph->CreateSizeVar(kUserEmbeddingSumTableRows);
+  // The source graph carries an independent physical stride (s44) for the
+  // lookup tensor; it is not implied by the lookup count.
+  const auto index_stride = graph->CreateSizeVar("s44");
+  const auto a0 = graph->CreateAxis("a0", rows).id;
+  const auto a1 = graph->CreateAxis("a1", dim).id;
+  const auto a2 = graph->CreateAxis("a2", lookups).id;
+  const std::vector<af::AxisId> axes = {a0, a1, a2};
+  const std::vector<af::Expression> full = {rows, dim, lookups};
+  const std::vector<af::Expression> full_strides = {dim * lookups, lookups, af::ops::One};
+
+  af::ascir_op::Data indices("indices", *graph);
+  indices.ir_attr.SetIndex(1);
+  indices.y.dtype = af::DT_INT32;
+  af::ascir_op::Load index_load("index_load");
+  graph->AddNode(index_load);
+  index_load.x = indices.y;
+  SetView(index_load, axes, {rows, af::ops::One, lookups}, {index_stride, af::ops::Zero, af::ops::One}, af::DT_INT32);
+  af::ascir_op::Broadcast index_broadcast("index_broadcast");
+  graph->AddNode(index_broadcast);
+  index_broadcast.x = index_load.y;
+  SetView(index_broadcast, axes, full, full_strides, af::DT_INT32);
+
+  af::ascir_op::Data table("table", *graph);
+  table.ir_attr.SetIndex(0);
+  table.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load table_load("table_load");
+  graph->AddNode(table_load);
+  table_load.x = table.y;
+  // In the source GraphHint this view is [ks0, 16, 1], while the backing
+  // embedding table may have more rows; IndirectLoad supplies the row index.
+  SetView(table_load, axes, {rows, dim, af::ops::One}, {dim, af::ops::One, af::ops::Zero}, af::DT_FLOAT);
+  af::ascir_op::Broadcast table_broadcast("table_broadcast");
+  graph->AddNode(table_broadcast);
+  table_broadcast.x = table_load.y;
+  SetView(table_broadcast, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  graph->AddNode(indirect_load);
+  indirect_load.x1 = table_broadcast.y;
+  indirect_load.x2 = index_broadcast.y;
+  indirect_load.ir_attr.SetAxis(0);
+  indirect_load.ir_attr.SetNegative_index_support(true);
+  indirect_load.ir_attr.SetNeed_check_bound(true);
+  indirect_load.ir_attr.SetMax(table_rows);
+  SetView(indirect_load, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::Sum sum("sum");
+  graph->AddNode(sum);
+  sum.x = indirect_load.y;
+  SetView(sum, axes, {rows, dim, af::ops::One}, {dim, af::ops::One, af::ops::Zero}, af::DT_FLOAT);
+  af::ascir_op::Store store("store");
+  graph->AddNode(store);
+  store.x = sum.y;
+  SetView(store, axes, {rows, dim, af::ops::One}, {dim, af::ops::One, af::ops::Zero}, af::DT_FLOAT);
+  af::ascir_op::Output output("output");
+  graph->AddNode(output);
+  output.ir_attr.SetIndex(0);
+  output.x = store.y;
+  SetView(output, axes, {rows, dim, af::ops::One}, {dim, af::ops::One, af::ops::Zero}, af::DT_FLOAT);
+  return graph;
+}
+#elif defined(IL_USER_EMBEDDING_MUL)
+constexpr int64_t kUserEmbeddingMulRows = 1024;
+constexpr int64_t kUserEmbeddingMulDim = 2048;
+constexpr int64_t kUserEmbeddingMulTableRows = 151936;
+constexpr char kUserEmbeddingMulGraphName[] = "user_embedding_mul";
+
+std::shared_ptr<af::AscGraph> CreateUserEmbeddingMulSubGraph() {
+  auto graph = std::make_shared<af::AscGraph>(kUserEmbeddingMulGraphName);
+  const auto rows = graph->CreateSizeVar(kUserEmbeddingMulRows);
+  const auto dim = graph->CreateSizeVar(kUserEmbeddingMulDim);
+  const auto table_rows = graph->CreateSizeVar(kUserEmbeddingMulTableRows);
+  const auto a0 = graph->CreateAxis("a0", rows).id;
+  const auto a1 = graph->CreateAxis("a1", dim).id;
+  const std::vector<af::AxisId> axes = {a0, a1};
+  const std::vector<af::Expression> full = {rows, dim};
+  const std::vector<af::Expression> full_strides = {dim, af::ops::One};
+
+  af::ascir_op::Data indices("indices", *graph);
+  indices.ir_attr.SetIndex(1);
+  af::ascir_op::Load index_load("index_load");
+  graph->AddNode(index_load);
+  index_load.x = indices.y;
+  SetView(index_load, axes, {rows, af::ops::One}, {af::ops::One, af::ops::Zero}, af::DT_INT64);
+  af::ascir_op::Broadcast index_broadcast("index_broadcast");
+  graph->AddNode(index_broadcast);
+  index_broadcast.x = index_load.y;
+  SetView(index_broadcast, axes, full, full_strides, af::DT_INT64);
+
+  af::ascir_op::Data table("table", *graph);
+  table.ir_attr.SetIndex(0);
+  af::ascir_op::Load table_load("table_load");
+  graph->AddNode(table_load);
+  table_load.x = table.y;
+  SetView(table_load, axes, {table_rows, dim}, {dim, af::ops::One}, af::DT_FLOAT16);
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  graph->AddNode(indirect_load);
+  indirect_load.x1 = table_load.y;
+  indirect_load.x2 = index_broadcast.y;
+  indirect_load.ir_attr.SetAxis(0);
+  indirect_load.ir_attr.SetNegative_index_support(true);
+  indirect_load.ir_attr.SetNeed_check_bound(true);
+  indirect_load.ir_attr.SetMax(table_rows);
+  SetView(indirect_load, axes, full, full_strides, af::DT_FLOAT16);
+
+  af::ascir_op::Cast cast("cast");
+  graph->AddNode(cast);
+  cast.x = indirect_load.y;
+  SetView(cast, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::ScalarData scale("scale", *graph);
+  scale.ir_attr.SetIndex(2);
+  scale.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Broadcast scale_broadcast("scale_broadcast");
+  graph->AddNode(scale_broadcast);
+  scale_broadcast.x = scale.y;
+  SetView(scale_broadcast, axes, {rows, af::ops::One}, {af::ops::One, af::ops::Zero}, af::DT_FLOAT);
+  af::ascir_op::Broadcast scale_broadcast_full("scale_broadcast_full");
+  graph->AddNode(scale_broadcast_full);
+  scale_broadcast_full.x = scale_broadcast.y;
+  SetView(scale_broadcast_full, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Mul mul("mul");
+  graph->AddNode(mul);
+  mul.x1 = cast.y;
+  mul.x2 = scale_broadcast_full.y;
+  SetView(mul, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Cast cast1("cast1");
+  graph->AddNode(cast1);
+  cast1.x = mul.y;
+  SetView(cast1, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Cast cast2("cast2");
+  graph->AddNode(cast2);
+  cast2.x = cast1.y;
+  SetView(cast2, axes, full, full_strides, af::DT_FLOAT16);
+  af::ascir_op::Store store("store");
+  graph->AddNode(store);
+  store.x = cast2.y;
+  SetView(store, axes, full, full_strides, af::DT_FLOAT16);
+  af::ascir_op::Output output("output");
+  graph->AddNode(output);
+  output.ir_attr.SetIndex(0);
+  output.x = store.y;
+  SetView(output, axes, full, full_strides, af::DT_FLOAT16);
+  return graph;
+}
+#elif defined(IL_USER_EMBEDDING_EXP_ABS_ADD)
+// Shrunken version of the user graph: one embedding result fans out to Exp and
+// Abs, then merges through Add. The first two source dimensions are flattened
+// into the row axis, preserving the original [batch, sequence, hidden] layout.
+constexpr int64_t kUserEmbeddingExpAbsAddRows = 8;
+constexpr int64_t kUserEmbeddingExpAbsAddDim = 16;
+constexpr int64_t kUserEmbeddingExpAbsAddTableRows = 100;
+constexpr char kUserEmbeddingExpAbsAddGraphName[] = "user_embedding_exp_abs_add";
+
+std::shared_ptr<af::AscGraph> CreateUserEmbeddingExpAbsAddSubGraph() {
+  auto graph = std::make_shared<af::AscGraph>(kUserEmbeddingExpAbsAddGraphName);
+  const auto rows = graph->CreateSizeVar(kUserEmbeddingExpAbsAddRows);
+  const auto dim = graph->CreateSizeVar(kUserEmbeddingExpAbsAddDim);
+  const auto table_rows = graph->CreateSizeVar(kUserEmbeddingExpAbsAddTableRows);
+  const auto a0 = graph->CreateAxis("a0", rows).id;
+  const auto a1 = graph->CreateAxis("a1", dim).id;
+  const std::vector<af::AxisId> axes = {a0, a1};
+  const std::vector<af::Expression> full = {rows, dim};
+  const std::vector<af::Expression> full_strides = {dim, af::ops::One};
+  const std::vector<af::Expression> index = {rows, af::ops::One};
+  const std::vector<af::Expression> index_strides = {af::ops::One, af::ops::Zero};
+
+  af::ascir_op::Data indices("indices", *graph);
+  indices.ir_attr.SetIndex(0);
+  indices.y.dtype = af::DT_INT64;
+  af::ascir_op::Load index_load("index_load");
+  graph->AddNode(index_load);
+  index_load.x = indices.y;
+  index_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(index_load, axes, index, index_strides, af::DT_INT64);
+
+  af::ascir_op::Broadcast index_broadcast("index_broadcast");
+  graph->AddNode(index_broadcast);
+  index_broadcast.x = index_load.y;
+  SetView(index_broadcast, axes, full, full_strides, af::DT_INT64);
+
+  af::ascir_op::Data embedding("embedding", *graph);
+  embedding.ir_attr.SetIndex(1);
+  embedding.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load embedding_load("embedding_load");
+  graph->AddNode(embedding_load);
+  embedding_load.x = embedding.y;
+  embedding_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(embedding_load, axes, {table_rows, dim}, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  graph->AddNode(indirect_load);
+  indirect_load.x1 = embedding_load.y;
+  indirect_load.x2 = index_broadcast.y;
+  indirect_load.ir_attr.SetAxis(0);
+  indirect_load.ir_attr.SetNegative_index_support(true);
+  indirect_load.ir_attr.SetNeed_check_bound(true);
+  indirect_load.ir_attr.SetMax(table_rows);
+  SetView(indirect_load, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::Exp exp("exp");
+  graph->AddNode(exp);
+  exp.x = indirect_load.y;
+  SetView(exp, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Abs abs("abs");
+  graph->AddNode(abs);
+  abs.x = indirect_load.y;
+  SetView(abs, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Add add("add");
+  graph->AddNode(add);
+  add.x1 = exp.y;
+  add.x2 = abs.y;
+  SetView(add, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Store store("store");
+  graph->AddNode(store);
+  store.ir_attr.SetOffset(af::sym::kSymbolZero);
+  store.x = add.y;
+  SetView(store, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Output output("output");
+  graph->AddNode(output);
+  output.ir_attr.SetIndex(0);
+  output.x = store.y;
+  SetView(output, axes, full, full_strides, af::DT_FLOAT);
+  return graph;
+}
+#elif defined(IL_USER_LAYERNORM)
+#if defined(IL_USER_LAYERNORM_SIMD)
+constexpr int64_t kUserLayerNormRows = 2;
+constexpr int64_t kUserLayerNormDim = 16;
+constexpr int64_t kUserLayerNormTableRows = 100;
+#else
+constexpr int64_t kUserLayerNormRows = 21;
+constexpr int64_t kUserLayerNormDim = 2048;
+constexpr int64_t kUserLayerNormTableRows = 102400;
+#endif
+constexpr char kUserLayerNormGraphName[] = "user_layernorm";
+
+std::shared_ptr<af::AscGraph> CreateUserLayerNormSubGraph() {
+  auto graph = std::make_shared<af::AscGraph>(kUserLayerNormGraphName);
+  const auto rows = graph->CreateSizeVar(kUserLayerNormRows);
+  const auto dim = graph->CreateSizeVar(kUserLayerNormDim);
+  const auto table_rows = graph->CreateSizeVar(kUserLayerNormTableRows);
+  const auto a0 = graph->CreateAxis("a0", rows).id;
+  const auto a1 = graph->CreateAxis("a1", dim).id;
+  const std::vector<af::AxisId> axes = {a0, a1};
+  const std::vector<af::Expression> full = {rows, dim};
+  const std::vector<af::Expression> full_strides = {dim, af::ops::One};
+  const std::vector<af::Expression> row = {rows, af::ops::One};
+  const std::vector<af::Expression> row_strides = {af::ops::One, af::ops::Zero};
+
+  af::ascir_op::Data indices("indices", *graph);
+  indices.ir_attr.SetIndex(0);
+  indices.y.dtype = af::DT_INT64;
+  af::ascir_op::Load index_load("index_load");
+  graph->AddNode(index_load);
+  index_load.x = indices.y;
+  index_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(index_load, axes, row, row_strides, af::DT_INT64);
+  af::ascir_op::Broadcast index_broadcast("index_broadcast");
+  graph->AddNode(index_broadcast);
+  index_broadcast.x = index_load.y;
+  SetView(index_broadcast, axes, full, full_strides, af::DT_INT64);
+
+  af::ascir_op::Data embedding("embedding", *graph);
+  embedding.ir_attr.SetIndex(1);
+  embedding.y.dtype = af::DT_BF16;
+  af::ascir_op::Load embedding_load("embedding_load");
+  graph->AddNode(embedding_load);
+  embedding_load.x = embedding.y;
+  embedding_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(embedding_load, axes, {table_rows, dim}, full_strides, af::DT_BF16);
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  graph->AddNode(indirect_load);
+  indirect_load.x1 = embedding_load.y;
+  indirect_load.x2 = index_broadcast.y;
+  indirect_load.ir_attr.SetAxis(0);
+  indirect_load.ir_attr.SetNegative_index_support(true);
+  indirect_load.ir_attr.SetNeed_check_bound(true);
+  indirect_load.ir_attr.SetMax(table_rows);
+  SetView(indirect_load, axes, full, full_strides, af::DT_BF16);
+
+  af::ascir_op::Cast to_float("to_float");
+  graph->AddNode(to_float);
+  to_float.x = indirect_load.y;
+  SetView(to_float, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Cast raw_bf16("raw_bf16");
+  graph->AddNode(raw_bf16);
+  raw_bf16.x = to_float.y;
+  SetView(raw_bf16, axes, full, full_strides, af::DT_BF16);
+  af::ascir_op::Store raw_store("raw_store");
+  graph->AddNode(raw_store);
+  raw_store.x = raw_bf16.y;
+  SetView(raw_store, axes, full, full_strides, af::DT_BF16);
+  af::ascir_op::Output raw_output("raw_output");
+  graph->AddNode(raw_output);
+  raw_output.ir_attr.SetIndex(0);
+  raw_output.x = raw_store.y;
+  SetView(raw_output, axes, full, full_strides, af::DT_BF16);
+
+  af::ascir_op::Cast cast2("cast2");
+  graph->AddNode(cast2);
+  cast2.x = raw_bf16.y;
+  SetView(cast2, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Cast cast3("cast3");
+  graph->AddNode(cast3);
+  cast3.x = cast2.y;
+  SetView(cast3, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Mul square("square");
+  graph->AddNode(square);
+  square.x1 = cast3.y;
+  square.x2 = cast3.y;
+  SetView(square, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Sum square_sum("square_sum");
+  graph->AddNode(square_sum);
+  square_sum.attr.api.compute_type = af::ComputeType::kComputeReduce;
+  square_sum.attr.sched.axis = axes;
+  square_sum.x = square.y;
+  SetView(square_sum, axes, row, row_strides, af::DT_FLOAT);
+
+  // Preserve the third fused-graph input slot from the original LayerNorm
+  // graph; the reduced-only repro does not consume its weight tensor.
+  af::ascir_op::Data weight("weight", *graph);
+  weight.ir_attr.SetIndex(2);
+  SetView(weight, axes, full, full_strides, af::DT_BF16);
+
+  // Keep Reduce as the terminal compute node for this IL path.  A Cast is
+  // retained before Store because the original LayerNorm output is BF16 and
+  // the IL reduce validator allows this framework-inserted conversion.
+  af::ascir_op::Cast reduced_bf16("reduced_bf16");
+  graph->AddNode(reduced_bf16);
+  reduced_bf16.x = square_sum.y;
+  SetView(reduced_bf16, axes, row, row_strides, af::DT_BF16);
+  af::ascir_op::Store square_store("square_store");
+  graph->AddNode(square_store);
+  square_store.x = reduced_bf16.y;
+  SetView(square_store, axes, row, row_strides, af::DT_BF16);
+  af::ascir_op::Output square_output("square_output");
+  graph->AddNode(square_output);
+  square_output.ir_attr.SetIndex(1);
+  square_output.x = square_store.y;
+  SetView(square_output, axes, row, row_strides, af::DT_BF16);
+  return graph;
+}
+#elif defined(IL_DUAL_IL_GATHER)
+constexpr int64_t kUserAddGatherRows = 1049600;
+constexpr int64_t kUserAddGatherWidth = 5;
+constexpr int64_t kUserAddGatherInputWidth = 10;
+constexpr int64_t kUserAddGatherTableRows = 1024 * 1025;
+constexpr char kUserAddGatherGraphName[] = "user_add_gather";
+
+std::shared_ptr<af::AscGraph> CreateUserAddGatherSubGraph() {
+  auto graph = std::make_shared<af::AscGraph>(kUserAddGatherGraphName);
+  const auto rows = graph->CreateSizeVar(kUserAddGatherRows);
+  const auto width = graph->CreateSizeVar(kUserAddGatherWidth);
+  const auto input_width = graph->CreateSizeVar(kUserAddGatherInputWidth);
+  const auto table_rows = graph->CreateSizeVar(kUserAddGatherTableRows);
+  const auto a0 = graph->CreateAxis("a0", rows).id;
+  const auto a1 = graph->CreateAxis("a1", width).id;
+  const std::vector<af::AxisId> axes = {a0, a1};
+  const std::vector<af::Expression> output = {rows, width};
+  const std::vector<af::Expression> output_strides = {width, af::ops::One};
+
+  af::ascir_op::Data indices("indices", *graph);
+  indices.ir_attr.SetIndex(2);
+  af::ascir_op::Load index_load("index_load");
+  graph->AddNode(index_load);
+  index_load.x = indices.y;
+  SetView(index_load, axes, output, output_strides, af::DT_INT64);
+
+  af::ascir_op::Data input0("input0", *graph);
+  input0.ir_attr.SetIndex(0);
+  af::ascir_op::Load input0_load("input0_load");
+  graph->AddNode(input0_load);
+  input0_load.x = input0.y;
+  SetView(input0_load, axes, {rows, input_width}, {input_width, af::ops::One}, af::DT_FLOAT);
+  af::ascir_op::IndirectLoad il0("input0_indirect_load");
+  graph->AddNode(il0);
+  il0.x1 = input0_load.y;
+  il0.x2 = index_load.y;
+  il0.ir_attr.SetAxis(1);
+  il0.ir_attr.SetNegative_index_support(true);
+  il0.ir_attr.SetNeed_check_bound(true);
+  il0.ir_attr.SetMax(input_width);
+  SetView(il0, axes, output, output_strides, af::DT_FLOAT);
+
+  af::ascir_op::Data input1("input1", *graph);
+  input1.ir_attr.SetIndex(1);
+  af::ascir_op::Load input1_load("input1_load");
+  graph->AddNode(input1_load);
+  input1_load.x = input1.y;
+  SetView(input1_load, axes, {rows, input_width}, {input_width, af::ops::One}, af::DT_FLOAT);
+  af::ascir_op::IndirectLoad il1("input1_indirect_load");
+  graph->AddNode(il1);
+  il1.x1 = input1_load.y;
+  il1.x2 = index_load.y;
+  il1.ir_attr.SetAxis(1);
+  il1.ir_attr.SetNegative_index_support(true);
+  il1.ir_attr.SetNeed_check_bound(true);
+  il1.ir_attr.SetMax(input_width);
+  SetView(il1, axes, output, output_strides, af::DT_FLOAT);
+
+  af::ascir_op::Add add("add");
+  graph->AddNode(add);
+  add.x1 = il0.y;
+  add.x2 = il1.y;
+  SetView(add, axes, output, output_strides, af::DT_FLOAT);
+  af::ascir_op::Store store("store");
+  graph->AddNode(store);
+  store.x = add.y;
+  SetView(store, axes, output, output_strides, af::DT_FLOAT);
+  af::ascir_op::Output out("output");
+  graph->AddNode(out);
+  out.ir_attr.SetIndex(0);
+  out.x = store.y;
+  SetView(out, axes, output, output_strides, af::DT_FLOAT);
+  return graph;
+}
+#elif defined(IL_GRAPH_HINT_SIMD_REPRO)
+// Exact reproduction of the user GraphHint graph that selects the SIMD
+// IndirectLoad implementation.  The input view intentionally has axis-1
+// extent 6 while the graph axis extent is 3, matching the generated ASCIR.
+constexpr int64_t kGraphHintSimdRows = 30;
+constexpr int64_t kGraphHintSimdIndexColumns = 3;
+constexpr int64_t kGraphHintSimdInner = 23;
+constexpr int64_t kGraphHintSimdInputRows = 6;
+constexpr char kGraphHintSimdGraphName[] = "indirect_load_graph_hint_simd_repro";
+
+std::shared_ptr<af::AscGraph> CreateGraphHintSimdReproSubGraph() {
+  auto graph = std::make_shared<af::AscGraph>(kGraphHintSimdGraphName);
+  const auto rows = graph->CreateSizeVar(kGraphHintSimdRows);
+  const auto index_columns = graph->CreateSizeVar(kGraphHintSimdIndexColumns);
+  const auto inner = graph->CreateSizeVar(kGraphHintSimdInner);
+  const auto input_rows = graph->CreateSizeVar(kGraphHintSimdInputRows);
+  const auto a0 = graph->CreateAxis("a0", rows).id;
+  const auto a1 = graph->CreateAxis("a1", index_columns).id;
+  const auto a2 = graph->CreateAxis("a2", inner).id;
+  const std::vector<af::AxisId> axes = {a0, a1, a2};
+  const std::vector<af::Expression> output_repeats = {rows, index_columns, inner};
+  const std::vector<af::Expression> output_strides = {index_columns * inner, inner, af::ops::One};
+  const std::vector<af::Expression> index_load_repeats = {af::ops::One, index_columns, af::ops::One};
+  const std::vector<af::Expression> index_load_strides = {af::ops::Zero, af::ops::One, af::ops::Zero};
+  const std::vector<af::Expression> index_broadcast_repeats = {rows, index_columns, af::ops::One};
+  const std::vector<af::Expression> index_broadcast_strides = {index_columns, af::ops::One, af::ops::Zero};
+  const std::vector<af::Expression> input_repeats = {rows, input_rows, inner};
+  const std::vector<af::Expression> input_strides = {input_rows * inner, inner, af::ops::One};
+  const std::vector<af::Expression> reduce_repeats = {rows, index_columns, af::ops::One};
+  const std::vector<af::Expression> reduce_strides = {index_columns, af::ops::One, af::ops::Zero};
+
+  af::ascir_op::Data index("graph_hint/data", *graph);
+  index.ir_attr.SetIndex(1);
+  index.y.dtype = af::DT_INT64;
+  af::ascir_op::Load index_load("graph_hint/load");
+  graph->AddNode(index_load);
+  index_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  index_load.x = index.y;
+  SetView(index_load, axes, index_load_repeats, index_load_strides, af::DT_INT64);
+  af::ascir_op::Broadcast index_broadcast("graph_hint/broadcast");
+  graph->AddNode(index_broadcast);
+  index_broadcast.x = index_load.y;
+  SetView(index_broadcast, axes, index_broadcast_repeats, index_broadcast_strides, af::DT_INT64);
+  af::ascir_op::Broadcast index_broadcast1("graph_hint/broadcast1");
+  graph->AddNode(index_broadcast1);
+  index_broadcast1.x = index_broadcast.y;
+  SetView(index_broadcast1, axes, output_repeats, output_strides, af::DT_INT64);
+
+  af::ascir_op::Data input("graph_hint/data1", *graph);
+  input.ir_attr.SetIndex(0);
+  input.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load input_load("graph_hint/load1");
+  graph->AddNode(input_load);
+  input_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  input_load.x = input.y;
+  SetView(input_load, axes, input_repeats, input_strides, af::DT_FLOAT);
+
+  af::ascir_op::IndirectLoad indirect_load("graph_hint/indirectload");
+  graph->AddNode(indirect_load);
+  indirect_load.x1 = input_load.y;
+  indirect_load.x2 = index_broadcast1.y;
+  indirect_load.ir_attr.SetAxis(1);
+  indirect_load.ir_attr.SetNegative_index_support(true);
+  indirect_load.ir_attr.SetNeed_check_bound(true);
+  indirect_load.ir_attr.SetMax(input_rows);
+  SetView(indirect_load, axes, output_repeats, output_strides, af::DT_FLOAT);
+
+  af::ascir_op::Sum sum("graph_hint/sum");
+  graph->AddNode(sum);
+  sum.x = indirect_load.y;
+  SetView(sum, axes, reduce_repeats, reduce_strides, af::DT_FLOAT);
+  af::ascir_op::Store store("graph_hint/store");
+  graph->AddNode(store);
+  store.ir_attr.SetOffset(af::sym::kSymbolZero);
+  store.x = sum.y;
+  SetView(store, axes, reduce_repeats, reduce_strides, af::DT_FLOAT);
+  af::ascir_op::Output output("graph_hint/output");
+  graph->AddNode(output);
+  output.ir_attr.SetIndex(0);
+  output.x = store.y;
+  output.y.dtype = af::DT_FLOAT;
+  return graph;
+}
+#elif defined(IL_GRAPH_HINT_REDUCE)
+// Strict C++ binding of the user-provided GraphHint.  Keep every node, view and
+// edge in the same order as the original ASCIR graph; this is the red E2E case
+// for the SIMT zero-stride/physical-gap fallback.
+constexpr int64_t kGraphHintRows = 8;
+constexpr int64_t kGraphHintColumns = 50;
+constexpr int64_t kGraphHintTableRows = 1353406;
+constexpr int64_t kGraphHintTableStride = 8;
+constexpr char kGraphHintGraphName[] = "indirect_load_graph_hint_reduce_simt_test";
+
+struct GraphHintReduceGraphView {
+  std::shared_ptr<af::AscGraph> graph;
+  af::AxisId a0;
+  af::AxisId a1;
+  af::Expression rows;
+  af::Expression columns;
+  af::Expression table_rows;
+};
+
+GraphHintReduceGraphView CreateGraphHintReduceGraphView() {
+  GraphHintReduceGraphView view;
+  view.graph = std::make_shared<af::AscGraph>(kGraphHintGraphName);
+  view.rows = view.graph->CreateSizeVar(kGraphHintRows);
+  view.columns = view.graph->CreateSizeVar(kGraphHintColumns);
+  view.table_rows = view.graph->CreateSizeVar(kGraphHintTableRows);
+  view.a0 = view.graph->CreateAxis("a0", view.rows).id;
+  view.a1 = view.graph->CreateAxis("a1", view.columns).id;
+  return view;
+}
+
+std::shared_ptr<af::AscGraph> CreateGraphHintReduceSubGraph() {
+  const auto view = CreateGraphHintReduceGraphView();
+  const auto axes = std::vector<af::AxisId>{view.a0, view.a1};
+  const auto output_repeats = std::vector<af::Expression>{view.rows, view.columns};
+  const auto output_strides = std::vector<af::Expression>{view.columns, af::ops::One};
+  const auto row_repeats = std::vector<af::Expression>{af::ops::One, view.columns};
+  const auto row_strides = std::vector<af::Expression>{af::ops::Zero, af::ops::One};
+  const auto scalar_repeats = std::vector<af::Expression>{view.rows, af::ops::One};
+  const auto scalar_strides = std::vector<af::Expression>{af::ops::One, af::ops::Zero};
+  const auto table_repeats = std::vector<af::Expression>{view.table_rows, af::ops::One};
+  const auto table_strides = std::vector<af::Expression>{af::Symbol(kGraphHintTableStride), af::ops::Zero};
+  const auto reduce_repeats = std::vector<af::Expression>{view.rows, af::ops::One};
+  const auto reduce_strides = std::vector<af::Expression>{af::ops::One, af::ops::Zero};
+
+  af::ascir_op::Data data("graph_hint/data", *view.graph);
+  data.ir_attr.SetIndex(0);
+  data.y.dtype = af::DT_INT64;
+  af::ascir_op::Load load("graph_hint/load");
+  view.graph->AddNode(load);
+  load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  load.x = data.y;
+  SetView(load, axes, row_repeats, row_strides, af::DT_INT64);
+
+  af::ascir_op::Broadcast broadcast("graph_hint/broadcast");
+  view.graph->AddNode(broadcast);
+  broadcast.x = load.y;
+  SetView(broadcast, axes, output_repeats, output_strides, af::DT_INT64);
+
+  af::ascir_op::Scalar scalar("graph_hint/scalar", *view.graph);
+  scalar.attr.sched.axis = axes;
+  scalar.ir_attr.SetValue("-1");
+  scalar.y.dtype = af::DT_INT64;
+  af::ascir_op::Broadcast broadcast1("graph_hint/broadcast1");
+  view.graph->AddNode(broadcast1);
+  broadcast1.x = scalar.y;
+  SetView(broadcast1, axes, scalar_repeats, scalar_strides, af::DT_INT64);
+
+  af::ascir_op::Broadcast broadcast2("graph_hint/broadcast2");
+  view.graph->AddNode(broadcast2);
+  broadcast2.x = broadcast1.y;
+  SetView(broadcast2, axes, output_repeats, output_strides, af::DT_INT64);
+
+  af::ascir_op::Cast cast("graph_hint/cast");
+  view.graph->AddNode(cast);
+  cast.x = broadcast.y;
+  SetView(cast, axes, output_repeats, output_strides, af::DT_FLOAT);
+  af::ascir_op::Cast cast1("graph_hint/cast1");
+  view.graph->AddNode(cast1);
+  cast1.x = broadcast2.y;
+  SetView(cast1, axes, output_repeats, output_strides, af::DT_FLOAT);
+
+  af::ascir_op::Eq eq("graph_hint/eq");
+  view.graph->AddNode(eq);
+  eq.x1 = cast.y;
+  eq.x2 = cast1.y;
+  SetView(eq, axes, output_repeats, output_strides, af::DT_BOOL);
+
+  af::ascir_op::Data data1("graph_hint/data1", *view.graph);
+  data1.ir_attr.SetIndex(2);
+  data1.y.dtype = af::DT_INT64;
+  af::ascir_op::Load load1("graph_hint/load1");
+  view.graph->AddNode(load1);
+  load1.ir_attr.SetOffset(af::sym::kSymbolZero);
+  load1.x = data1.y;
+  SetView(load1, axes, row_repeats, row_strides, af::DT_INT64);
+  af::ascir_op::Broadcast broadcast3("graph_hint/broadcast3");
+  view.graph->AddNode(broadcast3);
+  broadcast3.x = load1.y;
+  SetView(broadcast3, axes, output_repeats, output_strides, af::DT_INT64);
+
+  af::ascir_op::Where where("graph_hint/where");
+  view.graph->AddNode(where);
+  where.x1 = eq.y;
+  where.x2 = broadcast3.y;
+  where.x3 = broadcast.y;
+  SetView(where, axes, output_repeats, output_strides, af::DT_INT64);
+
+  af::ascir_op::Data data2("graph_hint/data2", *view.graph);
+  data2.ir_attr.SetIndex(1);
+  data2.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load load2("graph_hint/load2");
+  view.graph->AddNode(load2);
+  load2.ir_attr.SetOffset(af::sym::kSymbolZero);
+  load2.x = data2.y;
+  SetView(load2, axes, table_repeats, table_strides, af::DT_FLOAT);
+  af::ascir_op::Broadcast broadcast4("graph_hint/broadcast4");
+  view.graph->AddNode(broadcast4);
+  broadcast4.x = load2.y;
+  SetView(broadcast4, axes, std::vector<af::Expression>{view.table_rows, view.columns}, output_strides, af::DT_FLOAT);
+
+  af::ascir_op::IndirectLoad indirectload("graph_hint/indirectload");
+  view.graph->AddNode(indirectload);
+  indirectload.x1 = broadcast4.y;
+  indirectload.x2 = where.y;
+  indirectload.ir_attr.SetAxis(0);
+  indirectload.ir_attr.SetNegative_index_support(true);
+  indirectload.ir_attr.SetNeed_check_bound(true);
+  indirectload.ir_attr.SetMax(view.table_rows);
+  SetView(indirectload, axes, output_repeats, output_strides, af::DT_FLOAT);
+
+  af::ascir_op::Sum sum("graph_hint/sum");
+  view.graph->AddNode(sum);
+  sum.x = indirectload.y;
+  SetView(sum, axes, reduce_repeats, reduce_strides, af::DT_FLOAT);
+  af::ascir_op::Store store("graph_hint/store");
+  view.graph->AddNode(store);
+  store.ir_attr.SetOffset(af::sym::kSymbolZero);
+  store.x = sum.y;
+  SetView(store, axes, reduce_repeats, reduce_strides, af::DT_FLOAT);
+  af::ascir_op::Output output("graph_hint/output");
+  view.graph->AddNode(output);
+  output.ir_attr.SetIndex(0);
+  output.x = store.y;
+  output.y.dtype = af::DT_FLOAT;
+  return view.graph;
+}
+#elif defined(IL_EMBEDDING_REDUCE)
 constexpr int64_t kEmbRows = 2;
 constexpr int64_t kEmbColumns = 2;
 constexpr int64_t kEmbReduceSize = 2;
@@ -2815,7 +3661,10 @@ std::shared_ptr<af::AscGraph> CreateAddIlReduceSubGraph() {
 
 class ThreeInputBackendGraph {
  public:
-  explicit ThreeInputBackendGraph(const char *graph_name) : fused_graph_(graph_name) {
+  explicit ThreeInputBackendGraph(const char *graph_name, af::DataType input0_type = af::DT_INT64,
+                                  af::DataType input1_type = af::DT_FLOAT, af::DataType input2_type = af::DT_INT64,
+                                  af::DataType output_type = af::DT_FLOAT)
+      : fused_graph_(graph_name) {
     af::ascir_op::Data index0("input0", fused_graph_);
     af::ascir_op::Data table("input1", fused_graph_);
     af::ascir_op::Data index2("input2", fused_graph_);
@@ -2827,14 +3676,18 @@ class ThreeInputBackendGraph {
       return;
     }
     const auto index_desc = std::make_shared<af::GeTensorDesc>();
-    index_desc->SetDataType(af::DT_INT64);
+    index_desc->SetDataType(input0_type);
     const auto table_desc = std::make_shared<af::GeTensorDesc>();
-    table_desc->SetDataType(af::DT_FLOAT);
+    table_desc->SetDataType(input1_type);
+    const auto input2_desc = std::make_shared<af::GeTensorDesc>();
+    input2_desc->SetDataType(input2_type);
+    const auto output_desc = std::make_shared<af::GeTensorDesc>();
+    output_desc->SetDataType(output_type);
     const auto backend_desc = std::make_shared<af::OpDesc>("asc_backend", "AscBackend");
     backend_desc->AddInputDesc(index_desc->Clone());
     backend_desc->AddInputDesc(table_desc->Clone());
-    backend_desc->AddInputDesc(index_desc->Clone());
-    backend_desc->AddOutputDesc(table_desc->Clone());
+    backend_desc->AddInputDesc(input2_desc->Clone());
+    backend_desc->AddOutputDesc(output_desc->Clone());
     backend_ = compute_graph_->AddNode(backend_desc);
   }
 
@@ -2869,10 +3722,250 @@ class ThreeInputBackendGraph {
   af::ComputeGraphPtr compute_graph_;
   af::NodePtr backend_;
 };
+
+class IndexFirstTwoInputBackendGraph {
+ public:
+  explicit IndexFirstTwoInputBackendGraph(const char *graph_name) : fused_graph_(graph_name) {
+    af::ascir_op::Data indices("input0", fused_graph_);
+    af::ascir_op::Data embedding("input1", fused_graph_);
+    indices.ir_attr.SetIndex(0);
+    embedding.ir_attr.SetIndex(1);
+    compute_graph_ = af::AscGraphUtils::GetComputeGraph(fused_graph_);
+    if (compute_graph_ == nullptr) {
+      return;
+    }
+    const auto index_desc = std::make_shared<af::GeTensorDesc>();
+    index_desc->SetDataType(af::DT_INT64);
+    const auto embedding_desc = std::make_shared<af::GeTensorDesc>();
+    embedding_desc->SetDataType(af::DT_FLOAT);
+    const auto backend_desc = std::make_shared<af::OpDesc>("asc_backend", "AscBackend");
+    backend_desc->AddInputDesc(index_desc->Clone());
+    backend_desc->AddInputDesc(embedding_desc->Clone());
+    backend_desc->AddOutputDesc(embedding_desc->Clone());
+    backend_ = compute_graph_->AddNode(backend_desc);
+  }
+
+  af::ComputeGraphPtr Finalize(const std::shared_ptr<af::AscGraph> &sub_graph) {
+    if (compute_graph_ == nullptr || backend_ == nullptr) {
+      return nullptr;
+    }
+    const auto attrs = backend_->GetOpDesc()->GetOrCreateAttrsGroup<af::AutoFuseAttrs>();
+    if (attrs == nullptr) {
+      return nullptr;
+    }
+    attrs->SetAscGraph(sub_graph);
+    af::ascir_op::Output output("output");
+    output.ir_attr.SetIndex(0);
+    const auto output_node = compute_graph_->AddNode(af::OpDescUtils::GetOpDescFromOperator(output));
+    const auto input0 = fused_graph_.FindNode("input0");
+    const auto input1 = fused_graph_.FindNode("input1");
+    if (output_node == nullptr || input0 == nullptr || input1 == nullptr) {
+      return nullptr;
+    }
+    const bool edges_added =
+        af::GraphUtils::AddEdge(input0->GetOutDataAnchor(0), backend_->GetInDataAnchor(0)) == ge::GRAPH_SUCCESS &&
+        af::GraphUtils::AddEdge(input1->GetOutDataAnchor(0), backend_->GetInDataAnchor(1)) == ge::GRAPH_SUCCESS &&
+        af::GraphUtils::AddEdge(backend_->GetOutDataAnchor(0), output_node->GetInDataAnchor(0)) == ge::GRAPH_SUCCESS;
+    return edges_added && compute_graph_->TopologicalSorting() == ge::GRAPH_SUCCESS ? compute_graph_ : nullptr;
+  }
+
+ private:
+  af::AscGraph fused_graph_;
+  af::ComputeGraphPtr compute_graph_;
+  af::NodePtr backend_;
+};
+
+class ThreeInputTwoOutputBackendGraph {
+ public:
+  explicit ThreeInputTwoOutputBackendGraph(const char *graph_name) : fused_graph_(graph_name) {
+    af::ascir_op::Data input0("input0", fused_graph_);
+    af::ascir_op::Data input1("input1", fused_graph_);
+    af::ascir_op::Data input2("input2", fused_graph_);
+    input0.ir_attr.SetIndex(0);
+    input1.ir_attr.SetIndex(1);
+    input2.ir_attr.SetIndex(2);
+    compute_graph_ = af::AscGraphUtils::GetComputeGraph(fused_graph_);
+    if (compute_graph_ == nullptr) {
+      return;
+    }
+    auto index_desc = std::make_shared<af::GeTensorDesc>();
+    index_desc->SetDataType(af::DT_INT64);
+    auto data_desc = std::make_shared<af::GeTensorDesc>();
+    data_desc->SetDataType(af::DT_BF16);
+    auto backend_desc = std::make_shared<af::OpDesc>("asc_backend", "AscBackend");
+    backend_desc->AddInputDesc(index_desc->Clone());
+    backend_desc->AddInputDesc(data_desc->Clone());
+    backend_desc->AddInputDesc(data_desc->Clone());
+    backend_desc->AddOutputDesc(data_desc->Clone());
+    backend_desc->AddOutputDesc(data_desc->Clone());
+    backend_ = compute_graph_->AddNode(backend_desc);
+  }
+
+  af::ComputeGraphPtr Finalize(const std::shared_ptr<af::AscGraph> &sub_graph) {
+    if (compute_graph_ == nullptr || backend_ == nullptr) {
+      return nullptr;
+    }
+    const auto attrs = backend_->GetOpDesc()->GetOrCreateAttrsGroup<af::AutoFuseAttrs>();
+    if (attrs == nullptr) {
+      return nullptr;
+    }
+    attrs->SetAscGraph(sub_graph);
+    af::ascir_op::Output output0("output0");
+    output0.ir_attr.SetIndex(0);
+    af::ascir_op::Output output1("output1");
+    output1.ir_attr.SetIndex(1);
+    const auto output_node0 = compute_graph_->AddNode(af::OpDescUtils::GetOpDescFromOperator(output0));
+    const auto output_node1 = compute_graph_->AddNode(af::OpDescUtils::GetOpDescFromOperator(output1));
+    const auto input0 = fused_graph_.FindNode("input0");
+    const auto input1 = fused_graph_.FindNode("input1");
+    const auto input2 = fused_graph_.FindNode("input2");
+    if (output_node0 == nullptr || output_node1 == nullptr || input0 == nullptr || input1 == nullptr ||
+        input2 == nullptr) {
+      return nullptr;
+    }
+    const bool edges_added =
+        af::GraphUtils::AddEdge(input0->GetOutDataAnchor(0), backend_->GetInDataAnchor(0)) == ge::GRAPH_SUCCESS &&
+        af::GraphUtils::AddEdge(input1->GetOutDataAnchor(0), backend_->GetInDataAnchor(1)) == ge::GRAPH_SUCCESS &&
+        af::GraphUtils::AddEdge(input2->GetOutDataAnchor(0), backend_->GetInDataAnchor(2)) == ge::GRAPH_SUCCESS &&
+        af::GraphUtils::AddEdge(backend_->GetOutDataAnchor(0), output_node0->GetInDataAnchor(0)) == ge::GRAPH_SUCCESS &&
+        af::GraphUtils::AddEdge(backend_->GetOutDataAnchor(1), output_node1->GetInDataAnchor(0)) == ge::GRAPH_SUCCESS;
+    return edges_added && compute_graph_->TopologicalSorting() == ge::GRAPH_SUCCESS ? compute_graph_ : nullptr;
+  }
+
+ private:
+  af::AscGraph fused_graph_;
+  af::ComputeGraphPtr compute_graph_;
+  af::NodePtr backend_;
+};
 }  // namespace
 
 #ifndef IL_ADD_IL_REDUCE
-#ifdef IL_EMBEDDING_REDUCE
+#if defined(IL_USER_FANOUT)
+using TestBackendUserFanoutE2e = indirect_load_test::BackendE2e;
+
+TEST_F(TestBackendUserFanoutE2e, GeneratesUserFanoutKernel) {
+  ThreeInputTwoOutputBackendGraph backend(kUserFanoutGraphName);
+  const auto graph = backend.Finalize(CreateUserFanoutSubGraph());
+  ASSERT_NE(graph, nullptr);
+  codegen::CodegenResult result;
+#if defined(IL_USER_FANOUT_SIMD)
+  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimd, result);
+  EXPECT_NE(result.kernel.find("// IndirectLoad SIMD"), std::string::npos);
+#else
+  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimt, result);
+  EXPECT_NE(result.kernel.find("// IndirectLoad SIMT"), std::string::npos);
+#endif
+  indirect_load_test::WriteGeneratedFiles(result);
+}
+#elif defined(IL_USER_EMBEDDING_SUM)
+using TestBackendUserEmbeddingSumE2e = indirect_load_test::PrecisionBackendE2e;
+
+TEST_F(TestBackendUserEmbeddingSumE2e, GeneratesUserEmbeddingSumKernel) {
+  ASSERT_NE(testing::UnitTest::GetInstance(), nullptr);
+  indirect_load_test::BackendGraph backend(kUserEmbeddingSumGraphName, "input0", "input1", af::DT_FLOAT, af::DT_INT32);
+  const auto graph = backend.Finalize(CreateUserEmbeddingSumSubGraph(), "output");
+  ASSERT_NE(graph, nullptr);
+  codegen::CodegenResult result;
+  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimt, result);
+  EXPECT_NE(result.kernel.find("// IndirectLoad SIMT"), std::string::npos);
+  indirect_load_test::WriteGeneratedFiles(result);
+}
+#elif defined(IL_USER_EMBEDDING_MUL)
+using TestBackendUserEmbeddingMulE2e = indirect_load_test::BackendE2e;
+
+TEST_F(TestBackendUserEmbeddingMulE2e, GeneratesUserEmbeddingMulKernel) {
+  ASSERT_NE(testing::UnitTest::GetInstance(), nullptr);
+  ThreeInputBackendGraph backend(kUserEmbeddingMulGraphName, af::DT_FLOAT16, af::DT_INT64, af::DT_FLOAT16,
+                                 af::DT_FLOAT16);
+  const auto graph = backend.Finalize(CreateUserEmbeddingMulSubGraph());
+  ASSERT_NE(graph, nullptr);
+  codegen::CodegenResult result;
+  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimt, result);
+  EXPECT_NE(result.kernel.find("// IndirectLoad SIMT"), std::string::npos);
+  indirect_load_test::WriteGeneratedFiles(result);
+}
+#elif defined(IL_DUAL_IL_GATHER)
+using TestBackendUserAddGatherE2e = indirect_load_test::BackendE2e;
+
+TEST_F(TestBackendUserAddGatherE2e, GeneratesUserAddGatherKernel) {
+  ASSERT_NE(testing::UnitTest::GetInstance(), nullptr);
+  ThreeInputBackendGraph backend(kUserAddGatherGraphName, af::DT_FLOAT, af::DT_FLOAT, af::DT_INT64, af::DT_FLOAT);
+  const auto graph = backend.Finalize(CreateUserAddGatherSubGraph());
+  ASSERT_NE(graph, nullptr);
+  codegen::CodegenResult result;
+  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimt, result);
+  EXPECT_NE(result.kernel.find("// IndirectLoad SIMT"), std::string::npos);
+  indirect_load_test::WriteGeneratedFiles(result);
+}
+#elif defined(IL_USER_EMBEDDING_EXP_ABS_ADD)
+using TestBackendUserEmbeddingExpAbsAddE2e = indirect_load_test::BackendE2e;
+
+TEST_F(TestBackendUserEmbeddingExpAbsAddE2e, GeneratesUserEmbeddingExpAbsAddKernel) {
+  const auto graph =
+      IndexFirstTwoInputBackendGraph(kUserEmbeddingExpAbsAddGraphName).Finalize(CreateUserEmbeddingExpAbsAddSubGraph());
+  ASSERT_NE(graph, nullptr);
+  codegen::CodegenResult result;
+#if defined(IL_USER_EMBEDDING_EXP_ABS_ADD_SIMD)
+  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimd, result);
+  EXPECT_NE(result.kernel.find("// IndirectLoad SIMD"), std::string::npos);
+#else
+  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimt, result);
+  EXPECT_NE(result.kernel.find("// IndirectLoad SIMT"), std::string::npos);
+#endif
+  indirect_load_test::WriteGeneratedFiles(result);
+}
+#elif defined(IL_USER_LAYERNORM)
+using TestBackendUserLayerNormE2e = indirect_load_test::BackendE2e;
+
+TEST_F(TestBackendUserLayerNormE2e, GeneratesUserLayerNormKernel) {
+  ASSERT_NE(testing::UnitTest::GetInstance(), nullptr);
+  ThreeInputTwoOutputBackendGraph backend(kUserLayerNormGraphName);
+  const auto graph = backend.Finalize(CreateUserLayerNormSubGraph());
+  ASSERT_NE(graph, nullptr);
+#if defined(IL_USER_LAYERNORM_SIMD)
+  codegen::CodegenResult result;
+  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimd, result);
+  EXPECT_NE(result.kernel.find("// IndirectLoad SIMD"), std::string::npos);
+#else
+  ascir::FusedScheduledResult scheduled_result;
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{.graph_type = optimize::GraphType::kFusedAscBackend});
+  ASSERT_EQ(optimizer.Optimize(graph, scheduled_result), af::SUCCESS);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+  ASSERT_EQ(codegen.Generate({}, scheduled_result, result), af::SUCCESS);
+  EXPECT_NE(result.kernel.find("IndirectLoad"), std::string::npos);
+#endif
+  indirect_load_test::WriteGeneratedFiles(result);
+}
+#elif defined(IL_GRAPH_HINT_SIMD_REPRO)
+using TestBackendIndirectLoadGraphHintSimdReproE2e = indirect_load_test::PrecisionBackendE2e;
+
+TEST_F(TestBackendIndirectLoadGraphHintSimdReproE2e, GeneratesGraphHintSimdReproKernel) {
+  indirect_load_test::BackendGraph backend(kGraphHintSimdGraphName, "input0", "input1", af::DT_FLOAT, af::DT_INT64);
+  const auto graph = backend.Finalize(CreateGraphHintSimdReproSubGraph(), "output0");
+  ASSERT_NE(graph, nullptr);
+  codegen::CodegenResult result;
+  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimd, result);
+  EXPECT_NE(result.kernel.find("// IndirectLoad SIMD"), std::string::npos);
+  EXPECT_NE(result.kernel.find("IndirectLoadSimdStrided<float, int64_t, 3, 1>"), std::string::npos);
+  EXPECT_NE(result.kernel.find("local_8_actual_size = (3 - 1) * 24 + (23 - 1) + 1"), std::string::npos);
+  indirect_load_test::WriteGeneratedFiles(result);
+}
+#elif defined(IL_GRAPH_HINT_REDUCE)
+using TestBackendIndirectLoadGraphHintReduceE2e = indirect_load_test::PrecisionBackendE2e;
+
+TEST_F(TestBackendIndirectLoadGraphHintReduceE2e, GeneratesGraphHintReduceSimtKernel) {
+  ThreeInputBackendGraph backend(kGraphHintGraphName);
+  const auto graph = backend.Finalize(CreateGraphHintReduceSubGraph());
+  ASSERT_NE(graph, nullptr);
+  codegen::CodegenResult result;
+  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimt, result);
+  EXPECT_NE(result.kernel.find("// IndirectLoad SIMT"), std::string::npos);
+  EXPECT_NE(result.kernel.find("IndirectLoadSimt"), std::string::npos);
+  EXPECT_NE(result.kernel.find("ReduceSum"), std::string::npos);
+  indirect_load_test::WriteGeneratedFiles(result);
+}
+#elif defined(IL_EMBEDDING_REDUCE)
 using TestBackendIndirectLoadEmbReduceE2e = indirect_load_test::PrecisionBackendE2e;
 
 TEST_F(TestBackendIndirectLoadEmbReduceE2e, GeneratesEmbeddingReduceSimtKernel) {
@@ -2913,7 +4006,7 @@ TEST_F(TestBackendIndirectLoadAddIlReduceE2e, GeneratesAddIlReduceSimtKernel) {
   codegen::CodegenResult result;
   indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimt, result);
   EXPECT_NE(result.kernel.find("// IndirectLoad SIMT"), std::string::npos);
-  EXPECT_NE(result.kernel.find("IndirectLoadSimt<"), std::string::npos);
+  EXPECT_TRUE(indirect_load_test::HasSimtApi(result.kernel));
   EXPECT_NE(result.kernel.find("ReduceSum"), std::string::npos);
   indirect_load_test::WriteGeneratedFiles(result);
 }
@@ -3378,7 +4471,7 @@ TEST_F(TestBackendIndirectLoadEmbeddingE2e, GeneratesEmbeddingIndirectLoadKernel
   indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimd, result);
   EXPECT_NE(result.kernel.find("// IndirectLoad SIMD"), std::string::npos);
   EXPECT_NE(result.kernel.find("CastExtend"), std::string::npos);
-  EXPECT_NE(result.kernel.find("IndirectLoadSimd<"), std::string::npos);
+  EXPECT_TRUE(indirect_load_test::HasSimdApi(result.kernel));
   indirect_load_test::WriteGeneratedFiles(result);
 }
 

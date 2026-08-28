@@ -151,7 +151,7 @@ class AutoFuseAttrs : public AfAttrGroupsBase {
     inner_attrs_.vector_core_num = vector_core_num;
   }
 
-  int32_t GetVectorCoreNum() {
+  int32_t GetVectorCoreNum() const {
     return inner_attrs_.vector_core_num;
   }
 
@@ -221,7 +221,7 @@ class AutoFuseAttrs : public AfAttrGroupsBase {
     inner_attrs_.is_split_complete = true;
   }
 
-  bool GetSplitComplete() {
+  bool GetSplitComplete() const {
     return inner_attrs_.is_split_complete;
   }
 

@@ -3,6 +3,7 @@ name: af-reg-ascir
 description: |
   识别 graph-autofusion 新增或更新 ASCIR 的完整修改面，并给出注册、regbase、Codegen、Python、UT/ST/E2E、上板故障的最小修改方案。
   **必须触发的场景**：用户提到 ASCIR 注册/更新、ascir op、AscendC regbase、dtype、tmp buffer、pyascir、ASCIR UT/ST/E2E、上板编译或运行错误。
+  **必须触发ATT性能建模的场景**：用户提到 ASCIR reg API 外抛 for 循环、ATT 性能建模、perf 公式/性能模型、repeat_time/call_count、af-perf-modeler、性能模型缺失或需复核、新增/更新涉及外抛的 ASCIR（如 Load/Store/NDDMA/Transpose/Cast/Compare/Where/IsNan/IsFinite/IsInf 或融合进 VectorFunc 的 elewise）。
 ---
 
 # graph-autofusion ASCIR 注册辅助
@@ -21,6 +22,7 @@ description: |
 - 为 ASCIR 算子添加或修改 tmp buffer 注册、`CalcTmpBufSize`、`CalcXxxTmpSizeV2`。
 - 为 ASCIR 注册变更补充 UT、ST、E2E 测试或测试图函数。
 - 排查 ASCIR 注册、codegen、ATT、pyascir、性能模型、测试编译失败。
+- 涉及外抛 for 循环的 ASCIR reg API（必须触发 ATT 性能建模），或外抛未命中时需做 vector bound 兜底校验。
 
 ---
 
@@ -581,6 +583,137 @@ C++ E2E 可直接调用 `op.ir_attr.SetN()`，因此可能通过；Python 上板
 
 ---
 
+## ASCIR reg API 性能基线校验（外抛 for 循环先行，vector bound 兜底）
+
+注册或更新一个 ASCIR reg API 后，若需要判断“该 API 是否存在性能问题”，必须按以下**分支流程**执行，不能只凭功能正确就结束：
+
+1. **第一道门 — 外抛 for 循环静态判定**（无需上板）：见「校验一」。
+2. 若**外抛命中** → 性能问题成立，**跳过 vector bound 校验**（外抛循环会把计算集中在 AIV_VECTOR，大概率同时命中 vector bound，重复 profiling 无增量价值），直接进入「强制 ATT 性能建模」。
+3. 若**外抛未命中** → 设计典型用例上板采集 profiling，执行「校验二：vector bound」。
+
+### 校验一：外抛 for 循环（静态 codegen 分析 + 强制 ATT 性能建模）
+
+适用对象：对轴的个数有要求的 ASCIR reg API，典型如 `IsNan`、`Load`/`Store`/`NDDMA`、`Transpose` 等对轴数有上限的算子。当输入轴数超过内部最大 loop 数，codegen 会把多余轴“外抛”成 `outer_for_*` 循环，带来额外迭代开销。
+
+定位阈值与外抛点（修改前必须检索确认，不要只凭常量名）：
+
+- 向量函数路径：`autofuse/v35/codegen/vec_func_call/vec_func_call.cpp` 中 `kVFMaxLoop = 4U`，`VfCall::Generate` 在 `loop_num > kVFMaxLoop` 时调用 `CreateOuterForVFCall` 外抛。
+- DMA/transpose 路径：`autofuse/v35/codegen/reg_api_call/reg_api_call_utils.cpp` 中 `kFourAxisNum = 4U`，超过则填充 `api_param.outer_loop_axes` 并注释“超过四层 for 循环，需要外抛”。
+- 外抛循环生成：`autofuse/codegen/codegen_kernel_loop.cpp` 的 `GenOuterLoopAxesPreProcess`/`GenOuterLoopAxesPostProcess`，生成 `for (int outer_for_i = 0; ...)`。
+
+判定方法：构造覆盖高维（≥5 维）shape 的用例，跑 Codegen UT 或生成 kernel 文本，检索 `outer_for_` 是否出现。出现即外抛 for 循环 → 性能问题成立。
+
+识别方法（哪些 ASCIR 涉及外抛）：不能只靠“典型算子”举例，必须按下列静态检索得到当前工程确定集合，并随注册表变化复核：
+
+1. 检索外抛触发点：在 `autofuse/v35/codegen/reg_api_call/` 与 `autofuse/v35/codegen/vec_func_call/` 中搜索 `CreateComputeNodeOuterFor`、`CreateOuterForVFCall` 以及对 `outer_loop_axes` 的写入（`emplace_back`/`push_back`）。
+2. 回溯 ApiCall 名：每个命中的 codegen 文件对应一个 `ApiCallName`（如 `CastV2ApiCall`、`CompareV2ApiCall`、`WhereRegApiCall`、`TransposeRegApiCall`、`UnaryBitWidthChangeApiCallV2`、`VfCall`，以及走共享 DataCopy 参数构建的 `LoadRegApiCall`/`StoreRegApiCall`/`NddmaApiCall`）。
+3. 映射到 ASCIR：在 `autofuse/v35/ascir/generator/v2_ascir_codegen_impl.h` 中按 `GetApiCallName()` 返回值找到对应 Codegen impl 类，再到 `ascir_builtin_ops_v2.cpp` 确认注册的 `REG_ASC_IR` 算子。
+
+当前工程外抛涉及 ASCIR（以源码实际检索为准，下表为基线参考）：
+
+| 外抛路径 | ApiCallName | 涉及 ASCIR | 外抛 codegen 位置 |
+|---|---|---|---|
+| 向量融合 | `VfCall` | 任意被融合进 `VectorFunc` 的 elewise 算子（如 `Abs`/`Exp`/`Add`） | `vec_func_call.cpp` `CreateOuterForVFCall` |
+| DMA | `LoadRegApiCall`/`StoreRegApiCall`/`NddmaApiCall` | `Load`/`Store`/`NDDMA` | `reg_api_call_utils.cpp` 写 `outer_loop_axes` |
+| Transpose | `TransposeRegApiCall` | `Transpose` | `reg_transpose_api_call.cpp` 写 `outer_loop_axes` |
+| 位宽变化 | `UnaryBitWidthChangeApiCallV2` | `IsNan`/`IsFinite`/`IsInf` | `unary_bitwidth_change_api_call_v2.cpp` `CreateComputeNodeOuterFor` |
+| Cast | `CastV2ApiCall` | `Cast` | `cast_v2_api_call.cpp` `CreateComputeNodeOuterFor` |
+| Compare | `CompareV2ApiCall` | `Compare` | `compare_v2_api_call.cpp` `CreateComputeNodeOuterForIfRequired` |
+| Where | `WhereRegApiCall` | `Where` | `reg_where_api_call.cpp` `CreateComputeNodeOuterFor` |
+
+注：并非所有 unary 类 ASCIR 都外抛。`SignBit`（`UnaryApiTmpCall`）、`Frexp`（`UnaryDoubleOutputApiTmpCall`）等走普通 unary ApiCall，其 `Generate` 无 `CreateComputeNodeOuterFor`/`outer_loop_axes` 路径，不外抛。识别时必须以「该 ApiCall 的 codegen `Generate` 是否含外抛分支」为准，不能按算子名归类。
+
+新增/修改 ASCIR 时，若其 `GetApiCallName()` 落在表中外抛路径，或会被融合进 `VectorFunc`，即判定该 ASCIR 涉及外抛，必须进入本节判定与建模流程。
+
+强制 ATT 性能建模：一旦判定该 ASCIR 存在外抛场景，**必须触发 af-perf-modeler 为其建模**，并确认 perf 公式把外抛的最外侧维度纳入循环次数（repeat_time/call_count），不能漏算外抛迭代开销。本仓已有约定：`autofuse/v35/att/api_perf_register/ascir_api_perf_v2.cpp` 的 `LoadApi`/`NddmaApi` 注释明确“外抛for循环：最外侧4个维度丢到循环次数里面去”。新增/更新此类 ASCIR 时若 perf 公式未覆盖外抛分支，即建模缺失 → 性能问题。
+
+### 校验二：vector bound（profiling 统计，仅当外抛未命中时执行）
+
+定义：在典型单 ASCIR 用例上，profiling 采集到的 AIV_VECTOR 大于 AIV_MTE2 **且** 大于 AIV_MTE3，即计算被“绑死”在向量核上、无法与 load/store pipe 重叠，属于性能瓶颈。仅当校验一确认无外抛时执行本节。
+
+采集方法：
+
+1. 复用 `autofuse/tests/st/device_validation/` 的 `InProcessProfiler` / `msprof` 流程，或直接用 `msprof` 采集目标算子 kernel。
+2. 导出 `op_summary*.csv`，提取每个 kernel 的 AIV_VECTOR / AIV_MTE2 / AIV_MTE3 占比或 cycles。
+   - 当前 `autofuse/tests/st/device_validation/python/profiler.py`、`kernel_activity.py` 只解析 `task_duration`/`duration_us`，**未提取** per-pipe 占比；必须直接从 `op_summary*.csv` 读取对应列，不要假设解析器已支持。
+   - 具体列名以目标环境实际 msprof 导出为准（常见为 `aiv_vec_ratio`/`aiv_mte2_ratio`/`aiv_mte3_ratio`）；不确定时先用一行实际导出确认列名再批量统计。
+3. 与本仓性能模型对照：`PipeType` 定义在 `autofuse/att/base/base_types.h` 的 `enum class PipeType`（含 `AIV_MTE2`/`AIV_MTE3`/`AIV_VEC`），perf 公式写入 `perf.pipe_res[PipeType::AIV_VEC]` 等（见 `ascendc_regbase_perf.cpp`、`ascir_api_perf_v2.cpp`）。若实测 AIV_VECTOR 主导而性能模型未体现 MTE2/MTE3 可重叠，说明模型与实测偏离，需按 af-perf-modeler 复核。
+
+判定：`AIV_VECTOR > AIV_MTE2 AND AIV_VECTOR > AIV_MTE3` 命中即 vector bound → 性能问题。
+
+### 基础用例构造要求
+
+为被校验 ASCIR reg API 构造一批单算子典型用例（复用 share graph `Data → Load → Op → Store → Output`，见“UT/ST 生成流程 → BesselJ0 V2 参考结构”）：
+
+- 外抛判定用例：必须覆盖高维（≥5 维）shape 才能触发外抛分支；命中即止，无需上板。
+- vector bound 用例（仅外抛未命中时设计）：
+  - **dtype 覆盖**：覆盖该 ASCIR 在 `ascir_builtin_ops_v2.cpp` 中 `.DataTypes()`/`.Impl()` dtype map 注册的全部 dtype；存在 cast 的算子（`GetConversionDtype()`）同时覆盖源 dtype 与转换目标 dtype。每个 dtype 至少一组用例。
+  - **shape 覆盖**：对齐、非对齐、较大 shape 三类至少各一组（如 `{32,16}`、`{32,18}`、`{512,15}`）；DMA/带宽敏感算子额外覆盖小块边界（256B 临界、1 个 block、尾块）；用低维（≤4 维）典型 shape，避免外抛循环干扰占比统计。
+- 数据要覆盖算子定义域和分支，不能只填随机值；参考结果必须独立构造，禁止用被测 AscendC API 自证。
+
+### 输出结论格式
+
+性能基线校验完成后，方案中必须补充：
+
+```text
+性能基线结论：
+- 外抛 for 循环：[命中/未命中]，证据：<高维用例> 生成 kernel [含/不含] outer_for_*
+- 校验路径：[外抛命中→跳过 vector bound / 外抛未命中→已做 vector bound]
+- vector bound：[命中/未命中/跳过/未知]，证据：<用例>/<shape> 上 AIV_VECTOR=<..> vs AIV_MTE2=<..>、AIV_MTE3=<..>（未知=无上板环境，见「无上板环境处理」）
+- ATT 性能建模：[已覆盖/缺失/不适用]，外抛场景是否触发 af-perf-modeler 建模，perf 公式是否把最外侧维度纳入循环次数
+- 性能问题：[存在/不存在]，若存在说明最小改进方向（如降低轴数/调整 codegen/补 ATT 性能建模）
+```
+
+### 无上板环境处理（仅当「外抛未命中 + 需 vector bound 兜底」时适用）
+
+若当前环境无法上板采集 profiling，**必须先给用户明确告警**，不得默认“无性能问题”，并按下列步骤为用户产出可自行上板执行的交付物。
+
+告警格式：
+
+```text
+⚠️ 性能基线校验受限告警
+- 状态：外抛 for 循环未命中，需上板 profiling 校验 vector bound，但当前无上板环境。
+- 影响：无法确认是否存在 vector bound，性能结论暂为“未知”，不代表“无性能问题”。
+- 已为你准备：典型用例清单 + 上板执行步骤 + vector bound 识别方法，请在有设备环境后按步骤执行并回填结论。
+```
+
+典型用例清单（为用户设计，按「基础用例构造要求」填充实例）：
+
+```text
+目标 ASCIR：<OpName>   支持 dtype：<从 .DataTypes()/.Impl() 取>   是否含 cast：<是/否>
+| 用例名 | dtype | shape | 说明 |
+|---|---|---|---|
+| <op>_<dtype>_aligned | DT_FLOAT | {32,16} | 对齐，低维避免外抛 |
+| <op>_<dtype>_unaligned | DT_FLOAT16 | {32,18} | 非对齐 |
+| <op>_<dtype>_large | DT_FLOAT | {512,15} | 较大 shape |
+| ... | ... | ... | 每个 dtype 至少一组；DMA 算子加 256B 临界/尾块 |
+参考结果：独立构造（不可用被测 AscendC API 自证）；数据须覆盖算子定义域与分支。
+```
+
+上板执行方法（交付给用户按步执行）：
+
+1. 复用 `autofuse/tests/st/device_validation/` 的单算子 backend E2E 用例（share graph `Data → Load → Op → Store → Output`），或自带单算子 kernel。
+2. 用 `msprof` 采集（≥8.1 语法）：
+   ```bash
+   msprof --output=./prof_out --application="python run_<case>.py"
+   ```
+   容器内 `msprof --application=` 不可用时，改用进程内 ACL profiling（`aclprofInit/CreateConfig/Start/Stop`，参考 `autofuse/tests/st/device_validation/backend/inprocess_profiler.cpp`）。
+3. 导出 summary：
+   ```bash
+   msprof --export=on --output=./prof_out
+   # 产物：./prof_out/*/mindstudio_profiler_output/op_summary*.csv
+   ```
+
+vector bound 识别方法（交付给用户执行）：
+
+1. 在 `op_summary*.csv` 中按 `Op Name`/`Kernel Name` 定位目标算子 kernel（当前 `profiler.py`/`kernel_activity.py` 不解析 per-pipe 列，必须手动读 CSV）。
+2. 读取该 kernel 的 `aiv_vec_ratio`、`aiv_mte2_ratio`、`aiv_mte3_ratio`（列名以实际 msprof 导出为准，先打印表头确认）。
+3. 判定：`aiv_vec_ratio > aiv_mte2_ratio 且 aiv_vec_ratio > aiv_mte3_ratio` → 命中 vector bound → 性能问题。
+4. 同时与本仓性能模型对照 `perf.pipe_res[PipeType::AIV_VEC]`/`AIV_MTE2`/`AIV_MTE3`（见 `ascir_api_perf_v2.cpp`），若实测与模型偏离，按 af-perf-modeler 复核。
+5. 将每个用例的 `AIV_VECTOR/AIV_MTE2/AIV_MTE3` 回填到「性能基线结论」对应项。
+
+---
+
 ## 上板错误分阶段诊断
 
 先找“首个有效错误”，再按阶段定位；后续大量错误通常只是级联诊断。
@@ -631,6 +764,7 @@ C++ E2E 可直接调用 `op.ir_attr.SetN()`，因此可能通过；Python 上板
 5. **测试覆盖**：regbase UT、Codegen UT、share graph、backend E2E、脚本入口、上板测试各自验证什么。
 6. **验证命令**：先 source 环境，增量编译，格式检查，再运行目标测试。
 7. **部署确认**：Python/native `.so` 和测试文件的实际加载路径。
+8. **性能基线结论**：外抛先行、vector bound 兜底的分支校验结果（外抛命中则跳过 vector bound 并补 ATT 建模）、证据和最小改进方向；无上板环境时说明退化策略。
 
 ---
 
@@ -674,3 +808,4 @@ bash scripts/test/run_autofuse_test.sh -s -m e2e -j 8
 - 新增或修改了哪些 ASCIR 注册、dtype、tmp buffer、API、UT/ST。
 - 执行了哪些验证命令，结果如何。
 - 是否存在需要用户人工确认的 tmp buffer 系数、期望值计算或兼容性决策。
+- 性能基线校验：vector bound / 外抛 for 循环是否命中，上板环境是否可用，最小改进方向。

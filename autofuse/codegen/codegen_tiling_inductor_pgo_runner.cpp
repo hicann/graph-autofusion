@@ -12,9 +12,22 @@
 
 namespace codegen {
 
-void TilingLib::GenInductorPgoHostLoader(std::stringstream &ss) const {
+namespace {
+void AppendInductorPgoLoaderState(std::stringstream &ss) {
   ss << R"(
 void *g_pgo_tiling_handle = nullptr;
+std::atomic<uint32_t> g_pgo_active_calls{0};
+std::atomic<bool> g_pgo_closing{false};
+std::mutex g_pgo_dso_mutex;
+std::condition_variable g_pgo_dso_cv;
+)" << std::endl;
+  AppendPgoDlopenFlags(ss);
+  AppendPgoDsoCallGuard(ss, "g_pgo_tiling_handle", "true", "g_pgo_closing", "g_pgo_active_calls", "g_pgo_dso_mutex",
+                        "g_pgo_dso_cv");
+}
+
+void AppendInductorPgoLoaderFunctions(std::stringstream &ss) {
+  ss << R"(
 GenerateMeasuredTopnSolutionsType generate_measured_topn_solutions_fn = nullptr;
 SetTopnPgoContextType set_topn_pgo_context_fn = nullptr;
 ClearTopnPgoContextType clear_topn_pgo_context_fn = nullptr;
@@ -26,9 +39,15 @@ bool LoadInductorPgoSymbol(T &target, const char *name) {
   if (target == nullptr) { DLOGE("dlsym %s failed: %s", name, dlerror()); return false; }
   return true;
 }
+)" << std::endl;
+}
 
+void AppendInductorPgoLoadUnload(std::stringstream &ss) {
+  ss << R"(
 int LoadInductorPgoHost(const InductorPgoRunnerArgs &args) {
-  g_pgo_tiling_handle = dlopen(args.tiling_file.c_str(), RTLD_NOW | RTLD_LOCAL);
+  std::lock_guard<std::mutex> lock(g_pgo_dso_mutex);
+  g_pgo_closing.store(false, std::memory_order_release);
+  g_pgo_tiling_handle = dlopen(args.tiling_file.c_str(), kPgoDlopenFlags);
   if (g_pgo_tiling_handle == nullptr) { DLOGE("dlopen tiling failed: %s", dlerror()); return FAILED; }
   bool valid = LoadInductorPgoSymbol(generate_measured_topn_solutions_fn, "GenerateMeasuredTopnSolutions") &&
       LoadInductorPgoSymbol(set_topn_pgo_context_fn, "SetTopnPgoContext") &&
@@ -36,16 +55,41 @@ int LoadInductorPgoHost(const InductorPgoRunnerArgs &args) {
       LoadInductorPgoSymbol(get_tiling_data_repr_fn, "GetTilingDataRepr") &&
       LoadInductorPgoSymbol(get_tiling_key_count_fn, "GetTilingKeyCount") &&
       LoadInductorPgoSymbol(find_best_tiling_key_fn, "FindBestTilingKey");
+  if (!valid) {
+    generate_measured_topn_solutions_fn = nullptr;
+    set_topn_pgo_context_fn = nullptr;
+    clear_topn_pgo_context_fn = nullptr;
+    get_tiling_data_repr_fn = nullptr;
+    get_tiling_key_count_fn = nullptr;
+    find_best_tiling_key_fn = nullptr;
+    if (!kPgoDlopenNodelete) { dlclose(g_pgo_tiling_handle); }
+    g_pgo_tiling_handle = nullptr;
+    g_pgo_closing.store(true, std::memory_order_release);
+    return FAILED;
+  }
   return valid ? SUCCESS : FAILED;
 }
 
 void UnloadInductorPgoHost() {
+  std::unique_lock<std::mutex> lock(g_pgo_dso_mutex);
+  g_pgo_closing.store(true, std::memory_order_release);
+  g_pgo_dso_cv.wait(lock, [] { return g_pgo_active_calls.load(std::memory_order_acquire) == 0; });
   generate_measured_topn_solutions_fn = nullptr; set_topn_pgo_context_fn = nullptr;
   clear_topn_pgo_context_fn = nullptr; get_tiling_data_repr_fn = nullptr;
   get_tiling_key_count_fn = nullptr; find_best_tiling_key_fn = nullptr;
-  if (g_pgo_tiling_handle != nullptr) { dlclose(g_pgo_tiling_handle); g_pgo_tiling_handle = nullptr; }
+  if (g_pgo_tiling_handle != nullptr) {
+    if (!kPgoDlopenNodelete) { dlclose(g_pgo_tiling_handle); }
+    g_pgo_tiling_handle = nullptr;
+  }
 }
 )" << std::endl;
+}
+}  // namespace
+
+void TilingLib::GenInductorPgoHostLoader(std::stringstream &ss) const {
+  AppendInductorPgoLoaderState(ss);
+  AppendInductorPgoLoaderFunctions(ss);
+  AppendInductorPgoLoadUnload(ss);
 }
 
 void TilingLib::GenInductorPgoResultProtocol(std::stringstream &ss) const {
@@ -115,6 +159,8 @@ uint64_t HashPgoBytes(const void *data, size_t size) {
 
 bool WritePgoRecord(std::ofstream &out, const AutofuseTilingData &tiling_data,
                     int64_t workspace, int64_t block_dim) {
+  PgoDsoCallGuard dso_guard;
+  if (!dso_guard) { return false; }
   if (get_tiling_data_repr_fn == nullptr) { return false; }
   const std::string repr = get_tiling_data_repr_fn(&tiling_data);
   if (repr.empty() || repr.size() > kMaxPgoReprSize || workspace < 0 || block_dim <= 0 ||
@@ -267,7 +313,8 @@ void TilingLib::GenInductorPgoContextGuard(std::stringstream &ss) const {
 class PgoContextGuard {
  public:
   explicit PgoContextGuard(std::vector<AutofuseTilingDataPerf> *measured_candidates) {
-    if (set_topn_pgo_context_fn != nullptr) {
+    dso_guard_ = std::make_unique<PgoDsoCallGuard>();
+    if (*dso_guard_ && set_topn_pgo_context_fn != nullptr) {
       valid_ = set_topn_pgo_context_fn(&g_pgo_tensor_args, g_stream, PGOGetProfiling, PGOGetProfilingBatch,
                                        measured_candidates) == 0;
     }
@@ -280,6 +327,7 @@ class PgoContextGuard {
   PgoContextGuard &operator=(const PgoContextGuard &) = delete;
  private:
   bool valid_ = false;
+  std::unique_ptr<PgoDsoCallGuard> dso_guard_;
 };
 }  // namespace
 )" << std::endl;
@@ -370,6 +418,8 @@ void DeInitInductorPgoRuntime() {
 void TilingLib::GenInductorPgoMain(std::stringstream &ss) const {
   ss << R"(
 int RunInductorPgo(const InductorPgoRunnerArgs &args) {
+  PgoDsoCallGuard dso_guard;
+  if (!dso_guard) { return FAILED; }
   std::vector<AutofuseTilingDataPerf> measured_candidates;
   PgoContextGuard context_guard(&measured_candidates);
   if (!context_guard.IsValid() || generate_measured_topn_solutions_fn == nullptr) { return FAILED; }

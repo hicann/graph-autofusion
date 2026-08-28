@@ -16,6 +16,10 @@
 #include "ascgen_log.h"
 
 namespace codegen {
+void AppendPgoDsoCallGuard(std::stringstream &ss, const char *handle_name, const char *initialized_name,
+                           const char *closing_name, const char *active_calls_name, const char *mutex_name,
+                           const char *condition_name);
+void AppendPgoDlopenFlags(std::stringstream &ss);
 const std::string kTilingHeadIdentify = "TilingHead";
 const std::string kTilingStateHeaderIdentify = "TilingStateHeader";
 const std::string kTilingLogHeaderIdentify = "TilingLogHeader";
@@ -442,6 +446,7 @@ class TilingLib {
   std::string GenCubeFusionTilingBodyInductor(const ::ascir::FusedScheduledResult &fused_schedule_result,
                                               const ::ascir::FusedScheduledResult &elemwise_schedule_result,
                                               const std::string &shape_dim_param) const;
+  std::string GenFp32LargeKCondition(const MatMulCubeInfo &cube_info) const;
   TilingLibCodegenFunc codegen_func_{nullptr};
   bool enable_autofuse_pgo_{false};
 };

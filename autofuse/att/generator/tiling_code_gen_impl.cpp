@@ -704,7 +704,12 @@ TilingCodeGenImpl::TilingCodeGenImpl(const std::string &op_name, const TilingCod
 
   // 读取编译态缓存配置
   const auto &att_config = AutoFuseConfig::GetAttStrategyConfig();
-  config_.cache_enabled_at_compile_time = (!config_.is_cube) && (att_config.enable_tiling_cache == "true");
+  const auto &pgo_config = AutoFuseConfig::GetPgoStrategyConfig();
+  const bool pgo_enabled = pgo_config.set_env_enable_autofuse_pgo && (pgo_config.enable_autofuse_pgo == "true");
+  const bool cache_enabled = config_.is_inductor_scene
+                                 ? (!att_config.set_env_enable_tiling_cache || att_config.enable_tiling_cache == "true")
+                                 : (att_config.enable_tiling_cache == "true");
+  config_.cache_enabled_at_compile_time = (!config_.is_cube) && cache_enabled && !pgo_enabled;
 
   for (const auto &model_info : tiling_model_info) {
     const auto &hardware_cons = model_info.hardware_cons;
@@ -997,7 +1002,7 @@ af::Status TilingCodeGenImpl::GenCacheHashMapDef() {
   }
 
   auto &state_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kState].dependencies;
-  for (const auto &header : {"array", "cstddef", "cstdint", "memory"}) {
+  for (const auto &header : {"array", "cstddef", "cstdint", "memory", "type_traits"}) {
     autofuse::RequireSystemHeader(state_dependencies, header);
   }
 
@@ -2344,7 +2349,7 @@ af::Status TilingCodeGenImpl::GenGetTilingDataFromCopy() {
 af::Status TilingCodeGenImpl::GenFindCacheAndSaveCache() {
   ge::CodePrinter state_header;
   auto &state_dependencies = atomic_headers_[autofuse::GeneratedHeaderId::kState].dependencies;
-  for (const auto &header : {"array", "cstddef", "cstdint"}) {
+  for (const auto &header : {"array", "cstddef", "cstdint", "type_traits"}) {
     autofuse::RequireSystemHeader(state_dependencies, header);
   }
   // 当OperatorCache关闭但GroupCache开启时，需要在这里补齐GroupCache依赖的共享定义
@@ -4317,9 +4322,17 @@ af::Status TilingCodeGenImpl::GenFusedScheduleResultsGetTilingDefine(const Fused
                       "bool GetTiling(" + config_.tiling_data_type_name +
                           " &tiling_data, int32_t tiling_case_id, double *perf = nullptr);");
 
-  // 添加算子级缓存逻辑
-  GE_ASSERT_SUCCESS(cache::OperatorLevelCacheGen::GenInitAndQueryCacheCode(tiling_func_, tiling_model_info_, config_),
-                    "Generate init and query cache code failed.");
+  // Operator cache is only valid for automatic tiling.  Explicit case/PGO
+  // and force-case requests must execute the requested schedule and must not touch cache.
+  const bool has_forced_tiling_case =
+      std::any_of(tiling_model_info_.cbegin(), tiling_model_info_.cend(), [this](const auto &model_info) {
+        return config_.force_tiling_case.GetCase(model_info.schedule_group_ident.group_id).first >= 0;
+      });
+  if (config_.cache_enabled_at_compile_time && !has_forced_tiling_case) {
+    GE_ASSERT_SUCCESS(cache::OperatorLevelCacheGen::GenInitAndQueryCacheCode(tiling_func_, tiling_model_info_, config_,
+                                                                             true, "tiling_case_id == -1"),
+                      "Generate init and query cache code failed.");
+  }
   tiling_func_.AddLine("  bool ret = true;");  // 声明ret变量用于缓存保存操作
 
   size_t asc_graph_id = 0UL;
@@ -4344,9 +4357,13 @@ af::Status TilingCodeGenImpl::GenFusedScheduleResultsGetTilingDefine(const Fused
   }
   tiling_func_.AddLine("  tiling_data.set_block_dim(max_block_dim);");
 
-  // 保存算子级缓存
-  GE_ASSERT_SUCCESS(cache::OperatorLevelCacheGen::GenSaveCacheCalls(tiling_func_, tiling_model_info_, config_),
-                    "Generate save cache calls failed.");
+  // Save only automatic tilings; explicit case/PGO requests bypass operator cache.
+  if (config_.cache_enabled_at_compile_time && !has_forced_tiling_case) {
+    tiling_func_.AddLine("  if (tiling_case_id == -1) {");
+    GE_ASSERT_SUCCESS(cache::OperatorLevelCacheGen::GenSaveCacheCalls(tiling_func_, tiling_model_info_, config_),
+                      "Generate save cache calls failed.");
+    tiling_func_.AddLine("  }");
+  }
 
   tiling_func_.AddLine("  (void)perf;");
   tiling_func_.AddLine("  OP_LOGI(OP_NAME, \"End GetTiling.\");");
@@ -4646,31 +4663,50 @@ void TilingCodeGenImpl::GenGetTilingFunctionSignature(const std::string &workspa
 
 af::Status TilingCodeGenImpl::GenGetTilingFunctionBody(bool use_cache, bool is_tail, const std::string &cache_used) {
   (void)use_cache;  // 保留参数以备将来使用
-  bool need_operator_cache = is_tail || (!is_tail && is_uniq_group_);
+  const bool has_forced_tiling_case =
+      std::any_of(tiling_model_info_.cbegin(), tiling_model_info_.cend(), [this](const auto &model_info) {
+        return config_.force_tiling_case.GetCase(model_info.schedule_group_ident.group_id).first >= 0;
+      });
+  const bool need_operator_cache =
+      config_.cache_enabled_at_compile_time && !has_forced_tiling_case && (is_tail || (!is_tail && is_uniq_group_));
 
   // 初始化返回值
   tiling_func_.AddLine("  bool ret = true;");
+  if (need_operator_cache) {
+    tiling_func_.AddLine("  bool cache_hit = false;");
+  }
 
   // 生成duration begin代码
   GE_ASSERT_SUCCESS(GenDurationCode(true), "Generate duration begin code failed.");
 
   // 第一级：算子级缓存查询（在GetTilingKey之前）
   if (need_operator_cache) {
-    GE_ASSERT_SUCCESS(cache::OperatorLevelCacheGen::GenInitAndQueryCacheCode(tiling_func_, tiling_model_info_, config_),
+    GE_ASSERT_SUCCESS(cache::OperatorLevelCacheGen::GenInitAndQueryCacheCode(tiling_func_, tiling_model_info_, config_,
+                                                                             false, "tiling_case_id == -1"),
                       "Generate init and query cache code failed.");
   }
 
-  // 生成日志和GetTilingKey调用
+  // 缓存未命中时生成日志和GetTilingKey调用
+  if (need_operator_cache) {
+    tiling_func_.AddLine("  if (!cache_hit) {");
+  }
   GE_ASSERT_SUCCESS(GenGetTilingKeyCall(cache_used), "Generate GetTilingKey call failed.");
 
-  // 保存算子级缓存
-  GE_ASSERT_SUCCESS(GenOperatorCacheSaveCode(need_operator_cache), "Generate save cache calls failed.");
+  if (need_operator_cache) {
+    tiling_func_.AddLine("  }");
+    // 保存算子级缓存，仅在实际完成tiling且未命中缓存时执行。
+    tiling_func_.AddLine("  if (ret) {");
+    tiling_func_.AddLine("    if (tiling_case_id == -1 && !cache_hit) {");
+    GE_ASSERT_SUCCESS(GenOperatorCacheSaveCode(true), "Generate save cache calls failed.");
+    tiling_func_.AddLine("    }");
+    tiling_func_.AddLine("  }");
+  }
 
   // 生成duration end代码
   GE_ASSERT_SUCCESS(GenDurationCode(false), "Generate duration end code failed.");
 
   // 如果 perf 不为空，计算并赋值性能
-  tiling_func_.AddLine("  if (perf != nullptr) {");
+  tiling_func_.AddLine("  if (ret && perf != nullptr) {");
   tiling_func_.AddLine("    *perf = GetPerf(tiling_data);");
   tiling_func_.AddLine("  }");
 

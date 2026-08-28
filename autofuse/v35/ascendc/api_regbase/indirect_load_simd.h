@@ -18,6 +18,17 @@
 #endif
 
 namespace AscendC {
+template <int32_t Rank>
+struct IndirectLoadSimdStridedParams {
+  uint32_t logical_size;
+  uint32_t physical_size;
+  int64_t output_offset;
+  int64_t index_sizes[Rank];
+  int64_t input_strides[Rank];
+  int64_t index_strides[Rank];
+  int64_t output_strides[Rank];
+};
+
 namespace Internal {
 template <int32_t Dim, int32_t Axis, int32_t StrideBase>
 struct IndirectLoadSimdInnerOffset {
@@ -343,75 +354,158 @@ __aicore__ inline bool TryIndirectLoadSimdEmbedding(const LocalTensor<X> &x, con
   return false;
 }
 
-template <typename X, typename Index, int32_t Rank, int32_t Axis, typename... ShapeArgs>
-__aicore__ inline void IndirectLoadSimdStridedImpl(const LocalTensor<X> &x, const LocalTensor<Index> &index,
-                                                   const LocalTensor<X> &y, const LocalTensor<uint8_t> &tmp,
-                                                   uint32_t actual_size, int64_t output_offset,
-                                                   ShapeArgs... shape_args) {
-  static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMD rank or axis is invalid.");
-  static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(3 * Rank), "IndirectLoad SIMD shape is invalid.");
-  const int64_t shape[] = {static_cast<int64_t>(shape_args)...};
+template <int32_t Rank, int32_t Axis>
+struct IndirectLoadSimdStridedContext {
+  const int64_t *shape;
+  const int64_t *output_strides;
+  uint32_t logical_size;
+  uint32_t physical_size;
+  int64_t output_offset;
+  int64_t index_inner;
+  int64_t output_slice_count;
+  int64_t input_window_base;
+  int64_t index_window_base;
+};
+
+template <int32_t Rank>
+__aicore__ inline void BuildIndirectLoadSimdStridedShape(int64_t (&shape)[3 * Rank],
+                                                         const IndirectLoadSimdStridedParams<Rank> &params) {
+  for (int32_t dim = 0; dim < Rank; ++dim) {
+    shape[dim] = params.index_sizes[dim];
+    shape[Rank + dim] = params.input_strides[dim];
+    shape[2 * Rank + dim] = params.index_strides[dim];
+  }
+}
+
+template <int32_t Rank, int32_t Axis>
+__aicore__ inline IndirectLoadSimdStridedContext<Rank, Axis> MakeIndirectLoadSimdStridedContext(
+    const int64_t *shape, const IndirectLoadSimdStridedParams<Rank> &params) {
   const int64_t index_inner = Internal::IndirectLoadSimdInnerSize<Rank - 1, Axis>::Call(shape);
   const int64_t output_slice_count = shape[Axis] * index_inner;
-  const int64_t outer_begin = output_offset / output_slice_count;
+  const int64_t outer_begin = params.output_offset / output_slice_count;
   int64_t input_window_base = 0;
   int64_t index_window_base = 0;
   if constexpr (Axis > 0) {
     input_window_base = Internal::IndirectLoadSimdOuterOffset<Axis - 1, Rank>::Call(outer_begin, shape);
     index_window_base = Internal::IndirectLoadSimdOuterOffset<Axis - 1, 2 * Rank>::Call(outer_begin, shape);
   }
-  if (TryIndirectLoadSimdEmbedding<X, Index, Rank, Axis>(x, index, y, actual_size, output_offset, shape)) {
-    return;
+  return {shape,       params.output_strides, params.logical_size, params.physical_size, params.output_offset,
+          index_inner, output_slice_count,    input_window_base,   index_window_base};
+}
+
+template <int32_t Rank, int32_t Axis>
+__aicore__ inline int64_t GetIndirectLoadSimdStridedIndexOffset(int64_t global_idx,
+                                                                const IndirectLoadSimdStridedContext<Rank, Axis> &ctx) {
+  const int64_t outer_global = global_idx / ctx.output_slice_count;
+  const int64_t tail = global_idx % ctx.output_slice_count;
+  const int64_t axis_coord = tail / ctx.index_inner;
+  const int64_t inner = tail % ctx.index_inner;
+  int64_t index_offset = axis_coord * ctx.shape[2 * Rank + Axis];
+  if constexpr (Axis > 0) {
+    index_offset += Internal::IndirectLoadSimdOuterOffset<Axis - 1, 2 * Rank>::Call(outer_global, ctx.shape) -
+                    ctx.index_window_base;
   }
-  LocalTensor<uint32_t> offsets = tmp.template ReinterpretCast<uint32_t>();
-  for (int64_t i = 0; i < actual_size; ++i) {
-    const int64_t global_idx = output_offset + i;
-    const int64_t outer_global = global_idx / output_slice_count;
-    const int64_t tail = global_idx % output_slice_count;
-    const int64_t axis_coord = tail / index_inner;
-    const int64_t inner = tail % index_inner;
-    int64_t index_offset = axis_coord * shape[2 * Rank + Axis];
-    if constexpr (Axis > 0) {
-      index_offset +=
-          Internal::IndirectLoadSimdOuterOffset<Axis - 1, 2 * Rank>::Call(outer_global, shape) - index_window_base;
-    }
-    if constexpr (Axis + 1 < Rank) {
-      index_offset += Internal::IndirectLoadSimdInnerOffset<Rank - 1, Axis, 2 * Rank>::Call(inner, shape);
-    }
+  if constexpr (Axis + 1 < Rank) {
+    index_offset += Internal::IndirectLoadSimdInnerOffset<Rank - 1, Axis, 2 * Rank>::Call(inner, ctx.shape);
+  }
+  return index_offset;
+}
+
+template <int32_t Rank, int32_t Axis>
+__aicore__ inline int64_t GetIndirectLoadSimdStridedInputOffset(int64_t global_idx, int64_t index_value,
+                                                                const IndirectLoadSimdStridedContext<Rank, Axis> &ctx) {
+  const int64_t outer_global = global_idx / ctx.output_slice_count;
+  const int64_t tail = global_idx % ctx.output_slice_count;
+  const int64_t inner = tail % ctx.index_inner;
+  int64_t input_inner_offset = 0;
+  int64_t input_outer_offset = 0;
+  if constexpr (Axis + 1 < Rank) {
+    input_inner_offset = Internal::IndirectLoadSimdInnerOffset<Rank - 1, Axis, Rank>::Call(inner, ctx.shape);
+  }
+  if constexpr (Axis > 0) {
+    input_outer_offset =
+        Internal::IndirectLoadSimdOuterOffset<Axis - 1, Rank>::Call(outer_global, ctx.shape) - ctx.input_window_base;
+  }
+  return input_outer_offset + index_value * ctx.shape[Rank + Axis] + input_inner_offset;
+}
+
+template <typename X, typename Index, int32_t Rank, int32_t Axis>
+__aicore__ inline void BuildIndirectLoadSimdStridedOffsets(const LocalTensor<Index> &index,
+                                                           const LocalTensor<uint32_t> &offsets,
+                                                           const IndirectLoadSimdStridedContext<Rank, Axis> &ctx) {
+  for (uint32_t i = 0; i < ctx.logical_size; ++i) {
+    const int64_t global_idx = ctx.output_offset + static_cast<int64_t>(i);
+    const int64_t index_offset = GetIndirectLoadSimdStridedIndexOffset<Rank, Axis>(global_idx, ctx);
     const int64_t index_value = static_cast<int64_t>(index.GetValue(index_offset));
-    int64_t input_inner_offset = 0;
-    if constexpr (Axis + 1 < Rank) {
-      input_inner_offset = Internal::IndirectLoadSimdInnerOffset<Rank - 1, Axis, Rank>::Call(inner, shape);
-    }
-    int64_t input_outer_offset = 0;
-    if constexpr (Axis > 0) {
-      input_outer_offset =
-          Internal::IndirectLoadSimdOuterOffset<Axis - 1, Rank>::Call(outer_global, shape) - input_window_base;
-    }
-    const int64_t src_idx = input_outer_offset + index_value * shape[Rank + Axis] + input_inner_offset;
-    offsets.SetValue(i, static_cast<uint32_t>(src_idx * sizeof(X)));
+    const int64_t source_offset = GetIndirectLoadSimdStridedInputOffset<Rank, Axis>(global_idx, index_value, ctx);
+    offsets.SetValue(i, static_cast<uint32_t>(source_offset * sizeof(X)));
   }
+}
+
+template <int32_t Rank, int32_t Axis>
+__aicore__ inline int64_t GetIndirectLoadSimdStridedOutputOffset(
+    int64_t global_idx, const IndirectLoadSimdStridedContext<Rank, Axis> &ctx) {
+  int64_t current = global_idx;
+  int64_t base = ctx.output_offset;
+  int64_t output_offset = 0;
+  for (int32_t dim = Rank - 1; dim >= 0; --dim) {
+    const int64_t coord = current % ctx.shape[dim];
+    const int64_t base_coord = base % ctx.shape[dim];
+    current /= ctx.shape[dim];
+    base /= ctx.shape[dim];
+    output_offset += (coord - base_coord) * ctx.output_strides[dim];
+  }
+  return output_offset;
+}
+
+template <typename X, int32_t Rank, int32_t Axis>
+__aicore__ inline void ScatterIndirectLoadSimdStridedOutput(const LocalTensor<X> &y,
+                                                            const IndirectLoadSimdStridedContext<Rank, Axis> &ctx) {
+  // Gather writes packed logical values first. Repack from the end so padding lanes do not
+  // overwrite a source value that is still needed by the supported compact output layouts.
+  for (int64_t i = static_cast<int64_t>(ctx.logical_size) - 1; i >= 0; --i) {
+    const int64_t output_offset = GetIndirectLoadSimdStridedOutputOffset<Rank, Axis>(ctx.output_offset + i, ctx);
+    y.SetValue(output_offset, y.GetValue(i));
+  }
+}
+
+// Strided SIMD output may contain alignment holes (for example, a logical 23-element row
+// is stored with a physical stride of 24). Keep the gather packed and expand it into the
+// padded destination layout afterwards.
+template <typename X, typename Index, int32_t Rank, int32_t Axis>
+__aicore__ inline void IndirectLoadSimdStridedImpl(const LocalTensor<X> &x, const LocalTensor<Index> &index,
+                                                   const LocalTensor<X> &y, const LocalTensor<uint8_t> &tmp,
+                                                   const IndirectLoadSimdStridedParams<Rank> &params) {
+  static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMD rank or axis is invalid.");
+  int64_t shape[3 * Rank];
+  BuildIndirectLoadSimdStridedShape(shape, params);
+  const auto context = MakeIndirectLoadSimdStridedContext<Rank, Axis>(shape, params);
+  LocalTensor<uint32_t> offsets = tmp.template ReinterpretCast<uint32_t>();
+  BuildIndirectLoadSimdStridedOffsets<X, Index, Rank, Axis>(index, offsets, context);
   int32_t offset_event_id = static_cast<int32_t>(GetTPipePtr()->FetchEventID(AscendC::HardEvent::S_V));
   AscendC::SetFlag<AscendC::HardEvent::S_V>(offset_event_id);
   AscendC::WaitFlag<AscendC::HardEvent::S_V>(offset_event_id);
-  Gather(y, x, offsets, static_cast<uint32_t>(0), actual_size);
+  Gather(y, x, offsets, static_cast<uint32_t>(0), context.logical_size);
+  ScatterIndirectLoadSimdStridedOutput<X, Rank, Axis>(y, context);
 }
 }  // namespace Internal
 
-template <typename X, typename Index, int32_t Rank, int32_t Axis, typename FirstArg, typename... Args>
+template <typename X, typename Index, int32_t Rank, int32_t Axis, typename... ShapeArgs>
 __aicore__ inline void IndirectLoadSimd(const LocalTensor<X> &x, const LocalTensor<Index> &index,
-                                        const LocalTensor<X> &y, FirstArg first_arg, Args... args) {
+                                        const LocalTensor<X> &y, uint32_t actual_size, int64_t output_offset,
+                                        uint32_t input_actual_size, int64_t input_axis, ShapeArgs... shape_args) {
   static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMD rank or axis is invalid.");
-  constexpr bool has_tmp = std::is_same_v<std::decay_t<FirstArg>, LocalTensor<uint8_t>>;
-  if constexpr (has_tmp) {
-    static_assert(sizeof...(Args) == static_cast<size_t>(2 + 3 * Rank),
-                  "IndirectLoad SIMD strided arguments are invalid.");
-    Internal::IndirectLoadSimdStridedImpl<X, Index, Rank, Axis>(x, index, y, first_arg, args...);
-  } else {
-    static_assert(sizeof...(Args) == static_cast<size_t>(3 + 2 * Rank),
-                  "IndirectLoad SIMD dense arguments are invalid.");
-    Internal::IndirectLoadSimdDenseImpl<X, Index, Rank, Axis>(x, index, y, first_arg, args...);
-  }
+  static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(2 * Rank), "IndirectLoad SIMD shape is invalid.");
+  Internal::IndirectLoadSimdDenseImpl<X, Index, Rank, Axis>(x, index, y, actual_size, output_offset, input_actual_size,
+                                                            input_axis, shape_args...);
+}
+
+template <typename X, typename Index, int32_t Rank, int32_t Axis>
+__aicore__ inline void IndirectLoadSimdStrided(const LocalTensor<X> &x, const LocalTensor<Index> &index,
+                                               const LocalTensor<X> &y, const LocalTensor<uint8_t> &tmp,
+                                               const IndirectLoadSimdStridedParams<Rank> &params) {
+  static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMD rank or axis is invalid.");
+  Internal::IndirectLoadSimdStridedImpl<X, Index, Rank, Axis>(x, index, y, tmp, params);
 }
 
 template <typename X, typename Index, int32_t Rank, int32_t Axis, typename... ShapeArgs>

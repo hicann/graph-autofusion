@@ -76,10 +76,13 @@ class OperatorLevelCacheGen : public TilingCacheCodeGen {
    * @param code_printer 代码打印器（函数体）
    * @param tiling_model_info Tiling模型信息
    * @param config 生成器配置
+   * @param return_on_hit 命中时是否直接返回；false 时调用方必须提供并维护 cache_hit 变量，以便统一执行收尾逻辑
+   * @param query_guard 可选的生成态查询条件，例如自动 tiling 的 tiling_case_id == -1
    * @return af::Status
    */
   static af::Status GenInitAndQueryCacheCode(ge::CodePrinter &code_printer, const TilingModelInfo &tiling_model_info,
-                                             const TilingCodeGenConfig &config);
+                                             const TilingCodeGenConfig &config, bool return_on_hit = true,
+                                             const std::string &query_guard = "");
 
   /**
    * @brief 生成Context类代码

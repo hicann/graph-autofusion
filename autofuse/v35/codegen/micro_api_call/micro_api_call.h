@@ -83,25 +83,25 @@ class MicroApiCall {
     outputs_.emplace_back(type, id);
   }
 
-  size_t GetInputSize() {
+  size_t GetInputSize() const {
     return inputs_.size();
   }
 
-  size_t GetOutputSize() {
+  size_t GetOutputSize() const {
     return outputs_.size();
   }
 
   // 调用者保证index合法性
-  ascir::TensorId GetInputTensorIdByIndex(uint32_t index) {
+  ascir::TensorId GetInputTensorIdByIndex(uint32_t index) const {
     return inputs_[index].second;
   }
 
   // 调用者保证index合法性
-  ascir::TensorId GetOutputTensorIdByIndex(uint32_t index) {
+  ascir::TensorId GetOutputTensorIdByIndex(uint32_t index) const {
     return outputs_[index].second;
   }
 
-  std::string GetMicroApiName() {
+  std::string GetMicroApiName() const {
     return api_name_;
   }
 

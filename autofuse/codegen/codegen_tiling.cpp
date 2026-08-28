@@ -48,6 +48,8 @@ using namespace ascgen_utils;
 namespace {
 constexpr uint64_t kMaxPgoTilingKeyCount = 10000U;
 constexpr uint64_t kInt64TilingKeyCapacity = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + 1U;
+// fp32且K轴大于该阈值且未启用hf32时, CV融合UB模板存在精度问题, 需走common兜底模板
+constexpr int64_t kFp32LargeKThreshold = 2048;
 
 std::string GenUint64Literal(uint64_t value) {
   return std::to_string(value) + (value >= kInt64TilingKeyCapacity ? "ULL" : "");
@@ -95,6 +97,34 @@ void GenInductorCvSafetyFallback(std::stringstream &ss, uint64_t count, const st
   ss << indent << "tiling->cv_tiling_data.cv_aiv_num = vec_block_dim;" << std::endl;
   ss << indent << "tiling->cv_tiling_data.cv_vec_wss = vec_wss;" << std::endl;
   ss << indent << "return 0;" << std::endl;
+}
+
+// 生成cv_tiling_data字段重置代码, ub_mode区分UB模板(1)与common模板(0)
+void GenCvTilingDataReset(std::stringstream &ss, const std::string &indent, uint32_t ub_mode) {
+  ss << indent << "tiling->stage_size_name = tiling->tiling_data.STAGE_SIZE_NAME;" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.fusion_mode = 0;" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.ub_mode = " << ub_mode << ";" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.mix_mode = 0;" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.cv_aic_num = 0;" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.cv_aiv_num = 0;" << std::endl;
+  ss << indent << "tiling->cv_tiling_data.cv_vec_wss = 0;" << std::endl;
+}
+
+// 生成tiling函数尾部的GetTiling选模板分支: case 0(UB)失败则尝试case 1, 仍失败走common兜底
+void GenInductorGetTilingBranch(std::stringstream &ss, uint64_t count, uint32_t type_size) {
+  ss << "  if (!optiling::GetTiling(tiling->tiling_data, 0)) {" << std::endl;
+  ss << "    const uint32_t basen_basem_align_tmp = (uint32_t)basen_basem_align;" << std::endl;
+  ss << "    set_g_basen_basem_align(basen_align);" << std::endl;
+  ss << "    tiling->tiling_data.set_ub_size(limit->ub_size - 256 - basen_basem_align_tmp * " << type_size << ");"
+     << std::endl;
+  ss << "    if (!optiling::GetTiling(tiling->tiling_data, 1)) {" << std::endl;
+  GenInductorCvSafetyFallback(ss, count, "      ");
+  ss << "    } else {" << std::endl;
+  GenCvTilingDataReset(ss, "      ", 1U);
+  ss << "    }" << std::endl;
+  ss << "  } else {" << std::endl;
+  GenCvTilingDataReset(ss, "    ", 0U);
+  ss << "  }" << std::endl;
 }
 
 bool TryCalcTilingKeyCount(const ascir::FusedScheduledResult &result, uint64_t limit, uint64_t &count) {
@@ -1081,6 +1111,42 @@ void TilingLib::TilingSetShapeDim(std::stringstream &tiling_set_shape_dim, const
   }
 }
 
+std::string TilingLib::GenFp32LargeKCondition(const MatMulCubeInfo &cube_info) const {
+  // 非fp32类型(type_size!=4)不触发common兜底
+  if (cube_info.type_size != 4U) {
+    return "false";
+  }
+  // 启用hf32时不触发common兜底
+  if (cube_info.enable_hf32) {
+    return "false";
+  }
+  // 从matmul节点输入0获取K轴表达式
+  std::vector<TensorInfo> inputs;
+  if (ExtractInputsFromMatMulNode(cube_info.matmul_node, inputs) != af::SUCCESS || inputs.empty() ||
+      inputs[0].shape.size() < 2U) {
+    return "false";
+  }
+  // 非transpose_x1: K轴是shape[-1]; transpose_x1: K轴是shape[-2]
+  const auto &shape = inputs[0].shape;
+  const af::Expression &k_expr = cube_info.transpose_x1 ? shape[shape.size() - 2U] : shape[shape.size() - 1U];
+  if (!k_expr.IsValid()) {
+    return "false";
+  }
+  // K轴为常量: 编译期判断
+  if (k_expr.IsConstExpr()) {
+    std::string k_str = std::string(k_expr.Str().get());
+    try {
+      int64_t k_value = std::stoll(k_str);
+      return k_value > kFp32LargeKThreshold ? "true" : "false";
+    } catch (...) {
+      return "false";
+    }
+  }
+  // K轴为动态变量: 生成运行时判断
+  std::string k_var = std::string(k_expr.Str().get());
+  return "(static_cast<int64_t>(" + k_var + ") > " + std::to_string(kFp32LargeKThreshold) + ")";
+}
+
 std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedScheduledResult &fused_schedule_result,
                                                        const ::ascir::FusedScheduledResult &elemwise_schedule_result,
                                                        const std::string &shape_dim_param) const {
@@ -1106,35 +1172,13 @@ std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedSchedul
   ss << "  tiling->tiling_data.set_block_dim(limit->aiv_num);" << std::endl;
   ss << "  tiling->tiling_data.set_ub_size(limit->ub_size - 256);" << std::endl;
 
-  ss << "  if (cube_tiling_key_ub != 1) {" << std::endl;
+  // fp32且K轴大于阈值且未启用hf32时, CV融合UB模板有精度问题, 强制走common兜底
+  std::string fp32_large_k_cond = GenFp32LargeKCondition(cube_info);
+  ss << "  if (cube_tiling_key_ub != 1 || (" << fp32_large_k_cond << ")) {" << std::endl;
   GenInductorCvSafetyFallback(ss, count, "    ");
   ss << "  }" << std::endl;
 
-  ss << "  if (!optiling::GetTiling(tiling->tiling_data, 0)) {" << std::endl;
-  ss << "    const uint32_t basen_basem_align_tmp = (uint32_t)basen_basem_align;" << std::endl;
-  ss << "    set_g_basen_basem_align(basen_align);" << std::endl;
-  ss << "    tiling->tiling_data.set_ub_size(limit->ub_size - 256 - basen_basem_align_tmp * " << cube_info.type_size
-     << ");" << std::endl;
-  ss << "    if (!optiling::GetTiling(tiling->tiling_data, 1)) {" << std::endl;
-  GenInductorCvSafetyFallback(ss, count, "      ");
-  ss << "    } else {" << std::endl;
-  ss << "      tiling->stage_size_name = tiling->tiling_data.STAGE_SIZE_NAME;" << std::endl;
-  ss << "      tiling->cv_tiling_data.fusion_mode = 0;" << std::endl;
-  ss << "      tiling->cv_tiling_data.ub_mode = 1;" << std::endl;
-  ss << "      tiling->cv_tiling_data.mix_mode = 0;" << std::endl;
-  ss << "      tiling->cv_tiling_data.cv_aic_num = 0;" << std::endl;
-  ss << "      tiling->cv_tiling_data.cv_aiv_num = 0;" << std::endl;
-  ss << "      tiling->cv_tiling_data.cv_vec_wss = 0;" << std::endl;
-  ss << "    }" << std::endl;
-  ss << "  } else {" << std::endl;
-  ss << "    tiling->stage_size_name = tiling->tiling_data.STAGE_SIZE_NAME;" << std::endl;
-  ss << "    tiling->cv_tiling_data.fusion_mode = 0;" << std::endl;
-  ss << "    tiling->cv_tiling_data.ub_mode = 0;" << std::endl;
-  ss << "    tiling->cv_tiling_data.mix_mode = 0;" << std::endl;
-  ss << "    tiling->cv_tiling_data.cv_aic_num = 0;" << std::endl;
-  ss << "    tiling->cv_tiling_data.cv_aiv_num = 0;" << std::endl;
-  ss << "    tiling->cv_tiling_data.cv_vec_wss = 0;" << std::endl;
-  ss << "  }" << std::endl;
+  GenInductorGetTilingBranch(ss, count, cube_info.type_size);
   ss << "  *blockDim = cube_block_dim;" << std::endl;
   ss << "  *workspaceSize = GetWorkspaceSize(tiling->tiling_data) + ws_size;" << std::endl;
   ss << "  return 0;" << std::endl;

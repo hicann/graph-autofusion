@@ -24,6 +24,27 @@
 extern "C" int64_t AutofuseTiling(AutofuseTilingData *, uint32_t *, uint32_t *, uint32_t, uint32_t);
 #endif
 
+#if defined(IL_USER_FANOUT)
+extern "C" __global__ __aicore__ void user_fanout(GM_ADDR indices, GM_ADDR embedding, GM_ADDR weight, GM_ADDR output0,
+                                                  GM_ADDR output1, GM_ADDR workspace, GM_ADDR gm_tiling_data);
+#elif defined(IL_USER_EMBEDDING_EXP_ABS_ADD)
+extern "C" __global__ __aicore__ void user_embedding_exp_abs_add(GM_ADDR indices, GM_ADDR embedding, GM_ADDR output,
+                                                                 GM_ADDR workspace, GM_ADDR gm_tiling_data);
+#elif defined(IL_USER_EMBEDDING_SUM)
+extern "C" __global__ __aicore__ void user_embedding_sum(GM_ADDR table, GM_ADDR indices, GM_ADDR output,
+                                                         GM_ADDR workspace, GM_ADDR gm_tiling_data);
+#elif defined(IL_USER_EMBEDDING_MUL)
+extern "C" __global__ __aicore__ void user_embedding_mul(GM_ADDR table, GM_ADDR indices, float scale, GM_ADDR output,
+                                                         GM_ADDR workspace, GM_ADDR gm_tiling_data);
+#elif defined(IL_USER_LAYERNORM)
+extern "C" __global__ __aicore__ void user_layernorm(GM_ADDR indices, GM_ADDR embedding, GM_ADDR weight,
+                                                     GM_ADDR raw_output, GM_ADDR square_output, GM_ADDR workspace,
+                                                     GM_ADDR gm_tiling_data);
+#elif defined(IL_DUAL_IL_GATHER)
+extern "C" __global__ __aicore__ void user_add_gather(GM_ADDR input0, GM_ADDR input1, GM_ADDR indices, GM_ADDR output,
+                                                      GM_ADDR workspace, GM_ADDR gm_tiling_data);
+#endif
+
 namespace indirect_load_test {
 inline void GmFree(void *ptr) {
   AscendC::GmFree(ptr);
@@ -840,7 +861,336 @@ TEST(E2EIndirectLoadBroadcast, GeneratedKernelMatchesReference) {
 
 #endif
 
-#if defined(IL_CASE_BROADCAST_WHERE)
+#if defined(IL_USER_FANOUT)
+TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
+  constexpr int32_t kRows = 2;
+  constexpr int32_t kDim = 16;
+  constexpr int32_t kTableRows = 32;
+  auto *indices = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kRows));
+  auto *embedding = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kTableRows * kDim));
+  auto *weight = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kRows * kDim));
+  auto *output0 = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kRows * kDim));
+#if defined(IL_USER_FANOUT_REDUCE)
+  auto *output1 = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kRows));
+#else
+  auto *output1 = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kRows * kDim));
+#endif
+  ASSERT_NE(indices, nullptr);
+  ASSERT_NE(embedding, nullptr);
+  ASSERT_NE(weight, nullptr);
+  ASSERT_NE(output0, nullptr);
+  ASSERT_NE(output1, nullptr);
+  for (int32_t row = 0; row < kRows; ++row) {
+    indices[row] = row + 1;
+  }
+  for (int32_t row = 0; row < kTableRows; ++row) {
+    for (int32_t col = 0; col < kDim; ++col) {
+      embedding[row * kDim + col] = static_cast<bfloat16_t>((row + 1) * 0.01F + col * 0.001F);
+    }
+  }
+  std::fill_n(weight, kRows * kDim, static_cast<bfloat16_t>(0.0F));
+  std::fill_n(output0, kRows * kDim, static_cast<bfloat16_t>(0.0F));
+#if defined(IL_USER_FANOUT_REDUCE)
+  std::fill_n(output1, kRows, static_cast<bfloat16_t>(0.0F));
+#else
+  std::fill_n(output1, kRows * kDim, static_cast<bfloat16_t>(0.0F));
+#endif
+
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0U;
+  uint32_t block_dim = 48U;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(user_fanout, block_dim, reinterpret_cast<uint8_t *>(indices), reinterpret_cast<uint8_t *>(embedding),
+              reinterpret_cast<uint8_t *>(weight), reinterpret_cast<uint8_t *>(output0),
+              reinterpret_cast<uint8_t *>(output1), reinterpret_cast<uint8_t *>(workspace),
+              reinterpret_cast<uint8_t *>(&tiling_data));
+
+  for (int32_t row = 0; row < kRows; ++row) {
+#if defined(IL_USER_FANOUT_REDUCE)
+    float expected_reduce = 0.0F;
+#endif
+    for (int32_t col = 0; col < kDim; ++col) {
+      const float value = static_cast<float>(embedding[indices[row] * kDim + col]);
+#if defined(IL_USER_FANOUT_POST)
+      const float source = std::fabs(value);
+#else
+      const float source = value;
+#endif
+      EXPECT_NEAR(static_cast<float>(output0[row * kDim + col]), std::exp(source), 0.125F)
+          << "output0 row=" << row << ", col=" << col;
+#if defined(IL_USER_FANOUT_REDUCE)
+      expected_reduce += source * source;
+#else
+      EXPECT_NEAR(static_cast<float>(output1[row * kDim + col]), std::fabs(source), 0.125F)
+          << "output1 row=" << row << ", col=" << col;
+#endif
+    }
+#if defined(IL_USER_FANOUT_REDUCE)
+    EXPECT_NEAR(static_cast<float>(output1[row]), expected_reduce, 0.5F) << "output1 row=" << row;
+#endif
+  }
+  if (workspace != nullptr) AscendC::GmFree(workspace);
+  AscendC::GmFree(indices);
+  AscendC::GmFree(embedding);
+  AscendC::GmFree(weight);
+  AscendC::GmFree(output0);
+  AscendC::GmFree(output1);
+}
+
+#elif defined(IL_USER_EMBEDDING_EXP_ABS_ADD)
+TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
+  constexpr int32_t kRows = 8;
+  constexpr int32_t kDim = 16;
+  constexpr int32_t kTableRows = 100;
+  constexpr int32_t kTableElements = kTableRows * kDim;
+  auto *indices = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kRows));
+  auto *embedding = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kTableElements));
+  auto *output = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kRows * kDim));
+  ASSERT_NE(indices, nullptr);
+  ASSERT_NE(embedding, nullptr);
+  ASSERT_NE(output, nullptr);
+
+  for (int32_t row = 0; row < kRows; ++row) {
+    indices[row] = static_cast<int64_t>(row + 1);
+  }
+  for (int32_t row = 0; row < kTableRows; ++row) {
+    for (int32_t col = 0; col < kDim; ++col) {
+      embedding[row * kDim + col] = static_cast<float>(row - 40) * 0.01F + static_cast<float>(col) * 0.001F;
+    }
+  }
+  std::fill_n(output, kRows * kDim, 0.0F);
+
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0U;
+  uint32_t block_dim = 48U;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(user_embedding_exp_abs_add, block_dim, reinterpret_cast<uint8_t *>(indices),
+              reinterpret_cast<uint8_t *>(embedding), reinterpret_cast<uint8_t *>(output),
+              reinterpret_cast<uint8_t *>(workspace), reinterpret_cast<uint8_t *>(&tiling_data));
+
+  for (int32_t row = 0; row < kRows; ++row) {
+    const int64_t index = indices[row];
+    for (int32_t col = 0; col < kDim; ++col) {
+      const float value = embedding[index * kDim + col];
+      const float expected = std::exp(value) + std::fabs(value);
+      EXPECT_NEAR(output[row * kDim + col], expected, 1.0e-4F) << "row=" << row << ", col=" << col;
+    }
+  }
+
+  if (workspace != nullptr) {
+    AscendC::GmFree(workspace);
+  }
+  AscendC::GmFree(indices);
+  AscendC::GmFree(embedding);
+  AscendC::GmFree(output);
+}
+
+#elif defined(IL_USER_EMBEDDING_SUM)
+TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
+  constexpr int32_t kRows = 4;
+  constexpr int32_t kLookups = 4;
+  constexpr int32_t kDim = 16;
+  constexpr int32_t kTableRows = 100;
+  constexpr int32_t kIndexStride = 8;
+  const int32_t kIndexStorage = (kRows - 1) * kIndexStride + kLookups;
+  auto *indices = static_cast<int32_t *>(AscendC::GmAlloc(sizeof(int32_t) * kIndexStorage));
+  auto *table = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kTableRows * kDim));
+  auto *output = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kRows * kDim));
+  ASSERT_NE(indices, nullptr);
+  ASSERT_NE(table, nullptr);
+  ASSERT_NE(output, nullptr);
+  for (int32_t row = 0; row < kTableRows; ++row) {
+    for (int32_t col = 0; col < kDim; ++col) {
+      table[row * kDim + col] = static_cast<float>(row * kDim + col) * 0.01F;
+    }
+  }
+  for (int32_t row = 0; row < kRows; ++row) {
+    for (int32_t lookup = 0; lookup < kLookups; ++lookup) {
+      indices[row * kIndexStride + lookup] = (row * kLookups + lookup + 1) % kTableRows;
+    }
+  }
+  std::fill_n(output, kRows * kDim, 0.0F);
+
+  AutofuseTilingData tiling_data{};
+  tiling_data.set_ks0(kRows);
+  tiling_data.set_s44(kIndexStride);
+  uint32_t workspace_size = 0U;
+  uint32_t block_dim = 48U;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(user_embedding_sum, block_dim, reinterpret_cast<uint8_t *>(table), reinterpret_cast<uint8_t *>(indices),
+              reinterpret_cast<uint8_t *>(output), reinterpret_cast<uint8_t *>(workspace),
+              reinterpret_cast<uint8_t *>(&tiling_data));
+  for (int32_t row = 0; row < kRows; ++row) {
+    for (int32_t col = 0; col < kDim; ++col) {
+      float expected = 0.0F;
+      for (int32_t lookup = 0; lookup < kLookups; ++lookup) {
+        expected += table[indices[row * kIndexStride + lookup] * kDim + col];
+      }
+      EXPECT_NEAR(output[row * kDim + col], expected, 0.0625F) << "row=" << row << ", col=" << col;
+    }
+  }
+  if (workspace != nullptr) AscendC::GmFree(workspace);
+  AscendC::GmFree(indices);
+  AscendC::GmFree(table);
+  AscendC::GmFree(output);
+}
+
+#elif defined(IL_USER_EMBEDDING_MUL)
+TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
+  constexpr int32_t kRows = 1024;
+  constexpr int32_t kDim = 2048;
+  constexpr int32_t kTableRows = 2;
+  auto *indices = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kRows));
+  auto *table = static_cast<half *>(AscendC::GmAlloc(sizeof(half) * kTableRows * kDim));
+  auto *output = static_cast<half *>(AscendC::GmAlloc(sizeof(half) * kRows * kDim));
+  ASSERT_NE(indices, nullptr);
+  ASSERT_NE(table, nullptr);
+  ASSERT_NE(output, nullptr);
+  constexpr float scale = 0.5F;
+  for (int32_t row = 0; row < kRows; ++row) indices[row] = row % kTableRows;
+  for (int32_t row = 0; row < kTableRows; ++row) {
+    for (int32_t col = 0; col < kDim; ++col) {
+      table[row * kDim + col] = static_cast<half>((row + 1) * 0.01F + col * 0.001F);
+    }
+  }
+  std::fill_n(output, kRows * kDim, static_cast<half>(0.0F));
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0U;
+  uint32_t block_dim = 48U;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(user_embedding_mul, block_dim, reinterpret_cast<uint8_t *>(table), reinterpret_cast<uint8_t *>(indices),
+              scale, reinterpret_cast<uint8_t *>(output), reinterpret_cast<uint8_t *>(workspace),
+              reinterpret_cast<uint8_t *>(&tiling_data));
+  for (int32_t row = 0; row < kRows; ++row) {
+    for (int32_t col = 0; col < kDim; ++col) {
+      const float expected = static_cast<float>(table[indices[row] * kDim + col]) * scale;
+      EXPECT_NEAR(static_cast<float>(output[row * kDim + col]), expected, 0.0625F) << "row=" << row << ", col=" << col;
+    }
+  }
+  if (workspace != nullptr) AscendC::GmFree(workspace);
+  AscendC::GmFree(indices);
+  AscendC::GmFree(table);
+  AscendC::GmFree(output);
+}
+
+#elif defined(IL_USER_LAYERNORM)
+TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
+#if defined(IL_USER_LAYERNORM_SIMD)
+  constexpr int32_t kRows = 2;
+  constexpr int32_t kDim = 16;
+  constexpr int32_t kTableRows = 100;
+#else
+  constexpr int32_t kRows = 21;
+  constexpr int32_t kDim = 2048;
+  constexpr int32_t kTableRows = 102400;
+#endif
+  auto *indices = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kRows));
+  auto *embedding = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kTableRows * kDim));
+  auto *weight = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kRows * kDim));
+  auto *raw_output = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kRows * kDim));
+  auto *square_output = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kRows));
+  ASSERT_NE(indices, nullptr);
+  ASSERT_NE(embedding, nullptr);
+  ASSERT_NE(weight, nullptr);
+  ASSERT_NE(raw_output, nullptr);
+  ASSERT_NE(square_output, nullptr);
+  for (int32_t row = 0; row < kRows; ++row) indices[row] = row % kTableRows;
+  for (int32_t row = 0; row < kTableRows; ++row) {
+    for (int32_t col = 0; col < kDim; ++col) {
+      embedding[row * kDim + col] = static_cast<bfloat16_t>((row + 1) * 0.01F + col * 0.001F);
+    }
+  }
+  std::fill_n(weight, kRows * kDim, static_cast<bfloat16_t>(0.0F));
+  std::fill_n(raw_output, kRows * kDim, static_cast<bfloat16_t>(0.0F));
+  std::fill_n(square_output, kRows, static_cast<bfloat16_t>(0.0F));
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0U;
+  uint32_t block_dim = 48U;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(user_layernorm, block_dim, reinterpret_cast<uint8_t *>(indices), reinterpret_cast<uint8_t *>(embedding),
+              reinterpret_cast<uint8_t *>(weight), reinterpret_cast<uint8_t *>(raw_output),
+              reinterpret_cast<uint8_t *>(square_output), reinterpret_cast<uint8_t *>(workspace),
+              reinterpret_cast<uint8_t *>(&tiling_data));
+  for (int32_t row = 0; row < kRows; ++row) {
+    float expected_square = 0.0F;
+    for (int32_t col = 0; col < kDim; ++col) {
+      const float expected_raw = static_cast<float>(embedding[indices[row] * kDim + col]);
+      expected_square += expected_raw * expected_raw;
+      EXPECT_NEAR(static_cast<float>(raw_output[row * kDim + col]), expected_raw, 0.0625F)
+          << "raw row=" << row << ", col=" << col;
+    }
+    EXPECT_NEAR(static_cast<float>(square_output[row]), expected_square, 0.5F) << "square row=" << row;
+  }
+  if (workspace != nullptr) AscendC::GmFree(workspace);
+  AscendC::GmFree(indices);
+  AscendC::GmFree(embedding);
+  AscendC::GmFree(weight);
+  AscendC::GmFree(raw_output);
+  AscendC::GmFree(square_output);
+}
+
+#elif defined(IL_DUAL_IL_GATHER)
+TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
+  constexpr int32_t kRows = 1024 * 1025;
+  constexpr int32_t kInputWidth = 10;
+  constexpr int32_t kOutputWidth = 5;
+  auto *input0 = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kRows * kInputWidth));
+  auto *input1 = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kRows * kInputWidth));
+  auto *indices = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kRows * kOutputWidth));
+  auto *output = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kRows * kOutputWidth));
+  ASSERT_NE(input0, nullptr);
+  ASSERT_NE(input1, nullptr);
+  ASSERT_NE(indices, nullptr);
+  ASSERT_NE(output, nullptr);
+  for (int32_t row = 0; row < kRows; ++row) {
+    for (int32_t col = 0; col < kInputWidth; ++col) {
+      input0[row * kInputWidth + col] = row * 0.001F + col;
+      input1[row * kInputWidth + col] = row * 0.002F - col;
+    }
+    for (int32_t col = 0; col < kOutputWidth; ++col) indices[row * kOutputWidth + col] = col;
+  }
+  std::fill_n(output, kRows * kOutputWidth, 0.0F);
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0U;
+  uint32_t block_dim = 48U;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(user_add_gather, block_dim, reinterpret_cast<uint8_t *>(input0), reinterpret_cast<uint8_t *>(input1),
+              reinterpret_cast<uint8_t *>(indices), reinterpret_cast<uint8_t *>(output),
+              reinterpret_cast<uint8_t *>(workspace), reinterpret_cast<uint8_t *>(&tiling_data));
+  for (int32_t row = 0; row < kRows; ++row) {
+    for (int32_t col = 0; col < kOutputWidth; ++col) {
+      EXPECT_FLOAT_EQ(output[row * kOutputWidth + col],
+                      input0[row * kInputWidth + col] + input1[row * kInputWidth + col])
+          << "row=" << row << ", col=" << col;
+    }
+  }
+  if (workspace != nullptr) AscendC::GmFree(workspace);
+  AscendC::GmFree(input0);
+  AscendC::GmFree(input1);
+  AscendC::GmFree(indices);
+  AscendC::GmFree(output);
+}
+
+#elif defined(IL_CASE_BROADCAST_WHERE)
 /**
  * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
@@ -861,7 +1211,15 @@ TEST(E2EIndirectLoadBroadcast, GeneratedKernelMatchesReference) {
 extern "C" int64_t AutofuseTiling(AutofuseTilingData *, uint32_t *, uint32_t *, uint32_t, uint32_t);
 
 #ifndef IL_ADD_IL_REDUCE
-#ifdef IL_EMBEDDING_REDUCE
+#if defined(IL_GRAPH_HINT_SIMD_REPRO)
+extern "C" __global__ __aicore__ void indirect_load_graph_hint_simd_repro(GM_ADDR input0, GM_ADDR input1,
+                                                                          GM_ADDR output, GM_ADDR workspace,
+                                                                          GM_ADDR tiling);
+#elif defined(IL_GRAPH_HINT_REDUCE)
+extern "C" __global__ __aicore__ void indirect_load_graph_hint_reduce_simt_test(GM_ADDR input0, GM_ADDR input1,
+                                                                                GM_ADDR input2, GM_ADDR output,
+                                                                                GM_ADDR workspace, GM_ADDR tiling);
+#elif defined(IL_EMBEDDING_REDUCE)
 extern "C" __global__ __aicore__ void indirect_load_embedding_reduce_simt_test(GM_ADDR input0, GM_ADDR input1,
                                                                                GM_ADDR input2, GM_ADDR output,
                                                                                GM_ADDR workspace, GM_ADDR tiling);
@@ -878,7 +1236,122 @@ extern "C" __global__ __aicore__ void indirect_load_add_il_reduce_test(GM_ADDR i
 
 namespace {
 #ifndef IL_ADD_IL_REDUCE
-#ifdef IL_EMBEDDING_REDUCE
+#if defined(IL_GRAPH_HINT_SIMD_REPRO)
+constexpr int32_t kGraphHintSimdRows = 30;
+constexpr int32_t kGraphHintSimdIndexColumns = 3;
+constexpr int32_t kGraphHintSimdInner = 23;
+constexpr int32_t kGraphHintSimdInputRows = 6;
+
+TEST(E2EIndirectLoadGraphHintSimdRepro, GeneratedKernelMatchesReference) {
+  constexpr int64_t input_count =
+      static_cast<int64_t>(kGraphHintSimdRows) * kGraphHintSimdInputRows * kGraphHintSimdInner;
+  constexpr int64_t index_count = kGraphHintSimdIndexColumns;
+  constexpr int64_t output_count = static_cast<int64_t>(kGraphHintSimdRows) * kGraphHintSimdIndexColumns;
+  auto *input = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * input_count));
+  auto *index = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * index_count));
+  auto *output = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * output_count));
+  ASSERT_NE(input, nullptr);
+  ASSERT_NE(index, nullptr);
+  ASSERT_NE(output, nullptr);
+
+  for (int32_t row = 0; row < kGraphHintSimdRows; ++row) {
+    for (int32_t column = 0; column < kGraphHintSimdInputRows; ++column) {
+      for (int32_t inner = 0; inner < kGraphHintSimdInner; ++inner) {
+        input[(static_cast<int64_t>(row) * kGraphHintSimdInputRows + column) * kGraphHintSimdInner + inner] =
+            static_cast<float>((row * kGraphHintSimdInputRows + column) * kGraphHintSimdInner + inner);
+      }
+    }
+  }
+  std::fill_n(index, index_count, static_cast<int64_t>(5));
+  std::fill_n(output, output_count, 0.0F);
+
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0U;
+  uint32_t block_dim = 48U;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_graph_hint_simd_repro, block_dim, reinterpret_cast<uint8_t *>(input),
+              reinterpret_cast<uint8_t *>(index), reinterpret_cast<uint8_t *>(output),
+              reinterpret_cast<uint8_t *>(workspace), reinterpret_cast<uint8_t *>(&tiling_data));
+
+  for (int32_t row = 0; row < kGraphHintSimdRows; ++row) {
+    for (int32_t column = 0; column < kGraphHintSimdIndexColumns; ++column) {
+      float expected = 0.0F;
+      for (int32_t inner = 0; inner < kGraphHintSimdInner; ++inner) {
+        expected +=
+            input[(static_cast<int64_t>(row) * kGraphHintSimdInputRows + index[column]) * kGraphHintSimdInner + inner];
+      }
+      EXPECT_FLOAT_EQ(output[row * kGraphHintSimdIndexColumns + column], expected)
+          << "row=" << row << ", column=" << column;
+    }
+  }
+
+  if (workspace != nullptr) {
+    AscendC::GmFree(workspace);
+  }
+  AscendC::GmFree(input);
+  AscendC::GmFree(index);
+  AscendC::GmFree(output);
+}
+#elif defined(IL_GRAPH_HINT_REDUCE)
+constexpr int32_t kGraphHintRows = 8;
+constexpr int32_t kGraphHintColumns = 50;
+constexpr int32_t kGraphHintTableRows = 1353406;
+constexpr int32_t kGraphHintTableStride = 8;
+
+TEST(E2EIndirectLoadGraphHintReduce, GeneratedKernelMatchesReference) {
+  auto *index0 = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kGraphHintColumns));
+  auto *table = static_cast<float *>(
+      AscendC::GmAlloc(sizeof(float) * (static_cast<int64_t>(kGraphHintTableRows - 1) * kGraphHintTableStride + 1)));
+  auto *index2 = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kGraphHintColumns));
+  auto *output = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kGraphHintRows));
+  ASSERT_NE(index0, nullptr);
+  ASSERT_NE(table, nullptr);
+  ASSERT_NE(index2, nullptr);
+  ASSERT_NE(output, nullptr);
+
+  for (int32_t row = 0; row < kGraphHintTableRows; ++row) {
+    table[static_cast<int64_t>(row) * kGraphHintTableStride] = static_cast<float>((row % 97) * 0.25F + 1.0F);
+  }
+  for (int32_t column = 0; column < kGraphHintColumns; ++column) {
+    index0[column] = (column % 3 == 0) ? -1 : static_cast<int64_t>(column * 10000 + 7);
+    index2[column] = static_cast<int64_t>(column * 20000 + 11);
+  }
+
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0;
+  uint32_t block_dim = 48;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(indirect_load_graph_hint_reduce_simt_test, block_dim, reinterpret_cast<uint8_t *>(index0),
+              reinterpret_cast<uint8_t *>(table), reinterpret_cast<uint8_t *>(index2),
+              reinterpret_cast<uint8_t *>(output), reinterpret_cast<uint8_t *>(workspace),
+              reinterpret_cast<uint8_t *>(&tiling_data));
+
+  for (int32_t row = 0; row < kGraphHintRows; ++row) {
+    float expected = 0.0F;
+    for (int32_t column = 0; column < kGraphHintColumns; ++column) {
+      const int64_t selected = index0[column] == -1 ? index2[column] : index0[column];
+      expected += table[selected * kGraphHintTableStride];
+    }
+    EXPECT_FLOAT_EQ(output[row], expected) << "row=" << row;
+  }
+
+  if (workspace != nullptr) {
+    AscendC::GmFree(workspace);
+  }
+  AscendC::GmFree(index0);
+  AscendC::GmFree(table);
+  AscendC::GmFree(index2);
+  AscendC::GmFree(output);
+}
+#elif defined(IL_EMBEDDING_REDUCE)
 constexpr int32_t kEmbRows = 2;
 constexpr int32_t kEmbColumns = 2;
 constexpr int32_t kEmbReduceSize = 2;

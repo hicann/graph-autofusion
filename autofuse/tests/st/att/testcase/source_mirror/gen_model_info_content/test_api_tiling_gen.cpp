@@ -100,6 +100,25 @@ class TestApiTilingGen : public ::testing::Test {
   }
 };
 
+void VerifyScheduleGroupCacheSource(const std::string &tiling_func) {
+  EXPECT_NE(tiling_func.find("SaveOperatorCache"), std::string::npos);
+  const auto extract = [](const std::string &source, const std::string &guard) {
+    const auto guard_pos = source.find(guard);
+    if (guard_pos == std::string::npos) return std::string();
+    const auto open_pos = source.find('{', guard_pos);
+    if (open_pos == std::string::npos) return std::string();
+    size_t depth = 1U;
+    for (size_t pos = open_pos + 1U; pos < source.size(); ++pos) {
+      if (source[pos] == '{') ++depth;
+      if (source[pos] == '}' && --depth == 0U) return source.substr(open_pos + 1U, pos - open_pos - 1U);
+    }
+    return std::string();
+  };
+  EXPECT_NE(extract(tiling_func, "if (ret) {").find("const auto cache_save_result ="), std::string::npos);
+  EXPECT_NE(extract(tiling_func, "if (ret && perf != nullptr) {").find("*perf = GetPerf(tiling_data);"),
+            std::string::npos);
+}
+
 namespace ge {
 namespace ascir {
 namespace cg {
@@ -954,9 +973,7 @@ TEST_F(TestApiTilingGen, gen_schedule_group_cache_success) {
   EXPECT_EQ(GenTilingImplAutoFuseV3("FlashSoftmax", fused_schedule_result, options, tiling_funcs, true), true);
   std::string tiling_func;
   ge::ascir::cg::CombineTilings(tiling_funcs, tiling_func);
-  // TTODO 当前仅检查是否有生成使能cache后的字符串，后续需要增加端到端验证用例
-  // 更新：新API使用SaveOperatorCache替代SaveCache
-  EXPECT_NE(tiling_func.find("SaveOperatorCache"), std::string::npos);
+  VerifyScheduleGroupCacheSource(tiling_func);
 
   // 清理环境变量
   unsetenv("AUTOFUSE_DFX_FLAGS");

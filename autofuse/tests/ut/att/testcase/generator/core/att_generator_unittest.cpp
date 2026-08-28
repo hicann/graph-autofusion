@@ -52,6 +52,22 @@ size_t CountSubstr(const std::string &text, const std::string &pattern) {
   return count;
 }
 
+std::string ExtractGuardBody(const std::string &source, const std::string &guard) {
+  const auto guard_pos = source.find(guard);
+  if (guard_pos == std::string::npos) return {};
+  const auto open_pos = source.find('{', guard_pos);
+  if (open_pos == std::string::npos) return {};
+  size_t depth = 1U;
+  for (size_t pos = open_pos + 1U; pos < source.size(); ++pos) {
+    if (source[pos] == '{') {
+      ++depth;
+    } else if (source[pos] == '}' && --depth == 0U) {
+      return source.substr(open_pos + 1U, pos - open_pos - 1U);
+    }
+  }
+  return {};
+}
+
 void ExpectSystemHeaders(const std::string &source, const std::vector<std::string> &required,
                          const std::vector<std::string> &forbidden) {
   for (const auto &header : required) {
@@ -302,7 +318,39 @@ TEST(GeneratorUT, MultiGroupApiHeaderCollectsBodyDeclarations) {
   EXPECT_GE(CountSubstr(api_header, "double GetPerf("), 2U);
 }
 
+void CheckStateHeaderCacheGeneration(const std::map<std::string, std::string> &tiling_res) {
+  const auto &state_header = tiling_res.at(kTilingStateHeaderIdentify);
+  EXPECT_NE(state_header.find("template <typename TilingData>"), std::string::npos);
+  EXPECT_NE(state_header.find("inline static thread_local std::unique_ptr<OperatorLevelCache<TilingData>>"),
+            std::string::npos);
+  EXPECT_EQ(state_header.find("kOperatorCacheCapacity, OpTestTilingData>"), std::string::npos);
+  EXPECT_EQ(state_header.find("#include \"autofuse_tiling_data.h\""), std::string::npos);
+  for (const auto &token :
+       {"enum class OperatorCacheSaveResult", "kSaved", "kClearedAndSaved", "kFailed",
+        "uint64_t min_count = access_counts_[0]", "last_aged_min_count_ = min_count", "GetLastAgedMinCount()"}) {
+    EXPECT_NE(state_header.find(token), std::string::npos);
+  }
+  for (const auto &token : {"OP_LOGD", "OP_LOGI", "OP_NAME"}) {
+    EXPECT_EQ(state_header.find(token), std::string::npos);
+  }
+  const auto &group_source = tiling_res.at("asc_graph0_schedule_result0_g0");
+  for (const auto &token : {"#include <array>", "#include <cstring>", "const uint32_t request_block_dim =",
+                            "const uint32_t request_ub_size =", "OperatorCacheKey operator_cache_key",
+                            "[Operator Cache] HIT!", "[Operator Cache] MISS!", "OperatorCacheSaveResult::kSaved",
+                            "OperatorCacheSaveResult::kClearedAndSaved", "OperatorCacheSaveResult::kFailed",
+                            "[Operator Cache] SAVE SUCCESS", "[Operator Cache] CACHE CLEARED AND SAVE SUCCESS",
+                            "min_count=%lu", "GetLastAgedMinCount()", "[Operator Cache] SAVE FAILED"}) {
+    EXPECT_NE(group_source.find(token), std::string::npos);
+  }
+  EXPECT_EQ(CountSubstr(group_source, "FindOperatorCache(operator_cache_key)"), 1U);
+  const auto &tail = tiling_res.at(kTilingScheduleGroupTailIdentify);
+  EXPECT_EQ(tail.find("TilingCacheContext<TilingData>::"), std::string::npos);
+  EXPECT_EQ(tail.find("#include"), std::string::npos);
+}
+
 TEST(GeneratorUT, StateHeaderCacheUsesUninstantiatedTilingDataTemplate) {
+  unsetenv("AUTOFUSE_FLAGS");
+  AutoFuseConfig::MutablePgoStrategyConfig() = PgoStrategyConfig();
   setenv("AUTOFUSE_DFX_FLAGS", "--autofuse_enable_tiling_cache=true", 1);
   AutoFuseConfig::MutableAttStrategyConfig().Reset();
   ASSERT_EQ(AutoFuseConfig::MutableAttStrategyConfig().Init(), af::SUCCESS);
@@ -316,41 +364,98 @@ TEST(GeneratorUT, StateHeaderCacheUsesUninstantiatedTilingDataTemplate) {
   TilingCodeGenerator generator;
 
   ASSERT_EQ(generator.GenTilingCode(op_name, model_infos, config, tiling_res), af::SUCCESS);
-  const auto &state_header = tiling_res.at(kTilingStateHeaderIdentify);
-  EXPECT_NE(state_header.find("template <typename TilingData>"), std::string::npos);
-  EXPECT_NE(state_header.find("inline static thread_local std::unique_ptr<OperatorLevelCache<TilingData>>"),
-            std::string::npos);
-  EXPECT_EQ(state_header.find("kOperatorCacheCapacity, OpTestTilingData>"), std::string::npos);
-  EXPECT_EQ(state_header.find("#include \"autofuse_tiling_data.h\""), std::string::npos);
-  EXPECT_NE(state_header.find("enum class OperatorCacheSaveResult"), std::string::npos);
-  EXPECT_NE(state_header.find("kSaved"), std::string::npos);
-  EXPECT_NE(state_header.find("kClearedAndSaved"), std::string::npos);
-  EXPECT_NE(state_header.find("kFailed"), std::string::npos);
-  EXPECT_NE(state_header.find("uint64_t min_count = access_counts_[0]"), std::string::npos);
-  EXPECT_NE(state_header.find("last_aged_min_count_ = min_count"), std::string::npos);
-  EXPECT_NE(state_header.find("GetLastAgedMinCount()"), std::string::npos);
-  EXPECT_EQ(state_header.find("OP_LOGD"), std::string::npos);
-  EXPECT_EQ(state_header.find("OP_LOGI"), std::string::npos);
-  EXPECT_EQ(state_header.find("OP_NAME"), std::string::npos);
-  const auto &group_source = tiling_res.at("asc_graph0_schedule_result0_g0");
-  EXPECT_NE(group_source.find("#include <array>"), std::string::npos);
-  EXPECT_NE(group_source.find("#include <cstring>"), std::string::npos);
-  EXPECT_EQ(CountSubstr(group_source, "FindOperatorCache(input_shapes)"), 1U);
-  EXPECT_NE(group_source.find("[Operator Cache] HIT!"), std::string::npos);
-  EXPECT_NE(group_source.find("[Operator Cache] MISS!"), std::string::npos);
-  EXPECT_NE(group_source.find("OperatorCacheSaveResult::kSaved"), std::string::npos);
-  EXPECT_NE(group_source.find("OperatorCacheSaveResult::kClearedAndSaved"), std::string::npos);
-  EXPECT_NE(group_source.find("OperatorCacheSaveResult::kFailed"), std::string::npos);
-  EXPECT_NE(group_source.find("[Operator Cache] SAVE SUCCESS"), std::string::npos);
-  EXPECT_NE(group_source.find("[Operator Cache] CACHE CLEARED AND SAVE SUCCESS"), std::string::npos);
-  EXPECT_NE(group_source.find("min_count=%lu"), std::string::npos);
-  EXPECT_NE(group_source.find("GetLastAgedMinCount()"), std::string::npos);
-  EXPECT_NE(group_source.find("[Operator Cache] SAVE FAILED"), std::string::npos);
-  const auto &tail = tiling_res.at(kTilingScheduleGroupTailIdentify);
-  EXPECT_EQ(tail.find("TilingCacheContext<TilingData>::"), std::string::npos);
-  EXPECT_EQ(tail.find("#include"), std::string::npos);
+  CheckStateHeaderCacheGeneration(tiling_res);
   unsetenv("AUTOFUSE_DFX_FLAGS");
   AutoFuseConfig::MutableAttStrategyConfig().Reset();
+}
+
+TEST(GeneratorUT, PgoDisablesOperatorCacheEvenWhenCacheFlagIsEnabled) {
+  struct ConfigGuard {
+    const AttStrategyConfig original_att = AutoFuseConfig::GetAttStrategyConfig();
+    const PgoStrategyConfig original_pgo = AutoFuseConfig::GetPgoStrategyConfig();
+    ~ConfigGuard() {
+      unsetenv("AUTOFUSE_DFX_FLAGS");
+      unsetenv("AUTOFUSE_FLAGS");
+      AutoFuseConfig::MutableAttStrategyConfig() = original_att;
+      AutoFuseConfig::MutablePgoStrategyConfig() = original_pgo;
+    }
+  } config_guard;
+  setenv("AUTOFUSE_DFX_FLAGS", "--autofuse_enable_tiling_cache=true", 1);
+  setenv("AUTOFUSE_FLAGS", "--autofuse_enable_pgo=true", 1);
+  AutoFuseConfig::MutableAttStrategyConfig().Reset();
+  ASSERT_EQ(AutoFuseConfig::MutableAttStrategyConfig().Init(), af::SUCCESS);
+  AutoFuseConfig::MutablePgoStrategyConfig().is_first_init = true;
+  ASSERT_EQ(AutoFuseConfig::MutablePgoStrategyConfig().Init(), af::SUCCESS);
+
+  TilingCodeGenConfig config;
+  config.type = TilingImplType::HIGH_PERF;
+  config.tiling_data_type_name = "OpTestTilingData";
+  config.cache_enabled_at_compile_time = true;
+  TilingModelInfo model_infos{CreateModelInfo()};
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl(op_name, config, model_infos, score_funcs, true);
+
+  EXPECT_FALSE(gen_impl.config_.cache_enabled_at_compile_time);
+}
+
+TEST(GeneratorUT, InductorEnablesOperatorCacheByDefault) {
+  struct ConfigGuard {
+    const AttStrategyConfig original_att = AutoFuseConfig::GetAttStrategyConfig();
+    const PgoStrategyConfig original_pgo = AutoFuseConfig::GetPgoStrategyConfig();
+    ~ConfigGuard() {
+      unsetenv("AUTOFUSE_FLAGS");
+      AutoFuseConfig::MutableAttStrategyConfig() = original_att;
+      AutoFuseConfig::MutablePgoStrategyConfig() = original_pgo;
+    }
+  } config_guard;
+  unsetenv("AUTOFUSE_DFX_FLAGS");
+  unsetenv("AUTOFUSE_FLAGS");
+  AutoFuseConfig::MutableAttStrategyConfig().Reset();
+  AutoFuseConfig::MutablePgoStrategyConfig() = PgoStrategyConfig();
+
+  TilingCodeGenConfig config;
+  config.type = TilingImplType::HIGH_PERF;
+  config.tiling_data_type_name = "OpTestTilingData";
+  config.is_inductor_scene = true;
+  config.cache_enabled_at_compile_time = false;
+  TilingModelInfo model_infos{CreateModelInfo()};
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl(op_name, config, model_infos, score_funcs, true);
+
+  EXPECT_TRUE(gen_impl.config_.cache_enabled_at_compile_time);
+}
+
+TEST(GeneratorUT, OperatorCacheKeyIncludesShapeAndResources) {
+  ge::CodePrinter code_printer;
+  cache::OperatorLevelCacheGen cache_gen;
+  cache::OperatorLevelCacheGen::GenConstantDefs(code_printer, 2U);
+  ASSERT_EQ(cache_gen.GenFixedSizeHashMapDef(code_printer), af::SUCCESS);
+  ASSERT_EQ(cache::OperatorLevelCacheGen::GenOperatorCacheTypes(code_printer), af::SUCCESS);
+  ASSERT_EQ(cache::OperatorLevelCacheGen::GenTilingCacheContext(code_printer), af::SUCCESS);
+  const std::string generated = code_printer.GetOutputStr();
+
+  EXPECT_NE(generated.find("struct OperatorCacheKey"), std::string::npos);
+  EXPECT_NE(generated.find("#pragma pack(push, 1)"), std::string::npos);
+  EXPECT_NE(generated.find("#pragma pack(pop)"), std::string::npos);
+  EXPECT_NE(generated.find("std::array<uint32_t, kInputShapeSize> input_shapes;"), std::string::npos);
+  EXPECT_NE(generated.find("uint32_t request_block_dim;"), std::string::npos);
+  EXPECT_NE(generated.find("uint32_t request_ub_size;"), std::string::npos);
+  EXPECT_NE(generated.find("key.input_shapes"), std::string::npos);
+  EXPECT_NE(generated.find("key.request_block_dim"), std::string::npos);
+  EXPECT_NE(generated.find("key.request_ub_size"), std::string::npos);
+  EXPECT_NE(generated.find("FixedSizeHashMap<kInputShapeSize, kOperatorCacheCapacity, TilingData, OperatorCacheKey>"),
+            std::string::npos);
+}
+
+TEST(GeneratorUT, OperatorCacheFunctionsHaveValidGeneratedSignatures) {
+  ge::CodePrinter code_printer;
+  ASSERT_EQ(cache::OperatorLevelCacheGen::GenOperatorCacheFunctions(code_printer, "OpTestTilingData"), af::SUCCESS);
+  const std::string generated = code_printer.GetOutputStr();
+  EXPECT_EQ(generated.find("OperatorCacheKey& key, )"), std::string::npos);
+  EXPECT_NE(generated.find("FindOperatorCache(const OperatorCacheKey& key, OpTestTilingData& tiling_data"),
+            std::string::npos);
+  EXPECT_NE(generated.find("SaveOperatorCache(const OperatorCacheKey& key, const OpTestTilingData& tiling_data"),
+            std::string::npos);
 }
 
 TEST(GeneratorUT, StaticShapeOperatorCacheQueriesOnceAndKeepsLogsInGroupSource) {
@@ -364,10 +469,86 @@ TEST(GeneratorUT, StaticShapeOperatorCacheQueriesOnceAndKeepsLogsInGroupSource) 
   ASSERT_EQ(cache::OperatorLevelCacheGen::GenInitAndQueryCacheCode(code_printer, model_infos, config), af::SUCCESS);
   ASSERT_EQ(cache::OperatorLevelCacheGen::GenSaveCacheCalls(code_printer, model_infos, config), af::SUCCESS);
   const auto group_source = code_printer.GetOutputStr();
-  EXPECT_EQ(CountSubstr(group_source, "FindOperatorCache(input_shapes)"), 1U);
+  EXPECT_EQ(CountSubstr(group_source, "FindOperatorCache(operator_cache_key)"), 1U);
   EXPECT_NE(group_source.find("[Operator Cache] HIT! key=[]"), std::string::npos);
   EXPECT_NE(group_source.find("[Operator Cache] MISS! key=[]"), std::string::npos);
   EXPECT_NE(group_source.find("[Operator Cache] SAVE SUCCESS: key=[]"), std::string::npos);
+}
+
+TEST(GeneratorUT, OperatorCacheQueryCanContinueAfterHit) {
+  TilingModelInfo model_infos(1U);
+  model_infos[0].graph_name = op_name;
+  TilingCodeGenConfig config;
+  config.tiling_data_type_name = "OpTestTilingData";
+  config.cache_enabled_at_compile_time = true;
+  ge::CodePrinter code_printer;
+
+  ASSERT_EQ(cache::OperatorLevelCacheGen::GenInitAndQueryCacheCode(code_printer, model_infos, config, false),
+            af::SUCCESS);
+  const auto generated = code_printer.GetOutputStr();
+  EXPECT_NE(generated.find("cache_hit = true;"), std::string::npos);
+  EXPECT_EQ(generated.find("return true;"), std::string::npos);
+  EXPECT_NE(generated.find("} else {"), std::string::npos);
+}
+
+TEST(GeneratorUT, GroupCacheHitFallsBackToTilingOnMiss) {
+  TilingCodeGenConfig config;
+  config.tiling_data_type_name = "AutofuseTilingData";
+  config.cache_enabled_at_compile_time = true;
+  TilingModelInfo model_infos{CreateModelInfo(1U, ge::ExprType::kExprVariable)};
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl(op_name, config, model_infos, score_funcs, false);
+  gen_impl.with_reuse_info_ = true;
+
+  ASSERT_EQ(gen_impl.GenGroupCacheLookupCode(), af::SUCCESS);
+  const std::string generated = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_NE(generated.find("std::array<uint32_t, kInputShapeSize> input_shapes"), std::string::npos);
+  EXPECT_NE(generated.find("if (FindGroupCache(input_shapes, tiling_data, *cache))"), std::string::npos);
+  EXPECT_NE(generated.find("return true;"), std::string::npos);
+  EXPECT_NE(generated.find("find no cache, turn to main tiling procedure"), std::string::npos);
+}
+
+TEST(GeneratorUT, FusedOperatorCacheSkipsExplicitTilingCase) {
+  TilingCodeGenConfig config;
+  config.tiling_data_type_name = "AutofuseTilingData";
+  config.cache_enabled_at_compile_time = true;
+  TilingModelInfo model_infos(1U);
+  model_infos[0].graph_name = op_name;
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl(op_name, config, model_infos, score_funcs, false);
+  gen_impl.config_.cache_enabled_at_compile_time = true;
+  std::map<size_t, std::map<size_t, std::map<size_t, std::pair<std::string, std::string>>>> namespace_map;
+  namespace_map[0][0][0] = {"ScheduleResult0", "group0"};
+
+  ASSERT_EQ(gen_impl.GenFusedScheduleResultsGetTilingDefine(namespace_map), af::SUCCESS);
+  const std::string generated = gen_impl.tiling_func_.GetOutputStr();
+  const auto query_pos = generated.find("FindOperatorCache(operator_cache_key)");
+  ASSERT_NE(query_pos, std::string::npos);
+  const auto case_guard_pos = generated.find("if (tiling_case_id == -1)");
+  ASSERT_NE(case_guard_pos, std::string::npos);
+  EXPECT_LT(case_guard_pos, query_pos);
+  const auto save_pos = generated.find("SaveOperatorCache(operator_cache_key");
+  ASSERT_NE(save_pos, std::string::npos);
+  EXPECT_LT(case_guard_pos, save_pos);
+}
+
+TEST(GeneratorUT, ForcedTilingCaseBypassesOperatorCache) {
+  TilingCodeGenConfig config;
+  config.tiling_data_type_name = "AutofuseTilingData";
+  config.cache_enabled_at_compile_time = true;
+  config.force_tiling_case.is_single_mode = true;
+  config.force_tiling_case.single_case = 0;
+  TilingModelInfo model_infos(1U);
+  model_infos[0].graph_name = op_name;
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl(op_name, config, model_infos, score_funcs, true);
+  std::map<size_t, std::map<size_t, std::map<size_t, std::pair<std::string, std::string>>>> namespace_map;
+  namespace_map[0][0][0] = {"ScheduleResult0", "group0"};
+
+  ASSERT_EQ(gen_impl.GenFusedScheduleResultsGetTilingDefine(namespace_map), af::SUCCESS);
+  const std::string generated = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_EQ(generated.find("FindOperatorCache(operator_cache_key)"), std::string::npos);
+  EXPECT_EQ(generated.find("SaveOperatorCache(operator_cache_key"), std::string::npos);
 }
 
 TEST(GeneratorUT, NormalGenerationOmitsUnusedPgoHeader) {
@@ -970,6 +1151,65 @@ TEST(GeneratorUT, PGOGetTilingKeyFailureUsesWarningLog) {
   const std::string tiling_func_output = genImpl.tiling_func_.GetOutputStr();
   EXPECT_NE(tiling_func_output.find("OP_LOGW(OP_NAME, \"GetTiling Failed.\");"), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("OP_LOGE(OP_NAME, \"GetTiling Failed.\");"), std::string::npos);
+}
+
+void AssertOperatorCacheSaveAndPerfGuards(const std::string &generated) {
+  const auto save_guard_body = ExtractGuardBody(generated, "if (ret) {");
+  EXPECT_NE(save_guard_body.find("const auto cache_save_result ="), std::string::npos);
+  const auto perf_guard_body = ExtractGuardBody(generated, "if (ret && perf != nullptr) {");
+  EXPECT_NE(perf_guard_body.find("*perf = GetPerf(tiling_data);"), std::string::npos);
+
+  EXPECT_NE(generated.find("bool cache_hit = false;"), std::string::npos);
+  EXPECT_NE(generated.find("cache_hit = true;"), std::string::npos);
+  EXPECT_NE(generated.find("if (tiling_case_id == -1)"), std::string::npos);
+  EXPECT_NE(generated.find("if (tiling_case_id == -1 && !cache_hit)"), std::string::npos);
+  const auto return_pos = generated.find("return ret;");
+  ASSERT_NE(return_pos, std::string::npos);
+  for (const auto &duration_code :
+       {"DurationEnd", "DurationManager::GetInstance().Print()", "DurationManager::GetInstance().Clear()"}) {
+    const auto duration_pos = generated.find(duration_code);
+    ASSERT_NE(duration_pos, std::string::npos);
+    EXPECT_LT(duration_pos, return_pos);
+  }
+}
+
+TEST(GeneratorUT, OperatorCacheSaveAndPerfAreGuardedByTilingSuccess) {
+  unsetenv("AUTOFUSE_FLAGS");
+  AutoFuseConfig::MutablePgoStrategyConfig() = PgoStrategyConfig();
+  setenv("AUTOFUSE_DFX_FLAGS", "--autofuse_enable_tiling_cache=true", 1);
+  struct CacheConfigGuard {
+    ~CacheConfigGuard() {
+      unsetenv("AUTOFUSE_DFX_FLAGS");
+      AutoFuseConfig::MutableAttStrategyConfig().Reset();
+    }
+  } cache_config_guard;
+  AutoFuseConfig::MutableAttStrategyConfig().Reset();
+  ASSERT_EQ(AutoFuseConfig::MutableAttStrategyConfig().Init(), af::SUCCESS);
+  AutoFuseConfig::MutableAttStrategyConfig().enable_tiling_cache = "true";
+  AutoFuseConfig::MutableAttStrategyConfig().set_env_enable_tiling_cache = true;
+  struct DurationLevelGuard {
+    decltype(kg_duration_level) &level;
+    decltype(kg_duration_level) old_level;
+    ~DurationLevelGuard() {
+      level = old_level;
+    }
+  } duration_level_guard{kg_duration_level, kg_duration_level};
+  kg_duration_level = 2U;
+  TilingCodeGenConfig config;
+  config.tiling_data_type_name = "OpTestTilingData";
+  config.cache_enabled_at_compile_time = true;
+  TilingModelInfo tiling_model_info;
+  ModelInfo info;
+  info.graph_name = op_name;
+  info.schedule_group_ident.group_id = 0;
+  tiling_model_info.push_back(info);
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl(op_name, config, tiling_model_info, score_funcs, true);
+  ASSERT_TRUE(gen_impl.config_.cache_enabled_at_compile_time);
+
+  ASSERT_EQ(gen_impl.GenGetTilingFunctionBody(false, false, ""), af::SUCCESS);
+  const std::string generated = gen_impl.tiling_func_.GetOutputStr();
+  AssertOperatorCacheSaveAndPerfGuards(generated);
 }
 
 TEST(GeneratorUT, GetResultSummaryFailureUsesWarningLogForPGOPath) {
