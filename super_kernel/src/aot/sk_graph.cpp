@@ -15,7 +15,6 @@
 
 #include "sk_graph.h"
 #include "sk_dump_json.h"
-#include "sk_model_context.h"
 #include "sk_options_manager.h"
 #include "sk_scope_split.h"
 #include "super_kernel.h"
@@ -1003,9 +1002,7 @@ std::unique_ptr<SuperKernelBaseNode> SuperKernelNodeFactory::CreateNode(std::uni
 bool SuperKernelGraph::InitSKGraph() {
   SK_LOGI("Starting to initialize SuperKernel graph");
 
-  CaptureCurrentModelContext();
   SK_LOGI("current model id: %s", modelId.c_str());
-  SK_LOGI("current model label: %s", modelLabel.c_str());
 
   if (!InitFromModelRI()) {
     return false;
@@ -1041,13 +1038,6 @@ bool SuperKernelGraph::InitSKGraph() {
   SK_LOGI("Successfully initialized SuperKernel graph with %zu nodes and %zu streams", graphMap.size(), streams.size());
 
   return true;
-}
-
-void SuperKernelGraph::CaptureCurrentModelContext() {
-  modelId = GetCurrentModelId();
-  // The model label is frozen at the aclskOptimize entry; reuse that single
-  // value so the graph's label matches the meta-dir/event-recorder ones exactly.
-  modelLabel = GetCurrentModelLabel();
 }
 
 /**
@@ -1229,19 +1219,20 @@ bool SuperKernelGraph::ProcessSingleTask(aclmdlRITask &task, uint32_t streamIdx,
 void SuperKernelGraph::RegisterFusibleScope(const std::unique_ptr<SuperKernelBaseNode> &node) {
   if (node->GetNodeType() == SkNodeType::NODE_KERNEL && node->IsScopeNode()) {
     if (node->GetScopeName().length() > 0 && node->IsFusible()) {
+      const auto &scopeName = node->GetScopeName();
+      if (scopeNameToIdx.find(scopeName) != scopeNameToIdx.end()) {
+        return;
+      }
       if (scopeNameToIdx.size() >= MAX_SCOPE_NUM) {
-        SK_LOGE("Exceeded maximum scope limit %u, marking scope '%s' as unfusible", MAX_SCOPE_NUM,
-                node->GetScopeName().c_str());
+        SK_LOGW("Exceeded maximum scope limit %u, marking scope '%s' as unfusible", MAX_SCOPE_NUM, scopeName.c_str());
         node->SetIsFusible(false);
         node->SetFusionFailReason(FusionFailReason::EXCEED_SCOPE_MAX);
-      } else {
-        if (scopeNameToIdx.find(node->GetScopeName()) == scopeNameToIdx.end()) {
-          uint32_t scopeIdx = static_cast<uint32_t>(scopeNameToIdx.size());
-          scopeNameToIdx[node->GetScopeName()] = scopeIdx;
-          scopeIdxToName[scopeIdx] = node->GetScopeName();
-          SK_LOGI("Registered fusible scope '%s' with index %u", node->GetScopeName().c_str(), scopeIdx);
-        }
+        return;
       }
+      uint32_t scopeIdx = static_cast<uint32_t>(scopeNameToIdx.size());
+      scopeNameToIdx[scopeName] = scopeIdx;
+      scopeIdxToName[scopeIdx] = scopeName;
+      SK_LOGI("Registered fusible scope '%s' with index %u", scopeName.c_str(), scopeIdx);
     }
   }
 }

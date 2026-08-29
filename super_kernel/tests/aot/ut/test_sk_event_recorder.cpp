@@ -1102,9 +1102,8 @@ TEST_F(SkEventRecorderTest, RegisterModelId_DuplicateRegistrationThreadSafe) {
 
 TEST_F(SkEventRecorderTest, DumpProfilingDetailDisabledEncodesModelIdIndexInDevArgs) {
   const aclmdlRI modelRI = reinterpret_cast<aclmdlRI>(static_cast<uintptr_t>(0x12345678));
-  const std::string modelId = "305419896_7";
-  SuperKernelGraph graph(modelRI);
-  graph.modelId = modelId;
+  const std::string modelId = "model_305419896_7";
+  SuperKernelGraph graph(modelRI, modelId);
 
   SuperKernelScopeInfo scopeInfo;
   SkLaunchInfo launchInfo = {};
@@ -1131,9 +1130,8 @@ TEST_F(SkEventRecorderTest, DumpProfilingDetailDisabledEncodesModelIdIndexInDevA
 
 TEST_F(SkEventRecorderTest, DumpProfilingDetailEnabledUpdatesRuntimeConfigAndMappings) {
   const aclmdlRI modelRI = reinterpret_cast<aclmdlRI>(static_cast<uintptr_t>(0x87654321));
-  const std::string modelId = "2271560481_2";
-  SuperKernelGraph graph(modelRI);
-  graph.modelId = modelId;
+  const std::string modelId = "model_2271560481_2";
+  SuperKernelGraph graph(modelRI, modelId);
 
   SuperKernelScopeInfo scopeInfo;
   SkLaunchInfo launchInfo = {};
@@ -1185,9 +1183,8 @@ TEST_F(SkEventRecorderTest, DumpProfilingDetailEnabledUpdatesRuntimeConfigAndMap
 
 TEST_F(SkEventRecorderTest, DumpProfilingDetailEnabledReturnsFalseWhenGetDeviceFails) {
   const aclmdlRI modelRI = reinterpret_cast<aclmdlRI>(static_cast<uintptr_t>(0x2222));
-  const std::string modelId = "8738_1";
-  SuperKernelGraph graph(modelRI);
-  graph.modelId = modelId;
+  const std::string modelId = "model_8738_1";
+  SuperKernelGraph graph(modelRI, modelId);
 
   SuperKernelScopeInfo scopeInfo;
   SkLaunchInfo launchInfo = {};
@@ -1442,8 +1439,7 @@ TEST_F(SkEventRecorderTest, DumpProfilingDetail_DisabledRegistersModelAndSkName)
   launchInfo.skFuncName = "sk_disabled_start_add_end_mul";
   aclmdlRI modelRI = reinterpret_cast<aclmdlRI>(0x123456789ABCULL);
   const std::string modelId = "model_disabled_1";
-  SuperKernelGraph graph(modelRI);
-  graph.modelId = modelId;
+  SuperKernelGraph graph(modelRI, modelId);
 
   EXPECT_FALSE(SkEventRecorder::Instance().IsEnabled());
   EXPECT_TRUE(DumpProfilingDetail({}, launchInfo, scopeInfo, graph));
@@ -1479,8 +1475,7 @@ TEST_F(SkEventRecorderTest, DumpProfilingDetail_EnabledUpdatesEventConfigAndNode
 
   aclmdlRI modelRI = reinterpret_cast<aclmdlRI>(0x223344556677ULL);
   const std::string modelId = "model_enabled_1";
-  SuperKernelGraph graph(modelRI);
-  graph.modelId = modelId;
+  SuperKernelGraph graph(modelRI, modelId);
 
   EXPECT_TRUE(DumpProfilingDetail(taskNodes, launchInfo, scopeInfo, graph));
 

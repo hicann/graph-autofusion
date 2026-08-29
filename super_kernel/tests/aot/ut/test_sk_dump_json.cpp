@@ -2,9 +2,9 @@
  * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for the details. You may not use this file except in compliance with the License.
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNEsS FOR A PARTICULAR PURPOSE.
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
@@ -26,7 +26,6 @@
 
 #include "sk_dump_json.h"
 #include "sk_common.h"
-#include "sk_model_context.h"
 #include "sk_graph.h"
 #include "sk_node.h"
 #include "sk_scope_info.h"
@@ -638,8 +637,7 @@ TEST_F(SkDumpJsonDirectHelperTest, SkTaskQueueAndFileWritingHelpers) {
   Json noQueueJson = SkTaskToJson(SkTask());
   EXPECT_FALSE(noQueueJson.contains("taskQue"));
 
-  SuperKernelGraph graph(nullptr);
-  graph.modelLabel = "model_nullptr";
+  SuperKernelGraph graph(nullptr, "model_nullptr");
   sk::logger::FileLogger::Instance().SetEnabled(true);
   std::unordered_map<std::string, Json> taskQueues;
   taskQueues["99"] = SkTaskToQueueJson(task, task, 99);
@@ -894,7 +892,7 @@ TEST_F(DumpGraphJsonTest, DisabledLoggerSkipDump) {
   sk::logger::FileLogger::Instance().SetEnabled(false);
 
   SuperKernelOptionsManager opts;
-  bool result = DumpGraphJson(nullptr, opts, "/tmp", "test_raw_tasks");
+  bool result = DumpGraphJson(nullptr, "model_nullptr", opts, "/tmp", "test_raw_tasks");
 
   EXPECT_TRUE(result);
 
@@ -906,7 +904,7 @@ TEST_F(DumpGraphJsonTest, EmptyModelRISucceedsWithEmptyGraph) {
 
   SuperKernelOptionsManager opts;
   std::string metaDir = CreateSkMetaDirectory("model_nullptr");
-  bool result = DumpGraphJson(nullptr, opts, metaDir, "test_raw_tasks");
+  bool result = DumpGraphJson(nullptr, "model_nullptr", opts, metaDir, "test_raw_tasks");
 
   EXPECT_TRUE(result);
 
@@ -917,7 +915,7 @@ TEST_F(DumpGraphJsonTest, InvalidMetaDirFails) {
   sk::logger::FileLogger::Instance().SetEnabled(true);
 
   SuperKernelOptionsManager opts;
-  bool result = DumpGraphJson(nullptr, opts, "/nonexistent_dir_12345", "test_raw_tasks");
+  bool result = DumpGraphJson(nullptr, "model_nullptr", opts, "/nonexistent_dir_12345", "test_raw_tasks");
 
   EXPECT_FALSE(result);
 
@@ -929,7 +927,7 @@ TEST_F(DumpGraphJsonTest, EmptyFilenameWithValidDir) {
 
   SuperKernelOptionsManager opts;
   std::string metaDir = CreateSkMetaDirectory("model_nullptr");
-  bool result = DumpGraphJson(nullptr, opts, metaDir, "");
+  bool result = DumpGraphJson(nullptr, "model_nullptr", opts, metaDir, "");
 
   EXPECT_FALSE(result);
 
@@ -945,7 +943,7 @@ TEST_F(DumpGraphJsonTest, ValidMetaDirAndFilename) {
 
   std::string metaDir = CreateSkMetaDirectory("model_nullptr");
   std::string filename = "test_dump_valid";
-  bool result = DumpGraphJson(nullptr, opts, metaDir, filename);
+  bool result = DumpGraphJson(nullptr, "model_nullptr", opts, metaDir, filename);
 
   EXPECT_TRUE(result);
 
@@ -962,15 +960,14 @@ TEST_F(DumpGraphJsonTest, ExistingGraphWritesWithoutRebuildingFromModelRI) {
 
   SuperKernelOptionsManager opts;
   aclmdlRI model = reinterpret_cast<aclmdlRI>(static_cast<uintptr_t>(0x40));  // id=64
-  SkModelContext guard(model);
+  const std::string modelId = "model_64_1";
 
-  SuperKernelGraph graph(nullptr, opts);
-  graph.CaptureCurrentModelContext();
+  SuperKernelGraph graph(nullptr, opts, modelId);
   auto node = CreateKernelNode(400);
   AddKernelInfoToNode(node.get());
   graph.graphMap[400] = std::move(node);
 
-  std::string metaDir = CreateSkMetaDirectory(GetCurrentModelLabel());
+  std::string metaDir = CreateSkMetaDirectory(modelId);
   std::string filename = "test_existing_graph";
   bool result = DumpGraphJson(graph, opts, metaDir, filename);
 
@@ -981,7 +978,7 @@ TEST_F(DumpGraphJsonTest, ExistingGraphWritesWithoutRebuildingFromModelRI) {
 
   Json rootJson;
   file >> rootJson;
-  EXPECT_EQ(rootJson["modelId"], "64_1");
+  EXPECT_EQ(rootJson["modelId"], modelId);
   EXPECT_EQ(rootJson["totalNodes"], 1);
 
   sk::logger::FileLogger::Instance().SetEnabled(false);
@@ -1001,7 +998,7 @@ TEST_F(DumpGraphJsonTest, WithPopulatedOptionsManager) {
 
   std::string metaDir = CreateSkMetaDirectory("model_nullptr");
   std::string filename = "test_with_options";
-  bool result = DumpGraphJson(nullptr, opts, metaDir, filename);
+  bool result = DumpGraphJson(nullptr, "model_nullptr", opts, metaDir, filename);
 
   EXPECT_TRUE(result);
 
@@ -1020,7 +1017,7 @@ TEST_F(DumpGraphJsonTest, FileAlreadyExists) {
   existingFile << "{\"existing\": true}";
   existingFile.close();
 
-  bool result = DumpGraphJson(nullptr, opts, metaDir, filename);
+  bool result = DumpGraphJson(nullptr, "model_nullptr", opts, metaDir, filename);
 
   EXPECT_TRUE(result);
 
@@ -1032,18 +1029,18 @@ TEST_F(DumpGraphJsonTest, FileAlreadyExists) {
   sk::logger::FileLogger::Instance().SetEnabled(false);
 }
 
-TEST_F(DumpGraphJsonTest, ActiveModelContextWritesModelIdToJson) {
+TEST_F(DumpGraphJsonTest, ExplicitModelIdWritesCanonicalValueToJson) {
   sk::logger::FileLogger::Instance().SetEnabled(true);
   SkUtResetTestControls();
   SkUtSetModelStreamNum(0);
 
   SuperKernelOptionsManager opts;
   aclmdlRI model = reinterpret_cast<aclmdlRI>(static_cast<uintptr_t>(0x30));  // id=48
-  SkModelContext guard(model);
-  std::string metaDir = CreateSkMetaDirectory(GetCurrentModelLabel());
+  const std::string modelId = "model_48_1";
+  std::string metaDir = CreateSkMetaDirectory(modelId);
   std::string filename = "test_model_id_context";
 
-  bool result = DumpGraphJson(model, opts, metaDir, filename);
+  bool result = DumpGraphJson(model, modelId, opts, metaDir, filename);
   EXPECT_TRUE(result);
 
   std::ifstream file(metaDir + "/" + filename + ".json");
@@ -1051,7 +1048,7 @@ TEST_F(DumpGraphJsonTest, ActiveModelContextWritesModelIdToJson) {
 
   Json rootJson;
   file >> rootJson;
-  EXPECT_EQ(rootJson["modelId"], "48_1");
+  EXPECT_EQ(rootJson["modelId"], modelId);
 
   sk::logger::FileLogger::Instance().SetEnabled(false);
 }

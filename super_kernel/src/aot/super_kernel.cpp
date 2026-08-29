@@ -24,7 +24,6 @@
 #include "sk_resource_manager.h"
 #include "sk_scope_launch.h"
 #include "sk_event_recorder.h"
-#include "sk_model_context.h"
 
 namespace {
 class CurrentModelGuard {
@@ -63,11 +62,11 @@ aclError DumpMdlJson(aclmdlRI model, const std::string &metaDir, const std::stri
  * @param metaDir Output meta directory path
  * @return aclError status
  */
-aclError PrepareGraphDumpEnv(std::string &metaDir) {
+aclError PrepareGraphDumpEnv(const std::string &modelId, std::string &metaDir) {
   if (!sk::logger::FileLogger::Instance().IsEnabled()) {
     return ACL_SUCCESS;  // Kernel meta save is disabled, skip directory creation
   }
-  metaDir = CreateSkMetaDirectory(GetCurrentModelLabel());
+  metaDir = CreateSkMetaDirectory(modelId);
   return ACL_SUCCESS;
 }
 
@@ -78,15 +77,19 @@ extern "C" {
 #endif
 
 aclError aclskOptimize(aclmdlRI model, aclskOptions *options) {
-  SkModelContext modelContext(model);
+  std::string modelId;
+  aclError ret = SkResourceManager::GenerateModelId(model, modelId);
+  if (ret != ACL_SUCCESS) {
+    return ret;
+  }
 
   // Initialize logger first (controlled by environment variable ASCEND_OP_COMPILE_SAVE_KERNEL_META)
-  InitSkLogger(GetCurrentModelLabel());
+  InitSkLogger(modelId);
   // Init device socname, corenum, TICK_US_MULTIPLIER
   InitSkRuntimeConfig();
 
   std::string metaDir;
-  aclError ret = PrepareGraphDumpEnv(metaDir);
+  ret = PrepareGraphDumpEnv(modelId, metaDir);
   if (ret != ACL_SUCCESS) {
     return ret;
   }
@@ -98,7 +101,7 @@ aclError aclskOptimize(aclmdlRI model, aclskOptions *options) {
   }
   SK_LOGI("End dump tasks by use rts api to JSON...");
   CurrentModelGuard modelGuard(model);
-  ret = SkResourceManager::CallbackRegister(model);
+  ret = SkResourceManager::CallbackRegister(model, modelId);
   if (ret != ACL_SUCCESS) {
     return ret;
   }
@@ -123,7 +126,7 @@ aclError aclskOptimize(aclmdlRI model, aclskOptions *options) {
   SK_LOGI("End parse sk options");
 
   SK_LOGI("Start init sk graph...");
-  SuperKernelGraph graph(model, opts);
+  SuperKernelGraph graph(model, opts, modelId);
   if (!graph.InitSKGraph()) {
     return ACL_ERROR_FAILURE;
   }
@@ -162,14 +165,14 @@ aclError aclskOptimize(aclmdlRI model, aclskOptions *options) {
 
   SK_LOGI("Start dump raw tasks after update from modelRI to JSON...");
   const auto &scopeInfos = optimizer.GetScopeInfos();
-  if (!DumpGraphJson(model, opts, metaDir, "sk_graph_updated", &scopeInfos)) {
+  if (!DumpGraphJson(model, modelId, opts, metaDir, "sk_graph_updated", &scopeInfos)) {
     return ACL_ERROR_FAILURE;
   }
   SK_LOGI("End dump raw tasks after update from modelRI to JSON...");
 
   SK_LOGI("Start dump kernel binaries...");
   if (sk::logger::FileLogger::Instance().IsEnabled()) {
-    std::string binPath = CreateSkMetaDirectory(graph.GetModelLabel());
+    std::string binPath = CreateSkMetaDirectory(graph.GetModelId());
     if (!DumpKernelBinaries(graph, binPath)) {
       SK_LOGE("Failed to dump kernel binaries: %s/bin_files", binPath.c_str());
       return ACL_ERROR_FAILURE;
