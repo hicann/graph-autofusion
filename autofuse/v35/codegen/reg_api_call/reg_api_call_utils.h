@@ -84,7 +84,7 @@ void SetNddmaParams(const TPipe &tpipe, const DataCopyParams &data_copy_param, N
 void SetLoopModeParams(const TPipe &tpipe, const DataCopyParams &data_copy_param, LoopModeParams &loop_mode_param,
                        bool copy_in);
 void SetLoopModeParamsExpr(const DataCopyParams &data_copy_param, LoopModeParamsExpr &loop_mode_param, bool copy_in);
-std::string GetPaddingMode(const TPipe &tpipe, const Tensor &ub_tensor, const DataCopyParams &data_copy_param);
+std::string GetPaddingMode(const Tensor &ub_tensor);
 void BuildDataCopyApiParamInCVFusion(const TPipe &tpipe, CodegenApiParam &api_param,
                                      DmaSpecificParams &dma_specific_params, const Tensor &gm, const Tensor &ub,
                                      std::string &dtype_name, bool copy_in);

@@ -36,8 +36,8 @@ af::Status UnAlignmentStrategy::LoadAlignmentInferFunc(const af::AscNodePtr &nod
     tensor_to_align_type_[&output_attr] = {AlignmentType::kNotAligned};
     return af::SUCCESS;
   }
-  DiscontinuityInfo info;
-  GE_ASSERT_SUCCESS(TensorLayoutUtils::AnalyzeLoadDiscontinuity(output_attr, info),
+  ascgen_utils::DiscontinuityInfo info;
+  GE_ASSERT_SUCCESS(ascgen_utils::TensorLayoutUtils::AnalyzeLoadDiscontinuity(output_attr, info),
                     "Failed to analyze discontinuity info for node:[%s].", node->GetNamePtr());
   if (!info.has_multiple_discontinuities) {
     // 走compat模式搬运
