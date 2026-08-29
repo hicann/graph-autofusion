@@ -109,7 +109,13 @@ struct NodeCmp {
     const auto lhs_size = GetNodeOutputRealSize(lhs, *nodes_info_);
     const auto rhs_size = GetNodeOutputRealSize(rhs, *nodes_info_);
     if (lhs_size == rhs_size) {
-      return strcmp(lhs->GetNamePtr(), rhs->GetNamePtr()) > 0;
+      const int name_cmp = strcmp(lhs->GetNamePtr(), rhs->GetNamePtr());
+      if (name_cmp == 0) {
+        GELOGW("Duplicate node name [%s] found in topological sorting, comparing by pointer address.",
+               lhs->GetNamePtr());
+        return lhs.get() < rhs.get();
+      }
+      return name_cmp > 0;
     }
     return lhs_size > rhs_size;
   }
@@ -133,7 +139,13 @@ struct NodeCmpV2 {
       const auto lhs_branch = (*branch_widths_)[static_cast<size_t>(lhs->GetOpDesc()->GetId())];
       const auto rhs_branch = (*branch_widths_)[static_cast<size_t>(rhs->GetOpDesc()->GetId())];
       if (lhs_branch == rhs_branch) {
-        return strcmp(lhs->GetNamePtr(), rhs->GetNamePtr()) > 0;
+        const int name_cmp = strcmp(lhs->GetNamePtr(), rhs->GetNamePtr());
+        if (name_cmp == 0) {
+          GELOGW("Duplicate node name [%s] found in topological sorting, comparing by pointer address.",
+                 lhs->GetNamePtr());
+          return lhs.get() < rhs.get();
+        }
+        return name_cmp > 0;
       }
       return lhs_branch < rhs_branch;
     }
@@ -146,26 +158,27 @@ struct NodeCmpV2 {
 template <typename Compare>
 graphStatus RDFSCoreSort(std::vector<NodePtr> &node_vec, std::vector<NodeStatus> &nodes_info,
                          const ConstComputeGraphPtr &compute_graph, const Compare &cmp) {
+  std::set<NodePtr, Compare> zero_out_nodes{cmp};
   for (const auto &node : compute_graph->GetDirectNode()) {
-    if (node->GetOutNodesSize() > 0U) {
+    if (node->GetOutNodesSize() == 0U) {
+      zero_out_nodes.insert(node);
+    }
+  }
+  std::vector<NodePtr> stack(zero_out_nodes.begin(), zero_out_nodes.end());
+  while (!stack.empty()) {
+    const auto current = stack.back();
+    NodeStatus &info = nodes_info[current->GetOpDesc()->GetId()];
+    if (info.status == WalkStatus::kNotWalked) {
+      info.status = WalkStatus::kWalking;
+      const auto in_all_nodes = current->GetInAllNodes();
+      std::set<NodePtr, Compare> input_nodes{in_all_nodes.begin(), in_all_nodes.end(), cmp};
+      stack.insert(stack.end(), input_nodes.cbegin(), input_nodes.cend());
       continue;
     }
-    std::vector<NodePtr> stack = {node};
-    while (!stack.empty()) {
-      const auto current = stack.back();
-      NodeStatus &info = nodes_info[current->GetOpDesc()->GetId()];
-      if (info.status == WalkStatus::kNotWalked) {
-        info.status = WalkStatus::kWalking;
-        const auto in_all_nodes = current->GetInAllNodes();
-        std::set<NodePtr, Compare> input_nodes{in_all_nodes.begin(), in_all_nodes.end(), cmp};
-        stack.insert(stack.end(), input_nodes.cbegin(), input_nodes.cend());
-        continue;
-      }
-      stack.pop_back();
-      if (info.status == WalkStatus::kWalking) {
-        info.status = WalkStatus::kWalked;
-        node_vec.emplace_back(current);
-      }
+    stack.pop_back();
+    if (info.status == WalkStatus::kWalking) {
+      info.status = WalkStatus::kWalked;
+      node_vec.emplace_back(current);
     }
   }
   return GRAPH_SUCCESS;
@@ -1544,8 +1557,7 @@ graphStatus ComputeGraphImpl::RDFSTopologicalSortingV2(std::vector<NodePtr> &nod
   }
 
   std::vector<int64_t> branch_widths(initial_vec.size(), 0);
-  for (auto it = initial_vec.rbegin(); it != initial_vec.rend(); ++it) {
-    const auto &node = *it;
+  for (const auto &node : initial_vec) {
     const auto id = static_cast<size_t>(node->GetOpDesc()->GetId());
     int64_t width = GetNodeInputCount(node);
     for (const auto &in_node : node->GetInAllNodes()) {
