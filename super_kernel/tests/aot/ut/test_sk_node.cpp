@@ -561,6 +561,8 @@ TEST_F(SkNodeTest, FusionFailReasonStrings_CoverAllEnumNamesAndDetails) {
       {FusionFailReason::KERNEL_ATTR_GET_FAILED, "KERNEL_ATTR_GET_FAILED",
        "Failed to get kernel attribute for SuperKernel fusion"},
       {FusionFailReason::EXCEED_SCOPE_MAX, "EXCEED_SCOPE_MAX", "Exceeded maximum scope number limit"},
+      {FusionFailReason::ODD_VEC_SCHE_MODE_UNSUPPORT, "ODD_VEC_SCHE_MODE_UNSUPPORT",
+       "Odd-core pure vector ScheMode kernels cannot be fused safely"},
   };
   for (const auto &item : fusionReasonCases) {
     EXPECT_STREQ(to_string(item.reason), item.name);
@@ -1842,6 +1844,25 @@ TEST_F(SkNodeTest, KernelInfos_IsSimtOpFlag) {
   EXPECT_FALSE(infos.isSimtOp);
 }
 
+TEST_F(SkNodeTest, IsOddVecScheModeUnsupported_RejectsOnlyOddPureVecScheMode) {
+  KernelInfos infos;
+  infos.isScheModeOn = true;
+  infos.cubeNum = 0;
+  infos.vecNum = 45;
+  EXPECT_TRUE(IsOddVecScheModeUnsupported(infos));
+
+  infos.vecNum = 44;
+  EXPECT_FALSE(IsOddVecScheModeUnsupported(infos));
+
+  infos.vecNum = 45;
+  infos.isScheModeOn = false;
+  EXPECT_FALSE(IsOddVecScheModeUnsupported(infos));
+
+  infos.isScheModeOn = true;
+  infos.cubeNum = 1;
+  EXPECT_FALSE(IsOddVecScheModeUnsupported(infos));
+}
+
 TEST_F(SkNodeTest, KernelInfos_FormatWithSimtFlag) {
   KernelInfos infos;
   infos.funcName = "test_kernel";
@@ -2111,6 +2132,67 @@ aclError FakeAclrtGetFunctionAttributeMix12(aclrtFuncHandle funcHandle, aclrtFun
   }
   *attrValue = 0;
   return ACL_SUCCESS;
+}
+
+TEST_F(SkNodeTest, KernelInitNode_OddPureVecScheMode_IsNotFusible) {
+  UtSkNodeRITaskInternal task{};
+  task.taskId = 2013;
+  task.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x2013);
+  task.params.kernelTaskParams.numBlocks = 45;
+
+  aclrtLaunchKernelAttr scheModeAttr{};
+  scheModeAttr.id = ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE;
+  scheModeAttr.value.schemMode = 1;
+  aclrtLaunchKernelCfg launchCfg{&scheModeAttr, 1};
+  task.params.kernelTaskParams.cfg = &launchCfg;
+
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
+  MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeAivOnly));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+
+  SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
+  ASSERT_TRUE(node.InitNode());
+  EXPECT_TRUE(node.IsScheModeOn());
+  EXPECT_EQ(node.GetCubeNum(), 0U);
+  EXPECT_EQ(node.GetVecNum(), 45U);
+  EXPECT_FALSE(node.IsFusible());
+  EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::ODD_VEC_SCHE_MODE_UNSUPPORT);
+}
+
+TEST_F(SkNodeTest, KernelInitNode_EvenPureVecScheMode_RemainsFusible) {
+  UtSkNodeRITaskInternal task{};
+  task.taskId = 2014;
+  task.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x2014);
+  task.params.kernelTaskParams.numBlocks = 44;
+
+  aclrtLaunchKernelAttr scheModeAttr{};
+  scheModeAttr.id = ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE;
+  scheModeAttr.value.schemMode = 1;
+  aclrtLaunchKernelCfg launchCfg{&scheModeAttr, 1};
+  task.params.kernelTaskParams.cfg = &launchCfg;
+
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
+  MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeAivOnly));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+
+  SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
+  ASSERT_TRUE(node.InitNode());
+  EXPECT_TRUE(node.IsScheModeOn());
+  EXPECT_EQ(node.GetCubeNum(), 0U);
+  EXPECT_EQ(node.GetVecNum(), 44U);
+  EXPECT_TRUE(node.IsFusible());
 }
 
 TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_NullOptions_SkipCheck) {
