@@ -19,11 +19,6 @@
  * not depend on glibc float128 interfaces, so disable only that branch while
  * keeping the common floatn definitions from the host glibc.
  */
-#define __HAVE_FLOAT128 0
-#define __HAVE_DISTINCT_FLOAT128 0
-#define __HAVE_FLOAT64X 1
-#define __HAVE_FLOAT64X_LONG_DOUBLE 1
-
 #include_next <bits/floatn-common.h>
 
 #endif /* _BITS_FLOATN_H */
