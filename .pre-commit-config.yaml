@@ -66,6 +66,12 @@ repos:
   # OAT 合规性检查 (Open Source Audit Tool)
   - repo: local
     hooks:
+      - id: reject-docs-superpowers
+        name: Reject docs/superpowers changes
+        entry: bash scripts/reject_forbidden_paths.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
       - id: oat-check
         name: OAT Compliance Check
         entry: bash scripts/oat_check.sh
