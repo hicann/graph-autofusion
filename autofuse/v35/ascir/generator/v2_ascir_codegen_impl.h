@@ -3802,6 +3802,8 @@ class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/cos.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -4966,6 +4968,8 @@ class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/sin.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {

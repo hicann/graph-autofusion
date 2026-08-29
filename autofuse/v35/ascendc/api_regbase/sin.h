@@ -10,12 +10,20 @@
 #ifndef __ASCENDC_API_REGBASE_SIN_H__
 #define __ASCENDC_API_REGBASE_SIN_H__
 
-static constexpr AscendC::SinAlgo sin_algo = AscendC::SinAlgo::RADIAN_REDUCTION;
-static constexpr AscendC::SinConfig sin_config = {sin_algo};
+constexpr uint32_t SIN_THREAD_NUM = 1024;
 
 template <typename T>
-inline __aicore__ void SinExtend(const AscendC::LocalTensor<T> &dst, const AscendC::LocalTensor<T> &src,
-                                 AscendC::LocalTensor<uint8_t> &tmp_buf, const uint32_t calCount) {
-  Sin<T, false, sin_config>(dst, src, tmp_buf, calCount);
+__simt_vf__ __aicore__ LAUNCH_BOUND(SIN_THREAD_NUM) inline void SinSimtCompute(__ubuf__ T *x, __ubuf__ T *y,
+                                                                               const int64_t total_num) {
+  for (int64_t i = threadIdx.x; i < total_num; i += blockDim.x) {
+    y[i] = Simt::Sin(x[i]);
+  }
+}
+
+template <typename T>
+__aicore__ inline void SinExtend(const LocalTensor<T> &dst, const LocalTensor<T> &src,
+                                 const LocalTensor<uint8_t> &tmp_buf, const uint32_t calc_cnt) {
+  AscendC::Simt::VF_CALL<SinSimtCompute<T>>(AscendC::Simt::Dim3(SIN_THREAD_NUM), (__ubuf__ T *)src.GetPhyAddr(),
+                                            (__ubuf__ T *)dst.GetPhyAddr(), calc_cnt);
 }
 #endif  // __ASCENDC_API_REGBASE_SIN_H__

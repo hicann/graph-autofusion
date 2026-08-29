@@ -28,7 +28,7 @@ using namespace af::ascir_op;
 
 namespace optimize {
 namespace {
-constexpr int64_t kSimtDcacheSize = 32 * 1024;
+constexpr int64_t kSimtDcacheSize = 40 * 1024;
 
 static Status GetNodeIrAttrOffset(const af::NodePtr &node, af::Expression &offset) {
   auto asc_node = std::dynamic_pointer_cast<af::AscNode>(node);
@@ -80,7 +80,7 @@ void CompleteStoreApiInfo(af::AscNodePtr &node) {
 void CompleteElewiseApiInfo(af::AscNodePtr &node) {
   node->attr.api.type = af::ApiType::kAPITypeCompute;
   node->attr.api.unit = af::ComputeUnit::kUnitVector;
-  if (af::ops::IsOps<Expm1>(node)) {
+  if (af::ops::IsOps<Expm1>(node) || af::ops::IsOps<Sin>(node) || af::ops::IsOps<Cos>(node)) {
     (void)::ascir::SetDcacheSize(node, kSimtDcacheSize);
   }
 }
@@ -166,6 +166,8 @@ static const std::map<std::string, af::ComputeType> kOpTypeToComputeType = {
     {Tanh::Type, af::ComputeType::kComputeElewise},
     {Isnan::Type, af::ComputeType::kComputeElewise},
     {IsFinite::Type, af::ComputeType::kComputeElewise},
+    {Sin::Type, af::ComputeType::kComputeElewise},
+    {Cos::Type, af::ComputeType::kComputeElewise},
     {Ln::Type, af::ComputeType::kComputeElewise},
     {Expm1::Type, af::ComputeType::kComputeElewise},
     {LogicalNot::Type, af::ComputeType::kComputeElewise},
