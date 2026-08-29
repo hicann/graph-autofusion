@@ -1,0 +1,33 @@
+# 输出文件
+output/
+*.csv
+*.xlsx
+*.txt
+
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 测试输出
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 本地代码索引元数据
+.serena/
+
+# 临时文件
+comparison_output.txt
+run_comparison.py
+test_compare.py
+test_csv_comparison.py
+test_csv_tool.py
