@@ -65,4 +65,32 @@ TEST_F(RegbaseApiSoftmaxTest, TilingInfoForReduceTemp) {
   EXPECT_EQ(tiling.requiredTmpBytes, (tiling.expBufElems + tiling.reduceTmpElems) * sizeof(float));
 }
 
+TEST_F(RegbaseApiSoftmaxTest, PathTypeBoundaryCoverage) {
+  EXPECT_EQ(SoftmaxRegBase::GetSoftmaxARPathType(8U), SoftmaxRegBase::SoftmaxARPathType::SMALL_R);
+  EXPECT_EQ(SoftmaxRegBase::GetSoftmaxARPathType(9U), SoftmaxRegBase::SoftmaxARPathType::MID_R);
+  EXPECT_EQ(SoftmaxRegBase::GetSoftmaxARPathType(SoftmaxRegBase::VL_FP32), SoftmaxRegBase::SoftmaxARPathType::MID_R);
+  EXPECT_EQ(SoftmaxRegBase::GetSoftmaxARPathType(SoftmaxRegBase::VL_FP32 + 1U),
+            SoftmaxRegBase::SoftmaxARPathType::FULL_LOAD);
+}
+
+TEST_F(RegbaseApiSoftmaxTest, MidRtilingInfoCoverage) {
+  const auto tiling9 = SoftmaxRegBase::GetSoftmaxARTilingInfo<float>(2U, 9U);
+  EXPECT_EQ(tiling9.aSize, 2U);
+  EXPECT_EQ(tiling9.rSize, 9U);
+  EXPECT_EQ(tiling9.rAligned, SoftmaxRegBase::CalcRAligned<float>(9U));
+  EXPECT_EQ(tiling9.expBufElems, 2U * SoftmaxRegBase::CalcRAligned<float>(9U));
+  EXPECT_EQ(tiling9.reduceTmpStride, 0U);
+  EXPECT_EQ(tiling9.reduceTmpElems, 0U);
+  EXPECT_EQ(tiling9.requiredTmpBytes, tiling9.expBufElems * sizeof(float));
+
+  const auto tiling31 = SoftmaxRegBase::GetSoftmaxARTilingInfo<float>(3U, 31U);
+  EXPECT_EQ(tiling31.aSize, 3U);
+  EXPECT_EQ(tiling31.rSize, 31U);
+  EXPECT_EQ(tiling31.rAligned, SoftmaxRegBase::CalcRAligned<float>(31U));
+  EXPECT_EQ(tiling31.expBufElems, 3U * SoftmaxRegBase::CalcRAligned<float>(31U));
+  EXPECT_EQ(tiling31.reduceTmpStride, 0U);
+  EXPECT_EQ(tiling31.reduceTmpElems, 0U);
+  EXPECT_EQ(tiling31.requiredTmpBytes, tiling31.expBufElems * sizeof(float));
+}
+
 }  // namespace
