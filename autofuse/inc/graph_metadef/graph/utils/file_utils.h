@@ -14,7 +14,7 @@
 #include <cstdint>
 #include <string>
 #include "graph/types_af.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "ge_common_af/ge_api_types_af.h"
 #include "mmpa/mmpa_api.h"
 

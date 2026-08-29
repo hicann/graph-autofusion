@@ -14,7 +14,7 @@
 #include <vector>
 #include "graph/ascendc_ir/ascir_registry.h"
 #include "graph/ascendc_ir/ascendc_ir_core/ascendc_ir_def.h"
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 #include "graph/symbolizer/symbolic.h"
 
 namespace af {

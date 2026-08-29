@@ -11,7 +11,7 @@
 #ifndef INC_GRAPH_ATTR_GROUP_SERIALIZE_H
 #define INC_GRAPH_ATTR_GROUP_SERIALIZE_H
 
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/attr_store.h"
 #include "graph/detail/attributes_holder.h"
 #include "proto/af_ir.pb.h"

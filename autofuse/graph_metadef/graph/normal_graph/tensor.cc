@@ -8,7 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-#include "graph/tensor.h"
+#include "graph/tensor_af.h"
 
 #include <numeric>
 #include "graph_metadef/graph/debug/ge_util.h"
@@ -730,10 +730,10 @@ graphStatus Tensor::SetData(const char_t *data) {
   return ge::GRAPH_FAILED;
 }
 
-graphStatus Tensor::SetData(const std::vector<AscendString> &datas) {
+graphStatus Tensor::SetData(const std::vector<AscendString> &ascend_strings) {
   if (impl != nullptr) {
     std::vector<std::string> tensor_data;
-    for (auto &data : datas) {
+    for (auto &data : ascend_strings) {
       if (data.GetString() == nullptr) {
         REPORT_INNER_ERR_MSG("E18888", "Data is nullptr. check invalid");
         GELOGE(ge::GRAPH_FAILED, "[Check][Param] Data is nullptr.");

@@ -16,11 +16,11 @@
 #include <vector>
 #include <set>
 
-#include "graph/tensor.h"
+#include "graph/tensor_af.h"
 #include "graph/types_af.h"
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 #include "graph/resource_context_af.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 
 namespace af {
 using ge::AscendString;

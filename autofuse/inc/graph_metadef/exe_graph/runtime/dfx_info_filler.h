@@ -13,7 +13,7 @@
 
 #include <string>
 #include <vector>
-#include <graph/ge_error_codes.h>
+#include <graph/ge_error_codes_af.h>
 
 namespace gert {
 enum class NodeProfInfoType : uint32_t {

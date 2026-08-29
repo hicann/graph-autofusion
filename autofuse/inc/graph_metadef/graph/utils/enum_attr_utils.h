@@ -13,7 +13,7 @@
 
 #include <vector>
 #include "graph_metadef/common/ge_common/util.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/ge_tensor.h"
 
 namespace af {

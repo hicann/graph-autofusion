@@ -17,8 +17,8 @@
 #include <vector>
 
 #include "graph/operator_af.h"
-#include "graph/ge_error_codes.h"
-#include "graph/ascend_string.h"
+#include "graph/ge_error_codes_af.h"
+#include "graph/ascend_string_af.h"
 #include "graph/types_af.h"
 
 namespace af {

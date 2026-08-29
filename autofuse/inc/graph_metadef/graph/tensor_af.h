@@ -17,9 +17,9 @@
 #include <vector>
 #include <utility>
 
-#include "./ge_error_codes.h"
+#include "./ge_error_codes_af.h"
 #include "graph/types_af.h"
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 
 namespace af {
 class ShapeImpl;
@@ -170,7 +170,7 @@ class GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY Tensor {
   graphStatus SetData(const char_t *data);
   ATTRIBUTED_DEPRECATED(graphStatus SetData(const std::vector<AscendString> &))
   graphStatus SetData(const std::vector<std::string> &data);
-  graphStatus SetData(const std::vector<AscendString> &datas);
+  graphStatus SetData(const std::vector<AscendString> &ascend_strings);
   graphStatus SetData(uint8_t *data, size_t size, const Tensor::DeleteFunc &deleter_func);
   graphStatus IsValid();
 

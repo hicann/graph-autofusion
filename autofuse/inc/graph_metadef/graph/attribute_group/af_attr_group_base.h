@@ -12,7 +12,7 @@
 #define AF_INC_GRAPH_ATTR_GROUP_ATTR_GROUP_BASE_H
 
 #include <memory>
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/type_utils.h"
 
 namespace af {

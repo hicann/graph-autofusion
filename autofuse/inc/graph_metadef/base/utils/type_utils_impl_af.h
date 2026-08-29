@@ -11,7 +11,7 @@
 #ifndef AF_INC_BASE_UTILS_TYPE_UTILS_IMPL_H_
 #define AF_INC_BASE_UTILS_TYPE_UTILS_IMPL_H_
 
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 #include "graph/types_af.h"
 
 namespace af {

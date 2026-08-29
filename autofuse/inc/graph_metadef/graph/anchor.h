@@ -14,7 +14,7 @@
 #include "graph/compiler_options.h"
 
 #include <memory>
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/range_vistor.h"
 #include "graph/types_af.h"
 #include "node.h"

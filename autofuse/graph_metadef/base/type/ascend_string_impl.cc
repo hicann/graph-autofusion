@@ -9,7 +9,7 @@
  */
 
 #include "base/type/ascend_string_impl.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/debug/ge_log.h"
 #include <memory>
 

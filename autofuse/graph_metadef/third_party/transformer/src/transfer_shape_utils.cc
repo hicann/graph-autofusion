@@ -12,7 +12,7 @@
 #include <mutex>
 #include "axis_constants.h"
 #include "common/ge_common/string_util.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "platform/platform_info.h"
 #include "graph/utils/type_utils.h"
 #include "graph/types_af.h"

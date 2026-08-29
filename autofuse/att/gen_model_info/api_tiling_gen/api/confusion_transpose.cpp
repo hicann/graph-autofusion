@@ -461,7 +461,7 @@ af::Status GetConfusionTransposeTilingHeadFiles([[maybe_unused]] const std::stri
   static constexpr char kHeaderContent[] = R"(
 #include <vector>
 #include <array>
-#include "graph/tensor.h"
+#include "graph/tensor_af.h"
 
 #ifndef AUTOFUSE_CONFUSION_TRANSPOSE_TILING_DEFS
 #define AUTOFUSE_CONFUSION_TRANSPOSE_TILING_DEFS

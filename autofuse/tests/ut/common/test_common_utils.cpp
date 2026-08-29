@@ -19,7 +19,7 @@
 #include "ascir_register.h"
 #include "codegen_api_param/codegen_api_param.h"
 #include "graph/types_af.h"
-#include "graph/tensor.h"
+#include "graph/tensor_af.h"
 
 using namespace af::ops;
 using namespace af::ascir_op;

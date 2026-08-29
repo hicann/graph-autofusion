@@ -18,7 +18,7 @@
 
 #include "graph/operator_af.h"
 #include "graph/operator_factory_af.h"
-#include "graph/tensor.h"
+#include "graph/tensor_af.h"
 #include "graph/types_af.h"
 #include "graph/graph.h"
 

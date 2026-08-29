@@ -11,7 +11,7 @@
 #include "v1_ascir_codegen_impl.h"
 #include "v1_ascir_att_impl.h"
 #include "graph/types_af.h"
-#include "graph/tensor.h"
+#include "graph/tensor_af.h"
 #include <utility>
 #include <type_traits>
 

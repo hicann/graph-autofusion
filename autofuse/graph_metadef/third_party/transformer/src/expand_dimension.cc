@@ -18,7 +18,7 @@
 #include "exe_graph/runtime/expand_dims_type.h"
 #include "graph/types_af.h"
 #include "framework/common/debug/ge_log.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/utils/type_utils.h"
 
 namespace transformer {

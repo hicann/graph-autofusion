@@ -13,7 +13,7 @@
 
 #include <string>
 #include "graph/types_af.h"
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 
 namespace af {
 using ge::AscendString;

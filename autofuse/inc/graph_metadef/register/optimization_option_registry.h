@@ -16,7 +16,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include "graph/option/optimization_option_info.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 
 namespace af {
 class OptionRegistry {

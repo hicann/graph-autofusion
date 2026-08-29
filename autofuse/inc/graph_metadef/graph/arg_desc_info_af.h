@@ -14,8 +14,8 @@
 #include <vector>
 #include <cstdint>
 #include <memory>
-#include "graph/ge_error_codes.h"
-#include "graph/ascend_string.h"
+#include "graph/ge_error_codes_af.h"
+#include "graph/ascend_string_af.h"
 
 namespace af {
 enum class ArgDescType {

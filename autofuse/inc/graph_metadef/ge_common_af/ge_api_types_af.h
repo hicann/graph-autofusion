@@ -17,7 +17,7 @@
 #include <set>
 #include <functional>
 #include <memory>
-#include "graph/tensor.h"
+#include "graph/tensor_af.h"
 #include "graph/types_af.h"
 #include "exe_graph/runtime/tensor.h"
 

@@ -27,7 +27,7 @@
 #include <nlohmann/json.hpp>
 
 #include "common/checker.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/utils/attr_utils.h"
 #include "graph/debug/ge_attr_define.h"
 

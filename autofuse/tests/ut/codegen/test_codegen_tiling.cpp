@@ -3270,7 +3270,7 @@ TEST_F(TestCodegenTiling, SplitHeaderApiTilingSourceShouldIncludeApiHeaders) {
       continue;
     }
     found_api_source = true;
-    EXPECT_NE(source.find("#include \"graph/tensor.h\""), std::string::npos);
+    EXPECT_NE(source.find("#include \"graph/tensor_af.h\""), std::string::npos);
     EXPECT_NE(source.find("#ifndef AUTOFUSE_CONFUSION_TRANSPOSE_TILING_DEFS"), std::string::npos);
     EXPECT_NE(source.find("const uint32_t ONE_BLK_SIZE = 32;"), std::string::npos);
     EXPECT_NE(source.find("const uint32_t BLOCK_CUBE = 16;"), std::string::npos);

@@ -8,10 +8,10 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-#ifndef INC_EXTERNAL_GRAPH_GE_ERROR_CODES_H_
-#define INC_EXTERNAL_GRAPH_GE_ERROR_CODES_H_
+#ifndef INC_EXTERNAL_GRAPH_GE_ERROR_CODES_AF_H_
+#define INC_EXTERNAL_GRAPH_GE_ERROR_CODES_AF_H_
 
 #include <cstdint>
 #include <graph/error_codes.h>
 
-#endif  // INC_EXTERNAL_GRAPH_GE_ERROR_CODES_H_
+#endif  // INC_EXTERNAL_GRAPH_GE_ERROR_CODES_AF_H_

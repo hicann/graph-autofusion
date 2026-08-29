@@ -17,9 +17,9 @@
 #include <string>
 #include <functional>
 
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 #include "graph/operator_af.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "register/op_def_af.h"
 
 namespace af {

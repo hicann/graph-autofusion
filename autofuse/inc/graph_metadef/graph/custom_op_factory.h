@@ -11,8 +11,8 @@
 #ifndef CANN_GRAPH_ENGINE_CUSTOM_OP_REGISTRY_H
 #define CANN_GRAPH_ENGINE_CUSTOM_OP_REGISTRY_H
 #include "graph/custom_op_af.h"
-#include "graph/ascend_string.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ascend_string_af.h"
+#include "graph/ge_error_codes_af.h"
 
 namespace af {
 using BaseOpCreator = std::function<std::unique_ptr<BaseCustomOp>()>;

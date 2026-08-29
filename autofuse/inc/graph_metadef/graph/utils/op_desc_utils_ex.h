@@ -11,7 +11,7 @@
 #ifndef __INC_METADEF_OP_DESC_UTILS_EX_H
 #define __INC_METADEF_OP_DESC_UTILS_EX_H
 
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/op_desc.h"
 
 namespace af {

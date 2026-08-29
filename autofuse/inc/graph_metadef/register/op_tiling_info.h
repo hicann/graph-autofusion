@@ -14,9 +14,9 @@
 #include <sstream>
 #include <map>
 #include <memory>
-#include "graph/ge_error_codes.h"
-#include "graph/ascend_string.h"
-#include "graph/tensor.h"
+#include "graph/ge_error_codes_af.h"
+#include "graph/ascend_string_af.h"
+#include "graph/tensor_af.h"
 
 namespace optiling {
 using ByteBuffer = std::stringstream;

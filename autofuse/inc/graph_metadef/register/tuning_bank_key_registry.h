@@ -14,7 +14,7 @@
 #include <unordered_map>
 #include <nlohmann/json.hpp>
 #include <string>
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 #include "register/register_types.h"
 #include "exe_graph/runtime/tiling_context.h"
 

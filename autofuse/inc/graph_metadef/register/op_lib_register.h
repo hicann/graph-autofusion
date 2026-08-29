@@ -12,7 +12,7 @@
 #define INC_EXTERNAL_REGISTER_OP_LIB_REGISTER_H
 #include "graph/compiler_def.h"
 #include "graph/types_af.h"
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 
 namespace af {
 class OpLibRegisterImpl;

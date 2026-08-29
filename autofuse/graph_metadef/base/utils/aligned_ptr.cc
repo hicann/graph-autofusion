@@ -11,7 +11,7 @@
 #include "graph_metadef/graph/aligned_ptr.h"
 #include "common/util/mem_utils.h"
 #include "common/ge_common/debug/ge_log.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/def_types.h"
 
 namespace af {

@@ -588,7 +588,7 @@ int32_t CopyAndRunTransposeTest() {
   (void)std::system("mkdir ./graph/");
   ret = std::system(std::string("cp -r ")
                         .append(TOP_DIR)
-                        .append("/autofuse/tests/st/att/testcase/stub/tensor.h ./graph/ -f")
+                        .append("/autofuse/tests/st/att/testcase/stub/tensor_af.h ./graph/tensor_af.h -f")
                         .c_str());
   EXPECT_EQ(ret, 0);
   ret = std::system(std::string("cp -r ")

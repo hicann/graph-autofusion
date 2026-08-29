@@ -14,7 +14,7 @@
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "optimization_option_info.h"
 
 namespace af {
