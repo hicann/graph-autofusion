@@ -1355,50 +1355,49 @@ TEST_F(SuperKernelGraphTest, Update_ValueBackedEventUsesDefaultValueAndFlag) {
 }
 
 TEST_F(SuperKernelGraphTest, RegisterFusibleScope_ExceedMaxScopeNum_MarksUnfusible) {
-  for (uint32_t i = 0; i < MAX_SCOPE_NUM; ++i) {
-    graph->scopeNameToIdx["scope_" + std::to_string(i)] = i;
+  for (uint32_t i = 0; i < MAX_SCOPE_NUM + 1; ++i) {
+    auto node = std::unique_ptr<SuperKernelBaseNode>(
+        new SuperKernelKernelNode(nullptr, ACL_MODEL_RI_TASK_KERNEL, i, 0, INVALID_STREAM_ID, INVALID_TASK_ID));
+    node->SetNodeId(i);
+    node->SetNodeType(SkNodeType::NODE_KERNEL);
+    node->SetIsScopeNode(true);
+    static_cast<SuperKernelKernelNode *>(node.get())->isScopeBegin = true;
+    node->SetIsFusible(true);
+    static_cast<SuperKernelKernelNode *>(node.get())->scopeName = "scope_" + std::to_string(i);
+
+    graph->RegisterFusibleScope(node);
+    ASSERT_TRUE(graph->AddNode(std::move(node)));
   }
 
-  auto node = std::unique_ptr<SuperKernelBaseNode>(
-      new SuperKernelKernelNode(nullptr, ACL_MODEL_RI_TASK_KERNEL, 0, 0, INVALID_STREAM_ID, INVALID_TASK_ID));
-  node->SetNodeId(1000);
-  node->SetNodeType(SkNodeType::NODE_KERNEL);
-  node->SetIsScopeNode(true);
-  static_cast<SuperKernelKernelNode *>(node.get())->isScopeBegin = true;
-  node->SetIsFusible(true);
-  static_cast<SuperKernelKernelNode *>(node.get())->scopeName = "scope_exceed_limit";
-
-  graph->RegisterFusibleScope(node);
-  graph->graphMap[1000] = std::move(node);
-
-  auto *addedNode = graph->GetNodeById(1000);
-  EXPECT_NE(addedNode, nullptr);
+  auto *addedNode = graph->GetNodeById(MAX_SCOPE_NUM);
+  ASSERT_NE(addedNode, nullptr);
   EXPECT_FALSE(addedNode->IsFusible());
   EXPECT_EQ(addedNode->GetFusionFailReason(), FusionFailReason::EXCEED_SCOPE_MAX);
+  EXPECT_EQ(graph->graphMap.size(), MAX_SCOPE_NUM + 1);
   EXPECT_EQ(graph->scopeNameToIdx.size(), MAX_SCOPE_NUM);
 }
 
-TEST_F(SuperKernelGraphTest, RegisterFusibleScope_ExceedMaxScopeNum_ExistingScopeNameStillMarkedUnfusible) {
-  for (uint32_t i = 0; i < MAX_SCOPE_NUM; ++i) {
-    graph->scopeNameToIdx["scope_" + std::to_string(i)] = i;
+TEST_F(SuperKernelGraphTest, RegisterFusibleScope_MoreMarkersThanMaxScopeNum_ExistingScopeNameRemainsFusible) {
+  for (uint32_t i = 0; i < MAX_SCOPE_NUM + 1; ++i) {
+    auto node = std::unique_ptr<SuperKernelBaseNode>(
+        new SuperKernelKernelNode(nullptr, ACL_MODEL_RI_TASK_KERNEL, i, 0, INVALID_STREAM_ID, INVALID_TASK_ID));
+    node->SetNodeId(i);
+    node->SetNodeType(SkNodeType::NODE_KERNEL);
+    node->SetIsScopeNode(true);
+    static_cast<SuperKernelKernelNode *>(node.get())->isScopeBegin = true;
+    node->SetIsFusible(true);
+    static_cast<SuperKernelKernelNode *>(node.get())->scopeName =
+        (i == MAX_SCOPE_NUM) ? "scope_0" : "scope_" + std::to_string(i);
+
+    graph->RegisterFusibleScope(node);
+    ASSERT_TRUE(graph->AddNode(std::move(node)));
   }
 
-  auto node = std::unique_ptr<SuperKernelBaseNode>(
-      new SuperKernelKernelNode(nullptr, ACL_MODEL_RI_TASK_KERNEL, 0, 0, INVALID_STREAM_ID, INVALID_TASK_ID));
-  node->SetNodeId(1001);
-  node->SetNodeType(SkNodeType::NODE_KERNEL);
-  node->SetIsScopeNode(true);
-  static_cast<SuperKernelKernelNode *>(node.get())->isScopeBegin = true;
-  node->SetIsFusible(true);
-  static_cast<SuperKernelKernelNode *>(node.get())->scopeName = "scope_0";
-
-  graph->RegisterFusibleScope(node);
-  graph->graphMap[1001] = std::move(node);
-
-  auto *addedNode = graph->GetNodeById(1001);
-  EXPECT_NE(addedNode, nullptr);
-  EXPECT_FALSE(addedNode->IsFusible());
-  EXPECT_EQ(addedNode->GetFusionFailReason(), FusionFailReason::EXCEED_SCOPE_MAX);
+  auto *addedNode = graph->GetNodeById(MAX_SCOPE_NUM);
+  ASSERT_NE(addedNode, nullptr);
+  EXPECT_TRUE(addedNode->IsFusible());
+  EXPECT_EQ(addedNode->GetFusionFailReason(), FusionFailReason::CAN_FUSE);
+  EXPECT_EQ(graph->graphMap.size(), MAX_SCOPE_NUM + 1);
   EXPECT_EQ(graph->scopeNameToIdx.size(), MAX_SCOPE_NUM);
 }
 
