@@ -382,8 +382,8 @@ std::string TilingLib::GenGetTopnSolutionsFuncForInductor(const ascir::FusedSche
 void TilingLib::GenTopnInitSearchTiling(std::stringstream &ss, const ascir::FusedScheduledResult &fused_schedule_result,
                                         const std::string &tiling, int symbol_value_count,
                                         bool use_measured_perf) const {
-  ss << "  const ResLimit *limit = (request.res_limit == nullptr || request.res_limit->aiv_num == 0) "
-     << "? &g_no_limit_res : request.res_limit;" << std::endl;
+  ss << "  const ResLimit effective_res_limit = GetResLimit(request.res_limit);" << std::endl;
+  ss << "  const ResLimit *limit = &effective_res_limit;" << std::endl;
   ss << "  if (request.symbol_values.size() != " << symbol_value_count << "ULL) {" << std::endl;
   ss << "    response.error_message = \"symbol_values size mismatch\";" << std::endl;
   ss << "    return -1;" << std::endl;

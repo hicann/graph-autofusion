@@ -408,7 +408,8 @@ void TilingLib::GenInductorPgoProxyFunction(std::stringstream &ss, const std::st
      << "std::vector<int64_t> &block_dims, ResLimit *res_limit) {" << std::endl;
   ss << R"(  tiling_datas.clear(); workspaces.clear(); block_dims.clear();
   if (topn <= 0 || topn > kMaxPgoTopn) { return -1; }
-  const ResLimit *limit = (res_limit == nullptr || res_limit->aiv_num == 0U) ? &g_no_limit_res : res_limit;
+  const ResLimit effective_res_limit = GetResLimit(res_limit);
+  const ResLimit *limit = &effective_res_limit;
   if (limit->aiv_num == 0U || limit->ub_size <= 256U) { return -1; }
   InductorPgoArtifacts artifacts;
   if (!ResolveInductorPgoArtifacts(artifacts)) {

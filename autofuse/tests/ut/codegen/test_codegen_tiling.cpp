@@ -4066,6 +4066,21 @@ TEST_F(TestCodegenTiling, ProtocolRequestShouldContainMinimalFields) {
   EXPECT_NE(tiling_impl.find("int64_t topn = 1;"), std::string::npos);
 }
 
+TEST_F(TestCodegenTiling, ResLimitShouldUseOnlyPositiveOverrides) {
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  auto tiling_files = this->GenerateForInductor(fused_schedule_result);
+  ASSERT_TRUE(tiling_files.find(codegen::kTilingDefAndConstIdentify) != tiling_files.end());
+  const auto &tiling_impl = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  EXPECT_NE(tiling_impl.find("inline ResLimit GetResLimit(const ResLimit *res_limit)"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("if (res_limit->valid_num > 0U)"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("if (res_limit->aiv_num > 0U)"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("if (res_limit->aic_num > 0U)"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("if (res_limit->ub_size > 0U)"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("if (res_limit->resv[i] > 0U)"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("const ResLimit effective_res_limit = GetResLimit(res_limit);"), std::string::npos);
+  EXPECT_EQ(tiling_impl.find("res_limit == nullptr || res_limit->aiv_num == 0"), std::string::npos);
+}
+
 TEST_F(TestCodegenTiling, CandidateSolutionShouldContainOnlyMinimalFields) {
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
   auto tiling_files = this->GenerateForInductor(fused_schedule_result);
