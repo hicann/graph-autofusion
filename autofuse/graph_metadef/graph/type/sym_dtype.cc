@@ -259,7 +259,7 @@ ExpressionType SymDtype::Type() const {
 graphStatus SymDtype::Eval(const OpDesc &op, TypeOrTypes &type_or_types) const {
   GE_WARN_ASSERT(!is_legacy_, "Trying eval legacy sym dtype %s", id_.c_str());
   if (expression_ != nullptr) {
-    GELOGI("Eval sym dtype from expression of op %s", id_.c_str(), op.GetType().c_str());
+    GELOGI("Eval sym dtype %s from expression of op %s", id_.c_str(), op.GetType().c_str());
     return expression_->Eval(op, type_or_types);
   }
 

@@ -111,7 +111,7 @@ bool Result::InsertSorted(VarVal **temp, uint64_t rec_num, VarVal *new_vars, dou
 bool Result::AddVarVal(uint64_t *vars, double obj, double cons) {
   uint64_t rec_num = solution_num_;
   if (rec_num > MAX_SOLUTION) {
-    OP_LOG("Too much solutions!");
+    OP_LOG("Too many solutions!");
     return false;
   }
   solution_num_ = SMIN(solution_num_ + 1, top_n_);

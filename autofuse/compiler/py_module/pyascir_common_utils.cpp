@@ -51,14 +51,14 @@ bool OutputSymbolShapeDeserialize(PyObject *output_shape_obj, std::vector<std::v
   for (size_t i = 0UL; i < output_shape_obj_size; i++) {
     PyObject *inner_list = PyList_GetItem(output_shape_obj, i);
     if (PyList_Check(inner_list) == kPythonFail) {
-      ERROR_PRINT("OutputSymbolShape inner error, expected a list of lists");
+      ERROR_PRINT("OutputSymbolShape internal error, expected a list of lists");
       return false;
     }
     size_t inner_size = PyList_Size(inner_list);
     for (size_t j = 0UL; j < inner_size; j++) {
       PyObject *item = PyList_GetItem(inner_list, j);
       if (PyUnicode_Check(item) == kPythonFail) {
-        ERROR_PRINT("OutputSymbolShape inner error, expected a unicode string");
+        ERROR_PRINT("OutputSymbolShape internal error, expected a unicode string");
         return false;
       }
       std::string item_str = PyUnicode_AsUTF8(item);

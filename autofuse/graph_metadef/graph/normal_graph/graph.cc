@@ -322,9 +322,9 @@ class GraphImpl {
       }
       res = GraphUtils::RemoveEdge(src_node_ptr->GetOutControlAnchor(), dst_node_ptr->GetInControlAnchor());
       if (res != GRAPH_SUCCESS) {
-        REPORT_INNER_ERR_MSG("E18888", "remove control edge between [%s] and [%s]failed.",
+        REPORT_INNER_ERR_MSG("E18888", "remove control edge between [%s] and [%s] failed.",
                              src_node_ptr->GetName().c_str(), dst_node_ptr->GetName().c_str());
-        GELOGE(GRAPH_FAILED, "[Remove][ControlEdge] between [%s] and [%s]failed.", src_node_ptr->GetName().c_str(),
+        GELOGE(GRAPH_FAILED, "[Remove][ControlEdge] between [%s] and [%s] failed.", src_node_ptr->GetName().c_str(),
                dst_node_ptr->GetName().c_str());
         return GRAPH_FAILED;
       }
@@ -342,9 +342,9 @@ class GraphImpl {
     if ((src_port_index != -1) && (dst_port_index == -1)) {
       res = GraphUtils::RemoveEdge(src_node_ptr->GetOutDataAnchor(src_port_index), dst_node_ptr->GetInControlAnchor());
       if (res != GRAPH_SUCCESS) {
-        REPORT_INNER_ERR_MSG("E18888", "remove data-control edge between [%s] and [%s]failed.",
+        REPORT_INNER_ERR_MSG("E18888", "remove data-control edge between [%s] and [%s] failed.",
                              src_node_ptr->GetName().c_str(), dst_node_ptr->GetName().c_str());
-        GELOGE(GRAPH_FAILED, "[Remove][Edge] between [%s] and [%s]failed.", src_node_ptr->GetName().c_str(),
+        GELOGE(GRAPH_FAILED, "[Remove][Edge] between [%s] and [%s] failed.", src_node_ptr->GetName().c_str(),
                dst_node_ptr->GetName().c_str());
         return GRAPH_FAILED;
       }
@@ -1136,7 +1136,7 @@ GNodePtr Graph::FindNodeByName(const AscendString &node_name) const {
     return nullptr;
   }
   auto node = impl_->GetComputeGraph()->FindNode(node_name.GetString());
-  GE_ASSERT_NOTNULL(node, "Node name: %s was not found in the current graph：%s.", node_name.GetString(),
+  GE_ASSERT_NOTNULL(node, "Node name: %s was not found in the current graph: %s.", node_name.GetString(),
                     impl_->GetName().c_str());
   return NodeAdapter::Node2GNodePtr(node);
 }

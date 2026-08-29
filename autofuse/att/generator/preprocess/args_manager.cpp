@@ -53,9 +53,9 @@ bool ArgsManager::ReplaceVars(ExprExprMap &replaced_vars, ExprExprMap &replaceme
     GELOGD("obj after: %s", pipe_cost.second.Str().get());
   }
   for (auto &pair : ternary_op_) {
-    GELOGD("tenary op before: %s", pair.second.GetTernaryOpStr().c_str());
+    GELOGD("ternary op before: %s", pair.second.GetTernaryOpStr().c_str());
     pair.second.Replace(old_to_new_expr_replacement);
-    GELOGD("tenary op after: %s", pair.second.GetTernaryOpStr().c_str());
+    GELOGD("ternary op after: %s", pair.second.GetTernaryOpStr().c_str());
   }
   for (auto &group : perf_breakdowns_) {
     for (auto &item : group.items) {

@@ -142,7 +142,7 @@ class TestAscir:
         except Exception as e:
             assert (
                 e.args[0]
-                == "Check dtype failed for cast Cast; input_dtypes: [DT_INT8], output_dytpes: [DT_INT4]"
+                == "Check dtype failed for cast Cast; input_dtypes: [DT_INT8], output_dtypes: [DT_INT4]"
             )
         import sys
 
@@ -160,7 +160,7 @@ class TestAscir:
         except Exception as e:
             assert (
                 e.args[0]
-                == "Check dtype failed for cast_0 Cast; input_dtypes: [DT_INT8], output_dytpes: [DT_INT4]"
+                == "Check dtype failed for cast_0 Cast; input_dtypes: [DT_INT8], output_dtypes: [DT_INT4]"
             )
 
     @staticmethod
@@ -1125,7 +1125,7 @@ class TestAutofuseLoadConcatStore:
         try:
             load.infer_dtype()
         except Exception as e:
-            assert e.args[0] == "node load Load need set input before call infer dype"
+            assert e.args[0] == "node load Load need set input before call infer dtype"
         load.attr.sched.axis = [z0, z1]
         load.x = arg2_1.y
         load.y.axis = [z0, z1]

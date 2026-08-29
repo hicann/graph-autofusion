@@ -743,7 +743,7 @@ ExpressionImplPtr Rational(const ExpressionImplPtr &a, const ExpressionImplPtr &
     auto impl = ExpressionImpl::CreateExpressionImpl<const SymEngineExprPtr &>(sym_expr);
     return impl;
   } else {
-    std::cerr << "unsupported rational expr" << std::endl;
+    GELOGE(ge::PARAM_INVALID, "unsupported rational expr");
     return nullptr;
   }
 }

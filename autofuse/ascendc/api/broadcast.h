@@ -180,7 +180,7 @@ __aicore__ inline void GetBrcAlignLoopNumbers(const uint32_t first_dim, const ui
   constexpr uint32_t min_tmp_buf_size = min_brcb_temp_buffer_size;
   ASCENDC_ASSERT((tmp_buf_size >= min_tmp_buf_size), {
     KERNEL_LOG(KERNEL_ERROR,
-               "tmp_buf_size can't smaller than min_tmp_buf_size, tmp_buf_size is %u, min_tmp_buf_size is %u!",
+               "tmp_buf_size can't be smaller than min_tmp_buf_size, tmp_buf_size is %u, min_tmp_buf_size is %u!",
                tmp_buf_size, min_tmp_buf_size);
   });
   one_repeat_size = tmp_buf_size / min_tmp_buf_size * one_blk_num;
@@ -200,7 +200,7 @@ __aicore__ inline void GetBrcNotAlignLoopNumbers(const uint32_t first_dim, const
   const uint32_t min_tmp_buf_size = min_brcb_temp_buffer_size + min_copy_temp_buffer_size;
   ASCENDC_ASSERT((tmp_buf_size >= min_tmp_buf_size), {
     KERNEL_LOG(KERNEL_ERROR,
-               "tmp_buf_size can't smaller than min_tmp_buf_size, tmp_buf_size is %u, min_tmp_buf_size is %u!",
+               "tmp_buf_size can't be smaller than min_tmp_buf_size, tmp_buf_size is %u, min_tmp_buf_size is %u!",
                tmp_buf_size, min_tmp_buf_size);
   });
   one_repeat_size = tmp_buf_size / min_tmp_buf_size * one_blk_num;

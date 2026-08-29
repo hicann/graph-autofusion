@@ -102,7 +102,7 @@ graphStatus TuningUtils::ConvertGraphToFile(std::vector<ComputeGraphPtr> tuning_
     auto help_info = HelpInfo{i, exe_flag, true, path, user_path};
     help_info.need_preprocess_ = true;
     if (MakeExeGraph(subgraph, help_info) != SUCCESS) {
-      GELOGE(GRAPH_FAILED, "[Invoke][MakeExeGraph] TUU:subgraph %zu generate exe graph failed", i);
+      GELOGE(GRAPH_FAILED, "[Invoke][MakeExeGraph] subgraph %zu generate exe graph failed", i);
       return GRAPH_FAILED;
     }
     i++;
@@ -112,7 +112,7 @@ graphStatus TuningUtils::ConvertGraphToFile(std::vector<ComputeGraphPtr> tuning_
     (void)create_output_.emplace(subgraph, nullptr);
     const auto help_info = HelpInfo{j, true, false, path, user_path};
     if (MakeExeGraph(subgraph, help_info) != SUCCESS) {
-      GELOGE(GRAPH_FAILED, "[Invoke][MakeExeGraph] TUU:non tuning_subgraph %zu generate exe graph failed", j);
+      GELOGE(GRAPH_FAILED, "[Invoke][MakeExeGraph] non tuning_subgraph %zu generate exe graph failed", j);
       return GRAPH_FAILED;
     }
     j++;
@@ -179,7 +179,7 @@ graphStatus TuningUtils::MakeExeGraph(ComputeGraphPtr &exe_graph, const HelpInfo
   }
   // clear graph id
   GE_ASSERT_TRUE(AttrUtils::SetStr(*exe_graph, ATTR_NAME_SESSION_GRAPH_ID, ""));
-  GELOGI("TUU:clear [%s] session_graph_id success", exe_graph->GetName().c_str());
+  GELOGI("clear [%s] session_graph_id success", exe_graph->GetName().c_str());
   // if not make exe, just dump and return
   if (!help_info.exe_flag_) {
     if (ConvertConstToWeightAttr(exe_graph) != SUCCESS) {
@@ -188,7 +188,7 @@ graphStatus TuningUtils::MakeExeGraph(ComputeGraphPtr &exe_graph, const HelpInfo
       return FAILED;
     }
     DumpGraphToPath(exe_graph, help_info.index_, help_info.is_tuning_graph_, help_info.path_);
-    GELOGI("TUU:just return, dump original sub_graph[%s]index[%" PRId64 "]", exe_graph->GetName().c_str(),
+    GELOGI("just return, dump original sub_graph[%s]index[%" PRId64 "]", exe_graph->GetName().c_str(),
            help_info.index_);
     return SUCCESS;
   }
@@ -423,8 +423,8 @@ graphStatus TuningUtils::CreateDataNode(NodePtr &node, const std::string &aoe_pa
   GE_CHECK_NOTNULL(data_node);
   if (data_node->GetType() == CONSTANT) {
     if (OpDescUtils::SetWeights(data_node, weight) != GRAPH_SUCCESS) {
-      REPORT_INNER_ERR_MSG("E18888", "TUU:const node %s add weight failed", data_op_desc->GetName().c_str());
-      GELOGE(FAILED, "[Set][Weights] TUU:const node %s add weight failed", data_op_desc->GetName().c_str());
+      REPORT_INNER_ERR_MSG("E18888", "const node %s add weight failed", data_op_desc->GetName().c_str());
+      GELOGE(FAILED, "[Set][Weights] const node %s add weight failed", data_op_desc->GetName().c_str());
       return FAILED;
     }
   }
@@ -442,38 +442,38 @@ graphStatus TuningUtils::AddAttrToDataNodeForMergeGraph(const NodePtr &pld, cons
   // a.  set `end's input node type` as attr
   const std::string *parent_op_type = AttrUtils::GetStr(pld_desc, "parentOpType");
   if (parent_op_type == nullptr) {
-    REPORT_INNER_ERR_MSG("E18888", "TUU:pld %s get parentOpType failed", pld_desc->GetName().c_str());
-    GELOGE(FAILED, "[Invoke][GetStr] TUU:pld %s get parentOpType failed", pld_desc->GetName().c_str());
+    REPORT_INNER_ERR_MSG("E18888", "pld %s get parentOpType failed", pld_desc->GetName().c_str());
+    GELOGE(FAILED, "[Invoke][GetStr] pld %s get parentOpType failed", pld_desc->GetName().c_str());
     return FAILED;
   }
   (void)AttrUtils::SetStr(op_desc, "parentOpType", *parent_op_type);
   // b. set `end's input node name` as attr
   const std::string *parent_op_name = AttrUtils::GetStr(pld_desc, parent_node_name_attr);
   if (parent_op_name == nullptr) {
-    REPORT_INNER_ERR_MSG("E18888", "TUU:pld %s get _parentNodeName failed", pld_desc->GetName().c_str());
-    GELOGE(FAILED, "[Invoke][GetStr] TUU:pld %s get _parentNodeName failed", pld_desc->GetName().c_str());
+    REPORT_INNER_ERR_MSG("E18888", "pld %s get _parentNodeName failed", pld_desc->GetName().c_str());
+    GELOGE(FAILED, "[Invoke][GetStr] pld %s get _parentNodeName failed", pld_desc->GetName().c_str());
     return FAILED;
   }
   (void)AttrUtils::SetStr(op_desc, parent_node_name_attr, *parent_op_name);
   // c. set `end's input node's out anchor index` as attr
   int32_t parent_node_anchor_index;
   if (!AttrUtils::GetInt(pld_desc, "anchorIndex", parent_node_anchor_index)) {
-    REPORT_INNER_ERR_MSG("E18888", "TUU:pld %s get anchorIndex failed", pld_desc->GetName().c_str());
-    GELOGE(FAILED, "[Invoke][GetStr] TUU:pld %s get anchorIndex failed", pld_desc->GetName().c_str());
+    REPORT_INNER_ERR_MSG("E18888", "pld %s get anchorIndex failed", pld_desc->GetName().c_str());
+    GELOGE(FAILED, "[Invoke][GetStr] pld %s get anchorIndex failed", pld_desc->GetName().c_str());
     return FAILED;
   }
   (void)AttrUtils::SetInt(op_desc, parent_node_anchor_index_attr, parent_node_anchor_index);
-  GELOGD("TUU:from node %s(%s) to add attr to node %s(%s) success", pld->GetName().c_str(), pld->GetType().c_str(),
+  GELOGD("from node %s(%s) to add attr to node %s(%s) success", pld->GetName().c_str(), pld->GetType().c_str(),
          data_node->GetName().c_str(), data_node->GetType().c_str());
   // d. set `end node name` as attr
   const std::string *peer_end_name = AttrUtils::GetStr(pld_desc, peer_node_name_attr);
   if (peer_end_name == nullptr) {
-    REPORT_INNER_ERR_MSG("E18888", "TUU:pld %s get _peerNodeName failed", pld_desc->GetName().c_str());
-    GELOGE(FAILED, "[Invoke][GetStr] TUU:pld %s get _peerNodeName failed", pld_desc->GetName().c_str());
+    REPORT_INNER_ERR_MSG("E18888", "pld %s get _peerNodeName failed", pld_desc->GetName().c_str());
+    GELOGE(FAILED, "[Invoke][GetStr] pld %s get _peerNodeName failed", pld_desc->GetName().c_str());
     return FAILED;
   }
   (void)AttrUtils::SetStr(op_desc, peer_node_name_attr, *peer_end_name);
-  GELOGD("TUU:from node %s(%s) to add attr to node %s(%s) success", pld->GetName().c_str(), pld->GetType().c_str(),
+  GELOGD("from node %s(%s) to add attr to node %s(%s) success", pld->GetName().c_str(), pld->GetType().c_str(),
          data_node->GetName().c_str(), data_node->GetType().c_str());
   return SUCCESS;
 }
@@ -482,9 +482,9 @@ graphStatus TuningUtils::ChangePld2Data(const NodePtr &node, const NodePtr &data
   const auto type_pld = node->GetType();
   const auto type_data = data_node->GetType();
   if ((type_pld != PLACEHOLDER) || (kExeTypes.count(type_data) == 0U)) {
-    REPORT_INNER_ERR_MSG("E18888", "TUU:Failed to change node %s from type %s to type %s", node->GetName().c_str(),
+    REPORT_INNER_ERR_MSG("E18888", "Failed to change node %s from type %s to type %s", node->GetName().c_str(),
                          type_pld.c_str(), type_data.c_str());
-    GELOGE(FAILED, "[Check][Param] TUU:Failed to change node %s from type %s to type %s", node->GetName().c_str(),
+    GELOGE(FAILED, "[Check][Param] Failed to change node %s from type %s to type %s", node->GetName().c_str(),
            type_pld.c_str(), type_data.c_str());
     return FAILED;
   }
@@ -497,7 +497,7 @@ graphStatus TuningUtils::ChangePld2Data(const NodePtr &node, const NodePtr &data
 
   const auto ret = GraphUtils::ReplaceNodeAnchors(data_node, node, {}, output_map);
   if (ret != GRAPH_SUCCESS) {
-    REPORT_INNER_ERR_MSG("E18888", "TUU:Failed to replace node %s by node %s, ret:%u", node->GetName().c_str(),
+    REPORT_INNER_ERR_MSG("E18888", "Failed to replace node %s by node %s, ret:%u", node->GetName().c_str(),
                          data_node->GetName().c_str(), ret);
     GELOGE(FAILED, "[Replace][Node] %s by node %s failed, ret:%u", node->GetName().c_str(),
            data_node->GetName().c_str(), ret);
@@ -506,7 +506,7 @@ graphStatus TuningUtils::ChangePld2Data(const NodePtr &node, const NodePtr &data
 
   NodeUtils::UnlinkAll(*node);
 
-  GELOGD("TUU:Remove node %s(%s) by the ChangePld2Data process, replace it with node %s(%s)", node->GetName().c_str(),
+  GELOGD("Remove node %s(%s) by the ChangePld2Data process, replace it with node %s(%s)", node->GetName().c_str(),
          node->GetType().c_str(), data_node->GetName().c_str(), data_node->GetType().c_str());
   return ret;
 }
@@ -519,23 +519,23 @@ graphStatus TuningUtils::HandlePld(NodePtr &node, const std::string &aoe_path) {
   NodePtr data_node = nullptr;
   // 1. create data node
   if (CreateDataNode(node, aoe_path, data_node) != SUCCESS) {
-    GELOGE(FAILED, "[Create][DataNode] TUU:Failed to handle node %s from graph %s", node->GetName().c_str(),
+    GELOGE(FAILED, "[Create][DataNode] Failed to handle node %s from graph %s", node->GetName().c_str(),
            graph->GetName().c_str());
     return FAILED;
   }
   // 2. add necessary info to data_node for recovery whole graph
   if (AddAttrToDataNodeForMergeGraph(node, data_node) != SUCCESS) {
-    GELOGE(FAILED, "[Add][Attr] TUU:Failed to handle node %s from graph %s", node->GetName().c_str(),
+    GELOGE(FAILED, "[Add][Attr] Failed to handle node %s from graph %s", node->GetName().c_str(),
            graph->GetName().c_str());
     return FAILED;
   }
   // 3. replace pld node by data node created before
   if (ChangePld2Data(node, data_node) != SUCCESS) {
-    GELOGE(FAILED, "[Change][Pld2Data] TUU:Failed to handle node %s from graph %s", node->GetName().c_str(),
+    GELOGE(FAILED, "[Change][Pld2Data] Failed to handle node %s from graph %s", node->GetName().c_str(),
            graph->GetName().c_str());
     return FAILED;
   }
-  GELOGD("TUU:pld[%s] handle success", node->GetName().c_str());
+  GELOGD("pld[%s] handle success", node->GetName().c_str());
   return SUCCESS;
 }
 
@@ -545,15 +545,15 @@ graphStatus TuningUtils::CreateNetOutput(const NodePtr &node, NodePtr &out_node)
   GE_CHECK_NOTNULL(graph);
   const auto search = create_output_.find(graph);
   if (search == create_output_.end()) {
-    REPORT_INNER_ERR_MSG("E18888", "TUU:node %s's owner sub graph %s does not exist in create_output map",
+    REPORT_INNER_ERR_MSG("E18888", "node %s's owner sub graph %s does not exist in create_output map",
                          node->GetName().c_str(), graph->GetName().c_str());
-    GELOGE(FAILED, "[Check][Param] TUU:node %s's owner sub graph %s does not exist in create_output map",
+    GELOGE(FAILED, "[Check][Param] node %s's owner sub graph %s does not exist in create_output map",
            node->GetName().c_str(), graph->GetName().c_str());
     return FAILED;
   }
   if (search->second != nullptr) {
     out_node = search->second;
-    GELOGD("TUU:sub graph %s has created output node, just return", graph->GetName().c_str());
+    GELOGD("sub graph %s has created output node, just return", graph->GetName().c_str());
     return SUCCESS;
   }
   const auto out_op_desc = ComGraphMakeShared<OpDesc>(node->GetName(), NETOUTPUT);
@@ -561,8 +561,8 @@ graphStatus TuningUtils::CreateNetOutput(const NodePtr &node, NodePtr &out_node)
   out_node = graph->AddNode(out_op_desc);
   GE_CHECK_NOTNULL(out_node);
   if (out_node->SetOwnerComputeGraph(graph) != GRAPH_SUCCESS) {
-    REPORT_INNER_ERR_MSG("E18888", "TUU:SetOwnerComputeGraph failed, graph:%s", graph->GetName().c_str());
-    GELOGE(FAILED, "[Set][Graph] TUU:SetOwnerComputeGraph failed, graph:%s", graph->GetName().c_str());
+    REPORT_INNER_ERR_MSG("E18888", "SetOwnerComputeGraph failed, graph:%s", graph->GetName().c_str());
+    GELOGE(FAILED, "[Set][Graph] SetOwnerComputeGraph failed, graph:%s", graph->GetName().c_str());
     return FAILED;
   }
   create_output_[graph] = out_node;
@@ -601,13 +601,13 @@ graphStatus TuningUtils::LinkEnd2NetOutput(NodePtr &end_node, NodePtr &out_node)
   GE_CHECK_NOTNULL(src_anchor);
   if (GraphUtils::RemoveEdge(src_anchor, end_in_anchor) != GRAPH_SUCCESS) {
     REPORT_INNER_ERR_MSG("E18888",
-                         "TUU:remove end input edge from from %s(%d) to %s(%d) failed. "
+                         "remove end input edge from %s(%d) to %s(%d) failed. "
                          "node_name:%s, graph_name:%s",
                          GetNodeNameByAnchor(src_anchor.get()).c_str(), src_anchor->GetIdx(),
                          GetNodeNameByAnchor(end_in_anchor.get()).c_str(), end_in_anchor->GetIdx(),
                          end_node->GetName().c_str(), end_node->GetOwnerComputeGraph()->GetName().c_str());
     GELOGE(FAILED,
-           "[Remove][Edge] TUU:remove end input edge from from %s(%d) to %s(%d) failed. "
+           "[Remove][Edge] remove end input edge from %s(%d) to %s(%d) failed. "
            "node_name:%s, graph_name:%s",
            GetNodeNameByAnchor(src_anchor.get()).c_str(), src_anchor->GetIdx(),
            GetNodeNameByAnchor(end_in_anchor.get()).c_str(), end_in_anchor->GetIdx(), end_node->GetName().c_str(),
@@ -622,7 +622,7 @@ graphStatus TuningUtils::LinkEnd2NetOutput(NodePtr &end_node, NodePtr &out_node)
     GE_CHECK_NOTNULL(out_node->impl_);
     out_node->impl_->in_data_anchors_.push_back(anchor);
     if (GraphUtils::AddEdge(src_anchor, anchor) != GRAPH_SUCCESS) {
-      REPORT_INNER_ERR_MSG("E18888", "TUU:add edge from %s(%d) to %s(%d) failed. node_name:%s, graph_name:%s",
+      REPORT_INNER_ERR_MSG("E18888", "add edge from %s(%d) to %s(%d) failed. node_name:%s, graph_name:%s",
                            GetNodeNameByAnchor(src_anchor.get()).c_str(), src_anchor->GetIdx(),
                            GetNodeNameByAnchor(anchor.get()).c_str(), anchor->GetIdx(), end_node->GetName().c_str(),
                            end_node->GetOwnerComputeGraph()->GetName().c_str());
@@ -638,13 +638,13 @@ graphStatus TuningUtils::LinkEnd2NetOutput(NodePtr &end_node, NodePtr &out_node)
     GE_CHECK_NOTNULL(out_node_op_desc);
     // end node always has one input
     if (out_node_op_desc->AddInputDesc(end_op_desc->GetInputDesc(0U)) != GRAPH_SUCCESS) {
-      REPORT_INNER_ERR_MSG("E18888", "TUU:node %s add input desc failed.", out_node_op_desc->GetName().c_str());
-      GELOGE(FAILED, "[Add][InputDesc] failed, TUU:node %s .", out_node_op_desc->GetName().c_str());
+      REPORT_INNER_ERR_MSG("E18888", "node %s add input desc failed.", out_node_op_desc->GetName().c_str());
+      GELOGE(FAILED, "[Add][InputDesc] failed, node %s .", out_node_op_desc->GetName().c_str());
       return FAILED;
     }
     // add necessary info to out_node for recovery whole graph
     if (AddAttrToNetOutputForMergeGraph(end_node, out_node, static_cast<int64_t>(anchor->GetIdx())) != SUCCESS) {
-      GELOGE(FAILED, "[Add][Attr] TUU:Failed to handle node %s from graph %s", end_node->GetName().c_str(),
+      GELOGE(FAILED, "[Add][Attr] Failed to handle node %s from graph %s", end_node->GetName().c_str(),
              end_node->GetOwnerComputeGraph()->GetName().c_str());
       return FAILED;
     }
@@ -657,7 +657,7 @@ graphStatus TuningUtils::LinkEnd2NetOutput(NodePtr &end_node, NodePtr &out_node)
     const auto out_in_anchor = out_node->GetInControlAnchor();
     if ((GraphUtils::AddEdge(src_anchor, noop_node->GetInControlAnchor()) != GRAPH_SUCCESS) ||
         (GraphUtils::AddEdge(noop_node->GetOutControlAnchor(), out_in_anchor) != GRAPH_SUCCESS)) {
-      REPORT_INNER_ERR_MSG("E18888", "TUU:add edge from %s(%d) to %s(%d) failed. node_name:%s, graph_name:%s",
+      REPORT_INNER_ERR_MSG("E18888", "add edge from %s(%d) to %s(%d) failed. node_name:%s, graph_name:%s",
                            GetNodeNameByAnchor(src_anchor.get()).c_str(), src_anchor->GetIdx(),
                            GetNodeNameByAnchor(noop_node->GetInControlAnchor().get()).c_str(),
                            noop_node->GetInControlAnchor()->GetIdx(), end_node->GetName().c_str(),
@@ -671,14 +671,14 @@ graphStatus TuningUtils::LinkEnd2NetOutput(NodePtr &end_node, NodePtr &out_node)
     }
     // add necessary info to out_node for recovery whole graph
     if (AddAttrToNetOutputForMergeGraph(end_node, out_node, kControlIndex) != SUCCESS) {
-      GELOGE(FAILED, "[Add][Attr] TUU:Failed to handle node %s from graph %s", end_node->GetName().c_str(),
+      GELOGE(FAILED, "[Add][Attr] Failed to handle node %s from graph %s", end_node->GetName().c_str(),
              end_node->GetOwnerComputeGraph()->GetName().c_str());
       return FAILED;
     }
   } else {
-    REPORT_INNER_ERR_MSG("E18888", "TUU: node_name:%s, graph_name:%s handled failed", end_node->GetName().c_str(),
+    REPORT_INNER_ERR_MSG("E18888", "node_name:%s, graph_name:%s handled failed", end_node->GetName().c_str(),
                          end_node->GetOwnerComputeGraph()->GetName().c_str());
-    GELOGE(FAILED, "[Handle][Node] TUU: node_name:%s, graph_name:%s handled failed", end_node->GetName().c_str(),
+    GELOGE(FAILED, "[Handle][Node] node_name:%s, graph_name:%s handled failed", end_node->GetName().c_str(),
            end_node->GetOwnerComputeGraph()->GetName().c_str());
     return FAILED;
   }
@@ -692,15 +692,15 @@ graphStatus TuningUtils::ChangeEnd2NetOutput(NodePtr &end_node, NodePtr &out_nod
   const auto type_end = end_node->GetType();
   const auto type_out = out_node->GetType();
   if ((type_end != END) || (type_out != NETOUTPUT)) {
-    REPORT_INNER_ERR_MSG("E18888", "TUU:Failed to change end_node %s from type %s to type %s",
-                         end_node->GetName().c_str(), type_end.c_str(), type_out.c_str());
-    GELOGE(FAILED, "[Check][Param] TUU:Failed to change end_node %s from type %s to type %s",
-           end_node->GetName().c_str(), type_end.c_str(), type_out.c_str());
+    REPORT_INNER_ERR_MSG("E18888", "Failed to change end_node %s from type %s to type %s", end_node->GetName().c_str(),
+                         type_end.c_str(), type_out.c_str());
+    GELOGE(FAILED, "[Check][Param] Failed to change end_node %s from type %s to type %s", end_node->GetName().c_str(),
+           type_end.c_str(), type_out.c_str());
     return FAILED;
   }
   // link all `end nodes's in node` to this out_node
   if (LinkEnd2NetOutput(end_node, out_node) != SUCCESS) {
-    GELOGE(FAILED, "[Invoke][LinkEnd2NetOutput] failed, TUU:end_node [%s].", end_node->GetName().c_str());
+    GELOGE(FAILED, "[Invoke][LinkEnd2NetOutput] failed, end_node [%s].", end_node->GetName().c_str());
     return FAILED;
   }
   // remove `end node`
@@ -716,17 +716,17 @@ graphStatus TuningUtils::HandleEnd(NodePtr &node) {
 
   // 1. create net_output node , add only one NetOutput node to one subgraph
   if (CreateNetOutput(node, out_node) != SUCCESS) {
-    GELOGE(FAILED, "[Create][NetOutput] TUU:Failed to handle node %s from graph %s", node->GetName().c_str(),
+    GELOGE(FAILED, "[Create][NetOutput] Failed to handle node %s from graph %s", node->GetName().c_str(),
            graph->GetName().c_str());
     return FAILED;
   }
   // 2. replace all end nodes by one output node created before
   if (ChangeEnd2NetOutput(node, out_node) != SUCCESS) {
-    GELOGE(FAILED, "[Invoke][ChangeEnd2NetOutput] TUU:Failed to handle node %s from graph %s", node->GetName().c_str(),
+    GELOGE(FAILED, "[Invoke][ChangeEnd2NetOutput] Failed to handle node %s from graph %s", node->GetName().c_str(),
            graph->GetName().c_str());
     return FAILED;
   }
-  GELOGD("TUU:end[%s] handle success", node->GetName().c_str());
+  GELOGD("end[%s] handle success", node->GetName().c_str());
   return SUCCESS;
 }
 
@@ -786,7 +786,7 @@ graphStatus TuningUtils::LinkSubgraph(ComputeGraphPtr &root_graph, const Compute
     for (const auto &subgraph_name : op_desc->GetSubgraphInstanceNames()) {
       const auto iter = name_to_merged_subgraph.find(subgraph_name);
       if (iter == name_to_merged_subgraph.end()) {
-        REPORT_INNER_ERR_MSG("E18888", "TUU:can not find subgraph with name:%s for op:%s.", subgraph_name.c_str(),
+        REPORT_INNER_ERR_MSG("E18888", "can not find subgraph with name:%s for op:%s.", subgraph_name.c_str(),
                              op_desc->GetName().c_str());
         GELOGE(GRAPH_FAILED, "can not find subgraph with name:%s for op:%s", subgraph_name.c_str(),
                op_desc->GetName().c_str());
@@ -838,7 +838,7 @@ graphStatus TuningUtils::LoadGraphFromFile(const std::map<int64_t, std::string> 
     } else {
       const std::string *parent_graph_name = af::AttrUtils::GetStr(compute_graph, ATTR_NAME_PARENT_GRAPH_NAME);
       if (parent_graph_name == nullptr) {
-        REPORT_INNER_ERR_MSG("E18888", "TUU:get attr ATTR_NAME_PARENT_GRAPH_NAME failed for subgraph.");
+        REPORT_INNER_ERR_MSG("E18888", "get attr ATTR_NAME_PARENT_GRAPH_NAME failed for subgraph.");
         GELOGE(GRAPH_FAILED, "get attr ATTR_NAME_PARENT_GRAPH_NAME failed for subgraph:%s",
                compute_graph->GetName().c_str());
         return GRAPH_FAILED;
@@ -848,7 +848,7 @@ graphStatus TuningUtils::LoadGraphFromFile(const std::map<int64_t, std::string> 
   }
 
   if (root_graphs.empty()) {
-    REPORT_INNER_ERR_MSG("E18888", "TUU:root graph has no subgraphs, can not merge.");
+    REPORT_INNER_ERR_MSG("E18888", "root graph has no subgraphs, can not merge.");
     GELOGE(GRAPH_FAILED, "root graph has no subgraphs, can not merge");
     return GRAPH_FAILED;
   }
@@ -897,7 +897,7 @@ graphStatus TuningUtils::MergeAllSubGraph(const std::vector<ComputeGraphPtr> &su
   for (auto &subgraph : subgraphs) {
     const Status ret_status = MergeSubGraph(subgraph);
     if (ret_status != SUCCESS) {
-      GELOGE(ret_status, "[Invoke][MergeSubGraph] TUU:subgraph %s merge failed", subgraph->GetName().c_str());
+      GELOGE(ret_status, "[Invoke][MergeSubGraph] subgraph %s merge failed", subgraph->GetName().c_str());
       return ret_status;
     }
   }
@@ -906,13 +906,13 @@ graphStatus TuningUtils::MergeAllSubGraph(const std::vector<ComputeGraphPtr> &su
     (void)output_merged_compute_graph->AddNode(node);
     // set owner graph
     GE_CHK_STATUS_RET(node->SetOwnerComputeGraph(output_merged_compute_graph),
-                      "[Set][Graph] TUU:node %s set owner graph failed", node->GetName().c_str());
-    GELOGD("TUU:graph %s add node %s success", output_merged_compute_graph->GetName().c_str(), node->GetName().c_str());
+                      "[Set][Graph] node %s set owner graph failed", node->GetName().c_str());
+    GELOGD("graph %s add node %s success", output_merged_compute_graph->GetName().c_str(), node->GetName().c_str());
   }
 
   // 2. remove data and output node added by us
   if (RemoveDataNetoutputEdge(output_merged_compute_graph) != SUCCESS) {
-    GELOGE(FAILED, "[Remove][Edge] TUU:Failed to merge graph %s", output_merged_compute_graph->GetName().c_str());
+    GELOGE(FAILED, "[Remove][Edge] Failed to merge graph %s", output_merged_compute_graph->GetName().c_str());
     return FAILED;
   }
   const graphStatus ret = output_merged_compute_graph->TopologicalSorting();
@@ -923,16 +923,16 @@ graphStatus TuningUtils::MergeAllSubGraph(const std::vector<ComputeGraphPtr> &su
            output_merged_compute_graph->GetName().c_str(), ret);
     return ret;
   }
-  GELOGD("TUU:Print-%s", PrintCheckLog().c_str());
-  GELOGI("TUU:output_merged_compute_graph %s success", output_merged_compute_graph->GetName().c_str());
+  GELOGD("Print-%s", PrintCheckLog().c_str());
+  GELOGI("output_merged_compute_graph %s success", output_merged_compute_graph->GetName().c_str());
   return SUCCESS;
 }
 
 graphStatus TuningUtils::MergeSubGraph(const ComputeGraphPtr &subgraph) {
   for (auto &node : subgraph->GetDirectNode()) {
     if (kPartitionOpTypes.count(node->GetType()) > 0UL) {
-      REPORT_INNER_ERR_MSG("E18888", "TUU:subgraph passed in should not contain nodes of end or pld type");
-      GELOGE(FAILED, "[Check][Param] TUU:subgraph passed in should not contain nodes of end or pld type");
+      REPORT_INNER_ERR_MSG("E18888", "subgraph passed in should not contain nodes of end or pld type");
+      GELOGE(FAILED, "[Check][Param] subgraph passed in should not contain nodes of end or pld type");
       return FAILED;
     }
     // handle data converted from pld node
@@ -964,9 +964,9 @@ graphStatus TuningUtils::MergeSubGraph(const ComputeGraphPtr &subgraph) {
       const std::lock_guard<std::mutex> lock(mutex_);
       merged_graph_nodes_.emplace_back(node);
     }
-    GELOGD("TUU:subgraph %s add node %s success", subgraph->GetName().c_str(), node->GetName().c_str());
+    GELOGD("subgraph %s add node %s success", subgraph->GetName().c_str(), node->GetName().c_str());
   }
-  GELOGI("TUU:merge subgraph %s success", subgraph->GetName().c_str());
+  GELOGI("merge subgraph %s success", subgraph->GetName().c_str());
   return SUCCESS;
 }
 
@@ -1000,7 +1000,7 @@ graphStatus TuningUtils::RemoveDataNetoutputEdge(ComputeGraphPtr &graph) {
     const auto end_name = pair.second;
     int64_t index = 0;
     auto netoutput_node = FindNode(end_name, index);
-    GELOGD("TUU:start to find info[%s][%s][%" PRId64 "] ", data_node->GetName().c_str(), end_name.c_str(), index);
+    GELOGD("start to find info[%s][%s][%" PRId64 "] ", data_node->GetName().c_str(), end_name.c_str(), index);
     GE_CHECK_NOTNULL(netoutput_node);
     (void)data_node_2_netoutput_node_.emplace(data_node, netoutput_node);
     // 2. get `data out anchor` and `net output in anchor` and `net output in node's out anchor`
@@ -1024,9 +1024,9 @@ graphStatus TuningUtils::RemoveDataNetoutputEdge(ComputeGraphPtr &graph) {
           // remove noop node
           NodeUtils::UnlinkAll(*noop_node);
           if (GraphUtils::RemoveJustNode(graph, noop_node) != SUCCESS) {
-            REPORT_INNER_ERR_MSG("E18888", "TUU:noop node [%s] RemoveNodeWithoutRelink failed.",
+            REPORT_INNER_ERR_MSG("E18888", "noop node [%s] RemoveNodeWithoutRelink failed.",
                                  noop_node->GetName().c_str());
-            GELOGE(FAILED, "[Remove][Node]TUU:noop node [%s] RemoveNodeWithoutRelink failed.",
+            GELOGE(FAILED, "[Remove][Node]noop node [%s] RemoveNodeWithoutRelink failed.",
                    noop_node->GetName().c_str());
             return FAILED;
           }
@@ -1035,7 +1035,7 @@ graphStatus TuningUtils::RemoveDataNetoutputEdge(ComputeGraphPtr &graph) {
       }
     }
     GE_CHECK_NOTNULL(src_out_anchor);
-    GELOGD("TUU:get out node:%s 's in anchor(%d) peer_src_node:%s 's out anchor(%d) match info[%s][%s][%" PRId64 "]",
+    GELOGD("get out node:%s 's in anchor(%d) peer_src_node:%s 's out anchor(%d) match info[%s][%s][%" PRId64 "]",
            netoutput_node->GetName().c_str(), net_output_in_anchor->GetIdx(),
            src_out_anchor->GetOwnerNode()->GetName().c_str(), src_out_anchor->GetIdx(), data_node->GetName().c_str(),
            end_name.c_str(), index);
@@ -1059,7 +1059,7 @@ graphStatus TuningUtils::RemoveDataNetoutputEdge(ComputeGraphPtr &graph) {
       }
       if (GraphUtils::AddEdge(src_out_anchor, peer_in_anchor) != GRAPH_SUCCESS) {
         REPORT_INNER_ERR_MSG("E18888",
-                             "TUU:add edge from %s(%d) to %s(%d) failed. "
+                             "add edge from %s(%d) to %s(%d) failed. "
                              "node_name:(data:%s;netoutput:%s), graph_name:%s",
                              GetNodeNameByAnchor(src_out_anchor.get()).c_str(), src_out_anchor->GetIdx(),
                              GetNodeNameByAnchor(peer_in_anchor.get()).c_str(), peer_in_anchor->GetIdx(),
@@ -1076,11 +1076,11 @@ graphStatus TuningUtils::RemoveDataNetoutputEdge(ComputeGraphPtr &graph) {
   for (auto &node : netoutput_nodes_) {
     NodeUtils::UnlinkAll(*node);
     if (GraphUtils::RemoveNodeWithoutRelink(graph, node) != GRAPH_SUCCESS) {
-      REPORT_INNER_ERR_MSG("E18888", "TUU:Failed to remove node %s from graph", node->GetName().c_str());
+      REPORT_INNER_ERR_MSG("E18888", "Failed to remove node %s from graph", node->GetName().c_str());
       GELOGE(FAILED, "[Remove][Node] %s from graph failed.", node->GetName().c_str());
       return FAILED;
     }
-    GELOGD("TUU:Remove node %s by the RemoveDataNetoutputEdge process success", node->GetName().c_str());
+    GELOGD("Remove node %s by the RemoveDataNetoutputEdge process success", node->GetName().c_str());
   }
   return SUCCESS;
 }
@@ -1093,7 +1093,7 @@ graphStatus TuningUtils::PreProcessNode(const NodePtr &node) {
   }
   // strep 0: recovery ir
   if (op_desc->GetIrInputs().empty() && op_desc->GetIrOutputs().empty() && (op_desc->GetAllOutputsDescSize() != 0U)) {
-    GE_ASSERT_GRAPH_SUCCESS(RecoverIrUtils::RecoverOpDescIrDefinition(op_desc), "Failed recover ir def for %s %s",
+    GE_ASSERT_GRAPH_SUCCESS(RecoverIrUtils::RecoverOpDescIrDefinition(op_desc), "Failed to recover ir def for %s %s",
                             op_desc->GetNamePtr(), op_desc->GetTypePtr());
     GELOGI("Node %s %s recover ir def successfully", node->GetNamePtr(), node->GetTypePtr());
   }

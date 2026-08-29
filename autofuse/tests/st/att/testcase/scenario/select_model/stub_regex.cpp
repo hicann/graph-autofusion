@@ -23,7 +23,7 @@ bool CheckValidTilingkey() {
     }
     file.close();
   }
-  std::regex pattern("The optimal objection for tilingCaseId (\\d+) is (\\d+).");
+  std::regex pattern("The optimal objective for tilingCaseId (\\d+) is (\\d+).");
   std::sregex_iterator it(str.begin(), str.end(), pattern);
   std::sregex_iterator end;
   while (it != end) {

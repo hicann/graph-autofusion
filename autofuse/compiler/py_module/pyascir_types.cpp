@@ -90,7 +90,7 @@ bool CollectInputDtypes(const af::AscNodePtr &node, std::vector<af::DataType> &i
     return CollectInputDtypesForOutput(node, input_dtypes);
   }
   const auto op_desc = node->GetOpDesc();
-  PY_ASSERT_NOTNULL(op_desc, "Inner error!");
+  PY_ASSERT_NOTNULL(op_desc, "Internal error!");
 
   const auto &ir_inputs = op_desc->GetIrInputs();
   std::map<size_t, std::pair<size_t, size_t>> ir_input_2_range;
@@ -181,7 +181,7 @@ bool DoDynamicOutputInference(const af::AscNodePtr &node, InferDtypeFunc infer_f
 
   if (has_complete_output_dtypes) {
     PY_ASSERT_SUCCESS(infer_func(input_dtypes, output_dtyps, npu_arch),
-                      "Check dtype failed for %s %s; input_dtypes: %s, output_dytpes: %s", node->GetNamePtr(),
+                      "Check dtype failed for %s %s; input_dtypes: %s, output_dtypes: %s", node->GetNamePtr(),
                       node->GetTypePtr(), DataTypesToString(input_dtypes).c_str(),
                       DataTypesToString(output_dtyps).c_str());
     return true;
@@ -232,7 +232,7 @@ bool DoInference(const af::AscNodePtr &node, InferDtypeFunc infer_func, const st
   // 执行推导或者校验
   if (!for_infer) {
     PY_ASSERT_SUCCESS(infer_func(input_dtypes, output_dtyps, npu_arch),
-                      "Check dtype failed for %s %s; input_dtypes: %s, output_dytpes: %s", node->GetNamePtr(),
+                      "Check dtype failed for %s %s; input_dtypes: %s, output_dtypes: %s", node->GetNamePtr(),
                       node->GetTypePtr(), DataTypesToString(input_dtypes).c_str(),
                       DataTypesToString(output_dtyps).c_str());
     return true;

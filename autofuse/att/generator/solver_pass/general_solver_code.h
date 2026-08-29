@@ -612,7 +612,7 @@ inline std::string GenAddVarVal() {
   general_solver += "{\n";
   general_solver += "    uint64_t rec_num = solution_num_;\n";
   general_solver += "    if (rec_num > MAX_SOLUTION) {\n";
-  general_solver += "        OP_LOGW(OP_NAME, \"Too much solutions.\");\n";
+  general_solver += "        OP_LOGW(OP_NAME, \"Too many solutions.\");\n";
   general_solver += "        return false;\n";
   general_solver += "    }\n";
   general_solver += "    uint32_t cnt_num = 0;\n";
@@ -1686,7 +1686,7 @@ inline std::string GenFineTune() {
   general_solver += "template <typename SpecificCase>\n";
   general_solver += "inline bool GeneralSolver<SpecificCase>::FineTune()\n";
   general_solver += "{\n";
-  general_solver += "    OP_LOGD(OP_NAME, \"Feasible solution, start tuning the tilling data.\");\n";
+  general_solver += "    OP_LOGD(OP_NAME, \"Feasible solution, start tuning the tiling data.\");\n";
   general_solver += "    double init_obj = static_cast<SpecificCase*>(this)->GetSmoothObj(var_info_->cur_vars);\n";
   general_solver += "    double init_cons = static_cast<SpecificCase*>(this)->GetBuffCost(var_info_->cur_vars);\n";
   general_solver += "    if (!RecordBestVarVal())\n";

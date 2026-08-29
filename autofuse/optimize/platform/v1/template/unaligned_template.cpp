@@ -113,14 +113,14 @@ af::Status UnalignedTemplate::Generate(const af::AscGraph &origin_graph,
     const auto &src_nodes = node->GetInDataNodes();
     const auto connect_to_concat = (!src_nodes.empty()) && (src_nodes.at(0U)->GetType() == af::ascir_op::Concat::Type);
     if ((!connect_to_concat) && ScheduleUtils::IsContinuesVecStrides(std::dynamic_pointer_cast<af::AscNode>(node))) {
-      GELOGD("Graph[%s] Node[%s] is continues.", new_case.GetName().c_str(), node->GetNamePtr());
+      GELOGD("Graph[%s] Node[%s] is continuous.", new_case.GetName().c_str(), node->GetNamePtr());
       continues_store_cnt++;
       continue;
     }
     GE_WARN_ASSERT(ReverseDfsUnAlignNode(new_case, node, visited_nodes) == af::SUCCESS);
   }
   if (continues_store_cnt == store_nodes.size()) {
-    GELOGD("Graph[%s] is continues, do not need generate un-aligned tiling case.", new_case.GetName().c_str());
+    GELOGD("Graph[%s] is continuous, do not need to generate un-aligned tiling case.", new_case.GetName().c_str());
     return af::FAILED;
   }
   GE_ASSERT_SUCCESS(ScheduleUtils::TopologicalSorting(new_case));

@@ -333,7 +333,7 @@ do {
   current_block_dim = next_lower_block_dim;
   if (!FindNextLowerBlockDim(current_block_dim, next_lower_block_dim)) {
   OP_LOGD(OP_NAME,
-          "Found better solution by lower block dim, no lower block dim, current_perf: %f, "
+          "Found better solution by lower block dim, no lower block dim remains, current_perf: %f, "
           "current_block_dim: %u, input:%s",
           current_perf, current_block_dim, input_.DebugString().c_str());
     // 无更低档位，当前input_就是最优解，直接返回下档位的最优解
@@ -402,7 +402,7 @@ static std::string GenFindBetterSolutionByUpperBlockDimBodyPre() {
     current_block_dim = next_upper_block_dim;
     if (!FindNextUpperBlockDim(current_block_dim, next_upper_block_dim)) {
       OP_LOGD(OP_NAME,
-              "Found better solution by upper block dim, no upper block dim, current_perf: %f, "
+              "Found better solution by upper block dim, no upper block dim remains, current_perf: %f, "
               "current_block_dim: %u, input:%s",
               current_perf, current_block_dim, input_.DebugString().c_str());
       // 无更高档位，当前input_就是最优解，直接返回上档位的最优解
@@ -585,9 +585,9 @@ static std::string GenAutoTuningBetterSolution_CheckLower(bool enable_equal_orde
   double next_lower_perf = GetPerf();
   // 4.当前档位差于下档位，向下找更优解(考虑多核头开销对小Shape场景的影响和同地址冲突对多核的影响，当前更倾向于下档位)
   if (current_perf > next_lower_perf) {
-    OP_LOGD(OP_NAME, "Find lower block dim, as next_lower_perf: %f(block_dim=%u) is better than"
-            "current_perf: %f(block_dim=%u), input: %s", current_perf, block_dim, next_lower_perf,
-            next_lower_block_dim, input_.DebugString().c_str());
+    OP_LOGD(OP_NAME, "Find lower block dim, as next_lower_perf: %f(block_dim=%u) is better than "
+            "current_perf: %f(block_dim=%u), input: %s", next_lower_perf, next_lower_block_dim, current_perf,
+            block_dim, input_.DebugString().c_str());
 )";
   if (enable_equal_order_tiling) {
     codes += "    FindBetterSolutionByLowerBlockDim(next_lower_perf, next_lower_block_dim, enable_equal_order);\n";
@@ -621,7 +621,7 @@ static std::string GenAutoTuningBetterSolution_CheckUpper(bool enable_equal_orde
   if (current_perf > next_upper_perf) {
     OP_LOGD(OP_NAME,
         "Find upper block dim, as next_upper_perf: %f(block_dim=%u) is better than current_perf: %f(block_dim=%u).",
-        current_perf, block_dim, next_upper_perf, next_upper_block_dim);
+        next_upper_perf, next_upper_block_dim, current_perf, block_dim);
 )";
   if (enable_equal_order_tiling) {
     codes += "    FindBetterSolutionByUpperBlockDim(next_upper_perf, next_upper_block_dim, enable_equal_order);\n";

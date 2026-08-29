@@ -139,11 +139,11 @@ bool Node::NodeImpl::NodeAnchorIsEqual(const AnchorPtr &left_anchor, const Ancho
   if (anchor_peer_size != right_anchor_peer_size) {
     REPORT_INNER_ERR_MSG("E18888",
                          "Size of anchor's peer anchors verify failed, node name: %s "
-                         "anchor_peer_size [%zu]  is different form [%zu] at index [%zu].",
+                         "anchor_peer_size [%zu]  is different from [%zu] at index [%zu].",
                          this->GetName().c_str(), anchor_peer_size, right_anchor_peer_size, i);
     GELOGE(GRAPH_FAILED,
            "[Check][Param] Size of anchor's peer anchors verify failed, node name: %s "
-           "anchor_peer_size [%zu]  is different form [%zu] at index [%zu].",
+           "anchor_peer_size [%zu]  is different from [%zu] at index [%zu].",
            this->GetName().c_str(), anchor_peer_size, right_anchor_peer_size, i);
     return false;
   }
@@ -163,11 +163,11 @@ bool Node::NodeImpl::NodeAnchorIsEqual(const AnchorPtr &left_anchor, const Ancho
     // Determine the connection relationship by linking the node's name
     if (peer_node->GetName() != r_peer_node->GetName()) {
       REPORT_INNER_ERR_MSG("E18888",
-                           "anchor's peer node name verify failed, node name: %s index[%zu]"
+                           "anchor's peer node name verify failed, node name: %s index[%zu] "
                            "peer node name %s is different from %s at index [%zu].",
                            this->GetName().c_str(), i, peer_node->GetName().c_str(), r_peer_node->GetName().c_str(), j);
       GELOGE(GRAPH_FAILED,
-             "[Check][Param] anchor's peer node name verify failed, node name: %s index[%zu]"
+             "[Check][Param] anchor's peer node name verify failed, node name: %s index[%zu] "
              "peer node name %s is different from %s at index [%zu].",
              this->GetName().c_str(), i, peer_node->GetName().c_str(), r_peer_node->GetName().c_str(), j);
       return false;
@@ -250,8 +250,8 @@ graphStatus Node::NodeImpl::AddLinkFrom(const uint32_t &index, const af::Node::N
     in_data_anchors_.push_back(anchor);
     (void)out_anchors.at(input_node_index)->LinkTo(in_data_anchors_.back());
   } else {
-    REPORT_INNER_ERR_MSG("E18888", "index %u is over than in data anchors size %zu.", index, in_data_anchors_.size());
-    GELOGE(GRAPH_FAILED, "index %u is over than in data anchors size %zu.", index, in_data_anchors_.size());
+    REPORT_INNER_ERR_MSG("E18888", "index %u exceeds in data anchors size %zu.", index, in_data_anchors_.size());
+    GELOGE(GRAPH_FAILED, "index %u exceeds in data anchors size %zu.", index, in_data_anchors_.size());
     return GRAPH_PARAM_INVALID;
   }
 

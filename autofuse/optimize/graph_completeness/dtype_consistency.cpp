@@ -140,7 +140,7 @@ Status DtypeConsistency::ProcessOutputDtype(const NodeDtypeRequirement &req) {
   for (size_t i = 0UL; i < output_nums; ++i) {
     GE_ASSERT_TRUE(i < req.output_dtypes.size());
     if (req.node->outputs[i].attr.dtype != req.output_dtypes[i]) {
-      GELOGD("Node [%s]'s output[%zu] need to change dtype from [%s] to [%s].", req.node->GetNamePtr(), i,
+      GELOGD("Node [%s]'s output[%zu] needs to change dtype from [%s] to [%s].", req.node->GetNamePtr(), i,
              ge::TypeUtils::DataTypeToSerialString(req.node->outputs[i].attr.dtype).c_str(),
              ge::TypeUtils::DataTypeToSerialString(req.output_dtypes[i]).c_str());
       req.node->outputs[i].attr.dtype = req.output_dtypes[i];

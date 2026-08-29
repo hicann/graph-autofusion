@@ -167,7 +167,7 @@ void BuildAndRunBinary(const std::string &compile_cmd, const std::string &run_cm
 bool IsFileContainsString(const std::string &filename, const std::string &searchString) {
   std::ifstream file(filename);
   if (!file.is_open()) {
-    std::cerr << "无法打开文件: " << filename << std::endl;
+    std::cerr << "Cannot open file: " << filename << std::endl;
     return false;
   }
   std::string line;

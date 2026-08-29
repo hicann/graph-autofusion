@@ -293,8 +293,8 @@ graphStatus RefRelations::Impl::ProcessSubgraphDataNodes(std::vector<NodePtr> &g
     bool is_exist = true;
     is_exist = AttrUtils::GetInt(e->GetOpDesc(), kRefIdx, i);
     if (!is_exist) {
-      REPORT_INNER_ERR_MSG("E18888", "Invalid SubGraph NetOutput node[%s].no attr %s", e->GetName().c_str(), kRefIdx);
-      GELOGE(GRAPH_FAILED, "[Get][Int] Invalid SubGraph NetOutput node[%s].no attr %s", e->GetName().c_str(), kRefIdx);
+      REPORT_INNER_ERR_MSG("E18888", "Invalid SubGraph NetOutput node[%s]. no attr %s", e->GetName().c_str(), kRefIdx);
+      GELOGE(GRAPH_FAILED, "[Get][Int] Invalid SubGraph NetOutput node[%s]. no attr %s", e->GetName().c_str(), kRefIdx);
       return GRAPH_FAILED;
     }
     max_ref_idx = (i > max_ref_idx) ? i : max_ref_idx;

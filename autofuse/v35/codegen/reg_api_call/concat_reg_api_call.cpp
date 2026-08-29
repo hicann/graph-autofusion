@@ -115,7 +115,7 @@ af::Status ConcatRegApiCall::GenerateDefault(const vector<std::reference_wrapper
     DefineConcatTiling(tiling_b32, t_pipe.tiler, ss);
     dtype_name = "uint32_t";
   } else if (NeedB8ToB16(tiling)) {
-    GELOGD("can use b16 concat", dtype_name.c_str());
+    GELOGD("can use b16 concat, dtype: %s", dtype_name.c_str());
     const ConcatTiling tiling_b16 = B8ToB16(tiling);
     DefineConcatTiling(tiling_b16, t_pipe.tiler, ss);
     dtype_name = "uint16_t";
@@ -152,7 +152,7 @@ af::Status ConcatRegApiCall::GenerateForGather(const vector<std::reference_wrapp
     DefineConcatTilingGather(tiling_b32, t_pipe.tiler, ss);
     dtype_name = "uint32_t";
   } else if (NeedB8ToB16(tiling)) {
-    GELOGD("can use b16 concat", dtype_name.c_str());
+    GELOGD("can use b16 concat, dtype: %s", dtype_name.c_str());
     const ConcatTiling tiling_b16 = B8ToB16(tiling);
     DefineConcatTilingGather(tiling_b16, t_pipe.tiler, ss);
     dtype_name = "uint16_t";

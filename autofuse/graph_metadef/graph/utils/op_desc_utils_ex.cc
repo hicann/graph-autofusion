@@ -65,7 +65,7 @@ graphStatus OpDescUtilsEx::CallInferFuncV2(const OpDescPtr &op_desc, Operator &o
     return GRAPH_FAILED;
   }
   if (op_desc->GetIrInputs().empty() && op_desc->GetIrOutputs().empty() && op_desc->GetAllOutputsDescSize() != 0U) {
-    GE_CHK_STATUS_RET(RecoverIrUtils::RecoverOpDescIrDefinition(op_desc), "Failed recover ir def for %s %s",
+    GE_CHK_STATUS_RET(RecoverIrUtils::RecoverOpDescIrDefinition(op_desc), "Failed to recover ir def for %s %s",
                       op_desc->GetNamePtr(), op_desc->GetTypePtr());
   }
   GE_WARN_ASSERT_GRAPH_SUCCESS(call_infer_data_type(op_desc),
@@ -240,7 +240,7 @@ graphStatus OpDescUtilsEx::CallInferFormatFuncV2(const OpDescPtr &op_desc, Opera
   const auto call_infer_format_v2 = OperatorFactoryImpl::GetInferFormatV2Func();
   GE_ASSERT_NOTNULL(call_infer_format_v2);
   if (op_desc->GetIrInputs().empty() && op_desc->GetIrOutputs().empty() && op_desc->GetAllOutputsDescSize() != 0U) {
-    GE_CHK_STATUS_RET(RecoverIrUtils::RecoverOpDescIrDefinition(op_desc), "Failed recover ir def for %s %s",
+    GE_CHK_STATUS_RET(RecoverIrUtils::RecoverOpDescIrDefinition(op_desc), "Failed to recover ir def for %s %s",
                       op_desc->GetNamePtr(), op_desc->GetTypePtr());
   }
   return call_infer_format_v2(op, op_desc);

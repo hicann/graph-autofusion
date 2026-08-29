@@ -78,7 +78,7 @@ static std::string GetBasePath() {
   const char *pathRaw = MsprofGetPath();
   if (pathRaw == nullptr || pathRaw[0] == '\0') {
     SK_DLOGE("[sk time profiling] MsprofGetPath returned empty path\n");
-    SK_DLOGI("[sk time profiling] Profiler should start before than net start, Please check it\n");
+    SK_DLOGI("[sk time profiling] Profiler should start before the network starts, please check it\n");
     return "";
   }
   std::string path(pathRaw);

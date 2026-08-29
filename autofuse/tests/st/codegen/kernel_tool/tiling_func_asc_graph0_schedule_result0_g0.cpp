@@ -626,7 +626,7 @@ bool FindPerfBetterTilingbyCaseId(TilingCaseImpl *tilingCaseImplPtr, double &obj
   if (tilingCaseImplPtr->GetTiling(tiling_data, cur_ub_ratio)) {
     cur_obj = tilingCaseImplPtr->GetPerf(tiling_data);
     OP_LOGD(OP_NAME, "The ub ratio for tilingCaseId %u is %f.", tilingCaseId, cur_ub_ratio);
-    OP_LOGD(OP_NAME, "The optimal objection for tilingCaseId %u is %f.", tilingCaseId, cur_obj);
+    OP_LOGD(OP_NAME, "The optimal objective for tilingCaseId %u is %f.", tilingCaseId, cur_obj);
     if (obj < 0) {
       UpdateBetterTiling(tilingCaseImplPtr, tmp_tiling, tiling_data, tilingCaseId);
       sub_case_flag = is_sub_case;
@@ -738,7 +738,8 @@ bool GetTiling(AutofuseTilingData &tiling_data, int32_t tilingCaseId) {
 bool GetTilingOptionRange(const int32_t option_id, int32_t *option_range_size, int32_t *range_type,
                           int32_t *option_range) {
   if (!((option_id >= 0) && (option_id <= 1))) {
-    OP_LOGE(OP_NAME, "option_id is invalid, valid range is ((option_id >= 0) && (option_id <=1))");
+    OP_LOGE(OP_NAME, "option_id is invalid, option_id=%d, valid range is ((option_id >= 0) && (option_id <=1))",
+            option_id);
     return false;
   }
   if ((option_range_size != nullptr)) {

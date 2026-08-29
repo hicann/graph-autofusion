@@ -1033,7 +1033,7 @@ af::Status VectorFuncPartitioner::BuildSubgraph(const ClusterPtr &cluster, af::A
   vf_op.GetName(str);
   // add node to impl graph
   auto vf_node = impl_graph_.FindNode(str.GetString());
-  GE_ASSERT_NOTNULL(vf_node, "Failed to find vf node %s form graph %s.", str.GetString(),
+  GE_ASSERT_NOTNULL(vf_node, "Failed to find vf node %s from graph %s.", str.GetString(),
                     impl_graph_.GetName().c_str());
 
   int64_t parent_out_idx = 0;
@@ -1338,7 +1338,7 @@ af::Status VectorFuncPartitioner::AddRemovePadForBrcInline(af::AscGraph &graph) 
     const auto &src_nodes = node->GetInDataNodes();
     const auto connect_to_concat = (!src_nodes.empty()) && (src_nodes.at(0U)->GetType() == af::ascir_op::Concat::Type);
     if ((!connect_to_concat) && ScheduleUtils::IsContinuesVecStrides(std::dynamic_pointer_cast<af::AscNode>(node))) {
-      GELOGD("Graph[%s] Node[%s] is continues.", graph.GetName().c_str(), node->GetNamePtr());
+      GELOGD("Graph[%s] Node[%s] is continuous.", graph.GetName().c_str(), node->GetNamePtr());
       continue;
     }
     GE_ASSERT_SUCCESS(ReverseDfsUnAlignNode(graph, node, visited_nodes));

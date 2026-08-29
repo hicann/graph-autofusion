@@ -64,8 +64,8 @@ class Duration {
       return;
     }
     GEEVENT(
-        "Duration record: name[%s], total_count[%lu], total_time[%lu], max_time[%lu], min_time[%lu], "
-        "average_time[%lu].",
+        "Duration record: name[%s], total_count[%lu], total_time_ns[%lu], max_time_ns[%lu], min_time_ns[%lu], "
+        "average_time_ns[%lu].",
         name_.c_str(), total_count_, total_time_, max_time_, min_time_,
         static_cast<uint64_t>(total_time_ / total_count_));
   }

@@ -238,7 +238,7 @@ af::Status AxesTilingDataGen::AddAxesTailSizeAndLoopNum() {
     if (axis->axis_pos != AxisPosition::INNER) {
       continue;
     }
-    GE_ASSERT_TRUE(axis->from_axis.size() == 1UL, "axis[%s] is inner axis should only has one from.",
+    GE_ASSERT_TRUE(axis->from_axis.size() == 1UL, "axis[%s] is an inner axis and should only have one from_axis.",
                    axis->name.c_str());
     // 轴对应的BaseSize
     const auto axis_base_size = GetArgExpr(axis->name);
@@ -267,7 +267,7 @@ af::Status AxesTilingDataGen::AddSplitOuterAxisTailArgs() {
     if (axis->axis_pos != AxisPosition::INNER) {
       continue;
     }
-    GE_ASSERT_TRUE(axis->from_axis.size() == 1UL, "axis[%s] is inner axis should only has one from.",
+    GE_ASSERT_TRUE(axis->from_axis.size() == 1UL, "axis[%s] is an inner axis and should only have one from_axis.",
                    axis->name.c_str());
     // INNER axis should only has one parent axis
     std::string parents_size;
@@ -622,7 +622,7 @@ af::Status TilingDataGenerator::GenTilingData(const ModelInfo &model_info) {
 
   // Init tiling data gen for MemoryTilingDataGen
   auto memory_tiling_data_gen = af::MakeShared<MemoryTilingDataGen>(model_info);
-  GE_ASSERT_NOTNULL(memory_tiling_data_gen, "Init BlockTilingDataGen failed, tiling_key[%u].", tiling_key);
+  GE_ASSERT_NOTNULL(memory_tiling_data_gen, "Init MemoryTilingDataGen failed, tiling_key[%u].", tiling_key);
   GE_ASSERT_SUCCESS(memory_tiling_data_gen->Init());
   graphs_tiling_data_gens_[tiling_key].emplace_back(memory_tiling_data_gen);
   return af::SUCCESS;

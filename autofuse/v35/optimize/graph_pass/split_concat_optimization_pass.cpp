@@ -26,7 +26,7 @@ Status SplitConcatOptimizationPass::RunPass(af::AscGraph &graph) {
   std::vector<af::AscNodePtr> concat_nodes;
   FindSplitAndConcatNodes(graph, split_nodes, concat_nodes);
   if (split_nodes.empty() || concat_nodes.empty()) {
-    GELOGI("graph[%s] does not has split concat fusion", graph.GetName().c_str());
+    GELOGI("graph[%s] does not have split concat fusion", graph.GetName().c_str());
     return af::SUCCESS;
   }
   GE_ASSERT_TRUE(concat_nodes.size() == kExpectedNodeNum, "expect just 1 Concat node, but got %zu ",

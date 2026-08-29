@@ -455,7 +455,7 @@ def modify_json_file(json_file, host_so, is_cross_compile_flag=False):
     data["opParaSize"] = int(lib.GetTilingDataSize())
     CommonUtility.print_compile_log(
         "",
-        f"{kernenl_file_name} tiling size: {data['opParaSize']}",
+        f"{kernenl_file_name} tiling size: {data['opParaSize']} bytes",
         AscendCLogLevel.LOG_INFO,
     )
     # 自动融合 workspace 默认只有一个
@@ -956,7 +956,7 @@ def generate_device_and_host_code(graph_name, temp_dir, params, code_gen):
     # 生成host代码
     if not check_keys_in_dict(params, ["output_symbol_shape"]):
         CommonUtility.print_compile_log(
-            "", "output_symbol_shape is not exist", AscendCLogLevel.LOG_ERROR
+            "", "output_symbol_shape does not exist", AscendCLogLevel.LOG_ERROR
         )
         raise Exception("An error occurred autofuse compile for check extra_params")
     CommonUtility.print_compile_log(
@@ -1501,7 +1501,7 @@ def asc_pgo_exec(*args, temp_dir, params, op_kernel_src, code_gen):
 
     config_path = os.path.join(pgo_dir, f"{graph_name}_config.txt")
     if os.path.exists(config_path):
-        logger.info(f"[PGO] {config_path} exist, skip pgo tuning")
+        logger.info(f"[PGO] {config_path} exists, skip pgo tuning")
         return
 
     timestamp_set(True, graph_name, "CompileKernelForPGO")
@@ -2880,7 +2880,7 @@ def asc_codegen_compile(*args, **kwargs):
     if not is_valid_path(kernel_meta_dir):
         CommonUtility.print_compile_log(
             "",
-            f"invalid kernel meta path : `{kernel_meta_dir}' ",
+            f"invalid kernel meta path: `{kernel_meta_dir}'",
             AscendCLogLevel.LOG_ERROR,
         )
         raise Exception("An error occurred autofuse compile for check kernel_meta path")
@@ -2888,7 +2888,7 @@ def asc_codegen_compile(*args, **kwargs):
     if not os.path.exists(kernel_meta_dir):
         CommonUtility.print_compile_log(
             "",
-            f"kernel meta parent dir is not exist : `{kernel_meta_dir}' ",
+            f"kernel meta parent dir does not exist: `{kernel_meta_dir}'",
             AscendCLogLevel.LOG_ERROR,
         )
         raise Exception("An error occurred autofuse compile for check kernel_meta path")

@@ -164,7 +164,7 @@ Status FusedGraphModifier::SubgraphConnectionsToWorkspace(const af::ComputeGraph
       continue;
     }
     auto iter = asc_backend_to_ascgraph.find(node);
-    GE_ASSERT_TRUE(iter != asc_backend_to_ascgraph.end(), "Cannot find ascgraph for node [%s].", node->GetNamePtr());
+    GE_ASSERT_TRUE(iter != asc_backend_to_ascgraph.end(), "Cannot find AscGraph for node [%s].", node->GetNamePtr());
     std::set<int64_t> data_used_ids;
     ProcessNodesContext context = {nodes_to_out_anchor_idx_to_attr, free_workspace_id, data_used_ids};
 

@@ -48,7 +48,7 @@ class __attribute__((visibility("default"))) ApiPerfFactory {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto iter = creator_map_.find(api_name);
     if (iter != creator_map_.end()) {
-      GELOGD("ApiCallFactory::RegisterCreator: %s creator already exist", api_name.c_str());
+      GELOGD("ApiCallFactory::RegisterCreator: %s creator already exists", api_name.c_str());
       return;
     }
     creator_map_[api_name] = std::move(creator);

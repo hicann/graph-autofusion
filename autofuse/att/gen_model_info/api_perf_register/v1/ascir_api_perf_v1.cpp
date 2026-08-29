@@ -742,7 +742,7 @@ af::Status BroadcastApi([[maybe_unused]] const std::vector<TensorShapeInfo> &inp
                       input_shapes[0].GetDimExpr().c_str(), output_shapes[0].GetDimExpr().c_str());
   } else if (input_dims.size() == 4U) {
     GE_ASSERT_SUCCESS(BroadcastFourDim(input_shapes[0].data_type, input_dims, output_dims, perf_res),
-                      "Gen BroadcastThreeDim perf Failed, input size {%s}, output size {%s}.",
+                      "Gen BroadcastFourDim perf Failed, input size {%s}, output size {%s}.",
                       input_shapes[0].GetDimExpr().c_str(), output_shapes[0].GetDimExpr().c_str());
   } else if (input_dims.size() == 1U) {
     GE_ASSERT_SUCCESS(ascendcperf::DuplicatePerf(
@@ -781,7 +781,7 @@ af::Status LogicalCommonApi([[maybe_unused]] const std::vector<TensorShapeInfo> 
   GE_ASSERT_SUCCESS(
       ascendcperf::CastPerf(
           GenNodeDetail(output_shapes[0].data_type, "float16", {data_size - cycle_num * max_repeat_size}), cast_perf3),
-      "Gen node detail failed, node=[%s,%s]", node_ptr->GetNamePtr(), node_ptr->GetTypePtr());
+      "CastPerf failed, node=[%s,%s]", node_ptr->GetNamePtr(), node_ptr->GetTypePtr());
   GE_ASSERT_SUCCESS(
       ascendcperf::CastPerf(GenNodeDetail("float16", "uint8", {data_size - cycle_num * max_repeat_size}), cast_perf4),
       "CastPerf failed, node=[%s,%s]", node_ptr->GetNamePtr(), node_ptr->GetTypePtr());

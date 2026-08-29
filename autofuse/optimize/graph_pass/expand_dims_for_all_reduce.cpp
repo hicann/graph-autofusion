@@ -25,7 +25,7 @@ bool IsAllReduce(af::AscNode &node) {
                  "The output dim cnt [%zu] of reduce mismatch with input dim cnt [%zu].", dst_strides.size(),
                  src_strides.size());
   GE_ASSERT_TRUE((src_strides.size() == axes.size()),
-                 "The input dim cnt [%zu] of reduce mismatch with input dim cnt [%zu].", src_strides.size(),
+                 "The input dim cnt [%zu] of reduce mismatch with reduce axes cnt [%zu].", src_strides.size(),
                  axes.size());
   std::vector<ascir::AxisId> reduce_axes;
   for (size_t i = 0UL; i < src_strides.size(); ++i) {

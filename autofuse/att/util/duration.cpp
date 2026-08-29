@@ -200,8 +200,8 @@ std::string DurationGenDefineCode() {
   code += "void Duration::Print() {\n";
   code += "  if (total_count_ == 0ULL) return;\n";
   code +=
-      "  OP_EVENT(OP_NAME, \"Duration record: name[%s], total_count[%lu], total_time[%lu], max_time[%lu], "
-      "min_time[%lu], average_time[%lu].\",\n";
+      "  OP_EVENT(OP_NAME, \"Duration record: name[%s], total_count[%lu], total_time_ns[%lu], max_time_ns[%lu], "
+      "min_time_ns[%lu], average_time_ns[%lu].\",\n";
   code += "    name_.c_str(), total_count_, total_time_, max_time_, min_time_,\n";
   code += "    static_cast<uint64_t>(total_time_ / total_count_));\n";
   code += "}\n\n";

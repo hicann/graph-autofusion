@@ -77,13 +77,13 @@ const char *FusionFailReasonDetail(FusionFailReason reason) {
       return "There is no kernel node on the stream where the current node is located, and this stream is within the "
              "scope";
     case FusionFailReason::EXIST_DEADLOCK:
-      return "exist deadlock";
+      return "deadlock exists";
     case FusionFailReason::SCOPE_FUSE_PART:
       return "scope fuse failed";
     case FusionFailReason::EXTERNAL_DEPEND:
       return "event node has external dependency";
     case FusionFailReason::UNSUPPORT_EVENT_TYPE:
-      return "unsupport event type";
+      return "unsupported event type";
     case FusionFailReason::MEMORY_WAIT_NODE_ONLY:
       return "No memory write exists, meaning the memory write is outside modelRI. Therefore change all waits to event "
              "semantics, but they cannot be fused.";

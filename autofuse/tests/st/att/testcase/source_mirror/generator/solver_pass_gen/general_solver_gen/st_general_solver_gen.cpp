@@ -418,7 +418,7 @@ void AppendSolverImplPart7(std::string &codes) {
   codes += "        delete[] solution;\n";
   codes += "    }\n";
 
-  codes += "    OP_LOGW(OP_NAME, \"The solver executed failed.\");\n";
+  codes += "    OP_LOGW(OP_NAME, \"The solver execution failed.\");\n";
   codes += "    return false;\n";
   codes += "}\n";
   codes += "\n";
@@ -534,7 +534,7 @@ void AppendSolverInvokePart1(std::string &codes) {
 void AppendSolverInvokePart2(std::string &codes) {
   codes += "    }\n";
 
-  codes += "    OP_LOGW(OP_NAME, \"The solver executed failed.\");\n";
+  codes += "    OP_LOGW(OP_NAME, \"The solver execution failed.\");\n";
   codes += "    return false;\n";
   codes += "}\n";
   codes += "\n";

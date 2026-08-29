@@ -226,7 +226,7 @@ bool SuperKernelOptimizer::Update(SuperKernelScopeInfo &scopeInfo, SuperKernelGr
   }
 
   if (!skMainNodeUpdated) {
-    SK_LOGE("not find sk launch node, sk optimize failed");
+    SK_LOGE("failed to find sk launch node, sk optimize failed");
     return false;
   }
 

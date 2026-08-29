@@ -63,7 +63,7 @@ class MicroApiCallFactory {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto iter = creator_map_.find(class_name);
     if (iter != creator_map_.end()) {
-      GELOGD("MicroApiCallFactory::RegisterCreator: %s creator already exist", class_name.c_str());
+      GELOGD("MicroApiCallFactory::RegisterCreator: %s creator already exists", class_name.c_str());
       return;
     }
     creator_map_[class_name] = func;

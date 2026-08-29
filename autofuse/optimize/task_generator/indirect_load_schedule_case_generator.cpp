@@ -123,7 +123,7 @@ bool IsSupportedBroadcastPath(const NodePath &path, size_t broadcast_index, asci
   for (size_t i = broadcast_index + 1UL; i < path.size(); ++i) {
     const af::AscNodePtr &element = path[i];
     if (!IsSingleConsumerWithoutControlEdge(element)) {
-      GELOGI("[IndirectLoad] Reject candidate[%d]: Broadcast path node[%s] is not safely foldable.",
+      GELOGI("[IndirectLoad] Reject candidate[%d]: Broadcast post element node[%s] is not safely foldable.",
              static_cast<int32_t>(template_id), element->GetNamePtr());
       return false;
     }

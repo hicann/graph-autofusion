@@ -73,8 +73,8 @@ INTERFACE(EdgeLayout) {
     auto node_pair = graph->FindNodePair(edge_);
 
     if ((!node_pair.first) || (!node_pair.second)) {
-      EG_FATAL("Layout context graph(%s) has not found node(%s, %s)!", graph->GetName().c_str(),
-               edge_.GetSrc().getNodeId().c_str(), edge_.GetDst().getNodeId().c_str());
+      EG_FATAL("Node(%s, %s) not found in layout context graph(%s)!", edge_.GetSrc().getNodeId().c_str(),
+               edge_.GetDst().getNodeId().c_str(), graph->GetName().c_str());
       return "";
     }
 

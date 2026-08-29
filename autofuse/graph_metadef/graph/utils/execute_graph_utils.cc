@@ -293,13 +293,13 @@ ExecuteGraphUtils::InsertNodeAfter(const EdgeSrcEndpoint &src, const std::vector
   const auto src_node = src.node;
   GE_ASSERT_NOTNULL(src_node);
   const auto src_extend_info = src_node->GetExtendInfo();
-  GE_ASSERT_NOTNULL(src_extend_info, "The extend info of src node:% is null", src_node->GetNamePtr());
+  GE_ASSERT_NOTNULL(src_extend_info, "The extend info of src node:%s is null", src_node->GetNamePtr());
   const auto graph = src_extend_info->GetOwnerGraphBarePtr();
-  GE_ASSERT_NOTNULL(graph, "The own graph of src node:% is null", src_node->GetNamePtr());
-  GE_ASSERT_NOTNULL(insert_node->GetExtendInfo(), "The extend info of insert node:% is null",
+  GE_ASSERT_NOTNULL(graph, "The own graph of src node:%s is null", src_node->GetNamePtr());
+  GE_ASSERT_NOTNULL(insert_node->GetExtendInfo(), "The extend info of insert node:%s is null",
                     insert_node->GetNamePtr());
   GE_ASSERT_TRUE(graph == insert_node->GetExtendInfo()->GetOwnerGraphBarePtr(),
-                 "rc:%s and insert_node:%s does not exist in the same graph.", src_node->GetNamePtr(),
+                 "src:%s and insert_node:%s does not exist in the same graph.", src_node->GetNamePtr(),
                  insert_node->GetNamePtr());
 
   const auto src_index = src.index;
@@ -310,7 +310,7 @@ ExecuteGraphUtils::InsertNodeAfter(const EdgeSrcEndpoint &src, const std::vector
     GE_ASSERT_NOTNULL(dst_node);
     const auto dst_index = dst.index;
     const auto dst_extend_info = dst_node->GetExtendInfo();
-    GE_ASSERT_NOTNULL(dst_extend_info, "The extend info of src node:% is null", dst_node->GetNamePtr());
+    GE_ASSERT_NOTNULL(dst_extend_info, "The extend info of dst node:%s is null", dst_node->GetNamePtr());
     GE_ASSERT_TRUE(graph == dst_extend_info->GetOwnerGraphBarePtr(),
                    "[Check][Param] dst:%s and insert_node:%s does not exist in the same graph.", dst_node->GetNamePtr(),
                    insert_node->GetNamePtr());
@@ -341,10 +341,10 @@ GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY graphStatus ExecuteGraphUtils::In
   const auto dst_node = dst.node;
   GE_ASSERT_NOTNULL(dst_node);
   const auto dst_extend_info = dst_node->GetExtendInfo();
-  GE_ASSERT_NOTNULL(dst_extend_info, "The extend info of src node:% is null", dst_node->GetNamePtr());
+  GE_ASSERT_NOTNULL(dst_extend_info, "The extend info of dst node:%s is null", dst_node->GetNamePtr());
   const auto graph = dst_extend_info->GetOwnerGraphBarePtr();
-  GE_ASSERT_NOTNULL(graph, "The own graph of src node:% is null", dst_node->GetNamePtr());
-  GE_ASSERT_NOTNULL(insert_node->GetExtendInfo(), "The extend info of insert node:% is null",
+  GE_ASSERT_NOTNULL(graph, "The own graph of dst node:%s is null", dst_node->GetNamePtr());
+  GE_ASSERT_NOTNULL(insert_node->GetExtendInfo(), "The extend info of insert node:%s is null",
                     insert_node->GetNamePtr());
   GE_ASSERT_TRUE(graph == insert_node->GetExtendInfo()->GetOwnerGraphBarePtr(),
                  "[Check][Param] src:%s and insert_node:%s does not exist in the same graph.", dst_node->GetNamePtr(),
@@ -393,7 +393,7 @@ GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY graphStatus ExecuteGraphUtils::Co
   }
 
   const auto src_extend_info = src_node->GetExtendInfo();
-  GE_ASSERT_NOTNULL(src_extend_info, "The extend info of src node:% is null", src_node->GetNamePtr());
+  GE_ASSERT_NOTNULL(src_extend_info, "The extend info of src node:%s is null", src_node->GetNamePtr());
   const auto graph = src_extend_info->GetOwnerGraphBarePtr();
   GE_ASSERT_NOTNULL(graph, "The graph of src node:% is null", src_node->GetNamePtr());
   for (const auto in_node : src_ctrl_in_nodes) {
@@ -413,7 +413,7 @@ GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY graphStatus ExecuteGraphUtils::Mo
                           src_node->GetNamePtr(), dst_node->GetNamePtr());
 
   const auto src_extend_info = src_node->GetExtendInfo();
-  GE_ASSERT_NOTNULL(src_extend_info, "The extend info of src node:% is null", src_node->GetNamePtr());
+  GE_ASSERT_NOTNULL(src_extend_info, "The extend info of src node:%s is null", src_node->GetNamePtr());
   const auto graph = src_extend_info->GetOwnerGraphBarePtr();
   GE_ASSERT_NOTNULL(graph, "The graph of src node:% is null", src_node->GetNamePtr());
   for (const auto src_in_ctrl_edge : src_node->GetAllInControlEdgesRef()) {
@@ -442,7 +442,7 @@ GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY graphStatus ExecuteGraphUtils::Co
   }
 
   const auto src_extend_info = src_node->GetExtendInfo();
-  GE_ASSERT_NOTNULL(src_extend_info, "The extend info of src node:% is null", src_node->GetNamePtr());
+  GE_ASSERT_NOTNULL(src_extend_info, "The extend info of src node:%s is null", src_node->GetNamePtr());
   const auto graph = src_extend_info->GetOwnerGraphBarePtr();
   GE_ASSERT_NOTNULL(graph, "The graph of src node:% is null", src_node->GetNamePtr());
   for (const auto out_node : out_ctrl_nodes) {
@@ -462,7 +462,7 @@ GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY graphStatus ExecuteGraphUtils::Mo
                           src_node->GetNamePtr(), dst_node->GetNamePtr());
 
   const auto src_extend_info = src_node->GetExtendInfo();
-  GE_ASSERT_NOTNULL(src_extend_info, "The extend info of src node:% is null", src_node->GetNamePtr());
+  GE_ASSERT_NOTNULL(src_extend_info, "The extend info of src node:%s is null", src_node->GetNamePtr());
   const auto graph = src_extend_info->GetOwnerGraphBarePtr();
   GE_ASSERT_NOTNULL(graph, "The graph of src node:% is null", src_node->GetNamePtr());
   for (const auto src_out_ctrl_edge : src_node->GetAllOutControlEdgesRef()) {
@@ -477,7 +477,7 @@ GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY graphStatus ExecuteGraphUtils::Mo
 GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY graphStatus ExecuteGraphUtils::MoveNodeToGraph(FastNode *node,
                                                                                               ExecuteGraph *dst_graph) {
   GE_ASSERT_GRAPH_SUCCESS(IsolateNode(node, {}));
-  GE_ASSERT_NOTNULL(node->GetExtendInfo(), "EntendInfo of node %s is null.", node->GetNamePtr());
+  GE_ASSERT_NOTNULL(node->GetExtendInfo(), "ExtendInfo of node %s is null.", node->GetNamePtr());
   GE_ASSERT_GRAPH_SUCCESS(RemoveNodeWithoutRelink(node->GetExtendInfo()->GetOwnerGraphBarePtr(), node));
   GE_ASSERT_NOTNULL(dst_graph->AddNode(node));
   GE_ASSERT_GRAPH_SUCCESS(node->GetExtendInfo()->SetOwnerGraph(dst_graph, node));
@@ -532,8 +532,8 @@ ExecuteGraphUtils::ReplaceNodeEdges(FastNode *new_node, FastNode *old_node, cons
   GE_ASSERT_NOTNULL(old_node->GetExtendInfo());
   GE_ASSERT_TRUE(graph == old_node->GetExtendInfo()->GetOwnerGraphBarePtr());
   GE_ASSERT_GRAPH_SUCCESS(ReplaceNodeDataEdges(new_node, old_node, inputs_map, outputs_map, graph),
-                          "Replace data edgs from %s to %s failed.", old_node->GetNamePtr(), new_node->GetNamePtr());
-  GE_ASSERT_GRAPH_SUCCESS(ReplaceControlEdges(new_node, old_node, graph), "Replace control edgs from %s to %s failed.",
+                          "Replace data edges from %s to %s failed.", old_node->GetNamePtr(), new_node->GetNamePtr());
+  GE_ASSERT_GRAPH_SUCCESS(ReplaceControlEdges(new_node, old_node, graph), "Replace control edges from %s to %s failed.",
                           old_node->GetNamePtr(), new_node->GetNamePtr());
   return GRAPH_SUCCESS;
 }
@@ -588,7 +588,7 @@ ExecuteGraphUtils::RemoveSubgraphRecursively(ExecuteGraph *execute_graph, FastNo
   const auto remove_extend_info = remove_node->GetExtendInfo();
   GE_ASSERT_NOTNULL(remove_extend_info);
   if (remove_extend_info->GetOwnerGraphBarePtr() == nullptr) {
-    GELOGW("Node %s has a owner graph with null value.", remove_node->GetNamePtr());
+    GELOGW("Node %s has an owner graph with null value.", remove_node->GetNamePtr());
     return GRAPH_SUCCESS;
   }
 

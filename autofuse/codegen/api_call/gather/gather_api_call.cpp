@@ -135,7 +135,7 @@ Status GatherApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::Axis
 
 Status GatherApiCall::ParseAttr(const ascir::NodeView &node) {
   GE_CHK_GRAPH_STATUS_RET(node->attr.ir_attr->GetAttrValue("axis", this->axis),
-                          "Failed to get Gahter axis attr, node = %s", node->GetNamePtr());
+                          "Failed to get Gather axis attr, node = %s", node->GetNamePtr());
   GELOGI("name:%s, axis:%lld", node->GetNamePtr(), this->axis);
   return af::SUCCESS;
 }

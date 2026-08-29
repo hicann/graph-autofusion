@@ -454,10 +454,10 @@ Status ConcatFusionCaseGenerator::RemoveUnusedNodes(const af::AscNodePtr &concat
                                                     const std::vector<af::AscNodePtr> &nodes) {
   auto owner_compute_graph = concat_node->GetOwnerComputeGraph();
   GE_ASSERT_NOTNULL(owner_compute_graph);
-  GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(concat_node), "Failed to remote node: %s",
+  GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(concat_node), "Failed to remove node: %s",
                     concat_node->GetNamePtr());
   for (const auto &node : nodes) {
-    GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(node), "Failed to remote node: %s", node->GetNamePtr());
+    GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(node), "Failed to remove node: %s", node->GetNamePtr());
   }
   return af::SUCCESS;
 }

@@ -1021,7 +1021,7 @@ TEST_F(SuperKernelGraphTest, CollectFusionFailStats_WithNodes) {
                               "reasonDetail: scope fuse failed, "
                               "Insufficient stream task slots or event memory resources") != std::string::npos;
     const std::string deadlockDetail =
-        "reasonDetail: exist deadlock, "
+        "reasonDetail: deadlock exists, "
         "The wait node depends on a kernel node that requires more cores than available";
     hasDeadlockDetail = hasDeadlockDetail || entry.find(deadlockDetail) != std::string::npos;
   }

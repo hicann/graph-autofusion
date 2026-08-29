@@ -486,11 +486,11 @@ bool SuperKernelGraph::ProcessMemoryWriteNodes(const uint64_t eventId, const Mem
   bool waitFusible = false;
   // check notify size and apply corresponding bypass policy
   if (notifyIdVec.size() > 1) {
-    SK_LOGE("there exits multi memory write node which is notify, it is illegal, eventId: 0x%lx", eventId);
+    SK_LOGE("there exist multiple memory write nodes which are notify, it is illegal, eventId: 0x%lx", eventId);
     return false;
   } else if (notifyIdVec.size() == 1) {
     auto *writeNode = GetNodeById(notifyIdVec[0]);
-    SK_LOGD("there exits only one memory write node which is notify, it may cause dead lock, details=%s",
+    SK_LOGD("there exists only one memory write node which is notify, it may cause dead lock, details=%s",
             writeNode->Format().c_str());
     writeNode->SetNodeType(SkNodeType::NODE_NOTIFY);
     writeNode->SetIsFusible(enablePairedWaitBypass);
@@ -1082,15 +1082,15 @@ bool SuperKernelGraph::InitStreamsFromModelRI(std::vector<uint32_t> &streamTaskN
   uint32_t streamNum = 0;
   aclError ret = aclmdlRIGetStreams(modelRI, nullptr, &streamNum);
   if (ret != ACL_SUCCESS) {
-    SK_LOGE("Failed to get number of streams in model RI, ret=%d", ret);
+    SK_LOGE("Failed to get number of streams in model runtime image, ret=%d", ret);
     return false;
   }
-  SK_LOGI("Get %u streams from model RI", streamNum);
+  SK_LOGI("Get %u streams from model runtime image", streamNum);
 
   std::vector<aclrtStream> modelStreams(streamNum);
   ret = aclmdlRIGetStreams(modelRI, modelStreams.data(), &streamNum);
   if (ret != ACL_SUCCESS) {
-    SK_LOGE("Failed to get streams in model RI, ret=%d", ret);
+    SK_LOGE("Failed to get streams in model runtime image, ret=%d", ret);
     return false;
   }
 
@@ -1129,7 +1129,7 @@ bool SuperKernelGraph::InitStreamsFromModelRI(std::vector<uint32_t> &streamTaskN
  */
 bool SuperKernelGraph::ProcessAllStreamsAndTasks(const std::vector<uint32_t> &streamTaskNums) {
   if (streamTaskNums.empty()) {
-    SK_LOGI("No tasks found in model RI, skip processing streams and tasks");
+    SK_LOGI("No tasks found in model runtime image, skip processing streams and tasks");
     return true;
   }
 

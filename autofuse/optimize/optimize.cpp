@@ -566,7 +566,7 @@ Status Optimizer::DeserializeAscGraphNodes(const af::ComputeGraphPtr &fused_grap
       std::string graph_name = node->GetName() + "_ascgraph";
       af::AscGraph ascgraph(graph_name.c_str());
       GE_CHK_STATUS_RET(af::AscGraphUtils::DeserializeFromReadable(*serialized_ascgraph, ascgraph),
-                        "DeserializeFromBinary failed, graph:[%s].", fused_graph->GetName().c_str());
+                        "DeserializeFromReadable failed, graph:[%s].", fused_graph->GetName().c_str());
       std::vector<af::Expression> graph_shape_vars;
       GE_CHK_STATUS_RET(AscGraphInfoComplete::CollectFrontendShapeVars(ascgraph, graph_shape_vars),
                         "Collect frontend shape vars failed, graph:[%s].", ascgraph.GetName().c_str());

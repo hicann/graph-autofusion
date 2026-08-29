@@ -322,7 +322,7 @@ void to_json(nlohmann::json &j, const ModelInfo &info) {
 
 std::string GetRealPath(const std::string &path) {
   if (path.empty() || (path.size() >= kPathMax)) {
-    GELOGW("Path is size[%zu] exception.", path.size());
+    GELOGW("Invalid path: size [%zu].", path.size());
     return "";
   }
   std::string root_path = af::RealPath(path.c_str());

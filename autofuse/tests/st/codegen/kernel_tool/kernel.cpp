@@ -84,8 +84,11 @@ constexpr inline __aicore__ T2 Mod(T1 a, T2 b) {
     uint64_t mod_num = a_tmp % b_tmp;
     return static_cast<uint64_t>(mod_num);
   } else if constexpr (std::is_same<T1, uint64_t>::value || std::is_same<T2, uint64_t>::value) {
-    ASCENDC_ASSERT(true,
-                   { KERNEL_LOG(KERNEL_ERROR, "does not support mix type of uint64 because of possible overflow!"); });
+    ASCENDC_ASSERT(true, {
+      KERNEL_LOG(KERNEL_ERROR,
+                 "does not support mixed type of uint64 because of possible "
+                 "overflow!");
+    });
     return 0;
   } else {
     ASCENDC_ASSERT(b != 0, { KERNEL_LOG(KERNEL_ERROR, "b can't be equal to 0, b is %d!", b); });

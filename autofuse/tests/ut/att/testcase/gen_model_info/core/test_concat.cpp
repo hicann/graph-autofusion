@@ -534,7 +534,7 @@ Status BuildTqueTbufAscendGraph_multi_case_g1(af::AscGraph &graph) {
 bool IsFileContainsString(const std::string &filename, const std::string &searchString) {
   std::ifstream file(filename);
   if (!file.is_open()) {
-    std::cerr << "无法打开文件: " << filename << std::endl;
+    std::cerr << "Cannot open file: " << filename << std::endl;
     return false;
   }
   std::string line;

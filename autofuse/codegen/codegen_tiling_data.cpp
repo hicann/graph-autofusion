@@ -651,7 +651,7 @@ std::string codegen::TilingData::GenCVConstTilingData(const std::string &tiling_
     ss << "&limit, 0);" << std::endl;
     ss << "  if (ret == -1) {" << std::endl;
     ss << "    uint32_t basen_basem_align_tmp = (uint32_t)basen_basem_align;" << std::endl;
-    ss << "    // ub_size必大于 basen_basem_align_tmp" << std::endl;
+    ss << "    // ub_size must be greater than basen_basem_align_tmp" << std::endl;
     ss << "    limit.ub_size = limit.ub_size - basen_basem_align_tmp * cube_output_type_size;" << std::endl;
     ss << "    set_g_basen_basem_align(basen_align);" << std::endl;
     ss << "    OP_LOGI(OP_NAME, \"set_g_basen_basem_align=%d, ub_size=%u\", get_g_basen_basem_align(), ub_size);"

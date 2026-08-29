@@ -822,7 +822,8 @@ af::Status CalculateArTreeReduceParams(const ReduceApiPerfContext &context, uint
   int64_t vl_size_value = 0;
   nd.input_dims[1].GetConstValue(dim_r);
   vl_size.GetConstValue(vl_size_value);
-  GE_ASSERT_TRUE(dim_r > 0 && vl_size_value > 0, "Reduce AR dimR or vlSize is invalid.");
+  GE_ASSERT_TRUE(dim_r > 0 && vl_size_value > 0,
+                 "Reduce AR dimR[%ld] or vlSize[%ld] is invalid, both must be positive.", dim_r, vl_size_value);
   uint32_t main_r = CalculateMainRConst(static_cast<uint32_t>(dim_r));
   uint32_t tail_r = static_cast<uint32_t>(dim_r) - main_r;
   if (apply_non_reuse && !context.is_reuse_source) {

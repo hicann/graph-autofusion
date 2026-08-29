@@ -17,7 +17,7 @@ Expr GetDataTypeSize(const std::string &data_type) {
   constexpr int32_t kDefaultDataTypeSize = 4;
   const auto &iter = kDataTypeSizeMap.find(data_type);
   if (iter == kDataTypeSizeMap.end()) {
-    GELOGW("data type %s not support, use default %d byte", data_type.c_str(), kDefaultDataTypeSize);
+    GELOGW("data type %s not supported, use default %d byte", data_type.c_str(), kDefaultDataTypeSize);
     return CreateExpr(kDefaultDataTypeSize);
   }
   return iter->second;

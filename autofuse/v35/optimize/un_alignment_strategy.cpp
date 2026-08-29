@@ -24,7 +24,7 @@ AlignmentType UnAlignmentStrategy::GetDefaultAlignmentType() {
 af::Status UnAlignmentStrategy::LoadAlignmentInferFunc(const af::AscNodePtr &node) {
   const auto &output_attr = node->outputs[0].attr;
   if (!af::ops::IsOps<af::ascir_op::Load>(node)) {
-    GELOGD("Node[%s] is continuous loading, input tensor does not needs to be aligned.", node->GetNamePtr());
+    GELOGD("Node[%s] is continuous loading, input tensor does not need to be aligned.", node->GetNamePtr());
     // vectorized_axis连续则可以连续搬运
     tensor_to_align_type_[&output_attr] = {AlignmentType::kNotAligned};
     return af::SUCCESS;

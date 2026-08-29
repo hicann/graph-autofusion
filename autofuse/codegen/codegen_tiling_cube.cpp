@@ -162,9 +162,9 @@ Status TilingLib::ExtractMatMulCubeInfoFromImplGraph(const af::AscGraph &impl_gr
     cube_info.matmul_node = node;
 
     GE_CHK_STATUS_RET(ascgen_utils::GetCubeOutputTypeSize(node, cube_info.type_size),
-                      "GetMutmulOutputTypeSize failed for node[%s]", node->GetName().c_str());
+                      "GetCubeOutputTypeSize failed for node[%s]", node->GetName().c_str());
 
-    GE_CHK_STATUS_RET(ascgen_utils::GetCubeInputNum(node, cube_info.input_num), "GetMutmulInputNum failed for node[%s]",
+    GE_CHK_STATUS_RET(ascgen_utils::GetCubeInputNum(node, cube_info.input_num), "GetCubeInputNum failed for node[%s]",
                       node->GetName().c_str());
 
     return af::SUCCESS;
@@ -246,7 +246,7 @@ Status TilingLib::ExtractInputsFromMatMulNode(const ge::AscNodePtr &matmul_node,
     GE_ASSERT_NOTNULL(load_node);
 
     TensorInfo tensor_info;
-    GE_CHK_STATUS(GetInputTensorInfoFromLoadNode(load_node, tensor_info), "Get mutmul input info failed.");
+    GE_CHK_STATUS(GetInputTensorInfoFromLoadNode(load_node, tensor_info), "Get matmul input info failed.");
     inputs.push_back(tensor_info);
   }
 

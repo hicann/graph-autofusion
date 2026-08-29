@@ -247,10 +247,10 @@ using namespace optiling;
 
 int main() {
   // ========== Group 级别缓存测试 ==========
-  std::cout << "\n========== Group 级别缓存测试 ==========" << std::endl;
+  std::cout << "\n========== Group-level cache test ==========" << std::endl;
   AscGraph0ScheduleResult0G0::GroupLevelCache group_cache;
   // Test 1: ND = 1024，首次执行（不命中）
-  std::cout << "\n--- Test 1: ND = 1024 (首次执行) ---" << std::endl;
+  std::cout << "\n--- Test 1: ND = 1024 (first execution) ---" << std::endl;
   AscGraph0ScheduleResult0G0TilingData tilingData1;
   tilingData1.set_ND(1024);
   tilingData1.set_block_dim(64);
@@ -264,7 +264,7 @@ int main() {
   std::cout << "get_tiling_key = " << tilingData1.get_tiling_key() << std::endl;
   std::cout << "ND = " << tilingData1.get_ND() << std::endl;
   // Test 2: ND = 1024，再次执行（应命中 Group 缓存）
-  std::cout << "\n--- Test 2: ND = 1024 (应命中 Group 缓存) ---" << std::endl;
+  std::cout << "\n--- Test 2: ND = 1024 (should hit Group cache) ---" << std::endl;
   AscGraph0ScheduleResult0G0TilingData tilingData2;
   tilingData2.set_ND(1024);
   tilingData2.set_block_dim(64);
@@ -279,7 +279,7 @@ int main() {
   std::cout << "get_tiling_key = " << tilingData2.get_tiling_key() << std::endl;
   std::cout << "ND = " << tilingData2.get_ND() << std::endl;
   // Test 3: ND = 2048，首次执行（不命中）
-  std::cout << "\n--- Test 3: ND = 2048 (首次执行) ---" << std::endl;
+  std::cout << "\n--- Test 3: ND = 2048 (first execution) ---" << std::endl;
   AscGraph0ScheduleResult0G0TilingData tilingData3;
   tilingData3.set_ND(2048);
   tilingData3.set_block_dim(64);
@@ -295,7 +295,7 @@ int main() {
   std::cout << "ND = " << tilingData3.get_ND() << std::endl;
 
   // Test 4: ND = 2048，再次执行（应命中 Group 缓存）
-  std::cout << "\n--- Test 4: ND = 2048 (应命中 Group 缓存) ---" << std::endl;
+  std::cout << "\n--- Test 4: ND = 2048 (should hit Group cache) ---" << std::endl;
   AscGraph0ScheduleResult0G0TilingData tilingData4;
   tilingData4.set_ND(2048);
   tilingData4.set_block_dim(64);
@@ -311,10 +311,10 @@ int main() {
   std::cout << "ND = " << tilingData4.get_ND() << std::endl;
 
   // ========== Operator 级别缓存测试 ==========
-  std::cout << "\n========== Operator 级别缓存测试 ==========" << std::endl;
+  std::cout << "\n========== Operator-level cache test ==========" << std::endl;
 
   // Test 5: ND = 4096，首次执行（不命中）
-  std::cout << "\n--- Test 5: ND = 4096 (首次执行) ---" << std::endl;
+  std::cout << "\n--- Test 5: ND = 4096 (first execution) ---" << std::endl;
   graph_ndTilingData tilingData5;
   tilingData5.set_block_dim(64);
   tilingData5.set_ub_size(245760);
@@ -328,7 +328,7 @@ int main() {
   std::cout << "ND = " << tilingData5.graph0_result0_g0_tiling_data.get_ND() << std::endl;
 
   // Test 6: ND = 4096，再次执行（应命中 Operator 缓存）
-  std::cout << "\n--- Test 6: ND = 4096 (应命中 Operator 缓存) ---" << std::endl;
+  std::cout << "\n--- Test 6: ND = 4096 (should hit Operator cache) ---" << std::endl;
   graph_ndTilingData tilingData6;
   tilingData6.set_block_dim(64);
   tilingData6.set_ub_size(245760);
