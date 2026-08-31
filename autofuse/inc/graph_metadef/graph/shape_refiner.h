@@ -14,7 +14,7 @@
 #include <string>
 #include "graph/inference_context_af.h"
 
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/node.h"
 #include "graph/resource_context_mgr.h"
 

@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 #include "common/ge_common/debug/ge_log.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 
 struct ErrorResult {
   operator bool() const {

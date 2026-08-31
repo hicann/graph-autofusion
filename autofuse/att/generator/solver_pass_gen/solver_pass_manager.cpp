@@ -271,7 +271,7 @@ void SolverPassManager::InitSolverGen(AxesReorderSolverGen &solver_gen) {
   solver_gen.SetTilingCaseIdent({args_manager_.GetModelInfo().schedule_group_ident,
                                  args_manager_.GetModelInfo().tiling_case_id,
                                  args_manager_.GetModelInfo().sub_case_tag});
-  GELOGD("[DFX]Set %s to and tiling schedule %s axes reorder solver gen", DebugString().c_str(),
+  GELOGD("[DFX]Set %s and tiling schedule %s for axes reorder solver gen", DebugString().c_str(),
          args_manager_.GetModelInfo().tiling_schedule_config.DebugString().c_str());
 }
 

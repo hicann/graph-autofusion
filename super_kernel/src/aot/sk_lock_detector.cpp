@@ -414,7 +414,7 @@ bool LockDetector::GetFusibleStatus(SuperKernelBaseNode &curNode) {
       SK_LOGD("[lock detector] Notify node %s: not needed core resource, can fuse", curNode.Format().c_str());
       return true;
     } else {
-      SK_LOGE("[lock detector] Notify node %s: in SK range with coreNum>0 (cube %u, vec %u), which not allowed",
+      SK_LOGE("[lock detector] Notify node %s: in SK range with coreNum>0 (cube %u, vec %u), which is not allowed",
               curNode.Format().c_str(), curNode.GetCubeNum(), curNode.GetVecNum());
       deadlockReason_ = DeadlockFailReason::NOTIFY_INVALID;
       return false;

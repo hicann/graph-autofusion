@@ -528,7 +528,7 @@ void SuperKernelOptionsManager::SetOptOptionValue(const aclskOption *option) {
     }
   }
   if (iter == optionMap.end()) {
-    SK_LOGI("Optiontype: %d is not support now", static_cast<int>(type));
+    SK_LOGI("OptionType: %d is not supported now", static_cast<int>(type));
     return;
   }
   auto *subOption = iter->second.get();
@@ -687,7 +687,7 @@ void SuperKernelOptionsManager::SetOptOptionValue(const aclskOption *option) {
       }
       break;
     default:
-      SK_LOGI("Optiontype: %d is not support now", static_cast<int>(type));
+      SK_LOGI("OptionType: %d is not supported now", static_cast<int>(type));
       break;
   }
 }

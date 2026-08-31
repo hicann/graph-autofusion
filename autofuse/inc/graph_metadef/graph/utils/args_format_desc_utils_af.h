@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/op_desc.h"
 #include "register/hidden_inputs_func_registry_af.h"
 

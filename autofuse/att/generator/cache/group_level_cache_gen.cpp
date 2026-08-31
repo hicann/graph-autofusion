@@ -45,7 +45,7 @@ static inline bool FindGroupCache(const std::array<uint32_t, kInputShapeSize> &k
                                    GroupLevelCache &group_level_cache) {
   auto *result = group_level_cache.Find(key);
   if (result != nullptr) {
-    OP_LOGI(OP_NAME, "[Group Cache] HIT!key[%s]", [&key]()->std::string {
+    OP_LOGI(OP_NAME, "[Group Cache] HIT! key=[%s]", [&key]()->std::string {
       std::string out;
       for (auto axis : key) {
         out.append(std::to_string(axis));

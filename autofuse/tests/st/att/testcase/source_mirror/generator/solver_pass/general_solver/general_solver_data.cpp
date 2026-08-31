@@ -617,7 +617,7 @@ bool Result::AddVarVal(uint64_t *vars, double obj, double cons)
 {
     uint64_t rec_num = solution_num_;
     if (rec_num > MAX_SOLUTION) {
-        OP_LOG(op_name, "Too much solutions!");
+        OP_LOG(op_name, "Too many solutions!");
         return false;
     }
     int32_t cnt_num = 0;

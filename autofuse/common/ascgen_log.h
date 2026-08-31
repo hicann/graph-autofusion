@@ -12,7 +12,6 @@
 #define __ASCGEN_COMMON_H__
 
 #include <cstdio>
-#include <cstdbool>
 #include <cstdint>
 #include <memory>
 #include <unistd.h>

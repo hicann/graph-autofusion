@@ -22,7 +22,8 @@ foreach(SK_KERNEL_ARCH IN LISTS SK_KERNEL_ARCHS)
       $<$<COMPILE_LANGUAGE:ASC>:-D__ASCENDC_SUPERKERNEL_EARLY_START_V2>
    )
 
-   target_include_directories(${SK_ENTRY_TARGET} PRIVATE
+   target_include_directories(${SK_ENTRY_TARGET} BEFORE PRIVATE
+      $<$<COMPILE_LANGUAGE:ASC>:${CMAKE_CURRENT_SOURCE_DIR}/ascendc_compat>
       $<$<COMPILE_LANGUAGE:ASC>:${CMAKE_CURRENT_SOURCE_DIR}/../src/aot/>
    )
 
@@ -71,8 +72,9 @@ foreach(SK_KERNEL_ARCH IN LISTS SK_KERNEL_ARCHS)
       $<$<COMPILE_LANGUAGE:ASC>:SK_SCOPE_SYMBOL_SUFFIX=_${SK_KERNEL_ARCH_SUFFIX}>
    )
 
-   target_include_directories(${SK_SCOPE_TARGET} PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/../src/aot/
+   target_include_directories(${SK_SCOPE_TARGET} BEFORE PRIVATE
+      $<$<COMPILE_LANGUAGE:ASC>:${CMAKE_CURRENT_SOURCE_DIR}/ascendc_compat>
+      $<$<COMPILE_LANGUAGE:ASC>:${CMAKE_CURRENT_SOURCE_DIR}/../src/aot/>
    )
    target_link_libraries(${SK_SCOPE_TARGET} PRIVATE
       $<BUILD_INTERFACE:runtime_headers>

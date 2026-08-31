@@ -198,7 +198,7 @@ __aicore__ inline void ReduceSumInt32(const LocalTensor<T> &dst, const LocalTens
   LocalTensor<T> tmp_dst = tmp.ReinterpretCast<T>();
   if constexpr (IsSameType<pattern, Pattern::Reduce::AR>::value) {
     ASCENDC_ASSERT((dst.GetSize() >= first), {
-      KERNEL_LOG(KERNEL_ERROR, "dstTensor must be greater than or equal to %u, current size if %u", first,
+      KERNEL_LOG(KERNEL_ERROR, "dstTensor must be greater than or equal to %u, current size is %u", first,
                  dst.GetSize());
     });
     ReduceSumByLastAxis(dst, src, tmp_dst, first, last, pad_last);

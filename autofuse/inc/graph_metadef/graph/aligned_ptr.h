@@ -11,6 +11,8 @@
 #ifndef GE_ALIGNED_PTR_H_
 #define GE_ALIGNED_PTR_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <functional>
 

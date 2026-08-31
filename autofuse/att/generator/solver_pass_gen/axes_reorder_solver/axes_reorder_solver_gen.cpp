@@ -768,14 +768,14 @@ std::string AxesReorderSolverGen::GenUBSizeCacheLineFunc() {
         GELOGD("GetCacheLineCont for %s", c.ToString().c_str());
         codes += "  // check node " + c.node_name + "\n";
         codes += "  if (" + Str(c.solver_cache_line_expr) + " < " + std::to_string(c.cache_line_size) + ") {\n";
-        codes += "      OP_LOGD(OP_NAME, \"" + c.node_name + " condition not satisfy UB size cache line\");\n";
+        codes += "      OP_LOGD(OP_NAME, \"" + c.node_name + " condition does not satisfy UB size cache line\");\n";
         codes += "      return false;\n";
         codes += "  }\n";
       }
     }
   }
 
-  codes += "  OP_LOGD(OP_NAME, \"condition satisfy UB size cache line\");\n";
+  codes += "  OP_LOGD(OP_NAME, \"condition satisfies UB size cache line\");\n";
   codes += "  return true;\n";
   codes += "}\n";
   codes += "\n";

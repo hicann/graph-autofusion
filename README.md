@@ -23,6 +23,25 @@ Graph-autofusion 是一个面向昇腾（Ascend）芯片的轻量级、解耦式
 - 若您希望了解 SuperKernel 组件的原理与使用，请参考： [SuperKernel 简介](super_kernel/README.md)。
 - 若您希望了解 Autofuse 组件的原理与使用，请参考： [Autofuse 简介与快速上手](autofuse/README.md)。
 
+## 📚文档
+
+如果希望了解 Graph-autofusion 架构、模块功能、Skills等，可参考以下文档：
+
+- [AutoFuse 架构说明](docs/zh/autofuse/design/architecture.md)：介绍 AutoFuse 的整体架构、关键技术方案、处理流程和模块职责。
+- [贡献指南](CONTRIBUTING.md)：说明如何参与项目贡献、提交 Issue 和 Pull Request。
+- [Skills 管理指南](docs/zh/opencode-skill-management.md)：介绍仓内默认使用的 Skills 及其管理方式。
+- [Skill 复用指南](docs/zh/skill-reuse-guide.md)：介绍如何复用 Skill，并使用 Agent 辅助代码阅读、开发和问题定位。
+
+## 🌐生态集成
+
+AutoFuse 可作为上层图编译器和深度学习框架的自动融合后端，为模型编译和执行提供 Ascend C 融合算子生成能力。当前主要集成路径包括：
+
+- **GE**：作为 GE 的自动融合后端。[GE 项目](https://gitcode.com/cann/ge)
+- **PyTorch**：作为 PyTorch Inductor 的 Ascend C 后端，通过 `torch.compile` 使用 AutoFuse。[TorchAir 项目](https://gitcode.com/Ascend/torchair)
+- **TensorFlow**：作为 TensorFlow Adapter 对接 GE 后使用的自动融合后端。[TensorFlow Adapter 项目](https://gitcode.com/cann/tensorflow)
+
+上述集成路径以对应 CANN 版本和上层组件的实际支持情况为准。
+
 ## 🔍目录结构
 
 ```text
@@ -53,6 +72,5 @@ graph-autofusion/
 
 ## 📝相关信息
 
-- [贡献指南](CONTRIBUTING.md)
 - [安全声明](SECURITY.md)
 - [许可证](LICENSE)

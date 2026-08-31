@@ -1225,7 +1225,7 @@ Status ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::AxisId> &c
   // apicall pre process
   std::string pre_result;
   GE_CHK_STATUS_RET(PreProcess(tpipe, current_axis, output_tensors, pre_result),
-                    "Codegen generate API call pre_p failed");
+                    "Codegen generate API call PreProcess failed");
   ss << pre_result;
   std::string local_result;
   GE_CHK_STATUS_RET(Generate(tpipe, current_axis, input_tensors, output_tensors, local_result),
@@ -1235,7 +1235,7 @@ Status ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::AxisId> &c
   // apicall post process
   std::string post_result;
   GE_CHK_STATUS_RET(PostProcess(tpipe, current_axis, output_tensors, post_result),
-                    "Codegen generate API call post_p failed");
+                    "Codegen generate API call PostProcess failed");
   ss << post_result;
 
   result = ss.str();

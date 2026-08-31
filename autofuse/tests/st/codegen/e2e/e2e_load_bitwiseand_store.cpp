@@ -111,7 +111,6 @@ void LoadBitwiseAndStore_AfterAutofuse(af::AscGraph &graph, ge::DataType data_ty
 
   // Scheduler
   auto z0 = load1->attr.sched.axis[0];
-  auto z1 = load1->attr.sched.axis[1];
 
   auto [z0T, z0t] = graph.TileSplit(z0);
   auto [z0TB, z0Tb] = graph.BlockSplit(z0T->id);

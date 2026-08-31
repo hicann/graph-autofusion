@@ -219,7 +219,7 @@ Expression ShapeEnvAttr::FindReplacements(const Expression &expr) {
     return expr;
   }
   if (iter->second.has_replace) {
-    GELOGD("Find replace expr: %s of expr: %s has replace", iter->second.replace_expr.Str().get(), expr.Str().get());
+    GELOGD("Found replacement expr: %s for expr: %s", iter->second.replace_expr.Str().get(), expr.Str().get());
     return expr;
   }
   auto replace_expr = iter->second.replace_expr;

@@ -167,7 +167,7 @@ Status GatherRegApiCall::GenerateComputeTypeLoad(const TPipe &tpipe, const std::
   ss << dtypename << ", ";
   std::string case_;
   if (GetGatherCase(x1, case_) == af::FAILED) {
-    GELOGE(af::FAILED, "gather_dim status need add");
+    GELOGE(af::FAILED, "gather_dim status is not handled and needs to be implemented");
     return af::FAILED;
   }
   ss << case_ << ", " << y.vectorized_axis.size() << ", " << this->negative_index_support << ">(";
@@ -243,7 +243,7 @@ Status GatherRegApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::A
 
 Status GatherRegApiCall::ParseAttr(const ascir::NodeView &node) {
   GE_CHK_GRAPH_STATUS_RET(node->attr.ir_attr->GetAttrValue("axis", this->axis),
-                          "Failed to get Gahter axis attr, node = %s", node->GetNamePtr());
+                          "Failed to get Gather axis attr, node = %s", node->GetNamePtr());
   if (node->attr.api.compute_type == af::ComputeType::kComputeLoad) {
     GE_CHK_GRAPH_STATUS_RET(node->attr.ir_attr->GetAttrValue("negative_index_support", this->negative_index_support),
                             "Failed to get Gather negative_index_support attr, node = %s", node->GetNamePtr());

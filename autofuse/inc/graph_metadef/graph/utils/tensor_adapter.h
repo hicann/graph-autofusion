@@ -13,7 +13,7 @@
 
 #include <memory>
 #include "graph/ge_tensor.h"
-#include "graph/tensor.h"
+#include "graph/tensor_af.h"
 #include "graph/ge_attr_value.h"
 
 namespace af {

@@ -219,8 +219,8 @@ graphStatus UpdateSubGraphDataNodes(const ConstNodePtr &node) {
   for (const auto &name : sub_graph_names) {
     const auto sub_graph = root_graph->GetSubgraph(name);
     if (sub_graph == nullptr) {
-      REPORT_INNER_ERR_MSG("E18888", "Can not find the subgrpah %s for node %s", name.c_str(), node->GetName().c_str());
-      GE_LOGE("[Get][Graph] can not find the subgrpah %s for node %s", name.c_str(), node->GetName().c_str());
+      REPORT_INNER_ERR_MSG("E18888", "Can not find the subgraph %s for node %s", name.c_str(), node->GetName().c_str());
+      GE_LOGE("[Get][Graph] can not find the subgraph %s for node %s", name.c_str(), node->GetName().c_str());
       return GRAPH_FAILED;
     }
     for (const auto &node_sub : sub_graph->GetDirectNode()) {
@@ -459,7 +459,7 @@ graphStatus UpdateOpInputDesc(const ConstNodePtr &node_ptr) {
     const auto peer_out_dtype = peer_out_desc->GetDataType();
     if (peer_out_dtype != in_dtype) {
       GELOGW(
-          "[Update][InputDesc] current node [%s] [%d]\'th in_dtype is [%s].peer output node [%s] [%d]\'th "
+          "[Update][InputDesc] current node [%s] [%d]\'th in_dtype is [%s]. peer output node [%s] [%d]\'th "
           "output_dtype is [%s]. The two dtype should be same! Please check graph and fix it",
           node_ptr->GetName().c_str(), in_idx, TypeUtils::DataTypeToSerialString(in_dtype).c_str(),
           peer_out_data_node->GetName().c_str(), peer_out_idx,
@@ -468,7 +468,7 @@ graphStatus UpdateOpInputDesc(const ConstNodePtr &node_ptr) {
       const std::string in_shape_str = Serial(in_shape);
       const std::string peer_out_shape_str = Serial(peer_out_shape);
       GELOGW(
-          "[Update][InputDesc] current node [%s] [%d]\'th in_shape is [%s].peer output node [%s] [%d]\'th "
+          "[Update][InputDesc] current node [%s] [%d]\'th in_shape is [%s]. peer output node [%s] [%d]\'th "
           "output_shape is [%s]. The two shape should be same! Please check graph and fix it",
           node_ptr->GetName().c_str(), in_idx, in_shape_str.c_str(), peer_out_data_node->GetName().c_str(),
           peer_out_idx, peer_out_shape_str.c_str());

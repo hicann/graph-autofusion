@@ -36,6 +36,7 @@ int main(int argc, char *argv[]) {
 
   std::fstream kernel_file("load_broadcast_multi_axis_store_kernel.cpp", std::ios::out);
   std::fstream tiling_file("load_broadcast_multi_axis_store_tiling.cpp", std::ios::out);
+  std::fstream tiling_head_file("load_broadcast_multi_axis_store_tiling.h", std::ios::out);
   std::fstream tiling_data_file("autofuse_tiling_data.h", std::ios::out);
 
   ascir::ScheduledResult schedule_result;
@@ -48,6 +49,7 @@ int main(int argc, char *argv[]) {
   c.Generate(fused_schedule_result, result);
   kernel_file << tilig_stub << RemoveSubDirInclude(result.kernel);
   tiling_data_file << result.tiling_data;
+  tiling_head_file << "";
 
   // BroadCast_11CtoABC
   af::AscGraph graph_multi_axis_2("load_broadcast_multi_axis_store_2");
@@ -68,6 +70,7 @@ int main(int argc, char *argv[]) {
 
   std::fstream kernel_file_2("load_broadcast_multi_axis_store_2_kernel.cpp", std::ios::out);
   std::fstream tiling_file_2("load_broadcast_multi_axis_store_2_tiling.cpp", std::ios::out);
+  std::fstream tiling_head_file_2("load_broadcast_multi_axis_store_2_tiling.h", std::ios::out);
   std::fstream tiling_data_file_2("autofuse_tiling_data.h", std::ios::out);
 
   ascir::ScheduledResult schedule_result_2;
@@ -79,6 +82,7 @@ int main(int argc, char *argv[]) {
   c_2.Generate(fused_schedule_result_2, result);
   kernel_file_2 << tilig_stub_2 << RemoveSubDirInclude(result.kernel);
   tiling_data_file_2 << result.tiling_data;
+  tiling_head_file_2 << "";
 
   // BroadCast_A1CtoABC
   af::AscGraph graph_multi_axis_3("load_broadcast_multi_axis_store_3");
@@ -99,6 +103,7 @@ int main(int argc, char *argv[]) {
 
   std::fstream kernel_file_3("load_broadcast_multi_axis_store_3_kernel.cpp", std::ios::out);
   std::fstream tiling_file_3("load_broadcast_multi_axis_store_3_tiling.cpp", std::ios::out);
+  std::fstream tiling_head_file_3("load_broadcast_multi_axis_store_3_tiling.h", std::ios::out);
   std::fstream tiling_data_file_3("autofuse_tiling_data.h", std::ios::out);
 
   ascir::ScheduledResult schedule_result_3;
@@ -110,6 +115,7 @@ int main(int argc, char *argv[]) {
   c_3.Generate(fused_schedule_result_3, result);
   kernel_file_3 << tilig_stub_3 << RemoveSubDirInclude(result.kernel);
   tiling_data_file_3 << result.tiling_data;
+  tiling_head_file_3 << "";
 
   return 0;
 }

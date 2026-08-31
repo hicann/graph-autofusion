@@ -22,6 +22,25 @@ Component features:
 - To understand the principle and usage of the SuperKernel component, see [SuperKernel Introduction](super_kernel/README.md).
 - To understand the principle and usage of the Autofuse component, see [Autofuse Introduction and Quick Start](autofuse/README.md).
 
+## 📚 Documents
+
+If you want to understand the architecture, module functions, and skills of Graph-autofusion, please refer to the following documents:
+
+- [AutoFuse Architecture Description](docs/en/autofuse/design/architecture.md): Introduces the overall architecture, key technical solutions, processing flow and module responsibilities of AutoFuse.
+- [Contribution Guide](CONTRIBUTING.md): Describes how to contribute to the project, submit Issues and Pull Requests.
+- [Skills Management Guide](docs/zh/opencode-skill-management.md): Introduces the default Skills used in the repository and their management methods.
+- [Skill Reuse Guide](docs/zh/skill-reuse-guide.md): Introduces how to reuse Skills and use Agent to assist code reading, development and problem location.
+
+## 🌐 Ecosystem Integration
+
+AutoFuse can be used as an automatic fusion backend for upper-layer graph compilers and deep learning frameworks, providing Ascend C fused operator generation capabilities for model compilation and execution. Currently the main integration paths are:
+
+- **GE**: As the automatic fusion backend for GE. [GE Project](https://gitcode.com/cann/ge)
+- **PyTorch**: As the AscendC backend for PyTorch Inductor, use AutoFuse via `torch.compile`. [TorchAir Project](https://gitcode.com/Ascend/torchair)
+- **TensorFlow**: As the automatic fusion backend after TensorFlow Adapter connects to GE. [TensorFlow Adapter Project](https://gitcode.com/cann/tensorflow)
+
+The above integration paths are subject to the actual support of the corresponding CANN version and upper-layer components.
+
 ## 🔍Directory Structure
 
 ```text
@@ -52,6 +71,5 @@ graph-autofusion/
 
 ## 📝Related Information
 
-- [Contributing Guide](CONTRIBUTING_en.md)
 - [Security Statement](SECURITY_en.md)
 - [License](LICENSE)

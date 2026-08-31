@@ -1,0 +1,31 @@
+[Subtract] Start GetTiling.
+[Subtract] The user didn't specify tilingCaseId, iterate all templates.
+[Subtract] tiling case0 of asc_graph0_schedule_result0_g0 score is 0
+[Subtract] Calculating the tiling data for tilingCaseId 0 of score[0]
+[Subtract] Execute DoTiling.
+[Subtract] Set input params for tiling case 0 of AscGraph0ScheduleResult0G0.  S0 = 128. S1 = 128.
+[Subtract] Set ub_size for tiling case 0 of AscGraph0ScheduleResult0G0 to (32 * Ceiling((Rational(1 , 8) * s0t_size * s1t_size)))
+[Subtract] Set block_dim for tiling case 0 of AscGraph0ScheduleResult0G0 to Max(0, Ceiling((Ceiling((S0 / (s0t_size))) * Ceiling((S1 / (s1t_size))) / (s1Ts0Tb_size))))
+[Subtract] Set hardware params. ub_size = 128. block_dim = 8.
+[Subtract] local buffer tiling success, input: result_id: 0, group_id: 0, case_id: 0, sub_case_id: 0core_num: 8, ub_size: 128, input_vars[0]: 128, input_vars[1]: 128, tiling_vars[0]: 131072, tiling_vars[1]: 32, tiling_vars[2]: 1, pure_mc_vars[0]: 131072, local_buffer_vars[0]: 32, local_buffer_vars[1]: 1, all_cons_size: 5, ub_threshold: 0.2, corenum_threshold: 0.4, perf_threshold: 0
+[Subtract] multicore tiling success, input: result_id: 0, group_id: 0, case_id: 0, sub_case_id: 0core_num: 8, ub_size: 128, input_vars[0]: 128, input_vars[1]: 128, tiling_vars[0]: 512, tiling_vars[1]: 32, tiling_vars[2]: 1, pure_mc_vars[0]: 512, local_buffer_vars[0]: 32, local_buffer_vars[1]: 1, all_cons_size: 5, ub_threshold: 0.2, corenum_threshold: 0.4, perf_threshold: 0
+[Subtract] Start auto tuning, input:result_id: 0, group_id: 0, case_id: 0, sub_case_id: 0core_num: 8, ub_size: 128, input_vars[0]: 128, input_vars[1]: 128, tiling_vars[0]: 512, tiling_vars[1]: 32, tiling_vars[2]: 1, pure_mc_vars[0]: 512, local_buffer_vars[0]: 32, local_buffer_vars[1]: 1, all_cons_size: 5, ub_threshold: 0.2, corenum_threshold: 0.4, perf_threshold: 0
+[Subtract] Execute axes reorder solver for tilingCaseId case0 successfully.
+[Subtract] [PROF]The value of s0t_size is 32 in graph0_result0_g0_0.
+[Subtract] [PROF]The value of s1Ts0Tb_size is 512 in graph0_result0_g0_0.
+[Subtract] [PROF]The value of s1t_size is 1 in graph0_result0_g0_0.
+[Subtract] [PROF]The value of ub_size is 128 in graph0_result0_g0_0.
+[Subtract] [PROF]The value of block_dim is 8 in graph0_result0_g0_0.
+[Subtract] [PROF]The value of q0_size is 128 in graph0_result0_g0_0.
+[Subtract] [PROF]The value of AIV_MTE2 is 48488.262395 in graph0_result0_g0_0.
+[Subtract] [PROF]The value of AIV_MTE3 is 44382.286439 in graph0_result0_g0_0.
+[Subtract] [PROF]The objective value of the tiling data is 48525.762395 in graph0_result0_g0_0.
+[Subtract] The optimal objection for tilingCaseId 0 is 48525.762395.
+[Subtract] The solution for tilingCaseId 0 is better, updating the tiling data.
+[Subtract] Set the output tiling data.
+[Subtract] Updated the best tilingCaseId to 0.
+[Subtract] Finish calculating the tiling data for tilingCaseId 0
+[Subtract] [PROF]The score_map[0] has been processed, tiling case 0 of graph0_result0_g0 is the best choice.
+[Subtract] [PROF]Among the templates, tiling case 0 of graph0_result0_g0 is the best choice.
+[Subtract] End GetTiling.
+====================================================

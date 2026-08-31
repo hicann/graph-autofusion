@@ -1322,8 +1322,8 @@ std::string TilingLib::GenTilingFuncForInductor(const ascir::FusedScheduledResul
   ss << " ResLimit *res_limit = nullptr)" << std::endl;
   ss << "{" << std::endl;
 
-  ss << " const ResLimit *limit = (res_limit == nullptr || res_limit->aiv_num == 0) ? &g_no_limit_res : res_limit;"
-     << std::endl;
+  ss << " const ResLimit effective_res_limit = GetResLimit(res_limit);" << std::endl;
+  ss << " const ResLimit *limit = &effective_res_limit;" << std::endl;
 
   // Use first input shape pass all size variable value
   ss << pgo_shape_dim.tiling_set_shape_dim.str();

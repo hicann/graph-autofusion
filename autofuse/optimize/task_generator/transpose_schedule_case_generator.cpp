@@ -87,7 +87,7 @@ Status TransposeFusionCaseGenerator::TransposeConvertProcess(ascir::HintGraph &g
   UpdateAxis(graph, transpose_node);
 
   auto owner_compute_graph = transpose_node->GetOwnerComputeGraph();
-  GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(transpose_node), "Failed to remote node: %s",
+  GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(transpose_node), "Failed to remove node: %s",
                     transpose_node->GetNamePtr());
 
   GE_ASSERT_GRAPH_SUCCESS(ScheduleUtils::TopologicalSorting(graph));

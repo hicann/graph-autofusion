@@ -47,7 +47,7 @@ std::string ResultCheckerUtils::DefineCheckerFunction() {
 bool ResultCheckerUtils::IsFileContainsString(const std::string &filename, const std::string &search_sub_string) {
   std::ifstream file(filename);
   if (!file.is_open()) {
-    std::cerr << "无法打开文件: " << filename << std::endl;
+    std::cerr << "Cannot open file: " << filename << std::endl;
     return false;
   }
   std::string line;

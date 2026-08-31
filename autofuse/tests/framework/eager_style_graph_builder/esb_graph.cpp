@@ -82,7 +82,7 @@ Status EsbGraph::SetGraphOutput(EsbTensor *tensor, int32_t output_index) {
 }
 bool EsbGraph::IsGraphValid() const {
   if (!graph_input_indexes_.empty()) {
-    GE_ASSERT_TRUE(*graph_input_indexes_.begin() == 0, "Invalid graph, graph input index must starts with 0");
+    GE_ASSERT_TRUE(*graph_input_indexes_.begin() == 0, "Invalid graph, graph input index must start with 0");
     if (static_cast<size_t>(*graph_input_indexes_.rbegin()) + 1U != graph_input_indexes_.size()) {
       std::stringstream ss;
       ss << "Invalid graph, graph input indexes are not continuous: ";
@@ -100,7 +100,7 @@ bool EsbGraph::IsGraphValid() const {
   }
 
   if (!output_indexes_to_tensor_.empty()) {
-    GE_ASSERT_TRUE(output_indexes_to_tensor_.begin()->first == 0, "Invalid graph, output index must starts with 0");
+    GE_ASSERT_TRUE(output_indexes_to_tensor_.begin()->first == 0, "Invalid graph, output index must start with 0");
     if (static_cast<size_t>(output_indexes_to_tensor_.rbegin()->first) + 1U != output_indexes_to_tensor_.size()) {
       std::stringstream ss;
       ss << "Invalid graph, output indexes are not continuous: ";

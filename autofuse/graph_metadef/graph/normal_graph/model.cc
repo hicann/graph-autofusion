@@ -147,7 +147,7 @@ graphStatus Model::SaveToFile(const std::string &file_name, const bool force_sep
   std::string file;
   SplitFilePath(file_name, dir_path, file);
   if (!dir_path.empty()) {
-    GE_ASSERT_TRUE((CreateDir(dir_path) == 0), "Create direct failed, path: %s.", file_name.c_str());
+    GE_ASSERT_TRUE((CreateDir(dir_path) == 0), "Create directory failed, path: %s.", file_name.c_str());
   } else {
     GE_ASSERT_SUCCESS(GetAscendWorkPath(dir_path));
     if (dir_path.empty()) {

@@ -590,7 +590,7 @@ graphStatus ExecuteGraph::CollectBreadthOutNode(const FastNode *const node,
 
 graphStatus ExecuteGraph::BFSTopologicalSorting(std::vector<FastNode *> &node_vec, const bool reverse,
                                                 const ExecuteGraph *const compute_graph) const {
-  GELOGD("Runing_Bfs_Sort: %s", GetName().c_str());
+  GELOGD("Running_Bfs_Sort: %s", GetName().c_str());
   (void)reverse;
   const bool is_mem_priority = IsMemoryPriority();
   std::vector<NodeStatus> reverse_dfs_nodes_info;
@@ -628,7 +628,7 @@ graphStatus ExecuteGraph::BFSTopologicalSorting(std::vector<FastNode *> &node_ve
 
 graphStatus ExecuteGraph::DFSTopologicalSorting(std::vector<FastNode *> &node_vec, const bool reverse,
                                                 const ExecuteGraph *const compute_graph) const {
-  GELOGD("Runing_Dfs_Sort: %s", GetName().c_str());
+  GELOGD("Running_Dfs_Sort: %s", GetName().c_str());
   std::vector<FastNode *> stack;
   std::map<FastNode *, uint32_t> map_in_edge_num;
   // Record the number of non data nodes but no input nodes
@@ -703,7 +703,7 @@ void ExecuteGraph::GetInNodes(const FastNode *const current, std::vector<FastNod
 graphStatus ExecuteGraph::RDFSTopologicalSorting(std::vector<FastNode *> &node_vec, const bool reverse,
                                                  const ExecuteGraph *const compute_graph) const {
   (void)reverse;
-  GELOGD("Runing_Reverse_Dfs_Sort: %s", GetName().c_str());
+  GELOGD("Running_Reverse_Dfs_Sort: %s", GetName().c_str());
   std::vector<NodeStatus> reverse_dfs_nodes_info;
   InitNodeStatus(compute_graph, reverse_dfs_nodes_info);
 
@@ -763,13 +763,13 @@ graphStatus ExecuteGraph::TopologicalSortingGraph(const ExecuteGraph *const exec
     for (auto &node : node_vec) {
       (void)itered_nodes_set.insert(node);
     }
-    REPORT_INNER_ERR_MSG("E18888", "Failed to do topo sorting total %zu, itered %zu, exist closed loop in graph:%s",
+    REPORT_INNER_ERR_MSG("E18888", "Failed to do topo sorting total %zu, iterated %zu, exist closed loop in graph:%s",
                          GetDirectNodesSize(), node_vec.size(), GetName().c_str());
-    GELOGW("[Check][Param] Failed to do topo sorting total %zu, itered %zu, exist closed loop in graph.",
+    GELOGW("[Check][Param] Failed to do topo sorting total %zu, iterated %zu, exist closed loop in graph.",
            GetDirectNodesSize(), node_vec.size());
     for (auto node : graph_shared_->GetDirectNodeToModify()) {
       if (itered_nodes_set.count(&FastGraphUtils::GetNode(node)) == 0UL) {
-        GELOGW("[Check][Param] The node %s does not itered when topological sorting",
+        GELOGW("[Check][Param] The node %s is not iterated when topological sorting",
                FastGraphUtils::GetNode(node).GetName().c_str());
       }
     }

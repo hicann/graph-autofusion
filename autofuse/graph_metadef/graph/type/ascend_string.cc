@@ -8,7 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 #include "framework/common/debug/ge_log.h"
 #include "common/util/mem_utils.h"
 #include "base/type/ascend_string_impl.h"

@@ -15,7 +15,7 @@
 #include <cstdlib>
 
 #include "acl/acl_prof.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "experiment/msprof/toolchain/prof_api.h"
 #include "fused_graph_test.h"
 

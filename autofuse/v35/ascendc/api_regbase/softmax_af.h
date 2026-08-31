@@ -21,7 +21,24 @@ constexpr int64_t CONST_FOUR = 4;
 constexpr int64_t CONST_SIXTY_THREE = 63;
 constexpr float NEG_INFINITY = -(__builtin_inff());
 constexpr uint32_t VL_FP32 = AscendC::ONE_REPEAT_BYTE_SIZE / sizeof(float);
-constexpr uint32_t AR_SMALL_R_THRESHOLD = 16U;
+constexpr uint32_t AR_SMALL_R_THRESHOLD = 8U;
+constexpr uint32_t AR_MID_R_THRESHOLD = VL_FP32;
+
+enum class SoftmaxARPathType : uint32_t {
+  SMALL_R = 0U,
+  MID_R = 1U,
+  FULL_LOAD = 2U,
+};
+
+__aicore__ inline SoftmaxARPathType GetSoftmaxARPathType(uint32_t rSize) {
+  if (rSize <= AR_SMALL_R_THRESHOLD) {
+    return SoftmaxARPathType::SMALL_R;
+  }
+  if (rSize <= AR_MID_R_THRESHOLD) {
+    return SoftmaxARPathType::MID_R;
+  }
+  return SoftmaxARPathType::FULL_LOAD;
+}
 
 constexpr static AscendC::Reg::CastTrait cast_trait_fp16_to_fp32 = {
     AscendC::Reg::RegLayout::ZERO,
@@ -219,6 +236,44 @@ __aicore__ inline void NormalizeAndStoreRow(__local_mem__ TOut *dst, __local_mem
     AscendC::MicroAPI::DataCopy(outReg, (__local_mem__ float *)oriSrc + offset);
     AscendC::MicroAPI::Div(outReg, outReg, brcSumReg, oriMask);
     StoreFromFp32(dst, outReg, oriMask, offset);
+  }
+}
+
+template <typename TIn, typename TOut>
+__aicore__ inline void SoftmaxARMidRCompute(const AscendC::LocalTensor<TOut> &dst, const AscendC::LocalTensor<TIn> &src,
+                                            const AscendC::LocalTensor<float> &expBuf,
+                                            const SoftmaxARTilingInfo &tilingInfo) {
+  __local_mem__ TOut *dstAddr = (__local_mem__ TOut *)dst.GetPhyAddr();
+  __local_mem__ TIn *srcAddr = (__local_mem__ TIn *)src.GetPhyAddr();
+  const uint16_t aLoopTimes = static_cast<uint16_t>(tilingInfo.aSize);
+  const uint16_t rLoopCount = static_cast<uint16_t>(CeilDiv(tilingInfo.rSize, VL_FP32));
+  const uint32_t rAligned = tilingInfo.rAligned;
+
+  __VEC_SCOPE__ {
+    AscendC::MicroAPI::RegTensor<float> srcReg;
+    AscendC::MicroAPI::RegTensor<float> rowMaxReg;
+    AscendC::MicroAPI::RegTensor<float> brcMaxReg;
+    AscendC::MicroAPI::RegTensor<float> subReg;
+    AscendC::MicroAPI::RegTensor<float> expReg;
+    AscendC::MicroAPI::RegTensor<float> sumReg;
+    AscendC::MicroAPI::RegTensor<float> brcSumReg;
+    AscendC::MicroAPI::RegTensor<float> outReg;
+    uint32_t maskValue = tilingInfo.rSize;
+    AscendC::MicroAPI::MaskReg mask = AscendC::MicroAPI::UpdateMask<float>(maskValue);
+    AscendC::MicroAPI::MaskReg oriMask;
+
+    for (uint16_t row = 0U; row < aLoopTimes; ++row) {
+      uint32_t offset = row * rAligned;
+      LoadAsFp32(srcAddr, srcReg, mask, offset);
+      AscendC::MicroAPI::ReduceMax(rowMaxReg, srcReg, mask);
+      AscendC::MicroAPI::Duplicate(brcMaxReg, rowMaxReg, mask);
+      AscendC::MicroAPI::Sub(subReg, srcReg, brcMaxReg, mask);
+      AscendC::MicroAPI::Exp(expReg, subReg, mask);
+      AscendC::MicroAPI::ReduceSum(sumReg, expReg, mask);
+      AscendC::MicroAPI::Duplicate(brcSumReg, sumReg, mask);
+      AscendC::MicroAPI::Div(expReg, expReg, brcSumReg, mask);
+      StoreFromFp32(dstAddr, expReg, mask, offset);
+    }
   }
 }
 
@@ -567,9 +622,21 @@ template <typename TIn, typename TOut>
 __aicore__ inline void SoftmaxARFullLoadExtend(const AscendC::LocalTensor<TOut> &dst,
                                                const AscendC::LocalTensor<TIn> &src,
                                                AscendC::LocalTensor<uint8_t> &tmp_buf, const uint32_t (&shape)[2]) {
-  if (shape[1] <= SoftmaxRegBase::AR_SMALL_R_THRESHOLD) {
-    SoftmaxARSmallRExtendImpl<TIn, TOut>(dst, src, tmp_buf, shape);
-    return;
+  const uint32_t a = shape[0];
+  const uint32_t r = shape[1];
+  switch (SoftmaxRegBase::GetSoftmaxARPathType(r)) {
+    case SoftmaxRegBase::SoftmaxARPathType::SMALL_R:
+      SoftmaxARSmallRExtendImpl<TIn, TOut>(dst, src, tmp_buf, shape);
+      return;
+    case SoftmaxRegBase::SoftmaxARPathType::MID_R:
+      SoftmaxRegBase::SoftmaxARMidRCompute<TIn, TOut>(dst, src, tmp_buf.template ReinterpretCast<float>(),
+                                                      SoftmaxRegBase::GetSoftmaxARTilingInfo<TIn>(a, r));
+      return;
+    case SoftmaxRegBase::SoftmaxARPathType::FULL_LOAD:
+      SoftmaxARFullLoadExtendImpl<TIn, TOut>(dst, src, tmp_buf, shape);
+      return;
+    default:
+      break;
   }
   SoftmaxARFullLoadExtendImpl<TIn, TOut>(dst, src, tmp_buf, shape);
 }

@@ -63,11 +63,20 @@ function(do_backend_e2e_st_test)
        KERNEL_SRC_LIST=\"${KERNEL_SRC_LIST}\"
     )
 
-    add_test(NAME ${E2E_ST1_GENERATOR_EXE_NAME} COMMAND ${E2E_ST1_GENERATOR_EXE_NAME} --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/${E2E_ST1_GENERATOR_EXE_NAME}.xml)
+    set(BACKEND_RUNTIME_LD_LIBRARY_PATH
+        "${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/ascendc_ir/generator:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/ascendc_ir:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/expression:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph:${CMAKE_BINARY_DIR}/autofuse/tests:${CMAKE_BINARY_DIR}/autofuse/tests/depends/common:${CMAKE_BINARY_DIR}/autofuse/tests/depends/slog:${CMAKE_BINARY_DIR}/autofuse/tests/depends/trace:${CMAKE_BINARY_DIR}/autofuse/tests/depends/runtime:${CMAKE_BINARY_DIR}/autofuse/ascir/generator:${CMAKE_BINARY_DIR}/autofuse/ascir/meta:${ASCEND_INSTALL_PATH}/${CMAKE_SYSTEM_PROCESSOR}-linux/lib64:$ENV{LD_LIBRARY_PATH}")
+
+    add_test(NAME ${E2E_ST1_GENERATOR_EXE_NAME}
+             COMMAND ${CMAKE_COMMAND} -E env
+                     "LD_LIBRARY_PATH=${BACKEND_RUNTIME_LD_LIBRARY_PATH}"
+                     ${E2E_ST1_GENERATOR_EXE_NAME}
+                     --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/v35/st/${E2E_ST1_GENERATOR_EXE_NAME}.xml)
     set_tests_properties(${E2E_ST1_GENERATOR_EXE_NAME} PROPERTIES LABELS "st;build_backend_test1;${E2E_ST1_GENERATOR_EXE_NAME}")
 
     add_custom_target(${TEST_NAME}_generated_sources_v2
-                      COMMAND $<TARGET_FILE:${E2E_ST1_GENERATOR_EXE_NAME}>
+                      COMMAND ${CMAKE_COMMAND} -E env
+                              "LD_LIBRARY_PATH=${BACKEND_RUNTIME_LD_LIBRARY_PATH}"
+                              $<TARGET_FILE:${E2E_ST1_GENERATOR_EXE_NAME}>
                       WORKING_DIRECTORY ${ARG_WORKDIR}
                       BYPRODUCTS ${KERNEL_SRC}
                       DEPENDS ${E2E_ST1_GENERATOR_EXE_NAME})

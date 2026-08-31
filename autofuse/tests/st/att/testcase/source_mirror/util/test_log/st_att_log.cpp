@@ -107,7 +107,7 @@ TEST_F(TestAttLog, test_att_logw) {
   auto ret = std::system("./tiling_func_log_main 8192 2048 -1 > ./att_info.log");
   EXPECT_EQ(ret, 0);
 
-  EXPECT_TRUE(CheckOutput("\\[WARNING\\]\\[OpTest6\\]The solver executed failed."));
+  EXPECT_TRUE(CheckOutput("\\[WARNING\\]\\[OpTest6\\]The solver execution failed."));
 }
 
 TEST_F(TestAttLog, test_att_loge) {

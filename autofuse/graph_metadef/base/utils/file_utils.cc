@@ -289,7 +289,7 @@ graphStatus SaveBinToFile(const char *const data, size_t length, const std::stri
   SplitFilePath(file_path, dir_path, file_name);
   const bool meta_file_exist = (mmAccess(dir_path.c_str()) == EN_OK);
   if ((!dir_path.empty()) && (!meta_file_exist)) {
-    GE_ASSERT_TRUE((CreateDir(dir_path) == kFileSuccess), "Create direct failed, path: %s.", file_path.c_str());
+    GE_ASSERT_TRUE((CreateDir(dir_path) == kFileSuccess), "Create directory failed, path: %s.", file_path.c_str());
   }
   // 当dir_path为空时，默认使用当前路径
   std::string real_path = RealPath(dir_path.empty() ? "." : dir_path.c_str());

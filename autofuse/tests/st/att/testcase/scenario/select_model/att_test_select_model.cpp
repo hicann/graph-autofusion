@@ -90,7 +90,7 @@ TEST_F(TestSelectModel, att_test_select_model_01) {
     file.close();
   }
   std::map<uint64_t, double> myMap;
-  std::regex pattern("The optimal objection for tiling_case_id (\\d+) is (\\d+).");
+  std::regex pattern("The optimal objective for tiling_case_id (\\d+) is (\\d+).");
   std::sregex_iterator it(str.begin(), str.end(), pattern);
   std::sregex_iterator end;
   while (it != end) {
@@ -135,7 +135,7 @@ TEST_F(TestSelectModel, att_test_select_model_04) {
     file.close();
   }
   std::map<uint64_t, double> myMap;
-  std::regex pattern("The optimal objection for tiling_case_id (\\d+) is (\\d+).");
+  std::regex pattern("The optimal objective for tiling_case_id (\\d+) is (\\d+).");
   std::sregex_iterator it(str.begin(), str.end(), pattern);
   std::regex pattern2("Objective value for case(\\d+) is (\\d+).");
   std::sregex_iterator it2(str.begin(), str.end(), pattern2);

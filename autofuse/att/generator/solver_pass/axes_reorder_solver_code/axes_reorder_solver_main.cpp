@@ -123,7 +123,7 @@ std::string GenObjDrivenOptimize(bool enable_equal_order_tiling) {
 
 std::string GenEmptyTensorCheck() {
   std::string codes;
-  codes += "  // 检测空tensor场景：当某个轴的upper_bound为0时，直接返回成功\n";
+  codes += "  // Check empty tensor case: when the upper_bound of any axis is 0, return success directly\n";
   codes += "  auto is_var_empty = [](const TilingVariable *var) -> bool {\n";
   codes += "    return var->upper_bound(var->upper_bound_vars) == 0;\n";
   codes += "  };\n";

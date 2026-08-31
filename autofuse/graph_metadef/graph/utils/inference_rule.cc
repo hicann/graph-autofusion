@@ -27,7 +27,7 @@
 #include <nlohmann/json.hpp>
 
 #include "common/checker.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/utils/attr_utils.h"
 #include "graph/debug/ge_attr_define.h"
 
@@ -714,7 +714,7 @@ ge::graphStatus ShapeInferenceRule::InferOnRuntime(gert::InferShapeContext *infe
   GertContextWrapper ctx(infer_shape_ctx);
   const ge::graphStatus result = InferOnRuntime(&ctx);
   if (result != ge::GRAPH_SUCCESS) {
-    GELOGE(af::FAILED, "Failed infer shape by rule for op %s(%s): %s", infer_shape_ctx->GetNodeName(),
+    GELOGE(af::FAILED, "Failed to infer shape by rule for op %s(%s): %s", infer_shape_ctx->GetNodeName(),
            infer_shape_ctx->GetNodeType(), ctx.Error().c_str());
   }
   return result;
@@ -725,7 +725,7 @@ ge::graphStatus ShapeInferenceRule::InferOnCompile(gert::InferShapeContext *infe
   GertContextWrapper ctx(infer_shape_ctx);
   const ge::graphStatus result = InferOnCompile(&ctx);
   if (result != ge::GRAPH_SUCCESS) {
-    GELOGE(af::FAILED, "Failed infer shape on compile by rule for op %s(%s): %s", infer_shape_ctx->GetNodeName(),
+    GELOGE(af::FAILED, "Failed to infer shape on compile by rule for op %s(%s): %s", infer_shape_ctx->GetNodeName(),
            infer_shape_ctx->GetNodeType(), ctx.Error().c_str());
   }
   return result;
@@ -834,7 +834,7 @@ ge::graphStatus ShapeInferenceRule::CompileJsonString(const std::string &json_st
 ge::graphStatus DtypeInferenceRule::InferDtype(gert::InferDataTypeContext *infer_dtype_ctx) const {
   GE_ASSERT_NOTNULL(infer_dtype_ctx);
   if (!Error().empty()) {
-    GELOGE(af::FAILED, "Failed infer dtype by rule for op %s(%s): %s", infer_dtype_ctx->GetNodeName(),
+    GELOGE(af::FAILED, "Failed to infer dtype by rule for op %s(%s): %s", infer_dtype_ctx->GetNodeName(),
            infer_dtype_ctx->GetNodeType(), Error().c_str());
     return ge::GRAPH_FAILED;
   }
@@ -875,7 +875,7 @@ std::shared_ptr<DtypeInferenceRule> DtypeInferenceRule::FromJsonString(const std
 
   const auto dtype_json = rule_json["dtype"];
   if (dtype_json.is_null()) {
-    *rule << "Filed 'dtype' must not be null.";
+    *rule << "Field 'dtype' must not be null.";
     return g_dtype_rule_cache.GetWithDefault(json_str, rule);
   }
 

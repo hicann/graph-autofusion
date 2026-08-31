@@ -508,6 +508,16 @@ if (ENABLE_OPEN_SRC)
     target_compile_options(pyautofuse PUBLIC -g --coverage -fprofile-arcs -ftest-coverage)
 endif ()
 
+foreach(autofuse_test_target IN ITEMS ascgen_common att codegen optimize pyautofuse test_common)
+    target_compile_options(${autofuse_test_target} PRIVATE
+        -include${CODE_ROOT_DIR}/inc/graph_metadef/graph/tensor_af.h
+    )
+    target_compile_definitions(${autofuse_test_target} PRIVATE
+        INC_EXTERNAL_GRAPH_TENSOR_H_
+        INC_EXTERNAL_GRAPH_ASCEND_STRING_H_
+    )
+endforeach()
+
 if (IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/v35")
     add_subdirectory(v35)
 endif()

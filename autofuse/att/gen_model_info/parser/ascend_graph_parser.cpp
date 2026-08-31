@@ -164,13 +164,13 @@ af::Status AscendGraphParser::ParserOriginAxis(const af::AscGraph &graph) {
 }
 
 af::Status AscendGraphParser::CheckAxisIdValid(const int64_t axis_id) {
-  GE_ASSERT_TRUE(axes_info_.find(axis_id) != axes_info_.end(), "Invalid axid id [%ld].", axis_id);
+  GE_ASSERT_TRUE(axes_info_.find(axis_id) != axes_info_.end(), "Invalid axis id [%ld].", axis_id);
   return af::SUCCESS;
 }
 
 af::Status AscendGraphParser::CheckAxisIdValid(std::vector<int64_t> &axis_ids) {
   for (auto &axis_id : axis_ids) {
-    GE_ASSERT_TRUE(axes_info_.find(axis_id) != axes_info_.end(), "Invalid axid id [%ld].", axis_id);
+    GE_ASSERT_TRUE(axes_info_.find(axis_id) != axes_info_.end(), "Invalid axis id [%ld].", axis_id);
   }
   return af::SUCCESS;
 }
@@ -514,7 +514,7 @@ af::Status AscendGraphParser::ParseTensorDims(TensorPtr &tensor, af::AscTensorAt
   // 处理tensor的strides
   SetContinuesStrides(tensor, tensor_attr);
   GE_ASSERT_TRUE(tensor->stride.size() == tensor->dim_info.size(),
-                 "Tenosr [%s] stride num[%lu] not equal to dim info num[%lu].", tensor->name.c_str(),
+                 "Tensor [%s] stride num[%lu] not equal to dim info num[%lu].", tensor->name.c_str(),
                  tensor->stride.size(), tensor->dim_info.size());
   GELOGD("[DFX]parse tensor %s(%s): repeats [%s], gm_stride [%s], stride [%s]", tensor->name.c_str(),
          tensor->node_type.c_str(), GetVecString(tensor->repeat).c_str(), GetVecString(tensor->gm_stride).c_str(),

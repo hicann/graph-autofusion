@@ -12,7 +12,7 @@
 #define BASE_TYPE_ASCEND_STRING_IMPL_H_
 
 #include "graph/types_af.h"
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 
 namespace af {
 class AscendStringImpl {

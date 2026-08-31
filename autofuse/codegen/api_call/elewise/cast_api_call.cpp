@@ -51,7 +51,7 @@ Status CastApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::AxisId
   auto y = outputs[0].get();
   GELOGD("x, is_constant:%d", static_cast<int32_t>(x.is_constant));
   GELOGI("cast x_dtype:%d, y.dtype:%d.", static_cast<int32_t>(x.dtype), static_cast<int32_t>(y.dtype));
-  GE_ASSERT_TRUE((x.dtype != y.dtype), "cast s_dtype:%d, y.dtype:%d", static_cast<int32_t>(x.dtype),
+  GE_ASSERT_TRUE((x.dtype != y.dtype), "cast x_dtype:%d, y.dtype:%d", static_cast<int32_t>(x.dtype),
                  static_cast<int32_t>(y.dtype));
   // 通过 src_dtype 和 dst_dtype 获取 mode
   std::string x_dtype;

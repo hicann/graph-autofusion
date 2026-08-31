@@ -68,7 +68,7 @@ void CgContext::PopBackLoopAxis(const Axis &axis) {
   }
   auto last_id = *(loop_axis_ids_cache_.rbegin());
   if (last_id != axis.id) {
-    GELOGE(FAILED, "Pop Axis order unmatch", "");
+    GELOGE(FAILED, "Pop axis order mismatch", "");
     return;
   }
   loop_axis_ids_cache_.pop_back();

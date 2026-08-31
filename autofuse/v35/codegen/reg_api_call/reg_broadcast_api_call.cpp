@@ -16,6 +16,7 @@
 #include "api_call/utils/api_call_factory.h"
 #include "api_call/broadcast/broadcast_api_call.h"
 #include "codegen/expression_convert_struct.h"
+#include "reg_api_call_utils.h"
 
 namespace codegen {
 using namespace std;
@@ -26,6 +27,7 @@ static void GenParams(const TPipe &tpipe, const Tensor &input, const Tensor &out
   // 只保证在仅对张量尾轴做32B对齐的场景下有效，若对中间轴做了对齐，则还需要增加处理逻辑
   auto vectorized_axis_size = input.vectorized_axis.size();
   const char *shape_prefix = is_src ? "src_shape_" : "dst_shape_";
+
   ss << "const uint32_t " << shape_prefix << input.id << "_brc_to_" << output.id << "[" << vectorized_axis_size
      << "] = {";
   const char *sep = "";

@@ -1,9 +1,9 @@
 # -----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of 
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, 
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
@@ -146,6 +146,7 @@ add_library(graph_base_af SHARED
 )
 
 target_compile_options(graph_base_af PRIVATE
+    -include${CMAKE_CURRENT_LIST_DIR}/../../inc/graph_metadef/graph/tensor_af.h
     $<$<BOOL:${ENABLE_ASAN}>:-Werror=maybe-uninitialized>
     $<$<OR:$<STREQUAL:${PRODUCT_SIDE},host>,$<STREQUAL:${ENABLE_OPEN_SRC},True>>:-fexceptions>
     $<$<OR:$<STREQUAL:${TARGET_SYSTEM_NAME},Linux>,$<STREQUAL:${TARGET_SYSTEM_NAME},Android>>: -fno-common -Wextra -Wfloat-equal>
@@ -155,6 +156,8 @@ target_compile_options(graph_base_af PRIVATE
 target_compile_definitions(graph_base_af PRIVATE
     FMK_SUPPORT_DUMP
     google=ascend_private
+    INC_EXTERNAL_GRAPH_TENSOR_H_
+    INC_EXTERNAL_GRAPH_ASCEND_STRING_H_
     $<IF:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,OS_TYPE=WIN,OS_TYPE=0>
     $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:SECUREC_USING_STD_SECURE_LIB=0 NOMINMAX>
 )
@@ -206,6 +209,7 @@ if (NOT ENABLE_OPEN_SRC)
     )
 
     target_compile_options(graph_base_static_af PRIVATE
+        -include${CMAKE_CURRENT_LIST_DIR}/../../inc/graph_metadef/graph/tensor_af.h
         $<$<BOOL:${ENABLE_ASAN}>:-Werror=maybe-uninitialized>
         $<$<OR:$<STREQUAL:${PRODUCT_SIDE},host>,$<STREQUAL:${ENABLE_OPEN_SRC},True>>:-fexceptions>
         $<$<OR:$<STREQUAL:${TARGET_SYSTEM_NAME},Linux>,$<STREQUAL:${TARGET_SYSTEM_NAME},Android>>: -fno-common -Wextra -Wfloat-equal>
@@ -223,6 +227,8 @@ if (NOT ENABLE_OPEN_SRC)
     target_compile_definitions(graph_base_static_af PRIVATE
         FMK_SUPPORT_DUMP
         google=ascend_private
+        INC_EXTERNAL_GRAPH_TENSOR_H_
+        INC_EXTERNAL_GRAPH_ASCEND_STRING_H_
         $<IF:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,OS_TYPE=WIN,OS_TYPE=0>
         $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:SECUREC_USING_STD_SECURE_LIB=0 NOMINMAX>
     )
@@ -274,6 +280,7 @@ add_library(graph_af SHARED
 target_compile_options(graph_af PRIVATE -DNO_METADEF_ABI_COMPATIABLE)
 
 target_compile_options(graph_af PRIVATE
+    -include${CMAKE_CURRENT_LIST_DIR}/../../inc/graph_metadef/graph/tensor_af.h
     $<$<OR:$<STREQUAL:${PRODUCT_SIDE},host>,$<STREQUAL:${ENABLE_OPEN_SRC},True>>:-fexceptions>
     $<$<OR:$<STREQUAL:${TARGET_SYSTEM_NAME},Linux>,$<STREQUAL:${TARGET_SYSTEM_NAME},Android>>: -fno-common -Wextra -Wfloat-equal>
     $<$<AND:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,$<STREQUAL:${CMAKE_CONFIGURATION_TYPES},Debug>>:/MTd>
@@ -282,6 +289,8 @@ target_compile_options(graph_af PRIVATE
 target_compile_definitions(graph_af PRIVATE
     FMK_SUPPORT_DUMP
     google=ascend_private
+    INC_EXTERNAL_GRAPH_TENSOR_H_
+    INC_EXTERNAL_GRAPH_ASCEND_STRING_H_
     $<IF:$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>,OS_TYPE=WIN,OS_TYPE=0>
     $<$<STREQUAL:${TARGET_SYSTEM_NAME},Windows>:SECUREC_USING_STD_SECURE_LIB=0 NOMINMAX>
 )

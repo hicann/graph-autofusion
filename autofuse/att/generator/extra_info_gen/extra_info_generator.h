@@ -9,7 +9,7 @@
  */
 
 #ifndef ATT_EXTRA_INFO_GENERATOR_H_
-#define ATT_EXRTA_INFO_GENERATOR_H_
+#define ATT_EXTRA_INFO_GENERATOR_H_
 #include <set>
 #include <vector>
 #include <string>
@@ -48,4 +48,4 @@ class ExtraInfoGenerator {
   const TilingDataGenerator &tiling_data_generator_;
 };
 }  // namespace att
-#endif  // ATT_EXRTA_INFO_GENERATOR_H_
+#endif  // ATT_EXTRA_INFO_GENERATOR_H_

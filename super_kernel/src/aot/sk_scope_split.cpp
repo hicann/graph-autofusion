@@ -174,13 +174,8 @@ void ScopeSplitPass::PrintScopeDetails(const std::vector<SuperKernelScopeInfo> &
 
 void ScopeSplitPass::PrintScopeResults(const std::vector<SuperKernelScopeInfo> &scopes, const SuperKernelGraph &graph,
                                        const char *passName) {
-  // Log to dedicated file first
-  {
-    SK_LOG_CONTEXT_SIMPLE("sk_scope_split.log");
-    PrintScopeDetails(scopes, graph, passName);
-  }
-
-  // Also log to default log for visibility
+  // Log to dedicated file
+  SK_LOG_CONTEXT_SIMPLE("sk_scope_split.log");
   PrintScopeDetails(scopes, graph, passName);
 }
 

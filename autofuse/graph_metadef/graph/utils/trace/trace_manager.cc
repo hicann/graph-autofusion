@@ -39,7 +39,7 @@ class TraceFileHolder {
     if (fd_ >= 0) {
       const mmSsize_t written_count = mmWrite(fd_, const_cast<char_t *>(data), strlen(data));
       if ((written_count == EN_INVALID_PARAM) || (written_count == EN_ERROR)) {
-        GELOGE(INTERNAL_ERROR, "[trace] Failed write trace info to file %s", data);
+        GELOGE(INTERNAL_ERROR, "[trace] Failed to write trace info to file %s", data);
       }
       (void)mmWrite(fd_, const_cast<char_t *>(separator), strlen(separator));
     }
@@ -149,7 +149,7 @@ void TraceManager::SaveTraceBufferToFile(const ReadyPart ready_part) {
 
   auto fh = OpenOrCreateFile(current_saving_file_name_);
   if (fh == nullptr || (!fh->Valid())) {
-    GELOGE(INTERNAL_ERROR, "[trace] Failed get file holder for %s", current_saving_file_name_.c_str());
+    GELOGE(INTERNAL_ERROR, "[trace] Failed to get file holder for %s", current_saving_file_name_.c_str());
     return;
   }
 
@@ -190,7 +190,7 @@ Status TraceManager::Initialize(const char_t *file_save_path) {
      << MMPA_PATH_SEPARATOR_STR << af::GetContext().DeviceId() << MMPA_PATH_SEPARATOR_STR;
   trace_save_file_path_ = ss.str();
   if (CreateDir(trace_save_file_path_) != 0) {
-    GELOGE(INTERNAL_ERROR, "[trace] Trace not enabled as failed create trace file save directory[%s]",
+    GELOGE(INTERNAL_ERROR, "[trace] Trace not enabled as failed to create trace file save directory[%s]",
            trace_save_file_path_.c_str());
     return FAILED;
   }
@@ -198,7 +198,7 @@ Status TraceManager::Initialize(const char_t *file_save_path) {
   try {
     save_thread_ = std::thread(&TraceManager::SaveBufferToFileThreadFunc, this);
   } catch (const std::system_error &) {
-    GELOGE(INTERNAL_ERROR, "[trace] Trace not enabled as failed start trace saving thread");
+    GELOGE(INTERNAL_ERROR, "[trace] Trace not enabled as failed to start trace saving thread");
     return FAILED;
   }
   return SUCCESS;

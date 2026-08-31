@@ -83,7 +83,7 @@ class ReadableDump {
           std::shared_ptr<std::vector<std::string>> output_rets = ComGraphMakeShared<std::vector<std::string>>();
           if (output_rets == nullptr) {
             REPORT_INNER_ERR_MSG("E18888", "Initial output vector failed");
-            GELOGE(GRAPH_FAILED, "[OutputHandler][GenNodeToOutputsMap] failed to initial output vector");
+            GELOGE(GRAPH_FAILED, "[OutputHandler][GenNodeToOutputsMap] failed to initialize output vector");
             return;
           }
           if (node->GetAllOutDataAnchorsPtr().size() <= 1) {

@@ -75,3 +75,46 @@ TEST_F(LoadTransposeStoreTest, LoadTransposeStoreCodegen) {
   }
   EXPECT_EQ(gen_success, true);
 }
+
+TEST_F(LoadTransposeStoreTest, LoadTransposeStoreInvalidTransposeCodegen) {
+  bool gen_success = true;
+  bool gen_failed = false;
+
+  af::AscGraph test_graph("load_transpose_store_invalid");
+  LoadTransposeStore_BeforeAutofuse(test_graph, ge::DT_FLOAT, ge::DT_FLOAT);
+  LoadTransposeStore_AfterInferOutput(test_graph, ge::DT_FLOAT, ge::DT_FLOAT);
+
+  std::vector<af::AscGraph> test_impl_graphs = {af::AscGraph("load_transpose_store_invalid_general_0_nil_0_nil")};
+  test_impl_graphs[0].CopyFrom(test_graph);
+  LoadTransposeStore_AfterGetApiInfo(test_impl_graphs[0]);
+  LoadTransposeStore_AfterScheduler(test_impl_graphs[0]);
+  LoadTransposeStore_AfterQueBufAlloc(test_impl_graphs[0]);
+
+  auto x = test_impl_graphs[0].FindNode("x");
+  auto transpose = test_impl_graphs[0].FindNode("transpose");
+  transpose->outputs[0].attr.vectorized_axis = x->outputs[0].attr.vectorized_axis;
+  transpose->outputs[0].attr.vectorized_strides = x->outputs[0].attr.vectorized_strides;
+
+  try {
+    auto codegen = codegen::Codegen(codegen::CodegenOptions{.tiling_lib_path = ATT_SO_NAME,
+                                                            .tiling_lib_codegen_symbol = "CodegenTiling",
+                                                            .using_att_calc_qbt_size = false});
+
+    ascir::ScheduledResult schedule_result;
+    std::vector<ascir::ScheduledResult> schedule_results{schedule_result};
+    ascir::FusedScheduledResult fused_schedule_result;
+    fused_schedule_result.fused_graph_name = af::AscendString("load_transpose_store_invalid");
+    fused_schedule_result.node_idx_to_scheduled_results.push_back(schedule_results);
+    InitScheduleResultsByImplGraphs(test_impl_graphs, fused_schedule_result);
+
+    codegen::CodegenResult result;
+    auto ret = codegen.Generate(fused_schedule_result, result);
+    EXPECT_NE(ret, af::SUCCESS);
+    gen_failed = (ret != af::SUCCESS);
+  } catch (...) {
+    gen_success = false;
+  }
+
+  EXPECT_EQ(gen_success, true);
+  EXPECT_EQ(gen_failed, true);
+}

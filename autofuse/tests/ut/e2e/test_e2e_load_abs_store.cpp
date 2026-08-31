@@ -683,7 +683,7 @@ int WrapperOnlyLaunch(uint32_t workspace_size, AutofuseTilingData *tiling_data) 
   if (find_best_tiling_key_fn != nullptr) {
     tiling_key = find_best_tiling_key_fn(*tiling_data);
     if (tiling_key < 0 || static_cast<uint64_t>(tiling_key) >= tiling_key_count) {
-      DLOGE("find best tiling key failed");
+      DLOGE("find best tiling key failed, tiling_key=%ld, valid range=[0,%lu)", tiling_key, tiling_key_count);
       return FAILED;
     }
   } else {

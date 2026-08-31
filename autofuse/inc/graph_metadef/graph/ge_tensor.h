@@ -19,7 +19,7 @@
 #include "detail/attributes_holder.h"
 #include "graph/buffer.h"
 #include "graph_metadef/graph/aligned_ptr.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/small_vector.h"
 #include "graph/ascend_limits.h"
 

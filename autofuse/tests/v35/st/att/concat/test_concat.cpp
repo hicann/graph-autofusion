@@ -97,7 +97,7 @@ bool ExtractBlockDimFromLine(const std::string &line, uint32_t &block_dim) {
 std::pair<std::vector<uint32_t>, std::vector<uint32_t>> ParseBlockDimFromLog(const std::string &filename) {
   std::ifstream file(filename);
   if (!file.is_open()) {
-    std::cerr << "无法打开文件: " << filename << std::endl;
+    std::cerr << "Cannot open file: " << filename << std::endl;
     return {};
   }
 
@@ -125,7 +125,7 @@ bool VerifySecondaryTilingCoreUsage(const std::string &filename, uint32_t total_
   auto [first_blocks, second_blocks] = ParseBlockDimFromLog(filename);
 
   if (first_blocks.size() < 2 || second_blocks.size() < 2) {
-    std::cerr << "无法从日志中解析出足够的block_dim值，first.size()=" << first_blocks.size()
+    std::cerr << "Cannot parse enough block_dim values from log, first.size()=" << first_blocks.size()
               << ", second.size()=" << second_blocks.size() << std::endl;
     return false;
   }

@@ -272,7 +272,7 @@ OpDescPtr OpDescUtils::CreateConstOp(const GeTensorPtr &tensor_ptr, const bool c
                             const_opdesc->GetNamePtr());
   } else {
     GE_ASSERT_TRUE(AttrUtils::SetShareTensor(const_opdesc, ATTR_NAME_WEIGHTS, *tensor_ptr),
-                   "[Set][ShardTensor] success for %s.", const_opdesc->GetNamePtr());
+                   "[Set][ShardTensor] failed for %s.", const_opdesc->GetNamePtr());
   }
   const_opdesc->SetType(CONSTANT);
   std::string op_name;

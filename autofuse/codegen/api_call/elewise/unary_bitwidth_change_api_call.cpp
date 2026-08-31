@@ -24,7 +24,7 @@ Status UnaryBitWidthChangeApiCall::Generate(const TPipe &tpipe, const std::vecto
                                             std::string &result) const {
   auto x = inputs[0].get();
   auto y = outputs[0].get();
-  GE_ASSERT_TRUE((x.dtype != y.dtype), "cast s_dtype:%d, y.dtype:%d", static_cast<int32_t>(x.dtype),
+  GE_ASSERT_TRUE((x.dtype != y.dtype), "cast x_dtype:%d, y.dtype:%d", static_cast<int32_t>(x.dtype),
                  static_cast<int32_t>(y.dtype));
 
   // 获取tmp_buf复用TBuf的id

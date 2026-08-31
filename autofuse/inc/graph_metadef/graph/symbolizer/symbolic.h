@@ -14,7 +14,7 @@
 
 #include <vector>
 #include <limits>
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/types_af.h"
 #include "graph/type_utils.h"
 #include "graph/symbolizer/symbol_operator.h"

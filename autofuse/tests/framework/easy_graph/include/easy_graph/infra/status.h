@@ -11,7 +11,9 @@
 #ifndef HA25033D6_1564_4748_B2C8_4DE2C5A286DE
 #define HA25033D6_1564_4748_B2C8_4DE2C5A286DE
 
+#ifndef __cplusplus
 #include <stdbool.h>
+#endif
 #include <stdint.h>
 #include "easy_graph/eg.h"
 

@@ -34,7 +34,8 @@ int main() {
   if (GetTiling(tilingData)) {
     PrintResult(tilingData);
     if (tilingData.get_tiling_key() != 1101u) {
-      std::cout << "1101 should be better with brcbuf." << std::endl;
+      std::cout << "tiling key 1101 (brcbuf case) should be better, but got tiling key " << tilingData.get_tiling_key()
+                << "." << std::endl;
       return -1;
     }
   } else {

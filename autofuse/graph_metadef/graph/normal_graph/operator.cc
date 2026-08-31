@@ -2981,7 +2981,7 @@ class GraphBuilderImpl {
         GE_CHK_BOOL_EXEC(op_impl != nullptr, REPORT_INNER_ERR_MSG("E18888", "op_impl is nullptr, check invalid.");
                          return ge::GRAPH_FAILED, "[Check][Param] Operator Impl is null.");
         if (all_nodes_info_.find(op_impl) != all_nodes_info_.cend()) {
-          GELOGI("This node %s has created.", op_impl->GetName().c_str());
+          GELOGI("Node %s has been created.", op_impl->GetName().c_str());
           continue;
         }
         auto node_ptr = graph_->AddNode(op_impl->op_desc_);

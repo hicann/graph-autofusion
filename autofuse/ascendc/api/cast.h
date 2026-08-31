@@ -279,7 +279,7 @@ inline __aicore__ void CastExtend(const AscendC::LocalTensor<OutT> &dst, const A
     CastExtendWithOneTransferWithMaskMode<InT, OutT>(dst, src, first_dim, last_dim, input_last_dim_stride,
                                                      output_last_dim_stride, dtype_size, tmp_buf);  // 需要一次中间转换
   } else {
-    ASCENDC_ASSERT(false, { KERNEL_LOG(KERNEL_ERROR, "Current conversion not support mask mode"); });
+    ASCENDC_ASSERT(false, { KERNEL_LOG(KERNEL_ERROR, "Current conversion does not support mask mode"); });
   }
 }
 

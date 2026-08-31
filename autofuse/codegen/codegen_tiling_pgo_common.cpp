@@ -547,7 +547,9 @@ void TilingLib::GenPgoWrapperParmCall(const ascir::FusedScheduledResult &fused_s
     ss << "  if (find_best_tiling_key_fn != nullptr) {" << std::endl;
     ss << "    tiling_key = find_best_tiling_key_fn(*tiling_data);" << std::endl;
     ss << "    if (tiling_key < 0 || static_cast<uint64_t>(tiling_key) >= tiling_key_count) {" << std::endl;
-    ss << "      DLOGE(\"find best tiling key failed\");" << std::endl;
+    ss << "      DLOGE(\"find best tiling key failed, tiling_key=%ld, valid range=[0,%lu)\", tiling_key, "
+          "tiling_key_count);"
+       << std::endl;
     ss << "      return FAILED;" << std::endl;
     ss << "    }" << std::endl;
     ss << "  } else {" << std::endl;
@@ -944,7 +946,8 @@ void TilingLib::GenPgoBatchCallback(std::stringstream &ss) const {
   ss << "    if (best_perf > average_duration) {" << std::endl;
   ss << "      best_perf = average_duration;" << std::endl;
   ss << "    }" << std::endl;
-  ss << "    DLOGD(\"average_duration:%f best_perf:%f count:%\" PRId64 \" batch_size:%\" PRIu64 \" flush_count:%d\", "
+  ss << "    DLOGD(\"average_duration:%f ns best_perf:%f ns count:%\" PRId64 \" batch_size:%\" PRIu64 \" "
+        "flush_count:%d\", "
         "average_duration, best_perf, count, batch_size, flush_count);"
      << std::endl;
   ss << "  }" << std::endl;
@@ -1141,7 +1144,7 @@ void TilingLib::GenPgoLegacyProfilingCallback(std::stringstream &ss) const {
   ss << "  for (const auto &pair : g_profiling_map) {" << std::endl;
   ss << "    msptiActivityKernel* kernel = reinterpret_cast<msptiActivityKernel*>(pair.second);" << std::endl;
   ss << "    durations.push_back(kernel->end - kernel->start);" << std::endl;
-  ss << "    DLOGD(\"kernel duration:%\" PRIu64 \"\", kernel->end - kernel->start);" << std::endl;
+  ss << "    DLOGD(\"kernel duration:%\" PRIu64 \" ns\", kernel->end - kernel->start);" << std::endl;
   ss << "  }" << std::endl;
   ss << "  std::sort(durations.begin(), durations.end(), std::greater<uint64_t>());" << std::endl;
   ss << "  for (size_t i = 1; i < 6; ++i) {" << std::endl;

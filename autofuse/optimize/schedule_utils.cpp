@@ -23,6 +23,7 @@
 #include "ascir_ops_utils.h"
 #include "common_utils.h"
 
+namespace optimize {
 namespace {
 bool IsMulConsumerStruct(const af::NodePtr &node) {
   std::unordered_set<af::NodePtr> visited;
@@ -67,8 +68,33 @@ Status FindNodeSequence(af::Node *start_node, std::unordered_set<af::Node *> &re
 
   return af::SUCCESS;
 }
+
+bool IsNeedFixTopo(const af::AscGraph &graph, bool use_rdfs_v2) {
+  if (use_rdfs_v2) {
+    std::unordered_set<int64_t> unique_loop_axes;
+    for (const auto &node : graph.GetAllNodes()) {
+      if (node->attr.sched.loop_axis != af::kIdNone) {
+        unique_loop_axes.insert(node->attr.sched.loop_axis);
+      }
+    }
+    if (unique_loop_axes.size() <= 1U) {
+      GELOGD("Skip fix topo: only %zu unique loop_axis in graph[%s].", unique_loop_axes.size(),
+             graph.GetName().c_str());
+      return false;
+    }
+  }
+  for (const auto &node : graph.GetAllNodes()) {
+    if (ScheduleUtils::IsReduce(node) && IsMulConsumerStruct(node)) {
+      GELOGD("Need fix topo: reduce node[%s] with multi-consumer found in graph[%s].", node->GetNamePtr(),
+             graph.GetName().c_str());
+      return true;
+    }
+  }
+  GELOGD("Skip fix topo: no reduce multi-consumer found in graph[%s].", graph.GetName().c_str());
+  return false;
+}
 }  // namespace
-namespace optimize {
+
 std::vector<af::AxisId> ScheduleUtils::CalcReduceAxes(const std::vector<af::Expression> &src_strides,
                                                       const std::vector<af::Expression> &dst_strides,
                                                       const std::vector<ascir::AxisId> &axes) {
@@ -330,15 +356,7 @@ Status ScheduleUtils::TopologicalSorting(af::AscGraph &graph, bool use_rdfs_v2) 
   GE_ASSERT_GRAPH_SUCCESS(compute_graph->TopologicalSorting(mode), "TopologicalSorting failed, graph:[%s].",
                           compute_graph->GetName().c_str());
 
-  bool is_need_fix_topo = false;
-  for (const auto &node : graph.GetAllNodes()) {
-    if (IsReduce(node) && IsMulConsumerStruct(node)) {
-      is_need_fix_topo = true;
-      break;
-    }
-  }
-
-  if (!is_need_fix_topo) {
+  if (!IsNeedFixTopo(graph, use_rdfs_v2)) {
     return af::SUCCESS;
   }
 

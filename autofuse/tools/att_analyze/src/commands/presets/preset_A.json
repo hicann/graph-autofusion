@@ -1,0 +1,6 @@
+{
+  "dynamic_dims": [],
+  "aiv_num": 48,
+  "ub_size": 196608,
+  "abi": {"kind": "tf_static", "shape_dims": 0, "block_dim_width": 32}
+}

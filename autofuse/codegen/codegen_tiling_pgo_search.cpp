@@ -81,7 +81,8 @@ std::string TilingLib::GenPgoAutofuseTiling(const ascir::FusedScheduledResult &f
   ss << " ResLimit *res_limit = nullptr, int32_t tiling_case_id = -1)" << std::endl;
   ss << "{" << std::endl;
 
-  ss << " const ResLimit *limit = (res_limit == nullptr) ? &g_no_limit_res : res_limit;" << std::endl;
+  ss << " const ResLimit effective_res_limit = GetResLimit(res_limit);" << std::endl;
+  ss << " const ResLimit *limit = &effective_res_limit;" << std::endl;
   ss << pgo_shape_dim.tiling_set_shape_dim.str();
   ss << "  tiling->set_block_dim(limit->aiv_num);" << std::endl;
   if (is_inductor_scene) {
@@ -159,7 +160,8 @@ std::string TilingLib::GenPgoTilingSearchByCoreNum(const ascir::FusedScheduledRe
      << std::endl;
   ss << "  (void)prof_callback;" << std::endl;
   ss << "  (void)prof_batch_callback;" << std::endl;
-  ss << "  const ResLimit *limit = (res_limit == nullptr) ? &g_no_limit_res : res_limit;" << std::endl;
+  ss << "  const ResLimit effective_res_limit = GetResLimit(res_limit);" << std::endl;
+  ss << "  const ResLimit *limit = &effective_res_limit;" << std::endl;
   ss << pgo_shape_dim.tiling_set_shape_dim.str();
   ss << "  double best_perf = DBL_MAX;" << std::endl;
   ss << "  uint32_t max_block_dim = limit->aiv_num;" << std::endl;
@@ -287,7 +289,8 @@ std::string TilingLib::GenPgoTilingSearchPGO(const ascir::FusedScheduledResult &
 
   ss << "  (void)prof_callback;" << std::endl;
   ss << "  (void)prof_batch_callback;" << std::endl;
-  ss << "  const ResLimit *limit = (res_limit == nullptr) ? &g_no_limit_res : res_limit;" << std::endl;
+  ss << "  const ResLimit effective_res_limit = GetResLimit(res_limit);" << std::endl;
+  ss << "  const ResLimit *limit = &effective_res_limit;" << std::endl;
   ss << "  std::vector<AutofuseTilingDataPerf> tiling_data_list;" << std::endl;
   ss << pgo_shape_dim.tiling_set_shape_dim.str();
   ss << "  double best_perf = DBL_MAX;" << std::endl;
@@ -336,6 +339,20 @@ std::string TilingLib::GenGetResLimitStru(void) const {
   GE_ASSERT_SUCCESS(ge::PlatformContext::GetInstance().GetPlatformInfo(platform_info));
   ss << "constexpr ResLimit g_no_limit_res = {1, " << platform_info.aiv_num << ", 0, " << platform_info.ub_size
      << ", {}};" << std::endl;
+  ss << "inline ResLimit GetResLimit(const ResLimit *res_limit) {" << std::endl;
+  ss << "  ResLimit limit = g_no_limit_res;" << std::endl;
+  ss << "  if (res_limit == nullptr) {" << std::endl;
+  ss << "    return limit;" << std::endl;
+  ss << "  }" << std::endl;
+  ss << "  if (res_limit->valid_num > 0U) { limit.valid_num = res_limit->valid_num; }" << std::endl;
+  ss << "  if (res_limit->aiv_num > 0U) { limit.aiv_num = res_limit->aiv_num; }" << std::endl;
+  ss << "  if (res_limit->aic_num > 0U) { limit.aic_num = res_limit->aic_num; }" << std::endl;
+  ss << "  if (res_limit->ub_size > 0U) { limit.ub_size = res_limit->ub_size; }" << std::endl;
+  ss << "  for (uint32_t i = 0U; i < 10U; ++i) {" << std::endl;
+  ss << "    if (res_limit->resv[i] > 0U) { limit.resv[i] = res_limit->resv[i]; }" << std::endl;
+  ss << "  }" << std::endl;
+  ss << "  return limit;" << std::endl;
+  ss << "}" << std::endl;
 
   return ss.str();
 }

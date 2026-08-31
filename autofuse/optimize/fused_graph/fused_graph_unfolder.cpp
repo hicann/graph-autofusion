@@ -533,7 +533,7 @@ Status FusedGraphUnfolder::ReAssembleOutputIndex(const af::ComputeGraphPtr &fuse
         auto peer_out_anchor = in_data_anchor->GetPeerOutAnchor();
         if (peer_out_anchor != nullptr) {
           auto asc_node = std::dynamic_pointer_cast<af::AscNode>(peer_out_anchor->GetOwnerNode());
-          GE_ASSERT_NOTNULL(asc_node, "In anchor [%ld]'s peer out anchor[%d] does have owner node.", index,
+          GE_ASSERT_NOTNULL(asc_node, "In anchor [%ld]'s peer out anchor [%d] does not have owner node.", index,
                             peer_out_anchor->GetIdx());
           GE_ASSERT_TRUE(af::ops::IsOps<af::ascir_op::Output>(asc_node),
                          "Only output nodes can be directly connected to the netoutput.");
@@ -562,7 +562,7 @@ Status FusedGraphUnfolder::ReAssembleDataIrAttr(const af::ComputeGraphPtr &fused
     GE_ASSERT_TRUE(!peer_in_anchor.empty());
     auto peer_first_data_anchor = peer_in_anchor[0UL];
     auto iter = asc_backend_to_asc_graph.find(peer_first_data_anchor->GetOwnerNodeBarePtr());
-    GE_ASSERT_TRUE(iter != asc_backend_to_asc_graph.end(), "Cannot find ascgraph for data [%s].", node->GetNamePtr());
+    GE_ASSERT_TRUE(iter != asc_backend_to_asc_graph.end(), "Cannot find AscGraph for data [%s].", node->GetNamePtr());
     auto data_index = peer_first_data_anchor->GetIdx();
     // 存在geir和ascir构图两种可能性
     auto node_attr = node->GetOpDesc()->GetOrCreateAttrsGroup<af::AscNodeAttr>();
@@ -693,7 +693,8 @@ Status FusedGraphUnfolder::FindConcatContext(const af::ComputeGraphPtr &fused_gr
     }
   }
   GE_ASSERT_NOTNULL(concat_ascbc_node);
-  GE_ASSERT_TRUE(concat_dim < new_loop_axes.size(), "Concat dim is invalid.");
+  GE_ASSERT_TRUE(concat_dim < new_loop_axes.size(), "Concat dim [%zu] is invalid, max dim [%zu].", concat_dim,
+                 new_loop_axes.size());
   return af::SUCCESS;
 }
 
@@ -828,7 +829,7 @@ Status FusedGraphUnfolder::MarkAllOutputAxisId(
   while (!que.empty()) {
     auto top = que.front();
     auto iter = asc_backend_to_asc_graph.find(top);
-    GE_ASSERT_TRUE(iter != asc_backend_to_asc_graph.end(), "Cannot find ascgraph for node [%s].", top->GetNamePtr());
+    GE_ASSERT_TRUE(iter != asc_backend_to_asc_graph.end(), "Cannot find AscGraph for node [%s].", top->GetNamePtr());
     seen_graph_to_changed_axis_id[&iter->second] = axis_id;
     GELOGD("Mark graph [%s] with id [%ld].", iter->second.GetName().c_str(), axis_id);
     seen_node.emplace(top);
@@ -853,7 +854,7 @@ Status FusedGraphUnfolder::MarkAllInputAxisId(af::Node *concat_input_node,
     auto top = que.front();
     if (top->GetType() == kAscGraphNodeType && seen_node.count(top) == 0U) {
       auto iter = asc_backend_to_asc_graph.find(top);
-      GE_ASSERT_TRUE(iter != asc_backend_to_asc_graph.end(), "Cannot find ascgraph for node [%s].", top->GetNamePtr());
+      GE_ASSERT_TRUE(iter != asc_backend_to_asc_graph.end(), "Cannot find AscGraph for node [%s].", top->GetNamePtr());
       seen_graph_to_changed_axis_id[&iter->second] = axis_id;
       GELOGD("Mark graph [%s] with id [%ld].", iter->second.GetName().c_str(), axis_id);
     }

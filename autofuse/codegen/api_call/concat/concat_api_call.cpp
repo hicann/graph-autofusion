@@ -190,7 +190,7 @@ Status ConcatApiCall::ParseConcatDim(const Tensor &x0, const Tensor &y, size_t &
       break;
     }
   }
-  GE_ASSERT_TRUE(find_concat_dim, "not find concat dim in vectorized_axis");
+  GE_ASSERT_TRUE(find_concat_dim, "Failed to find concat dim in vectorized_axis");
   return af::SUCCESS;
 }
 

@@ -172,13 +172,13 @@ inline bool AppendVectorStrAttr(const ge::AnyValue &attr, std::vector<std::vecto
   for (size_t i = 0U; i < (*val).size(); ++i) {
     const size_t ele_str_size = (*val)[i].size() + static_cast<size_t>(1);
     if (ge::AddOverflow(total_str_size, ele_str_size, total_str_size)) {
-      GELOGW("Add over flow ele str size %zu, total_str_size %zu.", ele_str_size, total_str_size);
+      GELOGW("Add overflow ele str size %zu, total_str_size %zu.", ele_str_size, total_str_size);
       return false;
     }
   }
   size_t total_size = 0U;
   if (ge::AddOverflow(total_str_size, sizeof(ContinuousVector), total_size)) {
-    GELOGW("Add over flow ContinuousVector size %zu, total_str_size %zu.", sizeof(ContinuousVector), total_str_size);
+    GELOGW("Add overflow ContinuousVector size %zu, total_str_size %zu.", sizeof(ContinuousVector), total_str_size);
     return false;
   }
 

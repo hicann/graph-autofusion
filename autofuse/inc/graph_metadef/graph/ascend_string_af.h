@@ -7,8 +7,8 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  * ===================================================================================================================*/
 
-#ifndef INC_EXTERNAL_GRAPH_ASCEND_STRING_H_
-#define INC_EXTERNAL_GRAPH_ASCEND_STRING_H_
+#ifndef INC_EXTERNAL_GRAPH_ASCEND_STRING_AF_H_
+#define INC_EXTERNAL_GRAPH_ASCEND_STRING_AF_H_
 
 #include <string>
 #include <memory>
@@ -70,4 +70,4 @@ struct hash<af::AscendString> {
   }
 };
 }  // namespace std
-#endif  // INC_EXTERNAL_GRAPH_ASCEND_STRING_H_
+#endif  // INC_EXTERNAL_GRAPH_ASCEND_STRING_AF_H_

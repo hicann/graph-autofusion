@@ -446,7 +446,7 @@ bool IsGeneralizeBrcInlineScene(const af::AscNodePtr &node, const af::AscTensor 
                         i0_meger_repeates);
   }
 
-  GELOGD("node_name:%s, i0_meger_repeates:%s, i1_meger_repeates:%s", node->GetNamePtr(),
+  GELOGD("node_name:%s, i0_merged_repeats:%s, i1_merged_repeats:%s", node->GetNamePtr(),
          VectorToStr(i0_meger_repeates).c_str(), VectorToStr(i1_meger_repeates).c_str());
 
   if (i0_meger_repeates.size() == 2U && i1_meger_repeates.size() == 2U) {

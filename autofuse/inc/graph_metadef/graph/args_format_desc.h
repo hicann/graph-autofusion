@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "framework/common/debug/ge_log.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/op_desc.h"
 #include "graph/node.h"
 #include "register/hidden_inputs_func_registry_af.h"

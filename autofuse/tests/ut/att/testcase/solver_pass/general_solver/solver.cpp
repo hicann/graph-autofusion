@@ -85,7 +85,7 @@ Node *VisitedNode::GetVarVal(uint64_t *vars) {
 bool Result::AddVarVal(uint64_t *vars, double obj, double cons) {
   uint64_t rec_num = solution_num_;
   if (rec_num > MAX_SOLUTION) {
-    ATT_LOG("Too much solutions!");
+    ATT_LOG("Too many solutions!");
     return false;
   }
   uint32_t cnt_num = 0;

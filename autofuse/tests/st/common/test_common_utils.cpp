@@ -18,7 +18,7 @@
 #include "common_utils.h"
 #include "ascir_register.h"
 #include "graph/types_af.h"
-#include "graph/tensor.h"
+#include "graph/tensor_af.h"
 
 using namespace af::ops;
 using namespace af::ascir_op;

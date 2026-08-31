@@ -13,7 +13,7 @@
 #include <string>
 #include <sstream>
 #include "exe_graph/runtime/shape.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/types_af.h"
 
 namespace gert {

@@ -494,7 +494,7 @@ TEST_F(SkNodeTest, FusionFailReasonInfo_ScopeAndDeadlockDetails) {
   EXPECT_EQ(deadlockInfo.GetDeadlockFailReason(), static_cast<DeadlockFailReason>(1));
   EXPECT_EQ(FusionFailReasonToStr(deadlockInfo), "EXIST_DEADLOCK [KERNEL_INSUFFICIENT_CORES]");
   EXPECT_EQ(FusionFailReasonDetailToStr(deadlockInfo),
-            "exist deadlock, "
+            "deadlock exists, "
             "The wait node depends on a kernel node that requires more cores than available");
   EXPECT_STREQ(to_string(DeadlockFailReason::NOTIFY_NOT_IN_GRAPH), "NOTIFY_NOT_IN_GRAPH");
   EXPECT_STREQ(to_string(static_cast<DeadlockFailReason>(255)), "UNKNOWN_DEADLOCK_REASON");
@@ -551,10 +551,10 @@ TEST_F(SkNodeTest, FusionFailReasonStrings_CoverAllEnumNamesAndDetails) {
        "exceeds the maximum number of kernels that the device can provide"},
       {FusionFailReason::RESET_TYPE_NODE, "RESET_TYPE_NODE", "reset type node in end"},
       {FusionFailReason::ISOLATED_EVENT, "ISOLATED_EVENT", "There is no kernel node on the stream"},
-      {FusionFailReason::EXIST_DEADLOCK, "EXIST_DEADLOCK", "exist deadlock"},
+      {FusionFailReason::EXIST_DEADLOCK, "EXIST_DEADLOCK", "deadlock exists"},
       {FusionFailReason::SCOPE_FUSE_PART, "SCOPE_FUSE_PART", "scope fuse failed"},
       {FusionFailReason::EXTERNAL_DEPEND, "EXTERNAL_DEPEND", "event node has external dependency"},
-      {FusionFailReason::UNSUPPORT_EVENT_TYPE, "UNSUPPORT_EVENT_TYPE", "unsupport event type"},
+      {FusionFailReason::UNSUPPORT_EVENT_TYPE, "UNSUPPORT_EVENT_TYPE", "unsupported event type"},
       {FusionFailReason::MEMORY_WAIT_NODE_ONLY, "MEMORY_WAIT_NODE_ONLY", "No memory write exists"},
       {FusionFailReason::MEMORY_WRITE_NODE_ONLY, "MEMORY_WRITE_NODE_ONLY", "only exists memory write nodes"},
       {FusionFailReason::DEFAULT_NODE, "DEFAULT_NODE", "default node uses aicpu resources"},

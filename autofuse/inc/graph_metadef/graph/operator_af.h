@@ -17,10 +17,10 @@
 #include <string>
 #include <vector>
 
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "graph/types_af.h"
 #include "graph/inference_context_af.h"
-#include "graph/tensor.h"
+#include "graph/tensor_af.h"
 
 #ifndef USER_GE_LOGI
 #define USER_GE_LOGI(...)

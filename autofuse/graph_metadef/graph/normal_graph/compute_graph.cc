@@ -109,7 +109,13 @@ struct NodeCmp {
     const auto lhs_size = GetNodeOutputRealSize(lhs, *nodes_info_);
     const auto rhs_size = GetNodeOutputRealSize(rhs, *nodes_info_);
     if (lhs_size == rhs_size) {
-      return strcmp(lhs->GetNamePtr(), rhs->GetNamePtr()) > 0;
+      const int name_cmp = strcmp(lhs->GetNamePtr(), rhs->GetNamePtr());
+      if (name_cmp == 0) {
+        GELOGW("Duplicate node name [%s] found in topological sorting, comparing by pointer address.",
+               lhs->GetNamePtr());
+        return lhs.get() < rhs.get();
+      }
+      return name_cmp > 0;
     }
     return lhs_size > rhs_size;
   }
@@ -133,7 +139,13 @@ struct NodeCmpV2 {
       const auto lhs_branch = (*branch_widths_)[static_cast<size_t>(lhs->GetOpDesc()->GetId())];
       const auto rhs_branch = (*branch_widths_)[static_cast<size_t>(rhs->GetOpDesc()->GetId())];
       if (lhs_branch == rhs_branch) {
-        return strcmp(lhs->GetNamePtr(), rhs->GetNamePtr()) > 0;
+        const int name_cmp = strcmp(lhs->GetNamePtr(), rhs->GetNamePtr());
+        if (name_cmp == 0) {
+          GELOGW("Duplicate node name [%s] found in topological sorting, comparing by pointer address.",
+                 lhs->GetNamePtr());
+          return lhs.get() < rhs.get();
+        }
+        return name_cmp > 0;
       }
       return lhs_branch < rhs_branch;
     }
@@ -146,26 +158,27 @@ struct NodeCmpV2 {
 template <typename Compare>
 graphStatus RDFSCoreSort(std::vector<NodePtr> &node_vec, std::vector<NodeStatus> &nodes_info,
                          const ConstComputeGraphPtr &compute_graph, const Compare &cmp) {
+  std::set<NodePtr, Compare> zero_out_nodes{cmp};
   for (const auto &node : compute_graph->GetDirectNode()) {
-    if (node->GetOutNodesSize() > 0U) {
+    if (node->GetOutNodesSize() == 0U) {
+      zero_out_nodes.insert(node);
+    }
+  }
+  std::vector<NodePtr> stack(zero_out_nodes.begin(), zero_out_nodes.end());
+  while (!stack.empty()) {
+    const auto current = stack.back();
+    NodeStatus &info = nodes_info[current->GetOpDesc()->GetId()];
+    if (info.status == WalkStatus::kNotWalked) {
+      info.status = WalkStatus::kWalking;
+      const auto in_all_nodes = current->GetInAllNodes();
+      std::set<NodePtr, Compare> input_nodes{in_all_nodes.begin(), in_all_nodes.end(), cmp};
+      stack.insert(stack.end(), input_nodes.cbegin(), input_nodes.cend());
       continue;
     }
-    std::vector<NodePtr> stack = {node};
-    while (!stack.empty()) {
-      const auto current = stack.back();
-      NodeStatus &info = nodes_info[current->GetOpDesc()->GetId()];
-      if (info.status == WalkStatus::kNotWalked) {
-        info.status = WalkStatus::kWalking;
-        const auto in_all_nodes = current->GetInAllNodes();
-        std::set<NodePtr, Compare> input_nodes{in_all_nodes.begin(), in_all_nodes.end(), cmp};
-        stack.insert(stack.end(), input_nodes.cbegin(), input_nodes.cend());
-        continue;
-      }
-      stack.pop_back();
-      if (info.status == WalkStatus::kWalking) {
-        info.status = WalkStatus::kWalked;
-        node_vec.emplace_back(current);
-      }
+    stack.pop_back();
+    if (info.status == WalkStatus::kWalking) {
+      info.status = WalkStatus::kWalked;
+      node_vec.emplace_back(current);
     }
   }
   return GRAPH_SUCCESS;
@@ -1312,7 +1325,7 @@ graphStatus ComputeGraphImpl::UpdateOutputMapping(const std::map<uint32_t, uint3
   }
   const auto op_desc = net_output->GetOpDescBarePtr();
   if (op_desc == nullptr) {
-    REPORT_INNER_ERR_MSG("E18888", "net output's op desc pr should not be null.");
+    REPORT_INNER_ERR_MSG("E18888", "net output's op desc ptr should not be null.");
     GE_LOGE("[Get][OpDesc] UpdateOutputMapping failed: op_desc is NULL.");
     return GRAPH_FAILED;
   }
@@ -1402,7 +1415,7 @@ graphStatus ComputeGraphImpl::InsertGraphEvents(const ConstComputeGraphPtr &comp
 
 graphStatus ComputeGraphImpl::DFSTopologicalSorting(std::vector<NodePtr> &node_vec, const bool reverse,
                                                     const ConstComputeGraphPtr &compute_graph) const {
-  GELOGI("Runing_Dfs_Sort, reverse: %d, graph: %s", reverse, name_.c_str());
+  GELOGI("Running_Dfs_Sort, reverse: %d, graph: %s", reverse, name_.c_str());
   std::vector<NodePtr> stack;
   std::map<NodePtr, uint32_t> map_in_edge_num;
   // Record the number of non data nodes but no input nodes
@@ -1460,7 +1473,7 @@ graphStatus ComputeGraphImpl::DFSTopologicalSorting(std::vector<NodePtr> &node_v
 graphStatus ComputeGraphImpl::StableRDFSTopologicalSorting(std::vector<NodePtr> &node_vec, const bool reverse,
                                                            const ConstComputeGraphPtr &compute_graph) const {
   (void)reverse;
-  GELOGI("Runing_Stable_Reverse_Dfs_Sort: %s", name_.c_str());
+  GELOGI("Running_Stable_Reverse_Dfs_Sort: %s", name_.c_str());
   std::vector<NodeStatus> nodes_info;
   InitNodeStatus(compute_graph, nodes_info);
 
@@ -1544,8 +1557,7 @@ graphStatus ComputeGraphImpl::RDFSTopologicalSortingV2(std::vector<NodePtr> &nod
   }
 
   std::vector<int64_t> branch_widths(initial_vec.size(), 0);
-  for (auto it = initial_vec.rbegin(); it != initial_vec.rend(); ++it) {
-    const auto &node = *it;
+  for (const auto &node : initial_vec) {
     const auto id = static_cast<size_t>(node->GetOpDesc()->GetId());
     int64_t width = GetNodeInputCount(node);
     for (const auto &in_node : node->GetInAllNodes()) {
@@ -1563,7 +1575,7 @@ graphStatus ComputeGraphImpl::RDFSTopologicalSortingV2(std::vector<NodePtr> &nod
 
 graphStatus ComputeGraphImpl::BFSTopologicalSorting(std::vector<NodePtr> &node_vec, const bool reverse,
                                                     const ConstComputeGraphPtr &compute_graph) const {
-  GELOGI("Runing_Bfs_Sort: %s", name_.c_str());
+  GELOGI("Running_Bfs_Sort: %s", name_.c_str());
   (void)reverse;
   const bool is_mem_priority = IsMemoryPriority();
   std::vector<NodeStatus> nodes_info;
@@ -1615,7 +1627,7 @@ void ComputeGraphImpl::SetGraphTargetNodesInfo(const std::vector<af::NodePtr> &t
   targets_.clear();
   for (auto &node : target_nodes_info_) {
     if (node == nullptr) {
-      GELOGW("User pointed targets contains null node.ignore it !");
+      GELOGW("User pointed targets contains null node, ignore it!");
       continue;
     }
     targets_.insert(node);
@@ -2243,13 +2255,13 @@ graphStatus ComputeGraphImpl::DoTopologicalSorting(const ConstComputeGraphPtr &c
     for (auto &node : node_vec) {
       (void)itered_nodes_set.insert(node.get());
     }
-    REPORT_INNER_ERR_MSG("E18888", "Failed to do topo sorting total %zu, itered %zu, exist closed loop in graph:%s",
+    REPORT_INNER_ERR_MSG("E18888", "Failed to do topo sorting total %zu, iterated %zu, exist closed loop in graph:%s",
                          GetDirectNodesSize(), node_vec.size(), name_.c_str());
-    GELOGW("[Check][Param] Failed to do topo sorting total %zu, itered %zu, exist closed loop in graph.",
+    GELOGW("[Check][Param] Failed to do topo sorting total %zu, iterated %zu, exist closed loop in graph.",
            GetDirectNodesSize(), node_vec.size());
     for (auto &node : nodes_) {
       if (itered_nodes_set.count(node.get()) == 0UL) {
-        GELOGW("[Check][Param] The node %s does not itered when topological sorting", node->GetName().c_str());
+        GELOGW("[Check][Param] The node %s is not iterated when topological sorting", node->GetName().c_str());
       }
     }
     return GRAPH_FAILED;

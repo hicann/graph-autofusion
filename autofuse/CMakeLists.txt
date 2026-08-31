@@ -158,9 +158,12 @@ add_definitions(-DFORMULAS_PERF)
 
 target_compile_definitions(aihac_codegen PRIVATE
     google=ascend_private
+    INC_EXTERNAL_GRAPH_TENSOR_H_
+    INC_EXTERNAL_GRAPH_ASCEND_STRING_H_
 )
 
 target_compile_options(aihac_codegen PRIVATE
+    -include${CMAKE_CURRENT_LIST_DIR}/inc/graph_metadef/graph/tensor_af.h
     -O2
     -fPIC
     -fno-common

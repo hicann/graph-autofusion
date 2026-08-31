@@ -107,7 +107,7 @@ graphStatus EstablishAscNodeAndEdges(const ascendc_ir::proto::AscGraphDef &asc_g
                         node_attr.name().c_str());
       GE_ASSERT_GRAPH_SUCCESS(
           GraphUtils::AddEdge(src_node->GetOutDataAnchor(src_out_index), dst_node->GetInDataAnchor(dst_in_index)),
-          "[Add][Edge] failed to add edge from node[%s:%d] to node[%s:%d] failed.Possible  duplicate link.",
+          "[Add][Edge] failed to add edge from node[%s:%d] to node[%s:%d], possible duplicate link.",
           src_node_name.c_str(), src_out_index, dst_node_name.c_str(), dst_in_index);
       GELOGD("[Add][Edge] from node[%s:%d] to node[%s:%d].", src_node_name.c_str(), src_out_index,
              dst_node_name.c_str(), dst_in_index);
@@ -150,7 +150,7 @@ graphStatus AscGraphUtils::InsertNodeAfter(const OutDataAnchorPtr &src, const st
   const auto src_node = src->GetOwnerNodeBarePtr();
   GE_CHECK_NOTNULL(src_node);
   GE_ASSERT_TRUE(src_node->GetOwnerComputeGraph() == insert_node->GetOwnerComputeGraph(),
-                 "src:%s and insert_node:%s does not exist in the same graph.", src_node->GetName().c_str(),
+                 "src:%s and insert_node:%s do not exist in the same graph.", src_node->GetName().c_str(),
                  insert_node->GetName().c_str());
 
   GE_ASSERT_GRAPH_SUCCESS(GraphUtils::AddEdge(src, insert_node->GetInDataAnchor(static_cast<int32_t>(input_index))));
@@ -192,7 +192,7 @@ graphStatus AscGraphUtils::InsertNodeBefore(const InDataAnchorPtr &dst, const No
   const auto dst_node = dst->GetOwnerNodeBarePtr();
   GE_CHECK_NOTNULL(dst_node);
   GE_ASSERT_TRUE(dst_node->GetOwnerComputeGraph() == insert_node->GetOwnerComputeGraph(),
-                 "dst:%s and insert_node:%s does not exist in the same graph.", dst_node->GetName().c_str(),
+                 "dst:%s and insert_node:%s do not exist in the same graph.", dst_node->GetName().c_str(),
                  insert_node->GetName().c_str());
 
   const auto src_node_out_anchor = dst->GetPeerOutAnchor();
@@ -384,7 +384,7 @@ graphStatus AscGraphUtils::DeserializeFromProto(const ascendc_ir::proto::AscGrap
     asc_node->outputs();
     asc_node->inputs();
     GE_ASSERT_TRUE(node_index < asc_nodes.size(),
-                   "[Deserialize][Node] failed, node_index[%ld] should less than nodes size[%zu].", node_index,
+                   "[Deserialize][Node] failed, node_index[%ld] should be less than nodes size[%zu].", node_index,
                    asc_nodes.size());
     const auto &asc_node_def = asc_nodes[static_cast<int32_t>(node_index)];
     const auto op_desc = asc_node->GetOpDesc();

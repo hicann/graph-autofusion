@@ -64,8 +64,8 @@ af::Status IsUpperBoundValid(const Expr &min_expr, const Expr &max_expr) {
   T max_value{};
   (void)min_expr.GetConstValue(min_value);
   (void)max_expr.GetConstValue(max_value);
-  GE_ASSERT_TRUE(min_value <= max_value, "Args manager process failed, min[%u] cannot be less than max[%u].", min_value,
-                 max_value);
+  GE_ASSERT_TRUE(min_value <= max_value, "Args manager process failed, min[%u] cannot be greater than max[%u].",
+                 min_value, max_value);
   return af::SUCCESS;
 }
 
@@ -659,10 +659,10 @@ inline std::string RemoveSpace(std::string str) {
 af::Status TilingCodeGenImpl::GenCastReuseTilingDataCode(const ReuseScheduleGroupInfo &reuse_info,
                                                          const ReuseScheduleGroupInfo &info) {
   GE_ASSERT_TRUE(reuse_info.reuse_input_axes.size() == info.reuse_input_axes.size(),
-                 "reuse input axes size is not equal size: [%zu vs %zu]", reuse_info.reuse_input_axes.size(),
+                 "reuse input axes size is not equal: [%zu vs %zu]", reuse_info.reuse_input_axes.size(),
                  info.reuse_input_axes.size());
   GE_ASSERT_TRUE(reuse_info.reuse_search_axes.size() == info.reuse_search_axes.size(),
-                 "reuse search axes size is not equal size: [%zu vs %zu]", reuse_info.reuse_search_axes.size(),
+                 "reuse search axes size is not equal: [%zu vs %zu]", reuse_info.reuse_search_axes.size(),
                  info.reuse_search_axes.size());
   GE_ASSERT_TRUE(reuse_info.tiling_keys.size() == info.tiling_keys.size(),
                  "reuse_keys size is not equal to info, size: [%zu vs %zu]", reuse_info.tiling_keys.size(),
@@ -2120,7 +2120,7 @@ af::Status TilingCodeGenImpl::GenExtraTilingData(const ModelInfo &model_info) {
 af::Status TilingCodeGenImpl::GenExtraEvalFunc(const ModelInfo &model_info) {
   GE_ASSERT_SUCCESS(GenPipeTypeObj(model_info), "Generate PipeTypeObj failed.");
   GE_ASSERT_SUCCESS(GenGetObj(model_info), "Generate GetObj failed.");
-  GE_ASSERT_SUCCESS(GenCalcScore(model_info), "Generate GetObj failed, graph name %s, tiling case %u",
+  GE_ASSERT_SUCCESS(GenCalcScore(model_info), "Generate CalcScore failed, graph name %s, tiling case %u",
                     model_info.graph_name.c_str(), model_info.tiling_case_id);
   return af::SUCCESS;
 }
@@ -2708,7 +2708,7 @@ std::string TilingCodeGenImpl::GenPerformanceAdjustmentCode(bool enable_group_pa
     code += "    const double core_ratio = (double)tiling_data.get_block_dim() / (double)core_num;\n";
     code += "    cur_obj = cur_obj / 100.0 * group_num * core_ratio;\n";
     code +=
-        "    OP_LOGD(OP_NAME, \"The optimal objection for tiling_case_id %u of %s is %lf(original obj is %lf), "
+        "    OP_LOGD(OP_NAME, \"The optimal objective for tiling_case_id %u of %s is %lf(original obj is %lf), "
         "group_num is %u, limited core num is %u, used core num is %u.\",\n";
     if (!is_uniq_group) {
       code +=
@@ -2728,11 +2728,11 @@ std::string TilingCodeGenImpl::GenLogOutputCodeWithUb(const bool is_uniq_group) 
   if (!is_uniq_group) {
     return "    OP_LOGD(OP_NAME, \"The ub ratio for tiling_case_id %u of %s is %f.\", tiling_case_id, schedule_name, "
            "cur_ub_ratio);\n"
-           "    OP_LOGD(OP_NAME, \"The optimal objection for tiling_case_id %u of %s is %f.\", tiling_case_id, "
+           "    OP_LOGD(OP_NAME, \"The optimal objective for tiling_case_id %u of %s is %f.\", tiling_case_id, "
            "schedule_name, cur_obj);";
   } else {
     return "    OP_LOGD(OP_NAME, \"The ub ratio for tiling_case_id %u is %f.\", tiling_case_id, cur_ub_ratio);\n"
-           "    OP_LOGD(OP_NAME, \"The optimal objection for tiling_case_id %u is %f.\", tiling_case_id, cur_obj);";
+           "    OP_LOGD(OP_NAME, \"The optimal objective for tiling_case_id %u is %f.\", tiling_case_id, cur_obj);";
   }
 }
 
@@ -2776,7 +2776,7 @@ af::Status TilingCodeGenImpl::GenFindPerfBetterTilingbyCaseIdWithoutUb(bool enab
       tiling_func_.AddLine("    const double core_ratio = (double)tiling_data.block_dim_ / (double)core_num;");
       tiling_func_.AddLine("    cur_obj = cur_obj / 100.0 * group_num * core_ratio;");
       tiling_func_.AddLine(
-          "    OP_LOGD(OP_NAME, \"The optimal objection for tiling_case_id %u is %lf(original obj is %lf), "
+          "    OP_LOGD(OP_NAME, \"The optimal objective for tiling_case_id %u is %lf(original obj is %lf), "
           "group_num is %u, limited core num is %u, used core num is %u.\",");
       tiling_func_.AddLine("      tiling_case_id, cur_obj, org_cur_obj, group_num, core_num, tiling_data.block_dim_);");
     }
@@ -2784,7 +2784,7 @@ af::Status TilingCodeGenImpl::GenFindPerfBetterTilingbyCaseIdWithoutUb(bool enab
   }
 
   tiling_func_.AddLine(
-      "    OP_LOGD(OP_NAME, \"The optimal objection for tiling_case_id %u is %f.\", tiling_case_id, cur_obj);");
+      "    OP_LOGD(OP_NAME, \"The optimal objective for tiling_case_id %u is %f.\", tiling_case_id, cur_obj);");
   tiling_func_.AddLine("    if (obj < 0 || cur_obj < obj) {");
   // 始终传递 workspace_map 参数，确保与 UpdateBetterTiling 签名一致
   tiling_func_.AddLine(
@@ -4234,14 +4234,14 @@ af::Status TilingCodeGenImpl::GenGetAllSchedulesResults(const AscGraphNamepspace
     GELOGI("Force schedule result %ld for op %s", config_.force_schedule_result, config_.tiling_data_type_name.c_str());
     GE_ASSERT_TRUE(config_.force_schedule_result < static_cast<int32_t>(namespace_map.size()),
                    "Force schedule "
-                   "result[%ld] should less than result size[%zu]",
+                   "result[%ld] should be less than result size[%zu]",
                    config_.force_schedule_result, namespace_map.size());
     tiling_func_.AddLine("  auto got_result = kScheduleResultFunctions[" + chosen_index +
                          "](ori_block_dim, tiling_case_id, tiling_data, cur_perf, "
                          "best_perf, cur_block_dim);");
     tiling_func_.AddLine("  if (!got_result) {");
     tiling_func_.AddLine("    OP_LOGW(OP_NAME, \"Schedule result" + std::to_string(config_.force_schedule_result) +
-                         " cannot found for op\");");
+                         " cannot be found for op\");");
     tiling_func_.AddLine("    return false;");
     tiling_func_.AddLine("  }");
     return af::SUCCESS;
@@ -4387,7 +4387,6 @@ af::Status TilingCodeGenImpl::GenPGOByCoreNumFusedScheduleResultsGetTilingDefine
   auto core_num = BaseTypeUtils::DumpHardware(HardwareDef::CORENUM);
   tiling_func_.AddLine("    tiling_data->set_block_dim(block_dim_i);");
   tiling_func_.AddLine("    tiling_data->set_" + core_num + "(block_dim_i);");
-  size_t asc_graph_id = 0UL;
   for (const auto &asc_graph_namespace_map : namespace_map) {
     const std::string &asc_graph_namespace = "AscGraph" + std::to_string(asc_graph_namespace_map.first);
     tiling_func_.AddLine("    if (!" + asc_graph_namespace + "::PGOByCoreNumSearchTilingKey(vec" +
@@ -4395,7 +4394,6 @@ af::Status TilingCodeGenImpl::GenPGOByCoreNumFusedScheduleResultsGetTilingDefine
     tiling_func_.AddLine("      OP_LOGW(OP_NAME, \"Failed to get tiling of " + asc_graph_namespace + ".\");");
     tiling_func_.AddLine("      continue;");
     tiling_func_.AddLine("    }");
-    asc_graph_id++;
   }
   GenPGOByCoreNumSearchTilingKeyCollectTilingData(namespace_map);
   tiling_func_.AddLine("  }");
@@ -4412,7 +4410,6 @@ af::Status TilingCodeGenImpl::GenPGOFusedScheduleResultsGetTilingDefine(const Fu
                        config_.tiling_data_type_name + " &tiling_data, " +
                        " int32_t tiling_case_id, AutofuseTilingData* tilingData," + GenPgoTensorArgsDef() +
                        "void* stream, uint32_t workspaceSize, double& best_perf, const SearchConfig *search_cfg) {");
-  size_t asc_graph_id = 0UL;
   tiling_func_.AddLine("  OP_LOGI(OP_NAME, \"Start PGOSearchTilingKey root.\");");
   tiling_func_.AddLine("  (void)tilingData;");
   tiling_func_.AddLine("  PgoConfig::Instance().tensor_args = tensor_args;");
@@ -4424,7 +4421,6 @@ af::Status TilingCodeGenImpl::GenPGOFusedScheduleResultsGetTilingDefine(const Fu
   std::string block_dim_list_arg = "multi_group_block_dim_list";
   GenPGOMultiGroupBlockDimList(namespace_map, block_dim_list_arg);
 
-  asc_graph_id = 0UL;
   for (const auto &asc_graph_namespace_map : namespace_map) {
     const std::string &asc_graph_namespace = "AscGraph" + std::to_string(asc_graph_namespace_map.first);
     tiling_func_.AddLine("  if (!" + asc_graph_namespace +
@@ -4437,7 +4433,6 @@ af::Status TilingCodeGenImpl::GenPGOFusedScheduleResultsGetTilingDefine(const Fu
     tiling_func_.AddLine("    tiling_data = tilingTmp;");
     tiling_func_.AddLine("    best_perf = cur_perf;");
     tiling_func_.AddLine("  }");
-    asc_graph_id++;
   }
 
   tiling_func_.AddLine("  OP_LOGI(OP_NAME, \"End PGOSearchTilingKey root.\");");

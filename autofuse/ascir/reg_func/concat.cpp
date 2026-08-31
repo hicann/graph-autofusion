@@ -81,7 +81,7 @@ bool IsAllStaticAligned(const AscNode &node, int32_t align_size) {
     }
   }
 
-  GE_WARN_ASSERT(find_concat_dim, "not find concat dim in vectorized_axis, not aligned.");
+  GE_WARN_ASSERT(find_concat_dim, "Failed to find concat dim in vectorized_axis, not aligned.");
 
   for (uint32_t i = 0; i < node_inputs.Size(); ++i) {
     const auto &input_attr = node_inputs[i].attr;

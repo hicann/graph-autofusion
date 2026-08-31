@@ -53,6 +53,7 @@ int main(int argc, char *argv[]) {
   std::cout << "***************************************20250822****1****" << std::endl;
   std::cout << result.tiling;
   std::fstream tiling_file("load_broadcast_store_tiling.cpp", std::ios::out);
+  std::fstream tiling_head_file("load_broadcast_store_tiling.h", std::ios::out);
   std::cout << "***************************************20250822*****2***" << std::endl;
   std::cout << result.tiling_data;
   std::fstream tiling_data_file("autofuse_tiling_data.h", std::ios::out);
@@ -60,6 +61,7 @@ int main(int argc, char *argv[]) {
 
   kernel_file << tilig_stub << RemoveSubDirInclude(result.kernel);
   tiling_file << result.tiling;
+  tiling_head_file << "";
   tiling_data_file << result.tiling_data;
 
   af::AscGraph graph_int64("load_broadcast_store_int64");
@@ -92,8 +94,10 @@ int main(int argc, char *argv[]) {
 
   std::fstream kernel_file_int64("load_broadcast_store_int64_kernel.cpp", std::ios::out);
   std::fstream tiling_data_file_int64("autofuse_tiling_data.h", std::ios::out);
+  std::fstream tiling_head_file_int64("load_broadcast_store_int64_tiling.h", std::ios::out);
 
   kernel_file_int64 << tilig_stub_int64 << RemoveSubDirInclude(result.kernel);
+  tiling_head_file_int64 << "";
   tiling_data_file_int64 << result.tiling_data;
 
   af::AscGraph graph_uint8("load_broadcast_store_uint8");
@@ -127,8 +131,10 @@ int main(int argc, char *argv[]) {
 
   std::fstream kernel_file_uint8("load_broadcast_store_uint8_kernel.cpp", std::ios::out);
   std::fstream tiling_data_file_uint8("autofuse_tiling_data.h", std::ios::out);
+  std::fstream tiling_head_file_uint8("load_broadcast_store_uint8_tiling.h", std::ios::out);
 
   kernel_file_uint8 << tilig_stub_uint8 << RemoveSubDirInclude(result.kernel);
+  tiling_head_file_uint8 << "";
   tiling_data_file_uint8 << result.tiling_data;
 
   std::cout << "***************************************20250822*****6***" << std::endl;

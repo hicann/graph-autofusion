@@ -9,6 +9,7 @@
  */
 
 #include "graph/ascendc_ir/utils/ascendc_ir_dump_utils.h"
+#include "framework/common/debug/ge_log.h"
 namespace af {
 std::stringstream &DumpAscirGraph::TilingKeyStr(std::stringstream &ss, AscGraph &graph) {
   std::string Tilingkey = std::to_string(graph.GetTilingKey());
@@ -275,7 +276,7 @@ void DumpAscirGraph::WriteOutToFile(const std::string &filename, AscGraph &graph
   const auto &content = DumpGraph(graph);
   std::ofstream outFile(filename);
   if (!outFile) {
-    std::cerr << "Cannot open the file: " << filename << std::endl;
+    GELOGE(FAILED, "Cannot open the file: %s.", filename.c_str());
     return;
   }
   outFile << content;

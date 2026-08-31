@@ -12,7 +12,7 @@
 #define INC_GRAPH_UTILS_EXECUTE_GRAPH_ADAPTER_H
 
 #include "graph/fast_graph/execute_graph.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 
 namespace af {
 class ExecuteGraphAdapter {

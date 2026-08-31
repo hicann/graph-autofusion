@@ -318,7 +318,7 @@ graphStatus OpDescImpl::AddInputDesc(const uint32_t index, const af::GeTensorDes
 
 graphStatus OpDescImpl::AddInputDesc(const std::string &name, const af::GeTensorDesc &input_desc) {
   if (input_name_idx_.find(name) != input_name_idx_.end()) {
-    GELOGI("input %s is exist, update it", name.c_str());
+    GELOGI("input %s already exists, update it", name.c_str());
     const graphStatus ret = UpdateInputDesc(name, input_desc);
     return ret;
   } else {
@@ -1106,7 +1106,7 @@ graphStatus OpDescImpl::DefaultInferFormat(const ConstOpDescPtr &op_desc) const 
     }
   }
   // Refresh all input output format
-  GELOGD("Default infer format.node[%s], first none nod format is:%d", GetName().c_str(), first_none_nd_format);
+  GELOGD("Default infer format.node[%s], first none ND format is:%d", GetName().c_str(), first_none_nd_format);
 
   for (const auto &input_desc : input_descs) {
     const Format origin_format = input_desc->GetOriginFormat();

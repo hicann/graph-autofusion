@@ -15,7 +15,7 @@
 #include <memory>
 #include "cache_state.h"
 #include "policy_register.h"
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 
 namespace af {
 class CachePolicy {

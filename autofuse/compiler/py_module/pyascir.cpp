@@ -971,7 +971,7 @@ int CommonOpsOperatorInit(PyObject *self_pyobject, PyObject *args, PyObject *kwa
   PY_ASSERT_NOTNULL(op);
   PY_ASSERT_NOTNULL(ascgraph_object);
   PY_ASSERT(PyObject_IsInstance(ascgraph_object, ge::PtrToPtr<PyTypeObject, PyObject>(&pyascir::HintGraph::type)) != 0,
-            "The asc graph node requires hitgraph to be passed in as an input parameter.");
+            "The asc graph node requires hintgraph to be passed in as an input parameter.");
 
   auto graph = ge::PtrToPtr<PyObject, pyascir::HintGraph::Object>(ascgraph_object);
   PY_ASSERT_NOTNULL(graph->graph);
@@ -1029,7 +1029,8 @@ PyObject *OpsOperatorMethod::InferDtype(PyObject *self_pyobject, PyObject *args)
   ge::AscendString op_name;
   (void)self->op->GetName(op_name);
   auto node = af::NodeUtilsEx::GetNodeFromOperator(*self->op);
-  PY_ASSERT_NOTNULL(node, "node %s %s need set input before call infer dype", op_name.GetString(), op_type.GetString());
+  PY_ASSERT_NOTNULL(node, "node %s %s need set input before call infer dtype", op_name.GetString(),
+                    op_type.GetString());
   GE_ASSERT(
       HintGraph::ProcessSingleNode(std::dynamic_pointer_cast<af::AscNode>(std::const_pointer_cast<af::Node>(node))));
   Py_RETURN_NONE;
@@ -1066,8 +1067,8 @@ int OpsOperatorInput::_setter_list(PyObject *self, PyObject *value, void *closur
   ge::AscendString op_name;
   (void)self_->op->GetName(op_name);
   if (op_type == kAscBackendType || op_type == geir_op::AscGraph::Type) {
-    PY_ASSERT(dynamic_num == self_->op->GetInputsSize(), "%s %s should has %zu input but given %u", op_name.GetString(),
-              op_type.GetString(), self_->op->GetInputsSize(), dynamic_num);
+    PY_ASSERT(dynamic_num == self_->op->GetInputsSize(), "%s %s should have %zu input(s) but %u given",
+              op_name.GetString(), op_type.GetString(), self_->op->GetInputsSize(), dynamic_num);
   } else {
     PY_ASSERT_GRAPH_SUCCESS(af::SetDynamicInputNumByIrIndex(*self_->op, ir_index, dynamic_num));
   }
@@ -1124,9 +1125,9 @@ int OpsOperatorInput::_setter_or_setter_list(PyObject *self, PyObject *value, vo
 template <typename OpType, typename AttrDefType>
 auto GetValidatedIrAttr(PyObject *self, const char *attr_type_name) -> AttrDefType * {
   auto ir_attr_obj = reinterpret_cast<typename IrAttr<OpType>::Object *>(self);
-  PY_ASSERT(ir_attr_obj != nullptr, "Inner error, has no ir attr", "");
+  PY_ASSERT(ir_attr_obj != nullptr, "Internal error, has no ir attr", "");
   auto target_attr = dynamic_cast<AttrDefType *>(ir_attr_obj->ir_attr);
-  PY_ASSERT(target_attr != nullptr, "Inner error, ir attr type is not %s", attr_type_name);
+  PY_ASSERT(target_attr != nullptr, "Internal error, ir attr type is not %s", attr_type_name);
   return target_attr;
 }
 

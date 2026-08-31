@@ -261,7 +261,7 @@ __aicore__ inline void BroadcastExtendImpl(const LocalTensor<T> &dst, const Loca
   ASCENDC_ASSERT((tiling != nullptr), "BroadcastTilingExtend could not be empty!");
   if constexpr (constRank != -1) {
     ASCENDC_ASSERT((tiling->oriRank == constRank),
-                   { KERNEL_LOG(KERNEL_ERROR, "Tilling original rank and constRank should be equal!"); });
+                   { KERNEL_LOG(KERNEL_ERROR, "Tiling original rank and constRank should be equal!"); });
   }
   BroadcastInternal::ShapeCheck(tiling->oriDstShape, dstShape, tiling->oriRank);
   BroadcastInternal::ShapeCheck(tiling->oriSrcShape, srcShape, tiling->oriRank);

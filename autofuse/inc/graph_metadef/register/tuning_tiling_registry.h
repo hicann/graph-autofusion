@@ -14,7 +14,7 @@
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include "graph/ascend_string.h"
+#include "graph/ascend_string_af.h"
 #include "register/tuning_tiling_reflection_utils.h"
 namespace tuningtiling {
 struct TilingItem {

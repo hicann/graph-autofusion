@@ -217,7 +217,7 @@ af::Status SplitRegApiCall::GenerateDefault(const vector<std::reference_wrapper<
     DefineSplitTiling(tiling_b32, t_pipe.tiler, ss);
     dtype_name = "uint32_t";
   } else if (NeedB8ToB16(tiling)) {
-    GELOGD("can use b16 split", dtype_name.c_str());
+    GELOGD("can use b16 split, dtype: %s", dtype_name.c_str());
     SplitTiling tiling_b16;
     const auto &kB16ToB8 = af::Symbol(2);
     GE_ASSERT_TRUE(kB16ToB8 != 0);

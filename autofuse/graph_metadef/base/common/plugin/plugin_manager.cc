@@ -296,7 +296,7 @@ bool PluginManager::GetRequiredOppAbiVersion(std::vector<std::pair<uint32_t, uin
   } else if (mmIsDir((model_path + kRuntimePath).c_str()) == EN_OK) {
     version_path = model_path + kRuntimePath + kVersionInfo;
   } else {
-    GELOGW("compiler and runtime not exited");
+    GELOGW("compiler and runtime not exist");
     return true;
   }
   GELOGI("extract required opp abi version info from %s", version_path.c_str());
@@ -329,19 +329,19 @@ bool PluginManager::GetRequiredOppAbiVersion(std::vector<std::pair<uint32_t, uin
       second = second.substr(kEffectiveVersionNum, second.size() - kEffectiveVersionNum);
       uint32_t first_num = 0U;
       if (!GetEffectiveVersion(first, first_num)) {
-        GELOGW("[InvalidVersion] Format of required_opp_abi_version [%s] is not invalid", version.c_str());
+        GELOGW("[InvalidVersion] Format of required_opp_abi_version [%s] is invalid", version.c_str());
         return false;
       }
       uint32_t second_num = 0U;
       if (!GetEffectiveVersion(second, second_num)) {
-        GELOGW("[InvalidVersion] Format of required_opp_abi_version [%s] is not invalid", version.c_str());
+        GELOGW("[InvalidVersion] Format of required_opp_abi_version [%s] is invalid", version.c_str());
         return false;
       }
       (void)required_opp_abi_version.emplace_back(first_num, second_num);
     } else {
       uint32_t tmp_num = 0U;
       if (!GetEffectiveVersion(first, tmp_num)) {
-        GELOGW("[InvalidVersion] Format of required_opp_abi_version [%s] is not invalid", version.c_str());
+        GELOGW("[InvalidVersion] Format of required_opp_abi_version [%s] is invalid", version.c_str());
         return false;
       }
       (void)required_opp_abi_version.emplace_back(tmp_num, tmp_num);
@@ -432,7 +432,7 @@ bool PluginManager::CheckOppAndCompilerVersions(const std::string &opp_version, 
       return false;
     }
     if (!IsVersionWithInRequiredRange(effective_opp_version, required_version)) {
-      GELOGW("opp_version:%s is not with in required_opp_abi_version:%s", opp_version.c_str(),
+      GELOGW("opp_version:%s is not within required_opp_abi_version:%s", opp_version.c_str(),
              TransRequiredOppAbiVersionToString(required_version).c_str());
       return false;
     }
@@ -446,7 +446,7 @@ bool PluginManager::CheckOppAndCompilerVersions(const std::string &opp_version, 
         return false;
       }
       if (!IsVersionWithInRequiredRange(effective_compiler_version, required_version)) {
-        GELOGW("compiler version:%s is not with in required_opp_abi_version:%s", opp_version.c_str(),
+        GELOGW("compiler version:%s is not within required_opp_abi_version:%s", opp_version.c_str(),
                TransRequiredOppAbiVersionToString(required_version).c_str());
         return false;
       }
@@ -1060,7 +1060,7 @@ void PluginManager::GetCurEnvPackageOsAndCpuType(std::string &host_env_os, std::
   } else if (mmAccess2((model_path + kRuntimePath + kScene).c_str(), M_R_OK) == EN_OK) {
     scene = model_path + kRuntimePath + kScene;
   } else {
-    GELOGW("opp and runtime not exit");
+    GELOGW("opp and runtime not exist");
     return;
   }
   GELOGI("extract os and cpu info from %s", scene.c_str());
@@ -1171,7 +1171,7 @@ void PluginManager::GetFileListWithSuffix(const std::string &path, const std::st
 
   const INT32 is_dir = mmIsDir(&(resolved_path[0U]));
   if (is_dir != EN_OK) {
-    GELOGW("[FindSo][Check] Open directory %s failed, maybe it is not exit or not a dir, errmsg:%s",
+    GELOGW("[FindSo][Check] Open directory %s failed, maybe it does not exist or is not a dir, errmsg:%s",
            &(resolved_path[0U]), strerror(errno));
     return;
   }

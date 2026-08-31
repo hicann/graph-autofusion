@@ -514,7 +514,7 @@ class AscOpDynamicInput {
   template <typename Container>
   AscOpDynamicInput<INPUT_INDEX> &AssignImpl(const Container &outputs) {
     if (op_ == nullptr) {
-      GELOGE(FAILED, "op_ in null");
+      GELOGE(FAILED, "op_ is null");
       return *this;
     }
     if (inited_) {

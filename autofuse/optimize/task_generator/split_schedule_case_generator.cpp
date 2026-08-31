@@ -64,8 +64,7 @@ Status SplitFusionCaseGenerator::Generate(ascir::HintGraph &graph, std::vector<a
   split_node = FindSplitNodes(optimized_graph).front();
   bool split = false;
   GE_CHK_STATUS_RET(SplitSplits(optimized_graph, split_node, split_dim, split), "SplitSplits failed");
-  GELOGI("Split on non-first dim, split split into groups templates generated, split = %d",
-         static_cast<int32_t>(split));
+  GELOGI("Split on non-first dim, splits are grouped and templates generated, split = %d", static_cast<int32_t>(split));
 
   GE_CHK_STATUS_RET(ConvertSplitToLoads(optimized_graph, split_node, split_dim), "ConvertSplitToLoads failed");
   graphs.emplace_back(optimized_graph);
@@ -218,7 +217,7 @@ Status SplitFusionCaseGenerator::ReplaceWithLoad(::ascir::ImplGraph &owner_graph
                     "Failed to SplitData");
   std::vector<af::AscNodePtr> nodes;
   af::AscNodePtr broadcast_node;
-  GE_CHK_STATUS_RET(CollectBackwardNodes(load_node, nodes, broadcast_node), "Failed to SplitData");
+  GE_CHK_STATUS_RET(CollectBackwardNodes(load_node, nodes, broadcast_node), "Failed to collect backward nodes");
   GE_CHK_STATUS_RET(SplitOutReplaceAxis(owner_graph, nodes, load_node, out_index, broadcast_node),
                     "Failed to replace axis");
   return af::SUCCESS;
@@ -335,18 +334,18 @@ Status SplitFusionCaseGenerator::RemoveUnusedNodes(const af::AscNodePtr &split_n
   GE_CHK_STATUS_RET(af::GraphUtils::RemoveEdge(ori_load_node_->GetOutDataAnchor(0), split_node->GetInDataAnchor(0)),
                     "Failed to RemoveEdge");
   GE_ASSERT_NOTNULL(owner_compute_graph);
-  GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(split_node), "Failed to remote node: %s", split_node->GetNamePtr());
+  GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(split_node), "Failed to remove node: %s", split_node->GetNamePtr());
   auto load_out_data_anchor = ori_load_node_->GetOutDataAnchor(0);
   if (load_out_data_anchor->GetPeerInDataAnchors().empty()) {
     /* 先删除data与load的边 */
     GE_CHK_STATUS_RET(
         af::GraphUtils::RemoveEdge(ori_in_data_node_->GetOutDataAnchor(0), ori_load_node_->GetInDataAnchor(0)),
         "Failed to RemoveEdge");
-    GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(ori_load_node_), "Failed to remote node: %s",
+    GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(ori_load_node_), "Failed to remove node: %s",
                       ori_load_node_->GetNamePtr());
     auto data_node_data_anchor = ori_in_data_node_->GetOutDataAnchor(0);
     if (data_node_data_anchor->GetPeerInDataAnchors().empty()) {
-      GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(ori_in_data_node_), "Failed to remote node: %s",
+      GE_CHK_STATUS_RET(owner_compute_graph->RemoveNode(ori_in_data_node_), "Failed to remove node: %s",
                         ori_in_data_node_->GetNamePtr());
     }
   }

@@ -37,7 +37,7 @@ FastNode *FastNodeUtils::GetParentInput(const FastNode *const node) {
   }
 
   // Subgraph Data Node, check for constant input.
-  GE_ASSERT_NOTNULL(node->GetExtendInfo(), "EntendInfo of node %s is null.", node->GetNamePtr());
+  GE_ASSERT_NOTNULL(node->GetExtendInfo(), "ExtendInfo of node %s is null.", node->GetNamePtr());
   const auto graph = node->GetExtendInfo()->GetOwnerGraphBarePtr();
   GE_ASSERT_NOTNULL(graph);
 
@@ -100,7 +100,7 @@ ExecuteGraph *FastNodeUtils::GetSubgraphFromNode(const FastNode *const node, con
   const auto op_desc = node->GetOpDescBarePtr();
   GE_ASSERT_NOTNULL(op_desc);
 
-  GE_ASSERT_NOTNULL(node->GetExtendInfo(), "EntendInfo of node %s is null.", node->GetNamePtr());
+  GE_ASSERT_NOTNULL(node->GetExtendInfo(), "ExtendInfo of node %s is null.", node->GetNamePtr());
   const auto root_graph = ExecuteGraphUtils::FindRootGraph(node->GetExtendInfo()->GetOwnerGraphBarePtr());
   GE_ASSERT_NOTNULL(root_graph);
   return root_graph->GetSubGraph(op_desc->GetSubgraphInstanceName(index));
@@ -114,7 +114,7 @@ graphStatus FastNodeUtils::MountSubgraphToNode(FastNode *const node, const uint3
   const auto op_desc = node->GetOpDescBarePtr();
   GE_ASSERT_NOTNULL(op_desc);
 
-  GE_ASSERT_NOTNULL(node->GetExtendInfo(), "EntendInfo of node %s is null.", node->GetNamePtr());
+  GE_ASSERT_NOTNULL(node->GetExtendInfo(), "ExtendInfo of node %s is null.", node->GetNamePtr());
   const auto root_graph = ExecuteGraphUtils::FindRootGraph(node->GetExtendInfo()->GetOwnerGraphBarePtr());
   GE_ASSERT_NOTNULL(root_graph, "[Get][Graph] Failed to add subgraph to node %s, null root graph", node->GetNamePtr());
 
@@ -122,7 +122,7 @@ graphStatus FastNodeUtils::MountSubgraphToNode(FastNode *const node, const uint3
   GE_CHK_GRAPH_STATUS_RET(ret, "[Set][Name] Failed to set subgraph to node %s index %u", node->GetNamePtr(), index);
 
   subgraph->SetParentNode(node);
-  GE_ASSERT_NOTNULL(node->GetExtendInfo(), "EntendInfo of node %s is null.", node->GetNamePtr());
+  GE_ASSERT_NOTNULL(node->GetExtendInfo(), "ExtendInfo of node %s is null.", node->GetNamePtr());
   subgraph->SetParentGraph(node->GetExtendInfo()->GetOwnerGraphBarePtr());
 
   return (root_graph->AddSubGraph(const_cast<ExecuteGraphPtr &>(subgraph)) != nullptr) ? GRAPH_SUCCESS : GRAPH_FAILED;

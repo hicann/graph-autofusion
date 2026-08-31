@@ -24,6 +24,47 @@ TESTS_ST_PATH="${AUTOFUSE_PATH}/tests/st/"
 LOCAL_RUNTIME_LIB_PATH="${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir/generator:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/expression:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph:${AUTOFUSE_BUILD_PATH}/tests:${AUTOFUSE_BUILD_PATH}/tests/depends/trace:${AUTOFUSE_BUILD_PATH}/tests/depends/runtime"
 RUN_V35_TESTS="off"
 
+select_compilers() {
+  local selected_cc="${CC:-}"
+  local selected_cxx="${CXX:-}"
+  local gcc_version="${GCC_VERSION:-}"
+
+  if [[ -n "${selected_cc}" && -z "${selected_cxx}" ]]; then
+    if [[ "${selected_cc}" =~ ^gcc-([0-9]+)$ ]]; then
+      selected_cxx="g++-${BASH_REMATCH[1]}"
+    fi
+  fi
+
+  if [[ -n "${selected_cxx}" && -z "${selected_cc}" ]]; then
+    if [[ "${selected_cxx}" =~ ^g\+\+-([0-9]+)$ ]]; then
+      selected_cc="gcc-${BASH_REMATCH[1]}"
+    fi
+  fi
+
+  if [[ -z "${selected_cc}" || -z "${selected_cxx}" ]]; then
+    if [[ -n "${gcc_version}" ]]; then
+      selected_cc="${selected_cc:-gcc-${gcc_version}}"
+      selected_cxx="${selected_cxx:-g++-${gcc_version}}"
+    elif [[ "${task_name}" == *ubuntu24* ]]; then
+      selected_cc="${selected_cc:-gcc-14}"
+      selected_cxx="${selected_cxx:-g++-14}"
+    else
+      selected_cc="${selected_cc:-gcc}"
+      selected_cxx="${selected_cxx:-g++}"
+    fi
+  fi
+
+  export CC="${selected_cc}"
+  export CXX="${selected_cxx}"
+  echo "Using CC=${CC}"
+  echo "Using CXX=${CXX}"
+}
+
+select_compilers
+
+C_COMPILER="${CC}"
+CXX_COMPILER="${CXX}"
+
 source ${BASEPATH}/scripts/support_multiple_versions_of_lcov.sh
 
 # TODO(For autofuse): Remove 'export DISABLE_COMPILATION_WERROR=ON' and fix the related compilation errors.
@@ -186,8 +227,8 @@ build_ascgen-dev() {
     ENABLE_GE_ST_FLAG=""
   fi
 
-  CMAKE_ARGS="-D CMAKE_C_COMPILER=gcc \
-              -D CMAKE_CXX_COMPILER=g++ \
+  CMAKE_ARGS="-D CMAKE_C_COMPILER=${C_COMPILER} \
+              -D CMAKE_CXX_COMPILER=${CXX_COMPILER} \
               -D ASCEND_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
               -D CANN_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
               -D ASCEND_INSTALL_PATH=${ASCEND_INSTALL_PATH} \
@@ -223,8 +264,8 @@ build_ascgen-dev() {
 build_test_ascendc_api_test() {
   echo "create build directory and build ascendc_api_test";
   cd "${BUILD_PATH}"
-  CMAKE_ARGS="-D CMAKE_C_COMPILER=gcc \
-              -D CMAKE_CXX_COMPILER=g++ \
+  CMAKE_ARGS="-D CMAKE_C_COMPILER=${C_COMPILER} \
+              -D CMAKE_CXX_COMPILER=${CXX_COMPILER} \
               -D ASCEND_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
               -D CANN_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
               -D ASCEND_INSTALL_PATH=${ASCEND_INSTALL_PATH} \
@@ -308,8 +349,8 @@ build_test_ascir_st() {
   echo "$(date '+%F %T') create build directory and build test_ascir_st";
   cd "${BUILD_PATH}"
 
-  CMAKE_ARGS="-D CMAKE_C_COMPILER=gcc \
-              -D CMAKE_CXX_COMPILER=g++ \
+  CMAKE_ARGS="-D CMAKE_C_COMPILER=${C_COMPILER} \
+              -D CMAKE_CXX_COMPILER=${CXX_COMPILER} \
               -D ASCEND_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
               -D CANN_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
               -D ASCEND_INSTALL_PATH=${ASCEND_INSTALL_PATH} \
@@ -547,8 +588,8 @@ codegen_e2e_st() {
   g++ -v
 
   ASCEND_INSTALL_LIB_PATH=${ASCEND_INSTALL_PATH}/$(uname -m)-linux/lib64/
-  CMAKE_ARGS="-D CMAKE_C_COMPILER=gcc \
-            -D CMAKE_CXX_COMPILER=g++ \
+  CMAKE_ARGS="-D CMAKE_C_COMPILER=${C_COMPILER} \
+            -D CMAKE_CXX_COMPILER=${CXX_COMPILER} \
             -D ASCEND_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
             -D CANN_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
             -D ASCEND_INSTALL_PATH=${ASCEND_INSTALL_PATH} \
@@ -674,8 +715,8 @@ build_backend() {
   g++ -v
 
   ASCEND_INSTALL_LIB_PATH=${ASCEND_INSTALL_PATH}/$(uname -m)-linux/lib64/
-  CMAKE_ARGS="-D CMAKE_C_COMPILER=gcc \
-            -D CMAKE_CXX_COMPILER=g++ \
+  CMAKE_ARGS="-D CMAKE_C_COMPILER=${C_COMPILER} \
+            -D CMAKE_CXX_COMPILER=${CXX_COMPILER} \
             -D ASCEND_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
             -D CANN_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
             -D ASCEND_INSTALL_PATH=${ASCEND_INSTALL_PATH} \
@@ -1036,8 +1077,8 @@ build_ut_att() {
   echo "create build directory and build att ut";
 
   cd "${BUILD_PATH}"
-  CMAKE_ARGS="-D CMAKE_C_COMPILER=gcc \
-              -D CMAKE_CXX_COMPILER=g++ \
+  CMAKE_ARGS="-D CMAKE_C_COMPILER=${C_COMPILER} \
+              -D CMAKE_CXX_COMPILER=${CXX_COMPILER} \
               -D ASCEND_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
               -D CANN_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
               -D ASCEND_INSTALL_PATH=${ASCEND_INSTALL_PATH} \
@@ -1075,8 +1116,8 @@ build_st_att() {
   echo "$(date '+%F %T') create build directory and build att st"
   cd "${BUILD_PATH}"
 
-  CMAKE_ARGS="-D CMAKE_C_COMPILER=gcc \
-              -D CMAKE_CXX_COMPILER=g++ \
+  CMAKE_ARGS="-D CMAKE_C_COMPILER=${C_COMPILER} \
+              -D CMAKE_CXX_COMPILER=${CXX_COMPILER} \
               -D ASCEND_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
               -D CANN_3RD_LIB_PATH=${ASCEND_3RD_LIB_PATH} \
               -D ASCEND_INSTALL_PATH=${ASCEND_INSTALL_PATH} \

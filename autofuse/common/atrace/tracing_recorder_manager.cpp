@@ -51,7 +51,7 @@ TracingRecorderManager::TracingRecorderManager() {
 }
 
 TracingRecorder *TracingRecorderManager::GetTracingRecorder(TracingModule module) const {
-  GE_ASSERT_TRUE(static_cast<size_t>(module) <= tracing_recorders_.size(), "Module [%zu] should less than %zu",
+  GE_ASSERT_TRUE(static_cast<size_t>(module) <= tracing_recorders_.size(), "Module [%zu] should be less than %zu",
                  static_cast<size_t>(module), tracing_recorders_.size());
   return tracing_recorders_[static_cast<int32_t>(module)].get();
 }

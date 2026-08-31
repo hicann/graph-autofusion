@@ -122,6 +122,14 @@ git clone https://gitcode.com/cann/graph-autofusion.git
    sudo apt-get install cmake
    ```
 
+- GCC >= 7.3.0
+
+  > [!NOTE] 说明
+  > - 默认使用当前环境已安装的 gcc/g++，不会修改系统默认编译器。
+  > - 如需切换到 gcc15/gcc16，请在编译前显式设置 `CC/CXX`，例如 `export CC=gcc-15 CXX=g++-15`。
+  > - 也可以设置 `GCC_VERSION=15` 或 `GCC_VERSION=16`，由脚本生成对应的编译器命令。
+  > - 切换编译器后请清理 `build/` 再重新配置，避免 CMake 缓存沿用旧编译器。
+
 #### 4.2.2 检查编译环境
 
 环境准备完成后，建议执行环境检查脚本，确认当前环境是否满足编译要求。

@@ -1146,7 +1146,7 @@ std::string GeneralSolverGen::GenSolverFuncImpl() {
   CreateConfig();
   CreateInput();
   RunSolver();
-  invoke_codes_ += "    OP_LOGW(OP_NAME, \"The solver executed failed.\");\n";
+  invoke_codes_ += "    OP_LOGW(OP_NAME, \"The solver execution failed.\");\n";
   invoke_codes_ += "    return false;\n";
   invoke_codes_ += "  }\n";
   return invoke_codes_;
@@ -1158,7 +1158,7 @@ std::string GeneralSolverGen::GenSolverDTImpl() {
   CreateConfig();
   CreateInput();
   RunSolver(true);
-  invoke_codes_ += "    OP_LOGW(OP_NAME, \"The solver for decision tree executed failed.\");\n";
+  invoke_codes_ += "    OP_LOGW(OP_NAME, \"The solver for decision tree execution failed.\");\n";
   invoke_codes_ += "    return false;\n";
   invoke_codes_ += "  }\n";
   return invoke_codes_;

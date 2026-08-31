@@ -16,9 +16,9 @@
 #include <string>
 #include <vector>
 
-#include "graph/ge_error_codes.h"
-#include "graph/ascend_string.h"
-#include "graph/tensor.h"
+#include "graph/ge_error_codes_af.h"
+#include "graph/ascend_string_af.h"
+#include "graph/tensor_af.h"
 #include "graph/types_af.h"
 
 using std::make_shared;

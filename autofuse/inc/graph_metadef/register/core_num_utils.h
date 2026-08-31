@@ -11,7 +11,7 @@
 #ifndef INC_REGISTER_CORE_NUM_UTILS_H
 #define INC_REGISTER_CORE_NUM_UTILS_H
 
-#include "graph/ge_error_codes.h"
+#include "graph/ge_error_codes_af.h"
 #include "platform/platform_info_def.h"
 #include "platform/platform_infos_def.h"
 #include "graph/op_desc.h"
