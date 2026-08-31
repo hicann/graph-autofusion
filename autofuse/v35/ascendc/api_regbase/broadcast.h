@@ -10,7 +10,7 @@
 #ifndef __ASCENDC_API_REGBASE_BROADCAST_H
 #define __ASCENDC_API_REGBASE_BROADCAST_H
 
-#if defined(__DAV_C310__) || defined(__DAV_310R6__) || (__NPU_ARCH__ == 5102)
+#if defined(__DAV_C310__) || defined(__DAV_310R6__) || (__NPU_ARCH__ == 5102) || (__NPU_ARCH__ == 9202)
 #include "broadcast_extend_impl.h"
 
 template <typename T, int constRank = -1>

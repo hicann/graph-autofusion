@@ -50,7 +50,7 @@ class AscIrAttStubV2 : public af::ascir::AscIrAtt {
   }
 };
 
-const std::vector<std::string> v2_soc_versions{"3510", "5102"};
+const std::vector<std::string> v2_soc_versions{"3510", "5102", "9202"};
 
 REG_ASC_IR(Square)
     .Input("x", "T")

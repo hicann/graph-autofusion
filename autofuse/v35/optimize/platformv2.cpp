@@ -116,4 +116,5 @@ std::set<std::string> PlatformV2::BroadcastTypes() const {
 
 REGISTER_PLATFORM_V2("3510", v2, true);
 REGISTER_PLATFORM_V2("5102", V2_1, false);
+REGISTER_PLATFORM_V2("9202", V2_2, false);
 }  // namespace optimize

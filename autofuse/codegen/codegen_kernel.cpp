@@ -3682,9 +3682,10 @@ Status Kernel::GenerateKernelByNode(const ascir::ImplGraph &graph, stringstream 
   GE_CHK_STATUS_RET(GenerateMacro(ss), "Generate Macro failed");
   std::string npu_arch;
   GE_ASSERT_SUCCESS(ge::PlatformContext::GetInstance().GetCurrentPlatformString(npu_arch));
-  const bool need_marco = (npu_arch == "3510");
+  const bool need_marco = (npu_arch == "3510" || npu_arch == "9202");
   if (need_marco) {
-    ss << "#if defined(__DAV_C310__) || (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510))"
+    ss << "#if defined(__DAV_C310__) || "
+          "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))"
        << std::endl;
   }
   const std::string kMatMulTilingKeyDynamic = "mat_mul_tiling_key_dynamic.h";
