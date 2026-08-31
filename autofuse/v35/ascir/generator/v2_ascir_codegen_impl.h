@@ -3786,6 +3786,7 @@ class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
       const AscNode &node) {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
         {DT_BF16, DT_FLOAT},
+        {DT_FLOAT16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
@@ -3795,6 +3796,8 @@ class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/cos.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -4950,6 +4953,7 @@ class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
       const AscNode &node) {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
         {DT_BF16, DT_FLOAT},
+        {DT_FLOAT16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
@@ -4959,6 +4963,8 @@ class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/sin.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
