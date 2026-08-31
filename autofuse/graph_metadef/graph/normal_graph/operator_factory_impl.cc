@@ -28,7 +28,6 @@ void ReleaseOpsRegInfo() {
   af::OperatorFactoryImpl::operator_verify_funcs_ = nullptr;
   af::OperatorFactoryImpl::operator_inferformat_funcs_ = nullptr;
   af::OperatorFactoryImpl::operator_infershape_funcs_ = nullptr;
-  af::OperatorFactoryImpl::operator_creators_v2_ = nullptr;
   af::OperatorFactoryImpl::operator_creators_ = nullptr;
   GELOGI("Release ops proto reg info success.");
 }
@@ -54,14 +53,6 @@ IsInferFormatV2RegisteredFunc OperatorFactoryImpl::is_infer_format_v2_registered
 IsInferShapeV2RegisteredFunc OperatorFactoryImpl::is_infer_shape_v2_registered_func_ = nullptr;
 
 Operator OperatorFactoryImpl::CreateOperator(const std::string &operator_name, const std::string &operator_type) {
-  if (operator_creators_v2_ != nullptr) {
-    const std::map<std::string, OpCreatorV2>::const_iterator it_v2 = operator_creators_v2_->find(operator_type);
-    if (it_v2 != operator_creators_v2_->cend()) {
-      return it_v2->second(operator_name.c_str());
-    } else {
-      GELOGW("[Create][Operator] No op_proto of [%s] registered by AscendString.", operator_type.c_str());
-    }
-  }
   if (operator_creators_ == nullptr) {
     return Operator();
   }
@@ -75,16 +66,6 @@ Operator OperatorFactoryImpl::CreateOperator(const std::string &operator_name, c
 
 graphStatus OperatorFactoryImpl::GetOpsTypeList(std::vector<std::string> &all_ops) {
   all_ops.clear();
-  if (operator_creators_v2_ != nullptr) {
-    all_ops.resize(operator_creators_v2_->size());
-    (void)std::transform(
-        operator_creators_v2_->begin(), operator_creators_v2_->end(), all_ops.begin(),
-        [](const std::pair<std::string, OpCreatorV2> &operator_creator_v2) { return operator_creator_v2.first; });
-    return GRAPH_SUCCESS;
-  } else {
-    GELOGW("[Get][OpsTypeList] Ops not registered by AscendString.");
-  }
-
   if (operator_creators_ != nullptr) {
     all_ops.resize(operator_creators_->size());
     (void)std::transform(
@@ -99,13 +80,6 @@ graphStatus OperatorFactoryImpl::GetOpsTypeList(std::vector<std::string> &all_op
 }
 
 bool OperatorFactoryImpl::IsExistOp(const std::string &operator_type) {
-  if (operator_creators_v2_ != nullptr) {
-    const std::map<std::string, OpCreatorV2>::const_iterator it_v2 = operator_creators_v2_->find(operator_type);
-    if (it_v2 != operator_creators_v2_->cend()) {
-      return true;
-    }
-  }
-
   if (operator_creators_ == nullptr) {
     return false;
   }
@@ -210,21 +184,24 @@ graphStatus OperatorFactoryImpl::RegisterOperatorCreator(const std::string &oper
 
 graphStatus OperatorFactoryImpl::RegisterOperatorCreator(const std::string &operator_type,
                                                          OpCreatorV2 const &op_creator) {
-  if (operator_creators_v2_ == nullptr) {
-    operator_creators_v2_ = MakeShared<std::map<std::string, OpCreatorV2>>();
-    GE_CHECK_NOTNULL(operator_creators_v2_);
+  const OpCreator compatible_creator = [op_creator](const std::string &operator_name) {
+    return op_creator(AscendString(operator_name.c_str()));
+  };
+  if (operator_creators_ == nullptr) {
+    operator_creators_ = MakeShared<std::map<std::string, OpCreator>>();
+    GE_CHECK_NOTNULL(operator_creators_);
   }
-  auto it = operator_creators_v2_->find(operator_type);
-  if (it != operator_creators_v2_->cend()) {
+  auto it = operator_creators_->find(operator_type);
+  if (it != operator_creators_->cend()) {
     if (is_register_overridable.load()) {
-      GELOGD("Override creator v2 for %s.", operator_type.c_str());
-      it->second = op_creator;
+      GELOGD("Override creator for %s.", operator_type.c_str());
+      it->second = compatible_creator;
       return GRAPH_SUCCESS;
     }
     return GRAPH_FAILED;
   }
-  (void)operator_creators_v2_->emplace(operator_type, op_creator);
-  GELOGD("Register creator v2 for %s.", operator_type.c_str());
+  (void)operator_creators_->emplace(operator_type, compatible_creator);
+  GELOGD("Register creator for %s.", operator_type.c_str());
   return GRAPH_SUCCESS;
 }
 

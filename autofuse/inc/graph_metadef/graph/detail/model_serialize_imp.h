@@ -85,7 +85,7 @@ class ModelSerializeImp {
 
   bool SerializeToBuffer(const proto::ModelDef &model_def, Buffer &buffer) const;
 
-  bool UnserializeModel(Model &model, proto::ModelDef &model_proto, const bool is_enable_multi_thread = false);
+  bool UnserializeModel(Model &model, proto::ModelDef &model_proto);
   bool SetWeightForModel(proto::OpDef &op_def) const;
 
   bool UnserializeGraphWithoutEdge(ComputeGraphPtr &graph, proto::GraphDef &graph_proto);
@@ -123,8 +123,6 @@ class ModelSerializeImp {
 
  private:
   bool RebuildOwnership(ComputeGraphPtr &compute_graph, std::map<std::string, ComputeGraphPtr> &subgraphs) const;
-  Status ParallelUnserializeGraph(std::map<std::string, ComputeGraphPtr> &graphs,
-                                  ::google::protobuf::RepeatedPtrField<proto::GraphDef> &graphs_proto);
   Status UnserializeGraph(std::map<std::string, ComputeGraphPtr> &graphs,
                           ::google::protobuf::RepeatedPtrField<proto::GraphDef> &graphs_proto);
   void FixOpDefSubgraphInstanceName(const ConstOpDescPtr &op_desc) const;

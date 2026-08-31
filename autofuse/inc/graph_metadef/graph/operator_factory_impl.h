@@ -128,6 +128,7 @@ class GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY OperatorFactoryImpl {
   static void ReleaseRegInfo();
 
   static std::shared_ptr<std::map<std::string, OpCreator>> operator_creators_;
+  // Kept for ABI compatibility with older clients. New registrations use operator_creators_.
   static std::shared_ptr<std::map<std::string, OpCreatorV2>> operator_creators_v2_;
   static std::shared_ptr<std::map<std::string, InferShapeFunc>> operator_infershape_funcs_;
   static std::shared_ptr<std::map<std::string, InferFormatFunc>> operator_inferformat_funcs_;
