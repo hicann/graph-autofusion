@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <algorithm>
 #include "tikicpulib.h"
 
 #include "autofuse_tiling_data.h"
@@ -18,7 +17,6 @@ TEST_P(E2E_LoadNanOutForStore_Code, CalculateCorrect_Nan) {
   float *input = (float *)AscendC::GmAlloc(test_size * sizeof(float) + 32);
   uint8_t *y = (uint8_t *)AscendC::GmAlloc(test_size * sizeof(uint8_t) + 32);
   uint8_t *expect = (uint8_t *)AscendC::GmAlloc(test_size * sizeof(uint8_t) + 32);
-  std::fill_n(y, test_size, uint8_t{0});
 
   // Prepare test and expect data
   srand(1);
@@ -34,8 +32,6 @@ TEST_P(E2E_LoadNanOutForStore_Code, CalculateCorrect_Nan) {
   tiling_data.s2 = test_shape[2];
   tiling_data.tiling_key = 0;
   GetTiling(tiling_data);
-  // This generated test kernel iterates all z0 slices and does not partition them by block index.
-  tiling_data.block_dim = 1;
 
   AscendC::SetKernelMode(KernelMode::AIV_MODE);
   ICPU_RUN_KF(load_nan_out_for_store, tiling_data.block_dim, (uint8_t *)input, (uint8_t *)y, nullptr,
@@ -57,5 +53,5 @@ TEST_P(E2E_LoadNanOutForStore_Code, CalculateCorrect_Nan) {
 }
 
 INSTANTIATE_TEST_SUITE_P(CalcWithDifferentShape, E2E_LoadNanOutForStore_Code,
-                         ::testing::Values(std::vector<int>{2, 8, 32}, std::vector<int>{8, 16, 32},
-                                           std::vector<int>{96, 16, 32}));
+                         ::testing::Values(std::vector<int>{2, 8, 8}, std::vector<int>{8, 16, 16},
+                                           std::vector<int>{96, 16, 16}));

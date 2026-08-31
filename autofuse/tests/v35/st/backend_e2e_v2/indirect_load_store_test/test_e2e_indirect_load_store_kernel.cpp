@@ -1682,10 +1682,10 @@ extern "C" int64_t AutofuseTiling(AutofuseTilingData *, uint32_t *, uint32_t *, 
 
 namespace {
 constexpr int32_t kInputStride0 = IL_INPUT_STRIDE0;
-constexpr int32_t kInputStride1 = (!IL_EXPECT_SIMT && !IL_EXPECT_SK && IL_INPUT_STRIDE1 == 10) ? 5 : IL_INPUT_STRIDE1;
+constexpr int32_t kInputStride1 = IL_INPUT_STRIDE1;
 constexpr int32_t kInputStride2 = IL_INPUT_STRIDE2;
 constexpr int32_t kIndexStride0 = IL_INDEX_STRIDE0;
-constexpr int32_t kIndexStride1 = (!IL_EXPECT_SIMT && !IL_EXPECT_SK && IL_INDEX_STRIDE1 == 10) ? 5 : IL_INDEX_STRIDE1;
+constexpr int32_t kIndexStride1 = IL_INDEX_STRIDE1;
 constexpr int32_t kIndexStride2 = IL_INDEX_STRIDE2;
 #ifdef IL_INDEX_SELECT_CASE
 constexpr int32_t kEffectiveInputStride0 = 138;
@@ -1827,13 +1827,10 @@ void InitializeData(float *input, int32_t *index, float *expected) {
     }
   }
   for (int32_t row = 0; row < kIndexRows; ++row) {
-    const int32_t index_value = static_cast<int32_t>((row * 7 + 3) % kInputRows);
-    for (int32_t col = 0; col < kEmbeddingSize; ++col) {
-      index[row * kEmbeddingSize + col] = index_value;
-    }
+    index[row] = static_cast<int32_t>((row * 7 + 3) % kInputRows);
     float sum = 0.0F;
     for (int32_t col = 0; col < kEmbeddingSize; ++col) {
-      sum += 2.0F * (input[index[row * kEmbeddingSize] * kEmbeddingSize + col] + 0.1F);
+      sum += 2.0F * (input[index[row] * kEmbeddingSize + col] + 0.1F);
     }
     expected[row] = sum;
   }
@@ -1842,7 +1839,7 @@ void InitializeData(float *input, int32_t *index, float *expected) {
 
 TEST(E2EIndirectLoadEmbedding, GeneratedKernelMatchesReference) {
   constexpr int64_t input_count = static_cast<int64_t>(kInputRows) * kEmbeddingSize;
-  constexpr int64_t index_count = static_cast<int64_t>(kIndexRows) * kEmbeddingSize;
+  constexpr int64_t index_count = kIndexRows;
   constexpr int64_t output_count = kIndexRows;
   indirect_load_test::KernelData<float, int32_t> buffers(input_count, index_count, output_count);
   ASSERT_TRUE(buffers.IsValid());

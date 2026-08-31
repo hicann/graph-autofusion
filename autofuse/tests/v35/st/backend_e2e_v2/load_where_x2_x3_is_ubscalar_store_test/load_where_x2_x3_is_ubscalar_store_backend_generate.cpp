@@ -52,6 +52,6 @@ TEST_F(TestBackendLoadWhereX2X3IsUbscalarStoreE2e, LoadWhereX2X3IsUbscalarStoreE
     EXPECT_NE(kernel.find("Duplicate(local_blk_tensor_of_scalar_2[0], static_cast<float>(100), "
                           "static_cast<uint64_t>(32/sizeof(float)));"),
               std::string::npos);
-    EXPECT_NE(kernel.find("DataCopyPadExtend<float, AscendC::PaddingMode::Compact>(global_1"), std::string::npos);
+    EXPECT_NE(kernel.find("DataCopyPadExtend<float, AscendC::PaddingMode::Normal>(global_1"), std::string::npos);
   });
 }

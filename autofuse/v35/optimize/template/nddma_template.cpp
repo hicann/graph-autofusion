@@ -271,8 +271,8 @@ af::Status NddmaTemplate::Generate([[maybe_unused]] const af::AscGraph &origin_g
     }
     GE_ASSERT_SUCCESS(ProcessSliceToNddma(node, is_nddma_generated_cur));
     is_nddma_generated = is_nddma_generated || is_nddma_generated_cur;
-    ascgen_utils::DiscontinuityInfo info;
-    GE_ASSERT_SUCCESS(ascgen_utils::TensorLayoutUtils::AnalyzeLoadDiscontinuity(node->outputs[0].attr, info),
+    DiscontinuityInfo info;
+    GE_ASSERT_SUCCESS(TensorLayoutUtils::AnalyzeLoadDiscontinuity(node->outputs[0].attr, info),
                       "Failed to analyze discontinuity info for node:[%s].", node->GetNamePtr());
     bool need_align_at_repeat1 = info.has_multiple_discontinuities && info.is_tail_axis_discontinuous;
     if (!is_nddma_generated_cur && (IsLoadNeedAlign(node) || need_align_at_repeat1)) {

@@ -4174,10 +4174,10 @@ constexpr int64_t kOutputDim1 = 16;
 constexpr int64_t kDim2 = 5;
 #endif
 constexpr int64_t kInputStride0 = IL_INPUT_STRIDE0;
-constexpr int64_t kInputStride1 = (!kExpectSimt && !kExpectSk && IL_INPUT_STRIDE1 == 10) ? 5 : IL_INPUT_STRIDE1;
+constexpr int64_t kInputStride1 = IL_INPUT_STRIDE1;
 constexpr int64_t kInputStride2 = IL_INPUT_STRIDE2;
 constexpr int64_t kIndexStride0 = IL_INDEX_STRIDE0;
-constexpr int64_t kIndexStride1 = (!kExpectSimt && !kExpectSk && IL_INDEX_STRIDE1 == 10) ? 5 : IL_INDEX_STRIDE1;
+constexpr int64_t kIndexStride1 = IL_INDEX_STRIDE1;
 constexpr int64_t kIndexStride2 = IL_INDEX_STRIDE2;
 #ifndef IL_INDEX_SELECT_CASE
 constexpr int64_t kEffectiveInputStride0 = kInputStride0;
@@ -4369,8 +4369,8 @@ std::shared_ptr<af::AscGraph> CreateSubGraph() {
   const std::vector<af::AxisId> output_axes = {view.output_row_axis, view.output_inner_axis};
   const std::vector<af::Expression> output_repeats = {view.index_rows, view.embedding_size};
   const std::vector<af::Expression> output_strides = {view.embedding_size, af::ops::One};
-  const std::vector<af::Expression> index_repeats = {view.index_rows, view.embedding_size};
-  const std::vector<af::Expression> index_strides = {view.embedding_size, af::ops::One};
+  const std::vector<af::Expression> index_repeats = {view.index_rows, af::ops::One};
+  const std::vector<af::Expression> index_strides = {af::ops::One, af::ops::Zero};
   const std::vector<af::Expression> reduce_repeats = {view.index_rows, af::ops::One};
   const std::vector<af::Expression> reduce_strides = {af::ops::One, af::ops::Zero};
 
@@ -4388,11 +4388,16 @@ std::shared_ptr<af::AscGraph> CreateSubGraph() {
   index_load.x = index.y;
   SetView(index_load, output_axes, index_repeats, index_strides, af::DT_INT32);
 
+  af::ascir_op::Cast index_cast("index_cast");
+  view.graph->AddNode(index_cast);
+  index_cast.x = index_load.y;
+  SetView(index_cast, output_axes, index_repeats, index_strides, af::DT_INT64);
+
   af::ascir_op::Broadcast index_broadcast("index_broadcast");
   view.graph->AddNode(index_broadcast);
   index_broadcast.attr.api.compute_type = af::ComputeType::kComputeBroadcast;
-  index_broadcast.x = index_load.y;
-  SetView(index_broadcast, output_axes, output_repeats, output_strides, af::DT_INT32);
+  index_broadcast.x = index_cast.y;
+  SetView(index_broadcast, output_axes, output_repeats, output_strides, af::DT_INT64);
 
   af::ascir_op::IndirectLoad indirect_load("indirect_load");
   view.graph->AddNode(indirect_load);

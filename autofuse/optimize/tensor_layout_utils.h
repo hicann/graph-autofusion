@@ -13,7 +13,7 @@
 
 #include "ascendc_ir/ascendc_ir_core/ascendc_ir_def.h"
 
-namespace ascgen_utils {
+namespace optimize {
 struct DiscontinuityInfo {
   bool is_tail_axis_discontinuous{false};    //  最后一根有效轴不连续
   bool has_multiple_discontinuities{false};  // 多根轴不连续场景
@@ -22,6 +22,6 @@ class TensorLayoutUtils {
  public:
   static af::Status AnalyzeLoadDiscontinuity(const af::AscTensorAttr &attr, DiscontinuityInfo &info);
 };
-}  // namespace ascgen_utils
+}  // namespace optimize
 
 #endif  // OPTIMIZE_TENSOR_LAYOUT_UTILS_H_

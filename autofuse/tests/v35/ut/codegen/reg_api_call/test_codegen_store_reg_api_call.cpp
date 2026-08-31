@@ -130,13 +130,13 @@ TEST(CodegenKernel, StoreRegApiCall_TwoStoreOneOutput) {
   EXPECT_EQ(
       result,
       std::string{
-          "DataCopyPadExtend<float, AscendC::PaddingMode::Compact>(local_1[0 + 0], local_0[0], 1, 1, (16 - 1), 0);\n"});
+          "DataCopyPadExtend<float, AscendC::PaddingMode::Normal>(local_1[0 + 0], local_0[0], 1, 1, (16 - 1), 0);\n"});
 
   codegen::StoreRegApiCall call_1("DataCopyPadExtend");
   EXPECT_EQ(call_1.Init(store_1), 0);
   call_1.inputs.push_back(&x1);
   call_1.Generate(tpipe, vector<af::AxisId>{}, result);
-  EXPECT_EQ(result, std::string{"DataCopyPadExtend<float, AscendC::PaddingMode::Compact>(local_1[0 + 1], local_0[0], "
+  EXPECT_EQ(result, std::string{"DataCopyPadExtend<float, AscendC::PaddingMode::Normal>(local_1[0 + 1], local_0[0], "
                                 "z0_t_size, 1, (16 - 1), 0);\n"});
 }
 
@@ -352,7 +352,7 @@ TEST(CodegenKernel, StoreRegApiCall_NeetMte3SyncMte2) {
   EXPECT_EQ(
       result,
       std::string{
-          "DataCopyPadExtend<float, AscendC::PaddingMode::Compact>(local_1[0 + 0], local_0[0], 1, 1, (16 - 1), 0);\n"
+          "DataCopyPadExtend<float, AscendC::PaddingMode::Normal>(local_1[0 + 0], local_0[0], 1, 1, (16 - 1), 0);\n"
           "auto local_0_e_mte3_2_mte2_t_0 = tpipe.AllocEventID<HardEvent::MTE3_MTE2>();\n"
           "TQueSync<PIPE_MTE3, PIPE_MTE2> local_0_s_mte3_2_mte2_t_0;\n"
           "local_0_s_mte3_2_mte2_t_0.SetFlag(local_0_e_mte3_2_mte2_t_0);\n"
@@ -449,7 +449,7 @@ TEST(CodegenKernel, StoreRegApiCall_ThreeDimStore) {
   EXPECT_EQ(
       result,
       std::string{
-          "DataCopyPadExtend<float, AscendC::PaddingMode::Normal>(local_1[0 + 0], local_0[0], 4, 2, (2 - 2), 2, "
+          "DataCopyPadExtend<float, AscendC::PaddingMode::Compact>(local_1[0 + 0], local_0[0], 4, 2, (2 - 2), 2, "
           "{static_cast<uint32_t>(8), static_cast<uint32_t>(1), static_cast<uint64_t>(8 * 4), static_cast<uint64_t>(24 "
           "* 4), static_cast<uint64_t>(0 * 4), static_cast<uint64_t>(0 * 4)});\n"});
 }
@@ -553,7 +553,7 @@ TEST(CodegenKernel, StoreRegApiCall_FiveDimStore) {
   call_0.Generate(tpipe, vector<af::AxisId>{}, result);
   EXPECT_EQ(result,
             std::string{"for (int outer_for_0 = 0; outer_for_0 < 8; outer_for_0++) {\nDataCopyPadExtend<float, "
-                        "AscendC::PaddingMode::Normal>(local_1[(0 + 0 + "
+                        "AscendC::PaddingMode::Compact>(local_1[(0 + 0 + "
                         "outer_for_0 * 160)], local_0[outer_for_0 * 32], 2, 2, (2 - 2), 2, {static_cast<uint32_t>(2), "
                         "static_cast<uint32_t>(4), static_cast<uint64_t>(4 * 4), static_cast<uint64_t>(12 * 4), "
                         "static_cast<uint64_t>(8 * 4), "
