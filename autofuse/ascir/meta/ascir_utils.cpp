@@ -169,9 +169,9 @@ struct DumpConfig {
 
 // 去除字符串两端空白
 std::string TrimParam(const std::string &s) {
-  size_t start = s.find_first_not_of(" \t");
+  const size_t start = s.find_first_not_of(" \t");
   if (start == std::string::npos) return "";
-  size_t end = s.find_last_not_of(" \t");
+  const size_t end = s.find_last_not_of(" \t");
   return s.substr(start, end - start + 1);
 }
 
@@ -327,13 +327,13 @@ static bool InitDumpDirectories() {
     return true;
   }
 
-  std::string base_path = BuildBasePath(GetCodegenCompileDebugDir());
-  std::string autofuse_dir = base_path + "autofuse_compile_debug/";
+  const std::string base_path = BuildBasePath(GetCodegenCompileDebugDir());
+  const std::string autofuse_dir = base_path + "autofuse_compile_debug/";
   if (!TryCreateDir(autofuse_dir)) {
     return false;
   }
 
-  std::string pid_dir = autofuse_dir + "ascgen_dump_pid_" + std::to_string(mmGetPid()) + "/";
+  const std::string pid_dir = autofuse_dir + "ascgen_dump_pid_" + std::to_string(mmGetPid()) + "/";
   if (!TryCreateDir(pid_dir)) {
     return false;
   }
@@ -353,7 +353,7 @@ static std::string GetDumpGraphPrefixAndCreateDir() {
   }
 
   // 创建 graph 子目录
-  std::string graph_dir = g_cached_pid_dir + g_current_fused_graph_name + "/";
+  const std::string graph_dir = g_cached_pid_dir + g_current_fused_graph_name + "/";
   if (g_created_graph_dirs.count(graph_dir) > 0) {
     return graph_dir;
   }
@@ -495,7 +495,7 @@ static std::stringstream &NodeAttrStr(std::stringstream &ss, const ascir::Graph 
   auto all_axis = graph.GetAllAxis();
   std::map<af::AxisId, std::string> axis_id_to_name = GetAxisIdToName(all_axis);
 
-  bool is_buf = (node->attr.api.type == af::ApiType::kAPITypeBuffer);
+  const bool is_buf = (node->attr.api.type == af::ApiType::kAPITypeBuffer);
 
   if (!is_buf) {
     ss << "    .axis = "
@@ -724,7 +724,7 @@ static std::stringstream &NodeOutputStr(std::stringstream &ss, const ascir::Grap
 static void DumpGraphText(const Graph &graph, const string &suffix, const uint32_t graph_id, const bool verbose,
                           const std::string &prefix) {
   // 判断是否是子图
-  bool is_subgraph = (suffix.find("_Subgraph_") != std::string::npos);
+  const bool is_subgraph = (suffix.find("_Subgraph_") != std::string::npos);
   // 使用新的 MLIR 风格格式
   auto dump_asc_graph = DebugStrNew(graph, verbose, is_subgraph);
 
@@ -823,11 +823,11 @@ void DumpPyCode(const af::AscGraph &graph) {
   if (!ascir::utils::IsCodegenCompileEnabled()) {
     return;
   }
-  std::string prefix = GetDumpGraphPrefixAndCreateDir();
+  const std::string prefix = GetDumpGraphPrefixAndCreateDir();
   if (prefix.empty()) {
     return;
   }
-  std::string base_name = "py_code_" + graph.GetName() + ".py";
+  const std::string base_name = "py_code_" + graph.GetName() + ".py";
   std::string file_name = prefix + SanitizeFileName(base_name);
   af::ascir::PythonCodeDumper dumper;
   (void)dumper.Dump(graph, file_name);
