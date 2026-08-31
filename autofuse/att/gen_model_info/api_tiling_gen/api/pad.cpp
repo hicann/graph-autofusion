@@ -84,7 +84,7 @@ af::Status GetPadTilingHeadFiles([[maybe_unused]] const std::string &tiling_data
   static constexpr char kHeaderContent[] = R"(
 #include <vector>
 #include <array>
-#include "graph/tensor_af.h"
+#include "graph/tensor.h"
 #include "lib/pad/pad_tilingdata.h"
 #include "lib/pad/pad_tiling.h"
 )";
