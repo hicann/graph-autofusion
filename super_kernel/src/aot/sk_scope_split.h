@@ -4,7 +4,7 @@
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
@@ -18,8 +18,8 @@
  * Architecture:
  * The scope splitting is implemented as a multi-pass pipeline, similar to compiler passes:
  * - Pass 0: Initial scope splitting based on fusibility and scopeBitFlags
- * - Pass 1: Deadlock detection and scope refinement
- * - Pass 2: ScheMode kernel core trend based split refinement
+ * - Pass 1: ScheMode core compatibility refinement
+ * - Pass 2: Progressive deadlock detection and final SK core calculation
  * - Pass 3: Remove event-only streams from scopes
  *
  * Key Concepts:
@@ -191,7 +191,7 @@ class ScopeSplitPass {
   SuperKernelScopeSplitter *splitter_;  ///< Reference to splitter for re-split requests
 };
 
-// ============ Pass 3: Event-Only Stream Remove (after ScheModeKernelSplit) ============
+// ============ Pass 3: Event-Only Stream Remove (after SK core calculation) ============
 
 /*!
  * \class EventOnlyStreamRemovePass
@@ -336,9 +336,16 @@ class InitialScopeSplitPass : public ScopeSplitPass {
  * \brief Result of processing a single scope for deadlock detection
  */
 enum class ScopeProcessResult {
-  NO_DEADLOCK,         ///< No deadlock found, scope is safe and added to outputScopes
-  DEADLOCK_RESOLVED,   ///< Deadlock found and successfully split, remaining part returned via pendingScope
-  DEADLOCK_UNRESOLVED  ///< Deadlock found but cannot split (no Wait node), caller should treat as fatal and abort
+  NO_DEADLOCK,                ///< No deadlock found, scope is safe and added to outputScopes
+  DEADLOCK_RESOLVED,          ///< Deadlock found and successfully split, remaining part returned via pendingScope
+  DEADLOCK_UNRESOLVED,        ///< Deadlock found but cannot split (no Wait node)
+  SK_CORE_CALCULATION_FAILED  ///< Progressive SK core calculation failed
+};
+
+enum class DeadlockCheckResult {
+  NO_DEADLOCK,
+  DEADLOCK_FOUND,
+  CALCULATION_FAILED,
 };
 
 /*!
@@ -348,7 +355,7 @@ enum class ScopeProcessResult {
  * This pass performs fine-grained scope refinement:
  * - Detects deadlocks within each scope
  * - Splits scopes at Wait nodes that would cause deadlocks
- * - The Wait node that triggers deadlock is NOT included in either split scope
+ * - The Wait split point is NOT included in either split scope
  */
 class DeadlockRefinePass : public ScopeSplitPass {
  public:
@@ -365,11 +372,12 @@ class DeadlockRefinePass : public ScopeSplitPass {
    * \brief Find deadlock point in a scope
    * \param scope Scope to check
    * \param deadlockNode Output: node that causes deadlock (nullptr if no deadlock)
-   * \param deadlockWaitNode Output: first Wait node before deadlock (nullptr if no deadlock)
-   * \return true if deadlock found
+   * \param deadlockWaitNode Output: nearest Wait node before deadlock (nullptr if no deadlock)
+   * \param completedScopeCoreInfo Output: final core info for the checked scope prefix
+   * \return Deadlock check result
    */
-  bool FindDeadlockInScope(const SuperKernelScopeInfo &scope, SuperKernelBaseNode **deadlockNode,
-                           SuperKernelBaseNode **deadlockWaitNode);
+  DeadlockCheckResult FindDeadlockInScope(const SuperKernelScopeInfo &scope, SuperKernelBaseNode **deadlockNode,
+                                          SuperKernelBaseNode **deadlockWaitNode, SkCoreInfo *completedScopeCoreInfo);
 
   /*!
    * \brief Split a scope at a Wait node
@@ -389,13 +397,13 @@ class DeadlockRefinePass : public ScopeSplitPass {
    * - Detects a deadlock and splits at the nearest preceding Wait node, moving
    *   the front part into outputScopes and returning the remaining part via
    *   pendingScope; or
-   * - Detects an unresolvable deadlock (no suitable Wait node), in which case
-   *   the caller should treat this as a fatal error and abort refinement.
+   * - Detects an unresolvable deadlock (no suitable Wait node); or
+   * - Detects an invalid SK core result. Both failures abort refinement.
    *
    * \param scopeToProcess The scope to process (moved)
    * \param outputScopes Vector to store deadlock-free scopes produced from the front part
    * \param pendingScope Optional: remaining part of the scope that still needs processing
-   * \return Result of the processing (NO_DEADLOCK, DEADLOCK_RESOLVED, or DEADLOCK_UNRESOLVED)
+   * \return Result of the processing
    */
   ScopeProcessResult ProcessSingleScope(SuperKernelScopeInfo &&scopeToProcess,
                                         std::vector<SuperKernelScopeInfo> &outputScopes,
@@ -406,38 +414,39 @@ class DeadlockRefinePass : public ScopeSplitPass {
    * @param workingScope scope to split
    * @param deadlockNode node that caused deadlock
    * @param deadlockWaitNode wait node to split at
+   * @param scopeBeforeCoreInfo final core info for the scope before the wait node
    * @param outputScopes output scopes
    * @param pendingScope pending scope for next iteration
    * @return split result
    */
   ScopeProcessResult HandleDeadlockSplit(SuperKernelScopeInfo &workingScope, SuperKernelBaseNode *deadlockNode,
-                                         SuperKernelBaseNode *deadlockWaitNode,
+                                         SuperKernelBaseNode *deadlockWaitNode, const SkCoreInfo &scopeBeforeCoreInfo,
                                          std::vector<SuperKernelScopeInfo> &outputScopes,
                                          std::optional<SuperKernelScopeInfo> &pendingScope);
   LockDetector lockDetector_;
 };
 
-// ============ Pass 3: ScheMode Kernel Core Split Refinement ============
+// ============ Pass 1: ScheMode Kernel Core Split Refinement ============
 
 /*!
  * \enum ScheModeScopeProcessResult
  * \brief Result of processing a single scope for ScheMode kernel split refinement
  */
 enum class ScheModeScopeProcessResult {
-  NO_SPLIT,       ///< No split required, scope is output as-is
-  SPLIT_RESOLVED  ///< Split required and completed, remaining part returned via pendingScope
+  NO_SPLIT,           ///< No split required, scope is output as-is
+  SPLIT_RESOLVED,     ///< Split required and completed, remaining part returned via pendingScope
+  CALCULATION_FAILED  ///< A single kernel cannot form a legal SK core result
 };
 
 /*!
  * \class ScheModeKernelSplitPass
- * \brief Pass 3: Refine scopes based on ScheMode kernel core trend
+ * \brief Explore SK type/core candidates and refine incompatible scopes
  *
  * Rules:
- * - Traverse nodes in a scope and merge kernel core requirement using max(cube), max(vec)
- * - When a kernel node with IsScheModeOn()==true is encountered:
- *   - If its core requirement is greater than merged previous requirement, keep merging
- *   - If its core requirement is smaller than merged previous requirement, split at this node
- * - Split point kernel is included in the "after" scope
+ * - Explore legal AIC/AIV/MIX1:1/MIX1:2 core results after each kernel is appended
+ * - Non-ScheMode tasks require no more C/V cores than the candidate SK core result
+ * - ScheMode vector-only tasks require an exact V match; other ScheMode tasks require an exact C match
+ * - Split before the first kernel that makes all launch-shape candidates invalid
  */
 class ScheModeKernelSplitPass : public ScopeSplitPass {
  public:
@@ -470,6 +479,9 @@ class ScheModeKernelSplitPass : public ScopeSplitPass {
    */
   void SplitScopeAtNode(const SuperKernelScopeInfo &scope, SuperKernelBaseNode *splitNode,
                         SuperKernelScopeInfo &scopeBefore, SuperKernelScopeInfo &scopeAfter);
+
+  uint32_t maxCubeNum_ = 0;
+  uint32_t maxVectorNum_ = 0;
 };
 
 // ============ Default Node Process Pass ============

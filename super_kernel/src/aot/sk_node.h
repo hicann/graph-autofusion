@@ -54,25 +54,24 @@ using SkBindMap = std::unordered_map<uint64_t, SkBindInfo>;
 
 // Unfused reason
 enum class FusionFailReason {
-  CAN_FUSE,                     // 0: Can fuse (default)
-  OP_UNSUPPORT,                 // 1: Failed to resolve SuperKernel bind map for the operator
-  DYNAMIC_TASK_UNSUPPORT,       // 2: Operator dynamically refreshes task info at runtime, SK does not support fusing
-                                // dynamically changing tasks
-  NOT_IN_SCOPE,                 // 3: Operator is not within user-marked fusion range
-  IN_UNFUSIBLE_SCOPE,           // 4: User actively marked this operator as unfusible
-  EXCEED_CORE_MAX,              // 5: Operator requires more cores than device maximum
-  RESET_TYPE_NODE,              // 6: reset type node placed at end
-  ISOLATED_EVENT,               // 7: Isolated event exists
-  EXIST_DEADLOCK,               // 8: Deadlock exists
-  SCOPE_FUSE_PART,              // 9: Scope processing skipped part of the original scope
-  EXTERNAL_DEPEND,              // 10: Event has external dependency
-  UNSUPPORT_EVENT_TYPE,         // 11: Unsupported event type
-  MEMORY_WAIT_NODE_ONLY,        // 12: No memory write exists, meaning the memory write is outside modelRI,
-  MEMORY_WRITE_NODE_ONLY,       // 13: only exists memory write nodes, mask it as unfusible
-  DEFAULT_NODE,                 // 14: default node uses aicpu resources, mask it as unfusible
-  KERNEL_ATTR_GET_FAILED,       // 15: Failed to get kernel attribute for SuperKernel fusion
-  EXCEED_SCOPE_MAX,             // 16: Exceeded maximum scope number limit for SuperKernel fusion
-  ODD_VEC_SCHE_MODE_UNSUPPORT,  // 17: Odd-core pure vector ScheMode kernels cannot be fused safely
+  CAN_FUSE,                // 0: Can fuse (default)
+  OP_UNSUPPORT,            // 1: Failed to resolve SuperKernel bind map for the operator
+  DYNAMIC_TASK_UNSUPPORT,  // 2: Operator dynamically refreshes task info at runtime, SK does not support fusing
+                           // dynamically changing tasks
+  NOT_IN_SCOPE,            // 3: Operator is not within user-marked fusion range
+  IN_UNFUSIBLE_SCOPE,      // 4: User actively marked this operator as unfusible
+  EXCEED_CORE_MAX,         // 5: Operator requires more cores than device maximum
+  RESET_TYPE_NODE,         // 6: reset type node placed at end
+  ISOLATED_EVENT,          // 7: Isolated event exists
+  EXIST_DEADLOCK,          // 8: Deadlock exists
+  SCOPE_FUSE_PART,         // 9: Scope processing skipped part of the original scope
+  EXTERNAL_DEPEND,         // 10: Event has external dependency
+  UNSUPPORT_EVENT_TYPE,    // 11: Unsupported event type
+  MEMORY_WAIT_NODE_ONLY,   // 12: No memory write exists, meaning the memory write is outside modelRI,
+  MEMORY_WRITE_NODE_ONLY,  // 13: only exists memory write nodes, mask it as unfusible
+  DEFAULT_NODE,            // 14: default node uses aicpu resources, mask it as unfusible
+  KERNEL_ATTR_GET_FAILED,  // 15: Failed to get kernel attribute for SuperKernel fusion
+  EXCEED_SCOPE_MAX,        // 16: Exceeded maximum scope number limit for SuperKernel fusion
 };
 
 // Bindmap related fail reason detail
@@ -188,8 +187,6 @@ inline const char *to_string(FusionFailReason reason) {
       return "KERNEL_ATTR_GET_FAILED";
     case FusionFailReason::EXCEED_SCOPE_MAX:
       return "EXCEED_SCOPE_MAX";
-    case FusionFailReason::ODD_VEC_SCHE_MODE_UNSUPPORT:
-      return "ODD_VEC_SCHE_MODE_UNSUPPORT";
     default:
       return "UNKNOWN_FUSION_FAIL_REASON";
   }
@@ -270,8 +267,6 @@ struct KernelInfos {
 
   std::string Format() const;
 };
-
-bool IsOddVecScheModeUnsupported(const KernelInfos &kernelInfos);
 
 struct SyncInfos {
   uint64_t eventId = INVALID_TASK_ID;

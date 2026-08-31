@@ -375,6 +375,11 @@ class SuperKernelScopeSplitterTest : public testing::Test {
     return scope;
   }
 
+  bool RunDeadlockRefine(std::vector<SuperKernelScopeInfo> &scopes) {
+    DeadlockRefinePass pass(*graph, *opts);
+    return pass.Run(scopes);
+  }
+
   std::unique_ptr<SuperKernelGraph> graph;
   std::unique_ptr<SuperKernelOptionsManager> opts;
 };
@@ -2582,17 +2587,15 @@ TEST_F(SuperKernelScopeSplitterTest, Sync_CrossStreamWaitNotifySuspendResume) {
  *   2. Wait1发现Notify1已visited，融合进scope
  *   3. scope节点: K1 -> Wait1 -> K2
  *   4. DeadlockRefinePass检查:
- *      - IsFusible(K1): superKernelCubeNum=12
+ *      - 加入K1后，候选SK核数为12C
  *      - GetWaitNodeFusibleStatus(Wait1):
  *        -> HasDeadlock(Notify1) -> CheckKernelNodeDeadlock(K3)
- *        -> HasEnoughCores(K3, false): available={25-12=13}, 12<=13 ✓
- *        -> depOpCubeNum=12
- *      - IsFusible(K2):
- *        -> HasEnoughCores(K2, true):
- *           15 > superKernelCubeNum(12), 需要从设备分配
- *           available={25-12=13}, 15 > 13 ✗
- *        -> 死锁！返回false
- *   5. FindDeadlockInScope在K2处检测到死锁
+ *        -> HasEnoughCores(K3, false): available={25-12=13}, 12<=13
+ *        -> 记录外部依赖占用12C，Wait1可以继续融合
+ *      - 加入K2后，候选SK核数增长为15C
+ *        -> SK available={25-12=13}, 15>13
+ *        -> K2触发资源死锁风险
+ *   5. FindDeadlockInScope将K2记录为触发节点，将Wait1记录为切分点
  *   6. 在Wait1处切分（Wait是最近的Wait节点）
  *
  * 预期结果:
@@ -2649,37 +2652,66 @@ TEST_F(SuperKernelScopeSplitterTest, DeadlockRefine_ResourceDeadlockSplitAtWait)
   ASSERT_TRUE(result);
   const auto &scopeInfos = splitter.GetScopeInfos();
 
-  // 期望切分为至少2个scope
-  EXPECT_GE(scopeInfos.size(), 2);
-  EXPECT_TRUE(k2->IsFusible()) << "deadlock node entering scopeAfter should be restored to fusible";
-
-  std::set<uint64_t> allProcessedNodes;
-  for (const auto &scope : scopeInfos) {
-    for (const auto *node : scope.nodes_) {
-      allProcessedNodes.insert(node->GetNodeId());
-    }
-  }
-
-  EXPECT_TRUE(allProcessedNodes.find(1) != allProcessedNodes.end());
-  EXPECT_TRUE(allProcessedNodes.find(3) != allProcessedNodes.end());
-
-  // K1和K2应该在不同的scope中
-  bool k1AndK2Separated = false;
-  for (const auto &scope : scopeInfos) {
-    bool hasK1 = false, hasK2 = false;
-    for (const auto *node : scope.nodes_) {
-      if (node->GetNodeId() == 1) hasK1 = true;
-      if (node->GetNodeId() == 3) hasK2 = true;
-    }
-    if (hasK1 && hasK2) {
-      // K1和K2在同一scope，未分离
-    } else if (hasK1 || hasK2) {
-      k1AndK2Separated = true;
-    }
-  }
-  EXPECT_TRUE(k1AndK2Separated);
+  ASSERT_EQ(scopeInfos.size(), 2U);
+  ASSERT_EQ(scopeInfos[0].GetNodes().size(), 1U);
+  ASSERT_EQ(scopeInfos[1].GetNodes().size(), 1U);
+  EXPECT_EQ(scopeInfos[0].GetNodes()[0]->GetNodeId(), 1U);
+  EXPECT_EQ(scopeInfos[1].GetNodes()[0]->GetNodeId(), 3U);
+  EXPECT_EQ(scopeInfos[0].GetSkCoreInfo().type, SkKernelType::AIC_ONLY);
+  EXPECT_EQ(scopeInfos[0].GetSkCoreInfo().numBlocks, 12U);
+  EXPECT_EQ(scopeInfos[1].GetSkCoreInfo().type, SkKernelType::AIC_ONLY);
+  EXPECT_EQ(scopeInfos[1].GetSkCoreInfo().numBlocks, 15U);
+  EXPECT_EQ(wait1->GetFusionFailReason(), FusionFailReason::CAN_FUSE);
+  EXPECT_EQ(k2->GetFusionFailReason(), FusionFailReason::EXIST_DEADLOCK);
+  EXPECT_EQ(scopeInfos[0].GetBreakInfo().GetReason(), ScopeBreakReason::DEADLOCK_DETECTED);
+  EXPECT_EQ(scopeInfos[0].GetBreakInfo().GetTriggerNodeId(), 3U);
 
   // 恢复默认核心数
+  LockDetector::deviceRealCubeNum = 32;
+  LockDetector::deviceRealVecNum = 32;
+}
+
+TEST_F(SuperKernelScopeSplitterTest, DeadlockRefine_SplitUsesCandidateSnapshotBeforeWait) {
+  LockDetector::deviceRealCubeNum = 25;
+  LockDetector::deviceRealVecNum = 32;
+
+  auto *k1 = CreateKernelNode(1, 0, 2);
+  k1->nodeInfos.kernelInfos.cubeNum = 5;
+  k1->nodeInfos.kernelInfos.numBlocks = 5;
+  auto *wait = CreateWaitNode(2, 0, 6, 3);
+  auto *k2 = CreateKernelNode(3, 0, 4);
+  k2->nodeInfos.kernelInfos.cubeNum = 10;
+  k2->nodeInfos.kernelInfos.numBlocks = 10;
+  auto *k3 = CreateKernelNode(4, 0, INVALID_TASK_ID);
+  k3->nodeInfos.kernelInfos.cubeNum = 15;
+  k3->nodeInfos.kernelInfos.numBlocks = 15;
+
+  auto *dependency = CreateUnfusibleKernelNode(5, 1, 6);
+  dependency->nodeInfos.kernelInfos.cubeNum = 12;
+  dependency->nodeInfos.kernelInfos.numBlocks = 12;
+  auto *notify = CreateNotifyNode(6, 1, 100, INVALID_TASK_ID);
+  notify->isFusible = false;
+
+  SetupStreams({{1, 2, 3, 4}, {5, 6}});
+  SetupEvent(100, 6, {2});
+  graph->BuildEventNodeAssociations();
+
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+  LockDetector::deviceRealCubeNum = 25;
+  LockDetector::deviceRealVecNum = 32;
+  ASSERT_TRUE(splitter.SplitGraph());
+
+  const auto &scopes = splitter.GetScopeInfos();
+  ASSERT_EQ(scopes.size(), 2U);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().type, SkKernelType::AIC_ONLY);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().numBlocks, 5U);
+  EXPECT_EQ(scopes[1].GetSkCoreInfo().type, SkKernelType::AIC_ONLY);
+  EXPECT_EQ(scopes[1].GetSkCoreInfo().numBlocks, 15U);
+  EXPECT_EQ(wait->GetFusionFailReason(), FusionFailReason::CAN_FUSE);
+  EXPECT_EQ(k2->GetFusionFailReason(), FusionFailReason::CAN_FUSE);
+  EXPECT_EQ(k3->GetFusionFailReason(), FusionFailReason::EXIST_DEADLOCK);
+  EXPECT_EQ(scopes[0].GetBreakInfo().GetTriggerNodeId(), 4U);
+
   LockDetector::deviceRealCubeNum = 32;
   LockDetector::deviceRealVecNum = 32;
 }
@@ -2728,6 +2760,7 @@ TEST_F(SuperKernelScopeSplitterTest, DeadlockRefinePassWithoutValueBreakerDropsU
   scope.SetScopeStreamInfos({
       ScopeStreamInfo{0, 1, 2, 2},
   });
+  scope.SetSkCoreInfo({SkKernelType::AIC_ONLY, 1});
 
   std::vector<SuperKernelScopeInfo> scopes;
   scopes.emplace_back(std::move(scope));
@@ -2761,6 +2794,7 @@ TEST_F(SuperKernelScopeSplitterTest, DeadlockRefinePassValueBreakerBypassKeepsUn
   scope.SetScopeStreamInfos({
       ScopeStreamInfo{0, 1, 2, 2},
   });
+  scope.SetSkCoreInfo({SkKernelType::AIC_ONLY, 1});
 
   std::vector<SuperKernelScopeInfo> scopes;
   scopes.emplace_back(std::move(scope));
@@ -2773,6 +2807,44 @@ TEST_F(SuperKernelScopeSplitterTest, DeadlockRefinePassValueBreakerBypassKeepsUn
     actualNodes.insert(node->GetNodeId());
   }
   EXPECT_EQ(actualNodes, (std::set<uint64_t>{1, 2}));
+}
+
+TEST_F(SuperKernelScopeSplitterTest, DeadlockRefinePassCommitsSkCoreInfoAfterCheck) {
+  auto *kernel = CreateKernelNode(1, 0, INVALID_TASK_ID);
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+  auto *deadlockPass = dynamic_cast<DeadlockRefinePass *>(splitter.passes_[2].get());
+  ASSERT_NE(deadlockPass, nullptr);
+
+  SuperKernelScopeInfo scope;
+  scope.AddNode(kernel);
+  scope.SetScopeStreamInfos({ScopeStreamInfo{0, 1, 1, 1}});
+  std::vector<SuperKernelScopeInfo> scopes;
+  scopes.emplace_back(std::move(scope));
+
+  ASSERT_TRUE(deadlockPass->Run(scopes));
+  ASSERT_EQ(scopes.size(), 1U);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().type, SkKernelType::AIC_ONLY);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().numBlocks, 1U);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, DeadlockRefinePassOverwritesStaleSkCoreInfoAfterCheck) {
+  auto *kernel = CreateKernelNode(1, 0, INVALID_TASK_ID);
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+  auto *deadlockPass = dynamic_cast<DeadlockRefinePass *>(splitter.passes_[2].get());
+  ASSERT_NE(deadlockPass, nullptr);
+
+  SuperKernelScopeInfo scope;
+  scope.AddNode(kernel);
+  scope.SetScopeStreamInfos({ScopeStreamInfo{0, 1, 1, 1}});
+  scope.SetSkCoreInfo({SkKernelType::AIC_ONLY, 2});
+  std::vector<SuperKernelScopeInfo> scopes;
+  scopes.emplace_back(std::move(scope));
+
+  ASSERT_TRUE(deadlockPass->Run(scopes));
+  ASSERT_EQ(scopes.size(), 1U);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().type, SkKernelType::AIC_ONLY);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().numBlocks, 1U);
+  EXPECT_EQ(kernel->GetFusionFailReason(), FusionFailReason::CAN_FUSE);
 }
 
 /**
@@ -3587,6 +3659,9 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_DecreasingCube_SplitAtDropPoint) {
   EXPECT_EQ(inputScopes[0].nodes_[0]->GetNodeId(), 1);
   EXPECT_EQ(inputScopes[0].GetBreakInfo().GetReason(), ScopeBreakReason::SYNCALL_OP_DROP);
   EXPECT_EQ(inputScopes[0].GetBreakInfo().GetSyncAllNodeIds(), std::vector<uint64_t>({2}));
+  EXPECT_EQ(inputScopes[0].GetBreakInfo().GetDetail(),
+            "beforeSk=MIX_1_1(blocks=8,C=8,V=8), candidateSk=MIX_1_1(blocks=8,C=8,V=8), "
+            "mismatch=ScheMode C(expected=4,actual=8)");
   ASSERT_GE(inputScopes[1].nodes_.size(), 1);
   EXPECT_EQ(inputScopes[1].nodes_[0]->GetNodeId(), 2);
   EXPECT_EQ(inputScopes[1].GetBreakInfo().GetReason(), ScopeBreakReason::SYNCALL_OP_DROP);
@@ -3618,17 +3693,11 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_DecreasingVec_SplitAtDropPoint) {
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
-  EXPECT_EQ(inputScopes.size(), 3);  // 连续下降，分成3个scope
-  ASSERT_GE(inputScopes[0].nodes_.size(), 1);
-  EXPECT_EQ(inputScopes[0].nodes_[0]->GetNodeId(), 1);
-  EXPECT_EQ(inputScopes[0].GetBreakInfo().GetReason(), ScopeBreakReason::SYNCALL_OP_DROP);
-  EXPECT_EQ(inputScopes[0].GetBreakInfo().GetSyncAllNodeIds(), std::vector<uint64_t>({2}));
-  ASSERT_GE(inputScopes[1].nodes_.size(), 1);
-  EXPECT_EQ(inputScopes[1].nodes_[0]->GetNodeId(), 2);
-  EXPECT_EQ(inputScopes[1].GetBreakInfo().GetReason(), ScopeBreakReason::SYNCALL_OP_DROP);
-  EXPECT_EQ(inputScopes[1].GetBreakInfo().GetSyncAllNodeIds(), std::vector<uint64_t>({3}));
-  ASSERT_GE(inputScopes[2].nodes_.size(), 1);
-  EXPECT_EQ(inputScopes[2].nodes_[0]->GetNodeId(), 3);
+  ASSERT_EQ(inputScopes.size(), 1);
+  EXPECT_EQ(inputScopes[0].nodes_.size(), 3);
+  ASSERT_TRUE(RunDeadlockRefine(inputScopes));
+  EXPECT_EQ(inputScopes[0].GetSkCoreInfo().type, SkKernelType::MIX_AIC_1_2);
+  EXPECT_EQ(inputScopes[0].GetSkCoreInfo().numBlocks, 4U);
 }
 
 // ==================== ScheMode: 混合非ScheMode ====================
@@ -3792,7 +3861,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_SameCubeSmallerVec_Split) {
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
-  EXPECT_EQ(inputScopes.size(), 2);  // vec下降触发分割
+  EXPECT_EQ(inputScopes.size(), 1);  // C/MIX ScheMode only requires exact cube cores
 }
 
 // ==================== ScheMode: Cube大Vec小分割 ====================
@@ -3849,13 +3918,11 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_ZeroDimension_IgnoredInSplitJudgem
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
-  EXPECT_EQ(inputScopes.size(), 3);  // k2 vec上升 + k3 cube上升各触发CORE_RISE分割
+  ASSERT_EQ(inputScopes.size(), 2);
   ASSERT_GE(inputScopes[0].nodes_.size(), 1);
   EXPECT_EQ(inputScopes[0].nodes_[0]->GetNodeId(), 1);
   ASSERT_GE(inputScopes[1].nodes_.size(), 1);
-  EXPECT_EQ(inputScopes[1].nodes_[0]->GetNodeId(), 2);
-  ASSERT_GE(inputScopes[2].nodes_.size(), 1);
-  EXPECT_EQ(inputScopes[2].nodes_[0]->GetNodeId(), 3);
+  EXPECT_EQ(inputScopes[1].nodes_[0]->GetNodeId(), 3);
 }
 
 // ==================== ScheMode: 非ScheMode算子核数上升分割(CORE_RISE) ====================
@@ -3996,6 +4063,127 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_NonScheModeFirst_ScheModeRise_NoSp
   EXPECT_TRUE(result);
   EXPECT_EQ(inputScopes.size(), 1);  // K1非ScheMode，K2虽核数上升但自身ScheMode只检查CORE_DROP
   EXPECT_EQ(inputScopes[0].nodes_.size(), 2);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScheMode_OddVectorAndNativeMix12_SplitBeforeMix12) {
+  auto *vectorNode = CreateKernelNodeWithCores(1, 0, 2, 31, SkKernelType::AIV_ONLY);
+  vectorNode->nodeInfos.kernelInfos.isScheModeOn = true;
+  auto *mix12Node = CreateKernelNodeWithCores(2, 0, INVALID_TASK_ID, 8, SkKernelType::MIX_AIC_1_2);
+
+  std::vector<SuperKernelScopeInfo> scopes;
+  scopes.push_back(BuildTestScope({vectorNode, mix12Node}));
+
+  ScheModeKernelSplitPass pass(*graph);
+  ASSERT_TRUE(pass.Run(scopes));
+  ASSERT_EQ(scopes.size(), 2);
+  EXPECT_EQ(scopes[0].GetBreakInfo().GetDetail(),
+            "beforeSk=AIV_ONLY(blocks=31,C=0,V=31), candidateSk=MIX_1_2(blocks=16,C=16,V=32), "
+            "mismatch=ScheMode V(expected=31,actual=32)");
+  ASSERT_TRUE(RunDeadlockRefine(scopes));
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().type, SkKernelType::AIV_ONLY);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().numBlocks, 31U);
+  EXPECT_EQ(scopes[0].GetBreakInfo().GetReason(), ScopeBreakReason::SYNCALL_OP_DROP);
+  EXPECT_EQ(scopes[1].GetSkCoreInfo().type, SkKernelType::MIX_AIC_1_2);
+  EXPECT_EQ(scopes[1].GetSkCoreInfo().numBlocks, 8U);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScheMode_OddVectorAndNonScheCube_UseMix11) {
+  auto *vectorNode = CreateKernelNodeWithCores(1, 0, 2, 5, SkKernelType::AIV_ONLY);
+  vectorNode->nodeInfos.kernelInfos.isScheModeOn = true;
+  auto *cubeNode = CreateKernelNodeWithCores(2, 0, INVALID_TASK_ID, 3, SkKernelType::AIC_ONLY);
+
+  std::vector<SuperKernelScopeInfo> scopes;
+  scopes.push_back(BuildTestScope({vectorNode, cubeNode}));
+
+  ScheModeKernelSplitPass pass(*graph);
+  ASSERT_TRUE(pass.Run(scopes));
+  ASSERT_EQ(scopes.size(), 1);
+  ASSERT_TRUE(RunDeadlockRefine(scopes));
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().type, SkKernelType::MIX_AIC_1_1);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().numBlocks, 5U);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScheMode_NonScheOddVectorAndCube_UseMix12) {
+  auto *vectorNode = CreateKernelNodeWithCores(1, 0, 2, 5, SkKernelType::AIV_ONLY);
+  auto *cubeNode = CreateKernelNodeWithCores(2, 0, INVALID_TASK_ID, 3, SkKernelType::AIC_ONLY);
+
+  std::vector<SuperKernelScopeInfo> scopes;
+  scopes.push_back(BuildTestScope({vectorNode, cubeNode}));
+
+  ScheModeKernelSplitPass pass(*graph);
+  ASSERT_TRUE(pass.Run(scopes));
+  ASSERT_EQ(scopes.size(), 1U);
+  ASSERT_TRUE(RunDeadlockRefine(scopes));
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().type, SkKernelType::MIX_AIC_1_2);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().numBlocks, 3U);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScheMode_OddVectorAndScheCube_SplitForExactMismatch) {
+  auto *vectorNode = CreateKernelNodeWithCores(1, 0, 2, 5, SkKernelType::AIV_ONLY);
+  vectorNode->nodeInfos.kernelInfos.isScheModeOn = true;
+  auto *cubeNode = CreateKernelNodeWithCores(2, 0, INVALID_TASK_ID, 3, SkKernelType::AIC_ONLY);
+  cubeNode->nodeInfos.kernelInfos.isScheModeOn = true;
+
+  std::vector<SuperKernelScopeInfo> scopes;
+  scopes.push_back(BuildTestScope({vectorNode, cubeNode}));
+
+  ScheModeKernelSplitPass pass(*graph);
+  ASSERT_TRUE(pass.Run(scopes));
+  ASSERT_EQ(scopes.size(), 2);
+  EXPECT_EQ(scopes[0].GetBreakInfo().GetDetail(),
+            "beforeSk=AIV_ONLY(blocks=5,C=0,V=5), candidateSk=MIX_1_2(blocks=3,C=3,V=6), "
+            "mismatch=ScheMode V(expected=5,actual=6)");
+  ASSERT_TRUE(RunDeadlockRefine(scopes));
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().type, SkKernelType::AIV_ONLY);
+  EXPECT_EQ(scopes[1].GetSkCoreInfo().type, SkKernelType::AIC_ONLY);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScheMode_Mix11AdaptsVectorSideToMix12) {
+  auto *mix11Node = CreateKernelNodeWithCores(1, 0, 2, 5, SkKernelType::MIX_AIC_1_1);
+  mix11Node->nodeInfos.kernelInfos.isScheModeOn = true;
+  auto *vectorNode = CreateKernelNodeWithCores(2, 0, INVALID_TASK_ID, 10, SkKernelType::AIV_ONLY);
+  vectorNode->nodeInfos.kernelInfos.isScheModeOn = true;
+
+  std::vector<SuperKernelScopeInfo> scopes;
+  scopes.push_back(BuildTestScope({mix11Node, vectorNode}));
+
+  ScheModeKernelSplitPass pass(*graph);
+  ASSERT_TRUE(pass.Run(scopes));
+  ASSERT_EQ(scopes.size(), 1U);
+  ASSERT_TRUE(RunDeadlockRefine(scopes));
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().type, SkKernelType::MIX_AIC_1_2);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().numBlocks, 5U);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScheMode_CandidatesUseRawTaskCoreRequirements) {
+  auto *cube8 = CreateKernelNodeWithCores(1, 0, 2, 8, SkKernelType::AIC_ONLY);
+  auto *vector10 = CreateKernelNodeWithCores(2, 0, 3, 10, SkKernelType::AIV_ONLY);
+  auto *cube12 = CreateKernelNodeWithCores(3, 0, INVALID_TASK_ID, 12, SkKernelType::AIC_ONLY);
+
+  std::vector<SuperKernelScopeInfo> scopes;
+  scopes.push_back(BuildTestScope({cube8, vector10, cube12}));
+
+  ScheModeKernelSplitPass pass(*graph);
+  ASSERT_TRUE(pass.Run(scopes));
+  ASSERT_EQ(scopes.size(), 1U);
+  ASSERT_TRUE(RunDeadlockRefine(scopes));
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().type, SkKernelType::MIX_AIC_1_1);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().numBlocks, 12U);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScheMode_NativeMix12ConstrainsFinalSkType) {
+  auto *mix12 = CreateKernelNodeWithCores(1, 0, 2, 3, SkKernelType::MIX_AIC_1_2);
+  auto *cube = CreateKernelNodeWithCores(2, 0, INVALID_TASK_ID, 8, SkKernelType::AIC_ONLY);
+
+  std::vector<SuperKernelScopeInfo> scopes;
+  scopes.push_back(BuildTestScope({mix12, cube}));
+
+  ScheModeKernelSplitPass pass(*graph);
+  ASSERT_TRUE(pass.Run(scopes));
+  ASSERT_EQ(scopes.size(), 1U);
+  ASSERT_TRUE(RunDeadlockRefine(scopes));
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().type, SkKernelType::MIX_AIC_1_2);
+  EXPECT_EQ(scopes[0].GetSkCoreInfo().numBlocks, 8U);
 }
 
 // ==================== ScheMode: Pass名称验证 ====================
@@ -4402,18 +4590,15 @@ TEST_F(SuperKernelScopeSplitterTest, DefaultNode_StreamWithDefaultAndStreamOnlyE
  *      - RemoveStreamFromScope移除stream 1所有节点（Notify1被移除）
  *   4. 剩余scope: {K1,Wait1,K2}
  *   5. DeadlockRefinePass检查:
- *      - K1: superKernelCubeNum=12 ✓
+ *      - 加入K1后，候选SK核数为12C
  *      - Wait1检查Notify1(不在scope内):
  *        -> GetWaitNodeFusibleStatus: Notify1不在SK stream
  *        -> HasDeadlock(Notify1): preNode=K3(4, unfusible)
  *        -> CheckKernelNodeDeadlock(K3):
- *           HasEnoughCores(K3, false): available={25-12=13}, 12<=13 ✓
- *           depOpCubeNum=12 (K3虽不在scope，但资源占用计入depOp)
- *        -> Wait1可融合 ✓
- *      - K2检查:
- *        -> HasEnoughCores(K2, true): available={25-12=13}, 15>13 ✗
- *        -> 死锁！
- *   6. 在Wait1处切分
+ *           HasEnoughCores(K3, false): available={25-12=13}, 12<=13
+ *        -> 记录外部依赖占用12C，Wait1可以继续融合
+ *      - 加入K2后，候选SK核数增长为15C，大于剩余13C，K2触发资源死锁风险
+ *   6. 报告K2为触发节点，在Wait1处切分
  *
  * 预期结果:
  *   - 最终2个scope: {K1}, {K2}
@@ -4459,7 +4644,19 @@ TEST_F(SuperKernelScopeSplitterTest, DefaultNode_StreamWithKernelNotify_TriggerD
   ASSERT_TRUE(result);
   const auto &scopeInfos = splitter.GetScopeInfos();
 
-  EXPECT_GE(scopeInfos.size(), 2);
+  ASSERT_EQ(scopeInfos.size(), 2U);
+  ASSERT_EQ(scopeInfos[0].GetNodes().size(), 1U);
+  ASSERT_EQ(scopeInfos[1].GetNodes().size(), 1U);
+  EXPECT_EQ(scopeInfos[0].GetNodes()[0]->GetNodeId(), 1U);
+  EXPECT_EQ(scopeInfos[1].GetNodes()[0]->GetNodeId(), 3U);
+  EXPECT_EQ(scopeInfos[0].GetSkCoreInfo().type, SkKernelType::AIC_ONLY);
+  EXPECT_EQ(scopeInfos[0].GetSkCoreInfo().numBlocks, 12U);
+  EXPECT_EQ(scopeInfos[1].GetSkCoreInfo().type, SkKernelType::AIC_ONLY);
+  EXPECT_EQ(scopeInfos[1].GetSkCoreInfo().numBlocks, 15U);
+  EXPECT_EQ(wait1->GetFusionFailReason(), FusionFailReason::CAN_FUSE);
+  EXPECT_EQ(k2->GetFusionFailReason(), FusionFailReason::EXIST_DEADLOCK);
+  EXPECT_EQ(scopeInfos[0].GetBreakInfo().GetReason(), ScopeBreakReason::DEADLOCK_DETECTED);
+  EXPECT_EQ(scopeInfos[0].GetBreakInfo().GetTriggerNodeId(), 3U);
 
   std::set<uint64_t> allProcessedNodes;
   for (const auto &scope : scopeInfos) {
@@ -4475,20 +4672,6 @@ TEST_F(SuperKernelScopeSplitterTest, DefaultNode_StreamWithKernelNotify_TriggerD
       << "Notify1 should be removed by DefaultNodeProcessPass";
   EXPECT_TRUE(allProcessedNodes.find(6) == allProcessedNodes.end())
       << "Default1 should be removed by DefaultNodeProcessPass";
-
-  bool k1AndK2Separated = false;
-  for (const auto &scope : scopeInfos) {
-    bool hasK1 = false, hasK2 = false;
-    for (const auto *node : scope.nodes_) {
-      if (node->GetNodeId() == 1) hasK1 = true;
-      if (node->GetNodeId() == 3) hasK2 = true;
-    }
-    if (hasK1 && hasK2) {
-    } else if (hasK1 || hasK2) {
-      k1AndK2Separated = true;
-    }
-  }
-  EXPECT_TRUE(k1AndK2Separated) << "K1 and K2 should be in different scopes due to deadlock split";
 
   LockDetector::deviceRealCubeNum = 32;
   LockDetector::deviceRealVecNum = 32;
@@ -4521,6 +4704,34 @@ TEST_F(SuperKernelScopeSplitterTest, PerOpMaxCoreSplitPass_SingleKernel_CreatesS
   EXPECT_TRUE(result);
   EXPECT_EQ(splitter.GetScopeInfos().size(), 1);
   EXPECT_EQ(splitter.GetScopeInfos()[0].GetNodes().size(), 1);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, PerOpMaxCoreSplitPass_OddVectorScheModeKeepsAivResult) {
+  opts->AddOption(std::make_unique<NumberOptOption>("debug_per_op_max_core_num",
+                                                    aclskOptionType::DEBUG_PER_OP_MAX_CORE_NUM, 1, 0, 1));
+  auto *kernel = CreateKernelNodeWithCores(1, 0, INVALID_TASK_ID, 5, SkKernelType::AIV_ONLY);
+  kernel->nodeInfos.kernelInfos.isScheModeOn = true;
+  SetupStreams({{1}});
+
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+  ASSERT_TRUE(splitter.SplitGraph());
+  ASSERT_EQ(splitter.GetScopeInfos().size(), 1U);
+  EXPECT_EQ(splitter.GetScopeInfos()[0].GetSkCoreInfo().type, SkKernelType::AIV_ONLY);
+  EXPECT_EQ(splitter.GetScopeInfos()[0].GetSkCoreInfo().numBlocks, 5U);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, PerOpMaxCoreSplitPass_EvenVectorScheModeKeepsMix12Behavior) {
+  opts->AddOption(std::make_unique<NumberOptOption>("debug_per_op_max_core_num",
+                                                    aclskOptionType::DEBUG_PER_OP_MAX_CORE_NUM, 1, 0, 1));
+  auto *kernel = CreateKernelNodeWithCores(1, 0, INVALID_TASK_ID, 6, SkKernelType::AIV_ONLY);
+  kernel->nodeInfos.kernelInfos.isScheModeOn = true;
+  SetupStreams({{1}});
+
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+  ASSERT_TRUE(splitter.SplitGraph());
+  ASSERT_EQ(splitter.GetScopeInfos().size(), 1U);
+  EXPECT_EQ(splitter.GetScopeInfos()[0].GetSkCoreInfo().type, SkKernelType::MIX_AIC_1_2);
+  EXPECT_EQ(splitter.GetScopeInfos()[0].GetSkCoreInfo().numBlocks, 3U);
 }
 
 TEST_F(SuperKernelScopeSplitterTest, PerOpMaxCoreSplitPass_MultipleKernels_CreatesMultipleScopes) {

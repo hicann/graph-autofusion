@@ -95,8 +95,6 @@ const char *FusionFailReasonDetail(FusionFailReason reason) {
       return "Failed to get kernel attribute for SuperKernel fusion";
     case FusionFailReason::EXCEED_SCOPE_MAX:
       return "Exceeded maximum scope number limit for SuperKernel fusion";
-    case FusionFailReason::ODD_VEC_SCHE_MODE_UNSUPPORT:
-      return "Odd-core pure vector ScheMode kernels cannot be fused safely";
     default:
       return "UNKNOWN_REASON";
   }
@@ -116,11 +114,6 @@ KernelCapBits ParseKernelCapBits(uint64_t cap) {
   bits.disableScheMode = getBit(KernelCapBitOffset::DISABLE_SCHEMODE);
   bits.blockDimScaleUp = getBit(KernelCapBitOffset::BLOCKDIM_SCALE_UP);
   return bits;
-}
-
-bool IsOddVecScheModeUnsupported(const KernelInfos &kernelInfos) {
-  return kernelInfos.isScheModeOn && kernelInfos.cubeNum == 0 && kernelInfos.vecNum != 0 &&
-         (kernelInfos.vecNum % 2 != 0);
 }
 
 bool ShouldDisableScheMode(const KernelCapBits &capBits) {
@@ -1036,12 +1029,6 @@ bool SuperKernelKernelNode::InitNode(const SuperKernelOptionsManager *opts) {
     if (!isFusible) {
       SetFusionFailReason(nodeInfos.kernelInfos.bindmapFailReason);
     }
-  }
-
-  if (!isScopeNode && isFusible && IsOddVecScheModeUnsupported(nodeInfos.kernelInfos)) {
-    SK_LOGI("Kernel node %lu is an odd-core pure vector ScheMode kernel and cannot be fused in super kernel.", nodeId);
-    isFusible = false;
-    SetFusionFailReason(FusionFailReason::ODD_VEC_SCHE_MODE_UNSUPPORT);
   }
 
   // SIMT kernels need dynamic ubuf size propagated to the SK launch cfg.
