@@ -192,35 +192,40 @@ TEST_F(TestLockDetector, SingleStreamKernelFirst) {
   auto *k8 = CreateKernelNodeWithCores(8, 0, 7, INVALID_TASK_ID, 8, SkKernelType::MIX_AIC_1_1);
   SetupStreams({{0, 1, 2, 3, 4, 5, 6, 7, 8}});
   SetupEvent(1, 1, {6});  // eventid, notifynodeid, waitnodeidlist
-  lockDetector->SetSkCoreInfo({SkKernelType::MIX_AIC_1_2, 8});
   // sk - node 1
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 4});
   EXPECT_TRUE(lockDetector->IsFusible(*k2));
   EXPECT_TRUE(k2->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 4);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 0);
   // sk - node 2
   EXPECT_TRUE(lockDetector->IsFusible(*n3));
   EXPECT_TRUE(n3->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 4);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 0);
   // sk - node 3
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 4});
   EXPECT_TRUE(lockDetector->IsFusible(*k4));
   EXPECT_TRUE(k4->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 4);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 8);
   // sk - node 4
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 6});
   EXPECT_TRUE(lockDetector->IsFusible(*k5));
   EXPECT_TRUE(k5->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 6);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 12);
   // sk - node 5
   EXPECT_TRUE(lockDetector->IsFusible(*w6));
   EXPECT_TRUE(k5->isVisited);
   // sk - node 6
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 6});
   EXPECT_TRUE(lockDetector->IsFusible(*k7));
-  EXPECT_TRUE(k5->isVisited);
+  EXPECT_TRUE(k7->isVisited);
   // sk - node 7
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 8});
   EXPECT_TRUE(lockDetector->IsFusible(*k8));
+  EXPECT_TRUE(k8->isVisited);
   EXPECT_EQ(lockDetector->skStreamIds, std::unordered_set<uint32_t>{0});
   lockDetector->Reset();
   EXPECT_FALSE(k2->isVisited);
@@ -240,7 +245,7 @@ TEST_F(TestLockDetector, CrossStreamNotifyHasEnoughCores) {
   k8(8c,8v) ↑ ┌───────────────────────────────────────────────────────────────┘ ↑ stream1: k9(4c,8v) ->
   notify(eventid=1) -> k11(4c,4v)
   */
-  // The fixed SK uses 8 cube cores and 16 vector cores; k9 can run outside the SK and release w6.
+  // The candidate SK uses 6 cube cores and 12 vector cores at w6; k9 can run outside the SK and release w6.
   auto *k0 = CreateKernelNodeWithCores(0, 0, INVALID_TASK_ID, 1, 8, SkKernelType::AIC_ONLY);
   auto *n1 = CreateNotifyNode(1, 0, 0, 2, 10, {});  // nodeid, streamid, next, eventid
   auto *k2 = CreateKernelNodeWithCores(2, 0, 1, 3, 4, SkKernelType::AIC_ONLY);
@@ -255,36 +260,40 @@ TEST_F(TestLockDetector, CrossStreamNotifyHasEnoughCores) {
   auto *k11 = CreateKernelNodeWithCores(11, 1, 10, INVALID_TASK_ID, 4, SkKernelType::MIX_AIC_1_1);
   SetupStreams({{0, 1, 2, 3, 4, 5, 6, 7, 8}, {9, 10, 11}});
   SetupEvent(1, 10, {6});
-  lockDetector->SetSkCoreInfo({SkKernelType::MIX_AIC_1_2, 8});
   // sk - node 1
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 4});
   EXPECT_TRUE(lockDetector->IsFusible(*k2));
   EXPECT_TRUE(k2->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 4);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 0);
   // sk - node 2
   EXPECT_TRUE(lockDetector->IsFusible(*n3));
   EXPECT_TRUE(n3->isVisited);
   // sk - node 3
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 4});
   EXPECT_TRUE(lockDetector->IsFusible(*k4));
   EXPECT_TRUE(k4->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 4);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 8);
   // sk - node 4
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 6});
   EXPECT_TRUE(lockDetector->IsFusible(*k5));
   EXPECT_TRUE(k5->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 6);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 12);
   // // sk - node 5
   EXPECT_TRUE(lockDetector->IsFusible(*w6));
   EXPECT_TRUE(w6->isVisited);
   EXPECT_TRUE(k9->isVisited);
   EXPECT_TRUE(n10->isVisited);
   // sk - node 6
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 6});
   EXPECT_TRUE(lockDetector->IsFusible(*k7));
   EXPECT_TRUE(k7->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 6);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 12);
   // sk - node 7
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 8});
   EXPECT_TRUE(lockDetector->IsFusible(*k8));
   EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
   EXPECT_EQ(lockDetector->superKernelVecNum, 16);
@@ -313,7 +322,7 @@ TEST_F(TestLockDetector, CrossStreamNotifyHasInsufficientCores) {
   k8(8c,8v) ↑ ┌───────────────────────────────────────────────────────────────┘ ↑ stream1: k9(24c,24v) ->
   notify(eventid=1) -> k11(4c,4v)
   */
-  // The fixed SK uses 8 cube cores and 16 vector cores; k9 cannot run outside the SK to release w6.
+  // The candidate SK uses 6 cube cores and 12 vector cores at w6; k9 cannot run outside the SK to release w6.
   auto *k0 = CreateKernelNodeWithCores(0, 0, INVALID_TASK_ID, 1, 8, SkKernelType::AIC_ONLY);
   auto *n1 = CreateNotifyNode(1, 0, 0, 2, 10, {});  // nodeid, streamid, next, eventid
   auto *k2 = CreateKernelNodeWithCores(2, 0, 1, 3, 4, SkKernelType::AIC_ONLY);
@@ -328,25 +337,27 @@ TEST_F(TestLockDetector, CrossStreamNotifyHasInsufficientCores) {
   auto *k11 = CreateKernelNodeWithCores(11, 1, 10, INVALID_TASK_ID, 4, SkKernelType::MIX_AIC_1_1);
   SetupStreams({{0, 1, 2, 3, 4, 5, 6, 7, 8}, {9, 10, 11}});
   SetupEvent(1, 10, {6});
-  lockDetector->SetSkCoreInfo({SkKernelType::MIX_AIC_1_2, 8});
   // sk - node 1
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 4});
   EXPECT_TRUE(lockDetector->IsFusible(*k2));
   EXPECT_TRUE(k2->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 4);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 0);
   // sk - node 2
   EXPECT_TRUE(lockDetector->IsFusible(*n3));
   EXPECT_TRUE(n3->isVisited);
   // sk - node 3
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 4});
   EXPECT_TRUE(lockDetector->IsFusible(*k4));
   EXPECT_TRUE(k4->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 4);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 8);
   // sk - node 4
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 6});
   EXPECT_TRUE(lockDetector->IsFusible(*k5));
   EXPECT_TRUE(k5->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 16);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 6);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 12);
   // // sk - node 5
   EXPECT_FALSE(lockDetector->IsFusible(*w6));
   EXPECT_FALSE(n10->isVisited);
@@ -392,37 +403,41 @@ TEST_F(TestLockDetector, SingleStreamMultiWait) {
   auto *n12 = CreateNotifyNode(12, 1, 11, INVALID_TASK_ID, 2, {6});
   SetupStreams({{0, 1, 2, 3, 4, 5, 6, 7, 8}, {9, 10, 11}});
   SetupEvent(1, 10, {6});
-  lockDetector->SetSkCoreInfo({SkKernelType::MIX_AIC_1_2, 12});
   // sk - node 1
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 10});
   EXPECT_TRUE(lockDetector->IsFusible(*k2));
   EXPECT_TRUE(k2->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 12);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 24);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 10);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 20);
   // sk - node 2
   EXPECT_TRUE(lockDetector->IsFusible(*w3));
   EXPECT_TRUE(w3->isVisited);
   EXPECT_TRUE(k9->isVisited);
   // sk - node 3
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 10});
   EXPECT_TRUE(lockDetector->IsFusible(*k4));
   EXPECT_TRUE(k4->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 12);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 24);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 10);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 20);
   // sk - node 4
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 10});
   EXPECT_TRUE(lockDetector->IsFusible(*k5));
   EXPECT_TRUE(k5->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 12);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 24);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 10);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 20);
   // // sk - node 5
   EXPECT_TRUE(lockDetector->IsFusible(*w6));
   EXPECT_TRUE(w6->isVisited);
   EXPECT_TRUE(k9->isVisited);
   EXPECT_TRUE(n10->isVisited);
   // sk - node 6
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 10});
   EXPECT_TRUE(lockDetector->IsFusible(*k7));
   EXPECT_TRUE(k7->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 12);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 24);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 10);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 20);
   // sk - node 7
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 12});
   EXPECT_TRUE(lockDetector->IsFusible(*k8));
   EXPECT_EQ(lockDetector->superKernelCubeNum, 12);
   EXPECT_EQ(lockDetector->superKernelVecNum, 24);
@@ -444,21 +459,19 @@ TEST_F(TestLockDetector, SingleStreamMultiWait) {
   EXPECT_FALSE(n12->isVisited);
 }
 
-TEST_F(TestLockDetector, UnchangedSkCoreInfoSkipsResourceRecheck) {
-  auto *smallKernel = CreateKernelNodeWithCores(0, 0, INVALID_TASK_ID, 1, 4, SkKernelType::AIC_ONLY);
-  auto *oversizedKernel = CreateKernelNodeWithCores(1, 0, INVALID_TASK_ID, INVALID_TASK_ID, 12, SkKernelType::AIC_ONLY);
+TEST_F(TestLockDetector, UnchangedScopeCoreInfoSkipsResourceRecheck) {
+  auto *firstKernel = CreateKernelNodeWithCores(0, 0, INVALID_TASK_ID, 1, 4, SkKernelType::AIC_ONLY);
+  auto *secondKernel = CreateKernelNodeWithCores(1, 0, INVALID_TASK_ID, INVALID_TASK_ID, 4, SkKernelType::AIC_ONLY);
   SetupStreams({{0, 1}});
-  lockDetector->SetSkCoreInfo({SkKernelType::AIC_ONLY, 8});
-  EXPECT_TRUE(lockDetector->skCoreInfoChanged_);
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 4});
+  EXPECT_TRUE(lockDetector->scopeCoreInfoChanged_);
 
-  EXPECT_TRUE(lockDetector->IsFusible(*smallKernel));
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8U);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 0U);
-  lockDetector->SetSkCoreInfo({SkKernelType::AIC_ONLY, 8});
-  EXPECT_FALSE(lockDetector->skCoreInfoChanged_);
-  EXPECT_TRUE(lockDetector->IsFusible(*oversizedKernel));
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 8U);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 0U);
+  EXPECT_TRUE(lockDetector->IsFusible(*firstKernel));
+  EXPECT_TRUE(firstKernel->isVisited);
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 4});
+  EXPECT_FALSE(lockDetector->scopeCoreInfoChanged_);
+  EXPECT_TRUE(lockDetector->IsFusible(*secondKernel));
+  EXPECT_TRUE(secondKernel->isVisited);
 }
 
 // Test 6: one stream, notify node of wait node not in graph
@@ -467,7 +480,7 @@ TEST_F(TestLockDetector, SingleStreamNotifyOutsideSK) {
   auto *w1 = CreateWaitNode(1, 0, 0, INVALID_TASK_ID, 10);
   SetupStreams({{0}});
   SetupEvent(1, 10, {1});
-  lockDetector->SetSkCoreInfo({SkKernelType::AIC_ONLY, 20});
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 20});
   EXPECT_TRUE(lockDetector->IsFusible(*k0));
   EXPECT_FALSE(lockDetector->IsFusible(*w1));
   lockDetector->Reset();
@@ -491,7 +504,7 @@ TEST_F(TestLockDetector, SingleStreamNotifyHasCore) {
   SetupEvent(1, 5, {4});
 
   n5->SetNotifyExpandVecNum(40);
-  lockDetector->SetSkCoreInfo({SkKernelType::AIC_ONLY, 4});
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 4});
   EXPECT_TRUE(lockDetector->IsFusible(*k2));
   EXPECT_TRUE(lockDetector->IsFusible(*n3));
   EXPECT_FALSE(lockDetector->IsFusible(*w4));
@@ -574,21 +587,22 @@ TEST_F(TestLockDetector, notifyInOtherSKWithSameStream) {
   auto *n12 = CreateNotifyNode(12, 1, 11, INVALID_TASK_ID, 2, {6});
   SetupStreams({{0, 1, 2, 3, 4, 5, 6, 7, 8}, {9, 10, 11}});
   SetupEvent(1, 10, {6});
-  lockDetector->SetSkCoreInfo({SkKernelType::MIX_AIC_1_2, 12});
   // sk - node 1
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 10});
   EXPECT_TRUE(lockDetector->IsFusible(*k2));
   EXPECT_TRUE(k2->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 12);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 24);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 10);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 20);
   // sk - node 2
   EXPECT_TRUE(lockDetector->IsFusible(*w3));
   EXPECT_TRUE(w3->isVisited);
   EXPECT_FALSE(k9->isVisited);
   // sk - node 3
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 10});
   EXPECT_TRUE(lockDetector->IsFusible(*k4));
   EXPECT_TRUE(k4->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 12);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 24);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 10);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 20);
 }
 
 TEST_F(TestLockDetector, notifyInOtherSKWithoutSameStream) {
@@ -619,12 +633,12 @@ TEST_F(TestLockDetector, notifyInOtherSKWithoutSameStream) {
   auto *n12 = CreateNotifyNode(12, 1, 11, INVALID_TASK_ID, 2, {6});
   SetupStreams({{0, 1, 2, 3, 4, 5, 6, 7, 8}, {9, 10, 11}});
   SetupEvent(1, 10, {6});
-  lockDetector->SetSkCoreInfo({SkKernelType::MIX_AIC_1_2, 12});
   // sk - node 1
+  lockDetector->SetScopeCoreInfo({SkKernelType::MIX_AIC_1_2, 10});
   EXPECT_TRUE(lockDetector->IsFusible(*k2));
   EXPECT_TRUE(k2->isVisited);
-  EXPECT_EQ(lockDetector->superKernelCubeNum, 12);
-  EXPECT_EQ(lockDetector->superKernelVecNum, 24);
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 10);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 20);
   // sk - node 2
   EXPECT_FALSE(lockDetector->IsFusible(*w3));
   EXPECT_FALSE(w3->isVisited);

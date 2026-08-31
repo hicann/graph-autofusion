@@ -136,7 +136,7 @@ class SkTaskBuilder {
 
   SkBuildResult Build(std::string skFuncName, const std::vector<SuperKernelBaseNode *> &tasks,
                       const std::vector<SuperKernelBaseNode *> &customTasks, uint16_t scopeId,
-                      const SkCoreInfo &skCoreInfo);
+                      const ScopeCoreInfo &scopeCoreInfo);
 
  private:
   SuperKernelOptionsManager &opts;
@@ -159,14 +159,14 @@ class SkTaskBuilder {
 
   bool DispatchFuncTask(SkTask &skTaskCube, SkTask &skTaskVec, SuperKernelBaseNode *node, SkDfxInfo *dfxInfo,
                         size_t nodeIndex, int binCount, SkTaskType taskType, SkQueueType queueType,
-                        const SkCoreInfo &skCoreInfo);
+                        const ScopeCoreInfo &scopeCoreInfo);
   bool DispatchEventTask(SkTask &skTaskCube, SkTask &skTaskVec, SuperKernelBaseNode *node, size_t nodeIndex,
                          SkTaskType taskType, SkQueueType queueType);
 
   bool DispatchSyncTasks(SkTask &skTaskCube, SkTask &skTaskVec, size_t nodeIndex,
                          const std::map<size_t, SyncDirection> &syncInfo, bool isSend, SkQueueType queueType);
   bool DispatchSyncTasks(SkTask &skTaskCube, SkTask &skTaskVec, size_t nodeIndex, const EarlyStartInfo &earlyStartInfo,
-                         bool isSend, SkQueueType queueType, const SkCoreInfo &skCoreInfo);
+                         bool isSend, SkQueueType queueType, const ScopeCoreInfo &scopeCoreInfo);
 
   // ========== Graph-topology-based sync extraction ==========
 
@@ -220,7 +220,7 @@ class SkTaskBuilder {
   // Print sync metadata (debug only)
   void PrintSyncInfo(const char *stage) const;
 
-  SkHostEntryInfo GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, const SkCoreInfo &skCoreInfo,
+  SkHostEntryInfo GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, const ScopeCoreInfo &scopeCoreInfo,
                                bool useSimtEntry = false);
   DeviceArgsPtr GenEntryArgs(const SkTask &skTaskCube, const SkTask &skTaskVec, const SkDfxInfo *dfxInfos,
                              uint32_t dfxCount, const SkEventConfig *eventConfig = nullptr);

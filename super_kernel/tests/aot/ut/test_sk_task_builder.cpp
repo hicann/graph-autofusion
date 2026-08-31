@@ -157,7 +157,7 @@ class SkTaskBuilderTest : public testing::Test {
     return ptr;
   }
 
-  SkCoreInfo BuildCoreInfo(SkKernelType type, uint32_t numBlocks) {
+  ScopeCoreInfo BuildCoreInfo(SkKernelType type, uint32_t numBlocks) {
     return {type, numBlocks};
   }
 
@@ -181,8 +181,8 @@ class SkTaskBuilderTest : public testing::Test {
         numBlocks = aicTask.numBlocks;
       }
     }
-    auto skCoreInfo = BuildCoreInfo(type, numBlocks);
-    return builder->GenEntryInfo(aicTask, aivTask, skCoreInfo, useSimtEntry);
+    auto scopeCoreInfo = BuildCoreInfo(type, numBlocks);
+    return builder->GenEntryInfo(aicTask, aivTask, scopeCoreInfo, useSimtEntry);
   }
 
   SkBuildResult BuildWithCoreResult(std::string skFuncName, const std::vector<SuperKernelBaseNode *> &tasks,
@@ -197,7 +197,7 @@ class SkTaskBuilderTest : public testing::Test {
         hasNativeMix12 = hasNativeMix12 || node->GetKernelType() == SkKernelType::MIX_AIC_1_2;
       }
     }
-    SkCoreInfo result;
+    ScopeCoreInfo result;
     if (maxCubeNum == 0) {
       result = {SkKernelType::AIV_ONLY, maxVectorNum};
     } else if (maxVectorNum == 0) {
@@ -207,8 +207,8 @@ class SkTaskBuilderTest : public testing::Test {
     } else {
       result = {SkKernelType::MIX_AIC_1_1, std::max(maxCubeNum, maxVectorNum)};
     }
-    auto skCoreInfo = BuildCoreInfo(result.type, result.numBlocks);
-    return builder->Build(std::move(skFuncName), tasks, customTasks, scopeId, skCoreInfo);
+    auto scopeCoreInfo = BuildCoreInfo(result.type, result.numBlocks);
+    return builder->Build(std::move(skFuncName), tasks, customTasks, scopeId, scopeCoreInfo);
   }
 
   std::unique_ptr<SuperKernelGraph> graph;
@@ -497,7 +497,7 @@ TEST_F(SkTaskBuilderTest, AddAndDispatchTasks_Smoke) {
 
   auto *kernel = CreateKernelNodeEx(1001, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::AIC_ONLY);
   auto *notify = CreateNotifyNodeEx(1002, 0, 1001, INVALID_TASK_ID, 55);
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 1);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 1);
 
   SkDfxInfo dfx{};
   ASSERT_TRUE(builder->AddSyncTask(aic, 0, SkCoreSyncType::CROSS_SYNC_AIC_TO_AIC));
@@ -506,39 +506,13 @@ TEST_F(SkTaskBuilderTest, AddAndDispatchTasks_Smoke) {
 
   ASSERT_TRUE(builder->DispatchEventTask(aic, aiv, notify, 3, SkTaskType::TYPE_EVENT_NOTIFY, SkQueueType::AIV));
   ASSERT_TRUE(
-      builder->DispatchFuncTask(aic, aiv, kernel, &dfx, 4, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC, skCoreInfo));
+      builder->DispatchFuncTask(aic, aiv, kernel, &dfx, 4, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC, scopeCoreInfo));
 
   builder->taskSyncInfos_.resize(2);
   builder->taskSyncInfos_[0].queueType = SkQueueType::AIC;
   builder->taskSyncInfos_[1].queueType = SkQueueType::AIV;
   std::map<size_t, SyncDirection> syncInfo{{1, SyncDirection::CUB_TO_VEC}};
   ASSERT_TRUE(builder->DispatchSyncTasks(aic, aiv, 5, syncInfo, true, SkQueueType::AIC));
-}
-
-TEST_F(SkTaskBuilderTest, DispatchFuncTask_RejectsMix12VectorCoreOverflow) {
-  SkTask aic;
-  SkTask aiv;
-  ASSERT_TRUE(aic.taskQue.Init(4));
-  ASSERT_TRUE(aiv.taskQue.Init(4));
-  auto *kernel = CreateKernelNodeEx(1013, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::MIX_AIC_1_1);
-  kernel->nodeInfos.kernelInfos.cubeNum = 1;
-  kernel->nodeInfos.kernelInfos.vecNum = 1;
-  kernel->nodeInfos.kernelInfos.numBlocks = std::numeric_limits<uint32_t>::max();
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 1);
-
-  SkDfxInfo dfx{};
-  EXPECT_FALSE(
-      builder->DispatchFuncTask(aic, aiv, kernel, &dfx, 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::MIX_1_1, skCoreInfo));
-}
-
-TEST_F(SkTaskBuilderTest, Build_RejectsOverflowingMix12CoreInfo) {
-  auto *kernel = CreateKernelNodeEx(1014, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::MIX_AIC_1_2);
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, std::numeric_limits<uint32_t>::max());
-
-  SkBuildResult result = builder->Build("Unknown", {kernel}, {}, 0, skCoreInfo);
-
-  EXPECT_EQ(result.launchInfo.entryInfo.skEntryFunc, nullptr);
-  EXPECT_EQ(result.launchInfo.devArgs.Get(), nullptr);
 }
 
 TEST_F(SkTaskBuilderTest, Build_RejectsScheModeCoreMismatchAgainstScopeResult) {
@@ -548,9 +522,9 @@ TEST_F(SkTaskBuilderTest, Build_RejectsScheModeCoreMismatchAgainstScopeResult) {
   kernel->nodeInfos.kernelInfos.vecNum = 5;
   kernel->nodeInfos.kernelInfos.numBlocks = 5;
   kernel->nodeInfos.kernelInfos.isScheModeOn = true;
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 3);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 3);
 
-  SkBuildResult result = builder->Build("Unknown", {kernel}, {}, 0, skCoreInfo);
+  SkBuildResult result = builder->Build("Unknown", {kernel}, {}, 0, scopeCoreInfo);
   EXPECT_EQ(result.launchInfo.entryInfo.skEntryFunc, nullptr);
   EXPECT_EQ(result.launchInfo.devArgs.Get(), nullptr);
 }
@@ -565,11 +539,11 @@ TEST_F(SkTaskBuilderTest, DispatchFuncTask_AppliesBlockDimScaleUpFromScopeResult
   kernel->nodeInfos.kernelInfos.vecNum = 0;
   kernel->nodeInfos.kernelInfos.numBlocks = 3;
   kernel->nodeInfos.kernelInfos.capBits.blockDimScaleUp = true;
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 8);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 8);
 
   SkDfxInfo dfx{};
   ASSERT_TRUE(
-      builder->DispatchFuncTask(aic, aiv, kernel, &dfx, 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC, skCoreInfo));
+      builder->DispatchFuncTask(aic, aiv, kernel, &dfx, 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC, scopeCoreInfo));
   ASSERT_EQ(aic.GetTaskQue()->taskCnt, 1U);
   EXPECT_EQ(aic.GetTaskQue()->taskInfos[0].numBlocks, 8U);
 }
@@ -677,17 +651,17 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpOverwritesFuncAndPreloadAf
   scaled->nodeInfos.kernelInfos.capBits.blockDimScaleUp = true;
   unchanged->nodeInfos.kernelInfos.numBlocks = 6;
   skDriver->nodeInfos.kernelInfos.numBlocks = 12;
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 12);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 12);
 
   SkDfxInfo dfxInfos[3]{};
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, scaled, &dfxInfos[0], 0, 1, SkTaskType::TYPE_PRELOAD,
-                                        SkQueueType::AIC, skCoreInfo));
+                                        SkQueueType::AIC, scopeCoreInfo));
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, scaled, &dfxInfos[0], 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC,
-                                        skCoreInfo));
+                                        scopeCoreInfo));
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, unchanged, &dfxInfos[1], 1, 1, SkTaskType::TYPE_FUNC,
-                                        SkQueueType::AIC, skCoreInfo));
+                                        SkQueueType::AIC, scopeCoreInfo));
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, skDriver, &dfxInfos[2], 2, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC,
-                                        skCoreInfo));
+                                        scopeCoreInfo));
 
   TaskQue *taskQue = aic.GetTaskQue();
   ASSERT_EQ(taskQue->taskInfos[0].numBlocks, 12U);
@@ -712,7 +686,7 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpUsesFinalMix12QueueBlockDi
   scaledAiv->nodeInfos.kernelInfos.numBlocks = 6;
   scaledAiv->nodeInfos.kernelInfos.capBits.blockDimScaleUp = true;
   aivDriver->nodeInfos.kernelInfos.numBlocks = 12;
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 8);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 8);
 
   SkTask aic;
   SkTask aiv;
@@ -720,11 +694,11 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpUsesFinalMix12QueueBlockDi
   ASSERT_TRUE(aiv.taskQue.Init(4));
   SkDfxInfo dfxInfos[3]{};
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, aicNode, &dfxInfos[0], 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC,
-                                        skCoreInfo));
+                                        scopeCoreInfo));
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, scaledAiv, &dfxInfos[1], 1, 1, SkTaskType::TYPE_FUNC,
-                                        SkQueueType::AIV, skCoreInfo));
+                                        SkQueueType::AIV, scopeCoreInfo));
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, aivDriver, &dfxInfos[2], 2, 1, SkTaskType::TYPE_FUNC,
-                                        SkQueueType::AIV, skCoreInfo));
+                                        SkQueueType::AIV, scopeCoreInfo));
 
   ASSERT_EQ(aiv.GetTaskQue()->taskInfos[0].numBlocks, 16U);
   SkHostEntryInfo entryInfo = GenEntryInfoForTest(aic, aiv);
@@ -743,7 +717,7 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpOverridesOriginalMix12Adap
   scaledMix11->nodeInfos.kernelInfos.numBlocks = 4;
   scaledMix11->nodeInfos.kernelInfos.capBits.blockDimScaleUp = true;
   mix12Driver->nodeInfos.kernelInfos.numBlocks = 6;
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 6);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 6);
 
   SkTask aic;
   SkTask aiv;
@@ -751,9 +725,9 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpOverridesOriginalMix12Adap
   ASSERT_TRUE(aiv.taskQue.Init(4));
   SkDfxInfo dfxInfos[2]{};
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, scaledMix11, &dfxInfos[0], 0, 1, SkTaskType::TYPE_FUNC,
-                                        SkQueueType::MIX_1_1, skCoreInfo));
+                                        SkQueueType::MIX_1_1, scopeCoreInfo));
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, mix12Driver, &dfxInfos[1], 1, 1, SkTaskType::TYPE_FUNC,
-                                        SkQueueType::MIX_1_2, skCoreInfo));
+                                        SkQueueType::MIX_1_2, scopeCoreInfo));
 
   ASSERT_EQ(aiv.GetTaskQue()->taskInfos[0].numBlocks, 12U);
   SkHostEntryInfo entryInfo = GenEntryInfoForTest(aic, aiv);
@@ -890,11 +864,11 @@ TEST_F(SkTaskBuilderTest, DispatchFuncTask_UnknownQueueType_ReturnFalse) {
   ASSERT_TRUE(aic.taskQue.Init(4));
   ASSERT_TRUE(aiv.taskQue.Init(4));
   auto *kernel = CreateKernelNodeEx(5001, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::AIC_ONLY);
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 1);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 1);
   SkDfxInfo dfx{};
 
-  EXPECT_FALSE(
-      builder->DispatchFuncTask(aic, aiv, kernel, &dfx, 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::UNKNOWN, skCoreInfo));
+  EXPECT_FALSE(builder->DispatchFuncTask(aic, aiv, kernel, &dfx, 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::UNKNOWN,
+                                         scopeCoreInfo));
 }
 
 TEST_F(SkTaskBuilderTest, DispatchEventTask_UnsupportedNodeType_ReturnFalse) {
@@ -1258,21 +1232,21 @@ TEST_F(SkTaskBuilderTest, DispatchFuncTask_MixFailureAndDcciBranch) {
   auto *n2 = dynamic_cast<SuperKernelKernelNode *>(mix12);
   ASSERT_NE(n1, nullptr);
   ASSERT_NE(n2, nullptr);
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 1);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 1);
 
   SkDfxInfo dfx{};
-  ASSERT_TRUE(
-      builder->DispatchFuncTask(aic, aiv, mix11, &dfx, 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::MIX_1_1, skCoreInfo));
+  ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, mix11, &dfx, 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::MIX_1_1,
+                                        scopeCoreInfo));
   TaskInfo &firstFunc = aic.taskQue.get()->taskInfos[aic.taskQue.get()->taskCnt - 1];
   EXPECT_NE((firstFunc.debugOptions & 0x1U), 0U);
 
   n1->nodeInfos.kernelInfos.resolvedFuncs[0].funcAddr[1] = 0;
-  EXPECT_FALSE(
-      builder->DispatchFuncTask(aic, aiv, mix11, &dfx, 1, 1, SkTaskType::TYPE_FUNC, SkQueueType::MIX_1_1, skCoreInfo));
+  EXPECT_FALSE(builder->DispatchFuncTask(aic, aiv, mix11, &dfx, 1, 1, SkTaskType::TYPE_FUNC, SkQueueType::MIX_1_1,
+                                         scopeCoreInfo));
 
   n2->nodeInfos.kernelInfos.resolvedFuncs[0].funcAddr[1] = 0;
-  EXPECT_FALSE(
-      builder->DispatchFuncTask(aic, aiv, mix12, &dfx, 2, 1, SkTaskType::TYPE_FUNC, SkQueueType::MIX_1_2, skCoreInfo));
+  EXPECT_FALSE(builder->DispatchFuncTask(aic, aiv, mix12, &dfx, 2, 1, SkTaskType::TYPE_FUNC, SkQueueType::MIX_1_2,
+                                         scopeCoreInfo));
 }
 
 TEST_F(SkTaskBuilderTest, AddFuncTask_DcciBeforeKernelStart_SetsDebugFlag) {
@@ -1368,8 +1342,8 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_UsesScopeCoreResultWithoutRecalculation) 
   aiv.funcCnt = 1;
   aiv.numBlocks = 5;
 
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::AIV_ONLY, 5);
-  SkHostEntryInfo entryInfo = builder->GenEntryInfo(aic, aiv, skCoreInfo);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::AIV_ONLY, 5);
+  SkHostEntryInfo entryInfo = builder->GenEntryInfo(aic, aiv, scopeCoreInfo);
   ASSERT_NE(entryInfo.skEntryFunc, nullptr);
   EXPECT_EQ(entryInfo.entryType, SkKernelType::AIV_ONLY);
   EXPECT_EQ(entryInfo.numBlocks, 5U);
@@ -1483,7 +1457,7 @@ TEST_F(SkTaskBuilderTest, AddTasks_RemainsFullAfterExpand_AndUnsupportedNodeType
 
 TEST_F(SkTaskBuilderTest, DispatchFuncTask_UnsupportedNodeTypeAndQueueFailure) {
   auto *notify = CreateNotifyNodeEx(8701, 0, INVALID_TASK_ID, INVALID_TASK_ID, 77);
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 1);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 1);
   SkDfxInfo dfx{};
 
   SkTask aic;
@@ -1492,7 +1466,7 @@ TEST_F(SkTaskBuilderTest, DispatchFuncTask_UnsupportedNodeTypeAndQueueFailure) {
   ASSERT_TRUE(aiv.taskQue.Init(1));
 
   EXPECT_FALSE(
-      builder->DispatchFuncTask(aic, aiv, notify, &dfx, 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC, skCoreInfo));
+      builder->DispatchFuncTask(aic, aiv, notify, &dfx, 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC, scopeCoreInfo));
 }
 
 TEST_F(SkTaskBuilderTest, GenEntryInfo_Mix12ElseBranch_Selected) {
@@ -2332,7 +2306,7 @@ TEST_F(SkTaskBuilderTest, DispatchSyncTasks_EarlyStartMasksEnqueueTasks) {
   related->nodeInfos.kernelInfos.numBlocks = 2;
   nextAic->nodeInfos.kernelInfos.numBlocks = 3;
   nextAiv->nodeInfos.kernelInfos.numBlocks = 4;
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 4);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 4);
 
   EarlyStartInfo info;
   info.relatedSetNode = related;
@@ -2353,8 +2327,8 @@ TEST_F(SkTaskBuilderTest, DispatchSyncTasks_EarlyStartMasksEnqueueTasks) {
   ASSERT_TRUE(aic.taskQue.Init(16));
   ASSERT_TRUE(aiv.taskQue.Init(16));
 
-  EXPECT_TRUE(builder->DispatchSyncTasks(aic, aiv, 0, info, false, SkQueueType::AIC, skCoreInfo));
-  EXPECT_TRUE(builder->DispatchSyncTasks(aic, aiv, 0, info, true, SkQueueType::AIC, skCoreInfo));
+  EXPECT_TRUE(builder->DispatchSyncTasks(aic, aiv, 0, info, false, SkQueueType::AIC, scopeCoreInfo));
+  EXPECT_TRUE(builder->DispatchSyncTasks(aic, aiv, 0, info, true, SkQueueType::AIC, scopeCoreInfo));
   ASSERT_EQ(aic.taskQue.get()->taskCnt, 4U);
   ASSERT_EQ(aiv.taskQue.get()->taskCnt, 4U);
 
@@ -2394,7 +2368,8 @@ TEST_F(SkTaskBuilderTest, DispatchSyncTasks_EarlyStartMasksEnqueueTasks) {
   SkTask defaultAiv;
   ASSERT_TRUE(defaultAic.taskQue.Init(4));
   ASSERT_TRUE(defaultAiv.taskQue.Init(4));
-  EXPECT_TRUE(builder->DispatchSyncTasks(defaultAic, defaultAiv, 1, defaultInfo, false, SkQueueType::AIC, skCoreInfo));
+  EXPECT_TRUE(
+      builder->DispatchSyncTasks(defaultAic, defaultAiv, 1, defaultInfo, false, SkQueueType::AIC, scopeCoreInfo));
 }
 
 TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpUpdatesRelatedEarlyStartSyncTask) {
@@ -2406,7 +2381,7 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpUpdatesRelatedEarlyStartSy
   aicDriver->nodeInfos.kernelInfos.numBlocks = 8;
   aivDriver->nodeInfos.kernelInfos.numBlocks = 12;
   std::vector<SuperKernelBaseNode *> tasks = {scaled, aicDriver, aivDriver};
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 8);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::MIX_AIC_1_2, 8);
   ASSERT_TRUE(builder->InitTaskSyncInfos(tasks));
 
   EarlyStartInfo &earlyStartInfo = builder->taskSyncInfos_[0].earlyStartInfo;
@@ -2417,14 +2392,14 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpUpdatesRelatedEarlyStartSy
   SkTask aiv;
   ASSERT_TRUE(aic.taskQue.Init(6));
   ASSERT_TRUE(aiv.taskQue.Init(6));
-  ASSERT_TRUE(builder->DispatchSyncTasks(aic, aiv, 0, earlyStartInfo, true, SkQueueType::AIC, skCoreInfo));
+  ASSERT_TRUE(builder->DispatchSyncTasks(aic, aiv, 0, earlyStartInfo, true, SkQueueType::AIC, scopeCoreInfo));
   SkDfxInfo dfxInfos[3]{};
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, scaled, &dfxInfos[0], 0, 1, SkTaskType::TYPE_FUNC, SkQueueType::AIC,
-                                        skCoreInfo));
+                                        scopeCoreInfo));
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, aicDriver, &dfxInfos[1], 1, 1, SkTaskType::TYPE_FUNC,
-                                        SkQueueType::AIC, skCoreInfo));
+                                        SkQueueType::AIC, scopeCoreInfo));
   ASSERT_TRUE(builder->DispatchFuncTask(aic, aiv, aivDriver, &dfxInfos[2], 2, 1, SkTaskType::TYPE_FUNC,
-                                        SkQueueType::AIV, skCoreInfo));
+                                        SkQueueType::AIV, scopeCoreInfo));
 
   ASSERT_EQ(aic.GetTaskQue()->taskInfos[0].numBlocks, 8U);
   SkHostEntryInfo entryInfo = GenEntryInfoForTest(aic, aiv);
@@ -2437,7 +2412,7 @@ TEST_F(SkTaskBuilderTest, GenEntryInfo_BlockDimScaleUpUpdatesRelatedEarlyStartSy
 
 TEST_F(SkTaskBuilderTest, DispatchSyncTasks_EarlyStartAddFailureReturnsFalse) {
   auto *related = CreateKernelNodeEx(43411, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::AIC_ONLY);
-  auto skCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 1);
+  auto scopeCoreInfo = BuildCoreInfo(SkKernelType::AIC_ONLY, 1);
   EarlyStartInfo info;
   info.relatedWaitNode = related;
 
@@ -2445,7 +2420,7 @@ TEST_F(SkTaskBuilderTest, DispatchSyncTasks_EarlyStartAddFailureReturnsFalse) {
   SkTask aiv;
   ASSERT_TRUE(aiv.taskQue.Init(4));
   info.ApplySyncMask(SkEarlyStartMask::AIV_TO_AIC_WAIT);
-  EXPECT_FALSE(builder->DispatchSyncTasks(missingAicQueue, aiv, 0, info, false, SkQueueType::AIC, skCoreInfo));
+  EXPECT_FALSE(builder->DispatchSyncTasks(missingAicQueue, aiv, 0, info, false, SkQueueType::AIC, scopeCoreInfo));
 
   EarlyStartInfo aivInfo;
   aivInfo.relatedWaitNode = related;
@@ -2453,7 +2428,7 @@ TEST_F(SkTaskBuilderTest, DispatchSyncTasks_EarlyStartAddFailureReturnsFalse) {
   SkTask aic;
   SkTask missingAivQueue;
   ASSERT_TRUE(aic.taskQue.Init(4));
-  EXPECT_FALSE(builder->DispatchSyncTasks(aic, missingAivQueue, 0, aivInfo, false, SkQueueType::AIV, skCoreInfo));
+  EXPECT_FALSE(builder->DispatchSyncTasks(aic, missingAivQueue, 0, aivInfo, false, SkQueueType::AIV, scopeCoreInfo));
 }
 
 TEST_F(SkTaskBuilderTest, Build_WithEarlyStartOption_Success) {

@@ -263,7 +263,7 @@ bool SuperKernelOptimizer::Schedule(SuperKernelScopeInfo &scopeInfo, SuperKernel
           customTasks.size(), scopeInfo.GetScopeStreamInfos().size());
 
   SkBuildResult buildResult =
-      builder.Build(skFuncName, reorderedTaskNodes, customTasks, scopeInfo.GetScopeId(), scopeInfo.GetSkCoreInfo());
+      builder.Build(skFuncName, reorderedTaskNodes, customTasks, scopeInfo.GetScopeId(), scopeInfo.GetScopeCoreInfo());
   SkLaunchInfo &launchInfo = buildResult.launchInfo;
 
   // Collect task queue JSON for this scope

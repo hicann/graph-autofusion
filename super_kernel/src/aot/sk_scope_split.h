@@ -19,8 +19,9 @@
  * The scope splitting is implemented as a multi-pass pipeline, similar to compiler passes:
  * - Pass 0: Initial scope splitting based on fusibility and scopeBitFlags
  * - Pass 1: ScheMode core compatibility refinement
- * - Pass 2: Progressive deadlock detection and final SK core calculation
+ * - Pass 2: Progressive deadlock detection
  * - Pass 3: Remove event-only streams from scopes
+ * - Finalization: Calculate final SK core info after scope boundaries are stable
  *
  * Key Concepts:
  * - Scope: A collection of nodes from potentially multiple streams that can be fused together
@@ -88,6 +89,38 @@ struct StreamState {
 
 // Forward declaration
 class SuperKernelScopeSplitter;
+
+class ScopeCoreInfoCalculator {
+ public:
+  ScopeCoreInfoCalculator(int64_t maxDeviceCubeNum, int64_t maxDeviceVectorNum)
+      : maxDeviceCubeNum_(maxDeviceCubeNum), maxDeviceVectorNum_(maxDeviceVectorNum) {}
+
+  // Use this overload when only scope validity is needed.
+  bool GetValidScopeCoreInfo(const std::vector<SuperKernelBaseNode *> &nodes) const;
+
+  // On failure, scopeCoreInfo contains the preferred attempted shape for mismatch diagnostics.
+  bool GetValidScopeCoreInfo(const std::vector<SuperKernelBaseNode *> &nodes, ScopeCoreInfo &scopeCoreInfo) const;
+
+  // On failure, scopeCoreInfo contains the attempted shape and the accumulated constraints remain unchanged.
+  bool UpdateScopeCoreInfo(const SuperKernelBaseNode &node, ScopeCoreInfo &scopeCoreInfo);
+  void Reset();
+
+ private:
+  struct ScopeCoreConstraints {
+    uint32_t minCubeNum = 0;
+    uint32_t minVectorNum = 0;
+    std::optional<uint32_t> exactCubeNum;
+    std::optional<uint32_t> exactVectorNum;
+    bool requireMix12 = false;
+  };
+
+  static bool UpdateScopeCoreConstraints(const SuperKernelBaseNode &node, ScopeCoreConstraints &constraints);
+  bool GetScopeCoreCandidate(const ScopeCoreConstraints &constraints, ScopeCoreInfo &scopeCoreInfo) const;
+
+  int64_t maxDeviceCubeNum_ = 0;
+  int64_t maxDeviceVectorNum_ = 0;
+  ScopeCoreConstraints constraints_;
+};
 
 // ============ Pass Base Class ============
 
@@ -268,11 +301,11 @@ class PerOpMaxCoreSplitPass : public ScopeSplitPass {
   }
 };
 
-// ============ Pass 1: Initial Scope Split ============
+// ============ Pass 0: Initial Scope Split ============
 
 /*!
  * \class InitialScopeSplitPass
- * \brief Pass 1: Split graph into initial scopes based on fusibility and scopeBitFlags
+ * \brief Pass 0: Split graph into initial scopes based on fusibility and scopeBitFlags
  *
  * This pass performs coarse-grained scope splitting:
  * - Groups nodes by scopeBitFlags
@@ -336,16 +369,9 @@ class InitialScopeSplitPass : public ScopeSplitPass {
  * \brief Result of processing a single scope for deadlock detection
  */
 enum class ScopeProcessResult {
-  NO_DEADLOCK,                ///< No deadlock found, scope is safe and added to outputScopes
-  DEADLOCK_RESOLVED,          ///< Deadlock found and successfully split, remaining part returned via pendingScope
-  DEADLOCK_UNRESOLVED,        ///< Deadlock found but cannot split (no Wait node)
-  SK_CORE_CALCULATION_FAILED  ///< Progressive SK core calculation failed
-};
-
-enum class DeadlockCheckResult {
-  NO_DEADLOCK,
-  DEADLOCK_FOUND,
-  CALCULATION_FAILED,
+  NO_DEADLOCK,          ///< No deadlock found, scope is safe and added to outputScopes
+  DEADLOCK_RESOLVED,    ///< Deadlock found and successfully split, remaining part returned via pendingScope
+  DEADLOCK_UNRESOLVED,  ///< Deadlock found but cannot split (no Wait node)
 };
 
 /*!
@@ -373,11 +399,11 @@ class DeadlockRefinePass : public ScopeSplitPass {
    * \param scope Scope to check
    * \param deadlockNode Output: node that causes deadlock (nullptr if no deadlock)
    * \param deadlockWaitNode Output: nearest Wait node before deadlock (nullptr if no deadlock)
-   * \param completedScopeCoreInfo Output: final core info for the checked scope prefix
-   * \return Deadlock check result
+   * \param checkedScopeCoreInfo Output: core info used by deadlock detection for the checked scope prefix
+   * \return true if a deadlock is found
    */
-  DeadlockCheckResult FindDeadlockInScope(const SuperKernelScopeInfo &scope, SuperKernelBaseNode **deadlockNode,
-                                          SuperKernelBaseNode **deadlockWaitNode, SkCoreInfo *completedScopeCoreInfo);
+  bool FindDeadlockInScope(const SuperKernelScopeInfo &scope, SuperKernelBaseNode **deadlockNode,
+                           SuperKernelBaseNode **deadlockWaitNode, ScopeCoreInfo *checkedScopeCoreInfo);
 
   /*!
    * \brief Split a scope at a Wait node
@@ -397,8 +423,7 @@ class DeadlockRefinePass : public ScopeSplitPass {
    * - Detects a deadlock and splits at the nearest preceding Wait node, moving
    *   the front part into outputScopes and returning the remaining part via
    *   pendingScope; or
-   * - Detects an unresolvable deadlock (no suitable Wait node); or
-   * - Detects an invalid SK core result. Both failures abort refinement.
+   * - Detects an unresolvable deadlock (no suitable Wait node).
    *
    * \param scopeToProcess The scope to process (moved)
    * \param outputScopes Vector to store deadlock-free scopes produced from the front part
@@ -414,16 +439,19 @@ class DeadlockRefinePass : public ScopeSplitPass {
    * @param workingScope scope to split
    * @param deadlockNode node that caused deadlock
    * @param deadlockWaitNode wait node to split at
-   * @param scopeBeforeCoreInfo final core info for the scope before the wait node
+   * @param scopeBeforeCoreInfo core info used to model the scope before the wait node during deadlock detection
    * @param outputScopes output scopes
    * @param pendingScope pending scope for next iteration
    * @return split result
    */
   ScopeProcessResult HandleDeadlockSplit(SuperKernelScopeInfo &workingScope, SuperKernelBaseNode *deadlockNode,
-                                         SuperKernelBaseNode *deadlockWaitNode, const SkCoreInfo &scopeBeforeCoreInfo,
+                                         SuperKernelBaseNode *deadlockWaitNode,
+                                         const ScopeCoreInfo &scopeBeforeCoreInfo,
                                          std::vector<SuperKernelScopeInfo> &outputScopes,
                                          std::optional<SuperKernelScopeInfo> &pendingScope);
   LockDetector lockDetector_;
+  int64_t maxCubeNum_ = 0;
+  int64_t maxVectorNum_ = 0;
 };
 
 // ============ Pass 1: ScheMode Kernel Core Split Refinement ============
@@ -433,9 +461,8 @@ class DeadlockRefinePass : public ScopeSplitPass {
  * \brief Result of processing a single scope for ScheMode kernel split refinement
  */
 enum class ScheModeScopeProcessResult {
-  NO_SPLIT,           ///< No split required, scope is output as-is
-  SPLIT_RESOLVED,     ///< Split required and completed, remaining part returned via pendingScope
-  CALCULATION_FAILED  ///< A single kernel cannot form a legal SK core result
+  NO_SPLIT,       ///< No split required, scope is output as-is
+  SPLIT_RESOLVED  ///< Split required and completed, remaining part returned via pendingScope
 };
 
 /*!
@@ -480,8 +507,13 @@ class ScheModeKernelSplitPass : public ScopeSplitPass {
   void SplitScopeAtNode(const SuperKernelScopeInfo &scope, SuperKernelBaseNode *splitNode,
                         SuperKernelScopeInfo &scopeBefore, SuperKernelScopeInfo &scopeAfter);
 
-  uint32_t maxCubeNum_ = 0;
-  uint32_t maxVectorNum_ = 0;
+  std::string BuildScheModeCoreMismatchDetail(const ScopeCoreInfo &scopeBeforeCoreInfo,
+                                              const ScopeCoreInfo &candidateScopeCoreInfo,
+                                              const SuperKernelScopeInfo &scopeBefore,
+                                              const SuperKernelBaseNode &triggerNode) const;
+
+  int64_t maxCubeNum_ = 0;
+  int64_t maxVectorNum_ = 0;
 };
 
 // ============ Default Node Process Pass ============
@@ -597,6 +629,7 @@ class SuperKernelScopeSplitter {
   bool needResplit_ = false;
 
  private:
+  bool FinalizeScopeCoreInfo();
   void InitDefaultNodeFusibility();
   SuperKernelOptionsManager *opts_ = nullptr;
   bool enableTaskBreakerBypass_ = false;

@@ -29,7 +29,7 @@ void LockDetector::Init(SuperKernelGraph &graph) {
   depOpVecNum = 0;
   superKernelCubeNum = 0;
   superKernelVecNum = 0;
-  skCoreInfoChanged_ = false;
+  scopeCoreInfoChanged_ = false;
   nodeNum = 0;
   kernelNodeNum = 0;
   skStreamIds.clear();
@@ -206,7 +206,7 @@ bool LockDetector::HasEnoughCores(const SuperKernelBaseNode *curNode, bool isSup
   const uint32_t curNodeVecNum = curNode->GetVecNum();
 
   if (isSuperKernel) {
-    if (!skCoreInfoChanged_) {
+    if (!scopeCoreInfoChanged_) {
       SK_LOGD("[lock detector] Candidate SK core requirement is unchanged for node %s, skip resource recheck",
               curNode->Format().c_str());
       return true;
@@ -272,7 +272,7 @@ void LockDetector::Reset() {
   depOpVecNum = 0;
   superKernelCubeNum = 0;
   superKernelVecNum = 0;
-  skCoreInfoChanged_ = false;
+  scopeCoreInfoChanged_ = false;
   nodeNum = 0;
   kernelNodeNum = 0;
   deadlockReason_ = DeadlockFailReason::NOT_FIND_DEADLOCK;
@@ -492,12 +492,12 @@ bool LockDetector::IsFusible(SuperKernelBaseNode &curNode) {
   return canFuse;
 }
 
-void LockDetector::SetNotifyNodesExpandNumForScope(SuperKernelScopeInfo &scope) {
-  const uint32_t maxExpandVecNum = scope.GetSkCoreInfo().GetVectorNum();
-  const uint32_t maxExpandCubeNum = scope.GetSkCoreInfo().GetCubeNum();
+void LockDetector::SetNotifyNodesExpandNumForScope(SuperKernelScopeInfo &scope, const ScopeCoreInfo &scopeCoreInfo) {
+  const uint32_t maxExpandVecNum = scopeCoreInfo.GetVectorNum();
+  const uint32_t maxExpandCubeNum = scopeCoreInfo.GetCubeNum();
   std::vector<SuperKernelBaseNode *> notifyNodes;
   std::unordered_set<uint32_t> scopeStreams;
-  // Collect notify nodes and stream information. Core counts come from the final SK core info.
+  // Collect notify nodes and stream information using the current deadlock-check candidate.
   for (const auto *node : scope.GetNodes()) {
     if (node == nullptr) {
       continue;

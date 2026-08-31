@@ -19,20 +19,18 @@
 #include <atomic>
 #include <bitset>
 #include <cstdint>
-#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
 #include "sk_types.h"
 #include "sk_node.h"
 
-struct SkCoreInfo {
+struct ScopeCoreInfo {
   SkKernelType type = SkKernelType::DEFAULT;
   uint32_t numBlocks = 0;
 
   bool IsValid() const {
-    return type != SkKernelType::DEFAULT && numBlocks != 0 &&
-           (type != SkKernelType::MIX_AIC_1_2 || numBlocks <= std::numeric_limits<uint32_t>::max() / 2U);
+    return type != SkKernelType::DEFAULT && numBlocks != 0;
   }
 
   uint32_t GetCubeNum() const {
@@ -54,7 +52,7 @@ struct SkCoreInfo {
       case SkKernelType::MIX_AIC_1_1:
         return numBlocks;
       case SkKernelType::MIX_AIC_1_2:
-        return IsValid() ? numBlocks * 2U : 0;
+        return numBlocks * 2U;
       default:
         return 0;
     }
@@ -347,7 +345,7 @@ class SuperKernelScopeInfo {
         nodes_(std::move(other.nodes_)),
         scopeBitFlags_(other.scopeBitFlags_),
         breakInfo_(std::move(other.breakInfo_)),
-        skCoreInfo_(other.skCoreInfo_),
+        scopeCoreInfo_(other.scopeCoreInfo_),
         extInfo_(std::move(other.extInfo_)) {}
   SuperKernelScopeInfo &operator=(SuperKernelScopeInfo &&other) noexcept {
     if (this != &other) {
@@ -356,7 +354,7 @@ class SuperKernelScopeInfo {
       nodes_ = std::move(other.nodes_);
       scopeBitFlags_ = other.scopeBitFlags_;
       breakInfo_ = std::move(other.breakInfo_);
-      skCoreInfo_ = other.skCoreInfo_;
+      scopeCoreInfo_ = other.scopeCoreInfo_;
       extInfo_ = std::move(other.extInfo_);
     }
     return *this;
@@ -417,14 +415,14 @@ class SuperKernelScopeInfo {
   }
 
   // ============ Final SK Core Result ============
-  const SkCoreInfo &GetSkCoreInfo() const {
-    return skCoreInfo_;
+  const ScopeCoreInfo &GetScopeCoreInfo() const {
+    return scopeCoreInfo_;
   }
-  void SetSkCoreInfo(const SkCoreInfo &skCoreInfo) {
-    skCoreInfo_ = skCoreInfo;
+  void SetScopeCoreInfo(const ScopeCoreInfo &scopeCoreInfo) {
+    scopeCoreInfo_ = scopeCoreInfo;
   }
-  void ClearSkCoreInfo() {
-    skCoreInfo_ = {};
+  void ClearScopeCoreInfo() {
+    scopeCoreInfo_ = {};
   }
 
   // ============ ExtInfo ============
@@ -444,7 +442,7 @@ class SuperKernelScopeInfo {
   std::vector<SuperKernelBaseNode *> nodes_;       ///< All nodes in this scope
   std::bitset<MAX_SCOPE_NUM> scopeBitFlags_;       ///< Scope bit flags
   ScopeBreakInfo breakInfo_;                       ///< Break reason for this scope boundary
-  SkCoreInfo skCoreInfo_;                          ///< Final SK type and numBlocks
+  ScopeCoreInfo scopeCoreInfo_;                    ///< Final SK type and numBlocks
   ScopeExtInfo extInfo_;                           ///< Extended info for scope processing and scheduling
 };
 

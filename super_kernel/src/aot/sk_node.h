@@ -382,6 +382,9 @@ class SuperKernelBaseNode {
   virtual bool IsScheModeOn() const {
     return false;
   }
+  bool RequiresExactCoreMatch() const {
+    return IsScheModeOn() && !GetNodeInfos().kernelInfos.capBits.blockDimScaleUp;
+  }
   virtual bool GetScheMode() const {
     return false;
   }

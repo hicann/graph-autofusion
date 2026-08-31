@@ -101,10 +101,10 @@ class LockDetector {
    */
   void Reset();
 
-  void SetSkCoreInfo(const SkCoreInfo &skCoreInfo) {
-    const uint32_t cubeNum = skCoreInfo.GetCubeNum();
-    const uint32_t vectorNum = skCoreInfo.GetVectorNum();
-    skCoreInfoChanged_ = cubeNum != superKernelCubeNum || vectorNum != superKernelVecNum;
+  void SetScopeCoreInfo(const ScopeCoreInfo &scopeCoreInfo) {
+    const uint32_t cubeNum = scopeCoreInfo.GetCubeNum();
+    const uint32_t vectorNum = scopeCoreInfo.GetVectorNum();
+    scopeCoreInfoChanged_ = cubeNum != superKernelCubeNum || vectorNum != superKernelVecNum;
     superKernelCubeNum = cubeNum;
     superKernelVecNum = vectorNum;
   }
@@ -126,10 +126,11 @@ class LockDetector {
   /**
    * @brief 设置scope中Notify节点的expand number
    * @param scope Scope信息
+   * @param scopeCoreInfo 当前scope用于死锁检测的核信息
    *
-   * 该函数使用scope的最终SkCoreInfo，将vec/cube num设置到所有Notify节点上。
+   * 该函数使用死锁检测过程中的ScopeCoreInfo，将vec/cube num设置到所有Notify节点上。
    */
-  void SetNotifyNodesExpandNumForScope(SuperKernelScopeInfo &scope);
+  void SetNotifyNodesExpandNumForScope(SuperKernelScopeInfo &scope, const ScopeCoreInfo &scopeCoreInfo);
 
   /**
    * @brief 重置scope中Notify节点的expand number为0
@@ -182,7 +183,7 @@ class LockDetector {
   uint32_t depOpVecNum;                    // visited op vec num outside superkernel
   uint32_t superKernelCubeNum;             // SK cube cores
   uint32_t superKernelVecNum;              // SK vector cores
-  bool skCoreInfoChanged_ = false;         // Whether the current candidate changed physical core requirements
+  bool scopeCoreInfoChanged_ = false;      // Whether the current candidate changed physical core requirements
   static int64_t deviceRealCubeNum;
   static int64_t deviceRealVecNum;
   std::unordered_set<uint32_t> skStreamIds;

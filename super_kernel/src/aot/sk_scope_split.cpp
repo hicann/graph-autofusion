@@ -16,7 +16,6 @@
 #include "sk_scope_split.h"
 #include "sk_common.h"
 #include <algorithm>
-#include <limits>
 #include <unordered_map>
 
 namespace {
@@ -24,45 +23,34 @@ bool IsExecutableKernelNode(const SuperKernelBaseNode *node) {
   return node != nullptr && node->GetNodeType() == SkNodeType::NODE_KERNEL && !node->IsScopeNode();
 }
 
-bool LoadDeviceCoreNums(uint32_t &maxCubeNum, uint32_t &maxVectorNum) {
-  int64_t cubeNum = 0;
-  int64_t vectorNum = 0;
-  const aclError ret = GetDeviceCoreNums(cubeNum, vectorNum);
-  if (ret != ACL_SUCCESS || cubeNum <= 0 || vectorNum <= 0 ||
-      cubeNum > static_cast<int64_t>(std::numeric_limits<uint32_t>::max()) ||
-      vectorNum > static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
-    SK_LOGE("[ScopeCore] failed to get device cores, ret=%d, cube=%ld, vector=%ld", ret, cubeNum, vectorNum);
-    return false;
+ScopeCoreInfo BuildDebugPerOpScopeCoreInfo(const SuperKernelBaseNode &node, int64_t maxDeviceCubeNum,
+                                           int64_t maxDeviceVectorNum) {
+  if (node.RequiresExactCoreMatch()) {
+    if (node.GetCubeNum() == 0 && node.GetVecNum() != 0 && (node.GetVecNum() & 1U) != 0U) {
+      return {SkKernelType::AIV_ONLY, node.GetVecNum()};
+    } else {
+      const uint32_t numBlocks = node.GetCubeNum() == 0 ? node.GetVecNum() / 2U : node.GetCubeNum();
+      return {SkKernelType::MIX_AIC_1_2, numBlocks};
+    }
+  } else {
+    const int64_t numBlocks = std::min(maxDeviceCubeNum, maxDeviceVectorNum / 2);
+    return {SkKernelType::MIX_AIC_1_2, static_cast<uint32_t>(numBlocks)};
   }
-  maxCubeNum = static_cast<uint32_t>(cubeNum);
-  maxVectorNum = static_cast<uint32_t>(vectorNum);
-  return true;
 }
+}  // namespace
 
-uint32_t CeilDiv2(uint32_t value) {
-  return value / 2U + value % 2U;
-}
+bool ScopeCoreInfoCalculator::UpdateScopeCoreConstraints(const SuperKernelBaseNode &node,
+                                                         ScopeCoreConstraints &constraints) {
+  constraints.minCubeNum = std::max(constraints.minCubeNum, node.GetCubeNum());
+  constraints.minVectorNum = std::max(constraints.minVectorNum, node.GetVecNum());
+  constraints.requireMix12 = constraints.requireMix12 || node.GetKernelType() == SkKernelType::MIX_AIC_1_2;
 
-struct ScopeCoreRequirement {
-  uint32_t maxCubeNum = 0;
-  uint32_t maxVectorNum = 0;
-  std::optional<uint32_t> exactCubeNum;
-  std::optional<uint32_t> exactVectorNum;
-  bool requireMix12 = false;
-};
-
-bool UpdateScopeCoreRequirement(const SuperKernelBaseNode &node, ScopeCoreRequirement &requirement) {
-  requirement.maxCubeNum = std::max(requirement.maxCubeNum, node.GetCubeNum());
-  requirement.maxVectorNum = std::max(requirement.maxVectorNum, node.GetVecNum());
-  requirement.requireMix12 = requirement.requireMix12 || node.GetKernelType() == SkKernelType::MIX_AIC_1_2;
-
-  const bool blockDimScaleUp = node.GetNodeInfos().kernelInfos.capBits.blockDimScaleUp;
-  if (!node.IsScheModeOn() || blockDimScaleUp) {
+  if (!node.RequiresExactCoreMatch()) {
     return true;
   }
 
   const bool vectorOnly = node.GetCubeNum() == 0 && node.GetVecNum() != 0;
-  auto &exactCoreNum = vectorOnly ? requirement.exactVectorNum : requirement.exactCubeNum;
+  auto &exactCoreNum = vectorOnly ? constraints.exactVectorNum : constraints.exactCubeNum;
   const uint32_t taskCoreNum = vectorOnly ? node.GetVecNum() : node.GetCubeNum();
   if (exactCoreNum.has_value() && exactCoreNum.value() != taskCoreNum) {
     return false;
@@ -71,123 +59,90 @@ bool UpdateScopeCoreRequirement(const SuperKernelBaseNode &node, ScopeCoreRequir
   return true;
 }
 
-bool CheckScopeCoreRequirement(const SkCoreInfo &candidate, const ScopeCoreRequirement &requirement,
-                               uint32_t maxDeviceCubeNum, uint32_t maxDeviceVectorNum) {
-  if (!candidate.IsValid()) {
-    return false;
-  }
-  const uint32_t skCubeNum = candidate.GetCubeNum();
-  const uint32_t skVectorNum = candidate.GetVectorNum();
-  if ((requirement.requireMix12 && candidate.type != SkKernelType::MIX_AIC_1_2) || skCubeNum > maxDeviceCubeNum ||
-      skVectorNum > maxDeviceVectorNum || requirement.maxCubeNum > skCubeNum ||
-      requirement.maxVectorNum > skVectorNum) {
-    return false;
-  }
-  return (!requirement.exactCubeNum.has_value() || requirement.exactCubeNum.value() == skCubeNum) &&
-         (!requirement.exactVectorNum.has_value() || requirement.exactVectorNum.value() == skVectorNum);
-}
-
-std::vector<SkCoreInfo> CalculateSkCoreCandidates(uint32_t maxCubeNum, uint32_t maxVectorNum) {
-  std::vector<SkCoreInfo> candidates;
-  if (maxCubeNum == 0) {
-    candidates.push_back({SkKernelType::AIV_ONLY, maxVectorNum});
-  } else if (maxVectorNum == 0) {
-    candidates.push_back({SkKernelType::AIC_ONLY, maxCubeNum});
-  } else {
-    const SkCoreInfo mix11{SkKernelType::MIX_AIC_1_1, std::max(maxCubeNum, maxVectorNum)};
-    const SkCoreInfo mix12{SkKernelType::MIX_AIC_1_2, std::max(maxCubeNum, CeilDiv2(maxVectorNum))};
-    if (maxVectorNum <= maxCubeNum) {
-      candidates = {mix11, mix12};
+bool ScopeCoreInfoCalculator::GetScopeCoreCandidate(const ScopeCoreConstraints &constraints,
+                                                    ScopeCoreInfo &scopeCoreInfo) const {
+  const auto getCandidates = [](uint32_t minCubeNum, uint32_t minVectorNum, bool requireMix12) {
+    if (minCubeNum == 0 && minVectorNum == 0) {
+      return std::vector<ScopeCoreInfo>{{}};
+    } else if (requireMix12) {
+      const uint32_t vectorBlocks = static_cast<uint32_t>((static_cast<uint64_t>(minVectorNum) + 1U) >> 1U);
+      return std::vector<ScopeCoreInfo>{{SkKernelType::MIX_AIC_1_2, std::max(minCubeNum, vectorBlocks)}};
+    } else if (minCubeNum == 0 && minVectorNum != 0) {
+      return std::vector<ScopeCoreInfo>{{SkKernelType::AIV_ONLY, minVectorNum}};
+    } else if (minCubeNum != 0 && minVectorNum == 0) {
+      return std::vector<ScopeCoreInfo>{{SkKernelType::AIC_ONLY, minCubeNum}};
     } else {
-      candidates = {mix12, mix11};
+      const uint32_t vectorBlocks = static_cast<uint32_t>((static_cast<uint64_t>(minVectorNum) + 1U) >> 1U);
+      const ScopeCoreInfo mix12{SkKernelType::MIX_AIC_1_2, std::max(minCubeNum, vectorBlocks)};
+      const ScopeCoreInfo mix11{SkKernelType::MIX_AIC_1_1, std::max(minCubeNum, minVectorNum)};
+      return minVectorNum <= minCubeNum ? std::vector<ScopeCoreInfo>{mix11, mix12}
+                                        : std::vector<ScopeCoreInfo>{mix12, mix11};
+    }
+  };
+
+  const auto isValidCandidate = [this, &constraints](const ScopeCoreInfo &candidate) {
+    if (!candidate.IsValid()) {
+      return false;
+    }
+    const uint32_t cubeNum = candidate.GetCubeNum();
+    const uint32_t vectorNum = candidate.GetVectorNum();
+    if (cubeNum > maxDeviceCubeNum_ || vectorNum > maxDeviceVectorNum_ || constraints.minCubeNum > cubeNum ||
+        constraints.minVectorNum > vectorNum) {
+      return false;
+    }
+    return (!constraints.exactCubeNum.has_value() || constraints.exactCubeNum.value() == cubeNum) &&
+           (!constraints.exactVectorNum.has_value() || constraints.exactVectorNum.value() == vectorNum);
+  };
+
+  const auto candidates = getCandidates(constraints.minCubeNum, constraints.minVectorNum, constraints.requireMix12);
+  for (const auto &candidate : candidates) {
+    if (isValidCandidate(candidate)) {
+      scopeCoreInfo = candidate;
+      return true;
     }
   }
 
-  return candidates;
+  // getCandidates has already applied the required SK type, so the first entry is the attempted shape for diagnostics.
+  scopeCoreInfo = candidates.front();
+  return false;
 }
 
-std::vector<SkCoreInfo> GetValidSkCoreCandidates(const ScopeCoreRequirement &requirement, uint32_t maxDeviceCubeNum,
-                                                 uint32_t maxDeviceVectorNum) {
-  auto candidates = CalculateSkCoreCandidates(requirement.maxCubeNum, requirement.maxVectorNum);
-  candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
-                                  [&](const SkCoreInfo &candidate) {
-                                    return !CheckScopeCoreRequirement(candidate, requirement, maxDeviceCubeNum,
-                                                                      maxDeviceVectorNum);
-                                  }),
-                   candidates.end());
-  return candidates;
+bool ScopeCoreInfoCalculator::GetValidScopeCoreInfo(const std::vector<SuperKernelBaseNode *> &nodes) const {
+  ScopeCoreInfo scopeCoreInfo;
+  return GetValidScopeCoreInfo(nodes, scopeCoreInfo);
 }
 
-std::string FormatSkCoreInfoForDetail(const SkCoreInfo &coreInfo) {
-  return std::string(to_string(coreInfo.type)) + "(blocks=" + std::to_string(coreInfo.numBlocks) +
-         ",C=" + std::to_string(coreInfo.GetCubeNum()) + ",V=" + std::to_string(coreInfo.GetVectorNum()) + ")";
-}
-
-std::string BuildScheModeCoreMismatchDetail(const SkCoreInfo &beforeSkCore,
-                                            const ScopeCoreRequirement &candidateRequirement,
-                                            const SuperKernelBaseNode &triggerNode) {
-  auto candidates = CalculateSkCoreCandidates(candidateRequirement.maxCubeNum, candidateRequirement.maxVectorNum);
-  auto candidateIt = candidates.begin();
-  if (candidateRequirement.requireMix12) {
-    candidateIt = std::find_if(candidates.begin(), candidates.end(),
-                               [](const SkCoreInfo &candidate) { return candidate.type == SkKernelType::MIX_AIC_1_2; });
-  }
-  const SkCoreInfo &candidateSkCore = candidateIt == candidates.end() ? candidates.front() : *candidateIt;
-  const uint32_t candidateCubeNum = candidateSkCore.GetCubeNum();
-  const uint32_t candidateVectorNum = candidateSkCore.GetVectorNum();
-
-  std::string mismatch;
-  const bool blockDimScaleUp = triggerNode.GetNodeInfos().kernelInfos.capBits.blockDimScaleUp;
-  if (triggerNode.IsScheModeOn() && !blockDimScaleUp) {
-    const bool vectorOnly = triggerNode.GetCubeNum() == 0 && triggerNode.GetVecNum() != 0;
-    const uint32_t expected = vectorOnly ? triggerNode.GetVecNum() : triggerNode.GetCubeNum();
-    const uint32_t actual = vectorOnly ? candidateVectorNum : candidateCubeNum;
-    if (expected != actual) {
-      mismatch = std::string("ScheMode ") + (vectorOnly ? "V" : "C") + "(expected=" + std::to_string(expected) +
-                 ",actual=" + std::to_string(actual) + ")";
+bool ScopeCoreInfoCalculator::GetValidScopeCoreInfo(const std::vector<SuperKernelBaseNode *> &nodes,
+                                                    ScopeCoreInfo &scopeCoreInfo) const {
+  ScopeCoreConstraints constraints;
+  for (const auto *node : nodes) {
+    if (!IsExecutableKernelNode(node)) {
+      continue;
+    }
+    if (!UpdateScopeCoreConstraints(*node, constraints)) {
+      GetScopeCoreCandidate(constraints, scopeCoreInfo);
+      return false;
     }
   }
-  if (mismatch.empty() && candidateRequirement.exactCubeNum.has_value() &&
-      candidateRequirement.exactCubeNum.value() != candidateCubeNum) {
-    mismatch = "ScheMode C(expected=" + std::to_string(candidateRequirement.exactCubeNum.value()) +
-               ",actual=" + std::to_string(candidateCubeNum) + ")";
-  }
-  if (mismatch.empty() && candidateRequirement.exactVectorNum.has_value() &&
-      candidateRequirement.exactVectorNum.value() != candidateVectorNum) {
-    mismatch = "ScheMode V(expected=" + std::to_string(candidateRequirement.exactVectorNum.value()) +
-               ",actual=" + std::to_string(candidateVectorNum) + ")";
-  }
-  if (mismatch.empty()) {
-    mismatch = "no candidate satisfies current scope requirements";
-  }
-
-  return "beforeSk=" + FormatSkCoreInfoForDetail(beforeSkCore) +
-         ", candidateSk=" + FormatSkCoreInfoForDetail(candidateSkCore) + ", mismatch=" + mismatch;
+  return GetScopeCoreCandidate(constraints, scopeCoreInfo);
 }
 
-bool BuildDebugPerOpCoreResult(SuperKernelScopeInfo &scope, SuperKernelBaseNode &node, uint32_t maxCubeNum,
-                               uint32_t maxVectorNum) {
-  const bool blockDimScaleUp = node.GetNodeInfos().kernelInfos.capBits.blockDimScaleUp;
-  SkCoreInfo result;
-  if (node.GetCubeNum() == 0 && node.GetVecNum() != 0 && node.IsScheModeOn() && !blockDimScaleUp &&
-      (node.GetVecNum() & 1U) != 0U) {
-    result = {SkKernelType::AIV_ONLY, node.GetVecNum()};
-  } else {
-    uint32_t numBlocks = std::min(maxCubeNum, maxVectorNum / 2U);
-    if (node.IsScheModeOn() && !blockDimScaleUp) {
-      numBlocks = node.GetCubeNum() == 0 ? node.GetVecNum() / 2U : node.GetCubeNum();
-    }
-    result = {SkKernelType::MIX_AIC_1_2, numBlocks};
-  }
-  ScopeCoreRequirement requirement;
-  if (!UpdateScopeCoreRequirement(node, requirement) ||
-      !CheckScopeCoreRequirement(result, requirement, maxCubeNum, maxVectorNum)) {
+bool ScopeCoreInfoCalculator::UpdateScopeCoreInfo(const SuperKernelBaseNode &node, ScopeCoreInfo &scopeCoreInfo) {
+  ScopeCoreConstraints nextConstraints = constraints_;
+  if (!UpdateScopeCoreConstraints(node, nextConstraints)) {
+    GetScopeCoreCandidate(nextConstraints, scopeCoreInfo);
     return false;
   }
-  scope.SetSkCoreInfo(result);
+  if (!GetScopeCoreCandidate(nextConstraints, scopeCoreInfo)) {
+    return false;
+  }
+  constraints_ = std::move(nextConstraints);
   return true;
 }
-}  // namespace
+
+void ScopeCoreInfoCalculator::Reset() {
+  constraints_ = {};
+}
 
 // ============ EventOnlyStreamRemovePass Implementation ============
 
@@ -303,9 +258,9 @@ bool PerOpMaxCoreSplitPass::Run(std::vector<SuperKernelScopeInfo> &scopes) {
   SK_LOGI("[PerOpMaxCore] %s pass starting", GetName().c_str());
   scopes.clear();
 
-  uint32_t maxCubeNum = 0;
-  uint32_t maxVectorNum = 0;
-  if (!LoadDeviceCoreNums(maxCubeNum, maxVectorNum)) {
+  int64_t maxDeviceCubeNum = 0;
+  int64_t maxDeviceVectorNum = 0;
+  if (GetDeviceCoreNums(maxDeviceCubeNum, maxDeviceVectorNum) != ACL_SUCCESS) {
     return false;
   }
 
@@ -322,11 +277,7 @@ bool PerOpMaxCoreSplitPass::Run(std::vector<SuperKernelScopeInfo> &scopes) {
         SuperKernelScopeInfo scope;
         scope.AddNode(node);
         RebuildStreamInfos(scope);
-        if (!BuildDebugPerOpCoreResult(scope, *node, maxCubeNum, maxVectorNum)) {
-          SK_LOGE("[PerOpMaxCore] failed to calculate final core result for kernel %lu", node->GetNodeId());
-          scopes.clear();
-          return false;
-        }
+        scope.SetScopeCoreInfo(BuildDebugPerOpScopeCoreInfo(*node, maxDeviceCubeNum, maxDeviceVectorNum));
         scopes.push_back(std::move(scope));
         SK_LOGI("[PerOpMaxCore] Created scope for kernel %lu (scopeIdx=%zu)", node->GetNodeId(), scopes.size() - 1);
       }
@@ -1093,20 +1044,23 @@ bool InitialScopeSplitPass::Run(std::vector<SuperKernelScopeInfo> &scopes) {
 DeadlockRefinePass::DeadlockRefinePass(SuperKernelGraph &inputGraph, SuperKernelOptionsManager &opts)
     : ScopeSplitPass(inputGraph), lockDetector_(graph_, opts) {}
 
-DeadlockCheckResult DeadlockRefinePass::FindDeadlockInScope(const SuperKernelScopeInfo &scope,
-                                                            SuperKernelBaseNode **deadlockNode,
-                                                            SuperKernelBaseNode **deadlockWaitNode,
-                                                            SkCoreInfo *completedScopeCoreInfo) {
+bool DeadlockRefinePass::FindDeadlockInScope(const SuperKernelScopeInfo &scope, SuperKernelBaseNode **deadlockNode,
+                                             SuperKernelBaseNode **deadlockWaitNode,
+                                             ScopeCoreInfo *checkedScopeCoreInfo) {
   const auto &nodes = scope.GetNodes();
   SK_LOGI("[DeadlockRefine] checking scope with %zu nodes for deadlock", nodes.size());
   lockDetector_.Reset();
 
-  uint32_t maxDeviceCubeNum = 0;
-  uint32_t maxDeviceVectorNum = 0;
-  bool deviceCoreNumsLoaded = false;
-  ScopeCoreRequirement requirement;
-  SkCoreInfo candidateCoreInfo;
-  SkCoreInfo coreInfoBeforeLastWait;
+  ScopeCoreInfoCalculator coreInfoCalculator(maxCubeNum_, maxVectorNum_);
+  if (!coreInfoCalculator.GetValidScopeCoreInfo(nodes)) {
+    SK_LOGD("[DeadlockRefine] scope has no valid core info, skip deadlock refinement");
+    *checkedScopeCoreInfo = {};
+    return false;
+  }
+  coreInfoCalculator.Reset();
+
+  ScopeCoreInfo candidateCoreInfo;
+  ScopeCoreInfo coreInfoBeforeLastWait;
 
   // Track the most recent Wait node seen before each node
   SuperKernelBaseNode *lastWaitNode = nullptr;
@@ -1115,21 +1069,8 @@ DeadlockCheckResult DeadlockRefinePass::FindDeadlockInScope(const SuperKernelSco
   for (size_t i = 0; i < nodes.size(); ++i) {
     const auto *node = nodes[i];
     if (IsExecutableKernelNode(node)) {
-      if (!deviceCoreNumsLoaded && !LoadDeviceCoreNums(maxDeviceCubeNum, maxDeviceVectorNum)) {
-        return DeadlockCheckResult::CALCULATION_FAILED;
-      }
-      deviceCoreNumsLoaded = true;
-      if (!UpdateScopeCoreRequirement(*node, requirement)) {
-        SK_LOGE("[DeadlockRefine] conflicting core requirement at kernel %lu", node->GetNodeId());
-        return DeadlockCheckResult::CALCULATION_FAILED;
-      }
-      auto candidates = GetValidSkCoreCandidates(requirement, maxDeviceCubeNum, maxDeviceVectorNum);
-      if (candidates.empty()) {
-        SK_LOGE("[DeadlockRefine] no valid SK core candidate at kernel %lu", node->GetNodeId());
-        return DeadlockCheckResult::CALCULATION_FAILED;
-      }
-      candidateCoreInfo = candidates.front();
-      lockDetector_.SetSkCoreInfo(candidateCoreInfo);
+      coreInfoCalculator.UpdateScopeCoreInfo(*node, candidateCoreInfo);
+      lockDetector_.SetScopeCoreInfo(candidateCoreInfo);
     }
     // Update lastWaitNode when we encounter a Wait node
     if (node->GetNodeType() == SkNodeType::NODE_WAIT) {
@@ -1142,19 +1083,19 @@ DeadlockCheckResult DeadlockRefinePass::FindDeadlockInScope(const SuperKernelSco
     if (!lockDetector_.IsFusible(*const_cast<SuperKernelBaseNode *>(node))) {
       *deadlockNode = const_cast<SuperKernelBaseNode *>(node);
       *deadlockWaitNode = lastWaitNode;  // The nearest Wait node before deadlock point
-      *completedScopeCoreInfo = coreInfoBeforeLastWait;
+      *checkedScopeCoreInfo = coreInfoBeforeLastWait;
       SK_LOGI("Deadlock detected at node %s (position %zu)", node->Format().c_str(), i);
       if (lastWaitNode != nullptr) {
         SK_LOGI("  Nearest Wait node before deadlock: %s", lastWaitNode->Format().c_str());
       }
-      return DeadlockCheckResult::DEADLOCK_FOUND;
+      return true;
     }
     SK_LOGI("Node %s passed deadlock check", node->Format().c_str());
   }
 
-  *completedScopeCoreInfo = candidateCoreInfo;
+  *checkedScopeCoreInfo = candidateCoreInfo;
   SK_LOGI("[DeadlockRefine] no deadlock found in scope");
-  return DeadlockCheckResult::NO_DEADLOCK;
+  return false;
 }
 
 void DeadlockRefinePass::SplitScopeAtWaitNode(const SuperKernelScopeInfo &scope, SuperKernelBaseNode *waitNode,
@@ -1229,7 +1170,7 @@ static void SetupScopeAfterBreakInfo(SuperKernelScopeInfo &scopeAfter, const Sco
 ScopeProcessResult DeadlockRefinePass::HandleDeadlockSplit(SuperKernelScopeInfo &workingScope,
                                                            SuperKernelBaseNode *deadlockNode,
                                                            SuperKernelBaseNode *deadlockWaitNode,
-                                                           const SkCoreInfo &scopeBeforeCoreInfo,
+                                                           const ScopeCoreInfo &scopeBeforeCoreInfo,
                                                            std::vector<SuperKernelScopeInfo> &outputScopes,
                                                            std::optional<SuperKernelScopeInfo> &pendingScope) {
   // Save original scope break information
@@ -1240,7 +1181,6 @@ ScopeProcessResult DeadlockRefinePass::HandleDeadlockSplit(SuperKernelScopeInfo 
   SuperKernelScopeInfo scopeBefore;
   SuperKernelScopeInfo scopeAfter;
   SplitScopeAtWaitNode(workingScope, deadlockWaitNode, scopeBefore, scopeAfter);
-  scopeBefore.SetSkCoreInfo(scopeBeforeCoreInfo);
   deadlockNode->SetFusionFailReason(FusionFailReason::EXIST_DEADLOCK);
 
   SK_LOGI("[DeadlockRefine] Deadlock detected at node %s, splitting at Wait node %s", deadlockNode->Format().c_str(),
@@ -1257,7 +1197,7 @@ ScopeProcessResult DeadlockRefinePass::HandleDeadlockSplit(SuperKernelScopeInfo 
   SetupScopeAfterBreakInfo(scopeAfter, originalBreakInfo, originalScopeId, hasSameKernelAsOriginal);
   // Add valid scopeBefore to output
   if (!scopeBefore.GetNodes().empty()) {
-    lockDetector_.SetNotifyNodesExpandNumForScope(scopeBefore);
+    lockDetector_.SetNotifyNodesExpandNumForScope(scopeBefore, scopeBeforeCoreInfo);
     outputScopes.push_back(std::move(scopeBefore));
   } else {
     SK_LOGI("[DeadlockRefine] scopeBefore is empty after split, no scope added before Wait node");
@@ -1280,24 +1220,26 @@ ScopeProcessResult DeadlockRefinePass::ProcessSingleScope(SuperKernelScopeInfo &
   pendingScope.reset();
 
   SuperKernelScopeInfo workingScope = std::move(scopeToProcess);
+  workingScope.ClearScopeCoreInfo();
   if (workingScope.GetNodes().empty()) {
     SK_LOGI("[DeadlockRefine] ProcessSingleScope called with empty scope, nothing to do");
     return ScopeProcessResult::NO_DEADLOCK;
   }
   SuperKernelBaseNode *deadlockNode = nullptr;
   SuperKernelBaseNode *deadlockWaitNode = nullptr;
-  SkCoreInfo completedScopeCoreInfo;
+  ScopeCoreInfo checkedScopeCoreInfo;
 
-  const DeadlockCheckResult checkResult =
-      FindDeadlockInScope(workingScope, &deadlockNode, &deadlockWaitNode, &completedScopeCoreInfo);
-  if (checkResult == DeadlockCheckResult::CALCULATION_FAILED) {
-    return ScopeProcessResult::SK_CORE_CALCULATION_FAILED;
-  }
-  if (checkResult == DeadlockCheckResult::NO_DEADLOCK) {
-    // No deadlock: whole scope is safe
-    workingScope.SetSkCoreInfo(completedScopeCoreInfo);
-    lockDetector_.SetNotifyNodesExpandNumForScope(workingScope);
-    SK_LOGI("[DeadlockRefine] Scope has no deadlock, added as a whole with %zu nodes", workingScope.GetNodes().size());
+  if (!FindDeadlockInScope(workingScope, &deadlockNode, &deadlockWaitNode, &checkedScopeCoreInfo)) {
+    if (checkedScopeCoreInfo.IsValid()) {
+      lockDetector_.SetNotifyNodesExpandNumForScope(workingScope, checkedScopeCoreInfo);
+      SK_LOGI("[DeadlockRefine] Scope has no deadlock, added as a whole with %zu nodes",
+              workingScope.GetNodes().size());
+    } else {
+      SK_LOGD(
+          "[DeadlockRefine] Deadlock refinement skipped because SK core info is unavailable, scope kept with "
+          "%zu nodes",
+          workingScope.GetNodes().size());
+    }
     outputScopes.push_back(std::move(workingScope));
     return ScopeProcessResult::NO_DEADLOCK;
   }
@@ -1310,7 +1252,7 @@ ScopeProcessResult DeadlockRefinePass::ProcessSingleScope(SuperKernelScopeInfo &
   }
 
   // Execute deadlock split logic
-  return HandleDeadlockSplit(workingScope, deadlockNode, deadlockWaitNode, completedScopeCoreInfo, outputScopes,
+  return HandleDeadlockSplit(workingScope, deadlockNode, deadlockWaitNode, checkedScopeCoreInfo, outputScopes,
                              pendingScope);
 }
 
@@ -1320,6 +1262,11 @@ bool DeadlockRefinePass::Run(std::vector<SuperKernelScopeInfo> &scopes) {
 
   std::vector<SuperKernelScopeInfo> refinedScopes;
   size_t splitCount = 0;
+
+  if (!scopes.empty() && GetDeviceCoreNums(maxCubeNum_, maxVectorNum_) != ACL_SUCCESS) {
+    scopes.clear();
+    return false;
+  }
 
   for (size_t i = 0; i < scopes.size(); ++i) {
     SK_LOGI("[DeadlockRefine] Processing scope index %zu with %zu nodes", i, scopes[i].GetNodes().size());
@@ -1334,12 +1281,6 @@ bool DeadlockRefinePass::Run(std::vector<SuperKernelScopeInfo> &scopes) {
     // contiguous in refinedScopes.
     while (true) {
       ScopeProcessResult result = ProcessSingleScope(std::move(currentScope), refinedScopes, pendingScope);
-
-      if (result == ScopeProcessResult::SK_CORE_CALCULATION_FAILED) {
-        SK_LOGE("[DeadlockRefine] Scope %zu: invalid SK core calculation, aborting refinement", i);
-        scopes.clear();
-        return false;
-      }
 
       if (result == ScopeProcessResult::DEADLOCK_UNRESOLVED) {
         SK_LOGE("[DeadlockRefine] Scope %zu: deadlock detected and cannot be resolved, aborting refinement", i);
@@ -1404,21 +1345,17 @@ void ScheModeKernelSplitPass::SplitScopeAtNode(const SuperKernelScopeInfo &scope
 
 static void SetupScheModeScopeBeforeBreakInfo(SuperKernelScopeInfo &scopeBefore,
                                               const ScopeBreakInfo &originalBreakInfo, uint16_t originalScopeId,
-                                              SuperKernelBaseNode *splitNode, bool recordTriggerScheMode,
-                                              const std::string &coreMismatchDetail, bool hasSameKernelAsOriginal) {
+                                              SuperKernelBaseNode *splitNode, const std::string &coreMismatchDetail,
+                                              bool hasSameKernelAsOriginal) {
   if (hasSameKernelAsOriginal) {
     scopeBefore.MutableBreakInfo() = originalBreakInfo;
     scopeBefore.MutableBreakInfo().SetParentScopeId(originalScopeId);
     SK_LOGI("[ScheModeSplit] scopeBefore kernel same as original, inherits break info");
   } else {
     std::vector<uint64_t> syncAllNodeIds;
-    if (recordTriggerScheMode) {
-      syncAllNodeIds.push_back(splitNode->GetNodeId());
-    } else {
-      for (const auto *node : scopeBefore.GetNodes()) {
-        if (IsExecutableKernelNode(node) && node->IsScheModeOn()) {
-          syncAllNodeIds.push_back(node->GetNodeId());
-        }
+    for (const auto *node : scopeBefore.GetNodes()) {
+      if (IsExecutableKernelNode(node) && node->RequiresExactCoreMatch()) {
+        syncAllNodeIds.push_back(node->GetNodeId());
       }
     }
     scopeBefore.MutableBreakInfo()
@@ -1432,38 +1369,74 @@ static void SetupScheModeScopeBeforeBreakInfo(SuperKernelScopeInfo &scopeBefore,
   SK_LOGI("[ScheModeSplit] scopeBefore break info: %s", scopeBefore.GetBreakInfo().Format().c_str());
 }
 
+std::string ScheModeKernelSplitPass::BuildScheModeCoreMismatchDetail(const ScopeCoreInfo &scopeBeforeCoreInfo,
+                                                                     const ScopeCoreInfo &candidateScopeCoreInfo,
+                                                                     const SuperKernelScopeInfo &scopeBefore,
+                                                                     const SuperKernelBaseNode &triggerNode) const {
+  const auto formatScopeCoreInfo = [](const ScopeCoreInfo &coreInfo) {
+    return std::string(to_string(coreInfo.type)) + "(blocks=" + std::to_string(coreInfo.numBlocks) +
+           ",C=" + std::to_string(coreInfo.GetCubeNum()) + ",V=" + std::to_string(coreInfo.GetVectorNum()) + ")";
+  };
+  const uint32_t candidateCubeNum = candidateScopeCoreInfo.GetCubeNum();
+  const uint32_t candidateVectorNum = candidateScopeCoreInfo.GetVectorNum();
+  std::string mismatch;
+
+  const auto checkExactMismatch = [&](const SuperKernelBaseNode &node) {
+    if (!mismatch.empty() || !node.RequiresExactCoreMatch()) {
+      return;
+    }
+    const bool vectorOnly = node.GetCubeNum() == 0 && node.GetVecNum() != 0;
+    const uint32_t expected = vectorOnly ? node.GetVecNum() : node.GetCubeNum();
+    const uint32_t actual = vectorOnly ? candidateVectorNum : candidateCubeNum;
+    if (expected != actual) {
+      mismatch = std::string("ScheMode ") + (vectorOnly ? "V" : "C") + "(expected=" + std::to_string(expected) +
+                 ",actual=" + std::to_string(actual) + ")";
+    }
+  };
+
+  checkExactMismatch(triggerNode);
+  for (const auto *node : scopeBefore.GetNodes()) {
+    if (IsExecutableKernelNode(node)) {
+      checkExactMismatch(*node);
+    }
+  }
+  if (mismatch.empty()) {
+    mismatch = "no candidate satisfies current scope requirements";
+  }
+
+  return "beforeSk=" + formatScopeCoreInfo(scopeBeforeCoreInfo) +
+         ", candidateSk=" + formatScopeCoreInfo(candidateScopeCoreInfo) + ", mismatch=" + mismatch;
+}
+
 ScheModeScopeProcessResult ScheModeKernelSplitPass::ProcessSingleScope(
     SuperKernelScopeInfo &&scopeToProcess, std::vector<SuperKernelScopeInfo> &outputScopes,
     std::optional<SuperKernelScopeInfo> &pendingScope) {
   pendingScope.reset();
 
   SuperKernelScopeInfo workingScope = std::move(scopeToProcess);
+  workingScope.ClearScopeCoreInfo();
   if (workingScope.GetNodes().empty()) {
     SK_LOGI("[ScheModeSplit] ProcessSingleScope called with empty scope, nothing to do");
     return ScheModeScopeProcessResult::NO_SPLIT;
   }
 
-  ScopeCoreRequirement requirement;
-  bool hasKernel = false;
+  ScopeCoreInfoCalculator coreInfoCalculator(maxCubeNum_, maxVectorNum_);
+  if (coreInfoCalculator.GetValidScopeCoreInfo(workingScope.GetNodes())) {
+    outputScopes.push_back(std::move(workingScope));
+    return ScheModeScopeProcessResult::NO_SPLIT;
+  }
+  coreInfoCalculator.Reset();
+
+  ScopeCoreInfo currentCoreInfo;
 
   auto &nodes = workingScope.GetNodes();
-  for (size_t i = 0; i < nodes.size(); ++i) {
-    SuperKernelBaseNode *node = nodes[i];
+  for (auto *node : nodes) {
     if (!IsExecutableKernelNode(node)) {
       continue;
     }
 
-    auto nextRequirement = requirement;
-    std::vector<SkCoreInfo> nextCandidates;
-    if (UpdateScopeCoreRequirement(*node, nextRequirement)) {
-      nextCandidates = GetValidSkCoreCandidates(nextRequirement, maxCubeNum_, maxVectorNum_);
-    }
-    if (nextCandidates.empty()) {
-      if (!hasKernel) {
-        SK_LOGE("[ScheModeSplit] kernel %lu cannot form a standalone SK core result", node->GetNodeId());
-        return ScheModeScopeProcessResult::CALCULATION_FAILED;
-      }
-
+    ScopeCoreInfo candidateCoreInfo;
+    if (!coreInfoCalculator.UpdateScopeCoreInfo(*node, candidateCoreInfo)) {
       // Save original scope's break info before split
       const ScopeBreakInfo &originalBreakInfo = workingScope.GetBreakInfo();
       uint16_t originalScopeId = workingScope.GetScopeId();
@@ -1472,14 +1445,11 @@ ScheModeScopeProcessResult ScheModeKernelSplitPass::ProcessSingleScope(
       SuperKernelScopeInfo scopeAfter;
       SplitScopeAtNode(workingScope, node, scopeBefore, scopeAfter);
 
-      const bool recordTriggerScheMode =
-          node->IsScheModeOn() && ((node->GetCubeNum() != 0 && node->GetCubeNum() < requirement.maxCubeNum) ||
-                                   (node->GetVecNum() != 0 && node->GetVecNum() < requirement.maxVectorNum));
-      const SkCoreInfo beforeSkCore = GetValidSkCoreCandidates(requirement, maxCubeNum_, maxVectorNum_).front();
-      const std::string coreMismatchDetail = BuildScheModeCoreMismatchDetail(beforeSkCore, nextRequirement, *node);
+      const std::string coreMismatchDetail =
+          BuildScheModeCoreMismatchDetail(currentCoreInfo, candidateCoreInfo, scopeBefore, *node);
       bool hasSameKernelAsOriginal = HasSameKernelNodes(workingScope, scopeBefore);
-      SetupScheModeScopeBeforeBreakInfo(scopeBefore, originalBreakInfo, originalScopeId, node, recordTriggerScheMode,
-                                        coreMismatchDetail, hasSameKernelAsOriginal);
+      SetupScheModeScopeBeforeBreakInfo(scopeBefore, originalBreakInfo, originalScopeId, node, coreMismatchDetail,
+                                        hasSameKernelAsOriginal);
 
       hasSameKernelAsOriginal = HasSameKernelNodes(workingScope, scopeAfter);
       SetupScopeAfterBreakInfo(scopeAfter, originalBreakInfo, originalScopeId, hasSameKernelAsOriginal);
@@ -1494,11 +1464,9 @@ ScheModeScopeProcessResult ScheModeKernelSplitPass::ProcessSingleScope(
       }
       return ScheModeScopeProcessResult::SPLIT_RESOLVED;
     }
-    requirement = std::move(nextRequirement);
-    hasKernel = true;
+    currentCoreInfo = candidateCoreInfo;
   }
 
-  workingScope.ClearSkCoreInfo();
   outputScopes.push_back(std::move(workingScope));
   return ScheModeScopeProcessResult::NO_SPLIT;
 }
@@ -1513,7 +1481,7 @@ bool ScheModeKernelSplitPass::Run(std::vector<SuperKernelScopeInfo> &scopes) {
   if (scopes.empty()) {
     return true;
   }
-  if (!LoadDeviceCoreNums(maxCubeNum_, maxVectorNum_)) {
+  if (GetDeviceCoreNums(maxCubeNum_, maxVectorNum_) != ACL_SUCCESS) {
     scopes.clear();
     return false;
   }
@@ -1525,10 +1493,6 @@ bool ScheModeKernelSplitPass::Run(std::vector<SuperKernelScopeInfo> &scopes) {
 
     while (true) {
       ScheModeScopeProcessResult result = ProcessSingleScope(std::move(currentScope), resScopes, pendingScope);
-      if (result == ScheModeScopeProcessResult::CALCULATION_FAILED) {
-        scopes.clear();
-        return false;
-      }
       if (result == ScheModeScopeProcessResult::SPLIT_RESOLVED) {
         splitCount++;
       }
@@ -1613,6 +1577,37 @@ void SuperKernelScopeSplitter::InitDefaultNodeFusibility() {
   SK_LOGI("[ScopeSplitter] Initialized %u default nodes as fusible", count);
 }
 
+bool SuperKernelScopeSplitter::FinalizeScopeCoreInfo() {
+  if (scopeInfos_.empty()) {
+    return true;
+  }
+
+  int64_t maxDeviceCubeNum = 0;
+  int64_t maxDeviceVectorNum = 0;
+  if (GetDeviceCoreNums(maxDeviceCubeNum, maxDeviceVectorNum) != ACL_SUCCESS) {
+    return false;
+  }
+
+  ScopeCoreInfoCalculator coreInfoCalculator(maxDeviceCubeNum, maxDeviceVectorNum);
+  for (auto &scope : scopeInfos_) {
+    scope.ClearScopeCoreInfo();
+    if (std::none_of(scope.GetNodes().begin(), scope.GetNodes().end(), IsExecutableKernelNode)) {
+      SK_LOGD("[ScopeCoreFinalize] scope %u has no executable kernel, skip finalization", scope.GetScopeId());
+      continue;
+    }
+    ScopeCoreInfo scopeCoreInfo;
+    if (!coreInfoCalculator.GetValidScopeCoreInfo(scope.GetNodes(), scopeCoreInfo)) {
+      SK_LOGE("[ScopeCoreFinalize] scope %u has no valid final SK core info", scope.GetScopeId());
+      return false;
+    }
+    scope.SetScopeCoreInfo(scopeCoreInfo);
+    SK_LOGI("[ScopeCoreFinalize] scope %u final core: type=%s, blocks=%u, cube=%u, vector=%u", scope.GetScopeId(),
+            to_string(scopeCoreInfo.type), scopeCoreInfo.numBlocks, scopeCoreInfo.GetCubeNum(),
+            scopeCoreInfo.GetVectorNum());
+  }
+  return true;
+}
+
 bool SuperKernelScopeSplitter::SplitGraph() {
   SK_LOGI("[ScopeSplitPipeline] starting scope splitting pipeline");
   InitDefaultNodeFusibility();
@@ -1655,6 +1650,12 @@ bool SuperKernelScopeSplitter::SplitGraph() {
       break;
     }
   } while (needResplit_);
+
+  if (!enablePerOpMaxCore_ && !FinalizeScopeCoreInfo()) {
+    SK_LOGE("[ScopeSplitPipeline] failed to finalize SK core info");
+    scopeInfos_.clear();
+    return false;
+  }
 
   ScopeSplitPass::PrintScopeResults(scopeInfos_, graph_, "ScopeSplitPipelineFinal");
 
