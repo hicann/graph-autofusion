@@ -411,6 +411,7 @@ af::Status NddmaTemplate::SwapCastBrcAndGenNddma(const af::AscNodePtr &node_cast
 af::Status NddmaTemplate::BroadcastInputNodeIsScalar(const af::AscNodePtr &node, bool &is_scalar) {
   is_scalar = false;
   af::AscNodePtr in_node = node;
+  int32_t output_idx = 0;
   while (af::ops::IsOps<af::ascir_op::Broadcast>(in_node)) {
     auto brc_in_anchor = in_node->GetInDataAnchor(0);
     GE_CHECK_NOTNULL(brc_in_anchor);
@@ -418,13 +419,14 @@ af::Status NddmaTemplate::BroadcastInputNodeIsScalar(const af::AscNodePtr &node,
     GE_CHECK_NOTNULL(peer_out_anchor);
     in_node = std::dynamic_pointer_cast<af::AscNode>(peer_out_anchor->GetOwnerNode());
     GE_CHECK_NOTNULL(in_node);
+    output_idx = peer_out_anchor->GetIdx();
   }
   if (af::ops::IsOps<af::ascir_op::Scalar>(in_node) || af::ops::IsOps<af::ascir_op::ScalarData>(in_node)) {
     is_scalar = true;
     GELOGD("Node [%s] is scalar.", in_node->GetNamePtr());
     return af::SUCCESS;
   }
-  auto &output_attr = in_node->outputs[0].attr;
+  auto &output_attr = in_node->outputs[output_idx].attr;
   const auto &output_vec_strides = output_attr.vectorized_strides;
   GE_ASSERT_TRUE(!output_vec_strides.empty());
   is_scalar = std::all_of(output_vec_strides.begin(), output_vec_strides.end(), [](const auto &stride) {

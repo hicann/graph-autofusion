@@ -2897,8 +2897,7 @@ class DivAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsScalarInputSupported(const std::vector<bool> &is_scalar_list) const override {
@@ -2946,8 +2945,7 @@ class SubAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
@@ -3014,8 +3012,7 @@ class AddAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
@@ -3077,8 +3074,7 @@ class MulAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
@@ -3131,8 +3127,7 @@ class TrueDivAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
@@ -3201,8 +3196,7 @@ class MinimumAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
     (void)node;
@@ -3263,8 +3257,7 @@ class MaximumAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {

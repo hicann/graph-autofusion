@@ -31,6 +31,7 @@ Status ValidateShapeConsistencyWithSingleOutput(const AscNode &node,
                                                 const BroadcastCapability &broadcast_capability = {false, {}});
 bool IsNodeHasScalarInput(const AscNode &node);
 bool IsNodeFirstInputScalar(const AscNode &node);
+bool IsAnyInputNodeScalar(const AscNode &node);
 }  // namespace ascir
 }  // namespace af
 

@@ -236,5 +236,26 @@ bool IsNodeHasScalarInput(const AscNode &node) {
 bool IsNodeFirstInputScalar(const AscNode &node) {
   return IsScalarInputType(node.GetInDataNodes().at(0)->GetType());
 }
+
+bool IsScalarInput(const std::vector<af::Expression> &repeats) {
+  return std::all_of(repeats.begin(), repeats.end(), [](const af::Expression &repeat) {
+    return SymbolicUtils::StaticCheckEq(repeat, af::Symbol(1)) == TriBool::kTrue;
+  });
+}
+
+bool IsAnyInputNodeScalar(const AscNode &node) {
+  for (const auto &in_anchor : node.GetAllInDataAnchors()) {
+    GE_ASSERT_NOTNULL(in_anchor);
+    GE_ASSERT_NOTNULL(in_anchor->GetPeerOutAnchor());
+    GE_ASSERT_NOTNULL(in_anchor->GetPeerOutAnchor()->GetOwnerNode());
+    auto in_node = std::dynamic_pointer_cast<af::AscNode>(in_anchor->GetPeerOutAnchor()->GetOwnerNode());
+    int32_t output_idx = in_anchor->GetPeerOutAnchor()->GetIdx();
+    auto repeats = in_node->outputs[output_idx].attr.repeats;
+    if (IsScalarInputType(in_node->GetType()) || IsScalarInput(repeats)) {
+      return true;
+    }
+  }
+  return false;
+}
 }  // namespace ascir
 }  // namespace af

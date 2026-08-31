@@ -11,10 +11,12 @@
 #ifndef __ASCENDC_API_SCALAR_MINIMUM_H__
 #define __ASCENDC_API_SCALAR_MINIMUM_H__
 
+namespace AscendC {
 template <typename T>
-inline __aicore__ void Minimums(const LocalTensor<T> &dst, const T x, const T y) {
+inline __aicore__ void Mins(const LocalTensor<T> &dst, const T x, const T y) {
   T res = x < y ? x : y;
   AscendC::Duplicate(dst, res, dst.GetSize());
 }
+}  // namespace AscendC
 
 #endif  // __ASCENDC_API_SCALAR_MINIMUM_H__
