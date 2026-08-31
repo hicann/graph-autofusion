@@ -2379,7 +2379,7 @@ TEST_F(TestOptimizer, MergeAxesGatherOnlyOneDim) {
 }
 
 TEST_F(TestOptimizer, CompleteGatherApiInfoSetsDcacheSize) {
-  constexpr int64_t kSimtDcacheSize = 40 * 1024;
+  constexpr int64_t kSimtDcacheSize = 32 * 1024;
   af::AscGraph graph("GatherDcacheGraph");
 
   af::ascir_op::Data data0("data0", graph);
@@ -2411,7 +2411,7 @@ TEST_F(TestOptimizer, CompleteGatherApiInfoSetsDcacheSize) {
 }
 
 TEST_F(TestOptimizer, CompleteExpm1ApiInfoSetsDcacheSize) {
-  constexpr int64_t kSimtDcacheSize = 40 * 1024;
+  constexpr int64_t kSimtDcacheSize = 32 * 1024;
   af::AscGraph graph("Expm1DcacheGraph");
 
   af::ascir_op::Data data("data", graph);

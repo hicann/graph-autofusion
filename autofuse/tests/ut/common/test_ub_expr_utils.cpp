@@ -339,5 +339,5 @@ TEST(AscGraphUbExprBuilderTest, BuildIncludesReservedUbForGather) {
 
   int64_t min_ub_usage = 0;
   EXPECT_TRUE(context.ub_expr.Simplify().GetConstValue(min_ub_usage)) << context.ub_expr.Str().get();
-  EXPECT_EQ(min_ub_usage, 49152);
+  EXPECT_EQ(min_ub_usage, 40960);
 }

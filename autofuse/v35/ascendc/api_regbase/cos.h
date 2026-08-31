@@ -10,20 +10,12 @@
 #ifndef __ASCENDC_API_REGBASE_COS_H__
 #define __ASCENDC_API_REGBASE_COS_H__
 
-constexpr uint32_t COS_THREAD_NUM = 1024;
+static constexpr AscendC::CosAlgo cos_algo = AscendC::CosAlgo::RADIAN_REDUCTION;
+static constexpr AscendC::CosConfig cos_config = {cos_algo};
 
 template <typename T>
-__simt_vf__ __aicore__ LAUNCH_BOUND(COS_THREAD_NUM) inline void CosSimtCompute(__ubuf__ T *x, __ubuf__ T *y,
-                                                                               const int64_t total_num) {
-  for (int64_t i = threadIdx.x; i < total_num; i += blockDim.x) {
-    y[i] = Simt::Cos(x[i]);
-  }
-}
-
-template <typename T>
-__aicore__ inline void CosExtend(const LocalTensor<T> &dst, const LocalTensor<T> &src,
-                                 const LocalTensor<uint8_t> &tmp_buf, const uint32_t calc_cnt) {
-  AscendC::Simt::VF_CALL<CosSimtCompute<T>>(AscendC::Simt::Dim3(COS_THREAD_NUM), (__ubuf__ T *)src.GetPhyAddr(),
-                                            (__ubuf__ T *)dst.GetPhyAddr(), calc_cnt);
+inline __aicore__ void CosExtend(const AscendC::LocalTensor<T> &dst, const AscendC::LocalTensor<T> &src,
+                                 AscendC::LocalTensor<uint8_t> &tmp_buf, const uint32_t calCount) {
+  Cos<T, false, cos_config>(dst, src, tmp_buf, calCount);
 }
 #endif  // __ASCENDC_API_REGBASE_COS_H__
