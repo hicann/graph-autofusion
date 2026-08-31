@@ -12,6 +12,7 @@
 #define OPTIMIZE_PLATFORM_V2_PASS_RUNNER_V2_H
 
 #include "optimize/platform/common/pass_runner.h"
+#include "optimize/graph_pass/broadcast_backward_pass.h"
 #include "optimize/graph_pass/broadcast_const_to_store.h"
 #include "optimize/graph_pass/scalar_to_1d_tensor.h"
 #include "optimize/graph_pass/scalar_broadcast_optimization.h"
@@ -31,11 +32,12 @@ class PassRunnerV2 final : public BasePassRunner {
     this->RegisterPass<PowEquivSubstitutionPass>();
     this->RegisterPass<BroadcastConstToStorePass>();
     this->RegisterPass<ScalarTo1DTensorPass>();
+    this->RegisterPass<SameSourceBroadcastCsePass>();
+    this->RegisterPass<BroadcastBackwardPass>();
     this->RegisterPass<ScalarBroadcastOptimizationPass>();
     this->RegisterPass<MaskedFillInputReorderPass>();
     this->RegisterPass<ExpandDimsForAllReducePass>();
     this->RegisterPass<ContinuesBroadcastOptimizationPass>();
-    this->RegisterPass<SameSourceBroadcastCsePass>();
     this->RegisterPass<DuplicateElewiseCsePass>();
     this->RegisterPass<GatherToLoadPass>();
     this->RegisterPass<SplitConcatOptimizationPass>();

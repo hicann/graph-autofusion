@@ -64,14 +64,19 @@ TEST_F(SameSourceBroadcastCseStTest, MergesEquivalentBroadcastsThroughGraphPassR
 
   ASSERT_EQ(optimizer.GraphPass(graph), af::SUCCESS);
 
-  const auto canonical = graph.FindNode("broadcast0");
   const auto add = graph.FindNode("add");
-  ASSERT_NE(canonical, nullptr);
   ASSERT_NE(add, nullptr);
   EXPECT_EQ(graph.FindNode("broadcast1"), nullptr);
-  EXPECT_EQ(add->GetInDataAnchor(0)->GetPeerOutAnchor(), canonical->GetOutDataAnchor(0));
-  EXPECT_EQ(add->GetInDataAnchor(1)->GetPeerOutAnchor(), canonical->GetOutDataAnchor(0));
-  EXPECT_EQ(reduce->GetOutDataAnchor(0)->GetPeerInDataAnchors().size(), 1UL);
+
+  const auto input0_peer = add->GetInDataAnchor(0)->GetPeerOutAnchor();
+  const auto input1_peer = add->GetInDataAnchor(1)->GetPeerOutAnchor();
+  ASSERT_NE(input0_peer, nullptr);
+  ASSERT_NE(input1_peer, nullptr);
+  EXPECT_EQ(input0_peer, input1_peer);
+  ASSERT_NE(input0_peer->GetOwnerNode(), nullptr);
+  EXPECT_EQ(input0_peer->GetOwnerNode()->GetName(), "reduce");
+  EXPECT_EQ(input1_peer->GetOwnerNode()->GetName(), "reduce");
+  EXPECT_EQ(reduce->GetOutDataAnchor(0)->GetPeerInDataAnchors().size(), 2UL);
 }
 
 TEST_F(SameSourceBroadcastCseStTest, SkipsGraphWithoutNormStructureThroughGraphPassRunner) {
