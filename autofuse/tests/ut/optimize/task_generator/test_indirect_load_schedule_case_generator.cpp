@@ -1539,7 +1539,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceRejectsMultipleReduceSegme
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceAllowsDtypeCastBeforeStore) {
-  auto graph = BuildPostReduceGraph("R", false, OutputPostTopology::kSum, true);
+  auto graph = BuildPostReduceGraph("RAA", false, OutputPostTopology::kSum, true);
   optimize::IndirectLoadScheduleCaseGenerator generator;
   std::vector<af::AscGraph> graphs;
   std::vector<std::string> score_functions;
@@ -1549,7 +1549,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceAllowsDtypeCastBeforeStore
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceRejectsNonCastSuccessor) {
-  auto graph = BuildPostReduceGraph("R", false, OutputPostTopology::kSum, false, true);
+  auto graph = BuildPostReduceGraph("RAA", false, OutputPostTopology::kSum, false, true);
 
   optimize::IndirectLoadScheduleCaseGenerator generator;
   std::vector<af::AscGraph> graphs;
