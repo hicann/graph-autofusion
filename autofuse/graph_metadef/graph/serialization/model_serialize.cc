@@ -11,11 +11,8 @@
 #include "graph/model_serialize.h"
 #include <google/protobuf/text_format.h>
 #include <queue>
-#include <thread>
-#include <atomic>
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
-#include <pthread.h>
 
 #include "mmpa/mmpa_api.h"
 #include "graph/debug/ge_attr_define.h"
@@ -40,7 +37,6 @@ const std::string kTmpWeight = "air_weight/";
 const std::string kSrcOutPeerIndex = "_src_out_peer_index_for_ge_txt_load";  // only exist in dump file
 constexpr int64_t kInvalidIndex = -1;
 constexpr int32_t kDecimal = 10;
-constexpr int32_t kMaxThreadNum = 16;
 
 af::Status CreateExternalWeightPath(const std::string &model_path, const std::string &model_name,
                                     const std::string &op_tag, std::string &weight_real_path,
@@ -781,58 +777,6 @@ bool ModelSerializeImp::RebuildOwnership(ComputeGraphPtr &compute_graph,
   return true;
 }
 
-Status ModelSerializeImp::ParallelUnserializeGraph(
-    std::map<std::string, ComputeGraphPtr> &graphs,
-    ::google::protobuf::RepeatedPtrField<proto::GraphDef> &graphs_proto) {
-  if (graphs_proto.empty()) {
-    GELOGW("Graph proto is empty");
-    return af::SUCCESS;
-  }
-  // 当图个数小于16时，只需要拉起跟子图个数相同的线程数(这里需要拉起的线程数需要除去主线程)
-  const int32_t thread_num = std::min(graphs_proto.size() - 1, kMaxThreadNum);
-  GELOGI("Start to unserialize graph with multi thread, thread num[%d], graph num[%d]", thread_num,
-         graphs_proto.size());
-  // 初始化子图表
-  for (int32_t idx = 0; idx < graphs_proto.size(); ++idx) {
-    graphs.emplace(std::make_pair(graphs_proto[idx].name(), nullptr));
-  }
-  std::vector<std::thread> threads;
-  std::atomic<Status> ret{af::SUCCESS};
-  std::atomic<int32_t> doing_num{0};
-  auto path = air_path_;
-  auto func = [&graphs_proto, &path, &ret, &graphs, &doing_num]() {
-    int32_t cur_num = doing_num.fetch_add(1);
-    while ((cur_num < graphs_proto.size()) && (ret == af::SUCCESS)) {
-      GELOGD("Unserialize graph, id: %ld, graph_name: %s", cur_num, graphs_proto[cur_num].name().c_str());
-      af::ModelSerializeImp impl;
-      impl.SetAirModelPath(path);
-      if (!impl.UnserializeGraph(graphs[graphs_proto[cur_num].name()], graphs_proto[cur_num])) {
-        GELOGE(af::FAILED, "Unserialize graph: %ld failed, graph_name: %s", cur_num,
-               graphs_proto[cur_num].name().c_str());
-        ret = af::PARAM_INVALID;
-        return;
-      }
-      cur_num = doing_num.fetch_add(1);
-    }
-  };
-  for (int32_t i = 0; i < thread_num; i++) {
-    threads.emplace_back(std::thread([i, &func]() {
-      auto thread_name = "ge_dserigrh_" + std::to_string(i);
-      (void)pthread_setname_np(pthread_self(), thread_name.c_str());
-      func();
-    }));
-  }
-  // 当前线程也利用起来
-  func();
-  for (auto &t : threads) {
-    if (t.joinable()) {
-      t.join();
-    }
-  }
-  GE_ASSERT_SUCCESS(ret, "Parallel unserialize graph failed.");
-  return af::SUCCESS;
-}
-
 Status ModelSerializeImp::UnserializeGraph(std::map<std::string, ComputeGraphPtr> &graphs,
                                            ::google::protobuf::RepeatedPtrField<proto::GraphDef> &graphs_proto) {
   if (graphs_proto.empty()) {
@@ -851,8 +795,7 @@ Status ModelSerializeImp::UnserializeGraph(std::map<std::string, ComputeGraphPtr
   return af::SUCCESS;
 }
 
-bool ModelSerializeImp::UnserializeModel(Model &model, proto::ModelDef &model_proto,
-                                         const bool is_enable_multi_thread) {
+bool ModelSerializeImp::UnserializeModel(Model &model, proto::ModelDef &model_proto) {
   model.name_ = model_proto.name();
   model.version_ = model_proto.version();
   model.platform_version_ = model_proto.custom_version();
@@ -865,11 +808,7 @@ bool ModelSerializeImp::UnserializeModel(Model &model, proto::ModelDef &model_pr
   GE_ASSERT_GRAPH_SUCCESS(AttrGroupSerialize::DeserializeAllAttr(model_proto.attr_groups(), &model));
   auto &graphs_proto = *model_proto.mutable_graph();
   std::map<std::string, ComputeGraphPtr> graphs;
-  if (is_enable_multi_thread) {
-    GE_ASSERT_SUCCESS(ParallelUnserializeGraph(graphs, graphs_proto));
-  } else {
-    GE_ASSERT_SUCCESS(UnserializeGraph(graphs, graphs_proto));
-  }
+  GE_ASSERT_SUCCESS(UnserializeGraph(graphs, graphs_proto));
 
   if (!graphs_proto.empty()) {
     // 从图集合中找到根图
@@ -1197,6 +1136,8 @@ bool ModelSerializeImp::SetWeightForModel(proto::OpDef &op_def) const {
 
 bool ModelSerialize::UnserializeModel(const uint8_t *const data, const size_t len, Model &model,
                                       const bool is_enable_multi_thread) const {
+  // 保留参数以兼容已有调用方；当前统一使用串行反序列化，避免并发写入图表导致数据竞争。
+  (void)is_enable_multi_thread;
   if (data == nullptr) {
     REPORT_INNER_ERR_MSG("E18888", "param data is nullptr, check invalid.");
     GELOGE(GRAPH_FAILED, "[Check][Param] data is nullptr");
@@ -1218,7 +1159,7 @@ bool ModelSerialize::UnserializeModel(const uint8_t *const data, const size_t le
   }
   ModelSerializeImp model_imp;
   model_imp.SetProtobufOwner(model_proto_ptr);
-  if (!model_imp.UnserializeModel(model, model_proto, is_enable_multi_thread)) {
+  if (!model_imp.UnserializeModel(model, model_proto)) {
     GELOGE(GRAPH_FAILED, "[Unserialize][Model] failed");
     return false;
   }

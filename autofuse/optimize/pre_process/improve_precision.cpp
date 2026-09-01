@@ -206,10 +206,6 @@ int64_t GenUniqueNumber() {
   return g_unique_number.fetch_add(1);
 }
 
-void ResetUniqueNumber() {
-  g_unique_number.store(0);
-}
-
 // ====================== Blacklist ======================
 
 const std::unordered_map<std::string, std::string> kBlackList1 = {
@@ -756,7 +752,6 @@ Status ProcessNodeGroups(AscGraph &asc_graph, TypeToNodesMap &type_to_nodes) {
 }  // namespace
 
 af::Status ImprovePrecisionForAscGraph(AscGraph &asc_graph) {
-  ResetUniqueNumber();
   optimize::GraphPropertiesCache cache(asc_graph);
   if (ShouldSkipGraph(cache, asc_graph)) {
     return af::SUCCESS;

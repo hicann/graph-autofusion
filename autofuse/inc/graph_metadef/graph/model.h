@@ -64,8 +64,7 @@ class GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY Model : public AttrHolder {
   // Model will be rewrite
   static graphStatus Load(const uint8_t *data, size_t len, Model &model);
   /**
-   * 多线程加载模型接口，将data中的内容反序列化到model对象中
-   * 当模型图具有多个子图时，此接口可以多线程并行加载子图加速，线程上线为16
+   * 兼容旧调用方的模型加载接口。当前统一采用串行反序列化。
    * @param data 模型序列化后的内容指针
    * @param len 模型序列化后的内容长度
    * @param model 模型加载后的承载对象

@@ -3682,9 +3682,10 @@ Status Kernel::GenerateKernelByNode(const ascir::ImplGraph &graph, stringstream 
   GE_CHK_STATUS_RET(GenerateMacro(ss), "Generate Macro failed");
   std::string npu_arch;
   GE_ASSERT_SUCCESS(ge::PlatformContext::GetInstance().GetCurrentPlatformString(npu_arch));
-  const bool need_marco = (npu_arch == "3510");
+  const bool need_marco = (npu_arch == "3510" || npu_arch == "9202");
   if (need_marco) {
-    ss << "#if defined(__DAV_C310__) || (defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510))"
+    ss << "#if defined(__DAV_C310__) || "
+          "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))"
        << std::endl;
   }
   const std::string kMatMulTilingKeyDynamic = "mat_mul_tiling_key_dynamic.h";
@@ -4458,6 +4459,32 @@ static std::string GetScheduledResultInputOutput(const ascir::FusedScheduledResu
   return ss.str();
 }
 
+static std::string GetDynamicUbSize(const ascir::FusedScheduledResult &fused_schedule_result) {
+  ge::PlatformInfo platform_info;
+  GE_ASSERT_SUCCESS(ge::PlatformContext::GetInstance().GetPlatformInfo(platform_info),
+                    "Failed to get platform info for cube tiling.");
+  int64_t ub_size = platform_info.ub_size;
+  for (size_t graph_id = 0; graph_id < fused_schedule_result.node_idx_to_scheduled_results.size(); graph_id++) {
+    auto scheduled_results = fused_schedule_result.node_idx_to_scheduled_results[graph_id];
+    for (size_t i = 0; i < scheduled_results.size(); i++) {
+      auto schedule_groups = scheduled_results[i].schedule_groups;
+      for (size_t j = 0; j < schedule_groups.size(); j++) {
+        auto schedule_graphs = schedule_groups[j].impl_graphs;
+        for (size_t k = 0; k < schedule_graphs.size(); k++) {
+          for (const auto &node : schedule_graphs[k].GetAllNodes()) {
+            const int64_t simt_dcache_size = ::ascir::GetDcacheSize(*node);
+            if (simt_dcache_size > 0) {
+              int64_t dynamic_ub_size = ub_size - simt_dcache_size;
+              return std::to_string(dynamic_ub_size);
+            }
+          }
+        }
+      }
+    }
+  }
+  return "nullptr";
+}
+
 std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResult &fused_schedule_result) {
   std::string tiling_data_name;
   bool is_cv = ascgen_utils::IsCubeFusedScheduled(fused_schedule_result);
@@ -4909,7 +4936,7 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
     }
   } else {
     ss << "  " << graph_name;
-    ss << "<<<blockDim, nullptr, stream>>>(";
+    ss << "<<<blockDim, " << GetDynamicUbSize(fused_schedule_result) << ", stream>>>(";
     ss << GetScheduledResultInputOutput(fused_schedule_result, true);
     ss << "(uint8_t*)workspace, *tiling_data);" << std::endl;
   }

@@ -2897,8 +2897,7 @@ class DivAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsScalarInputSupported(const std::vector<bool> &is_scalar_list) const override {
@@ -2946,8 +2945,7 @@ class SubAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
@@ -3014,8 +3012,7 @@ class AddAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
@@ -3077,8 +3074,7 @@ class MulAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
@@ -3131,8 +3127,7 @@ class TrueDivAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
@@ -3201,8 +3196,7 @@ class MinimumAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
     (void)node;
@@ -3263,8 +3257,7 @@ class MaximumAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
@@ -3793,6 +3786,7 @@ class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
       const AscNode &node) {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
         {DT_BF16, DT_FLOAT},
+        {DT_FLOAT16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
@@ -3802,6 +3796,8 @@ class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/cos.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -4957,6 +4953,7 @@ class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
       const AscNode &node) {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
         {DT_BF16, DT_FLOAT},
+        {DT_FLOAT16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
@@ -4966,6 +4963,8 @@ class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/sin.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {

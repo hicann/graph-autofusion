@@ -1207,8 +1207,7 @@ class DivAscIrCodegenImpl : public AscIrCodegen {
   }
 
   bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
   bool IsScalarInputSupported(const std::vector<bool> &is_scalar_list) const override {
     (void)is_scalar_list;  // 支持任意输入是scalar
@@ -1248,8 +1247,7 @@ class SubAscIrCodegenImpl : public AscIrCodegen {
   }
 
   bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
   bool IsScalarInputSupported(const std::vector<bool> &is_scalar_list) const override {
     (void)is_scalar_list;  // 支持任意输入是scalar
@@ -1285,8 +1283,7 @@ class AddAscIrCodegenImpl : public AscIrCodegen {
     return {"scalar_add.h"};
   }
   bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
   bool IsScalarInputSupported(const std::vector<bool> &is_scalar_list) const override {
     return OnlySecondInputSupportScalar(is_scalar_list);
@@ -1331,8 +1328,7 @@ class MulAscIrCodegenImpl : public AscIrCodegen {
     return OnlySecondInputSupportScalar({is_scalar_list[1], is_scalar_list[0]});
   }
   bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
   bool IsInplaceSupported(const AscNode &mul_node) const override {
     (void)mul_node;
@@ -1438,8 +1434,7 @@ class MinimumAscIrCodegenImpl : public AscIrCodegen {
     return true;
   }
   bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
   std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
@@ -1469,8 +1464,7 @@ class MaximumAscIrCodegenImpl : public AscIrCodegen {
     return OnlySecondInputSupportScalar(is_scalar_list);
   }
   bool IsBrcInlineSupported(const AscNode &node) const override {
-    (void)node;
-    return true;
+    return !IsAnyInputNodeScalar(node);
   }
   bool IsScalarInputSupportedIfExchangeInputs(const std::vector<bool> &is_scalar_list) const override {
     GE_ASSERT_EQ(is_scalar_list.size(), 2UL);
