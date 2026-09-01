@@ -63,7 +63,7 @@ set +e
 
 pip3 install -r super_kernel/requirements-dev.txt
 
-echo "exec cmd: [bash build.sh --pkg --cann_3rd_lib_path="/home/jenkins/opensource"]"
-bash build.sh --pkg --cann_3rd_lib_path="/home/jenkins/opensource"
+echo "exec cmd: [bash build.sh -j12 --pkg --cann_3rd_lib_path="/home/jenkins/opensource"]"
+bash build.sh -j12 --pkg --cann_3rd_lib_path="/home/jenkins/opensource"
 ret=$?
 exit $ret
