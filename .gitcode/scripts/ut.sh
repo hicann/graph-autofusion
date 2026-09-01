@@ -10,43 +10,8 @@
 # -----------------------------------------------------------------------------------------------------------
 set +e
 echo $(grep -E "^VERSION_ID=" /etc/os-release | cut -d'"' -f2)
-
-select_compilers() {
-    local selected_cc="${CC:-}"
-    local selected_cxx="${CXX:-}"
-    local gcc_version="${GCC_VERSION:-}"
-
-    if [[ -n "${selected_cc}" && -z "${selected_cxx}" ]]; then
-        if [[ "${selected_cc}" =~ ^gcc-([0-9]+)$ ]]; then
-            selected_cxx="g++-${BASH_REMATCH[1]}"
-        fi
-    fi
-
-    if [[ -n "${selected_cxx}" && -z "${selected_cc}" ]]; then
-        if [[ "${selected_cxx}" =~ ^g\+\+-([0-9]+)$ ]]; then
-            selected_cc="gcc-${BASH_REMATCH[1]}"
-        fi
-    fi
-
-    if [[ -z "${selected_cc}" || -z "${selected_cxx}" ]]; then
-        if [[ -n "${gcc_version}" ]]; then
-            selected_cc="${selected_cc:-gcc-${gcc_version}}"
-            selected_cxx="${selected_cxx:-g++-${gcc_version}}"
-        else
-            selected_cc="${selected_cc:-gcc-14}"
-            selected_cxx="${selected_cxx:-g++-14}"
-        fi
-    fi
-
-    export CC="${selected_cc}"
-    export CXX="${selected_cxx}"
-    echo "Using CC=${CC}"
-    echo "Using CXX=${CXX}"
-}
-
-select_compilers
-"${CC}" --version
-"${CXX}" --version
+sudo update-alternatives --set gcc /usr/bin/gcc-14
+gcc --version
 source /home/jenkins/Ascend/cann/bin/setenv.bash
 pip3 install -r super_kernel/requirements-dev.txt
 
