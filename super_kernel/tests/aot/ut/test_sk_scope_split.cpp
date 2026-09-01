@@ -458,6 +458,15 @@ TEST_F(SuperKernelScopeSplitterTest, RequiresExactCoreMatchExcludesBlockDimScale
 
 // ==================== Basic Tests: 基础图切分和融合 ====================
 
+TEST_F(SuperKernelScopeSplitterTest, PassOrder_ScheModeSplitBeforeDeadlockRefine) {
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+
+  ASSERT_GE(splitter.passes_.size(), 3);
+  EXPECT_NE(dynamic_cast<InitialScopeSplitPass *>(splitter.passes_[0].get()), nullptr);
+  EXPECT_NE(dynamic_cast<ScheModeKernelSplitPass *>(splitter.passes_[1].get()), nullptr);
+  EXPECT_NE(dynamic_cast<DeadlockRefinePass *>(splitter.passes_[2].get()), nullptr);
+}
+
 /**
  * @brief 基础多流融合 - 无跨流依赖
  *
