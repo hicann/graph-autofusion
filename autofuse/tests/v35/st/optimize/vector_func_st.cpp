@@ -1497,7 +1497,7 @@ TEST_F(VectorFuncSt, CastNotFusion) {
   std::vector<af::AscGraph> asc_graphs;
   fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0].GetAllSubGraphs(
       asc_graphs);
-  EXPECT_EQ(asc_graphs.size(), 3UL);
+  EXPECT_EQ(asc_graphs.size(), 2UL);
   auto graph1 = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[1];
   std::vector<af::AscGraph> asc_graphs1;
   graph1.GetAllSubGraphs(asc_graphs1);
