@@ -165,6 +165,7 @@ def test_inductor_host_link_includes_acl_runtime(ascendc_compile_module, tmp_pat
         stage="host",
         graph_name="empty_tensor_graph",
         pgo_runner_file=None,
+        temp_dir=os.fspath(tmp_path),
     )
 
     def fake_compile_host_objs(*_args):
@@ -184,6 +185,6 @@ def test_inductor_host_link_includes_acl_runtime(ascendc_compile_module, tmp_pat
 
     ascendc_compile_module.module.link_shared = fake_link_shared
 
-    ascendc_compile_module.link_host_target(args, os.fspath(tmp_path))
+    ascendc_compile_module.build_host_output(args, os.fspath(tmp_path))
 
     assert "acl_rt" in captured["link_libraries"]

@@ -23,7 +23,6 @@ import platform
 import tempfile
 import uuid
 from contextlib import contextmanager, nullcontext
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 import time
 from dataclasses import dataclass
@@ -333,7 +332,7 @@ def link_pgo_executable(target_file, obj_files, mspti_link_flags):
     return target_file
 
 
-def extract_aicore_binary(device_obj_file, output_file):
+def extract_aicore_binary(kernel_obj_path, output_file):
     objcopy = shutil.which("llvm-objcopy")
     if objcopy is None:
         objcopy = os.path.join(
@@ -342,7 +341,7 @@ def extract_aicore_binary(device_obj_file, output_file):
     if not os.path.isfile(objcopy):
         raise CompileError("llvm-objcopy is required for Inductor PGO device binary")
     run_compile_command(
-        [objcopy, "--dump-section", f".aicore_binary={output_file}", device_obj_file],
+        [objcopy, "--dump-section", f".aicore_binary={output_file}", kernel_obj_path],
         "ExtractPgoDeviceBinary",
     )
     if not os.path.isfile(output_file) or os.path.getsize(output_file) == 0:
@@ -831,22 +830,10 @@ def compile_host_objs(args: argparse.Namespace, temp_dir, pch_path=None):
     if not host_files:
         return []
     pch_state = {"path": pch_path, "lock": Lock()}
-    if len(host_files) == 1:
-        return [compile_host_obj_file(args, temp_dir, host_files[0], pch_state)]
-
-    obj_files = [None] * len(host_files)
-    worker_count = get_host_compile_worker_count(len(host_files))
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        future_to_index = {
-            executor.submit(
-                compile_host_obj_file, args, temp_dir, source_file, pch_state
-            ): index
-            for index, source_file in enumerate(host_files)
-        }
-        for future in as_completed(future_to_index):
-            index = future_to_index[future]
-            obj_files[index] = future.result()
-    return obj_files
+    return [
+        compile_host_obj_file(args, temp_dir, source_file, pch_state)
+        for source_file in host_files
+    ]
 
 
 @inductor_compile_duration("CompileHostObj")
@@ -909,27 +896,30 @@ def compile_device_obj(args: argparse.Namespace, temp_dir):
     return f"{temp_dir}/device/{base_device_file}.o"
 
 
-@inductor_compile_duration("BuildDeviceSo")
-def build_device_so(args: argparse.Namespace, host_obj_path, temp_dir):
-    device_obj_path = compile_device_obj(args, temp_dir)
+@inductor_compile_duration("LinkKernelSo")
+def link_kernel_so(
+    args: argparse.Namespace, tiling_obj_paths, temp_dir, kernel_obj_path
+):
+    if not kernel_obj_path:
+        raise ValueError("kernel_obj_path is required for linking")
+
     target_file = os.path.join(temp_dir, os.path.basename(args.output_file))
-    obj_files = [device_obj_path]
-    host_obj_paths = normalize_to_list(host_obj_path)
-    if host_obj_paths:
-        obj_files = host_obj_paths + obj_files
+    obj_files = [kernel_obj_path]
+    tiling_obj_paths = normalize_to_list(tiling_obj_paths)
+    if tiling_obj_paths:
+        obj_files = tiling_obj_paths + obj_files
     obj_files = append_shared_cv_wrapper_so(args, obj_files)
     link_libraries = (
         CV_HOST_LINK_LIBRARIES
-        if host_obj_paths and is_cv_fusion_compile(args)
-        else (HOST_LINK_LIBRARIES if host_obj_paths else None)
+        if tiling_obj_paths and is_cv_fusion_compile(args)
+        else (HOST_LINK_LIBRARIES if tiling_obj_paths else None)
     )
-    with InductorCompileDuration(args, "LinkDeviceSo"):
-        return link_shared(
-            target_file,
-            obj_files,
-            link_libraries=link_libraries,
-            extra_link_options=get_shared_cv_wrapper_rpath_options(args),
-        )
+    return link_shared(
+        target_file,
+        obj_files,
+        link_libraries=link_libraries,
+        extra_link_options=get_shared_cv_wrapper_rpath_options(args),
+    )
 
 
 def clean_before_modify(temp_dir):
@@ -1183,56 +1173,64 @@ def try_static_shape_compile(args: argparse.Namespace, temp_dir, so_path):
     return True
 
 
-def link_host_target(args, temp_dir, pch_path=None):
-    # 处理 host 编译阶段
-    if pch_path is None:
-        host_obj_paths = append_shared_cv_wrapper_so(
-            args, compile_host_objs(args, temp_dir)
-        )
-    else:
-        host_obj_paths = append_shared_cv_wrapper_so(
-            args, compile_host_objs(args, temp_dir, pch_path)
-        )
+@inductor_compile_duration("LinkTilingSo")
+def link_tiling_so(args, tiling_obj_paths, temp_dir):
+    """Link an existing set of tiling objects into the tiling shared library."""
+    if not tiling_obj_paths:
+        raise ValueError("tiling object files are required for linking")
+
+    tiling_obj_paths = append_shared_cv_wrapper_so(
+        args, normalize_to_list(tiling_obj_paths)
+    )
     so_file = os.path.join(temp_dir, os.path.basename(args.output_file))
     link_libraries = (
         CV_HOST_LINK_LIBRARIES if is_cv_fusion_compile(args) else HOST_LINK_LIBRARIES
     )
     if getattr(args, "pgo_runner_file", None) is not None:
         link_libraries = link_libraries + ["ascendcl", "runtime"]
-    with InductorCompileDuration(args, "LinkHostSo"):
-        link_shared(
-            so_file,
-            host_obj_paths,
-            link_libraries=link_libraries,
-            extra_link_options=get_shared_cv_wrapper_rpath_options(args),
-        )
-    return so_file
+    return link_shared(
+        so_file,
+        tiling_obj_paths,
+        link_libraries=link_libraries,
+        extra_link_options=get_shared_cv_wrapper_rpath_options(args),
+    )
 
 
 @inductor_compile_duration("BuildKernelTarget")
-def link_kernel_target(args, host_obj_path, temp_dir):
-    if args.stage == "device":
-        if args.tiling_repr is not None or has_inductor_const_tiling_data(
-            args, temp_dir
-        ):
-            if args.tiling_repr is not None:
-                print("process static shape kernel with tiling_repr")
-            static_shape_kernel_proc(args, temp_dir, args.tiling_repr)
+def build_kernel_target(args, tiling_obj_paths, temp_dir):
+    """Compile device objects and build the final kernel shared library."""
+    if args.stage == "device" and (
+        args.tiling_repr is not None or has_inductor_const_tiling_data(args, temp_dir)
+    ):
+        if args.tiling_repr is not None:
+            print("process static shape kernel with tiling_repr")
+        static_shape_kernel_proc(args, temp_dir, args.tiling_repr)
 
-    # 首次编译
-    so_file = build_device_so(args, host_obj_path, temp_dir)
-
-    # kernel_compile场景一次性生成so，链接device.o
-    if args.stage == "device":
+    kernel_obj_path = compile_device_obj(args, temp_dir)
+    so_file = link_kernel_so(args, tiling_obj_paths, temp_dir, kernel_obj_path)
+    if args.stage == "device" or not try_static_shape_compile(args, temp_dir, so_file):
         return so_file
 
-    # jit_compile场景，检测是否为静态shape
-    re_compile = try_static_shape_compile(args, temp_dir, so_file)
-    if not re_compile:
+    # 静态 shape 重编译后，重新生成 device.o 并链接最终产物。
+    kernel_obj_path = compile_device_obj(args, temp_dir)
+    return link_kernel_so(args, tiling_obj_paths, temp_dir, kernel_obj_path)
+
+
+@inductor_compile_duration("BuildKernelTargetFromObjects")
+def build_kernel_target_from_objects(args, tiling_obj_paths, kernel_obj_path, temp_dir):
+    """Build the final kernel from precompiled host and device objects."""
+    if not tiling_obj_paths:
+        raise ValueError("host object files are required")
+    if not kernel_obj_path:
+        raise ValueError("device object path is required")
+
+    so_file = link_kernel_so(args, tiling_obj_paths, temp_dir, kernel_obj_path)
+    if not try_static_shape_compile(args, temp_dir, so_file):
         return so_file
 
-    # 重编译，最终产物链接host.o+device.o
-    return build_device_so(args, host_obj_path, temp_dir)
+    # 静态 shape 重编译会修改 device 源码，需生成新的 device.o。
+    kernel_obj_path = compile_device_obj(args, temp_dir)
+    return link_kernel_so(args, tiling_obj_paths, temp_dir, kernel_obj_path)
 
 
 @inductor_compile_duration("CopyOutput", args_index=1)
@@ -1263,7 +1261,11 @@ def build_host_output(args, pch_path=None):
     )
     if should_build_sidecars:
         args.pgo_generation = uuid.uuid4().hex
-    so_file = link_host_target(args, args.temp_dir, pch_path)
+    if pch_path is None:
+        tiling_obj_paths = compile_host_objs(args, args.temp_dir)
+    else:
+        tiling_obj_paths = compile_host_objs(args, args.temp_dir, pch_path)
+    so_file = link_tiling_so(args, tiling_obj_paths, args.temp_dir)
     if not should_build_sidecars:
         return so_file
     try:
@@ -1284,21 +1286,72 @@ def build_host_output(args, pch_path=None):
         return so_file
 
 
+def parse_object_paths(value):
+    if not value:
+        return []
+    return [path for path in value.split(";") if path]
+
+
+def validate_artifact_paths(paths, kind):
+    if not paths:
+        raise CompileError(f"{kind} artifact paths are empty")
+    missing = [
+        path for path in paths if not isinstance(path, str) or not os.path.isfile(path)
+    ]
+    if missing:
+        raise CompileError(f"{kind} artifact files are missing: {missing}")
+
+
 def main(args):
     print("compile args:", args)
     src_directory = os.getcwd()
     os.chdir(args.temp_dir)
     print("change work dir:", os.getcwd())
+    # 原子编译 stage 返回结构化 artifact，避免进程间共享 Python 状态。
     try:
         if args.stage == "host":
             with host_compile_batch(args) as pch_path:
                 so_file = build_host_output(args, pch_path)
+        elif args.stage == "host_obj":
+            with host_compile_batch(args) as pch_path:
+                tiling_obj_paths = compile_host_objs(args, args.temp_dir, pch_path)
+            return {
+                "version": 1,
+                "stage": "host_obj",
+                "tiling_obj_paths": tiling_obj_paths,
+                "tiling_source_paths": normalize_to_list(args.host_files),
+                "shared_cv_wrapper_so": getattr(args, "shared_cv_wrapper_so", None),
+            }
+        elif args.stage == "device_obj":
+            kernel_obj_path = compile_device_obj(args, args.temp_dir)
+            return {
+                "version": 1,
+                "stage": "device_obj",
+                "kernel_obj_path": kernel_obj_path,
+                "kernel_source_path": args.device_files,
+            }
+        elif args.stage == "link":
+            tiling_obj_paths = parse_object_paths(args.tiling_obj_paths)
+            kernel_obj_path = args.kernel_obj_path
+            validate_artifact_paths(tiling_obj_paths, "host object")
+            validate_artifact_paths(
+                [kernel_obj_path, args.kernel_source_path], "device artifact"
+            )
+            args.host_files = parse_object_paths(args.tiling_source_paths)
+            args.device_files = args.kernel_source_path
+            args.shared_cv_wrapper_so = args.shared_cv_wrapper_so or None
+            so_file = build_kernel_target_from_objects(
+                args, tiling_obj_paths, kernel_obj_path, args.temp_dir
+            )
         elif args.stage == "device":
-            so_file = link_kernel_target(args, None, args.temp_dir)
+            so_file = build_kernel_target(args, None, args.temp_dir)
         else:  # all
             with host_compile_batch(args) as pch_path:
-                host_obj_paths = compile_host_objs(args, args.temp_dir, pch_path)
-            so_file = link_kernel_target(args, host_obj_paths, args.temp_dir)
+                if pch_path is None:
+                    tiling_obj_paths = compile_host_objs(args, args.temp_dir)
+                else:
+                    tiling_obj_paths = compile_host_objs(args, args.temp_dir, pch_path)
+            so_file = build_kernel_target(args, tiling_obj_paths, args.temp_dir)
         if so_file is not None:
             copy_so_to_output(so_file, args, src_directory)
     finally:

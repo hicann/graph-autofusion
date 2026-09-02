@@ -12,7 +12,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <dlfcn.h>
-#include <filesystem>
 #include <fstream>
 #include <future>
 #include <gtest/gtest.h>
@@ -37,33 +36,27 @@ bool HasDynamicSymbol(const std::string &path, const std::string &symbol) {
   return RunCommand("nm -D " + path + " 2>/dev/null | grep -q ' " + symbol + "$'") == 0;
 }
 
-size_t CountFilesWithSuffix(const std::string &dir, const std::string &suffix) {
-  size_t count = 0;
-  for (const auto &entry : std::filesystem::directory_iterator(dir)) {
-    const std::string file_name = entry.path().filename().string();
-    if (file_name.size() >= suffix.size() &&
-        file_name.compare(file_name.size() - suffix.size(), suffix.size(), suffix) == 0) {
-      count++;
-    }
-  }
-  return count;
-}
-
 void VerifySplitHostArtifacts(const std::string &host_dir) {
+  // host 编译为单个 cpp 源文件（cpp 段合并），header 段拆出独立 .h 供 include 引用。
+  // 新格式（含 TilingStateHeader）下 codegen 不再单独输出 TilingHead/common.h，
+  // 公共结构体定义已内联进合并后的 cpp 翻译单元，故 common.h 与 base/entry/tail 一致均不存在。
   EXPECT_FALSE(FileExists(host_dir + "/autofuse_tiling_func_common.h"));
-  EXPECT_FALSE(FileExists(host_dir + "/autofuse_tiling_func_base.h"));
-  EXPECT_FALSE(FileExists(host_dir + "/autofuse_tiling_func_entry.h"));
-  EXPECT_FALSE(FileExists(host_dir + "/autofuse_tiling_func_tail.h"));
   ASSERT_TRUE(FileExists(host_dir + "/autofuse_tiling_func_state.h"));
   ASSERT_TRUE(FileExists(host_dir + "/autofuse_tiling_func_log.h"));
   ASSERT_TRUE(FileExists(host_dir + "/autofuse_tiling_func_pgo.h"));
   ASSERT_TRUE(FileExists(host_dir + "/autofuse_tiling_func_solver.h"));
   ASSERT_TRUE(FileExists(host_dir + "/autofuse_tiling_func_api.h"));
-  const std::string tail = ReadFile(host_dir + "/inductor_topn_tiling_func_schedule_group_tail.cpp");
-  EXPECT_EQ(tail.find("#include"), std::string::npos);
-  EXPECT_EQ(tail.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
-  EXPECT_GE(CountFilesWithSuffix(host_dir, ".cpp"), 2U);
-  EXPECT_GE(CountFilesWithSuffix(host_dir, ".cpp.o"), 2U);
+  EXPECT_FALSE(FileExists(host_dir + "/autofuse_tiling_func_base.h"));
+  EXPECT_FALSE(FileExists(host_dir + "/autofuse_tiling_func_entry.h"));
+  EXPECT_FALSE(FileExists(host_dir + "/autofuse_tiling_func_tail.h"));
+  // cpp 段合并为单个源文件，不再拆分多个 segment cpp（HeaderSelfContainedCheck 生成的
+  // *.self_contained.cpp 仅用于头文件自包含校验，不计入产物结构检查）。
+  ASSERT_TRUE(FileExists(host_dir + "/inductor_topn_tiling_func.cpp"));
+  EXPECT_FALSE(FileExists(host_dir + "/inductor_topn_tiling_func_schedule_group_tail.cpp"));
+  EXPECT_FALSE(FileExists(host_dir + "/inductor_topn_tiling_func_solver_func.cpp"));
+  const std::string merged = ReadFile(host_dir + "/inductor_topn_tiling_func.cpp");
+  EXPECT_NE(merged.find("extern \"C\" int64_t AutofuseTiling"), std::string::npos);
+  EXPECT_NE(merged.find("extern \"C\" int64_t GenerateTopnSolutions"), std::string::npos);
 }
 
 std::string HeaderSelfContainedCheck() {
