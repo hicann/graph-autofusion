@@ -70,10 +70,6 @@ target_include_directories(super_kernel_aot_utest PRIVATE
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/include/super_kernel/
 )
 
-target_compile_definitions(super_kernel_aot_utest PRIVATE
-    UT_TEST
-)
-
 target_compile_options(super_kernel_aot_utest PRIVATE
     -g
     -Werror
