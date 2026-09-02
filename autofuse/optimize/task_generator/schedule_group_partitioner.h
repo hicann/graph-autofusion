@@ -47,6 +47,8 @@ class ScheduleGroupGraphPartitioner {
   static Status RecordAxisSizes(const std::vector<af::Expression> &repeats, const std::vector<int64_t> &axis_ids,
                                 std::map<af::AxisId, af::Expression> &axis_id_to_size);
   static Status SortSubGraphsByDependency(std::vector<::ascir::ImplGraph> &sub_optimize_graphs);
+  static void CheckDuplicateWorkspaceNodes(std::vector<::ascir::ImplGraph> &sub_optimize_graphs);
+  static bool HasDuplicateWorkspaceNode(const ::ascir::ImplGraph &sub_graph, std::string &dup_name);
   static bool HasDataDependency(const ::ascir::ImplGraph &producer, const ::ascir::ImplGraph &consumer);
 };
 }  // namespace optimize

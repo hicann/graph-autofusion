@@ -209,6 +209,10 @@ Status ReducePartitionCaseGenerator::GeneratorGeneralTask(ascir::HintGraph &opti
     ScheduleTask task{graph, {}, score_funcs[i], {}, ReduceTemplateType::kCommon};
     GE_CHK_STATUS_RET(ScheduleGroupGraphPartitioner::PartitionByConnectivity(graph, task.grouped_graphs, node_order_),
                       "Failed to partition graph");
+    if (task.grouped_graphs.empty()) {
+      GELOGW("Graph[%s] has no subgraphs after partition, skip task", graph.GetName().c_str());
+      continue;
+    }
     tasks.emplace_back(std::move(task));
   }
   return ge::GRAPH_SUCCESS;
