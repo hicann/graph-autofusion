@@ -173,6 +173,8 @@ af::Expression CalculateWorkspaceSize(const std::vector<af::AscNodePtr> &workspa
 af::Expression CalcExtraTmpBufForAscGraph(const ascir::ImplGraph &graph);
 std::vector<ascir::TensorId> GetWorkspaceTensorIdListInOneScheduleResult(
     const ascir::FusedScheduledResult &fused_schedule_result);
+std::vector<ascir::TensorId> GetWorkspaceTensorIdListInOneGraph(
+    const ascir::FusedScheduledResult &fused_schedule_result, const ascir::ImplGraph &graph);
 
 af::Status GetApiTilingTypeName(const ascir::NodeView &node, std::string &type_name);
 af::Status GetApiTilingFieldName(const ascir::NodeView &node, std::string &field_name);

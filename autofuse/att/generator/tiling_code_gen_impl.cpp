@@ -58,6 +58,19 @@ inline const std::string &AddSlogExtend() {
   }
   return kGeLogUtils;
 }
+
+std::set<int64_t> GetWorkspaceTensorIds(const TensorIdSet &workspace_tensor_id_set) {
+  std::set<int64_t> workspace_ids;
+  for (const auto &[asc_graph_id, impl_graph_ids] : workspace_tensor_id_set) {
+    (void)asc_graph_id;
+    for (const auto &[impl_graph_id, tensor_ids] : impl_graph_ids) {
+      (void)impl_graph_id;
+      workspace_ids.insert(tensor_ids.begin(), tensor_ids.end());
+    }
+  }
+  return workspace_ids;
+}
+
 template <typename T>
 af::Status IsUpperBoundValid(const Expr &min_expr, const Expr &max_expr) {
   T min_value{};
@@ -2999,6 +3012,23 @@ af::Status TilingCodeGenImpl::GenPGOByCoreNumSearchTilingKeyCollectTilingData(Fu
     }
   }
 
+  std::set<int64_t> workspace_ids;
+  for (const auto &asc_graph_workspace_ids : workspace_tensor_id_set_) {
+    for (const auto &impl_graph_workspace_ids : asc_graph_workspace_ids.second) {
+      workspace_ids.insert(impl_graph_workspace_ids.second.begin(), impl_graph_workspace_ids.second.end());
+    }
+  }
+  for (const auto &tensor_id : workspace_ids) {
+    const auto tensor_id_str = std::to_string(tensor_id);
+    for (const auto &asc_graph_map_iter : namespace_map) {
+      const auto asc_graph_id = asc_graph_map_iter.first;
+      tiling_func_.AddLine("      tiling_data_tmp.set_workspace" + tensor_id_str +
+                           "(std::max(tiling_data_tmp.get_workspace" + tensor_id_str + "(), ascgraph_tiling_data_" +
+                           std::to_string(asc_graph_id) + ".get_workspace" + tensor_id_str + "()));");
+    }
+  }
+  GenWorkspaceOffsetFinalize("tiling_data_tmp");
+
   // The root search starts from the current core-count probe.  After composing
   // graph candidates, normalize the outer block_dim to the shared block range
   // instead of carrying that probe value into the candidate identity.
@@ -3054,6 +3084,7 @@ af::Status TilingCodeGenImpl::GenPGOByCoreNumSearchTilingKey() {
       "tiling_data, uint32_t max_block_dim) {");
   tiling_func_.AddLine("  (void)tiling_data_list; (void)tiling_data; (void)max_block_dim;");
   tiling_func_.AddLine("  bool ret = true;");
+  GenWorkspaceOffsetReset("*tiling_data");
   tiling_func_.AddLine("  for (uint32_t block_dim_i=1; block_dim_i <= max_block_dim; block_dim_i++) {");
   tiling_func_.AddLine("    int32_t tiling_case;");
   tiling_func_.AddLine("    AutofuseTilingData tiling_data_tmp;");
@@ -3483,12 +3514,53 @@ void TilingCodeGenImpl::GenGetScheduleResultTail(
   tiling_func_.AddLine("}");
 }
 
+void TilingCodeGenImpl::GenWorkspaceOffsetHelpers() {
+  const auto workspace_ids = GetWorkspaceTensorIds(workspace_tensor_id_set_);
+  if (workspace_ids.empty()) {
+    return;
+  }
+
+  const auto &tiling_data_type = config_.tiling_data_type_name;
+  // ATT 内部仍使用 workspace 字段暂存全局大小，所有子图完成后再统一转换为 offset。
+  tiling_func_.AddLine("inline void ResetWorkspaceSizes(" + tiling_data_type + " &tiling_data) {");
+  for (const auto &tensor_id : workspace_ids) {
+    tiling_func_.AddLine("  tiling_data.set_workspace" + std::to_string(tensor_id) + "(0);");
+  }
+  tiling_func_.AddLine("}");
+
+  tiling_func_.AddLine("inline void FinalizeWorkspaceOffsets(" + tiling_data_type + " &tiling_data) {");
+  tiling_func_.AddLine("  uint32_t workspace_offset = 0U;");
+  for (const auto &tensor_id : workspace_ids) {
+    const auto tensor_id_str = std::to_string(tensor_id);
+    tiling_func_.AddLine("  const uint32_t workspace_size_" + tensor_id_str + " = tiling_data.get_workspace" +
+                         tensor_id_str + "();");
+    tiling_func_.AddLine("  tiling_data.set_workspace" + tensor_id_str + "(workspace_offset);");
+    tiling_func_.AddLine("  workspace_offset += workspace_size_" + tensor_id_str + ";");
+  }
+  tiling_func_.AddLine("}");
+}
+
+void TilingCodeGenImpl::GenWorkspaceOffsetReset(const std::string &tiling_data_name) {
+  if (GetWorkspaceTensorIds(workspace_tensor_id_set_).empty()) {
+    return;
+  }
+  tiling_func_.AddLine("  ResetWorkspaceSizes(" + tiling_data_name + ");");
+}
+
+void TilingCodeGenImpl::GenWorkspaceOffsetFinalize(const std::string &tiling_data_name) {
+  if (GetWorkspaceTensorIds(workspace_tensor_id_set_).empty()) {
+    return;
+  }
+  tiling_func_.AddLine("  FinalizeWorkspaceOffsets(" + tiling_data_name + ");");
+}
+
 void TilingCodeGenImpl::GenUpdateWorkspace(const size_t asc_graph_id, const size_t impl_graph_id) {
   for (const auto &tensor_id : workspace_tensor_id_set_[asc_graph_id][impl_graph_id]) {
     auto tensor_id_str = to_string(tensor_id);
     tiling_func_.AddLine("      auto it" + tensor_id_str + " = workspace_map.find(" + tensor_id_str + ");");
     tiling_func_.AddLine("      if (it" + tensor_id_str + " != workspace_map.end()) {");
-    tiling_func_.AddLine("        tiling_data.set_workspace" + tensor_id_str + "(it" + tensor_id_str + "->second);");
+    tiling_func_.AddLine("        tiling_data.set_workspace" + tensor_id_str + "(std::max(tiling_data.get_workspace" +
+                         tensor_id_str + "(), static_cast<uint32_t>(it" + tensor_id_str + "->second)));");
     tiling_func_.AddLine("      }");
   }
 }
@@ -4317,6 +4389,7 @@ af::Status TilingCodeGenImpl::GenFusedScheduleResultsGetTilingDefine(const Fused
                       "Generate init and query cache code failed.");
   }
   tiling_func_.AddLine("  bool ret = true;");  // 声明ret变量用于缓存保存操作
+  GenWorkspaceOffsetReset("tiling_data");
 
   size_t asc_graph_id = 0UL;
   const std::string failed_log_level =
@@ -4338,6 +4411,7 @@ af::Status TilingCodeGenImpl::GenFusedScheduleResultsGetTilingDefine(const Fused
         "max_block_dim;");
     asc_graph_id++;
   }
+  GenWorkspaceOffsetFinalize("tiling_data");
   tiling_func_.AddLine("  tiling_data.set_block_dim(max_block_dim);");
 
   // Save only automatic tilings; explicit case/PGO requests bypass operator cache.
@@ -4370,6 +4444,7 @@ af::Status TilingCodeGenImpl::GenPGOByCoreNumFusedScheduleResultsGetTilingDefine
   auto core_num = BaseTypeUtils::DumpHardware(HardwareDef::CORENUM);
   tiling_func_.AddLine("    tiling_data->set_block_dim(block_dim_i);");
   tiling_func_.AddLine("    tiling_data->set_" + core_num + "(block_dim_i);");
+  GenWorkspaceOffsetReset("*tiling_data");
   for (const auto &asc_graph_namespace_map : namespace_map) {
     const std::string &asc_graph_namespace = "AscGraph" + std::to_string(asc_graph_namespace_map.first);
     tiling_func_.AddLine("    if (!" + asc_graph_namespace + "::PGOByCoreNumSearchTilingKey(vec" +
@@ -4399,10 +4474,25 @@ af::Status TilingCodeGenImpl::GenPGOFusedScheduleResultsGetTilingDefine(const Fu
   tiling_func_.AddLine("  double cur_perf = DBL_MAX;");
   tiling_func_.AddLine("  uint32_t cur_block_dim = 1;");
   tiling_func_.AddLine("  uint32_t ori_block_dim = tiling_data.get_block_dim();");
+  GenWorkspaceOffsetReset("tiling_data");
   tiling_func_.AddLine("  AutofuseTilingData tilingTmp;");
   tiling_func_.AddLine("  tilingTmp = tiling_data;");
+
+  // Rebuild size aggregation base by calling each AscGraph::GetTiling to populate workspace values
+  // This is the critical fix to ensure each subgraph's workspace values are included in tilingTmp
+  for (const auto &asc_graph_namespace_map : namespace_map) {
+    const std::string &asc_graph_namespace = "AscGraph" + std::to_string(asc_graph_namespace_map.first);
+    tiling_func_.AddLine("  if (!" + asc_graph_namespace + "::GetTiling(tilingTmp, -1, nullptr)) {");
+    tiling_func_.AddLine("    OP_LOGW(OP_NAME, \"Failed to rebuild size base for " + asc_graph_namespace + ".\");");
+    tiling_func_.AddLine("    return false;");
+    tiling_func_.AddLine("  }");
+  }
+
   std::string block_dim_list_arg = "multi_group_block_dim_list";
   GenPGOMultiGroupBlockDimList(namespace_map, block_dim_list_arg);
+
+  // Record baseline before search loop to identify new candidates
+  tiling_func_.AddLine("  const size_t ws_baseline = tiling_data_list.size();");
 
   for (const auto &asc_graph_namespace_map : namespace_map) {
     const std::string &asc_graph_namespace = "AscGraph" + std::to_string(asc_graph_namespace_map.first);
@@ -4418,6 +4508,17 @@ af::Status TilingCodeGenImpl::GenPGOFusedScheduleResultsGetTilingDefine(const Fu
     tiling_func_.AddLine("  }");
   }
 
+  // Finalize only the new candidates from this search iteration (skip baseline candidates)
+  // This prevents double-finalization of existing offset-semantic candidates
+  // 仅在存在 workspace tensor 时外抛：helper 定义由 GenWorkspaceOffsetHelpers 条件生成，
+  // 无 workspace 时调用点必须同步跳过，否则生成的 tiling func 编译失败。
+  if (!GetWorkspaceTensorIds(workspace_tensor_id_set_).empty()) {
+    tiling_func_.AddLine("  for (size_t i = ws_baseline; i < tiling_data_list.size(); ++i) {");
+    tiling_func_.AddLine("    FinalizeWorkspaceOffsets(tiling_data_list[i].tiling_data);");
+    tiling_func_.AddLine("  }");
+  }
+
+  GenWorkspaceOffsetFinalize("tiling_data");
   tiling_func_.AddLine("  OP_LOGI(OP_NAME, \"End PGOSearchTilingKey root.\");");
   tiling_func_.AddLine("  return true;");
   tiling_func_.AddLine("}");
@@ -4518,6 +4619,7 @@ af::Status TilingCodeGenImpl::GenGetTilingForScheduleResult() {
     GE_ASSERT_SUCCESS(GenGetTilingForAllSchedulesResults(asc_graph_id, asc_graph_map),
                       "Generate GetTiling for all schedules results failed, asc_graph_id = %zu.", asc_graph_id);
   }
+  GenWorkspaceOffsetHelpers();
   GE_ASSERT_SUCCESS(GenEnableGroupParallelFunctions(namespace_map));
   GE_ASSERT_SUCCESS(GenFusedScheduleResultsGetTilingDefine(namespace_map));
   GE_ASSERT_SUCCESS(GenIsStaticShape());

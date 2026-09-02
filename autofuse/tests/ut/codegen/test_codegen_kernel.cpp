@@ -261,12 +261,12 @@ TEST(CodegenKernel, Tiler_BlockOutterAxisDefine) {
 
   auto result_code = tiler.BlockOutterAxisDefine();
   EXPECT_EQ(result_code, std::string{"int block_dim = GetBlockIdx();\n"
-                                     "if (block_dim >= t->block_dim) { \n"
+                                     "if (block_dim >= t->block_dim) {\n"
                                      "  return;\n"
                                      "}\n"
-                                     "const int z0 = block_dim % z0_loop_size; \n"
-                                     "const int z1 = block_dim % z1_loop_size; \n"
-                                     "const int z2 = block_dim % z2_loop_size; \n"});
+                                     "const int z0 = block_dim % z0_loop_size;\n"
+                                     "const int z1 = block_dim % z1_loop_size;\n"
+                                     "const int z2 = block_dim % z2_loop_size;\n"});
 }
 
 TEST(CodegenKernel, Tiler_GetAxisVar) {
@@ -3817,18 +3817,17 @@ TEST(CodegenKernel, TwoWorkspaceCodegen) {
   codegen::Kernel::ParseGraph(graph, fused_schedule_result, kernel);
   std::string result;
   kernel.GlobalTensorInit(result);
-  EXPECT_EQ(
-      result,
-      std::string{"GlobalTensor<half> global_0;\n"
-                  "global_0.SetGlobalBuffer((__gm__ half*)x);\n"
-                  "GlobalTensor<half> global_3;\n"
-                  "global_3.SetGlobalBuffer((__gm__ half*)y1);\n"
-                  "GlobalTensor<half> global_4;\n"
-                  "global_4.SetGlobalBuffer((__gm__ half*)y2);\n"
-                  "GlobalTensor<half> global_1;\n"
-                  "global_1.SetGlobalBuffer((__gm__ half*)workspace);\n"
-                  "GlobalTensor<half> global_2;\n"
-                  "global_2.SetGlobalBuffer((__gm__ half*)((__gm__ uint8_t*)(workspace) + (0 + (workspace1))));\n"});
+  EXPECT_EQ(result,
+            std::string{"GlobalTensor<half> global_0;\n"
+                        "global_0.SetGlobalBuffer((__gm__ half*)x);\n"
+                        "GlobalTensor<half> global_3;\n"
+                        "global_3.SetGlobalBuffer((__gm__ half*)y1);\n"
+                        "GlobalTensor<half> global_4;\n"
+                        "global_4.SetGlobalBuffer((__gm__ half*)y2);\n"
+                        "GlobalTensor<half> global_1;\n"
+                        "global_1.SetGlobalBuffer((__gm__ half*)((__gm__ uint8_t*)(workspace) + (workspace1)));\n"
+                        "GlobalTensor<half> global_2;\n"
+                        "global_2.SetGlobalBuffer((__gm__ half*)((__gm__ uint8_t*)(workspace) + (workspace2)));\n"});
 }
 
 TEST(CodegenKernel, TwoWorkspaceReuseAsInputCodegen) {
@@ -3923,7 +3922,8 @@ TEST(CodegenKernel, TwoWorkspaceReuseAsInputCodegen) {
                                 "GlobalTensor<half> global_4;\n"
                                 "global_4.SetGlobalBuffer((__gm__ half*)y2);\n"
                                 "GlobalTensor<half> global_1;\n"
-                                "global_1.SetGlobalBuffer((__gm__ half*)workspace);\n"});
+                                "global_1.SetGlobalBuffer((__gm__ half*)((__gm__ uint8_t*)(workspace) + "
+                                "(workspace1)));\n"});
 }
 
 TEST(CodegenKernel, GlobalTensorInitShouldUseWorkspaceReuseOverride) {
@@ -3974,7 +3974,8 @@ TEST(CodegenKernel, GlobalTensorInitShouldUseWorkspaceReuseOverride) {
                                 "global_0.SetGlobalBuffer((__gm__ half*)x);\n"
                                 "GM_ADDR workspace_reuse = y0;\n"
                                 "GlobalTensor<half> global_1;\n"
-                                "global_1.SetGlobalBuffer((__gm__ half*)workspace_reuse);\n"});
+                                "global_1.SetGlobalBuffer((__gm__ half*)((__gm__ uint8_t*)(workspace_reuse) + "
+                                "(workspace1)));\n"});
 }
 
 TEST(CodegenKernel, GenCubeCommonTilingSingleFuncCallShouldUseOutputOverride) {
@@ -4638,7 +4639,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Multi_ScheduleGroup) {
           "inline __aicore__ void test_kernel_general_0_nil_0_nil(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, const "
           "AscGraph0ScheduleResult0G0TilingData *t) {\n"
           "int block_dim = GetBlockIdx();\n"
-          "if (block_dim >= t->block_dim) { \n"
+          "if (block_dim >= t->block_dim) {\n"
           "  return;\n"
           "}\n\n"
           "GlobalTensor<half> global_0;\n"
@@ -4659,7 +4660,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Multi_ScheduleGroup) {
           "inline __aicore__ void test_kernel_general_1_nil_1_nil(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, const "
           "AscGraph0ScheduleResult0G0TilingData *t) {\n"
           "int block_dim = GetBlockIdx();\n"
-          "if (block_dim >= t->block_dim) { \n"
+          "if (block_dim >= t->block_dim) {\n"
           "  return;\n"
           "}\n\n"
           "GlobalTensor<half> global_0;\n"
@@ -4680,7 +4681,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Multi_ScheduleGroup) {
           "inline __aicore__ void test_kernel_general_2_nil_2_nil(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, const "
           "AscGraph0ScheduleResult0G0TilingData *t) {\n"
           "int block_dim = GetBlockIdx();\n"
-          "if (block_dim >= t->block_dim) { \n"
+          "if (block_dim >= t->block_dim) {\n"
           "  return;\n"
           "}\n\n"
           "GlobalTensor<half> global_0;\n"
@@ -4701,7 +4702,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Multi_ScheduleGroup) {
           "inline __aicore__ void test_kernel_general_3_nil_3_nil(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, const "
           "AscGraph0ScheduleResult0G1TilingData *t) {\n"
           "int block_dim = GetBlockIdx();\n"
-          "if (block_dim >= t->block_dim) { \n"
+          "if (block_dim >= t->block_dim) {\n"
           "  return;\n"
           "}\n\n"
           "GlobalTensor<half> global_0;\n"
@@ -4722,7 +4723,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Multi_ScheduleGroup) {
           "inline __aicore__ void test_kernel_general_4_nil_4_nil(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, const "
           "AscGraph0ScheduleResult0G1TilingData *t) {\n"
           "int block_dim = GetBlockIdx();\n"
-          "if (block_dim >= t->block_dim) { \n"
+          "if (block_dim >= t->block_dim) {\n"
           "  return;\n"
           "}\n\n"
           "GlobalTensor<half> global_0;\n"
@@ -4743,7 +4744,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Multi_ScheduleGroup) {
           "inline __aicore__ void test_kernel_general_5_nil_5_nil(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, const "
           "AscGraph0ScheduleResult1G0TilingData *t) {\n"
           "int block_dim = GetBlockIdx();\n"
-          "if (block_dim >= t->block_dim) { \n"
+          "if (block_dim >= t->block_dim) {\n"
           "  return;\n"
           "}\n\n"
           "GlobalTensor<half> global_0;\n"
@@ -4764,7 +4765,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Multi_ScheduleGroup) {
           "inline __aicore__ void test_kernel_general_6_nil_6_nil(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, const "
           "AscGraph0ScheduleResult1G0TilingData *t) {\n"
           "int block_dim = GetBlockIdx();\n"
-          "if (block_dim >= t->block_dim) { \n"
+          "if (block_dim >= t->block_dim) {\n"
           "  return;\n"
           "}\n\n"
           "GlobalTensor<half> global_0;\n"
@@ -4953,7 +4954,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Single_ScheduleGroup) {
           "inline __aicore__ void test_kernel_general_0_nil_0_nil(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, const "
           "AutofuseTilingData *t) {\n"
           "int block_dim = GetBlockIdx();\n"
-          "if (block_dim >= t->block_dim) { \n"
+          "if (block_dim >= t->block_dim) {\n"
           "  return;\n"
           "}\n\n"
           "GlobalTensor<half> global_0;\n"
@@ -4974,7 +4975,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Single_ScheduleGroup) {
           "inline __aicore__ void test_kernel_general_1_nil_1_nil(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, const "
           "AutofuseTilingData *t) {\n"
           "int block_dim = GetBlockIdx();\n"
-          "if (block_dim >= t->block_dim) { \n"
+          "if (block_dim >= t->block_dim) {\n"
           "  return;\n"
           "}\n\n"
           "GlobalTensor<half> global_0;\n"
@@ -4995,7 +4996,7 @@ TEST(CodegenKernel, Kernel_GenerateKernel_Single_ScheduleGroup) {
           "inline __aicore__ void test_kernel_general_2_nil_2_nil(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, const "
           "AutofuseTilingData *t) {\n"
           "int block_dim = GetBlockIdx();\n"
-          "if (block_dim >= t->block_dim) { \n"
+          "if (block_dim >= t->block_dim) {\n"
           "  return;\n"
           "}\n\n"
           "GlobalTensor<half> global_0;\n"

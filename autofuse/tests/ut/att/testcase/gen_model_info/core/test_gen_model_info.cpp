@@ -1023,7 +1023,9 @@ TEST_F(TestGenModelInfo, gen_workspace_with_tensor_id) {
   EXPECT_EQ(GenTilingImplAutoFuseV3("FlashSoftmax", fused_schedule_result, options, tiling_funcs, true), true);
   std::string tiling_func;
   CombineTilings(tiling_funcs, tiling_func);
-  EXPECT_NE(tiling_func.find("tiling_data.set_workspace0(it0->second);"), std::string::npos);
+  EXPECT_NE(tiling_func.find("tiling_data.set_workspace0(std::max(tiling_data.get_workspace0(), "
+                             "static_cast<uint32_t>(it0->second)));"),
+            std::string::npos);
 }
 
 TEST_F(TestGenModelInfo, gen_schedule_group_reduce_tile_r) {

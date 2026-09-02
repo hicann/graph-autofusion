@@ -13440,4 +13440,228 @@ af::ComputeGraphPtr ShareGraph::RandnStoreFusedGraph(size_t dims_size) {
   return compute_graph;
 }
 
+static void CreateAscBackendGraphTwoInTwoOut(std::shared_ptr<af::AscGraph> &graph, const std::string &prefix,
+                                             int64_t axis_num = 2) {
+  auto ONE = af::Symbol(1);
+  std::vector<int64_t> axis_ids;
+  std::vector<af::Expression> repeats;
+  for (int64_t i = 0; i < axis_num; ++i) {
+    const af::Expression exp = graph->CreateSizeVar("s" + std::to_string(i));
+    auto axis = graph->CreateAxis("z" + std::to_string(i), exp);
+    axis_ids.push_back(i);
+    repeats.push_back(exp);
+  }
+
+  std::vector<af::Expression> strides(repeats.size(), af::ops::One);
+  if (axis_num > 1) {
+    for (int64_t i = axis_num - 2; i >= 0; --i) {
+      strides[i] = repeats[i + 1] * strides[i + 1];
+    }
+  }
+
+  af::ascir_op::Data data0(std::string(prefix + "_data0").c_str(), *graph);
+  data0.attr.sched.axis = axis_ids;
+  *data0.y.axis = axis_ids;
+  *data0.y.repeats = repeats;
+  *data0.y.strides = strides;
+  data0.ir_attr.SetIndex(0);
+  data0.y.dtype = ge::DT_FLOAT;
+
+  af::ascir_op::Load load0(std::string(prefix + "_load0").c_str());
+  load0.x = data0.y;
+  load0.attr.sched.axis = axis_ids;
+  *load0.y.axis = axis_ids;
+  *load0.y.repeats = repeats;
+  *load0.y.strides = strides;
+
+  af::ascir_op::Data data1(std::string(prefix + "_data1").c_str(), *graph);
+  data1.attr.sched.axis = axis_ids;
+  *data1.y.axis = axis_ids;
+  *data1.y.repeats = repeats;
+  *data1.y.strides = strides;
+  data1.ir_attr.SetIndex(1);
+  data1.y.dtype = ge::DT_FLOAT;
+
+  af::ascir_op::Load load1(std::string(prefix + "_load1").c_str());
+  load1.x = data1.y;
+  load1.attr.sched.axis = axis_ids;
+  *load1.y.axis = axis_ids;
+  *load1.y.repeats = repeats;
+  *load1.y.strides = strides;
+
+  af::ascir_op::Add add(std::string(prefix + "_add").c_str());
+  add.x1 = load0.y;
+  add.x2 = load1.y;
+  add.attr.sched.axis = axis_ids;
+  *add.y.axis = axis_ids;
+  *add.y.repeats = repeats;
+  *add.y.strides = strides;
+
+  af::ascir_op::Store store0(std::string(prefix + "_store0").c_str());
+  store0.x = add.y;
+  store0.attr.sched.axis = axis_ids;
+  *store0.y.axis = axis_ids;
+  *store0.y.repeats = repeats;
+  *store0.y.strides = strides;
+
+  af::ascir_op::Output y0(std::string(prefix + "_out0").c_str());
+  y0.x = store0.y;
+  y0.ir_attr.SetIndex(0);
+  y0.y.dtype = ge::DT_FLOAT;
+
+  af::ascir_op::Store store1(std::string(prefix + "_store1").c_str());
+  store1.x = add.y;
+  store1.attr.sched.axis = axis_ids;
+  *store1.y.axis = axis_ids;
+  *store1.y.repeats = repeats;
+  *store1.y.strides = strides;
+
+  af::ascir_op::Output y1(std::string(prefix + "_out1").c_str());
+  y1.x = store1.y;
+  y1.ir_attr.SetIndex(1);
+  y1.y.dtype = ge::DT_FLOAT;
+}
+
+static void CreateAscBackendGraphTwoInOneOut(std::shared_ptr<af::AscGraph> &graph, const std::string &prefix,
+                                             int64_t axis_num = 2) {
+  auto ONE = af::Symbol(1);
+  std::vector<int64_t> axis_ids;
+  std::vector<af::Expression> repeats;
+  for (int64_t i = 0; i < axis_num; ++i) {
+    const af::Expression exp = graph->CreateSizeVar("s" + std::to_string(i));
+    auto axis = graph->CreateAxis("z" + std::to_string(i), exp);
+    axis_ids.push_back(i);
+    repeats.push_back(exp);
+  }
+
+  std::vector<af::Expression> strides(repeats.size(), af::ops::One);
+  if (axis_num > 1) {
+    for (int64_t i = axis_num - 2; i >= 0; --i) {
+      strides[i] = repeats[i + 1] * strides[i + 1];
+    }
+  }
+
+  af::ascir_op::Data data0(std::string(prefix + "_data0").c_str(), *graph);
+  data0.attr.sched.axis = axis_ids;
+  *data0.y.axis = axis_ids;
+  *data0.y.repeats = repeats;
+  *data0.y.strides = strides;
+  data0.ir_attr.SetIndex(0);
+  data0.y.dtype = ge::DT_FLOAT;
+
+  af::ascir_op::Load load0(std::string(prefix + "_load0").c_str());
+  load0.x = data0.y;
+  load0.attr.sched.axis = axis_ids;
+  *load0.y.axis = axis_ids;
+  *load0.y.repeats = repeats;
+  *load0.y.strides = strides;
+
+  af::ascir_op::Data data1(std::string(prefix + "_data1").c_str(), *graph);
+  data1.attr.sched.axis = axis_ids;
+  *data1.y.axis = axis_ids;
+  *data1.y.repeats = repeats;
+  *data1.y.strides = strides;
+  data1.ir_attr.SetIndex(1);
+  data1.y.dtype = ge::DT_FLOAT;
+
+  af::ascir_op::Load load1(std::string(prefix + "_load1").c_str());
+  load1.x = data1.y;
+  load1.attr.sched.axis = axis_ids;
+  *load1.y.axis = axis_ids;
+  *load1.y.repeats = repeats;
+  *load1.y.strides = strides;
+
+  af::ascir_op::Add add(std::string(prefix + "_add").c_str());
+  add.x1 = load0.y;
+  add.x2 = load1.y;
+  add.attr.sched.axis = axis_ids;
+  *add.y.axis = axis_ids;
+  *add.y.repeats = repeats;
+  *add.y.strides = strides;
+
+  af::ascir_op::Store store0(std::string(prefix + "_store0").c_str());
+  store0.x = add.y;
+  store0.attr.sched.axis = axis_ids;
+  *store0.y.axis = axis_ids;
+  *store0.y.repeats = repeats;
+  *store0.y.strides = strides;
+
+  af::ascir_op::Output y0(std::string(prefix + "_out0").c_str());
+  y0.x = store0.y;
+  y0.ir_attr.SetIndex(0);
+  y0.y.dtype = ge::DT_FLOAT;
+}
+
+static NodePtr CreateAscbcToAscGraph(const std::string &name, ComputeGraphPtr &compute_graph, int64_t in_num = 1,
+                                     int64_t out_num = 1) {
+  OpDescBuilder op_desc_builder(name, "AscBackend");
+  op_desc_builder.AddDynamicInput("x", in_num);
+  op_desc_builder.AddDynamicOutput("y", out_num);
+  const auto &op_desc = op_desc_builder.Build();
+  auto node = compute_graph->AddNode(op_desc);
+  node->SetOwnerComputeGraph(compute_graph);
+  return node;
+}
+
+af::ComputeGraphPtr ShareGraph::FusedBackendElewiseGraph(size_t dims_size) {
+  std::shared_ptr<af::AscGraph> g0 = std::make_shared<af::AscGraph>("g0");
+  CreateAscBackendGraphTwoInTwoOut(g0, "g0", dims_size);
+  std::shared_ptr<af::AscGraph> g1 = std::make_shared<af::AscGraph>("g1");
+  CreateAscBackendGraphTwoInOneOut(g1, "g1", dims_size);
+  std::shared_ptr<af::AscGraph> g2 = std::make_shared<af::AscGraph>("g2");
+  CreateAscBackendGraphTwoInOneOut(g2, "g2", dims_size);
+
+  af::AscGraph fused_asc_graph("fused_backend_elewise_test");
+  af::ascir_op::Data data0("data0", fused_asc_graph);
+  auto ir_attr0 = data0.attr.ir_attr->DownCastTo<af::AscDataIrAttrDef>();
+  ir_attr0->SetIndex(0);
+
+  af::ascir_op::Data data1("data1", fused_asc_graph);
+  auto ir_attr1 = data1.attr.ir_attr->DownCastTo<af::AscDataIrAttrDef>();
+  ir_attr1->SetIndex(1);
+
+  af::ascir_op::Data data2("data2", fused_asc_graph);
+  auto ir_attr2 = data2.attr.ir_attr->DownCastTo<af::AscDataIrAttrDef>();
+  ir_attr2->SetIndex(2);
+
+  auto fused_graph = af::AscGraphUtils::GetComputeGraph(fused_asc_graph);
+  auto data0_node = fused_asc_graph.FindNode("data0");
+  auto data1_node = fused_asc_graph.FindNode("data1");
+  auto data2_node = fused_asc_graph.FindNode("data2");
+
+  auto ascbc1 = CreateAscbcToAscGraph("ascbc1", fused_graph, 2, 2);
+  auto ascbc2 = CreateAscbcToAscGraph("ascbc2", fused_graph, 2, 1);
+  auto ascbc3 = CreateAscbcToAscGraph("ascbc3", fused_graph, 2, 1);
+
+  af::GraphUtils::AddEdge(data0_node->GetOutDataAnchor(0), ascbc1->GetInDataAnchor(0));
+  af::GraphUtils::AddEdge(data1_node->GetOutDataAnchor(0), ascbc1->GetInDataAnchor(1));
+  af::GraphUtils::AddEdge(data2_node->GetOutDataAnchor(0), ascbc2->GetInDataAnchor(0));
+  af::GraphUtils::AddEdge(ascbc1->GetOutDataAnchor(0), ascbc2->GetInDataAnchor(1));
+  af::GraphUtils::AddEdge(ascbc2->GetOutDataAnchor(0), ascbc3->GetInDataAnchor(0));
+  af::GraphUtils::AddEdge(ascbc1->GetOutDataAnchor(1), ascbc3->GetInDataAnchor(1));
+
+  af::ascir_op::Output output0("output0");
+  auto out0_ir_attr = output0.attr.ir_attr->DownCastTo<af::AscDataIrAttrDef>();
+  out0_ir_attr->SetIndex(0);
+  auto out0_desc = OpDescUtils::GetOpDescFromOperator(output0);
+  auto output0_node = fused_graph->AddNode(out0_desc);
+
+  af::ascir_op::Output output1("output1");
+  auto out1_ir_attr = output1.attr.ir_attr->DownCastTo<af::AscDataIrAttrDef>();
+  out1_ir_attr->SetIndex(1);
+  auto out1_desc = OpDescUtils::GetOpDescFromOperator(output1);
+  auto output1_node = fused_graph->AddNode(out1_desc);
+  af::GraphUtils::AddEdge(ascbc3->GetOutDataAnchor(0), output0_node->GetInDataAnchor(0));
+  af::GraphUtils::AddEdge(ascbc1->GetOutDataAnchor(1), output1_node->GetInDataAnchor(0));
+
+  auto fuse1_attrs = ascbc1->GetOpDesc()->GetOrCreateAttrsGroup<ge::AutoFuseAttrs>();
+  fuse1_attrs->SetAscGraph(g0);
+  auto fuse2_attrs = ascbc2->GetOpDesc()->GetOrCreateAttrsGroup<ge::AutoFuseAttrs>();
+  fuse2_attrs->SetAscGraph(g1);
+  auto fuse3_attrs = ascbc3->GetOpDesc()->GetOrCreateAttrsGroup<ge::AutoFuseAttrs>();
+  fuse3_attrs->SetAscGraph(g2);
+  fused_graph->TopologicalSorting();
+  return fused_graph;
+}
+
 }  // namespace ascir

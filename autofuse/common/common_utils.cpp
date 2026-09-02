@@ -681,6 +681,32 @@ std::vector<ascir::TensorId> GetWorkspaceTensorIdListInOneScheduleResult(
   return tensorId;
 }
 
+std::vector<ascir::TensorId> GetWorkspaceTensorIdListInOneGraph(
+    const ascir::FusedScheduledResult &fused_schedule_result, const ascir::ImplGraph &graph) {
+  std::vector<ascir::TensorId> tensorId;
+  for (auto workspace : fused_schedule_result.workspace_nodes) {
+    GE_ASSERT_NOTNULL(workspace, "fused schedule result workspace node is null");
+    ascir::TensorId tId = workspace->outputs[0].attr.mem.tensor_id;
+    GELOGI("Get workspace tensor id: %ld", tId);
+    // 检查是否在 graph 中存在
+    bool is_exist = false;
+    for (auto node : graph.GetAllNodes()) {
+      if (IsOps<Workspace>(node)) {
+        ascir::TensorId tensor_id = node->outputs[0].attr.mem.tensor_id;
+        if (tId == tensor_id) {
+          is_exist = true;
+          break;
+        }
+      }
+    }
+    auto index = std::find(tensorId.begin(), tensorId.end(), tId);
+    if (index == tensorId.end() && is_exist) {
+      tensorId.emplace_back(tId);
+    }
+  }
+  return tensorId;
+}
+
 bool IsScalarNextNodeSupportBlkTensor(const af::AscNodePtr &node) {
   for (auto &out : node->outputs()) {
     for (auto &peer_input : out->anchor.GetPeerInDataAnchors()) {
@@ -735,6 +761,9 @@ bool IsSingleGroup(const ascir::FusedScheduledResult &fused_schedule_result) {
 }
 
 bool CanUseTilingKey(const ascir::FusedScheduledResult &fused_schedule_result) {
+  if (fused_schedule_result.node_idx_to_scheduled_results.size() > 1U) {
+    return false;
+  }
   for (const auto &schedule_result_list : fused_schedule_result.node_idx_to_scheduled_results) {
     for (const auto &schedule_result : schedule_result_list) {
       if (schedule_result.enable_group_parallel) {

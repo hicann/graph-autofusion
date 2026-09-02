@@ -1063,7 +1063,7 @@ std::string codegen::Tiler::BlockOutterAxisDefine() {
          << " - block_offset : " << this->block_dim.name << " + GetBlockNum() - block_offset;" << std::endl;
     // block_dim范围在调用前校验了，此处不需要重复校验
   } else {
-    code << "if (" << this->block_dim.name << " >= " << tiling_data.name << "->block_dim) { " << std::endl
+    code << "if (" << this->block_dim.name << " >= " << tiling_data.name << "->block_dim) {" << std::endl
          << "  return;" << std::endl
          << "}" << std::endl;
   }
@@ -1075,8 +1075,7 @@ std::string codegen::Tiler::BlockOutterAxisDefine() {
 
     stringstream axis_value;
     axis_value << this->block_dim.name << " % " << axis.loop_size;
-    code << axis.Define(axis_value.str(), true);
-    code << " " << std::endl;
+    code << axis.Define(axis_value.str(), true) << std::endl;
     if (axis.from.size() > 1) {
       BlockOutterAxisDefine(id, code);
     }
@@ -2093,8 +2092,6 @@ Status Kernel::AppendWorkspaceTensorInit(std::stringstream &ss,
     ss << workspace_buffer_arg.AsArg() << " = " << workspace_buffer_arg_override.c_str() << ";" << std::endl;
   }
 
-  std::stringstream offset_ss;
-  offset_ss << "0";
   auto it_ws_tensors = this->workspace_tensors.begin();
   for (size_t i = 0UL; i < this->workspaces.size(); i++) {
     GELOGI("Define workspace tensor id: %ld", it_ws_tensors->first);
@@ -2105,11 +2102,12 @@ Status Kernel::AppendWorkspaceTensorInit(std::stringstream &ss,
     }
 
     ss << tensor->second.Define() << std::endl;
+    std::stringstream offset_ss;
+    offset_ss << this->workspaces[i];
     std::string local_result;
     GE_CHK_STATUS_RET(tensor->second.SetGlobalBuffer(workspace_buffer_arg, offset_ss.str(), local_result),
                       "Codegen set global buffer failed");
     ss << local_result << std::endl;
-    offset_ss << " + " << "(" << this->workspaces[i] << ")";
     it_ws_tensors++;
   }
   return af::SUCCESS;
@@ -2237,7 +2235,7 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
     kernel.output_tensors.emplace_back(pair.second.second);
   }
 
-  std::vector<ascir::TensorId> workspace_tensor_id = GetWorkspaceTensorIdListInOneScheduleResult(fused_schedule_result);
+  std::vector<ascir::TensorId> workspace_tensor_id = GetWorkspaceTensorIdListInOneGraph(fused_schedule_result, graph);
   for (auto tId : workspace_tensor_id) {
     std::string workspaceStr = "workspace";
     workspaceStr = workspaceStr + std::to_string(tId);
@@ -3088,6 +3086,10 @@ Status Kernel::GenKernelFuncWithParseTilingData(const ascir::FusedScheduledResul
     } else {
       GE_ASSERT_SUCCESS(GenMulGroupKernelWithParseTilingData(fused_schedule_result, graph_id, config, ss, ss1,
                                                              use_list_tensor, kernel_file_ptr));
+      ss1 << std::endl;
+      if ((graph_id + 1) < fused_schedule_result.node_idx_to_scheduled_results.size()) {
+        ss1 << "  SyncAll();" << std::endl;
+      }
     }
   }
   return af::SUCCESS;
