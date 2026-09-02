@@ -15,6 +15,7 @@
 #include "ascgen_log.h"
 #include "ascir_ops.h"
 #include "task_generator/schedule_case_generator.h"
+#include <map>
 
 namespace optimize {
 
@@ -34,6 +35,13 @@ class ReducePartitionCaseGenerator : public FusionCaseGenerator {
                              const std::vector<std::string> &score_functions);
 
  private:
+  struct Citation {
+    af::AscNodePtr source;
+    af::AscNodePtr citation;
+    af::AscNodePtr reduce;
+  };
+  using CitationGroups = std::vector<std::vector<Citation>>;
+
   Status GeneratorGeneralTask(ascir::HintGraph &optimize_graph, std::vector<ScheduleTask> &tasks);
   Status GeneratorAllLoadTask(ascir::HintGraph &optimize_graph, std::vector<ScheduleTask> &tasks);
   Status GeneratorRCoreTask(ascir::HintGraph &optimize_graph, std::vector<ScheduleTask> &tasks) const;
@@ -56,6 +64,12 @@ class ReducePartitionCaseGenerator : public FusionCaseGenerator {
   static bool IsOnlyHasOneOrLessReduce(const ascir::ImplGraph &impl_graph);
   static bool CanFullLoadReduceFuse(const ascir::ImplGraph &impl_graph);
   Status ReducePartitionMultipleCitations(ascir::ImplGraph &impl_graph);
+  Status CollectCitationGroups(ascir::ImplGraph &impl_graph, CitationGroups &citation_groups);
+  void BuildCitationGroupAnchors(const CitationGroups &citation_groups, std::vector<size_t> &parent,
+                                 std::map<size_t, af::AscNodePtr> &group_anchors);
+  Status PartitionCitationGroups(ascir::ImplGraph &impl_graph, const CitationGroups &citation_groups,
+                                 const std::vector<size_t> &parent,
+                                 const std::map<size_t, af::AscNodePtr> &group_anchors);
   bool FindOutputReduce(const af::AscNodePtr &node, af::AscNodePtr &reduce_node);
   Status PartitionReduceNode(af::AscNodePtr &src_node, ascir::ImplGraph &impl_graph);
 

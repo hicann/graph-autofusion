@@ -9,6 +9,9 @@
  */
 
 #include <queue>
+#include <map>
+#include <numeric>
+#include <set>
 #include "graph/utils/graph_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
 #include "graph/ascendc_ir/utils/asc_graph_utils.h"
@@ -405,25 +408,109 @@ Status ReducePartitionCaseGenerator::ReducePartitionMultipleCitations(ascir::Imp
   if (IsOnlyHasOneOrLessReduce(impl_graph)) {
     return ge::GRAPH_SUCCESS;
   }
-  std::vector<af::AscNodePtr> multi_output_nodes;
+  CitationGroups citation_groups;
+  GE_CHK_STATUS_RET(CollectCitationGroups(impl_graph, citation_groups));
+  std::vector<size_t> parent(citation_groups.size());
+  std::map<size_t, af::AscNodePtr> group_anchors;
+  BuildCitationGroupAnchors(citation_groups, parent, group_anchors);
+  return PartitionCitationGroups(impl_graph, citation_groups, parent, group_anchors);
+}
+
+Status ReducePartitionCaseGenerator::CollectCitationGroups(ascir::ImplGraph &impl_graph,
+                                                           CitationGroups &citation_groups) {
   for (auto node : impl_graph.GetAllNodes()) {
-    if (node->GetOutNodes().size() > 1UL) {
-      multi_output_nodes.emplace_back(node);
+    if (!ScheduleUtils::IsLoad(node) && !ScheduleUtils::IsStore(node) &&
+        !af::ops::IsOps<af::ascir_op::Workspace>(node) && node->GetOutDataNodes().size() > 1UL) {
+      std::vector<Citation> citations;
+      for (const auto &output_node : node->GetOutDataNodes()) {
+        auto citation = std::dynamic_pointer_cast<af::AscNode>(output_node);
+        GE_CHECK_NOTNULL(citation);
+        af::AscNodePtr reduce;
+        if (FindOutputReduce(citation, reduce)) {
+          citations.push_back({node, citation, reduce});
+        }
+      }
+      if (!citations.empty()) {
+        std::sort(citations.begin(), citations.end(), [](const Citation &lhs, const Citation &rhs) {
+          if (lhs.reduce->GetOpDescBarePtr()->GetId() != rhs.reduce->GetOpDescBarePtr()->GetId()) {
+            return lhs.reduce->GetOpDescBarePtr()->GetId() < rhs.reduce->GetOpDescBarePtr()->GetId();
+          }
+          return lhs.citation->GetOpDescBarePtr()->GetId() < rhs.citation->GetOpDescBarePtr()->GetId();
+        });
+        citation_groups.emplace_back(std::move(citations));
+      }
     }
   }
-  std::sort(multi_output_nodes.begin(), multi_output_nodes.end(), [](const af::AscNodePtr &lhs, af::AscNodePtr &rhs) {
-    return lhs->GetOpDescBarePtr()->GetId() > rhs->GetOpDescBarePtr()->GetId();
-  });
-  for (auto node : multi_output_nodes) {
-    std::set<af::AscNodePtr> reduce_nodes;
-    for (const auto &output_node : node->GetOutNodes()) {
-      af::AscNodePtr out_asc_node = std::dynamic_pointer_cast<af::AscNode>(output_node);
-      if (af::AscNodePtr reduce_node = nullptr; FindOutputReduce(out_asc_node, reduce_node)) {
-        if (!reduce_nodes.empty() && reduce_nodes.find(reduce_node) == reduce_nodes.end()) {
-          PartitionByNode(node, out_asc_node, impl_graph);
+  return ge::GRAPH_SUCCESS;
+}
+
+void ReducePartitionCaseGenerator::BuildCitationGroupAnchors(const CitationGroups &citation_groups,
+                                                             std::vector<size_t> &parent,
+                                                             std::map<size_t, af::AscNodePtr> &group_anchors) {
+  std::iota(parent.begin(), parent.end(), 0UL);
+  auto find_root = [&parent](size_t index) {
+    while (parent[index] != index) {
+      parent[index] = parent[parent[index]];
+      index = parent[index];
+    }
+    return index;
+  };
+  for (size_t i = 0UL; i < citation_groups.size(); ++i) {
+    for (size_t j = i + 1UL; j < citation_groups.size(); ++j) {
+      bool shared_reduce = false;
+      for (const auto &lhs : citation_groups[i]) {
+        for (const auto &rhs : citation_groups[j]) {
+          if (lhs.reduce == rhs.reduce) {
+            shared_reduce = true;
+            break;
+          }
         }
-        reduce_nodes.emplace(reduce_node);
+        if (shared_reduce) {
+          break;
+        }
       }
+      if (shared_reduce) {
+        parent[find_root(j)] = find_root(i);
+      }
+    }
+  }
+
+  for (size_t i = 0UL; i < citation_groups.size(); ++i) {
+    const auto root = find_root(i);
+    for (const auto &citation : citation_groups[i]) {
+      auto anchor = group_anchors.find(root);
+      if (anchor == group_anchors.end() ||
+          citation.reduce->GetOpDescBarePtr()->GetId() < anchor->second->GetOpDescBarePtr()->GetId()) {
+        group_anchors[root] = citation.reduce;
+      }
+    }
+  }
+}
+
+Status ReducePartitionCaseGenerator::PartitionCitationGroups(ascir::ImplGraph &impl_graph,
+                                                             const CitationGroups &citation_groups,
+                                                             const std::vector<size_t> &parent,
+                                                             const std::map<size_t, af::AscNodePtr> &group_anchors) {
+  auto find_root = [&parent](size_t index) {
+    while (parent[index] != index) {
+      index = parent[index];
+    }
+    return index;
+  };
+  // A source can have multiple citations that eventually reach the same non-anchor reduce.
+  // Partitioning each citation creates duplicate workspace/load chains for one reduce.
+  std::set<std::pair<const af::Node *, const af::Node *>> partitioned_source_reduces;
+  for (size_t i = 0UL; i < citation_groups.size(); ++i) {
+    const auto root = find_root(i);
+    const auto anchor = group_anchors.at(root);
+    for (const auto &citation : citation_groups[i]) {
+      if (citation.reduce == anchor ||
+          !partitioned_source_reduces.emplace(citation.source.get(), citation.reduce.get()).second) {
+        continue;
+      }
+      auto source = citation.source;
+      auto citation_node = citation.citation;
+      GE_CHK_STATUS_RET(PartitionByNode(source, citation_node, impl_graph));
     }
   }
   return ge::GRAPH_SUCCESS;
@@ -435,10 +522,10 @@ bool ReducePartitionCaseGenerator::FindOutputReduce(const af::AscNodePtr &node, 
     return true;
   }
   bool output_has_reduce = false;
-  if (node->GetOutNodes().empty()) {
+  if (node->GetOutDataNodes().empty()) {
     return output_has_reduce;
   }
-  for (const auto &output_node : node->GetOutNodes()) {
+  for (const auto &output_node : node->GetOutDataNodes()) {
     auto output_asc_node = std::dynamic_pointer_cast<af::AscNode>(output_node);
     output_has_reduce = output_has_reduce || FindOutputReduce(output_asc_node, reduce_node);
   }
