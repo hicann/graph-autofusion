@@ -54,7 +54,14 @@ The following uses a PyTorch scenario as an example to demonstrate how to set up
 pip3 install numpy
 pip3 install pyyaml
 pip3 install setuptools
-pip3 install torch_npu==2.10.0  # torch_npu must be version 2.9.0 or later. Installing torch_npu through pip automatically installs the required torch version.
+```
+
+To ensure the `torch_npu Daily` environment is compatible with the AutoFuse AscendC backend, install `torch_npu` using the [PyTorch Environment Installation Script](../scripts/env_install/pytorch/setup_torch_npu_daily.sh) provided in the repository. Installing `torch_npu` directly through PyPI is not recommended.
+
+Run the following command in the root directory of the Graph-AutoFusion repository:
+
+```bash
+bash scripts/env_install/pytorch/setup_torch_npu_daily.sh
 ```
 
 #### Other Environment Dependencies

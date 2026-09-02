@@ -46,11 +46,18 @@ AutoFuse 当前提供 PyTorch 和 TensorFlow 两种框架下的 Sample 用例，
 ### 安装依赖
 
 #### 安装 torch_npu
+
 ```bash
 pip3 install numpy
 pip3 install pyyaml
 pip3 install setuptools
-pip3 install torch_npu==2.10.0  # torch_npu版本应为 2.9.0 及以上。通过pip 安装 torch_npu 时，会自动安装依赖的torch 版本。
+```
+为确保使用与 AutoFuse AscendC 后端匹配的 `torch_npu Daily` 环境，`torch_npu`的安装请使用仓库提供的[ PyTorch环境安装脚本 ](../scripts/env_install/pytorch/setup_torch_npu_daily.sh)，不建议直接通过 PyPI 安装 `torch_npu`。
+
+在 Graph-AutoFusion 仓库根目录执行：
+
+```bash
+bash scripts/env_install/pytorch/setup_torch_npu_daily.sh
 ```
 
 #### 其他环境依赖
