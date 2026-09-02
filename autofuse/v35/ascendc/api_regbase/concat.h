@@ -253,7 +253,7 @@ __aicore__ inline AscendC::MicroAPI::MaskReg GenMaskReg(uint32_t block_size, uin
   // 不对齐, 必然有tail
   const uint16_t all_num = (gather_mask_repeat_stride / kDataBlockSize) - 1;
   const uint16_t tail_num = gather_mask_dim_size % (32 / sizeof(U));
-  const uint16_t tail_mask = (1U << (tail_num * sizeof(U))) - 1U;
+  const uint32_t tail_mask = (1U << (tail_num * sizeof(U))) - 1U;
   if (all_num == 0) {
     for (uint16_t i = 0; i < loop_times; ++i) {
       index_addr[i] = tail_mask;

@@ -131,8 +131,17 @@ inline __aicore__ void CastExtendWithMaskMode(const AscendC::LocalTensor<OutT> &
   uint32_t repeat_reminder = repeat_times - repeat_throw_for_extent * MAX_REPEAT_TIMES;
   uint16_t dst_block_stride = 1;
   uint16_t src_block_stride = 1;
-  uint8_t dst_repeat_stride = output_last_dim_stride * sizeof(OutT) / ONE_BLK_SIZE;
-  uint8_t src_repeat_stride = input_last_dim_stride * sizeof(InT) / ONE_BLK_SIZE;
+  uint32_t dst_repeat_stride_in_blocks = output_last_dim_stride / (ONE_BLK_SIZE / sizeof(OutT));
+  uint32_t src_repeat_stride_in_blocks = input_last_dim_stride / (ONE_BLK_SIZE / sizeof(InT));
+  if (dst_repeat_stride_in_blocks > MAX_REPEAT_TIMES || src_repeat_stride_in_blocks > MAX_REPEAT_TIMES) {
+    for (uint32_t i = 0; i < repeat_times; ++i) {
+      AscendC::Cast(dst[i * output_last_dim_stride], src[i * input_last_dim_stride], GetRoundMode<InT, OutT>(),
+                    last_dim);
+    }
+    return;
+  }
+  uint8_t dst_repeat_stride = static_cast<uint8_t>(dst_repeat_stride_in_blocks);
+  uint8_t src_repeat_stride = static_cast<uint8_t>(src_repeat_stride_in_blocks);
   AscendC::SetMaskNorm();
   if constexpr (sizeof(InT) > sizeof(OutT)) {
     AscendC::SetVectorMask<InT, MaskMode::NORMAL>(last_dim);

@@ -18,6 +18,20 @@ using namespace AscendC;
 
 enum class BinaryOp { Add, Sub, Div, Mul };
 
+constexpr int64_t kLargeFirstAxisStride = 2048;
+constexpr float kCounterPathMarker = 1.0F;
+constexpr float kRepeatPathMarker = -1.0F;
+
+inline __aicore__ void MarkCounterPath(const LocalTensor<float> &dst, const LocalTensor<float> &,
+                                       const LocalTensor<float> &, const int32_t &) {
+  dst.SetValue(0, kCounterPathMarker);
+}
+
+inline __aicore__ void MarkRepeatPath(const LocalTensor<float> &dst, const LocalTensor<float> &,
+                                      const LocalTensor<float> &, uint64_t, const uint8_t, const BinaryRepeatParams &) {
+  dst.SetValue(0, kRepeatPathMarker);
+}
+
 template <class T>
 void UbToGm(T *gm, LocalTensor<T> &local, uint64_t size) {
   for (int i = 0; i < size; i++) {
@@ -146,6 +160,35 @@ void TestBrcInlineTwoDimApi(std::vector<int64_t> &input1_shape, std::vector<int6
     }
   }
   EXPECT_EQ(diff_count, 0);
+}
+
+TEST(TestApiBroInline, TestLargeRepeatStrideFallsBackToCounterPath) {
+  constexpr int64_t kOuterSize = 2;
+  constexpr int64_t kInnerSize = 64;
+  constexpr int64_t kBufferSize = kOuterSize * kLargeFirstAxisStride;
+  constexpr int64_t kOutputSize = 2;
+  auto *output = static_cast<float *>(AscendC::GmAlloc(kOutputSize * sizeof(float)));
+
+  auto kernel = [](float *output) {
+    TPipe pipe;
+    TBuf<TPosition::VECCALC> output_buf;
+    pipe.InitBuffer(output_buf, kBufferSize * sizeof(float));
+    LocalTensor<float> local_output = output_buf.Get<float>();
+    local_output.SetValue(0, 0.0F);
+    local_output.SetValue(kLargeFirstAxisStride, 0.0F);
+    BinaryBrcInlineApiWithTwoVectorizedAxis<float>(local_output, local_output, local_output, kOuterSize, kInnerSize, 0,
+                                                   0, kLargeFirstAxisStride, sizeof(float), &MarkCounterPath,
+                                                   &MarkRepeatPath);
+    output[0] = local_output.GetValue(0);
+    output[1] = local_output.GetValue(kLargeFirstAxisStride);
+  };
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(kernel, 1, output);
+
+  EXPECT_EQ(output[0], kCounterPathMarker);
+  EXPECT_EQ(output[1], kCounterPathMarker);
+  AscendC::GmFree(output);
 }
 
 TEST(TestApiBroInline, Test_Add_Float_Two_Axis) {

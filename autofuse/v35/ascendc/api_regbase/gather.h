@@ -474,17 +474,19 @@ inline __aicore__ void DataCopySimdSimt(AscendC::LocalTensor<T1> &dst, const Asc
   if ((dst_p * sizeof(T1)) % 32 != 0) {
     current_addr = dst_p * sizeof(T1);
     padding = (32 - (current_addr % 32)) % 32;
+    uint32_t padding_elements = padding / sizeof(T1);
+    uint32_t padding_copy_length = length <= padding_elements ? static_cast<uint32_t>(length) : padding_elements;
     int32_t event_id_mte2_to_v = static_cast<int32_t>(GetTPipePtr()->FetchEventID(AscendC::HardEvent::MTE2_V));
     AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(event_id_mte2_to_v);
     AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(event_id_mte2_to_v);
-    AscendC::Simt::VF_CALL<GatherSimtContinuous<T1>>(AscendC::Simt::Dim3(128), dst_p1, x1_gm, padding / sizeof(T1),
+    AscendC::Simt::VF_CALL<GatherSimtContinuous<T1>>(AscendC::Simt::Dim3(128), dst_p1, x1_gm, padding_copy_length,
                                                      dst_p, src_p, is_out);
-    dst_p += padding / sizeof(T1);
-    src_p += padding / sizeof(T1);
-    length -= padding / sizeof(T1);
-    if (length <= 0) {
+    if (length <= padding_elements) {
       return;
     }
+    dst_p += padding_elements;
+    src_p += padding_elements;
+    length -= padding_elements;
     if (unlikely(is_out)) {
       T1 value{};
       AscendC::Duplicate(dst[dst_p], value, length);
