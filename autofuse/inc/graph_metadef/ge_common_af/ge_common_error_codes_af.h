@@ -7,8 +7,8 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  * ===================================================================================================================*/
 
-#ifndef INC_EXTERNAL_GE_COMMON_AF_GE_ERROR_CODES_H_
-#define INC_EXTERNAL_GE_COMMON_AF_GE_ERROR_CODES_H_
+#ifndef INC_EXTERNAL_GE_COMMON_AF_GE_COMMON_ERROR_CODES_H_
+#define INC_EXTERNAL_GE_COMMON_AF_GE_COMMON_ERROR_CODES_H_
 
 #if defined(_MSC_VER)
 #ifdef FUNC_VISIBILITY
@@ -27,4 +27,4 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#endif  // INC_EXTERNAL_GE_COMMON_AF_GE_ERROR_CODES_H_
+#endif  // INC_EXTERNAL_GE_COMMON_AF_GE_COMMON_ERROR_CODES_H_
