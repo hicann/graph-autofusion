@@ -1177,6 +1177,24 @@ TEST(GeneratorUT, PGOByCoreNumNormalizesSharedGroupBlockDim) {
   EXPECT_NE(output.find("total_block_dim = std::max(total_block_dim, result_block_dim);"), std::string::npos);
 }
 
+TEST(GeneratorUT, PGOByCoreNumSerialGroupsUseMaximumBlockDim) {
+  TilingCodeGenConfig config;
+  TilingModelInfo tiling_model_info;
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl genImpl("test", config, tiling_model_info, score_funcs, false);
+  std::map<size_t, std::map<size_t, std::map<size_t, std::pair<std::string, std::string>>>> namespace_map;
+  namespace_map[0][0][0] = {"ScheduleResult0", "group0"};
+  namespace_map[0][0][1] = {"ScheduleResult0", "group1"};
+
+  EXPECT_EQ(genImpl.GenPGOByCoreNumFusedScheduleResultsGetTilingDefine(namespace_map), af::SUCCESS);
+  const std::string output = genImpl.tiling_func_.GetOutputStr();
+  // This entry point emits the root candidate collection; schedule-result block_dim updates are generated separately.
+  EXPECT_NE(
+      output.find("result_block_dim = std::max(result_block_dim, tiling_data_tmp.group1_tiling_data.get_block_dim());"),
+      std::string::npos);
+  EXPECT_EQ(output.find("result_block_dim += tiling_data_tmp.group1_tiling_data.get_block_dim();"), std::string::npos);
+}
+
 TEST(GeneratorUT, PGOGetTilingKeyFailureUsesWarningLog) {
   TilingCodeGenConfig config;
   TilingModelInfo tiling_model_info;
