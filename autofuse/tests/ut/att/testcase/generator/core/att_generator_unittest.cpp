@@ -618,6 +618,49 @@ TEST(GeneratorUT, ReuseGroupStateHeaderKeepsGroupNamespacesAndForwardDeclaration
   EXPECT_EQ(reuse_source.find("#include \"autofuse_tiling_func_pgo.h\""), std::string::npos);
 }
 
+TEST(GeneratorUT, WorkspaceReuseRelationIsOmittedFromGroupCache) {
+  TilingModelInfo primary_group{CreateModelInfo()};
+  TilingModelInfo reuse_group{CreateModelInfo()};
+  primary_group[0].schedule_group_ident = {0UL, 0UL, 0UL};
+  reuse_group[0].schedule_group_ident = {0UL, 0UL, 1UL};
+  primary_group[0].workspace_size_map[1] = CreateExpr(1);
+  reuse_group[0].workspace_size_map[0] = CreateExpr(1);
+  ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 0UL}, primary_group), af::SUCCESS);
+  ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 1UL}, reuse_group), af::SUCCESS);
+  auto shared_reuse_group = primary_group[0].reuse_schedule_group;
+  shared_reuse_group->schedule_group_to_info[{0UL, 0UL, 1UL}] = reuse_group[0].reuse_schedule_group->info;
+  reuse_group[0].reuse_schedule_group = shared_reuse_group;
+
+  FusedParsedScheduleResult fused_schedule_result;
+  auto &schedule_result = fused_schedule_result[0UL][0UL];
+  schedule_result.asc_graph_id = 0UL;
+  schedule_result.impl_graph_id = 0UL;
+  schedule_result.groups_tiling_model_info[0UL] = primary_group;
+  schedule_result.groups_tiling_model_info[1UL] = reuse_group;
+  TilingCodeGenConfig config;
+  config.type = TilingImplType::HIGH_PERF;
+  config.tiling_data_type_name = "AutofuseTilingData";
+  config.is_autofuse = true;
+  config.is_inductor_scene = true;
+  std::map<std::string, std::string> tiling_res;
+
+  TilingCodeGenerator generator;
+  ASSERT_EQ(generator.GenTilingCode(op_name, fused_schedule_result, config, tiling_res), af::SUCCESS);
+
+  const auto &primary_source = tiling_res.at("asc_graph0_schedule_result0_g0");
+  const auto &reuse_source = tiling_res.at("asc_graph0_schedule_result0_g1");
+  EXPECT_EQ(primary_source.find("GroupLevelCache"), std::string::npos);
+  EXPECT_EQ(reuse_source.find("GroupLevelCache"), std::string::npos);
+  EXPECT_EQ(primary_source.find("* cache"), std::string::npos);
+  EXPECT_EQ(reuse_source.find("* cache"), std::string::npos);
+
+  const auto &tail_source = tiling_res.at(kTilingScheduleGroupTailIdentify);
+  EXPECT_EQ(tail_source.find("AscGraph0ScheduleResult0G0::GroupLevelCache"), std::string::npos);
+  EXPECT_EQ(tail_source.find("AscGraph0ScheduleResult0G0_Cache"), std::string::npos);
+  EXPECT_EQ(tail_source.find("AscGraph0ScheduleResult0G1::GroupLevelCache"), std::string::npos);
+  EXPECT_EQ(tail_source.find("AscGraph0ScheduleResult0G1_Cache"), std::string::npos);
+}
+
 TEST(GeneratorUT, ReuseGroupPgoCopiesPrimaryGroupTiling) {
   TilingModelInfo primary_group{CreateModelInfo()};
   TilingModelInfo reuse_group{CreateModelInfo()};
