@@ -133,6 +133,11 @@ void ConstructAscGraph(AscGraph &graph) {
 TEST_F(AscendGraphCodeDumperUT, test_python_gen) {
   AscGraph graph("test");
   ConstructAscGraph(graph);
+  const auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
+  ASSERT_NE(compute_graph, nullptr);
+  const auto graph_attr = compute_graph->GetOrCreateAttrsGroup<af::AscGraphAttr>();
+  ASSERT_NE(graph_attr, nullptr);
+  graph_attr->sched.axis = {0, 1};
   af::ascir::PythonCodeDumper dumper;
   EXPECT_EQ(dumper.Dump(graph, "./asc_graph_python.py"), af::SUCCESS);
   const std::string expected_graph_code = R"(# Python code to construct AscGraph
@@ -143,6 +148,7 @@ graph = ascir.HintGraph("test")
 s0 = graph.create_size("s0")
 S0 = graph.create_axis("S0", s0)
 S1 = graph.create_axis("S1", 2)
+graph.sched.axis = [S0, S1]
 Scalar_0 = ascir.ops.Scalar("Scalar", graph)
 Scalar_0.attr.sched.axis = [S0, S1]
 Scalar_0.y.dtype = ascir.dtypes.float16

@@ -343,6 +343,10 @@ class ScheduleUtils {
 
   static void NormalizeAxisIds(const af::AscGraph &graph);
 
+  // 将 graph.sched.axis 作为统一输入轴下发到各节点，保留节点级 loop_axis 和 exec_condition。
+  // graph.sched.loop_axis 当前为预留字段，若配置则记录错误并重置为 kIdNone（-1）。
+  static Status ApplyGraphSchedAxisToNodes(const af::AscGraph &graph);
+
   static Status GetVectorRepeats(const std::vector<af::Expression> &repeats, const std::vector<int64_t> &axis,
                                  const std::vector<int64_t> &vector_axis, std::vector<af::Expression> &vector_repeats);
   static Status GetNodeInputVectorRepeats(const ascir::NodeView &node, std::vector<af::Expression> &vector_repeats);

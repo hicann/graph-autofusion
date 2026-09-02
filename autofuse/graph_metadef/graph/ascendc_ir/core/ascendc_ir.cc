@@ -1393,6 +1393,13 @@ graphStatus AscGraphAttr::SerializeAttr(ascendc_ir::proto::AscGraphAttrGroupsDef
   for (const auto &var : size_vars) {
     asc_graph_group.add_size_var(SymbolicUtils::ToString(var->expr));
   }
+  if (!sched.axis.empty() || sched.loop_axis != kIdNone) {
+    auto sched_def = asc_graph_group.mutable_sched();
+    for (const auto axis_id : sched.axis) {
+      sched_def->add_axis(axis_id);
+    }
+    sched_def->set_loop_axis(sched.loop_axis);
+  }
   asc_graph_group.set_type(static_cast<int64_t>(type));
   GELOGD("Graph serialization successful, tiling_key[%ld] type[%ld]", tiling_key, static_cast<int64_t>(type));
   return GRAPH_SUCCESS;
@@ -1426,6 +1433,14 @@ graphStatus AscGraphAttr::DeserializeAttr(const ascendc_ir::proto::AscGraphAttrG
   for (const auto &var : asc_graph_group.size_var()) {
     auto new_size_var = std::make_shared<SizeVar>(Expression::Deserialize(var.c_str()));
     size_vars.emplace_back(new_size_var);
+  }
+  sched.axis.clear();
+  sched.loop_axis = kIdNone;
+  if (asc_graph_group.has_sched()) {
+    for (const auto axis_id : asc_graph_group.sched().axis()) {
+      sched.axis.emplace_back(axis_id);
+    }
+    sched.loop_axis = asc_graph_group.sched().loop_axis();
   }
   type = static_cast<AscGraphType>(asc_graph_group.type());
   GELOGD("Graph deserialization successful, tiling_key[%ld], type[%ld]", tiling_key, asc_graph_group.type());

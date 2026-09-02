@@ -634,6 +634,8 @@ Status Optimizer::CollectAscBackendNodes(const af::ComputeGraphPtr &fused_graph,
       GE_ASSERT_NOTNULL(fuse_attr, "Node %s has no AutoFuseAttrs", node->GetName().c_str());
       auto fuse_asc_graph = fuse_attr->GetAscGraph();
       GE_ASSERT_NOTNULL(fuse_asc_graph, "Cannot get ascgraph from ascbc node:[%s].", node->GetNamePtr());
+      GE_CHK_STATUS_RET(ScheduleUtils::ApplyGraphSchedAxisToNodes(*fuse_asc_graph),
+                        "Failed to apply graph sched axis to graph:[%s].", fuse_asc_graph->GetName().c_str());
       ascir::utils::DumpGraph(*fuse_asc_graph, "AutoFuseBeforeRemoveDanglingNodes");
       std::vector<af::Expression> graph_shape_vars;
       GE_CHK_STATUS_RET(AscGraphInfoComplete::CollectFrontendShapeVars(*fuse_asc_graph, graph_shape_vars),

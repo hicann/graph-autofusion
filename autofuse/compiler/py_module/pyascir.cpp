@@ -288,7 +288,8 @@ PyTypeObject ApiInfo::type = {PyVarObject_HEAD_INIT(nullptr, 0)};
 class SchedInfo {
  public:
   struct Object {
-    PyObject_HEAD af::SchedInfo *sched_info;
+    PyObject_HEAD std::vector<int64_t> *axis{nullptr};
+    int64_t *loop_axis{nullptr};
   };
   static PyTypeObject type;
   static PyGetSetDef GetSetters[];
@@ -297,6 +298,7 @@ class SchedInfo {
   static int set_axis(PyObject *self, PyObject *value, void *closure);
 
   static PyObject *FromAscNode(af::AscNodeAttr &node_attr);
+  static PyObject *FromGraph(af::AscGraphAttr &graph_attr);
 };
 
 void SchedInfo::Dealloc(PyObject *self) {
@@ -307,8 +309,8 @@ PyObject *SchedInfo::get_axis(PyObject *self, void *closure) {
   (void)closure;
   auto sched_info = ge::PtrToPtr<PyObject, SchedInfo::Object>(self);
   PY_ASSERT_NOTNULL(sched_info);
-  PY_ASSERT_NOTNULL(sched_info->sched_info, "sched attr has not been inited.");
-  auto axis = sched_info->sched_info->axis;
+  PY_ASSERT_NOTNULL(sched_info->axis, "sched attr has not been inited.");
+  const auto &axis = *sched_info->axis;
   auto list = PyList_New(axis.size());
   for (size_t i = 0UL; i < axis.size(); ++i) {
     PyList_SetItem(list, i, PyLong_FromLong(axis[i]));
@@ -320,7 +322,7 @@ PyObject *SchedInfo::get_axis(PyObject *self, void *closure) {
 int SchedInfo::set_axis(PyObject *self, PyObject *value, void *closure) {
   (void)closure;
   auto sched_info = ge::PtrToPtr<PyObject, SchedInfo::Object>(self);
-  if (sched_info->sched_info == nullptr) {
+  if (sched_info->axis == nullptr) {
     PyErr_SetString(PyExc_ValueError, "sched attr has not been inited.");
     return -1;
   }
@@ -328,7 +330,7 @@ int SchedInfo::set_axis(PyObject *self, PyObject *value, void *closure) {
     PyErr_SetString(PyExc_TypeError, "value must be a list");
     return -1;
   }
-  sched_info->sched_info->axis.resize(PyList_Size(value));
+  sched_info->axis->resize(PyList_Size(value));
   for (int i = 0; i < PyList_Size(value); ++i) {
     auto axis = ge::PtrToPtr<PyObject, Axis::Object>(PyList_GetItem(value, i));
     if (PyObject_IsInstance(ge::PtrToPtr<Axis::Object, PyObject>(axis),
@@ -336,7 +338,7 @@ int SchedInfo::set_axis(PyObject *self, PyObject *value, void *closure) {
       PyErr_Format(PyExc_ValueError, "axis on %d is not Axis type", i);
       return -1;
     }
-    sched_info->sched_info->axis[i] = axis->id;
+    (*sched_info->axis)[i] = axis->id;
   }
   return 0;
 }
@@ -344,7 +346,18 @@ int SchedInfo::set_axis(PyObject *self, PyObject *value, void *closure) {
 PyObject *SchedInfo::FromAscNode(af::AscNodeAttr &node_attr) {
   auto sched_info = ge::PtrToPtr<PyObject, SchedInfo::Object>(SchedInfo::type.tp_alloc(&SchedInfo::type, 0));
   PY_ASSERT_NOTNULL(sched_info);
-  sched_info->sched_info = &node_attr.sched;
+  sched_info->axis = &node_attr.sched.axis;
+  sched_info->loop_axis = &node_attr.sched.loop_axis;
+  auto sched_py_obj = ge::PtrToPtr<SchedInfo::Object, PyObject>(sched_info);
+  Py_IncRef(sched_py_obj);
+  return sched_py_obj;
+}
+
+PyObject *SchedInfo::FromGraph(af::AscGraphAttr &graph_attr) {
+  auto sched_info = ge::PtrToPtr<PyObject, SchedInfo::Object>(SchedInfo::type.tp_alloc(&SchedInfo::type, 0));
+  PY_ASSERT_NOTNULL(sched_info);
+  sched_info->axis = &graph_attr.sched.axis;
+  sched_info->loop_axis = &graph_attr.sched.loop_axis;
   auto sched_py_obj = ge::PtrToPtr<SchedInfo::Object, PyObject>(sched_info);
   Py_IncRef(sched_py_obj);
   return sched_py_obj;
@@ -355,6 +368,19 @@ PyGetSetDef SchedInfo::GetSetters[] = {
 };
 
 PyTypeObject SchedInfo::type = {PyVarObject_HEAD_INIT(nullptr, 0)};
+
+PyObject *HintGraph::GetSched(PyObject *self_pyobject, void *closure) {
+  (void)closure;
+  auto self = reinterpret_cast<HintGraph::Object *>(self_pyobject);
+  PY_ASSERT_NOTNULL(self);
+  PY_ASSERT_NOTNULL(self->graph, "graph is not ready");
+  const auto compute_graph = af::AscGraphUtils::GetComputeGraph(*self->graph);
+  PY_ASSERT_NOTNULL(compute_graph);
+  auto graph_attr = compute_graph->GetOrCreateAttrsGroup<af::AscGraphAttr>();
+  PY_ASSERT_NOTNULL(graph_attr);
+  return SchedInfo::FromGraph(*graph_attr);
+}
+
 template <typename OpType>
 class IrAttr {
  public:

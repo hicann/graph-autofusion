@@ -792,6 +792,8 @@ PyObject *HintGraph::SetName(PyObject *self_pyobject, PyObject *args) {
 }
 
 PyMemberDef HintGraph::members[] = {{"name", T_OBJECT_EX, offsetof(HintGraph::Object, name), 0, nullptr}, {nullptr}};
+PyGetSetDef HintGraph::getsetters[] = {{"sched", HintGraph::GetSched, nullptr, "Graph schedule attributes.", nullptr},
+                                       {nullptr}};
 
 PyMethodDef HintGraph::methods[] = {
     {"create_size", reinterpret_cast<PyCFunction>(HintGraph::CreateSize), METH_VARARGS, "Create a size variable"},
@@ -1172,6 +1174,7 @@ void pyascir_graph_types_type_init() {
   HintGraph::type.tp_doc = "HintGraph object";
   HintGraph::type.tp_methods = HintGraph::methods;
   HintGraph::type.tp_members = HintGraph::members;
+  HintGraph::type.tp_getset = HintGraph::getsetters;
   HintGraph::type.tp_init = HintGraph::Init;
   HintGraph::type.tp_new = HintGraph::New;
   // HintComputeGraph::type

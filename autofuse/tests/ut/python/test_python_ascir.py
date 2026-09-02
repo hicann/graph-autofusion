@@ -118,6 +118,16 @@ class TestAscir:
         )
 
     @staticmethod
+    def test_graph_sched_axis():
+        graph = ascir.HintGraph("test")
+        z0 = graph.create_axis("z0", 4)
+        z1 = graph.create_axis("z1", 8)
+
+        assert graph.sched.axis == []
+        graph.sched.axis = [z0, z1]
+        assert graph.sched.axis == [z0.id, z1.id]
+
+    @staticmethod
     def test_graph_create_node():
         graph = ascir.HintGraph("test")
 
