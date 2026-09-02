@@ -1563,44 +1563,57 @@ std::string DumpGraphStructureView(const ascir::Graph &graph, const DumpContext 
 
 namespace {
 void CollectQueueInfo(const af::AscNodePtr &node, size_t topo_id, std::map<int32_t, dumper::QueueInfo> &queues) {
-  if (node->outputs().empty()) {
+  const size_t output_count = node->outputs().size();
+  if (output_count == 0U) {
     return;
   }
-  auto &output_attr = node->outputs()[0]->attr;
-  auto &mem = output_attr.mem;
-  if (mem.alloc_type != af::AllocType::kAllocTypeQueue) {
-    return;
-  }
+  for (size_t i = 0U; i < output_count; ++i) {
+    auto &output_attr = node->outputs()[i]->attr;
+    auto &mem = output_attr.mem;
+    if (mem.alloc_type != af::AllocType::kAllocTypeQueue) {
+      continue;
+    }
 
-  int32_t que_id = output_attr.que.id;
-  if (queues.find(que_id) == queues.end()) {
-    dumper::QueueInfo info;
-    info.que_id = que_id;
-    info.depth = output_attr.que.depth;
-    info.buf_num = static_cast<int32_t>(output_attr.que.buf_num);
-    info.position = "TPosition::" + PositionToString(mem.position);
-    queues[que_id] = info;
+    int32_t que_id = output_attr.que.id;
+    const int32_t buf_num = static_cast<int32_t>(output_attr.que.buf_num);
+    if (queues.find(que_id) == queues.end()) {
+      dumper::QueueInfo info;
+      info.que_id = que_id;
+      info.depth = output_attr.que.depth;
+      info.buf_num = buf_num;
+      info.position = "TPosition::" + PositionToString(mem.position);
+      queues[que_id] = info;
+    } else {
+      // 复用场景下同一 que 的多个 tensor 可能携带不同 buf_num，
+      // 与 codegen LocalTQueAlloc 的 que 级聚合语义保持一致：取 max
+      queues[que_id].buf_num = std::max(queues[que_id].buf_num, buf_num);
+    }
+    const std::string suffix = (output_count > 1U) ? ("[" + std::to_string(i) + "]") : "";
+    queues[que_id].nodes.push_back({topo_id, node->GetName(), static_cast<int32_t>(mem.reuse_id), "", suffix});
   }
-  queues[que_id].nodes.push_back({topo_id, node->GetName(), static_cast<int32_t>(mem.reuse_id), ""});
 }
 
 void CollectBufferInfo(const af::AscNodePtr &node, size_t topo_id, std::map<int32_t, dumper::BufferInfo> &buffers) {
-  if (node->outputs().empty()) {
+  const size_t output_count = node->outputs().size();
+  if (output_count == 0U) {
     return;
   }
-  auto &output_attr = node->outputs()[0]->attr;
-  auto &mem = output_attr.mem;
-  if (mem.alloc_type != af::AllocType::kAllocTypeBuffer) {
-    return;
-  }
+  for (size_t i = 0U; i < output_count; ++i) {
+    auto &output_attr = node->outputs()[i]->attr;
+    auto &mem = output_attr.mem;
+    if (mem.alloc_type != af::AllocType::kAllocTypeBuffer) {
+      continue;
+    }
 
-  int32_t buf_id = output_attr.buf.id;
-  if (buffers.find(buf_id) == buffers.end()) {
-    dumper::BufferInfo info;
-    info.buf_id = buf_id;
-    buffers[buf_id] = info;
+    int32_t buf_id = output_attr.buf.id;
+    if (buffers.find(buf_id) == buffers.end()) {
+      dumper::BufferInfo info;
+      info.buf_id = buf_id;
+      buffers[buf_id] = info;
+    }
+    const std::string suffix = (output_count > 1U) ? ("[" + std::to_string(i) + "]") : "";
+    buffers[buf_id].nodes.push_back({topo_id, node->GetName(), "", false, 0, suffix});
   }
-  buffers[buf_id].nodes.push_back({topo_id, node->GetName(), "", false, 0});
 }
 
 std::string GetTmpBufSizeStr(const af::TmpBufDesc &buf_desc) {
@@ -1628,7 +1641,7 @@ void CollectTmpBufferInfo(const af::AscNodePtr &node, size_t topo_id, std::map<i
       buffers[buf_id] = info;
     }
     std::string size_str = GetTmpBufSizeStr(tmp_buf.buf_desc);
-    buffers[buf_id].nodes.push_back({topo_id, node->GetName(), size_str, true, static_cast<int32_t>(i)});
+    buffers[buf_id].nodes.push_back({topo_id, node->GetName(), size_str, true, static_cast<int32_t>(i), ""});
   }
 }
 
@@ -1674,7 +1687,7 @@ void DumpQueues(std::stringstream &ss, const std::map<int32_t, dumper::QueueInfo
     for (auto &reuse_entry : reuse_groups) {
       auto &nodes = reuse_entry.second;
       for (size_t i = 0; i < nodes.size(); ++i) {
-        ss << "  [" << nodes[i].topo_id << "] " << nodes[i].node_name << ".y" << std::endl;
+        ss << "  [" << nodes[i].topo_id << "] " << nodes[i].node_name << ".y" << nodes[i].tensor_suffix << std::endl;
       }
     }
     ss << std::endl;
@@ -1714,7 +1727,7 @@ void DumpBuffers(std::stringstream &ss, const std::map<int32_t, dumper::BufferIn
           ss << "  # size:" << node_info.size_str;
         }
       } else {
-        ss << ".y";
+        ss << ".y" << node_info.tensor_suffix;
       }
       ss << std::endl;
     }
