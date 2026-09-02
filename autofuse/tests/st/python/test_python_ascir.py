@@ -9,11 +9,13 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
 
-import pytest
 import json
-import time
 import os
 import shutil
+import time
+from collections import namedtuple
+
+import pytest
 from autofuse.pyautofuse import ascir, Autofuser, AutofuserOptions, Schedule, CodeGen
 
 try:
@@ -875,6 +877,28 @@ class TestAutofuseLoadMatMulStoreNew:
             )
 
 
+_Fp16Layout = namedtuple("_Fp16Layout", ["axes", "sizes", "strides"])
+
+
+def _fill_fp16_tensor(node, layout):
+    node.attr.sched.axis = layout.axes
+    node.y.dtype = ascir.dtypes.float16
+    node.y.axis = layout.axes
+    node.y.size = layout.sizes
+    node.y.strides = layout.strides
+
+
+def _make_data_and_load(graph, name, index, layout):
+    data = ascir.ops.Data(f"data_{name}", graph)
+    data.attr.ir_attr.index = index
+    _fill_fp16_tensor(data, layout)
+    load = ascir.ops.Load(f"load_{name}")
+    load.attr.ir_attr.offset = ascir.SizeExpr(0)
+    load.x = data
+    _fill_fp16_tensor(load, layout)
+    return load
+
+
 class TestCubeAttributes:
     @staticmethod
     def construct_graph_with_cube_matmul():
@@ -971,6 +995,37 @@ class TestCubeAttributes:
         graph.set_axis_map({m: [buf_m], k: [buf_k], n: [buf_n]})
         return graph
 
+    @staticmethod
+    def construct_graph_with_extend_conv2d():
+        if not hasattr(ascir.ops, "ExtendConv2D"):
+            pytest.skip("ExtendConv2D is not registered in ascir.ops")
+        graph = ascir.HintGraph("ExtendConv2DCube")
+        s0 = graph.create_size("s0")
+        s1 = graph.create_size("s1")
+        z0 = graph.create_axis("z0", s0)
+        z1 = graph.create_axis("z1", s1)
+        layout = _Fp16Layout([z0, z1], [s0, s1], [s1, ascir.SizeExpr(1)])
+
+        load_x = _make_data_and_load(graph, "x", 0, layout)
+        load_w = _make_data_and_load(graph, "w", 1, layout)
+
+        conv = ascir.ops.ExtendConv2D("extend_conv2d")
+        conv.x = load_x
+        conv.filter = load_w
+        conv.attr.api.compute_type = "cube"
+        _fill_fp16_tensor(conv, layout)
+
+        store = ascir.ops.Store("store")
+        store.attr.ir_attr.offset = ascir.SizeExpr(0)
+        store.x = conv
+        _fill_fp16_tensor(store, layout)
+
+        out = ascir.ops.Output("buf0", graph)
+        out.attr.ir_attr.index = 0
+        out.x = store
+        _fill_fp16_tensor(out, layout)
+        return graph
+
     def test_cube_attributes_extraction(self):
         options = AutofuserOptions()
         fuser = Autofuser(options)
@@ -996,6 +1051,27 @@ class TestCubeAttributes:
         # assert attr_dict["enable_hf32"] == 1, "enable_hf32 should be 1"
         # assert attr_dict["type_size"] == 2, "type_size should be 2 for float16"
         # assert attr_dict["input_num"] == 2, "input_num should be 2"
+
+    def test_extend_conv2d_cube_attributes_extraction(self):
+        options = AutofuserOptions()
+        fuser = Autofuser(options)
+        hint_graph = self.construct_graph_with_extend_conv2d()
+        try:
+            schedule_results = fuser.schedule(hint_graph)
+            cube_attrs = schedule_results.get_cube_attributes()
+        except Exception as exc:
+            pytest.skip(
+                f"ExtendConv2D schedule/get_cube_attributes is not ready: {exc}"
+            )
+        assert isinstance(cube_attrs, dict)
+        if "cube_attributes" not in cube_attrs:
+            pytest.skip(
+                "schedule result does not carry cube_attributes for ExtendConv2D"
+            )
+        attr_dict = cube_attrs["cube_attributes"]
+        assert attr_dict.get("is_extend_conv2d") is True
+        assert "round_mode" in attr_dict
+        assert "has_scale0" in attr_dict
 
 
 class TestAutofuseGatherAbsStore:

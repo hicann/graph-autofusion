@@ -989,12 +989,17 @@ static bool ProcessConv2DNode(const af::AscNodePtr &node, PyObject *attr_dict) {
   Py_DECREF(dilations_list);
 
   SET_DICT_LONG(attr_dict, "groups", conv_attr_data.groups);
+  PyDict_SetItemString(attr_dict, "round_mode", PyUnicode_FromString(conv_attr_data.round_mode.c_str()));
   PyDict_SetItemString(attr_dict, "pad_mode", PyUnicode_FromString(conv_attr_data.pad_mode.c_str()));
   PyDict_SetItemString(attr_dict, "data_format", PyUnicode_FromString(conv_attr_data.data_format.c_str()));
   SET_DICT_LONG(attr_dict, "offset_x", conv_attr_data.offset_x);
   PyDict_SetItemString(attr_dict, "enable_hf32", conv_attr_data.enable_hf32 ? Py_True : Py_False);
-  PyDict_SetItemString(attr_dict, "is_bias", conv_attr_data.is_bias ? Py_True : Py_False);
-  PyDict_SetItemString(attr_dict, "is_offset_w", conv_attr_data.is_offset_w ? Py_True : Py_False);
+  SET_DICT_LONG(attr_dict, "fixed_shift_value", conv_attr_data.fixed_shift_value);
+  PyDict_SetItemString(attr_dict, "enable_relu0", conv_attr_data.enable_relu0 ? Py_True : Py_False);
+  PyDict_SetItemString(attr_dict, "has_bias", conv_attr_data.has_bias ? Py_True : Py_False);
+  PyDict_SetItemString(attr_dict, "has_offset_w", conv_attr_data.has_offset_w ? Py_True : Py_False);
+  PyDict_SetItemString(attr_dict, "has_scale0", conv_attr_data.has_scale0 ? Py_True : Py_False);
+  PyDict_SetItemString(attr_dict, "is_extend_conv2d", conv_attr_data.is_extend_conv2d ? Py_True : Py_False);
   PyDict_SetItemString(attr_dict, "output_dtype", PyUnicode_FromString(conv_attr_data.output_dtype.c_str()));
   PyDict_SetItemString(attr_dict, "input_dtype", PyUnicode_FromString(conv_attr_data.input_dtype.c_str()));
   SET_DICT_LONG(attr_dict, "type_size", length);

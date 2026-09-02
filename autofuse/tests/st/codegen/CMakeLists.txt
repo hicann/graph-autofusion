@@ -4,6 +4,7 @@ add_executable(codegen_st
         test.cpp
         test_codegen_infershape.cpp
         test_codegen_graph_check.cpp
+        test_codegen_extend_conv2d.cpp
 )
 target_compile_definitions(codegen_st PRIVATE
         CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}"
@@ -24,6 +25,8 @@ target_link_libraries(codegen_st PRIVATE
     aihac_symbolizer_af
     json
     ascendc_api_extend
+    pyautofuse
+    Python3::Python
     GTest::gtest)
 
 add_test(NAME codegen_st COMMAND codegen_st --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/codegen_st.xml)

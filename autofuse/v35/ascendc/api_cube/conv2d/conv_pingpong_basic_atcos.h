@@ -26,66 +26,54 @@ namespace Conv2DV2Advanced {
 using namespace Atcos;
 using namespace Atcos::Conv;
 
-template <class A_TYPE, class B_TYPE, class C_TYPE, class BIAS_TYPE, class A_LAYOUT, class B_LAYOUT, class C_LAYOUT,
-          class BIAS_LAYOUT, uint64_t FULL_LOAD_MODE = 0>
-__aicore__ inline void ConvActKernel(GM_ADDR aGM, GM_ADDR bGM, GM_ADDR biasGM, GM_ADDR offsetWGM,
+template <const Conv2DTilingData &TilingData, class A_TYPE, class B_TYPE, class C_TYPE, class BIAS_TYPE,
+          class SCALE_TYPE, class A_LAYOUT, class B_LAYOUT, class C_LAYOUT, class BIAS_LAYOUT, class CONV_CONFIG>
+__aicore__ inline void ConvActKernel(GM_ADDR aGM, GM_ADDR bGM, GM_ADDR biasGM, GM_ADDR offsetWGM, GM_ADDR scaleGM,
 #ifdef CV_UB_FUSION
-                                     GM_ADDR cGM, GM_ADDR workspaceGM, const Conv2DTilingData &tilingData,
-                                     AutoFusionVector::Params *param
+                                     GM_ADDR cGM, GM_ADDR workspaceGM, AutoFusionVector::Params *param
 #else
-                                     GM_ADDR cGM, GM_ADDR workspaceGM, const Conv2DTilingData &tilingData
+                                     GM_ADDR cGM, GM_ADDR workspaceGM
 #endif
 ) {
   using AType = A_TYPE;
   using BType = B_TYPE;
   using CType = C_TYPE;
   using BiasType = BIAS_TYPE;
-
+  using ScaleType = SCALE_TYPE;
   using LayoutA = A_LAYOUT;
   using LayoutB = B_LAYOUT;
   using LayoutC = C_LAYOUT;
   using LayoutBias = BIAS_LAYOUT;
 
-  using BlockScheduler = Block::IterateMFirst;
-
-  using OutputOrder = order::OutputMMode;
   using BlockPrologue = Block::BlockPrologueEmpty;
 
-  using BlockConvPolicy = Atcos::Conv::Img2ColConvMModePolicy;
-  using BlockConv = Block::BlockConv<ConvShape, BlockConvPolicy, AType, BType, CType, BiasType, LayoutA, LayoutB,
-                                     LayoutC, LayoutBias>;
-
-  ConvShape shape;
-  TilingData2ConvShape(tilingData, shape);
-  ConvDim dimArgs;
-  TilingData2ConvDim(tilingData, dimArgs);
+  using BlockConv = Block::BlockConv<TilingData, CONV_CONFIG, AType, BType, CType, BiasType, ScaleType, LayoutA,
+                                     LayoutB, LayoutC, LayoutBias>;
 
 #ifdef CV_UB_FUSION
   using FusionOp = AutoFusionVector;
 
-  using BlockEpilogue = Block::BlockEpilogueCV<ConvShape, CType, CType, FusionOp>;
+  using BlockEpilogue = Block::BlockEpilogueCV<TilingData, CType, CType, FusionOp>;
 
-  using ConvKernel =
-      Kernel::KernelConv<ConvShape, BlockConv, BlockPrologue, BlockEpilogue, BlockScheduler, OutputOrder>;
+  using ConvKernel = Kernel::KernelConv<TilingData, CONV_CONFIG, BlockConv, BlockPrologue, BlockEpilogue>;
 
-  typename ConvKernel::BlockConvArguments convArgs = {aGM, bGM, cGM, biasGM};
+  typename ConvKernel::BlockConvArguments convArgs = {aGM, bGM, cGM, biasGM, scaleGM};
 
   typename BlockEpilogue::Params epilogueParams;
   epilogueParams.fusionParams = *param;
 
-  typename ConvKernel::Params params = {shape, dimArgs, convArgs, {}, epilogueParams};
+  typename ConvKernel::Params params = {{}, {}, convArgs, {}, epilogueParams};
 
   ConvKernel conv;
   conv(params);
 #else
   using BlockEpilogue = Block::BlockEpilogueEmpty;
 
-  using ConvKernel =
-      Kernel::KernelConv<ConvShape, BlockConv, BlockPrologue, BlockEpilogue, BlockScheduler, OutputOrder>;
+  using ConvKernel = Kernel::KernelConv<TilingData, CONV_CONFIG, BlockConv, BlockPrologue, BlockEpilogue>;
 
-  typename ConvKernel::BlockConvArguments convArgs = {aGM, bGM, cGM, biasGM};
+  typename ConvKernel::BlockConvArguments convArgs = {aGM, bGM, cGM, biasGM, scaleGM};
 
-  typename ConvKernel::Params parmas = {shape, dimArgs, convArgs, {}, {}};
+  typename ConvKernel::Params parmas = {{}, {}, convArgs, {}, {}};
 
   ConvKernel conv;
   conv(parmas);

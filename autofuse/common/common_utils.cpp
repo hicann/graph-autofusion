@@ -837,7 +837,8 @@ bool IsMatMulTypeWithOffsetW(const ascir::ImplGraph &impl_graph) {
 
 bool IsConv2DTypeWithBias(const ascir::ImplGraph &impl_graph) {
   for (const auto &node : impl_graph.GetAllNodes()) {
-    if ((node->GetType() == kConv2DBias) || (node->GetType() == kConv2DOffsetBias)) {
+    if ((node->GetType() == kConv2DBias) || (node->GetType() == kConv2DOffsetBias) ||
+        (node->GetType() == kExtendConv2DBias) || (node->GetType() == kExtendConv2DBiasScale)) {
       return true;
     }
   }
@@ -853,10 +854,22 @@ bool IsConv2DTypeWithOffsetW(const ascir::ImplGraph &impl_graph) {
   return false;
 }
 
+bool IsConv2DTypeWithScale0(const ascir::ImplGraph &impl_graph) {
+  // scale0 仅出现在 ExtendConv2DScale / ExtendConv2DBiasScale 变体中。
+  for (const auto &node : impl_graph.GetAllNodes()) {
+    if ((node->GetType() == kExtendConv2DScale) || (node->GetType() == kExtendConv2DBiasScale)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool IsConv2DGraphType(const ascir::ImplGraph &impl_graph) {
   for (const auto &node : impl_graph.GetAllNodes()) {
     if ((node->GetType() == kConv2DOffset) || (node->GetType() == kConv2DOffsetBias) ||
-        (node->GetType() == kConv2DBias) || (node->GetType() == kConv2D)) {
+        (node->GetType() == kConv2DBias) || (node->GetType() == kConv2D) || (node->GetType() == kExtendConv2D) ||
+        (node->GetType() == kExtendConv2DBias) || (node->GetType() == kExtendConv2DScale) ||
+        (node->GetType() == kExtendConv2DBiasScale)) {
       return true;
     }
   }
@@ -957,14 +970,30 @@ af::Status ParseConv2DAttr(const ascir::NodeView &node, Conv2DAttr &conv_attr_da
     GET_CONV2D_ATTRS(node, Conv2D, conv_attr_data);
   } else if (node->GetType() == kConv2DBias) {
     GET_CONV2D_ATTRS(node, Conv2DBias, conv_attr_data);
-    conv_attr_data.is_bias = true;
+    conv_attr_data.has_bias = true;
   } else if (node->GetType() == kConv2DOffset) {
     GET_CONV2D_ATTRS(node, Conv2DOffset, conv_attr_data);
-    conv_attr_data.is_offset_w = true;
+    conv_attr_data.has_offset_w = true;
   } else if (node->GetType() == kConv2DOffsetBias) {
     GET_CONV2D_ATTRS(node, Conv2DOffsetBias, conv_attr_data);
-    conv_attr_data.is_bias = true;
-    conv_attr_data.is_offset_w = true;
+    conv_attr_data.has_bias = true;
+    conv_attr_data.has_offset_w = true;
+  } else if (node->GetType() == kExtendConv2D) {
+    GET_EXTEND_CONV2D_ATTRS(node, ExtendConv2D, conv_attr_data);
+    conv_attr_data.is_extend_conv2d = true;
+  } else if (node->GetType() == kExtendConv2DBias) {
+    GET_EXTEND_CONV2D_ATTRS(node, ExtendConv2DBias, conv_attr_data);
+    conv_attr_data.is_extend_conv2d = true;
+    conv_attr_data.has_bias = true;
+  } else if (node->GetType() == kExtendConv2DScale) {
+    GET_EXTEND_CONV2D_ATTRS(node, ExtendConv2DScale, conv_attr_data);
+    conv_attr_data.is_extend_conv2d = true;
+    conv_attr_data.has_scale0 = true;
+  } else if (node->GetType() == kExtendConv2DBiasScale) {
+    GET_EXTEND_CONV2D_ATTRS(node, ExtendConv2DBiasScale, conv_attr_data);
+    conv_attr_data.is_extend_conv2d = true;
+    conv_attr_data.has_bias = true;
+    conv_attr_data.has_scale0 = true;
   } else {
     GELOGE(af::FAILED, "can't parse conv2d node attr, type=%s", node->GetType().c_str());
   }

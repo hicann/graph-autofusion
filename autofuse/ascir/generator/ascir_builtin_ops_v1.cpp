@@ -863,16 +863,15 @@ REG_ASC_IR(Conv2D)
     .Attr<std::vector<int64_t>>("pads")
     .Attr<std::vector<int64_t>>("dilations")
     .Attr<int64_t>("groups")
-    .Attr<int64_t>("has_relu")
     .Attr<std::string>("pad_mode")
     .Attr<std::string>("data_format")
     .Attr<int64_t>("offset_x")
     .Attr<bool>("enable_hf32")
+    .Attr<int64_t>("fixed_shift_value")
     .ComputeType(ComputeType::kComputeCube)
     .Impl(v1_soc_versions, {af::ascir::AscIrImplCreator<Conv2DAscIrAttImpl>(),
                             af::ascir::AscIrImplCreator<af::ascir::Conv2DAscIrCodegenImpl>(),
-                            {{"T1", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16, DT_HIFLOAT8}},
-                             {"T2", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16, DT_HIFLOAT8}}}});
+                            {{"T1", TensorType{DT_FLOAT16}}, {"T2", TensorType{DT_FLOAT16}}}});
 
 REG_ASC_IR(Conv2DBias)
     .Input("x", "T1")
@@ -883,16 +882,15 @@ REG_ASC_IR(Conv2DBias)
     .Attr<std::vector<int64_t>>("pads")
     .Attr<std::vector<int64_t>>("dilations")
     .Attr<int64_t>("groups")
-    .Attr<int64_t>("has_relu")
     .Attr<std::string>("pad_mode")
     .Attr<std::string>("data_format")
     .Attr<int64_t>("offset_x")
     .Attr<bool>("enable_hf32")
+    .Attr<int64_t>("fixed_shift_value")
     .ComputeType(ComputeType::kComputeCube)
     .Impl(v1_soc_versions, {af::ascir::AscIrImplCreator<Conv2DAscIrAttImpl>(),
                             af::ascir::AscIrImplCreator<af::ascir::Conv2DAscIrCodegenImpl>(),
-                            {{"T1", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16, DT_HIFLOAT8}},
-                             {"T2", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16, DT_HIFLOAT8}}}});
+                            {{"T1", TensorType{DT_FLOAT16}}, {"T2", TensorType{DT_FLOAT16}}}});
 
 REG_ASC_IR(Conv2DOffset)
     .Input("x", "T1")
@@ -903,17 +901,16 @@ REG_ASC_IR(Conv2DOffset)
     .Attr<std::vector<int64_t>>("pads")
     .Attr<std::vector<int64_t>>("dilations")
     .Attr<int64_t>("groups")
-    .Attr<int64_t>("has_relu")
     .Attr<std::string>("pad_mode")
     .Attr<std::string>("data_format")
     .Attr<int64_t>("offset_x")
     .Attr<bool>("enable_hf32")
+    .Attr<int64_t>("fixed_shift_value")
     .ComputeType(ComputeType::kComputeCube)
-    .Impl(v1_soc_versions, {af::ascir::AscIrImplCreator<Conv2DAscIrAttImpl>(),
-                            af::ascir::AscIrImplCreator<af::ascir::Conv2DAscIrCodegenImpl>(),
-                            {{"T1", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16, DT_HIFLOAT8}},
-                             {"T2", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16, DT_HIFLOAT8}},
-                             {"T3", TensorType{DT_INT8}}}});
+    .Impl(v1_soc_versions,
+          {af::ascir::AscIrImplCreator<Conv2DAscIrAttImpl>(),
+           af::ascir::AscIrImplCreator<af::ascir::Conv2DAscIrCodegenImpl>(),
+           {{"T1", TensorType{DT_FLOAT16}}, {"T2", TensorType{DT_FLOAT16}}, {"T3", TensorType{DT_INT8}}}});
 
 REG_ASC_IR(Conv2DOffsetBias)
     .Input("x", "T1")
@@ -925,17 +922,105 @@ REG_ASC_IR(Conv2DOffsetBias)
     .Attr<std::vector<int64_t>>("pads")
     .Attr<std::vector<int64_t>>("dilations")
     .Attr<int64_t>("groups")
-    .Attr<int64_t>("has_relu")
     .Attr<std::string>("pad_mode")
     .Attr<std::string>("data_format")
     .Attr<int64_t>("offset_x")
     .Attr<bool>("enable_hf32")
+    .Attr<int64_t>("fixed_shift_value")
+    .ComputeType(ComputeType::kComputeCube)
+    .Impl(v1_soc_versions,
+          {af::ascir::AscIrImplCreator<Conv2DAscIrAttImpl>(),
+           af::ascir::AscIrImplCreator<af::ascir::Conv2DAscIrCodegenImpl>(),
+           {{"T1", TensorType{DT_FLOAT16}}, {"T2", TensorType{DT_FLOAT16}}, {"T3", TensorType{DT_INT8}}}});
+
+REG_ASC_IR(ExtendConv2D)
+    .Input("x", "T1")
+    .Input("filter", "T1")
+    .Output("y", "T2")
+    .Attr<std::vector<int64_t>>("strides")
+    .Attr<std::vector<int64_t>>("pads")
+    .Attr<std::vector<int64_t>>("dilations")
+    .Attr<int64_t>("groups")
+    .Attr<std::string>("pad_mode")
+    .Attr<std::string>("data_format")
+    .Attr<int64_t>("offset_x")
+    .Attr<std::string>("round_mode")
+    .Attr<bool>("enable_hf32")
+    .Attr<int64_t>("fixed_shift_value")
+    .Attr<bool>("enable_relu0")
     .ComputeType(ComputeType::kComputeCube)
     .Impl(v1_soc_versions, {af::ascir::AscIrImplCreator<Conv2DAscIrAttImpl>(),
                             af::ascir::AscIrImplCreator<af::ascir::Conv2DAscIrCodegenImpl>(),
-                            {{"T1", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16, DT_HIFLOAT8}},
-                             {"T2", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16, DT_HIFLOAT8}},
-                             {"T3", TensorType{DT_INT8}}}});
+                            {{"T1", TensorType{DT_FLOAT16}}, {"T2", TensorType{DT_FLOAT16}}}});
+
+REG_ASC_IR(ExtendConv2DBias)
+    .Input("x", "T1")
+    .Input("filter", "T1")
+    .Input("bias", "T2")
+    .Output("y", "T3")
+    .Attr<std::vector<int64_t>>("strides")
+    .Attr<std::vector<int64_t>>("pads")
+    .Attr<std::vector<int64_t>>("dilations")
+    .Attr<int64_t>("groups")
+    .Attr<std::string>("pad_mode")
+    .Attr<std::string>("data_format")
+    .Attr<int64_t>("offset_x")
+    .Attr<std::string>("round_mode")
+    .Attr<bool>("enable_hf32")
+    .Attr<int64_t>("fixed_shift_value")
+    .Attr<bool>("enable_relu0")
+    .ComputeType(ComputeType::kComputeCube)
+    .Impl(v1_soc_versions,
+          {af::ascir::AscIrImplCreator<Conv2DAscIrAttImpl>(),
+           af::ascir::AscIrImplCreator<af::ascir::Conv2DAscIrCodegenImpl>(),
+           {{"T1", TensorType{DT_FLOAT16}}, {"T2", TensorType{DT_FLOAT16}}, {"T3", TensorType{DT_FLOAT16}}}});
+
+REG_ASC_IR(ExtendConv2DScale)
+    .Input("x", "T1")
+    .Input("filter", "T1")
+    .Input("scale0", "T3")
+    .Output("y", "T2")
+    .Attr<std::vector<int64_t>>("strides")
+    .Attr<std::vector<int64_t>>("pads")
+    .Attr<std::vector<int64_t>>("dilations")
+    .Attr<int64_t>("groups")
+    .Attr<std::string>("pad_mode")
+    .Attr<std::string>("data_format")
+    .Attr<int64_t>("offset_x")
+    .Attr<std::string>("round_mode")
+    .Attr<bool>("enable_hf32")
+    .Attr<int64_t>("fixed_shift_value")
+    .Attr<bool>("enable_relu0")
+    .ComputeType(ComputeType::kComputeCube)
+    .Impl(v1_soc_versions,
+          {af::ascir::AscIrImplCreator<Conv2DAscIrAttImpl>(),
+           af::ascir::AscIrImplCreator<af::ascir::Conv2DAscIrCodegenImpl>(),
+           {{"T1", TensorType{DT_INT8}}, {"T2", TensorType{DT_FLOAT16}}, {"T3", TensorType{DT_UINT64}}}});
+
+REG_ASC_IR(ExtendConv2DBiasScale)
+    .Input("x", "T1")
+    .Input("filter", "T1")
+    .Input("bias", "T2")
+    .Input("scale0", "T4")
+    .Output("y", "T3")
+    .Attr<std::vector<int64_t>>("strides")
+    .Attr<std::vector<int64_t>>("pads")
+    .Attr<std::vector<int64_t>>("dilations")
+    .Attr<int64_t>("groups")
+    .Attr<std::string>("pad_mode")
+    .Attr<std::string>("data_format")
+    .Attr<int64_t>("offset_x")
+    .Attr<std::string>("round_mode")
+    .Attr<bool>("enable_hf32")
+    .Attr<int64_t>("fixed_shift_value")
+    .Attr<bool>("enable_relu0")
+    .ComputeType(ComputeType::kComputeCube)
+    .Impl(v1_soc_versions, {af::ascir::AscIrImplCreator<Conv2DAscIrAttImpl>(),
+                            af::ascir::AscIrImplCreator<af::ascir::Conv2DAscIrCodegenImpl>(),
+                            {{"T1", TensorType{DT_INT8}},
+                             {"T2", TensorType{DT_INT32}},
+                             {"T3", TensorType{DT_FLOAT16}},
+                             {"T4", TensorType{DT_UINT64}}}});
 
 REG_ASC_IR(Split).Input("x", "T").DynamicOutput("y", "T").Attr<int64_t>("index").Attr<int64_t>(
     "gid");  // global_id, SplitOp的全局编号
