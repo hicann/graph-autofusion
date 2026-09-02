@@ -303,6 +303,9 @@ Register::Register() {
   const std::string kAscendcCosRegBaseStr = {
 #include "cos_reg_base.h"
   };
+  const std::string kAscendcAtanRegBaseStr = {
+#include "atan_reg_base.h"
+  };
   std::unordered_map<std::string, std::string> api_to_file{
       {"cast_reg_base.h", kAscendcCastRegStr},
       {"compare_reg_base.h", kAscendcCompareRegStr},
@@ -393,6 +396,7 @@ Register::Register() {
       {"indirect_load_sk_reg_base.h", kAscendcIndirectLoadSkRegBaseStr},
       {"sin_reg_base.h", kAscendcSinRegBaseStr},
       {"cos_reg_base.h", kAscendcCosRegBaseStr},
+      {"atan_reg_base.h", kAscendcAtanRegBaseStr},
   };
 
   AscendCApiRegistry::GetInstance().RegisterApi(api_to_file);
