@@ -2304,6 +2304,18 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
                           "Codegen parse workspace tensor failed");
         kernel.has_workspace_node = true;
       } else if (IsOps<Store>(node)) {
+        if (ascgen_utils::indirect_load::ShouldSkipTpipeTensorCollection(node)) {
+          // Skipped Store still needs a GM tensor entry for the downstream Output binding.
+          std::string dtype_name;
+          GE_CHK_STATUS_RET(Tensor::DtypeName(output->attr.dtype, dtype_name), "Codegen get output dtype failed");
+          Tensor gm_output(*output, dtype_name, tensor_name);
+          gm_output.alloc_type = af::AllocType::kAllocTypeGlobal;
+          gm_output.position = af::Position::kPositionGM;
+          gm_output.que_id = af::kIdNone;
+          GE_CHK_STATUS_RET(gm_output.Init(), "Codegen init direct-GM output tensor failed");
+          GE_CHK_STATUS_RET(kernel.tpipe.AddTensor(gm_output), "Codegen add direct-GM output tensor failed");
+          continue;
+        }
         // 1. 多个Store节点写同一个Output的不同offset场景
         // 2. 多个schedule group之间通过workspace承接输出
         if (kernel.tpipe.tensors.find(output->attr.mem.tensor_id) == kernel.tpipe.tensors.cend()) {
@@ -2530,7 +2542,8 @@ std::string Kernel::KernelFuncDeclare(const std::string &graph_name,
     if (is_conv2d) {
       ss << "template<int8_t FmapTiling, int8_t WeightTiling, int8_t L1PingPong, int8_t L0PingPong, int8_t "
             "OutputOrder, int8_t IterOrder, int8_t GroupType, int8_t EnableSmallChannel, int8_t WeightUbTrans, int8_t "
-            "FmapCopyMode, int8_t InnerBatch, int8_t DisContinuous > "
+            "FmapCopyMode, int8_t InnerBatch, int8_t DisContinuous, int8_t BatchOne, int8_t NoPad, int8_t SmallWeight, "
+            "int8_t SmallKernel> "
          << std::endl;
     } else {
       if (is_inductor) {
@@ -3297,7 +3310,7 @@ af::Status Kernel::GenCubeCommonTiling(std::stringstream &ss, const bool is_batc
     ss << "AscendC::TPipe pipe;" << std::endl;
     ss << "  conv2d_v2<";
     ss << "FmapTiling, WeightTiling, L1PingPong, L0PingPong, OutputOrder, IterOrder, GroupType, EnableSmallChannel, "
-          "WeightUbTrans, FmapCopyMode, InnerBatch, DisContinuous>(";
+          "WeightUbTrans, FmapCopyMode, InnerBatch, DisContinuous, BatchOne, NoPad, SmallWeight, SmallKernel>(";
   } else {
     if (is_dynamic) {
       if (is_db) {
@@ -3333,48 +3346,83 @@ af::Status Kernel::GenCubeCommonTiling(std::stringstream &ss, const bool is_batc
   return af::SUCCESS;
 }
 
-std::string Kernel::GenCubeTilingSingleFuncCall(const bool is_batch, const bool is_cv_fuse, bool is_bias,
-                                                bool is_offset_w, bool is_conv2d, bool is_dynamic, bool is_db) const {
-  std::stringstream ss;
-  GE_CHK_STATUS(GenCubeCommonTiling(ss, is_batch, is_conv2d, is_dynamic, is_db), "GenCubeCommonTilingHead failed");
+namespace {
+Status AppendConv2DInputArgs(std::stringstream &ss, const std::vector<Variable> &inputs,
+                             const CubeTilingOptions &options) {
+  ss << inputs[0].Str() << ", " << inputs[1].Str() << ", ";
+  size_t next_input_idx = 2U;
+  for (const bool is_present : {options.has_bias, options.has_offset_w, options.has_scale0}) {
+    ss << (is_present ? inputs[next_input_idx++].Str() : "nullptr") << ", ";
+  }
+  return af::SUCCESS;
+}
 
-  if (use_list_tensor_) {
+Status AppendMatMulInputArgs(std::stringstream &ss, const std::vector<Variable> &inputs,
+                             const CubeTilingOptions &options) {
+  if (inputs.size() < (2U + (options.has_bias ? 1U : 0U) + (options.has_offset_w ? 1U : 0U))) {
+    // a、b 矩阵同输入时 AscGraph 有两个输入，但 AscBackend 只有一个，需补齐第二个实参。
+    ss << inputs[0].Str() << ", ";
+  }
+  for (const auto &input : inputs) {
+    ss << input.Str() << ", ";
+  }
+  if (!options.has_bias) {
+    ss << "nullptr, ";
+  }
+  if (!options.has_offset_w) {
+    ss << "nullptr, ";
+  }
+  return af::SUCCESS;
+}
+
+Status AppendCubeInputArgs(std::stringstream &ss, const std::vector<Variable> &inputs,
+                           const CubeTilingOptions &options) {
+  return options.is_conv2d ? AppendConv2DInputArgs(ss, inputs, options) : AppendMatMulInputArgs(ss, inputs, options);
+}
+
+void AppendCubeOutputArgs(std::stringstream &ss, const std::vector<GM_ADDR> &outputs,
+                          const std::string &empty_output_arg) {
+  for (const auto &output : outputs) {
+    ss << output.Str() << ", ";
+  }
+  if (outputs.empty()) {
+    ss << empty_output_arg << ", ";
+  }
+}
+
+CubeTilingOptions GetCubeTilingOptions(const ascir::ImplGraph &impl_graph) {
+  CubeTilingOptions options;
+  options.is_conv2d = IsConv2DGraphType(impl_graph);
+  if (options.is_conv2d) {
+    options.has_bias = ascgen_utils::IsConv2DTypeWithBias(impl_graph);
+    options.has_offset_w = ascgen_utils::IsConv2DTypeWithOffsetW(impl_graph);
+    options.has_scale0 = ascgen_utils::IsConv2DTypeWithScale0(impl_graph);
+  } else {
+    options.is_batch = ascgen_utils::IsMatMulTypeWithBatch(impl_graph);
+    options.has_bias = ascgen_utils::IsMatMulTypeWithBias(impl_graph);
+    options.has_offset_w = ascgen_utils::IsMatMulTypeWithOffsetW(impl_graph);
+  }
+  return options;
+}
+}  // namespace
+
+std::string Kernel::GenCubeTilingSingleFuncCall(const CubeTilingOptions &options) const {
+  std::stringstream ss;
+  GE_CHK_STATUS(GenCubeCommonTiling(ss, options.is_batch, options.is_conv2d, options.is_dynamic, options.is_db),
+                "GenCubeCommonTilingHead failed");
+  if (this->use_list_tensor_) {
     ss << kInputTensorDescName << ", " << kOutputTensorDescName << ", ";
   } else {
-    if (this->inputs.size() < (2U + (is_bias ? 1U : 0U) + (is_offset_w ? 1U : 0U))) {
-      ss << this->inputs[0].Str()
-         << ", ";  // a矩阵、b矩阵同输入存在ascgraph的matmul有两个输入，Ascackend只有一个输入，需多加一个
+    if (options.is_conv2d) {
+      GE_ASSERT_TRUE(this->inputs.size() >= 2U, "conv2d inputs num [%u] < 2", this->inputs.size());
     }
-    for (auto &input : this->inputs) {
-      ss << input.Str() << ", ";
-    }
-    if (!is_bias) {  // 无bias场景
-      ss << "nullptr, ";
-    }
-    if (!is_offset_w) {  // 无offset_w场景
-      ss << "nullptr, ";
-    }
-    for (auto &output : this->outputs) {
-      ss << output.Str() << ", ";
-    }
-    if (this->outputs.empty()) {
-      ss << (is_cv_fuse ? "nullptr, " : "output_0, ");
-    }
+    GE_CHK_STATUS(AppendCubeInputArgs(ss, this->inputs, options), "Append cube input arguments failed");
+    AppendCubeOutputArgs(ss, this->outputs, options.is_cv_fuse ? "nullptr" : "output_0");
   }
   ss << this->workspace_arg.Str() << ", ";
   ss << "gm_tiling_data";
-  if (is_cv_fuse) {
-    if (is_dynamic) {
-      if (is_db) {
-        ss << ", &CV_FUSION_ADDR_DB";
-      } else {
-        ss << ", &CV_FUSION_ADDR";
-      }
-    } else {
-      ss << ", &CV_FUSION_ADDR";
-    }
-  } else {
-    ss << "";
+  if (options.is_cv_fuse) {
+    ss << (options.is_dynamic && options.is_db ? ", &CV_FUSION_ADDR_DB" : ", &CV_FUSION_ADDR");
   }
   ss << ");" << std::endl;
   return ss.str();
@@ -3382,43 +3430,25 @@ std::string Kernel::GenCubeTilingSingleFuncCall(const bool is_batch, const bool 
 
 std::string Kernel::GenCubeCommonTilingSingleFuncCall(const ascir::ImplGraph &impl_graph,
                                                       const std::string &output_arg_override) const {
-  bool is_batch = false;
-  bool has_bias = false;
-  bool has_offset_w = false;
-  bool is_conv2d = IsConv2DGraphType(impl_graph);
-  if (is_conv2d) {
-    has_bias = ascgen_utils::IsConv2DTypeWithBias(impl_graph);
-    has_offset_w = ascgen_utils::IsConv2DTypeWithOffsetW(impl_graph);
-  } else {
-    is_batch = ascgen_utils::IsMatMulTypeWithBatch(impl_graph);
-    has_bias = ascgen_utils::IsMatMulTypeWithBias(impl_graph);
-    has_offset_w = ascgen_utils::IsMatMulTypeWithOffsetW(impl_graph);
-  }
+  const auto options = GetCubeTilingOptions(impl_graph);
   std::stringstream ss;
-  GE_CHK_STATUS(GenCubeCommonTiling(ss, is_batch, is_conv2d), "GenCubeCommonTilingHead failed");
-  if (use_list_tensor_) {
+  GE_CHK_STATUS(GenCubeCommonTiling(ss, options.is_batch, options.is_conv2d), "GenCubeCommonTilingHead failed");
+  if (this->use_list_tensor_) {
     ss << kInputTensorDescName << ", " << kOutputTensorDescName << ", ";
   } else {
-    auto min_inputs_num = 1U + (has_bias ? 1U : 0U) + (has_offset_w ? 1U : 0U);
-    GE_ASSERT_TRUE(this->inputs.size() >= min_inputs_num, "cube inputs num [%u] < min_inputs_num [%u]",
-                   this->inputs.size(), min_inputs_num);
-    // a矩阵、b矩阵同输入存在ascgraph的matmul有两个输入，Ascackend只有一个输入，需多加一个输入再生成kernel函数
-    (this->inputs.size() == min_inputs_num) ? (ss << this->inputs[0].Str() << ", ") : (ss << "");
-    for (auto &input : this->inputs) {
-      ss << input.Str() << ", ";
+    if (options.is_conv2d) {
+      auto min_inputs_num =
+          2U + (options.has_bias ? 1U : 0U) + (options.has_offset_w ? 1U : 0U) + (options.has_scale0 ? 1U : 0U);
+      GE_ASSERT_TRUE(this->inputs.size() >= min_inputs_num, "conv2d inputs num [%u] < min_inputs_num [%u]",
+                     this->inputs.size(), min_inputs_num);
+    } else {
+      auto min_inputs_num = 1U + (options.has_bias ? 1U : 0U) + (options.has_offset_w ? 1U : 0U);
+      GE_ASSERT_TRUE(this->inputs.size() >= min_inputs_num, "cube inputs num [%u] < min_inputs_num [%u]",
+                     this->inputs.size(), min_inputs_num);
     }
-    if (!has_bias) {  // 无bias场景
-      ss << "nullptr, ";
-    }
-    if (!has_offset_w) {  // 无offset_w场景
-      ss << "nullptr, ";
-    }
-    for (auto &output : this->outputs) {
-      ss << output.Str() << ", ";
-    }
-    if (this->outputs.empty()) {
-      ss << (output_arg_override.empty() ? this->workspace_arg.Str() : output_arg_override) << ", ";
-    }
+    GE_CHK_STATUS(AppendCubeInputArgs(ss, this->inputs, options), "Append cube input arguments failed");
+    AppendCubeOutputArgs(ss, this->outputs,
+                         output_arg_override.empty() ? this->workspace_arg.Str() : output_arg_override);
   }
   ss << this->workspace_arg.Str();
   // cube workspace的位置需要计算 workspace + vector的偏移
@@ -3427,30 +3457,24 @@ std::string Kernel::GenCubeCommonTilingSingleFuncCall(const ascir::ImplGraph &im
 }
 
 std::string Kernel::GenCubeTilingFuncCall(const ascir::ImplGraph &impl_graph, bool is_dynamic) const {
-  bool is_batch = false;
-  bool is_bias = false;
-  bool is_offset_w = false;
-  bool is_conv2d = IsConv2DGraphType(impl_graph);
-  if (is_conv2d) {
-    is_bias = ascgen_utils::IsConv2DTypeWithBias(impl_graph);
-    is_offset_w = ascgen_utils::IsConv2DTypeWithOffsetW(impl_graph);
-  } else {
-    is_batch = ascgen_utils::IsMatMulTypeWithBatch(impl_graph);
-    is_bias = ascgen_utils::IsMatMulTypeWithBias(impl_graph);
-    is_offset_w = ascgen_utils::IsMatMulTypeWithOffsetW(impl_graph);
-  }
+  auto options = GetCubeTilingOptions(impl_graph);
+  options.is_dynamic = is_dynamic;
   std::stringstream ss;
   if (is_dynamic) {
+    options.is_cv_fuse = true;
     ss << "if constexpr (UB_MODE == 0) {" << std::endl;
-    ss << GenCubeTilingSingleFuncCall(is_batch, true, is_bias, is_offset_w, is_conv2d, true, false);
+    ss << GenCubeTilingSingleFuncCall(options);
     ss << "} else {" << std::endl;
-    ss << GenCubeTilingSingleFuncCall(is_batch, true, is_bias, is_offset_w, is_conv2d, true, true);
+    options.is_db = true;
+    ss << GenCubeTilingSingleFuncCall(options);
     ss << "}" << std::endl;
   } else {
     ss << "#ifdef CV_UB_FUSION" << std::endl;
-    ss << GenCubeTilingSingleFuncCall(is_batch, true, is_bias, is_offset_w, is_conv2d);
+    options.is_cv_fuse = true;
+    ss << GenCubeTilingSingleFuncCall(options);
     ss << "#else" << std::endl;
-    ss << GenCubeTilingSingleFuncCall(is_batch, false, is_bias, is_offset_w, is_conv2d);
+    options.is_cv_fuse = false;
+    ss << GenCubeTilingSingleFuncCall(options);
     ss << "#endif" << std::endl;
   }
   return ss.str();
@@ -4151,7 +4175,7 @@ class AutoFusionVector {
     result << std::endl;
     result << "GET_TILING_DATA_WITH_STRUCT(Conv2DTilingData, tmpTilingData, tmpTilingGM);" << std::endl;
     result << "const int32_t ub_align_value = 32 / sizeof(" << dtype_name << ");" << std::endl;
-    result << "const int32_t basen_align = (tmpTilingData.conv2dApiTiling.hoL0 + ub_align_value - 1) / "
+    result << "const int32_t basen_align = (tmpTilingData.hoL0 + ub_align_value - 1) / "
               "ub_align_value * ub_align_value;"
            << std::endl;
     std::string npu_arch;
@@ -4160,8 +4184,7 @@ class AutoFusionVector {
     if (npu_arch == "5102") {
       vec_num = 1;
     }
-    result << "stage_size1 = KernelUtils::Max(tmpTilingData.conv2dApiTiling.nL0 / " << vec_num << ", 16) * basen_align;"
-           << std::endl;
+    result << "stage_size1 = KernelUtils::Max(tmpTilingData.nL0 / " << vec_num << ", 16) * basen_align;" << std::endl;
     if (is_dynamic && is_inductor) {
       result << "#ifdef INDUCTOR_CONST_TILING_DATA" << std::endl;
       result << "const uint32_t stage_size_name = kConstTilingData.tiling_data.STAGE_SIZE_NAME;" << std::endl;

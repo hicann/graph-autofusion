@@ -254,7 +254,7 @@ def test_execute_compile_keeps_single_host_file_without_marker(
     assert os.path.exists(host_file)
 
 
-def test_execute_compile_splits_host_files_with_marker(compile_adapter_module, tmpdir):
+def test_execute_compile_merges_host_files_with_marker(compile_adapter_module, tmpdir):
     captured = {}
 
     def fake_main(args):
@@ -287,16 +287,17 @@ def test_execute_compile_splits_host_files_with_marker(compile_adapter_module, t
     )
 
     host_dir = os.path.join(str(tmpdir), "host")
+    # host 编译为单个 cpp 源文件（cpp 段合并），header 段拆出独立 .h 供 include 引用。
+    host_file = os.path.join(host_dir, "graph_tiling_func.cpp")
+    assert captured["args"].host_files == host_file
     assert os.path.exists(os.path.join(host_dir, "autofuse_tiling_func_common.h"))
-    assert captured["args"].host_files == [
-        os.path.join(host_dir, "graph_tiling_func_solver_func.cpp"),
-        os.path.join(host_dir, "graph_tiling_func_asc_graph0_schedule_result0_g0.cpp"),
-    ]
-    for cpp_file in captured["args"].host_files:
-        with open(cpp_file) as f:
-            assert f.read().count('#include "autofuse_tiling_func_common.h"') == 1
+    with open(host_file) as f:
+        merged = f.read()
+    assert merged.count('#include "autofuse_tiling_func_common.h"') == 1
+    assert 'extern "C" int Solver()' in merged
+    assert 'extern "C" int TilingFunc()' in merged
     assert not os.path.exists(
-        os.path.join(host_dir, "graph_tiling_func_TilingHead.cpp")
+        os.path.join(host_dir, "graph_tiling_func_solver_func.cpp")
     )
 
 

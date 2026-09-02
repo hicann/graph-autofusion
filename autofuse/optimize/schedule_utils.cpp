@@ -510,6 +510,62 @@ void ScheduleUtils::NormalizeAxisIds(const af::AscGraph &graph) {
       ReplaceAxisId(origin_id_to_new_id, output->attr.axis);
     }
   }
+
+  const auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
+  if (compute_graph == nullptr) {
+    return;
+  }
+  const auto graph_attr = compute_graph->GetAttrsGroup<af::AscGraphAttr>();
+  if (graph_attr == nullptr) {
+    return;
+  }
+  ReplaceAxisId(origin_id_to_new_id, graph_attr->sched.axis);
+  if (graph_attr->sched.loop_axis == af::kIdNone) {
+    return;
+  }
+  const auto iter = origin_id_to_new_id.find(graph_attr->sched.loop_axis);
+  if (iter != origin_id_to_new_id.end()) {
+    graph_attr->sched.loop_axis = iter->second;
+  }
+}
+
+Status ScheduleUtils::ApplyGraphSchedAxisToNodes(const af::AscGraph &graph) {
+  const auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
+  GE_ASSERT_NOTNULL(compute_graph);
+  const auto graph_attr = compute_graph->GetAttrsGroup<af::AscGraphAttr>();
+  if (graph_attr == nullptr) {
+    return af::SUCCESS;
+  }
+
+  if (graph_attr->sched.loop_axis != af::kIdNone) {
+    GELOGE(af::FAILED,
+           "Graph sched.loop_axis[%ld] is a reserved field and is currently unsupported. "
+           "The configured value will not take effect and will be reset to -1. graph[%s].",
+           graph_attr->sched.loop_axis, graph.GetName().c_str());
+    graph_attr->sched.loop_axis = af::kIdNone;
+  }
+
+  if (graph_attr->sched.axis.empty()) {
+    return af::SUCCESS;
+  }
+
+  const auto all_axes = graph.GetAllAxis();
+  for (const auto axis_id : graph_attr->sched.axis) {
+    const auto iter = std::find_if(all_axes.begin(), all_axes.end(), [axis_id](const af::AxisPtr &axis) {
+      return axis != nullptr && axis->id == axis_id;
+    });
+    GE_ASSERT_TRUE(iter != all_axes.end(), "Graph sched axis[%ld] is not found in graph[%s].", axis_id,
+                   graph.GetName().c_str());
+  }
+
+  for (const auto &node : graph.GetAllNodes()) {
+    GE_ASSERT_NOTNULL(node);
+    if (IsBuffer(node)) {
+      continue;
+    }
+    node->attr.sched.axis = graph_attr->sched.axis;
+  }
+  return af::SUCCESS;
 }
 
 std::string ScheduleUtils::AxesToString(const std::vector<af::AxisPtr> &axes) {

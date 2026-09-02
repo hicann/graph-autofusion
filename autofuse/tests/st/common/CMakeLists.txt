@@ -36,6 +36,7 @@ target_link_libraries(test_common_st ${ASCGEN_COMMON_LINK_OPTION}
         json
         mmpa_headers
         metadef_headers
+        metadef
         error_manager
         GTest::gtest
         GTest::gtest_main

@@ -277,25 +277,6 @@ inline std::vector<std::string> GenScheduleResultBlockDimCode(
   return block_dim_code;
 }
 
-inline std::vector<std::string> GenScheduleResultBlockDimSumCode(
-    const std::map<size_t, std::pair<std::string, std::string>> &graph_info) {
-  std::vector<std::string> block_dim_code;
-  if (graph_info.empty()) {
-    block_dim_code.emplace_back("      tiling_data.set_block_dim(tiling_data.get_block_dim());");
-    return block_dim_code;
-  }
-  auto group_info = graph_info.cbegin();
-  const std::string first_group_block_dim = "tiling_data." + group_info->second.second + "_tiling_data.get_block_dim()";
-  block_dim_code.emplace_back("      uint32_t total_block_dim = " + first_group_block_dim + ";");
-  ++group_info;
-  for (; group_info != graph_info.cend(); ++group_info) {
-    const std::string group_block_dim = "tiling_data." + group_info->second.second + "_tiling_data.get_block_dim()";
-    block_dim_code.emplace_back("      total_block_dim += " + group_block_dim + ";");
-  }
-  block_dim_code.emplace_back("      tiling_data.set_block_dim(total_block_dim);");
-  return block_dim_code;
-}
-
 inline bool HasSymbol(const Expr &expr) {
   return !expr.FreeSymbols().empty();
 }
@@ -3031,8 +3012,12 @@ af::Status TilingCodeGenImpl::GenPGOByCoreNumSearchTilingKeyCollectTilingData(Fu
       tiling_func_.AddLine("        uint32_t result_block_dim = 0U;");
       for (const auto &group_info : graph_info_map.second) {
         const auto schedule_result_prefix = group_info.second.second;
-        tiling_func_.AddLine("        result_block_dim += tiling_data_tmp." + schedule_result_prefix +
-                             "_tiling_data.get_block_dim();");
+        const auto group_block_dim = "tiling_data_tmp." + schedule_result_prefix + "_tiling_data.get_block_dim()";
+        if (enable_group_parallels_[asc_graph_id][result_id]) {
+          tiling_func_.AddLine("        result_block_dim += " + group_block_dim + ";");
+        } else {
+          tiling_func_.AddLine("        result_block_dim = std::max(result_block_dim, " + group_block_dim + ");");
+        }
       }
       if (enable_group_parallels_[asc_graph_id][result_id]) {
         tiling_func_.AddLine("        result_block_dim = std::min(result_block_dim, block_dim_i);");
@@ -3993,10 +3978,8 @@ void TilingCodeGenImpl::GenPGOByCoreNumGetScheduleResult(
 void TilingCodeGenImpl::GenPGOUpdateTilingInfo(
     const size_t asc_graph_id, const size_t impl_graph_id,
     const std::map<size_t, std::pair<std::string, std::string>> &graph_info) {
-  const auto block_dim_code = enable_group_parallels_[asc_graph_id][impl_graph_id]
-                                  ? GenScheduleResultBlockDimCode(graph_info)
-                                  : GenScheduleResultBlockDimSumCode(graph_info);
-  for (const auto &line : block_dim_code) {
+  // Serial groups reuse the same launch block range; the outer block_dim is therefore the group maximum.
+  for (const auto &line : GenScheduleResultBlockDimCode(graph_info)) {
     tiling_func_.AddLine(line);
   }
   GenUpdateWorkspace(asc_graph_id, impl_graph_id);

@@ -15,6 +15,7 @@
 
 #include "ascendc_ir.h"
 #include "ascend_graph_code_dumper.h"
+#include "ascendc_graph_txt_dumper.h"
 
 #include "graph_utils.h"
 #include "ascendc_ir/utils/asc_graph_utils.h"
@@ -132,6 +133,11 @@ void ConstructAscGraph(AscGraph &graph) {
 TEST_F(AscendGraphCodeDumperUT, test_python_gen) {
   AscGraph graph("test");
   ConstructAscGraph(graph);
+  const auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
+  ASSERT_NE(compute_graph, nullptr);
+  const auto graph_attr = compute_graph->GetOrCreateAttrsGroup<af::AscGraphAttr>();
+  ASSERT_NE(graph_attr, nullptr);
+  graph_attr->sched.axis = {0, 1};
   af::ascir::PythonCodeDumper dumper;
   EXPECT_EQ(dumper.Dump(graph, "./asc_graph_python.py"), af::SUCCESS);
   const std::string expected_graph_code = R"(# Python code to construct AscGraph
@@ -142,6 +148,7 @@ graph = ascir.HintGraph("test")
 s0 = graph.create_size("s0")
 S0 = graph.create_axis("S0", s0)
 S1 = graph.create_axis("S1", 2)
+graph.sched.axis = [S0, S1]
 Scalar_0 = ascir.ops.Scalar("Scalar", graph)
 Scalar_0.attr.sched.axis = [S0, S1]
 Scalar_0.y.dtype = ascir.dtypes.float16
@@ -1066,6 +1073,59 @@ schedule_results = fuser.schedule(graph)
 tiling_def, host_impl, device_impl = fuser.codegen(schedule_results)
 )";
   EXPECT_EQ(expected_graph_code, ReadFileContent("./asc_wrong_graph_python.py"));
+}
+
+// 验证 DumpMemoryLayoutView 对多输出节点的收集：
+// 多输出节点的每个 output 的 que/buf 信息都应收集，且命名为 y[i]
+TEST_F(AscendGraphCodeDumperUT, test_memory_layout_view_multi_output) {
+  AscGraph graph("multi_output_layout");
+  Expression s0 = graph.CreateSizeVar("s0");
+  Expression s1 = graph.CreateSizeVar("s1");
+  Axis &z0 = graph.CreateAxis("z0", s0);
+  Axis &z1 = graph.CreateAxis("z1", s1);
+
+  ascir_op::Data data("data", graph);
+  data.attr.sched.axis = {z0.id, z1.id};
+  data.y.dtype = DT_FLOAT16;
+
+  ascir_op::Load load("load");
+  load.x = data.y;
+  load.attr.sched.axis = {z0.id, z1.id};
+  *load.y.axis = {z0.id, z1.id};
+  load.y.dtype = DT_FLOAT16;
+  *load.y.repeats = {s0, s1};
+  *load.y.strides = {s1, One};
+
+  ascir_op::Split split("split");
+  split.InstanceOutputy(3U);
+  split.x = load.y;
+  split.attr.sched.axis = {z0.id, z1.id};
+  split.attr.api.compute_type = ComputeType::kComputeSplit;
+  for (size_t i = 0UL; i < 3UL; ++i) {
+    split.y[i].dtype = DT_FLOAT16;
+    *split.y[i].axis = {z0.id, z1.id};
+    *split.y[i].repeats = {s0, s1};
+    *split.y[i].strides = {s1, One};
+    // output[0] 用 queue，output[1]/[2] 用 buffer，覆盖两种收集路径
+    split.y[i].mem->alloc_type = (i == 0UL) ? AllocType::kAllocTypeQueue : AllocType::kAllocTypeBuffer;
+    if (i == 0UL) {
+      split.y[i].que->id = 7;
+      split.y[i].que->depth = 2;
+      split.y[i].que->buf_num = 2;
+    } else {
+      split.y[i].buf->id = static_cast<int64_t>(i);
+    }
+  }
+
+  const std::string layout = ::ascir::dumper::DumpMemoryLayoutView(graph, true);
+  // Queue 7 来自 split 的 output[0]
+  EXPECT_NE(layout.find("Queue 7"), std::string::npos);
+  EXPECT_NE(layout.find("split.y[0]"), std::string::npos) << layout;
+  // Buffer 1/2 来自 split 的 output[1]/[2]，修复前会缺失
+  EXPECT_NE(layout.find("Buffer 1"), std::string::npos) << layout;
+  EXPECT_NE(layout.find("Buffer 2"), std::string::npos) << layout;
+  EXPECT_NE(layout.find("split.y[1]"), std::string::npos) << layout;
+  EXPECT_NE(layout.find("split.y[2]"), std::string::npos) << layout;
 }
 
 }  // namespace af

@@ -715,9 +715,16 @@ void TilingLib::GenGenerateTopnSolutionsEntry(std::stringstream &ss,
   ss << "    tiling_datas.push_back(sol.tiling_data);" << std::endl;
   ss << "    workspaces.push_back(static_cast<int64_t>(GetWorkspaceSize(sol.tiling_data)));" << std::endl;
   ss << "    block_dims.push_back(static_cast<int64_t>(sol.tiling_data.get_block_dim()));" << std::endl;
-  ss << "    OP_LOGI(OP_NAME, \"output[%zu]: perf=%.6f is_default=%d block_dim=%ld repr=%s\", "
+  ss << "    OP_LOGI(OP_NAME, \"output[%zu]: perf=%.6f is_default=%d block_dim=%ld repr_len=%zu\", "
      << "tiling_datas.size() - 1, sol.modeled_perf, sol.is_default, "
-     << "static_cast<long>(sol.tiling_data.get_block_dim()), sol.canonical_repr.c_str());" << std::endl;
+     << "static_cast<long>(sol.tiling_data.get_block_dim()), sol.canonical_repr.size());" << std::endl;
+  ss << "    const std::string &repr = sol.canonical_repr;" << std::endl;
+  ss << "    const size_t chunk = 800;" << std::endl;
+  ss << "    for (size_t off = 0; off < repr.size(); off += chunk) {" << std::endl;
+  ss << "      OP_LOGI(OP_NAME, \"  output[%zu] repr[%zu..%zu]: %.*s\", "
+     << "tiling_datas.size() - 1, off, std::min(off + chunk, repr.size()), "
+     << "static_cast<int>(std::min(chunk, repr.size() - off)), repr.c_str() + off);" << std::endl;
+  ss << "    }" << std::endl;
   ss << "  }" << std::endl;
   ss << "  return 0;" << std::endl;
   ss << "}" << std::endl;

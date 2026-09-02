@@ -4331,6 +4331,17 @@ TEST_F(TestCodegenTiling, WrapperBackfillsWorkspaceAndBlockDim) {
   EXPECT_NE(tiling_impl.find("sol.tiling_data.get_block_dim()"), std::string::npos);
 }
 
+TEST_F(TestCodegenTiling, TopnWrapperPrintsCompleteFinalTilingDataInChunks) {
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  auto tiling_files = this->GenerateForInductor(fused_schedule_result);
+  ASSERT_TRUE(tiling_files.find(codegen::kTilingDefAndConstIdentify) != tiling_files.end());
+  const auto &tiling_impl = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+
+  EXPECT_NE(tiling_impl.find("output[%zu]: perf=%.6f is_default=%d block_dim=%ld"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("output[%zu] repr[%zu..%zu]: %.*s"), std::string::npos);
+  EXPECT_EQ(tiling_impl.find("block_dim=%ld repr=%s"), std::string::npos);
+}
+
 // Task 2: Config truth table — request construction & config semantics
 
 TEST_F(TestCodegenTiling, TopnWrapperMapsEmptyConfigsToInternalNoConfigPath) {

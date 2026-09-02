@@ -349,6 +349,85 @@ static void CreateElemwiseGraphWithAddScalar(af::AscGraph &graph, const std::str
 
 }  // namespace
 
+struct ConvGraphAxes {
+  af::Expression s0;
+  af::Expression s1;
+  af::AxisId z0;
+  af::AxisId z1;
+};
+
+struct ConvInputConfig {
+  int64_t index;
+  ge::DataType dtype;
+  bool use_output_shape;
+};
+
+ConvGraphAxes CreateConvGraphAxes(af::AscGraph &graph) {
+  const auto s0 = graph.CreateSizeVar(32);
+  const auto s1 = graph.CreateSizeVar(32);
+  return {s0, s1, graph.CreateAxis("z0", s0).id, graph.CreateAxis("z1", s1).id};
+}
+
+void ConfigureConvInput(af::ascir_op::Data &data, af::ascir_op::Load &load, const ConvGraphAxes &axes,
+                        const ConvInputConfig &config) {
+  data.attr.sched.axis = {axes.z0, axes.z1};
+  data.y.dtype = config.dtype;
+  *data.y.axis = {axes.z0, axes.z1};
+  data.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  data.ir_attr.SetIndex(config.index);
+  load.attr.sched.axis = {axes.z0, axes.z1};
+  load.x = data.y;
+  load.y.dtype = config.dtype;
+  *load.y.axis = {axes.z0, axes.z1};
+  if (config.use_output_shape) {
+    *data.y.strides = {axes.s1, af::ops::One};
+    *data.y.repeats = {axes.s0, axes.s1};
+    *load.y.strides = {axes.s1, af::ops::One};
+    *load.y.repeats = {axes.s0, axes.s1};
+  } else {
+    *data.y.strides = {af::ops::Zero, af::ops::Zero};
+    *data.y.repeats = {af::ops::One, af::ops::One};
+    *load.y.strides = {af::ops::Zero, af::ops::Zero};
+    *load.y.repeats = {af::ops::One, af::ops::One};
+  }
+}
+
+template <typename ConvOp>
+void ConfigureExtendConv2D(ConvOp &conv2d, const ConvGraphAxes &axes, bool enable_relu0) {
+  conv2d.attr.sched.axis = {axes.z0, axes.z1};
+  conv2d.y.dtype = ge::DT_FLOAT16;
+  *conv2d.y.axis = {axes.z0, axes.z1};
+  *conv2d.y.repeats = {axes.s0, axes.s1};
+  *conv2d.y.strides = {axes.s1, af::ops::One};
+  conv2d.ir_attr.SetStrides({1, 1});
+  conv2d.ir_attr.SetPads({0, 0, 0, 0});
+  conv2d.ir_attr.SetDilations({1, 1});
+  conv2d.ir_attr.SetGroups(1);
+  conv2d.ir_attr.SetData_format("NCHW");
+  conv2d.ir_attr.SetOffset_x(0);
+  conv2d.ir_attr.SetPad_mode("SPECIFIC");
+  conv2d.ir_attr.SetRound_mode("rint");
+  conv2d.ir_attr.SetEnable_hf32(false);
+  conv2d.ir_attr.SetEnable_relu0(enable_relu0);
+}
+
+template <typename Tensor>
+void FinishConvGraph(af::AscGraph &graph, Tensor &conv_output, const ConvGraphAxes &axes) {
+  af::ascir_op::Store store_op("store");
+  store_op.attr.sched.axis = {axes.z0, axes.z1};
+  store_op.x = conv_output;
+  *store_op.y.axis = {axes.z0, axes.z1};
+  store_op.y.dtype = ge::DT_FLOAT16;
+  *store_op.y.strides = {axes.s1, af::ops::One};
+  *store_op.y.repeats = {axes.s0, axes.s1};
+  store_op.ir_attr.SetOffset(af::ops::One);
+  af::ascir_op::Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = ge::DT_FLOAT16;
+  output_op.ir_attr.SetIndex(0);
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+}
+
 void CreateConv2DGraph(af::AscGraph &graph) {
   auto s0 = graph.CreateSizeVar(32);
   auto s1 = graph.CreateSizeVar(32);
@@ -405,21 +484,7 @@ void CreateConv2DGraph(af::AscGraph &graph) {
   conv2d.ir_attr.SetOffset_x(0);
   conv2d.ir_attr.SetPad_mode("SPECIFIC");
   conv2d.ir_attr.SetEnable_hf32(false);
-
-  af::ascir_op::Store store_op("store");
-  store_op.attr.sched.axis = {z0.id, z1.id};
-  store_op.x = conv2d.y;
-  *store_op.y.axis = {z0.id, z1.id};
-  store_op.y.dtype = ge::DT_FLOAT16;
-  *store_op.y.strides = {s1, af::ops::One};
-  *store_op.y.repeats = {s0, s1};
-  store_op.ir_attr.SetOffset(af::ops::One);
-
-  af::ascir_op::Output output_op("output");
-  output_op.x = store_op.y;
-  output_op.y.dtype = ge::DT_FLOAT16;
-  output_op.ir_attr.SetIndex(0);
-  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  FinishConvGraph(graph, conv2d.y, {s0, s1, z0.id, z1.id});
 }
 
 void CreateConv2DBiasGraph(af::AscGraph &graph) {
@@ -496,21 +561,7 @@ void CreateConv2DBiasGraph(af::AscGraph &graph) {
   conv2d_bias.ir_attr.SetOffset_x(0);
   conv2d_bias.ir_attr.SetPad_mode("SPECIFIC");
   conv2d_bias.ir_attr.SetEnable_hf32(false);
-
-  af::ascir_op::Store store_op("store");
-  store_op.attr.sched.axis = {z0.id, z1.id};
-  store_op.x = conv2d_bias.y;
-  *store_op.y.axis = {z0.id, z1.id};
-  store_op.y.dtype = ge::DT_FLOAT16;
-  *store_op.y.strides = {s1, af::ops::One};
-  *store_op.y.repeats = {s0, s1};
-  store_op.ir_attr.SetOffset(af::ops::One);
-
-  af::ascir_op::Output output_op("output");
-  output_op.x = store_op.y;
-  output_op.y.dtype = ge::DT_FLOAT16;
-  output_op.ir_attr.SetIndex(0);
-  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  FinishConvGraph(graph, conv2d_bias.y, {s0, s1, z0.id, z1.id});
 }
 
 void CreateConv2DOffsetGraph(af::AscGraph &graph) {
@@ -587,21 +638,7 @@ void CreateConv2DOffsetGraph(af::AscGraph &graph) {
   conv2d_offset.ir_attr.SetOffset_x(0);
   conv2d_offset.ir_attr.SetPad_mode("SPECIFIC");
   conv2d_offset.ir_attr.SetEnable_hf32(false);
-
-  af::ascir_op::Store store_op("store");
-  store_op.attr.sched.axis = {z0.id, z1.id};
-  store_op.x = conv2d_offset.y;
-  *store_op.y.axis = {z0.id, z1.id};
-  store_op.y.dtype = ge::DT_FLOAT16;
-  *store_op.y.strides = {s1, af::ops::One};
-  *store_op.y.repeats = {s0, s1};
-  store_op.ir_attr.SetOffset(af::ops::One);
-
-  af::ascir_op::Output output_op("output");
-  output_op.x = store_op.y;
-  output_op.y.dtype = ge::DT_FLOAT16;
-  output_op.ir_attr.SetIndex(0);
-  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  FinishConvGraph(graph, conv2d_offset.y, {s0, s1, z0.id, z1.id});
 }
 
 void CreateConv2DOffsetBiasGraph(af::AscGraph &graph) {
@@ -696,21 +733,7 @@ void CreateConv2DOffsetBiasGraph(af::AscGraph &graph) {
   conv2d_offset_bias.ir_attr.SetOffset_x(0);
   conv2d_offset_bias.ir_attr.SetPad_mode("SPECIFIC");
   conv2d_offset_bias.ir_attr.SetEnable_hf32(false);
-
-  af::ascir_op::Store store_op("store");
-  store_op.attr.sched.axis = {z0.id, z1.id};
-  store_op.x = conv2d_offset_bias.y;
-  *store_op.y.axis = {z0.id, z1.id};
-  store_op.y.dtype = ge::DT_FLOAT16;
-  *store_op.y.strides = {s1, af::ops::One};
-  *store_op.y.repeats = {s0, s1};
-  store_op.ir_attr.SetOffset(af::ops::One);
-
-  af::ascir_op::Output output_op("output");
-  output_op.x = store_op.y;
-  output_op.y.dtype = ge::DT_FLOAT16;
-  output_op.ir_attr.SetIndex(0);
-  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  FinishConvGraph(graph, conv2d_offset_bias.y, {s0, s1, z0.id, z1.id});
 }
 
 TEST_F(TestBackendConv2DE2e, Conv2DE2eCodegen) {
@@ -758,6 +781,38 @@ TEST_F(TestBackendConv2DE2e, Conv2DOffsetE2eCodegen) {
   EXPECT_EQ(gen_success, true);
 }
 
+void CreateExtendConv2DGraph(af::AscGraph &graph, bool with_bias_scale = false) {
+  const auto axes = CreateConvGraphAxes(graph);
+  af::ascir_op::Data data0("data0", graph);
+  af::ascir_op::Load load0("load0");
+  ConfigureConvInput(data0, load0, axes, {0, ge::DT_FLOAT16, true});
+  af::ascir_op::Data data1("data1", graph);
+  af::ascir_op::Load load1("load1");
+  ConfigureConvInput(data1, load1, axes, {1, ge::DT_FLOAT16, false});
+  if (!with_bias_scale) {
+    af::ascir_op::ExtendConv2D conv2d("extend_conv2d");
+    conv2d.x = load0.y;
+    conv2d.filter = load1.y;
+    ConfigureExtendConv2D(conv2d, axes, false);
+    FinishConvGraph(graph, conv2d.y, axes);
+    return;
+  }
+
+  af::ascir_op::Data data2("data2", graph);
+  af::ascir_op::Load load2("load2");
+  ConfigureConvInput(data2, load2, axes, {2, ge::DT_FLOAT16, false});
+  af::ascir_op::Data data3("data3", graph);
+  af::ascir_op::Load load3("load3");
+  ConfigureConvInput(data3, load3, axes, {3, ge::DT_UINT64, false});
+  af::ascir_op::ExtendConv2DBiasScale conv2d("extend_conv2d_bias_scale");
+  conv2d.x = load0.y;
+  conv2d.filter = load1.y;
+  conv2d.bias = load2.y;
+  conv2d.scale0 = load3.y;
+  ConfigureExtendConv2D(conv2d, axes, true);
+  FinishConvGraph(graph, conv2d.y, axes);
+}
+
 TEST_F(TestBackendConv2DE2e, Conv2DOffsetBiasE2eCodegen) {
   af::AscGraph graph("conv2d_offset_bias_elemwise_pro");
   CreateElemwiseGraphWithAddScalar(graph, "1.0");
@@ -773,5 +828,27 @@ TEST_F(TestBackendConv2DE2e, Conv2DOffsetBiasE2eCodegen) {
   std::fstream tiling_data_file(parts[0], std::ios::out);
   tiling_data_file << "";
 
+  EXPECT_EQ(gen_success, true);
+}
+
+TEST_F(TestBackendConv2DE2e, ExtendConv2DE2eCodegen) {
+  af::AscGraph graph("extend_conv2d_elemwise_pro");
+  CreateElemwiseGraphWithAbs(graph);
+
+  af::AscGraph conv2d_graph("extend_conv2d");
+  CreateExtendConv2DGraph(conv2d_graph);
+
+  bool gen_success = OptimizeAndGenerateCode(*this, graph, conv2d_graph, "ExtendConv2d_fuse_tiling_func.cpp");
+  EXPECT_EQ(gen_success, true);
+}
+
+TEST_F(TestBackendConv2DE2e, ExtendConv2DBiasScaleE2eCodegen) {
+  af::AscGraph graph("extend_conv2d_bias_scale_elemwise_pro");
+  CreateElemwiseGraphWithRelu(graph);
+
+  af::AscGraph conv2d_graph("extend_conv2d_bias_scale");
+  CreateExtendConv2DGraph(conv2d_graph, true);
+
+  bool gen_success = OptimizeAndGenerateCode(*this, graph, conv2d_graph, "ExtendConv2dBiasScale_fuse_tiling_func.cpp");
   EXPECT_EQ(gen_success, true);
 }

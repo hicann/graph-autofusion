@@ -198,7 +198,8 @@ struct QueueNodeInfo {
   size_t topo_id = 0;
   std::string node_name;
   int32_t reuse_id = -1;
-  std::string size_str;  // tensor 的 vector<> 格式大小
+  std::string size_str;       // tensor 的 vector<> 格式大小
+  std::string tensor_suffix;  // 多输出节点为 "[i]"，单输出为 ""
 };
 
 /**
@@ -218,9 +219,10 @@ struct QueueInfo {
 struct BufferNodeInfo {
   size_t topo_id = 0;
   std::string node_name;
-  std::string size_str;    // tensor 的 vector<> 格式大小
-  bool is_tmpbuf = false;  // 是否为节点的 tmpbuf
-  int32_t tmpbuf_idx = 0;  // tmpbuf 的索引（仅当 is_tmpbuf=true 时有效）
+  std::string size_str;       // tensor 的 vector<> 格式大小
+  bool is_tmpbuf = false;     // 是否为节点的 tmpbuf
+  int32_t tmpbuf_idx = 0;     // tmpbuf 的索引（仅当 is_tmpbuf=true 时有效）
+  std::string tensor_suffix;  // 多输出节点为 "[i]"，单输出为 ""
 };
 
 /**

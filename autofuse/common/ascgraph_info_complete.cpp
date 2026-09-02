@@ -217,6 +217,10 @@ static const std::map<std::string, af::ComputeType> kOpTypeToComputeType = {
     {Conv2DBias::Type, af::ComputeType::kComputeCube},
     {Conv2DOffset::Type, af::ComputeType::kComputeCube},
     {Conv2DOffsetBias::Type, af::ComputeType::kComputeCube},
+    {ExtendConv2D::Type, af::ComputeType::kComputeCube},
+    {ExtendConv2DBias::Type, af::ComputeType::kComputeCube},
+    {ExtendConv2DScale::Type, af::ComputeType::kComputeCube},
+    {ExtendConv2DBiasScale::Type, af::ComputeType::kComputeCube},
 };
 
 static const std::map<af::ComputeType, Completer> kComputeTypeToCompleter = {

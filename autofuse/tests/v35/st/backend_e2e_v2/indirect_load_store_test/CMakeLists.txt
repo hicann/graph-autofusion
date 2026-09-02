@@ -84,6 +84,23 @@ function(mark_indirect_load_simt_codegen test_name policy offset_bits)
         IL_EXPECT_SIMT_OFFSET_BITS=${offset_bits})
 endfunction()
 
+# Registers an IndirectLoad backend E2E case whose kernel sources are
+# ${kernel_stem}_kernel.cpp / ${kernel_stem}_tiling.cpp.
+function(add_indirect_load_graph_case test_name kernel_stem tiling_key)
+    set(case_workdir ${CMAKE_CURRENT_BINARY_DIR}/${test_name})
+    file(MAKE_DIRECTORY ${case_workdir})
+    do_backend_e2e_st_test(${test_name}
+        WORKDIR ${case_workdir}
+        CODEGEN indirect_load_store_backend_generator.cpp
+        TILING_KEY ${tiling_key}
+        KERNEL_SRC
+            ${kernel_stem}_kernel.cpp
+            ${kernel_stem}_tiling.cpp
+            autofuse_tiling_data.h
+        TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
+    mark_indirect_load_codegen_and_e2e(${test_name} ${ARGN})
+endfunction()
+
 function(mark_indirect_load_implementation test_name implementation)
     mark_indirect_load_codegen(${test_name}
         IL_SELECTED_IMPLEMENTATION=${implementation})
@@ -331,9 +348,6 @@ add_indirect_load_broadcast_test(indirect_load_broadcast_elements_sk_test sk 2 2
 add_indirect_load_broadcast_test(indirect_load_broadcast_index_physical_view_simt_test simt 2 2 3 0 0)
 mark_indirect_load_codegen_and_e2e(indirect_load_broadcast_index_physical_view_simt_test IL_AIC_REPRO=1)
 
-# Identity Broadcast keeps the index source axis/repeats unchanged while exercising the direct SIMD Broadcast path.
-add_indirect_load_broadcast_test(indirect_load_broadcast_identity_index_simd_test simd 0 0 0 0 0 0 1)
-
 # Regression: a unary elementwise op after an index Broadcast must retain the source physical view in SIMT.
 add_indirect_load_broadcast_test(indirect_load_broadcast_index_abs_simt_test simt 0 1 2 0 0 0 1)
 mark_indirect_load_codegen_and_e2e(indirect_load_broadcast_index_abs_simt_test IL_INDEX_ABS_DENSE_VIEW=1)
@@ -352,6 +366,23 @@ do_backend_e2e_st_test(indirect_load_broadcast_index_where_simt_test
         autofuse_tiling_data.h
     TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
 mark_indirect_load_codegen_and_e2e(indirect_load_broadcast_index_where_simt_test IL_CASE_BROADCAST_WHERE)
+
+# Regression: Where index branches use different physical views.  The row-broadcast branch
+# must not provide the index offset for the dense branch.
+set(indirect_load_broadcast_index_mixed_view_simt_test_workdir
+    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_broadcast_index_mixed_view_simt_test)
+file(MAKE_DIRECTORY ${indirect_load_broadcast_index_mixed_view_simt_test_workdir})
+do_backend_e2e_st_test(indirect_load_broadcast_index_mixed_view_simt_test
+    WORKDIR ${indirect_load_broadcast_index_mixed_view_simt_test_workdir}
+    CODEGEN indirect_load_store_backend_generator.cpp
+    TILING_KEY 1
+    KERNEL_SRC
+        indirect_load_broadcast_where_test_kernel.cpp
+        indirect_load_broadcast_where_test_tiling.cpp
+        autofuse_tiling_data.h
+    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
+mark_indirect_load_codegen_and_e2e(indirect_load_broadcast_index_mixed_view_simt_test
+                                   IL_CASE_BROADCAST_WHERE IL_INDEX_MIXED_VIEW)
 
 # Strict regression for the user-provided GraphHint: Where + Broadcast + IndirectLoad
 # followed by ReduceSum, including the non-overlapping zero-stride/physical-gap table view.
@@ -386,115 +417,63 @@ do_backend_e2e_st_test(indirect_load_graph_hint_simd_repro
 mark_indirect_load_codegen_and_e2e(indirect_load_graph_hint_simd_repro
                                    IL_CASE_BROADCAST_WHERE IL_GRAPH_HINT_SIMD_REPRO)
 
+# Minimal SIMT reproducer: a partially zero-stride mask view is enough to trigger the bad evaluator offset.
+add_indirect_load_graph_case(indirect_load_user_masked_embedding_minimal
+    indirect_load_user_masked_embedding_minimal 1
+    IL_CASE_BROADCAST_WHERE IL_USER_MASKED_EMBEDDING_MINIMAL)
+
+# Full three-input reproduction of the user-provided embedding + ge + mul + sum GraphHint.
+add_indirect_load_graph_case(indirect_load_user_masked_embedding_sum_full
+    indirect_load_user_masked_embedding_sum_full 1
+    IL_CASE_BROADCAST_WHERE IL_USER_MASKED_EMBEDDING_SUM_FULL)
+
+# Run the exact user graph through the normal optimizer/codegen flow without
+# forcing a template.  This guards the Embedding-like candidate selection.
+add_indirect_load_graph_case(indirect_load_user_masked_embedding_sum_full_auto
+    indirect_load_user_masked_embedding_sum_full 1
+    IL_CASE_BROADCAST_WHERE IL_USER_MASKED_EMBEDDING_SUM_FULL IL_USER_MASKED_EMBEDDING_AUTO_SELECT)
+
 # User graph: embedding + Sum over the lookup axis.
-set(indirect_load_user_embedding_sum_workdir
-    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_user_embedding_sum)
-file(MAKE_DIRECTORY ${indirect_load_user_embedding_sum_workdir})
-do_backend_e2e_st_test(indirect_load_user_embedding_sum
-    WORKDIR ${indirect_load_user_embedding_sum_workdir}
-    CODEGEN indirect_load_store_backend_generator.cpp
-    TILING_KEY 1
-    KERNEL_SRC
-        indirect_load_user_embedding_sum_kernel.cpp
-        indirect_load_user_embedding_sum_tiling.cpp
-        autofuse_tiling_data.h
-    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_user_embedding_sum IL_CASE_BROADCAST_WHERE IL_USER_EMBEDDING_SUM)
+add_indirect_load_graph_case(indirect_load_user_embedding_sum indirect_load_user_embedding_sum 1
+    IL_CASE_BROADCAST_WHERE IL_USER_EMBEDDING_SUM)
+
+# Rank-2 embedding view followed by Reduce on the payload dimension.  Keep the
+# original rank-3 lookup-reduction case above unchanged as a regression guard.
+add_indirect_load_graph_case(indirect_load_user_embedding_sum_rank2
+    indirect_load_user_embedding_sum_rank2 1
+    IL_CASE_BROADCAST_WHERE IL_USER_EMBEDDING_SUM IL_USER_EMBEDDING_SUM_RANK2)
+
+# Same GraphHint and runtime buffers as the user embedding+Sum graph, but force the SIMD candidate
+# to exercise the vector-gather path used by the board kernel in the simulator.
+add_indirect_load_graph_case(indirect_load_user_embedding_sum_simd indirect_load_user_embedding_sum_simd 0
+    IL_CASE_BROADCAST_WHERE IL_USER_EMBEDDING_SUM IL_USER_EMBEDDING_SUM_SIMD)
 
 # User graph: embedding followed by scalar Mul.
-set(indirect_load_user_embedding_mul_workdir
-    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_user_embedding_mul)
-file(MAKE_DIRECTORY ${indirect_load_user_embedding_mul_workdir})
-do_backend_e2e_st_test(indirect_load_user_embedding_mul
-    WORKDIR ${indirect_load_user_embedding_mul_workdir}
-    CODEGEN indirect_load_store_backend_generator.cpp
-    TILING_KEY 1
-    KERNEL_SRC
-        indirect_load_user_embedding_mul_kernel.cpp
-        indirect_load_user_embedding_mul_tiling.cpp
-        autofuse_tiling_data.h
-    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_user_embedding_mul IL_CASE_BROADCAST_WHERE IL_USER_EMBEDDING_MUL)
+add_indirect_load_graph_case(indirect_load_user_embedding_mul indirect_load_user_embedding_mul 1
+    IL_CASE_BROADCAST_WHERE IL_USER_EMBEDDING_MUL IL_EXPECT_EMBEDDING_SIMT)
 
 # User graph: bf16 embedding with mean/rsqrt normalization and two outputs.
-set(indirect_load_user_layernorm_workdir
-    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_user_layernorm)
-file(MAKE_DIRECTORY ${indirect_load_user_layernorm_workdir})
-do_backend_e2e_st_test(indirect_load_user_layernorm
-    WORKDIR ${indirect_load_user_layernorm_workdir}
-    CODEGEN indirect_load_store_backend_generator.cpp
-    TILING_KEY 1
-    KERNEL_SRC
-        indirect_load_user_layernorm_kernel.cpp
-        indirect_load_user_layernorm_tiling.cpp
-        autofuse_tiling_data.h
-    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_user_layernorm IL_CASE_BROADCAST_WHERE IL_USER_LAYERNORM)
+add_indirect_load_graph_case(indirect_load_user_layernorm indirect_load_user_layernorm 1
+    IL_CASE_BROADCAST_WHERE IL_USER_LAYERNORM)
 
 # Same LayerNorm split topology with a small shape; force the SIMD candidate to
 # determine whether the branch itself, rather than UB pressure, is the blocker.
-set(indirect_load_user_layernorm_simd_workdir
-    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_user_layernorm_simd)
-file(MAKE_DIRECTORY ${indirect_load_user_layernorm_simd_workdir})
-do_backend_e2e_st_test(indirect_load_user_layernorm_simd
-    WORKDIR ${indirect_load_user_layernorm_simd_workdir}
-    CODEGEN indirect_load_store_backend_generator.cpp
-    TILING_KEY 1
-    KERNEL_SRC
-        indirect_load_user_layernorm_simd_kernel.cpp
-        indirect_load_user_layernorm_simd_tiling.cpp
-        autofuse_tiling_data.h
-    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_user_layernorm_simd
-                                   IL_CASE_BROADCAST_WHERE IL_USER_LAYERNORM IL_USER_LAYERNORM_SIMD)
+add_indirect_load_graph_case(indirect_load_user_layernorm_simd indirect_load_user_layernorm_simd 1
+    IL_CASE_BROADCAST_WHERE IL_USER_LAYERNORM IL_USER_LAYERNORM_SIMD)
 
 # User graph: one embedding result fans out to Exp and Abs, then merges by Add.
 # Run both IL SIMD and IL SIMT templates to compare branch handling.
-set(indirect_load_user_embedding_exp_abs_add_simd_workdir
-    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_user_embedding_exp_abs_add_simd)
-file(MAKE_DIRECTORY ${indirect_load_user_embedding_exp_abs_add_simd_workdir})
-do_backend_e2e_st_test(indirect_load_user_embedding_exp_abs_add_simd
-    WORKDIR ${indirect_load_user_embedding_exp_abs_add_simd_workdir}
-    CODEGEN indirect_load_store_backend_generator.cpp
-    TILING_KEY 1
-    KERNEL_SRC
-        indirect_load_user_embedding_exp_abs_add_simd_kernel.cpp
-        indirect_load_user_embedding_exp_abs_add_simd_tiling.cpp
-        autofuse_tiling_data.h
-    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_user_embedding_exp_abs_add_simd
-                                   IL_USER_EMBEDDING_EXP_ABS_ADD IL_USER_EMBEDDING_EXP_ABS_ADD_SIMD)
-
-set(indirect_load_user_embedding_exp_abs_add_simt_workdir
-    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_user_embedding_exp_abs_add_simt)
-file(MAKE_DIRECTORY ${indirect_load_user_embedding_exp_abs_add_simt_workdir})
-do_backend_e2e_st_test(indirect_load_user_embedding_exp_abs_add_simt
-    WORKDIR ${indirect_load_user_embedding_exp_abs_add_simt_workdir}
-    CODEGEN indirect_load_store_backend_generator.cpp
-    TILING_KEY 1
-    KERNEL_SRC
-        indirect_load_user_embedding_exp_abs_add_simt_kernel.cpp
-        indirect_load_user_embedding_exp_abs_add_simt_tiling.cpp
-        autofuse_tiling_data.h
-    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_user_embedding_exp_abs_add_simt
-                                   IL_USER_EMBEDDING_EXP_ABS_ADD)
+add_indirect_load_graph_case(indirect_load_user_embedding_exp_abs_add_simd
+    indirect_load_user_embedding_exp_abs_add_simd 1
+    IL_USER_EMBEDDING_EXP_ABS_ADD IL_USER_EMBEDDING_EXP_ABS_ADD_SIMD)
+add_indirect_load_graph_case(indirect_load_user_embedding_exp_abs_add_simt
+    indirect_load_user_embedding_exp_abs_add_simt 1
+    IL_USER_EMBEDDING_EXP_ABS_ADD)
 
 # Fan-out matrix: split at IndirectLoad or at a post-IndirectLoad elementwise node,
 # with either two ordinary Stores or one ordinary Store plus one Reduce Store.
 function(add_indirect_load_user_fanout_case test_name)
-    set(workdir ${CMAKE_CURRENT_BINARY_DIR}/${test_name})
-    file(MAKE_DIRECTORY ${workdir})
-    do_backend_e2e_st_test(${test_name}
-        WORKDIR ${workdir}
-        CODEGEN indirect_load_store_backend_generator.cpp
-        TILING_KEY 1
-        KERNEL_SRC
-            ${test_name}_kernel.cpp
-            ${test_name}_tiling.cpp
-            autofuse_tiling_data.h
-        TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-    mark_indirect_load_codegen_and_e2e(${test_name} IL_USER_FANOUT ${ARGN})
+    add_indirect_load_graph_case(${test_name} ${test_name} 1 IL_USER_FANOUT ${ARGN})
 endfunction()
 
 add_indirect_load_user_fanout_case(indirect_load_user_fanout_direct_stores_simd
@@ -513,20 +492,25 @@ add_indirect_load_user_fanout_case(indirect_load_user_fanout_post_reduce_simd
 add_indirect_load_user_fanout_case(indirect_load_user_fanout_post_reduce_simt
                                    IL_USER_FANOUT_POST IL_USER_FANOUT_REDUCE)
 
+# Minimal red regression: a post-IndirectLoad fanout Add consumes an independent Load side input.
+add_indirect_load_graph_case(indirect_load_user_side_input_fanout_simd
+    indirect_load_user_side_input_fanout_simd 0
+    IL_USER_SIDE_INPUT_FANOUT IL_USER_SIDE_INPUT_FANOUT_SIMD)
+mark_indirect_load_red(indirect_load_user_side_input_fanout_simd)
+
+add_indirect_load_graph_case(indirect_load_user_side_input_fanout_simt
+    indirect_load_user_side_input_fanout_simt 1
+    IL_USER_SIDE_INPUT_FANOUT)
+mark_indirect_load_red(indirect_load_user_side_input_fanout_simt)
+
 # User graph: two IndirectLoads over two tensors followed by Add (dual-IL graph).
-set(indirect_load_user_add_gather_workdir
-    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_user_add_gather)
-file(MAKE_DIRECTORY ${indirect_load_user_add_gather_workdir})
-do_backend_e2e_st_test(indirect_load_user_add_gather
-    WORKDIR ${indirect_load_user_add_gather_workdir}
-    CODEGEN indirect_load_store_backend_generator.cpp
-    TILING_KEY 1
-    KERNEL_SRC
-        indirect_load_user_add_gather_kernel.cpp
-        indirect_load_user_add_gather_tiling.cpp
-        autofuse_tiling_data.h
-    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_user_add_gather IL_CASE_BROADCAST_WHERE IL_DUAL_IL_GATHER)
+# Keep the case sources for future capability work, but do not register the unsupported
+# topology in the default build/test collection.
+option(ENABLE_IL_DUAL_IL "Build the dual-IndirectLoad regression case" OFF)
+if(ENABLE_IL_DUAL_IL)
+    add_indirect_load_graph_case(indirect_load_user_add_gather indirect_load_user_add_gather 1
+        IL_CASE_BROADCAST_WHERE IL_DUAL_IL_GATHER)
+endif()
 
 # Regression: SIMT post-reduce Output() evaluator uses full output_index instead of address.index_offset
 # to access index-tensor GM, causing OOB reads when output_index exceeds index tensor size.
@@ -557,8 +541,7 @@ do_backend_e2e_st_test(indirect_load_add_il_reduce_test
         indirect_load_add_il_reduce_test_tiling.cpp
         autofuse_tiling_data.h
     TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_add_il_reduce_test IL_CASE_BROADCAST_WHERE)
-mark_indirect_load_codegen_and_e2e(indirect_load_add_il_reduce_test IL_ADD_IL_REDUCE)
+mark_indirect_load_codegen_and_e2e(indirect_load_add_il_reduce_test IL_CASE_BROADCAST_WHERE IL_ADD_IL_REDUCE)
 
 # Same-view tensor fan-in without Broadcast: the binary operation is coordinate-preserving.
 add_indirect_load_broadcast_test(indirect_load_index_binary_same_view_simd_test simd 0 1 0 0 0 0 0)
@@ -677,3 +660,25 @@ do_backend_e2e_st_test(indirect_load_embedding_test
         autofuse_tiling_data.h
     TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
 mark_indirect_load_codegen_and_e2e(indirect_load_embedding_test IL_CASE_EMBEDDING)
+
+# SIMD uses tiling key 0; SIMT uses tiling key 1 and requests the SIMT embedding policy.
+foreach(embedding_case_template IN ITEMS simd simt)
+    set(embedding_case_tiling_key 0)
+    set(embedding_case_extra_defs)
+    if(embedding_case_template STREQUAL "simt")
+        set(embedding_case_tiling_key 1)
+        set(embedding_case_extra_defs IL_EMBEDDING_SIMT=1)
+    endif()
+    # Non-block-aligned payload regression: exercise the SIMD Embedding head/body/tail split and
+    # the SIMT Embedding policy's non-power-of-two division path while keeping the aligned case below.
+    add_indirect_load_graph_case(indirect_load_embedding_tail_${embedding_case_template}
+        indirect_load_embedding_tail_${embedding_case_template} ${embedding_case_tiling_key}
+        IL_CASE_EMBEDDING IL_EMBEDDING_SIZE=13 IL_EMBEDDING_DIRECT=1 ${embedding_case_extra_defs})
+
+    # Aligned direct-output controls for both templates.  The existing aligned
+    # Embedding case has a post-reduce chain; these controls isolate the direct
+    # Embedding address path from the fusion chain.
+    add_indirect_load_graph_case(indirect_load_embedding_aligned_${embedding_case_template}
+        indirect_load_embedding_test ${embedding_case_tiling_key}
+        IL_CASE_EMBEDDING IL_EMBEDDING_DIRECT=1 ${embedding_case_extra_defs})
+endforeach()

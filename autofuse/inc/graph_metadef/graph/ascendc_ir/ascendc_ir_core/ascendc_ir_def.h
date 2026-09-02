@@ -250,6 +250,13 @@ struct SchedInfo {
   ExecuteCondition exec_condition{ExecuteCondition::kNoCache};
 };
 
+// 图级调度信息。当前仅用于接收外部统一调度轴，loop_axis 保留给内部流程使用。
+// 与节点级 SchedInfo 分开定义，避免将节点级 exec_condition 提升到图级。
+struct GraphSchedInfo {
+  std::vector<int64_t> axis;
+  int64_t loop_axis{kIdNone};
+};
+
 class AscIrAttrDefBase {
  public:
   AscIrAttrDefBase() = default;
@@ -433,6 +440,9 @@ class AscGraphAttr : public AfAttrGroupsBase {
   // [HI] 图上的轴
   std::vector<AxisPtr> axis;
 
+  // 图级调度信息。axis 在进入优化流程前可同步到各节点的 sched.axis。
+  GraphSchedInfo sched{};
+
   // TODO 待正式方案后删除
   TransInfoRoadOfGraph trans_info_road;
 
@@ -551,6 +561,7 @@ using af::AxisPtr;
 using af::ComputeType;
 using af::ComputeUnit;
 using af::ExecuteCondition;
+using af::GraphSchedInfo;
 using af::MemAttr;
 using af::MemBufAttr;
 using af::MemHardware;

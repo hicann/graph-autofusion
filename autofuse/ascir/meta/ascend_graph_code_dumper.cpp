@@ -369,6 +369,14 @@ void PythonCodeDumper::GenerateGraphInstance(const af::AscGraph &asc_graph, std:
     output_file << axis->name << " = " << "" << "graph.create_axis(" << "\"" << axis->name << "\"" << ", "
                 << axis->size.Str().get() << ")\n";
   }
+  const auto compute_graph = af::AscGraphUtils::GetComputeGraph(asc_graph);
+  if (compute_graph == nullptr) {
+    return;
+  }
+  const auto graph_attr = compute_graph->GetAttrsGroup<af::AscGraphAttr>();
+  if (graph_attr != nullptr && !graph_attr->sched.axis.empty()) {
+    output_file << "graph.sched.axis = " << GenerateAxisCode(graph_attr->sched.axis, asis_ptrs) << "\n";
+  }
 }
 
 Status PythonCodeDumper::GenerateTensorCode(const af::NodePtr &node, std::ostream &output_file) {

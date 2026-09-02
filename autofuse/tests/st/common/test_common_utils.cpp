@@ -635,4 +635,146 @@ TEST_F(CommonUtilsTest, GetAscIrAttImplNotNullTest) {
   EXPECT_NE(att_impl, nullptr);
   EXPECT_EQ((uint64_t)(uintptr_t)(att_impl->GetApiPerf()), 0x123456);
 }
+
+template <typename ConvOp>
+void FillConv2DCommonIrAttr(ConvOp &conv) {
+  conv.ir_attr.SetStrides({1, 1, 1, 1});
+  conv.ir_attr.SetPads({0, 0, 0, 0});
+  conv.ir_attr.SetDilations({1, 1, 1, 1});
+  conv.ir_attr.SetGroups(1);
+  conv.ir_attr.SetPad_mode("SPECIFIC");
+  conv.ir_attr.SetData_format("NCHW");
+  conv.ir_attr.SetOffset_x(0);
+  conv.ir_attr.SetEnable_hf32(false);
+  conv.ir_attr.SetFixed_shift_value(0);
+  conv.attr.api.compute_type = af::ComputeType::kComputeCube;
+}
+
+template <typename ConvOp>
+void FillExtendConv2DIrAttr(ConvOp &conv, bool enable_relu0 = false) {
+  FillConv2DCommonIrAttr(conv);
+  conv.ir_attr.SetRound_mode("rint");
+  conv.ir_attr.SetEnable_relu0(enable_relu0);
+}
+
+TEST_F(CommonUtilsTest, ExtendConv2DGraphTypeAndAttrParse) {
+  af::AscGraph graph("extend_conv2d_graph");
+  af::ascir_op::ExtendConv2D conv("extend_conv2d");
+  graph.AddNode(conv);
+  FillExtendConv2DIrAttr(conv);
+
+  EXPECT_TRUE(IsConv2DGraphType(graph));
+  EXPECT_FALSE(IsConv2DTypeWithBias(graph));
+  EXPECT_FALSE(IsConv2DTypeWithScale0(graph));
+  EXPECT_FALSE(IsConv2DTypeWithOffsetW(graph));
+
+  auto node = graph.FindNode("extend_conv2d");
+  ASSERT_NE(node, nullptr);
+  Conv2DAttr attr;
+  ASSERT_EQ(ParseConv2DAttr(node, attr), af::SUCCESS);
+  EXPECT_TRUE(attr.is_extend_conv2d);
+  EXPECT_FALSE(attr.has_bias);
+  EXPECT_FALSE(attr.has_scale0);
+  EXPECT_EQ(attr.round_mode, "rint");
+  EXPECT_EQ(attr.pad_mode, "SPECIFIC");
+}
+
+TEST_F(CommonUtilsTest, ExtendConv2DBiasGraphTypeAndAttrParse) {
+  af::AscGraph graph("extend_conv2d_bias_graph");
+  af::ascir_op::ExtendConv2DBias conv("extend_conv2d_bias");
+  graph.AddNode(conv);
+  FillExtendConv2DIrAttr(conv);
+
+  EXPECT_TRUE(IsConv2DGraphType(graph));
+  EXPECT_TRUE(IsConv2DTypeWithBias(graph));
+  EXPECT_FALSE(IsConv2DTypeWithScale0(graph));
+
+  auto node = graph.FindNode("extend_conv2d_bias");
+  ASSERT_NE(node, nullptr);
+  Conv2DAttr attr;
+  ASSERT_EQ(ParseConv2DAttr(node, attr), af::SUCCESS);
+  EXPECT_TRUE(attr.is_extend_conv2d);
+  EXPECT_TRUE(attr.has_bias);
+  EXPECT_FALSE(attr.has_scale0);
+}
+
+TEST_F(CommonUtilsTest, ExtendConv2DScaleGraphTypeAndAttrParse) {
+  af::AscGraph graph("extend_conv2d_scale_graph");
+  af::ascir_op::ExtendConv2DScale conv("extend_conv2d_scale");
+  graph.AddNode(conv);
+  FillExtendConv2DIrAttr(conv);
+
+  EXPECT_TRUE(IsConv2DGraphType(graph));
+  EXPECT_TRUE(IsConv2DTypeWithScale0(graph));
+  EXPECT_FALSE(IsConv2DTypeWithBias(graph));
+
+  auto node = graph.FindNode("extend_conv2d_scale");
+  ASSERT_NE(node, nullptr);
+  Conv2DAttr attr;
+  ASSERT_EQ(ParseConv2DAttr(node, attr), af::SUCCESS);
+  EXPECT_TRUE(attr.is_extend_conv2d);
+  EXPECT_TRUE(attr.has_scale0);
+  EXPECT_FALSE(attr.has_bias);
+}
+
+TEST_F(CommonUtilsTest, ExtendConv2DBiasScaleGraphTypeAndAttrParse) {
+  af::AscGraph graph("extend_conv2d_bias_scale_graph");
+  af::ascir_op::ExtendConv2DBiasScale conv("extend_conv2d_bias_scale");
+  graph.AddNode(conv);
+  FillExtendConv2DIrAttr(conv, true);
+
+  EXPECT_TRUE(IsConv2DGraphType(graph));
+  EXPECT_TRUE(IsConv2DTypeWithBias(graph));
+  EXPECT_TRUE(IsConv2DTypeWithScale0(graph));
+
+  auto node = graph.FindNode("extend_conv2d_bias_scale");
+  ASSERT_NE(node, nullptr);
+  Conv2DAttr attr;
+  ASSERT_EQ(ParseConv2DAttr(node, attr), af::SUCCESS);
+  EXPECT_TRUE(attr.is_extend_conv2d);
+  EXPECT_TRUE(attr.has_bias);
+  EXPECT_TRUE(attr.has_scale0);
+  EXPECT_TRUE(attr.enable_relu0);
+}
+
+TEST_F(CommonUtilsTest, Conv2DLegacyOptionalInputAttrParse) {
+  {
+    af::AscGraph graph("conv2d_bias_graph");
+    af::ascir_op::Conv2DBias conv("conv2d_bias");
+    graph.AddNode(conv);
+    FillConv2DCommonIrAttr(conv);
+    EXPECT_TRUE(IsConv2DTypeWithBias(graph));
+    auto node = graph.FindNode("conv2d_bias");
+    ASSERT_NE(node, nullptr);
+    Conv2DAttr attr;
+    ASSERT_EQ(ParseConv2DAttr(node, attr), af::SUCCESS);
+    EXPECT_TRUE(attr.has_bias);
+    EXPECT_FALSE(attr.has_offset_w);
+  }
+  {
+    af::AscGraph graph("conv2d_offset_graph");
+    af::ascir_op::Conv2DOffset conv("conv2d_offset");
+    graph.AddNode(conv);
+    FillConv2DCommonIrAttr(conv);
+    auto node = graph.FindNode("conv2d_offset");
+    ASSERT_NE(node, nullptr);
+    Conv2DAttr attr;
+    ASSERT_EQ(ParseConv2DAttr(node, attr), af::SUCCESS);
+    EXPECT_TRUE(attr.has_offset_w);
+    EXPECT_FALSE(attr.has_bias);
+  }
+  {
+    af::AscGraph graph("conv2d_offset_bias_graph");
+    af::ascir_op::Conv2DOffsetBias conv("conv2d_offset_bias");
+    graph.AddNode(conv);
+    FillConv2DCommonIrAttr(conv);
+    EXPECT_TRUE(IsConv2DTypeWithBias(graph));
+    auto node = graph.FindNode("conv2d_offset_bias");
+    ASSERT_NE(node, nullptr);
+    Conv2DAttr attr;
+    ASSERT_EQ(ParseConv2DAttr(node, attr), af::SUCCESS);
+    EXPECT_TRUE(attr.has_bias);
+    EXPECT_TRUE(attr.has_offset_w);
+  }
+}
 }  // namespace ascgen_utils

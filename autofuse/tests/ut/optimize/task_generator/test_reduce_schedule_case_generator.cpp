@@ -23,6 +23,8 @@ using namespace optimize;
 using namespace ge;
 using namespace af::ops;
 using namespace af::ascir_op;
+using af::testing::AscGraphBuilder;
+using af::testing::Sym;
 
 class ReduceScheduleCaseGeneratorTest : public ::testing::Test {
  protected:
@@ -550,6 +552,102 @@ TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_Multi_Cita_Store) {
   generator.GeneratorTask(graph, tasks, options);
   EXPECT_TRUE(HasReduceTemplateType(tasks, ReduceTemplateType::kCommon));
   EXPECT_FALSE(HasReduceTemplateType(tasks, ReduceTemplateType::kAllLoad));
+}
+
+TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_Multi_Cita_Multi_Out_NoDependencyCycle) {
+  // 双 source 多输出交叉链：shared0/shared1 各自的 citation group 共享 sum0（经 merge0 汇聚），
+  // 触发并查集合并；sum0 为最小 id 的 anchor。非 anchor citation（branch01→sum2、branch11→sum1）
+  // 被切分，且断边后 source 与 citation 不再连通，满足 CheckDuplicateWorkspaceNodes 对
+  // workspace 读写端必须分属不同子图的约束（PR !1914 引入）。
+  auto graph = AscGraphBuilder("reduce_multi_citation_multi_out")
+                   .Loops({Sym(128), Sym(64)})
+                   .Data("data0", 0)
+                   .Load("load0", "data0")
+                   .Data("data1", 1)
+                   .Load("load1", "data1")
+                   .Abs("shared0", "load0")
+                   .Relu("branch00", "shared0")
+                   .Op<af::ascir_op::Tanh>("branch01", {"shared0"})
+                   .Abs("shared1", "load1")
+                   .Relu("branch10", "shared1")
+                   .Op<af::ascir_op::Tanh>("branch11", {"shared1"})
+                   .Add("merge0", "branch00", "branch10")
+                   .Sum("sum0", "merge0", {0, 1})
+                   .Sum("sum1", "branch11", {0, 1})
+                   .Sum("sum2", "branch01", {0, 1})
+                   .Store("store0", "sum0")
+                   .Output("output0", "store0", 0)
+                   .Store("store1", "sum1")
+                   .Output("output1", "store1", 1)
+                   .Store("store2", "sum2")
+                   .Output("output2", "store2", 2)
+                   .Build();
+  std::vector<ScheduleTask> tasks;
+  ReducePartitionCaseGenerator generator;
+  OptimizerOptions options;
+
+  EXPECT_EQ(generator.GeneratorTask(graph, tasks, options), af::SUCCESS);
+  EXPECT_TRUE(HasReduceTemplateType(tasks, ReduceTemplateType::kCommon));
+
+  size_t shared0_workspace_count = 0UL;
+  size_t shared1_workspace_count = 0UL;
+  for (const auto &task : tasks) {
+    for (const auto &grouped_graph : task.grouped_graphs) {
+      for (const auto &node : grouped_graph.GetAllNodes()) {
+        if (!af::ops::IsOps<af::ascir_op::Workspace>(node)) {
+          continue;
+        }
+        if (node->GetName().find("shared0_to_branch") != std::string::npos) {
+          ++shared0_workspace_count;
+        }
+        if (node->GetName().find("shared1_to_branch") != std::string::npos) {
+          ++shared1_workspace_count;
+        }
+      }
+    }
+  }
+  // Both citation groups share sum0 and must be merged; sum0 is the lowest-id anchor.
+  // Each non-anchor source/reduce pair is partitioned once, producing one workspace pair.
+  EXPECT_EQ(shared0_workspace_count, 2UL);
+  EXPECT_EQ(shared1_workspace_count, 2UL);
+}
+
+TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_Multi_Cita_SameReduce_NoDuplicatePartition) {
+  auto graph = AscGraphBuilder("reduce_multi_citation_same_reduce")
+                   .Loops({Sym(128), Sym(64)})
+                   .Data("data", 0)
+                   .Load("load", "data")
+                   .Abs("shared", "load")
+                   .Relu("branch0", "shared")
+                   .Op<af::ascir_op::Tanh>("branch1", {"shared"})
+                   .Add("merge", "branch0", "branch1")
+                   .Sum("sum0", "merge", {0, 1})
+                   .Relu("branch2", "shared")
+                   .Sum("sum1", "branch2", {0, 1})
+                   .Store("store0", "sum0")
+                   .Output("output0", "store0", 0)
+                   .Store("store1", "sum1")
+                   .Output("output1", "store1", 1)
+                   .Build();
+  std::vector<ScheduleTask> tasks;
+  ReducePartitionCaseGenerator generator;
+  OptimizerOptions options;
+
+  EXPECT_EQ(generator.GeneratorTask(graph, tasks, options), af::SUCCESS);
+
+  size_t shared_workspace_count = 0UL;
+  for (const auto &task : tasks) {
+    for (const auto &grouped_graph : task.grouped_graphs) {
+      for (const auto &node : grouped_graph.GetAllNodes()) {
+        if (af::ops::IsOps<af::ascir_op::Workspace>(node) &&
+            node->GetName().find("shared_to_branch") != std::string::npos) {
+          ++shared_workspace_count;
+        }
+      }
+    }
+  }
+  // One partition creates a workspace pair; duplicate citation partitioning would create two pairs.
+  EXPECT_EQ(shared_workspace_count, 2UL);
 }
 
 void ConstructReduceWithScalarData(AscGraph &graph) {

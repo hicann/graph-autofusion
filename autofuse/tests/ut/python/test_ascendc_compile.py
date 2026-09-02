@@ -523,13 +523,14 @@ def test_main_host_pgo_builds_bundle_and_skips_plain_copy(
     events = []
     args = _make_host_pgo_args(tmpdir, ("/mspti", [], []))
 
-    def fake_link_host_target(*_):
+    def fake_link_tiling_so(*_):
         return str(tmpdir.join("built_tiling.so"))
 
     def fake_build_pgo_sidecars(*_):
         return str(tmpdir.join("built_runner")), str(tmpdir.join("built_kernel"))
 
-    ascendc_compile_module.module.link_host_target = fake_link_host_target
+    ascendc_compile_module.module.compile_host_objs = lambda *_: ["/tmp/build/host.o"]
+    ascendc_compile_module.module.link_tiling_so = fake_link_tiling_so
     ascendc_compile_module.module.build_pgo_sidecars = fake_build_pgo_sidecars
     args.pgo_ld_preload = "/mspti/lib64/libmspti.so"
 
@@ -572,7 +573,7 @@ def test_main_host_pgo_failure_falls_back_to_plain_tiling(
     copied = []
     args = _make_host_pgo_args(tmpdir, ("/mspti", [], []))
 
-    def fake_link_host_target(*_):
+    def fake_link_tiling_so(*_):
         return str(tmpdir.join("built_tiling.so"))
 
     def fail_build_pgo_sidecars(*_):
@@ -581,7 +582,8 @@ def test_main_host_pgo_failure_falls_back_to_plain_tiling(
     def record_copy(so_file, compile_args, src_dir):
         copied.append((so_file, compile_args.output_file, src_dir))
 
-    ascendc_compile_module.module.link_host_target = fake_link_host_target
+    ascendc_compile_module.module.compile_host_objs = lambda *_: ["/tmp/build/host.o"]
+    ascendc_compile_module.module.link_tiling_so = fake_link_tiling_so
     ascendc_compile_module.module.build_pgo_sidecars = fail_build_pgo_sidecars
     ascendc_compile_module.module.copy_so_to_output = record_copy
 
@@ -597,15 +599,19 @@ def test_main_host_pgo_failure_falls_back_to_plain_tiling(
     assert os.getcwd() == original_dir
 
 
-def test_build_host_output_passes_pch_to_host_link(ascendc_compile_module, tmpdir):
+def test_build_host_output_passes_pch_to_host_compile(ascendc_compile_module, tmpdir):
     args = _make_host_pgo_args(tmpdir, None)
     captured = {}
 
-    def fake_link_host_target(compile_args, temp_dir, pch_path=None):
+    def fake_compile_host_objs(compile_args, temp_dir, pch_path):
         captured["pch_path"] = pch_path
+        return ["/tmp/build/host.o"]
+
+    def fake_link_tiling_so(compile_args, tiling_obj_paths, temp_dir):
         return str(tmpdir.join("built_tiling.so"))
 
-    ascendc_compile_module.module.link_host_target = fake_link_host_target
+    ascendc_compile_module.module.compile_host_objs = fake_compile_host_objs
+    ascendc_compile_module.module.link_tiling_so = fake_link_tiling_so
 
     result = ascendc_compile_module.build_host_output(args, "/tmp/cache/host.pch")
 
@@ -619,7 +625,7 @@ def test_main_host_pgo_without_mspti_skips_sidecars_and_copies_plain_tiling(
     copied = []
     args = _make_host_pgo_args(tmpdir, None)
 
-    def fake_link_host_target(*_):
+    def fake_build_host_output(*_):
         return str(tmpdir.join("built_tiling.so"))
 
     def fail_build_pgo_sidecars(*_):
@@ -628,7 +634,7 @@ def test_main_host_pgo_without_mspti_skips_sidecars_and_copies_plain_tiling(
     def record_copy(so_file, compile_args, src_dir):
         copied.append(so_file)
 
-    ascendc_compile_module.module.link_host_target = fake_link_host_target
+    ascendc_compile_module.module.build_host_output = fake_build_host_output
     ascendc_compile_module.module.build_pgo_sidecars = fail_build_pgo_sidecars
     ascendc_compile_module.module.copy_so_to_output = record_copy
 
@@ -654,15 +660,16 @@ def test_host_target_records_compile_and_link_stage(
             "stage": "host",
             "graph_name": "graph",
             "output_file": str(tmpdir.join("host.so")),
+            "temp_dir": str(tmpdir),
         },
     )()
 
     ascendc_compile_module.module.run_compile_command = _noop_run_compile_command
-    ascendc_compile_module.link_host_target(args, str(tmpdir))
+    ascendc_compile_module.build_host_output(args, str(tmpdir))
 
     labels = [item[0] for item in ascendc_compile_module.duration_records]
     assert ["InductorCompile", "host", "CompileHostObj", "graph"] in labels
-    assert ["InductorCompile", "host", "LinkHostSo", "graph"] in labels
+    assert ["InductorCompile", "host", "LinkTilingSo", "graph"] in labels
     assert capsys.readouterr().out == ""
 
 
@@ -690,11 +697,11 @@ def test_kernel_target_records_device_compile_and_link_stage(
     )()
 
     ascendc_compile_module.module.run_compile_command = _noop_run_compile_command
-    ascendc_compile_module.link_kernel_target(args, None, str(tmpdir))
+    ascendc_compile_module.build_kernel_target(args, None, str(tmpdir))
 
     labels = [item[0] for item in ascendc_compile_module.duration_records]
     assert ["InductorCompile", "device", "CompileDeviceObj", "graph"] in labels
-    assert ["InductorCompile", "device", "LinkDeviceSo", "graph"] in labels
+    assert ["InductorCompile", "device", "LinkKernelSo", "graph"] in labels
 
 
 def test_compile_device_obj_includes_machine_asc_headers(
@@ -1662,15 +1669,8 @@ def test_compile_host_obj_rejects_multiple_sources_without_compile(
     assert "expects exactly one host source" in str(exc_info.value)
 
 
-def _capture_build_device_so_link(
-    ascendc_compile_module, args, host_obj_path, temp_dir
-):
+def _capture_link_kernel_so(ascendc_compile_module, args, host_obj_path, temp_dir):
     captured = {}
-
-    def fake_compile_device_obj(compile_args, temp_dir):
-        return "/tmp/build/device/kernel.cpp.o"
-
-    ascendc_compile_module.module.compile_device_obj = fake_compile_device_obj
 
     def fake_link_shared(
         target_file, obj_files, link_libraries=None, extra_link_options=None
@@ -1681,18 +1681,15 @@ def _capture_build_device_so_link(
         return target_file
 
     ascendc_compile_module.module.link_shared = fake_link_shared
-    ascendc_compile_module.build_device_so(args, host_obj_path, temp_dir)
+    ascendc_compile_module.link_kernel_so(
+        args, host_obj_path, temp_dir, "/tmp/build/device/kernel.cpp.o"
+    )
     return captured
 
 
-def test_build_device_so_links_all_host_objects(ascendc_compile_module):
+def test_link_kernel_so_links_all_host_objects(ascendc_compile_module):
     captured = {}
     args = _make_compile_args()
-
-    def fake_compile_device_obj(compile_args, temp_dir):
-        return "/tmp/build/device/kernel.cpp.o"
-
-    ascendc_compile_module.module.compile_device_obj = fake_compile_device_obj
 
     def fake_link_shared(
         target_file, obj_files, link_libraries=None, extra_link_options=None
@@ -1705,14 +1702,16 @@ def test_build_device_so_links_all_host_objects(ascendc_compile_module):
 
     ascendc_compile_module.module.link_shared = fake_link_shared
 
-    result = ascendc_compile_module.build_device_so(args, ["a.o", "b.o"], "/tmp/build")
+    result = ascendc_compile_module.link_kernel_so(
+        args, ["a.o", "b.o"], "/tmp/build", "/tmp/build/device/kernel.cpp.o"
+    )
 
     assert result == "/tmp/build/kernel.so"
     assert captured["obj_files"] == ["a.o", "b.o", "/tmp/build/device/kernel.cpp.o"]
     assert captured["link_libraries"] == ascendc_compile_module.HOST_LINK_LIBRARIES
 
 
-def test_build_device_so_links_shared_cv_wrapper_so_for_cv_compile(
+def test_link_kernel_so_links_shared_cv_wrapper_so_for_cv_compile(
     ascendc_compile_module, tmpdir
 ):
     device_dir = tmpdir.mkdir("device")
@@ -1723,7 +1722,7 @@ def test_build_device_so_links_shared_cv_wrapper_so_for_cv_compile(
     args.shared_cv_wrapper_so = (
         "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so"
     )
-    captured = _capture_build_device_so_link(
+    captured = _capture_link_kernel_so(
         ascendc_compile_module, args, ["graph.o"], "/tmp/build"
     )
 
@@ -1738,7 +1737,7 @@ def test_build_device_so_links_shared_cv_wrapper_so_for_cv_compile(
     ]
 
 
-def test_build_device_so_ignores_shared_cv_wrapper_so_for_non_cv_compile(
+def test_link_kernel_so_ignores_shared_cv_wrapper_so_for_non_cv_compile(
     ascendc_compile_module, tmpdir
 ):
     device_dir = tmpdir.mkdir("device")
@@ -1749,7 +1748,7 @@ def test_build_device_so_ignores_shared_cv_wrapper_so_for_non_cv_compile(
     args.shared_cv_wrapper_so = (
         "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so"
     )
-    captured = _capture_build_device_so_link(
+    captured = _capture_link_kernel_so(
         ascendc_compile_module, args, ["graph.o"], str(tmpdir)
     )
 
@@ -1757,7 +1756,7 @@ def test_build_device_so_ignores_shared_cv_wrapper_so_for_non_cv_compile(
     assert captured["link_libraries"] == ascendc_compile_module.HOST_LINK_LIBRARIES
 
 
-def test_link_host_target_links_multiple_host_objects(ascendc_compile_module):
+def test_build_host_output_links_multiple_host_objects(ascendc_compile_module):
     captured = {}
     args = _make_compile_args(
         [
@@ -1782,7 +1781,7 @@ def test_link_host_target_links_multiple_host_objects(ascendc_compile_module):
 
     ascendc_compile_module.module.link_shared = fake_link_shared
 
-    result = ascendc_compile_module.link_host_target(args, "/tmp/build")
+    result = ascendc_compile_module.link_tiling_so(args, ["a.o", "b.o"], "/tmp/build")
 
     assert result == "/tmp/build/kernel.so"
     assert captured["target_file"] == "/tmp/build/kernel.so"
@@ -1791,7 +1790,7 @@ def test_link_host_target_links_multiple_host_objects(ascendc_compile_module):
     assert "acl_rt" in captured["link_libraries"]
 
 
-def _capture_link_host_target_link(ascendc_compile_module, args, temp_dir):
+def _capture_build_host_output_link(ascendc_compile_module, args, temp_dir):
     captured = {}
 
     def fake_compile_host_objs(compile_args, temp_dir):
@@ -1808,11 +1807,12 @@ def _capture_link_host_target_link(ascendc_compile_module, args, temp_dir):
         return target_file
 
     ascendc_compile_module.module.link_shared = fake_link_shared
-    ascendc_compile_module.link_host_target(args, temp_dir)
+    args.temp_dir = temp_dir
+    ascendc_compile_module.build_host_output(args)
     return captured
 
 
-def test_link_host_target_links_shared_cv_wrapper_so_for_cv_compile(
+def test_build_host_output_links_shared_cv_wrapper_so_for_cv_compile(
     ascendc_compile_module, tmpdir
 ):
     host_dir = tmpdir.mkdir("host")
@@ -1822,7 +1822,7 @@ def test_link_host_target_links_shared_cv_wrapper_so_for_cv_compile(
     args.shared_cv_wrapper_so = (
         "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so"
     )
-    captured = _capture_link_host_target_link(
+    captured = _capture_build_host_output_link(
         ascendc_compile_module, args, "/tmp/build"
     )
 
@@ -1836,7 +1836,7 @@ def test_link_host_target_links_shared_cv_wrapper_so_for_cv_compile(
     ]
 
 
-def test_link_host_target_ignores_shared_cv_wrapper_so_for_non_cv_compile(
+def test_build_host_output_ignores_shared_cv_wrapper_so_for_non_cv_compile(
     ascendc_compile_module, tmpdir
 ):
     host_dir = tmpdir.mkdir("host")
@@ -1846,16 +1846,18 @@ def test_link_host_target_ignores_shared_cv_wrapper_so_for_non_cv_compile(
     args.shared_cv_wrapper_so = (
         "/tmp/run/cv_tiling_wrapper_cache/libautofuse_cv_tiling_wrapper.so"
     )
-    captured = _capture_link_host_target_link(ascendc_compile_module, args, str(tmpdir))
+    captured = _capture_build_host_output_link(
+        ascendc_compile_module, args, str(tmpdir)
+    )
 
     assert captured["obj_files"] == ["graph.o"]
     assert captured["link_libraries"] == ascendc_compile_module.HOST_LINK_LIBRARIES
 
 
-def test_link_host_target_adds_acl_runtime_for_pgo_proxy(ascendc_compile_module):
+def test_build_host_output_adds_acl_runtime_for_pgo_proxy(ascendc_compile_module):
     args = _make_compile_args(["/tmp/build/host/graph_tiling_func.cpp"])
     args.pgo_runner_file = "/tmp/build/host/graph_tiling_func_PgoRunner.cpp"
-    captured = _capture_link_host_target_link(
+    captured = _capture_build_host_output_link(
         ascendc_compile_module, args, "/tmp/build"
     )
 
@@ -1865,7 +1867,7 @@ def test_link_host_target_adds_acl_runtime_for_pgo_proxy(ascendc_compile_module)
     ]
 
 
-def test_link_kernel_target_reuses_host_objects_for_static_recompile(
+def test_build_kernel_target_reuses_host_objects_for_static_recompile(
     ascendc_compile_module,
 ):
     calls = []
@@ -1879,15 +1881,22 @@ def test_link_kernel_target_reuses_host_objects_for_static_recompile(
         fake_try_static_shape_compile
     )
 
-    def fake_build_device_so(compile_args, host_obj_paths, temp_dir):
-        calls.append(list(host_obj_paths))
+    def fake_compile_device_obj(compile_args, temp_dir):
+        return f"/tmp/build/device/kernel_{len(calls) + 1}.o"
+
+    def fake_link_kernel_so(compile_args, tiling_obj_paths, temp_dir, kernel_obj_path):
+        calls.append((list(tiling_obj_paths), kernel_obj_path))
         return f"/tmp/build/kernel_{len(calls)}.so"
 
-    ascendc_compile_module.module.build_device_so = fake_build_device_so
+    ascendc_compile_module.module.compile_device_obj = fake_compile_device_obj
+    ascendc_compile_module.module.link_kernel_so = fake_link_kernel_so
 
-    result = ascendc_compile_module.link_kernel_target(
+    result = ascendc_compile_module.build_kernel_target(
         args, ["a.o", "b.o"], "/tmp/build"
     )
 
     assert result == "/tmp/build/kernel_2.so"
-    assert calls == [["a.o", "b.o"], ["a.o", "b.o"]]
+    assert [tiling_obj_paths for tiling_obj_paths, _ in calls] == [
+        ["a.o", "b.o"],
+        ["a.o", "b.o"],
+    ]

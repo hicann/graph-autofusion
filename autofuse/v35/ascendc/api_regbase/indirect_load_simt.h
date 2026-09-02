@@ -67,6 +67,13 @@ struct IndirectLoadSimtAddress {
   OffsetT input_base;
 };
 
+template <typename OffsetT, uint64_t InnerSpan, uint64_t InputAxisSpan>
+__simt_callee__ __aicore__ inline IndirectLoadSimtAddress<OffsetT> BuildInnerPowerOfTwoAddress(OffsetT output_index,
+                                                                                               OffsetT outer) {
+  const OffsetT inner = output_index & static_cast<OffsetT>(InnerSpan - 1U);
+  return {output_index, outer * static_cast<OffsetT>(InputAxisSpan) + inner};
+}
+
 template <int32_t Dim, typename OffsetT, typename AddressPolicy>
 struct IndirectLoadSimtAddressDecoder {
   __simt_callee__ __aicore__ inline static void Call(OffsetT linear_index, const AddressPolicy &policy,
@@ -89,11 +96,9 @@ struct IndirectLoadSimtStaticPowerOfTwoPolicy {
   static constexpr bool kUsesInputAxis = true;
 
   __simt_callee__ __aicore__ inline Internal::IndirectLoadSimtAddress<OffsetT> GetAddress(OffsetT output_index) const {
-    constexpr uint32_t inner_shift = Internal::IndirectLoadLog2<InnerSpan>();
     constexpr uint32_t output_axis_shift = Internal::IndirectLoadLog2<OutputAxisSpan>();
     const OffsetT outer = output_index >> output_axis_shift;
-    const OffsetT inner = output_index & static_cast<OffsetT>(InnerSpan - 1U);
-    return {output_index, outer * static_cast<OffsetT>(InputAxisSpan) + inner};
+    return Internal::BuildInnerPowerOfTwoAddress<OffsetT, InnerSpan, InputAxisSpan>(output_index, outer);
   }
 
   static constexpr OffsetT input_axis_stride = static_cast<OffsetT>(InputAxisStride);
@@ -110,10 +115,8 @@ struct IndirectLoadSimtStaticInnerPolicy {
   }
 
   __simt_callee__ __aicore__ inline Internal::IndirectLoadSimtAddress<OffsetT> GetAddress(OffsetT output_index) const {
-    constexpr uint32_t inner_shift = Internal::IndirectLoadLog2<InnerSpan>();
     const OffsetT outer = Simt::UintDiv(output_index, output_axis_magic, output_axis_shift);
-    const OffsetT inner = output_index & static_cast<OffsetT>(InnerSpan - 1U);
-    return {output_index, outer * static_cast<OffsetT>(InputAxisSpan) + inner};
+    return Internal::BuildInnerPowerOfTwoAddress<OffsetT, InnerSpan, InputAxisSpan>(output_index, outer);
   }
 
   static constexpr OffsetT input_axis_stride = static_cast<OffsetT>(InputAxisStride);
@@ -148,6 +151,61 @@ struct IndirectLoadSimtStructuredMagicPolicy {
   OffsetT inner_shift{0U};
   OffsetT output_axis_magic{0U};
   OffsetT output_axis_shift{0U};
+};
+
+// Embedding-like views use a zero-stride index payload.  Keep the canonical
+// rank-2 path compact and use the same stride-aware decoder for higher ranks.
+template <typename OffsetT, int32_t Rank = 2, int32_t Axis = 0, uint64_t InputStrideMask = 0U,
+          uint64_t IndexStrideMask = 0U>
+struct IndirectLoadSimtEmbeddingPolicy {
+  using OffsetType = OffsetT;
+  static constexpr bool kStructured = true;
+  static constexpr bool kUsesInputAxis = true;
+
+  template <typename... ShapeArgs>
+  __aicore__ explicit IndirectLoadSimtEmbeddingPolicy(ShapeArgs... shape_args)
+      : shape{static_cast<OffsetT>(shape_args)...} {
+    static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMT embedding rank or axis is invalid.");
+    static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(3 * Rank),
+                  "IndirectLoad SIMT embedding shape is invalid.");
+    if constexpr (Rank == 2 && Axis == 0 && InputStrideMask == 0U && IndexStrideMask == 0U) {
+      Internal::IndirectLoadGetUintDivMagicAndShift(magic[1], shift[1], shape[1]);
+    } else {
+      for (int32_t dim = 0; dim < Rank; ++dim) {
+        Internal::IndirectLoadGetUintDivMagicAndShift(magic[dim], shift[dim], shape[dim]);
+      }
+    }
+    input_axis_stride = shape[Rank + Axis];
+  }
+
+  __simt_callee__ __aicore__ inline Internal::IndirectLoadSimtAddress<OffsetT> GetAddress(OffsetT output_index) const {
+    if constexpr (Rank == 2 && Axis == 0 && InputStrideMask == 0U && IndexStrideMask == 0U) {
+      const OffsetT row = Simt::UintDiv(output_index, magic[1], shift[1]);
+      const OffsetT inner = output_index - row * shape[1];
+      return {row * shape[4], inner * shape[3]};
+    } else {
+      Internal::IndirectLoadSimtAddress<OffsetT> address{0U, 0U};
+      Internal::IndirectLoadSimtAddressDecoder<Rank - 1, OffsetT, IndirectLoadSimtEmbeddingPolicy>::Call(
+          output_index, *this, address);
+      return address;
+    }
+  }
+
+  template <int32_t Dim>
+  __simt_callee__ __aicore__ inline void AddCoordinate(OffsetT coordinate,
+                                                       Internal::IndirectLoadSimtAddress<OffsetT> &address) const {
+    if constexpr ((IndexStrideMask & (1ULL << Dim)) != 0U) {
+      address.index_offset += coordinate * shape[2 * Rank + Dim];
+    }
+    if constexpr (Dim != Axis && (InputStrideMask & (1ULL << Dim)) != 0U) {
+      address.input_base += coordinate * shape[Rank + Dim];
+    }
+  }
+
+  OffsetT shape[3 * Rank];
+  OffsetT magic[Rank];
+  OffsetT shift[Rank];
+  OffsetT input_axis_stride{0U};
 };
 
 template <typename OffsetT, int32_t Rank, int32_t Axis>
@@ -305,6 +363,34 @@ __aicore__ inline void LaunchIndirectLoadSimt(__gm__ X *x, LocalTensor<Y> y, Con
       Simt::Dim3(ThreadNum), x, (__ubuf__ Y *)y.GetPhyAddr(), context, actual_size, output_offset, address_policy);
 }
 
+template <uint32_t ThreadNum, typename X, typename FusedBody, typename Context, typename AddressPolicy>
+__simt_vf__ __aicore__ LAUNCH_BOUND(ThreadNum) inline void IndirectLoadSimtMultiKernel(
+    __gm__ X *x, typename FusedBody::OutputTargets targets, Context context, uint32_t actual_size,
+    typename AddressPolicy::OffsetType output_offset, AddressPolicy address_policy) {
+  using OffsetT = typename AddressPolicy::OffsetType;
+  for (uint32_t i = threadIdx.x; i < actual_size; i += blockDim.x) {
+    const OffsetT output_index = output_offset + static_cast<OffsetT>(i);
+    const auto address = address_policy.GetAddress(output_index);
+    const OffsetT indirect_index = static_cast<OffsetT>(FusedBody::Index(address.index_offset, context));
+    OffsetT input_offset = address.input_base;
+    if constexpr (AddressPolicy::kUsesInputAxis) {
+      input_offset += indirect_index * address_policy.input_axis_stride;
+    }
+    const typename FusedBody::OutputPack outputs =
+        FusedBody::Outputs(x[input_offset], output_index, address.index_offset, context);
+    FusedBody::Store(targets, output_index, static_cast<OffsetT>(i), outputs);
+  }
+}
+
+template <uint32_t ThreadNum, typename X, typename FusedBody, typename Context, typename AddressPolicy>
+__aicore__ inline void LaunchIndirectLoadSimtMulti(__gm__ X *x, typename FusedBody::OutputTargets targets,
+                                                   Context context, uint32_t actual_size,
+                                                   typename AddressPolicy::OffsetType output_offset,
+                                                   AddressPolicy address_policy) {
+  Simt::VF_CALL<IndirectLoadSimtMultiKernel<ThreadNum, X, FusedBody, Context, AddressPolicy>>(
+      Simt::Dim3(ThreadNum), x, targets, context, actual_size, output_offset, address_policy);
+}
+
 template <typename AddressPolicy>
 inline __aicore__ constexpr bool IndirectLoadUse2048Threads() {
   return sizeof(typename AddressPolicy::OffsetType) == sizeof(uint32_t);
@@ -336,7 +422,49 @@ __aicore__ inline void DispatchIndirectLoadSimt(__gm__ X *x, Output y, Context c
     LaunchIndirectLoadSimt<1024U, X, Y, FusedBody>(x, y, context, actual_size, output_offset, address_policy);
   }
 }
+
+template <typename X, typename FusedBody, typename Context, typename AddressPolicy>
+__aicore__ inline void DispatchIndirectLoadSimtMulti(__gm__ X *x, typename FusedBody::OutputTargets targets,
+                                                     Context context, uint32_t actual_size,
+                                                     typename AddressPolicy::OffsetType output_offset,
+                                                     AddressPolicy address_policy) {
+  if (actual_size <= 128U) {
+    LaunchIndirectLoadSimtMulti<128U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    return;
+  }
+  if (actual_size <= 256U) {
+    LaunchIndirectLoadSimtMulti<256U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    return;
+  }
+  if (actual_size <= 512U) {
+    LaunchIndirectLoadSimtMulti<512U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    return;
+  }
+  if (actual_size <= 1024U) {
+    LaunchIndirectLoadSimtMulti<1024U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    return;
+  }
+  if constexpr (IndirectLoadUse2048Threads<AddressPolicy>()) {
+    LaunchIndirectLoadSimtMulti<2048U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+  } else {
+    LaunchIndirectLoadSimtMulti<1024U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+  }
+}
 }  // namespace Internal
+
+template <typename X, typename FusedBody, typename AddressPolicy, typename Context, typename... PolicyArgs>
+__aicore__ inline void IndirectLoadSimtMulti(__gm__ X *x, typename FusedBody::OutputTargets targets, Context context,
+                                             uint32_t actual_size, typename AddressPolicy::OffsetType output_offset,
+                                             PolicyArgs... policy_args) {
+  if (actual_size != 0U) {
+    const AddressPolicy address_policy{static_cast<typename AddressPolicy::OffsetType>(policy_args)...};
+    Internal::DispatchIndirectLoadSimtMulti<X, FusedBody>(x, targets, context, actual_size, output_offset,
+                                                          address_policy);
+  }
+  const int32_t event_id = static_cast<int32_t>(GetTPipePtr()->FetchEventID(HardEvent::V_MTE3));
+  SetFlag<HardEvent::V_MTE3>(event_id);
+  WaitFlag<HardEvent::V_MTE3>(event_id);
+}
 
 template <typename X, typename Y, typename FusedBody, typename AddressPolicy, typename Context, typename... PolicyArgs>
 __aicore__ inline void IndirectLoadSimt(__gm__ X *x, __gm__ Y *y, Context context, uint32_t actual_size,

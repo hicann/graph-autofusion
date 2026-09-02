@@ -14,6 +14,7 @@
 #include "graph/ascendc_ir/utils/asc_graph_utils.h"
 #include "ascendc_ir.h"
 #include "ascir_ops.h"
+#include "ascir_utils.h"
 #include "schedule_utils.h"
 #include "util/mem_utils.h"
 #include <queue>
@@ -99,6 +100,9 @@ Status ScheduleGroupGraphPartitioner::PartitionByConnectivity(const ::ascir::Imp
     }
     GE_CHK_STATUS_RET(SortSubGraphsByDependency(sub_optimize_graphs), "Failed to sort subgraphs by dependency");
   }
+
+  CheckDuplicateWorkspaceNodes(sub_optimize_graphs);
+
   if (visited.size() != num_nodes) {
     for (const auto &node : optimize_graph.GetAllNodes()) {
       if (visited.find(node) == visited.cend()) {
@@ -111,6 +115,36 @@ Status ScheduleGroupGraphPartitioner::PartitionByConnectivity(const ::ascir::Imp
 
   GELOGI("Partition success, subgraph number = %zu", sub_optimize_graphs.size());
   return af::SUCCESS;
+}
+
+void ScheduleGroupGraphPartitioner::CheckDuplicateWorkspaceNodes(std::vector<::ascir::ImplGraph> &sub_optimize_graphs) {
+  for (size_t i = 0UL; i < sub_optimize_graphs.size(); ++i) {
+    std::string dup_name;
+    if (!HasDuplicateWorkspaceNode(sub_optimize_graphs[i], dup_name)) {
+      continue;
+    }
+    GELOGE(af::FAILED, "Duplicate workspace node[%s] found in subgraph[%s], partition may be incorrect",
+           dup_name.c_str(), sub_optimize_graphs[i].GetName().c_str());
+    ::ascir::utils::DumpImplGraphs(sub_optimize_graphs, "Wrong_DuplicateWorkspace");
+    sub_optimize_graphs.clear();
+    return;
+  }
+}
+
+bool ScheduleGroupGraphPartitioner::HasDuplicateWorkspaceNode(const ::ascir::ImplGraph &sub_graph,
+                                                              std::string &dup_name) {
+  std::set<std::string> workspace_names;
+  for (const auto &node : sub_graph.GetAllNodes()) {
+    if (node->GetType() != "Workspace") {
+      continue;
+    }
+    const auto &name = node->GetName();
+    if (!workspace_names.insert(name).second) {
+      dup_name = name;
+      return true;
+    }
+  }
+  return false;
 }
 
 Status ScheduleGroupGraphPartitioner::NeedRefreshAxisSize(const ::ascir::ImplGraph &optimize_graph,

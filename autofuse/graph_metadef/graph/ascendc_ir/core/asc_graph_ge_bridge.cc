@@ -423,6 +423,19 @@ AscNodePtr AscGraphAddAscirNodeByType(AscGraph &asc_graph, const char *op_type, 
   if (type == ascir_op::Conv2DOffsetBias::Type) {
     MAKE_NODE(Conv2DOffsetBias);
   }
+  // ExtendConv2D 四个 ASCIR 变体：无附加输入 / bias / scale0 / bias+scale0。
+  if (type == ascir_op::ExtendConv2D::Type) {
+    MAKE_NODE(ExtendConv2D);
+  }
+  if (type == ascir_op::ExtendConv2DBias::Type) {
+    MAKE_NODE(ExtendConv2DBias);
+  }
+  if (type == ascir_op::ExtendConv2DScale::Type) {
+    MAKE_NODE(ExtendConv2DScale);
+  }
+  if (type == ascir_op::ExtendConv2DBiasScale::Type) {
+    MAKE_NODE(ExtendConv2DBiasScale);
+  }
 
 #undef MAKE_NODE
 

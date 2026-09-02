@@ -96,6 +96,18 @@ ShapeCompileContext = namedtuple(
     "ShapeCompileContext", ["kernel_name", "temp_dir", "graph_name"]
 )
 
+ConvArgsConfig = namedtuple(
+    "ConvArgsConfig",
+    [
+        "input_num",
+        "data_format",
+        "has_bias",
+        "has_scale0",
+        "is_extend_conv2d",
+    ],
+    defaults=[False, False, False],
+)
+
 
 def get_target_machine(params):
     host_env_cpu = params.get("host_env_cpu", "")
@@ -1621,60 +1633,71 @@ def _build_mm_args(args_list, input_num, mm_attr1, mm_attr2):
     return _origin_inputs_, _origin_outputs_, _inputs_
 
 
-def build_conv_args(args_list, input_num, data_format):
-    _inputs_ = []
+def fill_conv_origin_input(_origin_inputs_, input_arg, logical_index):
+    op_msg = "Processing input " + str(logical_index) + ":" + str(input_arg)
+    logger.info("CV fusion op, conv input info: %s", op_msg)
+    CommonUtility.print_compile_log("", op_msg, AscendCLogLevel.LOG_INFO)
+    _origin_inputs_.append(input_arg)
+    # 与 CreateConvSubgraphAttr 对齐：x=NCHW，filter=FRACTAL_Z，其余可选输入按 ND。
+    _origin_inputs_[-1]["ori_shape"] = _origin_inputs_[-1]["shape"]
+    if logical_index == 0:
+        _origin_inputs_[-1]["ori_format"] = "NCHW"
+        _origin_inputs_[-1]["format"] = "NCHW"
+    elif logical_index == 1:
+        _origin_inputs_[-1]["ori_format"] = "NCHW"
+        _origin_inputs_[-1]["format"] = "FRACTAL_Z"
+    else:
+        _origin_inputs_[-1]["ori_format"] = "ND"
+        _origin_inputs_[-1]["format"] = "ND"
+
+
+def build_conv_args(args_list, config):
+    """构造 Conv2DV2/ExtendConv2D 二次 tiling 入参。
+
+    ExtendConv2D 逻辑槽位固定 10 个：0 x、1 filter、2 bias(has_bias)、3 offset_w 恒空、
+    4 scale0(has_scale0)、5-9 恒空。Conv2DV2 仍按已连接输入紧凑排布。
+    """
     _origin_inputs_ = []
     _origin_outputs_ = []
+    input_num = config.input_num
     logger.info("CV fusion op, conv input(%s)", input_num)
 
-    format_shape_transfer_map = {
-        ("HWCN", "NCHW"): [3, 2, 0, 1],
-        ("NCHW", "HWCN"): [2, 3, 1, 0],
-        ("NHWC", "NCHW"): [0, 3, 1, 2],
-        ("NCHW", "NHWC"): [0, 2, 3, 1],
-    }
+    input_args = args_list[:input_num]  # input_num是实际输入个数
+    input_index = 0
 
-    def transfer_shape_between_formats(shape, old_format, new_format):
-        """格式转换时对应的 shape 维度重排，参考 TransferShapeBetweenHwcnNchw"""
-        if len(shape) != 4:
-            return shape
-        if old_format == new_format:
-            return shape
-        transfer_key = (old_format.upper(), new_format.upper())
-        if transfer_key in format_shape_transfer_map:
-            indices = format_shape_transfer_map[transfer_key]
-            return tuple(shape[i] for i in indices)
-        return shape
+    def take_connected(logical_index):
+        nonlocal input_index
+        if input_index >= len(input_args):
+            logger.error(
+                "CV fusion op, conv input %s missing, input_num=%s, has_bias=%s, has_scale0=%s",
+                logical_index,
+                input_num,
+                config.has_bias,
+                config.has_scale0,
+            )
+            _origin_inputs_.append(None)
+            return
+        fill_conv_origin_input(_origin_inputs_, input_args[input_index], logical_index)
+        input_index += 1
 
-    # 遍历args中的每个元素
-    for i, input_arg in enumerate(args_list[:input_num]):
-        if i >= input_num:
-            continue
-        op_msg = "Processing input " + str(i) + ":" + str(input_arg)
-        logger.info("CV fusion op, conv input info: %s", op_msg)
-        CommonUtility.print_compile_log("", op_msg, AscendCLogLevel.LOG_INFO)
-        _origin_inputs_.append(input_arg)
-        if input_arg is not None:
-            if isinstance(input_arg, (list, tuple)) and len(input_arg) != 0:
-                _inputs_.append(input_arg[0])
+    def take_empty(logical_index):
+        _origin_inputs_.append(None)
+        logger.info("CV fusion op, conv input %s is nullptr", logical_index)
+
+    if config.is_extend_conv2d:
+        extend_conv2d_logical_input_num = 10
+        for i in range(extend_conv2d_logical_input_num):
+            if i in (0, 1):
+                take_connected(i)
+            elif i == 2:
+                take_connected(i) if config.has_bias else take_empty(i)
+            elif i == 4:
+                take_connected(i) if config.has_scale0 else take_empty(i)
             else:
-                _inputs_.append(input_arg)
-        else:
-            _inputs_.append(input_arg)
-        _inputs_[-1]["param_name"] = "input" + str(i)
-        shape = _inputs_[-1]["shape"]
-        src_format = _inputs_[-1]["format"]
-        # 如果输入格式与目标格式不匹配，需要进行转换
-        if src_format.upper() != data_format.upper():
-            # 根据 format 转换规则重排 shape 维度
-            new_shape = transfer_shape_between_formats(shape, src_format, data_format)
-            _inputs_[-1]["shape"] = new_shape
-            _inputs_[-1]["ori_shape"] = new_shape
-        else:
-            _inputs_[-1]["shape"] = shape
-            _inputs_[-1]["ori_shape"] = shape
-        _inputs_[-1]["ori_format"] = data_format
-        _inputs_[-1]["format"] = data_format
+                take_empty(i)
+    else:
+        for i in range(input_num):
+            take_connected(i)
 
     op_msg = "Processing output " + ":" + str(args_list[-2])
     logger.info("CV fusion op, conv output info: %s", op_msg)
@@ -1682,12 +1705,15 @@ def build_conv_args(args_list, input_num, data_format):
     _origin_outputs_.append(args_list[-2])
     _origin_outputs_[-1]["param_name"] = "output0"
     _origin_outputs_[-1]["shape"] = args_list[-2]["shape"]
-    _origin_outputs_[-1]["dtype"] = _inputs_[-1]["dtype"]
+    _origin_outputs_[-1]["dtype"] = args_list[-2]["dtype"]
     _origin_outputs_[-1]["ori_shape"] = args_list[-2]["shape"]
-    _origin_outputs_[-1]["ori_format"] = data_format
-    _origin_outputs_[-1]["format"] = data_format
+    _origin_outputs_[-1]["ori_format"] = config.data_format
+    _origin_outputs_[-1]["format"] = config.data_format
+    if config.is_extend_conv2d:
+        # ExtendConv2D proto 含可选第二输出；tiling 侧按双输出占位，避免输出个数校验失败。
+        _origin_outputs_.append(_origin_outputs_[-1])
     logger.info("CV fusion op, new conv output info: %s", str(_origin_outputs_[-1]))
-    return _origin_inputs_, _origin_outputs_, _inputs_
+    return _origin_inputs_, _origin_outputs_
 
 
 def _process_tiling_info(
@@ -1899,7 +1925,19 @@ def template_decider(
 
 
 def map_dtype_to_string(dtype):
-    dtype_map = {"bfloat16": "bfloat16_t", "float16": "half", "float32": "float"}
+    dtype_map = {
+        "bfloat16": "bfloat16_t",
+        "float16": "half",
+        "float32": "float",
+        "int8": "int8_t",
+        "int16": "int16_t",
+        "int32": "int32_t",
+        "int64": "int64_t",
+        "uint8": "uint8_t",
+        "uint16": "uint16_t",
+        "uint32": "uint32_t",
+        "uint64": "uint64_t",
+    }
 
     return dtype_map.get(dtype.lower(), dtype)
 
@@ -2099,13 +2137,14 @@ def create_conv_tiling_data(compile_context, tiling_info, cube_info, cube_attrib
         _,
         _,
         _,
-        is_bias,
-        is_offset_w,
+        has_bias,
+        has_offset_w,
+        has_scale0,
         origin_inputs,
         origin_outputs,
-    ) = cube_info[:9]
+    ) = cube_info[:10]
     struct_name = "Conv2DTilingData"
-    data_prefix = "(*tmpTilingData).conv2dApiTiling"
+    data_prefix = "(*tmpTilingData)"
 
     host_tiling_data = f"""
 // conv2d
@@ -2156,14 +2195,28 @@ GET_TILING_DATA_PTR_WITH_STRUCT({struct_name}, tmpTilingData, tmpTilingGM);
     )
 
     device_tiling_data = f"""\n#include "arch35/conv2d_v2_tiling_def.h"
-#define IS_ENABLE_BIAS {str(is_bias).lower()}
-#define IS_ENABLE_OFFSET_W {str(is_offset_w).lower()}
+#define IS_ENABLE_BIAS {str(has_bias).lower()}
+#define IS_ENABLE_OFFSET_W {str(has_offset_w).lower()}
+#define IS_ENABLE_SCALE0 {str(has_scale0).lower()}
 #define DTYPE_X1 {map_dtype_to_string(origin_inputs[0]["dtype"])}
 #define DTYPE_X2 {map_dtype_to_string(origin_inputs[1]["dtype"])}
 #define DTYPE_Y {map_dtype_to_string(origin_outputs[0]["dtype"])}
-#define DTYPE_BIAS {map_dtype_to_string(origin_outputs[0]["dtype"])}
 """
-
+    device_tiling_data += (
+        f"""#define DTYPE_BIAS {map_dtype_to_string(origin_inputs[2]["dtype"])}\n"""
+        if has_bias
+        else "#define DTYPE_BIAS int32_t\n"
+    )
+    device_tiling_data += (
+        f"""#define DTYPE_OFFSET_W {map_dtype_to_string(origin_inputs[3]["dtype"])}\n"""
+        if has_offset_w
+        else "#define DTYPE_OFFSET_W uint64_t\n"
+    )
+    device_tiling_data += (
+        f"""#define DTYPE_SCALE0 {map_dtype_to_string(origin_inputs[4]["dtype"])}\n"""
+        if has_scale0
+        else "#define DTYPE_SCALE0 uint64_t\n"
+    )
     tiling_data_undef = create_conv_tiling_undef_header()
     tiling_info.file_content += device_tiling_data
     device_tiling_content = tiling_data_undef
@@ -2213,62 +2266,82 @@ def ascbc_conv_kernel_tiling_pro(
         logger.error("kernel_name=[%s] can't find cube attributes", kernel_name)
         return
 
-    is_bias = cube_attributes.get("is_bias", False)
-    is_offset_w = cube_attributes.get("is_offset_w", False)
-    enable_hf32 = cube_attributes.get("enable_hf32", False)
-    offset_x = cube_attributes.get("offset_x", 0)
-    groups = cube_attributes.get("groups", 1)
-    pad_mode = cube_attributes.get("pad_mode", "SPECIFIC")
-    data_format = cube_attributes.get("data_format", "NCHW")
+    has_bias = cube_attributes.get("has_bias", False)
+    has_offset_w = cube_attributes.get("has_offset_w", False)
+    has_scale0 = cube_attributes.get("has_scale0", False)
+    is_extend_conv2d = cube_attributes.get("is_extend_conv2d", False)
+
     strides = cube_attributes.get("strides", [1, 1])
     pads = cube_attributes.get("pads", [0, 0, 0, 0])
     dilations = cube_attributes.get("dilations", [1, 1])
+    groups = cube_attributes.get("groups", 1)
+    data_format = cube_attributes.get("data_format", "NCHW")
+    offset_x = cube_attributes.get("offset_x", 0)
+    round_mode = cube_attributes.get("round_mode", "rint")
+    pad_mode = cube_attributes.get("pad_mode", "SPECIFIC")
+    enable_hf32 = cube_attributes.get("enable_hf32", False)
+    fixed_shift_value = cube_attributes.get("fixed_shift_value", 0)
+    enable_relu0 = cube_attributes.get("enable_relu0", False)
+    enable_relu1 = cube_attributes.get("enable_relu1", False)
+    dual_output = cube_attributes.get("dual_output", False)
+    dtype0 = cube_attributes.get("dtype0", -1)
+    dtype1 = cube_attributes.get("dtype1", -1)
 
-    conv_attr1 = {"name": "strides", "dtype": "list_int", "value": strides}
-    conv_attr2 = {"name": "pads", "dtype": "list_int", "value": pads}
-    conv_attr3 = {"name": "dilations", "dtype": "list_int", "value": dilations}
-    conv_attr4 = {"name": "groups", "dtype": "int", "value": groups}
-    conv_attr5 = {"name": "data_format", "dtype": "str", "value": data_format}
-    conv_attr6 = {"name": "offset_x", "dtype": "int", "value": offset_x}
-    conv_attr7 = {"name": "pad_mode", "dtype": "str", "value": pad_mode}
-    conv_attr8 = {"name": "enable_hf32", "dtype": "bool", "value": enable_hf32}
-    conv_attr9 = {"name": "is_bias", "dtype": "bool", "value": is_bias}
-    conv_attr10 = {"name": "is_offset_w", "dtype": "bool", "value": is_offset_w}
+    op_type = "ExtendConv2D" if is_extend_conv2d else "Conv2DV2"
+
+    # attr 顺序需与对应 op proto 一致：ExtendConv2D 在 pad_mode 前插入 round_mode。
+    conv_attr = []
+    conv_attr.append({"name": "strides", "dtype": "list_int", "value": strides})
+    conv_attr.append({"name": "pads", "dtype": "list_int", "value": pads})
+    conv_attr.append({"name": "dilations", "dtype": "list_int", "value": dilations})
+    conv_attr.append({"name": "groups", "dtype": "int", "value": groups})
+    conv_attr.append({"name": "data_format", "dtype": "str", "value": data_format})
+    conv_attr.append({"name": "offset_x", "dtype": "int", "value": offset_x})
+    if is_extend_conv2d:
+        conv_attr.append({"name": "round_mode", "dtype": "str", "value": round_mode})
+    conv_attr.append({"name": "pad_mode", "dtype": "str", "value": pad_mode})
+    conv_attr.append({"name": "enable_hf32", "dtype": "bool", "value": enable_hf32})
+    if is_extend_conv2d:
+        conv_attr.append(
+            {"name": "enable_relu0", "dtype": "bool", "value": enable_relu0}
+        )
+        conv_attr.append(
+            {"name": "enable_relu1", "dtype": "bool", "value": enable_relu1}
+        )
+        conv_attr.append({"name": "dual_output", "dtype": "bool", "value": dual_output})
+        conv_attr.append({"name": "dtype0", "dtype": "int", "value": dtype0})
+        conv_attr.append({"name": "dtype1", "dtype": "int", "value": dtype1})
 
     conv_input_num = cube_attributes.get("input_num", 0)
-    _origin_inputs_, _origin_outputs_, _inputs_ = build_conv_args(
-        args_list, input_num=conv_input_num, data_format=data_format
+    conv_args_config = ConvArgsConfig(
+        input_num=conv_input_num,
+        data_format=data_format,
+        has_bias=has_bias,
+        has_scale0=has_scale0,
+        is_extend_conv2d=is_extend_conv2d,
     )
+    _origin_inputs_, _origin_outputs_ = build_conv_args(args_list, conv_args_config)
 
-    attrs = [
-        conv_attr1,
-        conv_attr2,
-        conv_attr3,
-        conv_attr4,
-        conv_attr5,
-        conv_attr6,
-        conv_attr7,
-        conv_attr8,
-        conv_attr9,
-        conv_attr10,
-    ]
     tiling_info = TilingInfo()
     context = get_context()
-    _change_param_name_to_name(_inputs_)
-    _change_param_name_to_name(_origin_inputs_)
+    non_none_origin_inputs = [item for item in _origin_inputs_ if item is not None]
+    _change_param_name_to_name(non_none_origin_inputs)
     compile_info = context.get_compile_info()
     tiling_config = {
         "name": "ascendc_op_para_size",
         "dtype": "int",
         "value": 2 * 1024 * 1024,
     }
-    attrs.append(tiling_config)
+    conv_attr.append(tiling_config)
+    # fixed_shift_value 为 private attr，需显式追加，保证与 ascendc_op_para_size 的 IR 序一致。
+    conv_attr.append(
+        {"name": "fixed_shift_value", "dtype": "int", "value": fixed_shift_value}
+    )
 
-    op_type = "Conv2DV2"
     tiling_data_type = "Conv2DTilingData"
 
     run_info = do_op_tiling(
-        op_type, compile_info, _origin_inputs_, _origin_outputs_, None, None, attrs
+        op_type, compile_info, _origin_inputs_, _origin_outputs_, None, None, conv_attr
     )
     tiling_info.tiling_data = run_info["tiling_data"]
     tiling_info.tiling_key = run_info["tiling_key"]
@@ -2292,8 +2365,9 @@ def ascbc_conv_kernel_tiling_pro(
         cube_block_dim,
         use_cv_common,
         False,
-        is_bias,
-        is_offset_w,
+        has_bias,
+        has_offset_w,
+        has_scale0,
         _origin_inputs_,
         _origin_outputs_,
     ]

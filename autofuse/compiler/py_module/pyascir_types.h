@@ -113,6 +113,8 @@ class HintGraph {
   static PyObject *GetOutputNum(PyObject *self_pyobject);
   static PyObject *GetName(PyObject *self_pyobject);
   static PyObject *SetName(PyObject *self_pyobject, PyObject *args);
+  static PyObject *GetSched(PyObject *self_pyobject, void *closure);
+  static PyGetSetDef getsetters[];
   static bool ProcessSingleNode(const af::AscNodePtr &node);
 };
 

@@ -16,12 +16,14 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "ascir.h"
 #include "graph/ascendc_ir/ascendc_ir_core/ascendc_ir.h"
 
 namespace ascgen_utils::indirect_load {
 constexpr size_t kInputTensorIndex = 0UL;
 constexpr size_t kIndexTensorIndex = 1UL;
 constexpr char kTemplateLogicalViewAttr[] = "af.internal.indirect_load.logical_view";
+constexpr char kAccessInfoAttr[] = "af.internal.indirect_load.access_info";
 
 enum class TemplateRole : int64_t {
   kNone,
@@ -88,10 +90,25 @@ struct TemplateLogicalView {
   LogicalTensorView output;
 };
 
+struct IndirectLoadAccessInfo {
+  enum class Kind : int64_t { kGeneric, kEmbeddingLike };
+
+  Kind kind = Kind::kGeneric;
+  int64_t axis = -1L;
+  af::Expression input_slice_bytes;
+  af::Expression index_varying_extent;
+  bool can_use_simt_structured = false;
+  // SIMD uses a contiguous payload suffix and a zero-stride index suffix.
+  // This is stricter than the generalized SIMT structured-layout condition.
+  bool can_use_simd_embedding = false;
+};
+
 TemplateBehavior GetTemplateBehavior(const af::AscNodePtr &node);
 TemplateRole GetTemplateRole(const af::AscNodePtr &node);
 af::AscNodePtr GetPostReduceConsumer(const af::AscNodePtr &node);
 af::AscNodePtr GetPostReduceInputProducer(const af::AscNodePtr &node);
+// Returns the terminal tensor ID of a chain whose API emission is skipped.
+ascir::TensorId FindSkippedChainResultTensor(const af::AscNodePtr &root);
 bool ShouldSkipTpipeTensorCollection(const af::AscNodePtr &node);
 af::Status InheritTemplateRoleIfIL(af::AscGraph &graph, const std::string &vf_node_name, const af::AscNodePtr &src);
 af::Status SetTemplateRole(const af::AscNodePtr &node, TemplateRole role);
@@ -99,6 +116,10 @@ af::Status SetTemplateAxes(const af::AscNodePtr &node, const TemplateAxes &axes)
 af::Status GetTemplateAxes(const af::AscNodePtr &node, TemplateAxes &axes);
 af::Status SetTemplateLogicalView(const af::AscNodePtr &node, const TemplateLogicalView &view);
 af::Status GetTemplateLogicalView(const af::AscNodePtr &node, TemplateLogicalView &view);
+af::Status SetIndirectLoadAccessInfo(const af::AscNodePtr &node, const IndirectLoadAccessInfo &info);
+af::Status GetIndirectLoadAccessInfo(const af::AscNodePtr &node, IndirectLoadAccessInfo &info);
+af::Status AnalyzeIndirectLoadAccess(const af::AscNodePtr &node, const TemplateLogicalView &logical_view,
+                                     IndirectLoadAccessInfo &info);
 af::Status SetImplementation(const af::AscNodePtr &node, Implementation implementation);
 af::Status GetImplementation(const af::AscNodePtr &node, Implementation &implementation);
 af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout,

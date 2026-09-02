@@ -42,6 +42,10 @@ const std::string kConv2D = "Conv2D";
 const std::string kConv2DBias = "Conv2DBias";
 const std::string kConv2DOffset = "Conv2DOffset";
 const std::string kConv2DOffsetBias = "Conv2DOffsetBias";
+const std::string kExtendConv2D = "ExtendConv2D";
+const std::string kExtendConv2DBias = "ExtendConv2DBias";
+const std::string kExtendConv2DScale = "ExtendConv2DScale";
+const std::string kExtendConv2DBiasScale = "ExtendConv2DBiasScale";
 
 struct MatMulAttr {
   int64_t transpose_x1{0};
@@ -66,12 +70,18 @@ struct Conv2DAttr {
   std::vector<int64_t> pads;
   std::vector<int64_t> dilations;
   int64_t groups{1};
-  std::string pad_mode{"SPECIFIC"};
   std::string data_format{"NCHW"};
   int64_t offset_x{0};
+  std::string round_mode{"rint"};  // ExtendConv2D only
+  std::string pad_mode{"SPECIFIC"};
   bool enable_hf32{false};
-  bool is_bias{false};
-  bool is_offset_w{false};
+  int64_t fixed_shift_value{0};
+  bool enable_relu0{false};  // ExtendConv2D only
+  // 以下字段非 op proto 属性，供 codegen / host tiling 选择入参布局与算子变体。
+  bool has_bias{false};
+  bool has_offset_w{false};
+  bool has_scale0{false};  // ExtendConv2D only
+  bool is_extend_conv2d{false};
   std::string output_dtype;
   std::string input_dtype;
 };
@@ -104,7 +114,14 @@ struct Conv2DAttr {
   GE_ASSERT_SUCCESS(conv_attr->GetPad_mode(AttrData.pad_mode));                                        \
   GE_ASSERT_SUCCESS(conv_attr->GetData_format(AttrData.data_format));                                  \
   GE_ASSERT_SUCCESS(conv_attr->GetOffset_x(AttrData.offset_x));                                        \
-  GE_ASSERT_SUCCESS(conv_attr->GetEnable_hf32(AttrData.enable_hf32))
+  GE_ASSERT_SUCCESS(conv_attr->GetEnable_hf32(AttrData.enable_hf32));                                  \
+  GE_ASSERT_SUCCESS(conv_attr->GetFixed_shift_value(AttrData.fixed_shift_value))
+
+// ExtendConv2D 相对 Conv2D 额外携带 round_mode / enable_relu0。
+#define GET_EXTEND_CONV2D_ATTRS(Node, AttrType, AttrData)           \
+  GET_CONV2D_ATTRS(Node, AttrType, AttrData);                       \
+  GE_ASSERT_SUCCESS(conv_attr->GetRound_mode(AttrData.round_mode)); \
+  GE_ASSERT_SUCCESS(conv_attr->GetEnable_relu0(AttrData.enable_relu0))
 
 struct MergeBrcAxisParams {
   const std::vector<af::Expression> &repeats;
@@ -262,6 +279,7 @@ af::Status ParseConv2DAttr(const ascir::NodeView &node, Conv2DAttr &conv_attr_da
 bool IsConv2DGraphType(const ascir::ImplGraph &impl_graph);
 bool IsConv2DTypeWithBias(const ascir::ImplGraph &impl_graph);
 bool IsConv2DTypeWithOffsetW(const ascir::ImplGraph &impl_graph);
+bool IsConv2DTypeWithScale0(const ascir::ImplGraph &impl_graph);
 af::Status GetCubeInfo(const ascir::FusedScheduledResult &fused_schedule_result, bool &is_batch, bool &is_conv,
                        std::string &input_type, std::string &output_type);
 }  // namespace ascgen_utils

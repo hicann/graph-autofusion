@@ -20,6 +20,9 @@ import re
 HOST_DEFAULT_CXX11_ABI = "-D_GLIBCXX_USE_CXX11_ABI=1"
 HOST_CXX11_ABI_PREFIX = "-D_GLIBCXX_USE_CXX11_ABI="
 INDUCTOR_COMPILE_TRACE_LABEL = "InductorCompile"
+SOURCES_TILING_STRUCT = "tiling_struct_code"
+SOURCES_HOST_IMPL = "host_impl_code"
+SOURCES_KERNEL_IMPL = "kernel_impl_code"
 SPLIT_BEGIN_PREFIX = "// AUTOFUSE_SPLIT_FILE_BEGIN:"
 SPLIT_END_PREFIX = "// AUTOFUSE_SPLIT_FILE_END:"
 SPLIT_HEADER_KEY = "TilingHead"
@@ -119,7 +122,16 @@ def parse_compile_args(argv):
         type=str,
         help="Compile options of tiling and kernel.",
     )
-    return parser.parse_args(argv)
+    parser.add_argument("--tiling_obj_paths", default="", type=str)
+    parser.add_argument("--tiling_source_paths", default="", type=str)
+    parser.add_argument("--kernel_obj_path", default="", type=str)
+    parser.add_argument("--kernel_source_path", default="", type=str)
+    parser.add_argument("--shared_cv_wrapper_so", default="", type=str)
+    # 使用 parse_known_args 容忍上层透传的未声明参数，避免触发 SystemExit 终止编译。
+    args, unknown = parser.parse_known_args(argv)
+    if unknown:
+        print(f"[CompileArgs] ignored unrecognized arguments: {unknown}")
+    return args
 
 
 def generate_file(dst_dir, file_name, text):
@@ -311,11 +323,42 @@ def has_inductor_pgo_split(host_impl_code):
     return bool(keys & {SPLIT_PGO_RUNNER_KEY, SPLIT_PGO_DEVICE_SOURCE_KEY})
 
 
-def write_host_sources(host_file_path, base_host_file, graph_name, host_impl_code):
+def write_single_host_source(host_file_path, base_host_file, host_impl_code):
+    generate_file(host_file_path, base_host_file, host_impl_code)
+    return os.path.join(host_file_path, base_host_file)
+
+
+def write_merged_host_sources(host_file_path, base_host_file, host_impl_code):
+    """Generate one host source file while preserving split headers.
+
+    cpp 段合并为单个源文件（单文件编译），header 段仍拆出为独立 .h 文件，
+    供 cpp 段中间的 #include "autofuse_tiling_func_*.h" 引用。
+    """
     if not has_split_host_marker(host_impl_code):
-        generate_file(host_file_path, base_host_file, host_impl_code)
-        return os.path.join(host_file_path, base_host_file)
-    return write_split_host_sources(host_file_path, graph_name, host_impl_code)
+        return write_single_host_source(host_file_path, base_host_file, host_impl_code)
+
+    headers, cpp_sources = parse_split_host_sources(host_impl_code)
+    for key, content in headers.items():
+        generate_file(host_file_path, SPLIT_HEADER_FILES[key], content)
+
+    is_split_format = is_versioned_split_format(headers)
+    merged = []
+    for _key, cpp_content in cpp_sources:
+        if is_split_format:
+            content = cpp_content
+        else:
+            content = add_split_header_include(cpp_content)
+            if merged and content.startswith(SPLIT_HEADER_INCLUDE):
+                content = content[len(SPLIT_HEADER_INCLUDE):]  # fmt: skip
+        merged.append(content.rstrip("\n"))
+    generate_file(host_file_path, base_host_file, "\n".join(merged) + "\n")
+    return os.path.join(host_file_path, base_host_file)
+
+
+def write_host_sources(host_file_path, base_host_file, graph_name, host_impl_code):
+    # host 编译为单个 cpp 源文件（cpp 段合并），header 段拆出独立 .h 供 include 引用。
+    # 多文件拆分逻辑保留在 write_split_host_sources 中备用，但当前不调用。
+    return write_merged_host_sources(host_file_path, base_host_file, host_impl_code)
 
 
 def parse_env_flags(env_name):
@@ -395,7 +438,10 @@ def prepare_compile_context(argv, stage, tiling_repr):
     args = parse_compile_args(argv)
     args.stage = stage
     args.tiling_repr = tiling_repr
-    if stage == "host" and HOST_CXX11_ABI_PREFIX not in args.compile_options:
+    if (
+        stage in ("host", "host_obj")
+        and HOST_CXX11_ABI_PREFIX not in args.compile_options
+    ):
         args.compile_options = (
             args.compile_options + " " + HOST_DEFAULT_CXX11_ABI
         ).strip()
@@ -413,8 +459,8 @@ def prepare_compile_context(argv, stage, tiling_repr):
 
 def write_compile_host_sources(sources, args, tiling_def_file, base_host_file):
     host_file_path = os.path.join(args.temp_dir, "host")
-    generate_file(host_file_path, tiling_def_file, sources["tiling_struct_code"])
-    host_impl_code = sources["host_impl_code"]
+    generate_file(host_file_path, tiling_def_file, sources[SOURCES_TILING_STRUCT])
+    host_impl_code = sources[SOURCES_HOST_IMPL]
     if not (
         has_split_host_marker(host_impl_code) and has_inductor_pgo_split(host_impl_code)
     ):
@@ -422,12 +468,12 @@ def write_compile_host_sources(sources, args, tiling_def_file, base_host_file):
             host_file_path, base_host_file, args.graph_name, host_impl_code
         )
         return
-    if args.stage != "host":
+    if args.stage not in ("host", "host_obj"):
         raise ascendc_compile.CompileError(
             "Inductor PGO sidecar is supported only in host_compile stage"
         )
     device_file_path = os.path.join(args.temp_dir, "device")
-    generate_file(device_file_path, tiling_def_file, sources["tiling_struct_code"])
+    generate_file(device_file_path, tiling_def_file, sources[SOURCES_TILING_STRUCT])
     args.host_files, args.pgo_runner_file, args.pgo_device_file = (
         write_inductor_pgo_sources(
             host_file_path, device_file_path, args.graph_name, host_impl_code
@@ -440,8 +486,8 @@ def write_compile_host_sources(sources, args, tiling_def_file, base_host_file):
 
 def write_compile_device_sources(sources, args, tiling_def_file, base_device_file):
     device_file_path = os.path.join(args.temp_dir, "device")
-    generate_file(device_file_path, tiling_def_file, sources["tiling_struct_code"])
-    generate_file(device_file_path, base_device_file, sources["kernel_impl_code"])
+    generate_file(device_file_path, tiling_def_file, sources[SOURCES_TILING_STRUCT])
+    generate_file(device_file_path, base_device_file, sources[SOURCES_KERNEL_IMPL])
     args.device_files = os.path.join(device_file_path, base_device_file)
 
 
@@ -449,12 +495,12 @@ def execute_compile(sources, args):
     tiling_def_file = "autofuse_tiling_data.h"
     base_host_file = args.graph_name + "_tiling_func.cpp"
     base_device_file = args.graph_name + "_op_kernel.cpp"
-    if args.stage in ["all", "host"]:
+    if args.stage in ["all", "host", "host_obj"]:
         with InductorCompileDuration(
             args.trace_stage, "WriteHostSource", args.graph_name
         ):
             write_compile_host_sources(sources, args, tiling_def_file, base_host_file)
-    if args.stage in ["all", "device"]:
+    if args.stage in ["all", "device", "device_obj"]:
         with InductorCompileDuration(
             args.trace_stage, "WriteDeviceSource", args.graph_name
         ):
@@ -465,8 +511,31 @@ def execute_compile(sources, args):
     with InductorCompileDuration(
         args.trace_stage, "BuildCompiledArtifacts", args.graph_name
     ):
-        ascendc_compile.main(args)
+        result = ascendc_compile.main(args)
+    if result is not None:
+        return _compile_result(args, result)
+    if args.stage == "link":
+        return args.output_file
     return args.temp_dir
+
+
+def _compile_result(args, result):
+    if args.stage == "host_obj":
+        return {
+            "version": 1,
+            "stage": args.stage,
+            "tiling_obj_paths": result["tiling_obj_paths"],
+            "tiling_source_paths": result["tiling_source_paths"],
+            "shared_cv_wrapper_so": result.get("shared_cv_wrapper_so"),
+        }
+    if args.stage == "device_obj":
+        return {
+            "version": 1,
+            "stage": args.stage,
+            "kernel_obj_path": result["kernel_obj_path"],
+            "kernel_source_path": result["kernel_source_path"],
+        }
+    return result
 
 
 def compile_core(
@@ -508,9 +577,9 @@ def compile_core(
 def jit_compile(tiling_def, host_tiling, op_kernel, argv: List[str]):
     return compile_core(
         {
-            "tiling_struct_code": tiling_def,
-            "host_impl_code": host_tiling,
-            "kernel_impl_code": op_kernel,
+            SOURCES_TILING_STRUCT: tiling_def,
+            SOURCES_HOST_IMPL: host_tiling,
+            SOURCES_KERNEL_IMPL: op_kernel,
         },
         argv,
         trace_stage="jit_compile",
@@ -520,9 +589,9 @@ def jit_compile(tiling_def, host_tiling, op_kernel, argv: List[str]):
 def host_compile(tiling_def_code, tiling_impl_code, argv: List[str]):
     return compile_core(
         {
-            "tiling_struct_code": tiling_def_code,
-            "host_impl_code": tiling_impl_code,
-            "kernel_impl_code": None,
+            SOURCES_TILING_STRUCT: tiling_def_code,
+            SOURCES_HOST_IMPL: tiling_impl_code,
+            SOURCES_KERNEL_IMPL: None,
         },
         argv,
         "host",
@@ -535,14 +604,60 @@ def kernel_compile(
 ):
     return compile_core(
         {
-            "tiling_struct_code": tiling_def_code,
-            "host_impl_code": None,
-            "kernel_impl_code": kernel_impl_code,
+            SOURCES_TILING_STRUCT: tiling_def_code,
+            SOURCES_HOST_IMPL: None,
+            SOURCES_KERNEL_IMPL: kernel_impl_code,
         },
         argv,
         "device",
         tiling_repr,
         trace_stage="kernel_compile",
+    )
+
+
+def build_tiling_obj(tiling_def_code, tiling_impl_code, argv: List[str]):
+    """编译 host 侧 tiling 函数为 .o，不链接。供外层（torchair）并行调度。"""
+    return compile_core(
+        {
+            SOURCES_TILING_STRUCT: tiling_def_code,
+            SOURCES_HOST_IMPL: tiling_impl_code,
+            SOURCES_KERNEL_IMPL: None,
+        },
+        argv,
+        "host_obj",
+        trace_stage="build_tiling_obj",
+    )
+
+
+def build_kernel_obj(
+    tiling_def_code, kernel_impl_code, argv: List[str], *, tiling_repr=None
+):
+    """编译 device 侧 kernel 代码为 .o，不链接。供外层（torchair）并行调度。"""
+    return compile_core(
+        {
+            SOURCES_TILING_STRUCT: tiling_def_code,
+            SOURCES_HOST_IMPL: None,
+            SOURCES_KERNEL_IMPL: kernel_impl_code,
+        },
+        argv,
+        "device_obj",
+        tiling_repr,
+        trace_stage="build_kernel_obj",
+    )
+
+
+def build_kernel_so(tiling_def_code, argv: List[str], *, tiling_repr=None):
+    """链接 host.o + device.o，产出最终 kernel.so。"""
+    return compile_core(
+        {
+            SOURCES_TILING_STRUCT: tiling_def_code,
+            SOURCES_HOST_IMPL: None,
+            SOURCES_KERNEL_IMPL: None,
+        },
+        argv,
+        "link",
+        tiling_repr,
+        trace_stage="build_kernel_so",
     )
 
 

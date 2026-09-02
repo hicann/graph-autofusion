@@ -36,7 +36,7 @@ def _build_nchw_conv_args(module, input_shape, input_format):
         {"shape": input_shape, "format": input_format, "dtype": "float16"},
         {"shape": [1, 64, 224, 224], "format": "NCHW", "dtype": "float16"},
     ]
-    return module.build_conv_args(args_list, 1, "NCHW")
+    return module.build_conv_args(args_list, module.ConvArgsConfig(1, "NCHW"))
 
 
 class SimpleNamespace(object):
@@ -209,27 +209,22 @@ class TestBuildConvArgs:
         input_num = 2  # 只处理前2个作为输入
         data_format = "NCHW"
 
-        origin_inputs, origin_outputs, inputs = (
-            asc_codegen_compile_module.build_conv_args(
-                args_list, input_num, data_format
-            )
+        config = asc_codegen_compile_module.ConvArgsConfig(input_num, data_format)
+        origin_inputs, origin_outputs = asc_codegen_compile_module.build_conv_args(
+            args_list, config
         )
 
         # 验证输入输出数量
         assert len(origin_inputs) == 2
-        assert len(inputs) == 2
         assert len(origin_outputs) == 1
 
-        # 验证第一个输入（已经是 NCHW，不需要转换）
-        assert inputs[0]["param_name"] == "input0"
-        assert inputs[0]["format"] == "NCHW"
+        # 验证第一个输入按 x 槽位写成 NCHW
+        assert origin_inputs[0]["format"] == "NCHW"
+        assert origin_inputs[0]["ori_format"] == "NCHW"
 
-        # 验证第二个输入的 HWCN -> NCHW 格式转换
-        # 转换索引: [3,2,0,1]
-        assert inputs[1]["param_name"] == "input1"
-        assert inputs[1]["format"] == "NCHW"
-        # shape 会被转换成 tuple，这是正常的
-        assert list(inputs[1]["shape"]) == [64, 3, 7, 7]
+        # 验证第二个输入按 filter 槽位写成 FRACTAL_Z
+        assert origin_inputs[1]["format"] == "FRACTAL_Z"
+        assert origin_inputs[1]["ori_format"] == "NCHW"
 
         # 验证输出格式（args_list[-2] 是 dummy 元素）
         assert origin_outputs[0]["format"] == "NCHW"
@@ -237,26 +232,86 @@ class TestBuildConvArgs:
 
     @staticmethod
     def test_build_conv_args_nhwc_to_nchw(asc_codegen_compile_module):
-        """测试 NHWC -> NCHW 格式转换"""
-        origin_inputs, origin_outputs, inputs = _build_nchw_conv_args(
+        """测试 x 槽位被强制写成 NCHW"""
+        origin_inputs, origin_outputs = _build_nchw_conv_args(
             asc_codegen_compile_module, [1, 224, 224, 64], "NHWC"
         )
 
-        assert inputs[0]["format"] == "NCHW"
-        # shape 会被转换成 tuple，使用 list() 转换后比较
-        assert list(inputs[0]["shape"]) == [1, 64, 224, 224]
-        assert inputs[0]["ori_format"] == "NCHW"
+        assert origin_inputs[0]["format"] == "NCHW"
+        assert origin_inputs[0]["ori_format"] == "NCHW"
+        assert origin_inputs[0]["shape"] == [1, 224, 224, 64]
 
     @staticmethod
     def test_build_conv_args_same_format_no_conversion(asc_codegen_compile_module):
-        """测试格式相同时不转换"""
-        origin_inputs, origin_outputs, inputs = _build_nchw_conv_args(
+        """测试格式相同时 shape 保持原值"""
+        origin_inputs, origin_outputs = _build_nchw_conv_args(
             asc_codegen_compile_module, [1, 64, 224, 224], "NCHW"
         )
 
-        # 格式相同，shape 不变
-        assert inputs[0]["format"] == "NCHW"
-        assert inputs[0]["shape"] == [1, 64, 224, 224]
+        assert origin_inputs[0]["format"] == "NCHW"
+        assert origin_inputs[0]["shape"] == [1, 64, 224, 224]
+
+    @staticmethod
+    def test_build_conv_args_extend_conv2d_slots(asc_codegen_compile_module):
+        """ExtendConv2D 固定 10 个逻辑输入槽，并补第二输出占位"""
+        args_list = [
+            {"shape": [1, 64, 56, 56], "format": "NCHW", "dtype": "float16"},
+            {"shape": [64, 64, 3, 3], "format": "NCHW", "dtype": "float16"},
+            {"shape": [64], "format": "ND", "dtype": "float16"},
+            {"shape": [64], "format": "ND", "dtype": "uint64"},
+            {"shape": [1, 64, 56, 56], "format": "NCHW", "dtype": "float16"},
+            "extend_conv2d_kernel",
+        ]
+
+        config = asc_codegen_compile_module.ConvArgsConfig(
+            input_num=4,
+            data_format="NCHW",
+            has_bias=True,
+            has_scale0=True,
+            is_extend_conv2d=True,
+        )
+        origin_inputs, origin_outputs = asc_codegen_compile_module.build_conv_args(
+            args_list, config
+        )
+
+        assert len(origin_inputs) == 10
+        assert origin_inputs[0] is not None
+        assert origin_inputs[1] is not None
+        assert origin_inputs[2] is not None
+        assert origin_inputs[3] is None
+        assert origin_inputs[4] is not None
+        assert all(item is None for item in origin_inputs[5:])
+        assert origin_inputs[0]["format"] == "NCHW"
+        assert origin_inputs[1]["format"] == "FRACTAL_Z"
+        assert origin_inputs[2]["format"] == "ND"
+        assert origin_inputs[4]["format"] == "ND"
+        assert len(origin_outputs) == 2
+        assert origin_outputs[0]["param_name"] == "output0"
+
+    @staticmethod
+    def test_build_conv_args_extend_conv2d_empty_optional(asc_codegen_compile_module):
+        """ExtendConv2D 无 bias/scale0 时对应槽位为空"""
+        args_list = [
+            {"shape": [1, 64, 56, 56], "format": "NCHW", "dtype": "float16"},
+            {"shape": [64, 64, 3, 3], "format": "NCHW", "dtype": "float16"},
+            {"shape": [1, 64, 56, 56], "format": "NCHW", "dtype": "float16"},
+            "extend_conv2d_kernel",
+        ]
+
+        config = asc_codegen_compile_module.ConvArgsConfig(
+            input_num=2,
+            data_format="NCHW",
+            is_extend_conv2d=True,
+        )
+        origin_inputs, origin_outputs = asc_codegen_compile_module.build_conv_args(
+            args_list, config
+        )
+
+        assert len(origin_inputs) == 10
+        assert origin_inputs[0] is not None
+        assert origin_inputs[1] is not None
+        assert all(item is None for item in origin_inputs[2:])
+        assert len(origin_outputs) == 2
 
 
 class TestGetGraphBasicInfo:
