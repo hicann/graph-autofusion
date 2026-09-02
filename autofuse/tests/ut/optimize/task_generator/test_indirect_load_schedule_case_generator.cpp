@@ -422,6 +422,73 @@ bool AddSideConsumer(af::AscGraph &graph, const char *producer_name) {
          af::GraphUtils::AddEdge(producer->GetOutDataAnchor(0), consumer->GetInDataAnchor(0)) == ge::GRAPH_SUCCESS;
 }
 
+bool AddSimtFanoutTopology(af::AscGraph &graph) {
+  const auto indirect_load = graph.FindNode("indirect_load");
+  const auto store = graph.FindNode("store");
+  if (indirect_load == nullptr || store == nullptr || indirect_load->outputs().empty()) {
+    return false;
+  }
+  const auto &output_attr = indirect_load->outputs()[0]->attr;
+
+  af::ascir_op::Abs main_transform("coverage_main_transform");
+  SetNodeView(main_transform, af::DT_FLOAT16, output_attr.axis, output_attr.repeats, output_attr.strides);
+  SetVectorApi(main_transform);
+  graph.AddNode(main_transform);
+
+  af::ascir_op::Data side_input("coverage_side_input", graph);
+  side_input.ir_attr.SetIndex(2);
+  SetNodeView(side_input, af::DT_FLOAT16, output_attr.axis, output_attr.repeats, output_attr.strides);
+  af::ascir_op::Load side_load("coverage_side_load");
+  SetNodeView(side_load, af::DT_FLOAT16, output_attr.axis, output_attr.repeats, output_attr.strides);
+  side_load.attr.api.compute_type = af::ComputeType::kComputeLoad;
+  graph.AddNode(side_load);
+  af::ascir_op::Abs side_pre("coverage_side_pre");
+  SetNodeView(side_pre, af::DT_FLOAT16, output_attr.axis, output_attr.repeats, output_attr.strides);
+  SetVectorApi(side_pre);
+  graph.AddNode(side_pre);
+  af::ascir_op::Add side_branch("coverage_side_branch");
+  SetNodeView(side_branch, af::DT_FLOAT16, output_attr.axis, output_attr.repeats, output_attr.strides);
+  SetVectorApi(side_branch);
+  graph.AddNode(side_branch);
+  af::ascir_op::Store side_store("coverage_side_store");
+  SetNodeView(side_store, af::DT_FLOAT16, output_attr.axis, output_attr.repeats, output_attr.strides);
+  side_store.attr.api.compute_type = af::ComputeType::kComputeStore;
+  graph.AddNode(side_store);
+  af::ascir_op::Output side_output("coverage_side_output");
+  side_output.ir_attr.SetIndex(1);
+  SetNodeView(side_output, af::DT_FLOAT16, output_attr.axis, output_attr.repeats, output_attr.strides);
+  graph.AddNode(side_output);
+
+  const auto main_transform_node = graph.FindNode("coverage_main_transform");
+  const auto side_input_node = graph.FindNode("coverage_side_input");
+  const auto side_load_node = graph.FindNode("coverage_side_load");
+  const auto side_pre_node = graph.FindNode("coverage_side_pre");
+  const auto side_branch_node = graph.FindNode("coverage_side_branch");
+  const auto side_store_node = graph.FindNode("coverage_side_store");
+  const auto side_output_node = graph.FindNode("coverage_side_output");
+  if (main_transform_node == nullptr || side_input_node == nullptr || side_load_node == nullptr ||
+      side_pre_node == nullptr || side_branch_node == nullptr || side_store_node == nullptr ||
+      side_output_node == nullptr) {
+    return false;
+  }
+  return af::GraphUtils::AddEdge(indirect_load->GetOutDataAnchor(0), main_transform_node->GetInDataAnchor(0)) ==
+             ge::GRAPH_SUCCESS &&
+         af::GraphUtils::ReplaceEdgeSrc(indirect_load->GetOutDataAnchor(0), store->GetInDataAnchor(0),
+                                        main_transform_node->GetOutDataAnchor(0)) == ge::GRAPH_SUCCESS &&
+         af::GraphUtils::AddEdge(side_input_node->GetOutDataAnchor(0), side_load_node->GetInDataAnchor(0)) ==
+             ge::GRAPH_SUCCESS &&
+         af::GraphUtils::AddEdge(side_load_node->GetOutDataAnchor(0), side_pre_node->GetInDataAnchor(0)) ==
+             ge::GRAPH_SUCCESS &&
+         af::GraphUtils::AddEdge(indirect_load->GetOutDataAnchor(0), side_branch_node->GetInDataAnchor(0)) ==
+             ge::GRAPH_SUCCESS &&
+         af::GraphUtils::AddEdge(side_pre_node->GetOutDataAnchor(0), side_branch_node->GetInDataAnchor(1)) ==
+             ge::GRAPH_SUCCESS &&
+         af::GraphUtils::AddEdge(side_branch_node->GetOutDataAnchor(0), side_store_node->GetInDataAnchor(0)) ==
+             ge::GRAPH_SUCCESS &&
+         af::GraphUtils::AddEdge(side_store_node->GetOutDataAnchor(0), side_output_node->GetInDataAnchor(0)) ==
+             ge::GRAPH_SUCCESS;
+}
+
 void SetStridedInputPath(af::AscGraph &graph) {
   const std::vector<af::Expression> strides = {af::Symbol(64), af::Symbol(2)};
   for (const char *name : {"data0", "load0", "data1", "load1", "x_copy_sign"}) {
@@ -1334,6 +1401,56 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratorTaskRestoresSkLogicalViewAf
   EXPECT_EQ(logical_view.output.strides, indirect_load->outputs()[0]->attr.strides);
 }
 
+TEST(IndirectLoadScheduleCaseGeneratorTest, GeneratorTaskPopulatesCandidateMetadata) {
+  auto graph = BuildIndirectLoadGraph(2);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<optimize::ScheduleTask> tasks;
+  ASSERT_EQ(generator.GeneratorTask(graph, tasks, {}), af::SUCCESS);
+
+  ASSERT_EQ(tasks.size(), 4UL);
+  for (const auto &task : tasks) {
+    ASSERT_FALSE(task.score_func.empty());
+    ASSERT_FALSE(task.grouped_graphs.empty());
+    const auto indirect_load = task.optimize_graph.FindNode("indirect_load");
+    ASSERT_NE(indirect_load, nullptr);
+    const auto template_id = ascir::GetTemplateIdOrDefault(*indirect_load);
+    ASSERT_TRUE(template_id == ascir::TemplateId::kIndirectLoadSimd ||
+                template_id == ascir::TemplateId::kIndirectLoadSimt ||
+                template_id == ascir::TemplateId::kIndirectLoadSK);
+  }
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimtFanoutAnnotatesMainPathAndSideInputClosure) {
+  PlatformContextReset platform_reset;
+  ge::PlatformContext::GetInstance().Reset();
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  auto graph = BuildIndirectLoadGraph(2);
+  ASSERT_TRUE(AddSimtFanoutTopology(graph));
+
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  const auto simt = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
+  ASSERT_NE(simt, graphs.end());
+  const auto main_transform = simt->FindNode("coverage_main_transform");
+  const auto side_load = simt->FindNode("coverage_side_load");
+  const auto side_pre = simt->FindNode("coverage_side_pre");
+  const auto side_branch = simt->FindNode("coverage_side_branch");
+  ASSERT_NE(main_transform, nullptr);
+  ASSERT_NE(side_load, nullptr);
+  ASSERT_NE(side_pre, nullptr);
+  ASSERT_NE(side_branch, nullptr);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(main_transform),
+            ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(side_load),
+            ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(side_pre),
+            ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(side_branch),
+            ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch);
+}
+
 TEST(IndirectLoadScheduleCaseGeneratorTest, SimdNormalizesNonExpandedGraph) {
   auto graph = BuildIndirectLoadGraph(2, true);
   optimize::IndirectLoadScheduleCaseGenerator generator;
@@ -1925,6 +2042,24 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, GenerateFailsWhenAxisOutOfRange) {
     EXPECT_NE(generator.Generate(graph, graphs, score_functions), af::SUCCESS) << "axis=" << axis;
     EXPECT_TRUE(graphs.empty());
   }
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, GenerateFailsWhenUnsupportedTopologyNodePresent) {
+  auto graph = BuildIndirectLoadGraph(2L);
+
+  af::ascir_op::Transpose transpose("unsupported_transpose");
+  graph.AddNode(transpose);
+  transpose.attr.api.compute_type = af::ComputeType::kComputeTranspose;
+  transpose.attr.api.type = af::ApiType::kAPITypeCompute;
+  transpose.y.dtype = ge::DT_FLOAT16;
+  ASSERT_NE(graph.FindNode("unsupported_transpose"), nullptr);
+
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  EXPECT_NE(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  EXPECT_TRUE(graphs.empty());
+  EXPECT_TRUE(score_functions.empty());
 }
 
 }  // namespace

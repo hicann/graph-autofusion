@@ -733,7 +733,6 @@ build_backend() {
   cmake $CMAKE_ARGS ../
 
   # st用例可执行文件的列表，inductor split_compile 仅保留 presubmit 代表用例，其余放 nightly。
-  # Dual-IL case is kept in CMake for local debugging but excluded from the online pipeline.
   MAKE_TARGET_LIST="add_abs_test_e2e \
                     axpy_abs_test_e2e \
                     sub_abs_test_e2e \
@@ -846,6 +845,10 @@ build_backend() {
                           indirect_load_broadcast_continuous_simd_test_e2e_v2 \
                           indirect_load_broadcast_continuous_index_simt_test_e2e_v2 \
                           indirect_load_embedding_test_e2e_v2 \
+                          indirect_load_embedding_tail_simd_e2e_v2 \
+                          indirect_load_embedding_tail_simt_e2e_v2 \
+                          indirect_load_embedding_aligned_simd_e2e_v2 \
+                          indirect_load_embedding_aligned_simt_e2e_v2 \
                            indirect_load_broadcast_retained_simd_test_e2e_v2 \
                           indirect_load_complex_broadcast_simd_test_e2e_v2 \
                           indirect_load_complex_broadcast_simt_test_e2e_v2 \
@@ -856,7 +859,7 @@ build_backend() {
                          indirect_load_broadcast_retained_simt_test_e2e_v2 \
                         indirect_load_broadcast_elements_sk_test_e2e_v2 \
                         indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 \
-                        indirect_load_broadcast_identity_index_simd_test_e2e_v2 \
+                        indirect_load_broadcast_index_mixed_view_simt_test_e2e_v2 \
                         indirect_load_broadcast_index_abs_simt_test_e2e_v2 \
                         indirect_load_broadcast_index_where_simt_test_e2e_v2 \
                         indirect_load_index_binary_same_view_simd_test_e2e_v2 \
@@ -872,7 +875,12 @@ build_backend() {
                        indirect_load_graph_hint_simd_repro_e2e_v2 \
                        indirect_load_embedding_reduce_simt_test_e2e_v2 \
                        indirect_load_add_il_reduce_test_e2e_v2 \
+                       indirect_load_user_masked_embedding_minimal_e2e_v2 \
+                       indirect_load_user_masked_embedding_sum_full_e2e_v2 \
+                       indirect_load_user_masked_embedding_sum_full_auto_e2e_v2 \
                        indirect_load_user_embedding_sum_e2e_v2 \
+                       indirect_load_user_embedding_sum_rank2_e2e_v2 \
+                       indirect_load_user_embedding_sum_simd_e2e_v2 \
                        indirect_load_user_embedding_mul_e2e_v2 \
                        indirect_load_user_layernorm_e2e_v2 \
                        indirect_load_user_layernorm_simd_e2e_v2 \
@@ -886,6 +894,8 @@ build_backend() {
                        indirect_load_user_fanout_post_stores_simt_e2e_v2 \
                        indirect_load_user_fanout_post_reduce_simd_e2e_v2 \
                        indirect_load_user_fanout_post_reduce_simt_e2e_v2 \
+                       indirect_load_user_side_input_fanout_simd_e2e_v2 \
+                       indirect_load_user_side_input_fanout_simt_e2e_v2 \
                        load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \
                       gather_reduce_store_test_e2e_v2 \
                       load_where_store_test_e2e_v2 \

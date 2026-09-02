@@ -29,6 +29,10 @@
 namespace optimize {
 namespace {
 constexpr int64_t kIndirectLoadSimtDcacheSize = 32 * 1024;
+constexpr int64_t kEmbeddingSimdPayloadBytesThreshold = 2048;
+constexpr int64_t kEmbeddingSimdLookupCountThreshold = 32;
+constexpr int32_t kEmbeddingFastPathScore = 2;
+constexpr int32_t kEmbeddingAlternateFastPathScore = 1;
 constexpr size_t kIndirectLoadInputCount = 2UL;
 constexpr size_t kIndirectLoadOutputCount = 1UL;
 constexpr size_t kIndirectLoadInvalidAxisIndex = std::numeric_limits<size_t>::max();
@@ -274,30 +278,85 @@ af::Status ApplyIndirectLoadPathLayout(const NodePath &path,
   return af::SUCCESS;
 }
 
+template <typename VisitFn>
+void TraverseInputProducers(const NodePath &roots, NodeSet &visited, const VisitFn &visit) {
+  NodePath pending = roots;
+  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
+    const af::AscNodePtr node = pending[cursor];
+    if (node == nullptr || !visited.emplace(node.get()).second || !visit(node)) {
+      continue;
+    }
+    for (size_t input_index = 0UL; input_index < node->inputs.Size(); ++input_index) {
+      pending.emplace_back(ascgen_utils::indirect_load::GetInputProducer(node, input_index));
+    }
+  }
+}
+
+template <typename VisitFn>
+af::Status TraverseOutputConsumers(const NodePath &roots, NodeSet &visited, const VisitFn &visit) {
+  NodePath pending = roots;
+  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
+    const af::AscNodePtr node = pending[cursor];
+    GE_ASSERT_NOTNULL(node, "IndirectLoad output successor is invalid.");
+    if (!visited.emplace(node.get()).second) {
+      continue;
+    }
+    bool stop = false;
+    GE_ASSERT_SUCCESS(visit(node, stop));
+    if (stop) {
+      continue;
+    }
+    for (const auto &out_node : node->GetOutDataNodes()) {
+      const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out_node);
+      GE_ASSERT_NOTNULL(consumer, "IndirectLoad output successor is invalid.");
+      pending.emplace_back(consumer);
+    }
+  }
+  return af::SUCCESS;
+}
+
+bool IsSupportedIndirectLoadTopologyNode(const af::AscNodePtr &node) {
+  if (node == nullptr) {
+    return false;
+  }
+  if (ScheduleUtils::IsIOBuffer(node) || ScheduleUtils::IsBuffer(node) ||
+      af::ops::IsOps<af::ascir_op::IndirectLoad>(node)) {
+    return true;
+  }
+  return ScheduleUtils::IsLoad(node) || ScheduleUtils::IsStore(node) || ScheduleUtils::IsElewise(node) ||
+         ScheduleUtils::IsBroadcast(node) || ScheduleUtils::IsReduce(node);
+}
+
+af::Status CollectAndValidateIndirectLoadNodes(const ascir::HintGraph &graph, af::AscNodePtr &indirect_load) {
+  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ValidateSingleIndirectLoadNode(graph, indirect_load));
+  if (indirect_load == nullptr) {
+    return af::SUCCESS;
+  }
+  af::AscNodePtr unsupported_node;
+  for (const af::AscNodePtr &node : graph.GetAllNodes()) {
+    if (!IsSupportedIndirectLoadTopologyNode(node)) {
+      unsupported_node = node;
+      break;
+    }
+  }
+  if (unsupported_node != nullptr) {
+    GELOGE(af::FAILED,
+           "[IndirectLoad] Graph[%s] node[%s] contains unsupported topology operator[%s, compute_type=%u] "
+           "around IndirectLoad[%s].",
+           graph.GetName().c_str(), unsupported_node->GetNamePtr(), unsupported_node->GetTypePtr(),
+           static_cast<uint32_t>(unsupported_node->attr.api.compute_type), indirect_load->GetNamePtr());
+    return af::FAILED;
+  }
+  return af::SUCCESS;
+}
+
 void CollectInputRegionMembers(const af::AscNodePtr &indirect_load, size_t input_index, NodeSet &region) {
   const af::AscNodePtr root = ascgen_utils::indirect_load::GetInputProducer(indirect_load, input_index);
   if (root == nullptr) {
     return;
   }
-  NodePath pending = {root};
-  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
-    const af::AscNodePtr node = pending[cursor];
-    if (node == nullptr) {
-      continue;
-    }
-    if (!region.emplace(node.get()).second) {
-      continue;
-    }
-    if (af::ops::IsOps<af::ascir_op::Load>(node)) {
-      continue;
-    }
-    for (size_t i = 0UL; i < node->inputs.Size(); ++i) {
-      const af::AscNodePtr producer = ascgen_utils::indirect_load::GetInputProducer(node, i);
-      if (producer != nullptr) {
-        pending.emplace_back(producer);
-      }
-    }
-  }
+  TraverseInputProducers({root}, region,
+                         [](const af::AscNodePtr &node) { return !af::ops::IsOps<af::ascir_op::Load>(node); });
 }
 
 bool CollectSimtBackwardRegion(const NodePath &roots, const af::AscNodePtr &indirect_load, NodeSet &region) {
@@ -906,7 +965,8 @@ af::Status NormalizeSimtAxesForTemplate(af::AscGraph &graph, const af::AscNodePt
   const auto output_axes = indirect_load->outputs()[0]->attr.axis;
   GE_ASSERT_TRUE(!output_axes.empty(), "IndirectLoad SIMT output axis is empty.");
   GE_ASSERT_TRUE(boundary <= output_axes.size(), "IndirectLoad SIMT boundary is out of range.");
-  return NormalizeAxesForTemplate(graph, indirect_load, boundary, af::kIdNone, af::kIdNone);
+  GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, boundary, af::kIdNone, af::kIdNone));
+  return af::SUCCESS;
 }
 
 // SIMT direct-GM nodes deliberately preserve their vectorized view through the
@@ -914,7 +974,7 @@ af::Status NormalizeSimtAxesForTemplate(af::AscGraph &graph, const af::AscNodePt
 // fill it from the node's physical strides before VF partitioning consumes it.
 af::Status CompletePreservedVectorizedViews(const af::AscGraph &graph, const af::AscNodePtr &indirect_load) {
   for (const auto &node : graph.GetAllNodes()) {
-    if (node == nullptr || node == indirect_load ||
+    if (node == nullptr || node == indirect_load || af::ops::IsOps<af::ascir_op::Output>(node) ||
         !ascgen_utils::indirect_load::GetTemplateBehavior(node).preserves_vectorized_axis) {
       continue;
     }
@@ -977,38 +1037,31 @@ af::Status ValidateReduceOutput(const af::AscNodePtr &reduce) {
 
 // Traverse all output branches once, collecting Store/Reduce boundaries and validating each Reduce successor.
 af::Status CollectOutputBoundaries(const af::AscNodePtr &indirect_load, RewrittenGraphAnalysis &analysis) {
-  NodePath pending;
   NodeSet visited{indirect_load.get()};
+  NodePath roots;
   for (const auto &out_node : indirect_load->GetOutDataNodes()) {
     const auto out_asc_node = std::dynamic_pointer_cast<af::AscNode>(out_node);
     GE_ASSERT_NOTNULL(out_asc_node, "IndirectLoad output successor is invalid.");
-    if (visited.emplace(out_asc_node.get()).second) {
-      pending.emplace_back(out_asc_node);
-    }
+    roots.emplace_back(out_asc_node);
   }
-  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
-    const auto &current = pending[cursor];
+  const auto visit = [&analysis](const af::AscNodePtr &current, bool &stop) -> af::Status {
     if (ScheduleUtils::IsStore(current)) {
       if (analysis.output_store == nullptr) {
         analysis.output_store = current;
       }
-      continue;
+      stop = true;
+      return af::SUCCESS;
     }
     if (ScheduleUtils::IsReduce(current)) {
       GE_ASSERT_SUCCESS(ValidateReduceOutput(current));
       GE_ASSERT_TRUE(analysis.post_reduce == nullptr);
       analysis.post_reduce = current;
-      continue;
+      stop = true;
+      return af::SUCCESS;
     }
-    for (const auto &out_node : current->GetOutDataNodes()) {
-      const auto out_asc_node = std::dynamic_pointer_cast<af::AscNode>(out_node);
-      GE_ASSERT_NOTNULL(out_asc_node, "IndirectLoad output successor is invalid.");
-      if (visited.emplace(out_asc_node.get()).second) {
-        pending.emplace_back(out_asc_node);
-      }
-    }
-  }
-  return af::SUCCESS;
+    return af::SUCCESS;
+  };
+  return TraverseOutputConsumers(roots, visited, visit);
 }
 
 af::Status CollectRewrittenBoundaries(const af::AscNodePtr &indirect_load, RewrittenGraphAnalysis &analysis) {
@@ -1145,21 +1198,13 @@ void CollectReachableLoads(const af::AscNodePtr &root, NodeSet &visited, NodePat
   if (root == nullptr) {
     return;
   }
-  NodePath pending{root};
-  while (!pending.empty()) {
-    const af::AscNodePtr current = pending.back();
-    pending.pop_back();
-    if (current == nullptr || !visited.emplace(current.get()).second) {
-      continue;
+  TraverseInputProducers({root}, visited, [&loads](const af::AscNodePtr &node) {
+    if (af::ops::IsOps<af::ascir_op::Load>(node)) {
+      loads.emplace_back(node);
+      return false;
     }
-    if (af::ops::IsOps<af::ascir_op::Load>(current)) {
-      loads.emplace_back(current);
-      continue;
-    }
-    for (size_t input_index = 0UL; input_index < current->inputs.Size(); ++input_index) {
-      pending.emplace_back(ascgen_utils::indirect_load::GetInputProducer(current, input_index));
-    }
-  }
+    return true;
+  });
 }
 
 af::Status CompleteInputDataTensorAttrs(const RewrittenGraphAnalysis &analysis) {
@@ -1309,6 +1354,10 @@ af::Status PreparePhysicalViews(const af::AscNodePtr &indirect_load, ascir::Temp
   const auto &output_attr = outputs.front()->attr;
   preparation.logical_view.output = {output_attr.axis, output_attr.repeats, output_attr.strides};
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ValidateIndirectLoadOutputLayout(preparation.logical_view.output));
+  ascgen_utils::indirect_load::IndirectLoadAccessInfo access_info;
+  GE_ASSERT_SUCCESS(
+      ascgen_utils::indirect_load::AnalyzeIndirectLoadAccess(indirect_load, preparation.logical_view, access_info));
+  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetIndirectLoadAccessInfo(indirect_load, access_info));
   // 本函数只做只读分析；Broadcast 删除与物理视图写回在 AnalyzeRewrittenGraph 中统一执行。
   return ascgen_utils::indirect_load::SetTemplateLogicalView(indirect_load, preparation.logical_view);
 }
@@ -1450,10 +1499,79 @@ af::Status AnnotateSimtTemplateRoles(const af::AscNodePtr &indirect_load, const 
   GE_ASSERT_SUCCESS(
       ascgen_utils::indirect_load::SetTemplateRole(indirect_load, ascgen_utils::indirect_load::TemplateRole::kSimtOp));
   for (const af::AscNodePtr &node : analysis.index_region) {
+    // Every node in the fused index/output backward region is emitted by the
+    // SIMT scalar evaluator, including nodes that fan out to multiple
+    // consumers inside that same region (for example the shared Broadcast in
+    // the relative-position bucket calculation).  A fan-out role is reserved
+    // for branches outside the selected scalar path and is assigned by
+    // AnnotateSimtFanoutBranches below; marking an internal fan-out here would
+    // make ValidateSimtRegionNode reject it as not inline-transformable.
     const auto role = (af::ops::IsOps<af::ascir_op::Load>(node) || af::ops::IsOps<af::ascir_op::Store>(node))
                           ? ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary
                           : ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform;
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(node, role));
+  }
+  return af::SUCCESS;
+}
+
+af::Status AnnotateSimtMainOutputPath(const af::AscNodePtr &indirect_load, const af::AscNodePtr &selected_root,
+                                      const NodeSet &selected) {
+  // Nodes on the selected output path are emitted by the SIMT scalar evaluator.
+  // With a user fan-out this path can contain ordinary elementwise transforms
+  // that are not part of the index region handled by AnnotateSimtTemplateRoles.
+  NodePath pending = {selected_root};
+  NodeSet visited;
+  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
+    const auto &node = pending[cursor];
+    if (node == nullptr || node == indirect_load || !visited.emplace(node.get()).second) {
+      continue;
+    }
+    if (!IsInputRegionBoundary(node) && !ScheduleUtils::IsReduce(node) && !ScheduleUtils::IsStore(node)) {
+      GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
+          node, ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform));
+    }
+    for (const auto &producer_node : node->GetInDataNodes()) {
+      const auto producer = std::dynamic_pointer_cast<af::AscNode>(producer_node);
+      if (producer != nullptr && selected.count(producer.get()) != 0UL) {
+        pending.emplace_back(producer);
+      }
+    }
+  }
+  return af::SUCCESS;
+}
+
+af::Status AnnotateSimtSideInputClosure(const af::AscNodePtr &branch_node, const af::AscNodePtr &indirect_load,
+                                        const NodeSet &selected, NodeSet &visited) {
+  NodePath pending;
+  for (const auto &producer_node : branch_node->GetInDataNodes()) {
+    const auto producer = std::dynamic_pointer_cast<af::AscNode>(producer_node);
+    if (producer != nullptr) {
+      pending.emplace_back(producer);
+    }
+  }
+  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
+    const auto &producer = pending[cursor];
+    if (producer == nullptr || producer == indirect_load || selected.count(producer.get()) != 0UL ||
+        ScheduleUtils::IsReduce(producer) || !visited.emplace(producer.get()).second) {
+      continue;
+    }
+    if (IsInputRegionBoundary(producer) && !af::ops::IsOps<af::ascir_op::Load>(producer)) {
+      continue;
+    }
+    const auto role = ascgen_utils::indirect_load::GetTemplateRole(producer);
+    const auto side_role = af::ops::IsOps<af::ascir_op::Load>(producer)
+                               ? ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary
+                               : ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch;
+    if (role == ascgen_utils::indirect_load::TemplateRole::kNone ||
+        role == ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch) {
+      GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(producer, side_role));
+    }
+    for (const auto &upstream_node : producer->GetInDataNodes()) {
+      const auto upstream = std::dynamic_pointer_cast<af::AscNode>(upstream_node);
+      if (upstream != nullptr) {
+        pending.emplace_back(upstream);
+      }
+    }
   }
   return af::SUCCESS;
 }
@@ -1466,38 +1584,36 @@ af::Status AnnotateSimtFanoutBranches(const af::AscNodePtr &indirect_load, const
     return af::SUCCESS;
   }
   NodeSet selected;
-  const bool selected_ok = CollectSimtBackwardRegion({selected_root}, indirect_load, selected);
-  if (!selected_ok) {
+  if (!CollectSimtBackwardRegion({selected_root}, indirect_load, selected)) {
     GELOGW("[IndirectLoad] Cannot identify SIMT main output chain from root[%s]; keep existing roles.",
            selected_root->GetNamePtr());
     return af::SUCCESS;
   }
+  GE_ASSERT_SUCCESS(AnnotateSimtMainOutputPath(indirect_load, selected_root, selected));
 
-  NodePath pending;
   NodeSet visited{indirect_load.get()};
+  NodeSet side_visited;
+  NodePath roots;
   for (const auto &out_node : indirect_load->GetOutDataNodes()) {
     const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out_node);
-    if (consumer != nullptr && visited.emplace(consumer.get()).second) {
-      pending.emplace_back(consumer);
-    }
+    GE_ASSERT_NOTNULL(consumer, "IndirectLoad output successor is invalid.");
+    roots.emplace_back(consumer);
   }
-  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
-    const auto &node = pending[cursor];
-    if (selected.count(node.get()) == 0UL && !IsInputRegionBoundary(node) && !ScheduleUtils::IsReduce(node)) {
+  const auto visit = [&](const af::AscNodePtr &node, bool &stop) -> af::Status {
+    const bool is_fanout_branch =
+        selected.count(node.get()) == 0UL && !IsInputRegionBoundary(node) && !ScheduleUtils::IsReduce(node);
+    if (is_fanout_branch) {
       GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
           node, ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch));
+      GE_ASSERT_SUCCESS(AnnotateSimtSideInputClosure(node, indirect_load, selected, side_visited));
     }
     if (ScheduleUtils::IsStore(node) || ScheduleUtils::IsReduce(node)) {
-      continue;
+      stop = true;
+      return af::SUCCESS;
     }
-    for (const auto &out_node : node->GetOutDataNodes()) {
-      const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out_node);
-      if (consumer != nullptr && visited.emplace(consumer.get()).second) {
-        pending.emplace_back(consumer);
-      }
-    }
-  }
-  return af::SUCCESS;
+    return af::SUCCESS;
+  };
+  return TraverseOutputConsumers(roots, visited, visit);
 }
 
 af::Status ValidateTemplate(const af::AscNodePtr &indirect_load, ascir::TemplateId template_id,
@@ -1603,11 +1719,48 @@ af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_lo
   return FinalizeTemplate(indirect_load, template_id);
 }
 
-std::string GenerateScoreFunc(const TemplateCase &template_case) {
-  (void)template_case;
-  return "int32_t CalcScore(AutofuseTilingData &tiling_data) {\n"
+bool IsEmbeddingFastPathCapable(const TemplateCase &template_case,
+                                const ascgen_utils::indirect_load::IndirectLoadAccessInfo &access_info) {
+  if (template_case.implementation != ascgen_utils::indirect_load::Implementation::kDefault) {
+    return false;
+  }
+  if (template_case.template_id == ascir::TemplateId::kIndirectLoadSimt) {
+    return access_info.can_use_simt_structured;
+  }
+  if (template_case.template_id == ascir::TemplateId::kIndirectLoadSimd) {
+    return access_info.can_use_simd_embedding;
+  }
+  return false;
+}
+
+std::string GenerateScoreFunc(const TemplateCase &template_case,
+                              const ascgen_utils::indirect_load::IndirectLoadAccessInfo &access_info) {
+  int32_t score = 0;
+  if (IsEmbeddingFastPathCapable(template_case, access_info)) {
+    int64_t input_slice_bytes = 0L;
+    int64_t lookup_count = 0L;
+    const bool static_cost_inputs = access_info.input_slice_bytes.GetConstValue(input_slice_bytes) &&
+                                    access_info.index_varying_extent.GetConstValue(lookup_count);
+    if (!static_cost_inputs) {
+      // Dynamic sizes still get a positive fast-path score.  With both paths
+      // available the existing candidate order is retained until a runtime
+      // shape-aware model is added.
+      score = kEmbeddingAlternateFastPathScore;
+    } else {
+      const bool simd_preferred = input_slice_bytes >= kEmbeddingSimdPayloadBytesThreshold &&
+                                  lookup_count >= kEmbeddingSimdLookupCountThreshold;
+      if (template_case.template_id == ascir::TemplateId::kIndirectLoadSimd) {
+        score = simd_preferred ? kEmbeddingFastPathScore : kEmbeddingAlternateFastPathScore;
+      } else {
+        score = simd_preferred ? kEmbeddingAlternateFastPathScore : kEmbeddingFastPathScore;
+      }
+    }
+  }
+  return "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
          "  (void)tiling_data;\n"
-         "  return 0;\n"
+         "  return " +
+         std::to_string(score) +
+         ";\n"
          "}\n";
 }
 
@@ -1655,7 +1808,7 @@ af::Status ReduceTaskGraphCount(std::vector<ascir::ImplGraph> &grouped_graphs, c
 Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std::vector<ascir::ImplGraph> &graphs,
                                                    std::vector<std::string> &score_functions) {
   af::AscNodePtr indirect_load;
-  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ValidateSingleIndirectLoadNode(graph, indirect_load));
+  GE_ASSERT_SUCCESS(CollectAndValidateIndirectLoadNodes(graph, indirect_load));
   if (indirect_load == nullptr) {
     return af::SUCCESS;
   }
@@ -1684,8 +1837,10 @@ Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std:
              candidate_indirect_load->GetNamePtr());
       continue;
     }
+    ascgen_utils::indirect_load::IndirectLoadAccessInfo access_info;
+    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetIndirectLoadAccessInfo(candidate_indirect_load, access_info));
     graphs.emplace_back(std::move(candidate_graph));
-    score_functions.emplace_back(GenerateScoreFunc(template_case));
+    score_functions.emplace_back(GenerateScoreFunc(template_case, access_info));
     GELOGI("[IndirectLoad] Add schedule candidate[%d, %d] for node[%s].", static_cast<int32_t>(template_id),
            static_cast<int32_t>(template_case.implementation), candidate_indirect_load->GetNamePtr());
   }

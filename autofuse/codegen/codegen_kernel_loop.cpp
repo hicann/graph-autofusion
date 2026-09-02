@@ -91,7 +91,16 @@ Status ResolveSkippedOutputCall(const ascir::NodeView &node, const std::map<asci
       return af::SUCCESS;
     }
   }
-  if (common_input_call != nullptr && common_input_call->outputs.size() == 1UL) {
+  if (common_input_call == nullptr) {
+    return af::SUCCESS;
+  }
+  if (common_input_call->node != nullptr && IsOps<IndirectLoad>(common_input_call->node)) {
+    const auto result_tensor =
+        ascgen_utils::indirect_load::FindSkippedChainResultTensor(std::dynamic_pointer_cast<af::AscNode>(node));
+    if (result_tensor != af::kIdNone && !call->outputs.empty()) {
+      call->outputs[0].id = result_tensor;
+    }
+  } else if (common_input_call->outputs.size() == 1UL) {
     output_call = common_input_call;
   }
   return af::SUCCESS;

@@ -135,8 +135,9 @@ TemplateBehavior GetBehavior(TemplateRole role) {
       behavior.preserves_vectorized_axis = true;
       break;
     case TemplateRole::kSimtFanoutBranch:
-      behavior.excludes_tiling_group = true;
       behavior.skips_main_schedule_tiling = true;
+      behavior.skips_api_emit = true;
+      behavior.skips_ub_lifecycle = true;
       behavior.uses_direct_gm_pipeline = true;
       behavior.preserves_vectorized_axis = true;
       break;
@@ -155,32 +156,7 @@ TemplateBehavior GetBehavior(TemplateRole role) {
   }
   return behavior;
 }
-}  // namespace
 
-TemplateRole GetTemplateRole(const af::AscNodePtr &node) {
-  return GetAnnotatedTemplateRole(node);
-}
-
-TemplateBehavior GetTemplateBehavior(const af::AscNodePtr &node) {
-  const TemplateRole role = GetTemplateRole(node);
-  TemplateBehavior behavior = GetBehavior(role);
-  if (role == TemplateRole::kSimtOp && GetPostReduceConsumer(node) != nullptr) {
-    behavior = {};
-    behavior.excludes_tiling_group = true;
-  }
-  behavior.skips_input_lifecycle = node != nullptr && af::ops::IsOps<af::ascir_op::IndirectLoad>(node) &&
-                                   ::ascir::GetTemplateIdOrDefault(*node) == ::ascir::TemplateId::kIndirectLoadSimt;
-  return behavior;
-}
-
-af::AscNodePtr GetOnlyOutputConsumer(const af::AscNodePtr &node) {
-  if (node == nullptr || node->GetOutDataNodesSize() != 1UL) {
-    return nullptr;
-  }
-  return std::dynamic_pointer_cast<af::AscNode>(*node->GetOutDataNodes().begin());
-}
-
-namespace {
 struct PostReduceChain {
   af::AscNodePtr input_producer;
   af::AscNodePtr reduce;
@@ -223,6 +199,61 @@ PostReduceChain FindPostReduceChain(const af::AscNodePtr &node) {
 }
 }  // namespace
 
+TemplateRole GetTemplateRole(const af::AscNodePtr &node) {
+  return GetAnnotatedTemplateRole(node);
+}
+
+TemplateBehavior GetTemplateBehavior(const af::AscNodePtr &node) {
+  const TemplateRole role = GetTemplateRole(node);
+  TemplateBehavior behavior = GetBehavior(role);
+  if (role == TemplateRole::kSimtOp && GetPostReduceConsumer(node) != nullptr) {
+    behavior = {};
+    behavior.excludes_tiling_group = true;
+  }
+  behavior.skips_input_lifecycle = node != nullptr && af::ops::IsOps<af::ascir_op::IndirectLoad>(node) &&
+                                   ::ascir::GetTemplateIdOrDefault(*node) == ::ascir::TemplateId::kIndirectLoadSimt;
+  return behavior;
+}
+
+af::AscNodePtr GetOnlyOutputConsumer(const af::AscNodePtr &node) {
+  if (node == nullptr || node->GetOutDataNodesSize() != 1UL) {
+    return nullptr;
+  }
+  return std::dynamic_pointer_cast<af::AscNode>(*node->GetOutDataNodes().begin());
+}
+
+ascir::TensorId FindSkippedChainResultTensor(const af::AscNodePtr &root) {
+  if (root == nullptr || root->outputs().empty()) {
+    return af::kIdNone;
+  }
+  std::vector<af::AscNodePtr> pending{root};
+  std::unordered_set<af::AscNode *> visited;
+  ascir::TensorId result = root->outputs()[0]->attr.mem.tensor_id;
+  for (size_t i = 0UL; i < pending.size(); ++i) {
+    const auto &node = pending[i];
+    if (node == nullptr || !visited.emplace(node.get()).second || node->outputs().empty()) {
+      continue;
+    }
+    result = node->outputs()[0]->attr.mem.tensor_id;
+    bool has_skipped_consumer = false;
+    for (const auto &out_node : node->GetOutDataNodes()) {
+      const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out_node);
+      if (consumer == nullptr) {
+        continue;
+      }
+      const auto behavior = GetTemplateBehavior(consumer);
+      if (behavior.skips_api_emit) {
+        has_skipped_consumer = true;
+        pending.emplace_back(consumer);
+      }
+    }
+    if (!has_skipped_consumer) {
+      return result;
+    }
+  }
+  return result;
+}
+
 af::AscNodePtr GetPostReduceConsumer(const af::AscNodePtr &node) {
   return FindPostReduceChain(node).reduce;
 }
@@ -232,38 +263,6 @@ af::AscNodePtr GetPostReduceInputProducer(const af::AscNodePtr &node) {
 }
 
 bool ShouldSkipTpipeTensorCollection(const af::AscNodePtr &node) {
-  // A SIMT IndirectLoad normally bypasses the TPipe because its direct-GM
-  // chain consumes the value in registers.  With a user fan-out, however,
-  // an ordinary scheduled branch may consume the IndirectLoad result as a
-  // UB tensor (for example through a VectorFunc), so keep that output in the
-  // tensor table for the branch while retaining the direct-GM path.
-  if (node != nullptr && af::ops::IsOps<af::ascir_op::IndirectLoad>(node)) {
-    std::vector<af::AscNodePtr> pending;
-    std::unordered_set<const af::AscNode *> visited;
-    for (const auto &out : node->GetOutDataNodes()) {
-      const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out);
-      if (consumer != nullptr && visited.emplace(consumer.get()).second) {
-        pending.emplace_back(consumer);
-      }
-    }
-    size_t store_count = 0UL;
-    for (size_t i = 0UL; i < pending.size(); ++i) {
-      const auto &current = pending[i];
-      if (af::ops::IsOps<af::ascir_op::Store>(current)) {
-        ++store_count;
-        if (store_count > 1UL) {
-          return false;
-        }
-        continue;
-      }
-      for (const auto &out : current->GetOutDataNodes()) {
-        const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out);
-        if (consumer != nullptr && visited.emplace(consumer.get()).second) {
-          pending.emplace_back(consumer);
-        }
-      }
-    }
-  }
   const TemplateBehavior behavior = GetTemplateBehavior(node);
   const af::AscNodePtr consumer = GetOnlyOutputConsumer(node);
   return (behavior.skips_api_emit || behavior.skips_ub_lifecycle) &&
@@ -337,6 +336,265 @@ af::Status GetTemplateLogicalView(const af::AscNodePtr &node, TemplateLogicalVie
   GE_ASSERT_TRUE(
       IsValidTensorLayout(view.input) && IsValidTensorLayout(view.index) && IsValidLogicalTensorView(view.output),
       "IndirectLoad logical view is missing or invalid, node = %s", node->GetNamePtr());
+  return af::SUCCESS;
+}
+
+af::Status SetIndirectLoadAccessInfo(const af::AscNodePtr &node, const IndirectLoadAccessInfo &info) {
+  GE_ASSERT_NOTNULL(node);
+  auto op_desc = node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kAccessInfoAttr, info), "Set IndirectLoad access info failed, node = %s",
+                 node->GetNamePtr());
+  return af::SUCCESS;
+}
+
+af::Status GetIndirectLoadAccessInfo(const af::AscNodePtr &node, IndirectLoadAccessInfo &info) {
+  GE_ASSERT_NOTNULL(node);
+  auto op_desc = node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  info = op_desc->TryGetExtAttr(kAccessInfoAttr, IndirectLoadAccessInfo{});
+  return af::SUCCESS;
+}
+
+namespace {
+af::Expression ProductFrom(const LogicalTensorView &view, size_t begin) {
+  af::Expression product = af::sym::kSymbolOne;
+  for (size_t index = begin; index < view.sizes.size(); ++index) {
+    product = product * view.sizes[index];
+  }
+  return product;
+}
+
+// Verifies that the suffix after axis_index is contiguous.  When skip_zero_stride is set,
+// zero-stride (broadcast) dimensions are ignored by the stride chain.  has_payload reports
+// whether any suffix dimension carries data; axis_stride receives the dense stride of the
+// axis dimension on success.
+bool IsContiguousSuffixImpl(const LogicalTensorView &view, size_t axis_index, bool skip_zero_stride, bool &has_payload,
+                            af::Expression &axis_stride) {
+  has_payload = false;
+  if (axis_index >= view.sizes.size()) {
+    return false;
+  }
+  af::Expression expected_stride = af::sym::kSymbolOne;
+  for (size_t index = view.sizes.size(); index > axis_index + 1UL; --index) {
+    const size_t dim = index - 1UL;
+    if (skip_zero_stride &&
+        af::SymbolicUtils::StaticCheckEq(view.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      continue;
+    }
+    if (af::SymbolicUtils::StaticCheckEq(view.strides[dim], expected_stride) != af::TriBool::kTrue) {
+      return false;
+    }
+    has_payload = true;
+    expected_stride = expected_stride + (view.sizes[dim] - af::sym::kSymbolOne) * view.strides[dim];
+  }
+  axis_stride = expected_stride;
+  return true;
+}
+
+bool IsContiguousSuffix(const LogicalTensorView &view, size_t axis_index) {
+  bool has_payload = false;
+  af::Expression axis_stride;
+  return IsContiguousSuffixImpl(view, axis_index, false, has_payload, axis_stride);
+}
+
+bool IsContiguousPayloadSuffix(const LogicalTensorView &view, size_t axis_index) {
+  bool has_payload = false;
+  af::Expression axis_stride;
+  return IsContiguousSuffixImpl(view, axis_index, true, has_payload, axis_stride);
+}
+
+bool HasZeroStrideOnInputPayload(const LogicalTensorView &input, const LogicalTensorView &index, size_t axis_index) {
+  bool has_payload = false;
+  af::Expression axis_stride;
+  if (input.sizes.size() != index.sizes.size() ||
+      !IsContiguousSuffixImpl(input, axis_index, true, has_payload, axis_stride)) {
+    return false;
+  }
+  if (!has_payload) {
+    return false;
+  }
+  for (size_t dim = axis_index + 1UL; dim < input.sizes.size(); ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(input.strides[dim], af::sym::kSymbolZero) != af::TriBool::kTrue &&
+        af::SymbolicUtils::StaticCheckEq(index.strides[dim], af::sym::kSymbolZero) != af::TriBool::kTrue) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsPayloadInvariantView(const af::AscTensorAttr &source_attr, const LogicalTensorView &input,
+                            const LogicalTensorView &index, size_t axis_index) {
+  if (source_attr.axis.size() != source_attr.repeats.size() || source_attr.axis.size() != source_attr.strides.size()) {
+    return false;
+  }
+  for (size_t dim = axis_index + 1UL; dim < index.axis_ids.size(); ++dim) {
+    // Only dimensions that carry the gathered payload need an invariant index.
+    // Other dimensions may legitimately enumerate independent lookups (for
+    // example the sequence axis in [B, D, S] embedding views).
+    if (af::SymbolicUtils::StaticCheckEq(input.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      continue;
+    }
+    const auto source_axis = std::find(source_attr.axis.begin(), source_attr.axis.end(), index.axis_ids[dim]);
+    if (source_axis == source_attr.axis.end()) {
+      return false;
+    }
+    const size_t source_dim = static_cast<size_t>(std::distance(source_attr.axis.begin(), source_axis));
+    const auto &source_size = source_attr.repeats[source_dim];
+    const auto &source_stride = source_attr.strides[source_dim];
+    if (af::SymbolicUtils::StaticCheckEq(source_stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      continue;
+    }
+    if (af::SymbolicUtils::StaticCheckGt(source_size, af::sym::kSymbolOne) != af::TriBool::kFalse) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsIndexPayloadInvariantFromSources(const af::AscNodePtr &indirect_load, const LogicalTensorView &input,
+                                        const LogicalTensorView &index, size_t axis_index) {
+  const af::AscNodePtr root = GetInputProducer(indirect_load, kIndexTensorIndex);
+  if (root == nullptr) {
+    return false;
+  }
+  std::vector<af::AscNodePtr> pending{root};
+  std::unordered_set<const af::AscNode *> visited;
+  bool saw_source = false;
+  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
+    const af::AscNodePtr node = pending[cursor];
+    if (node == nullptr || !visited.emplace(node.get()).second) {
+      continue;
+    }
+    if (af::ops::IsOps<af::ascir_op::Scalar>(node) || af::ops::IsOps<af::ascir_op::ScalarData>(node)) {
+      continue;
+    }
+    if (af::ops::IsOps<af::ascir_op::Load>(node)) {
+      const auto outputs = node->outputs();
+      if (outputs.empty() || outputs.front() == nullptr ||
+          !IsPayloadInvariantView(outputs.front()->attr, input, index, axis_index)) {
+        return false;
+      }
+      saw_source = true;
+      continue;
+    }
+    if (af::ops::IsOps<af::ascir_op::Data>(node)) {
+      const auto outputs = node->outputs();
+      if (!outputs.empty() && outputs.front() != nullptr && !outputs.front()->attr.axis.empty()) {
+        if (!IsPayloadInvariantView(outputs.front()->attr, input, index, axis_index)) {
+          return false;
+        }
+        saw_source = true;
+      }
+      continue;
+    }
+    if (af::ops::IsOps<af::ascir_op::IndirectLoad>(node)) {
+      return false;
+    }
+    for (size_t input_index = 0UL; input_index < node->inputs.Size(); ++input_index) {
+      pending.emplace_back(GetInputProducer(node, input_index));
+    }
+  }
+  return saw_source;
+}
+
+bool IsSimdEmbeddingAccess(const TemplateLogicalView &logical_view, const IndirectLoadAccessInfo &info) {
+  const size_t rank = logical_view.input.sizes.size();
+  if (info.kind != IndirectLoadAccessInfo::Kind::kEmbeddingLike || rank < 2UL ||
+      logical_view.index.sizes.size() != rank || logical_view.output.sizes.size() != rank || info.axis < 0L ||
+      static_cast<size_t>(info.axis + 1L) >= rank) {
+    return false;
+  }
+  const auto &input = logical_view.input;
+  const auto &index = logical_view.index;
+  const auto &output = logical_view.output;
+  const size_t axis = static_cast<size_t>(info.axis);
+  for (size_t dim = 0UL; dim < rank; ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(index.sizes[dim], output.sizes[dim]) != af::TriBool::kTrue) {
+      return false;
+    }
+  }
+  bool has_payload = false;
+  af::Expression input_axis_stride;
+  if (!IsContiguousSuffixImpl(input, axis, false, has_payload, input_axis_stride)) {
+    return false;
+  }
+  for (size_t dim = axis + 1UL; dim < rank; ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(input.sizes[dim], output.sizes[dim]) != af::TriBool::kTrue) {
+      return false;
+    }
+  }
+  if (af::SymbolicUtils::StaticCheckEq(input.strides[axis], input_axis_stride) != af::TriBool::kTrue) {
+    return false;
+  }
+  for (size_t dim = 0UL; dim < axis; ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(input.strides[dim], af::sym::kSymbolZero) != af::TriBool::kTrue &&
+        af::SymbolicUtils::StaticCheckEq(input.sizes[dim], output.sizes[dim]) != af::TriBool::kTrue) {
+      return false;
+    }
+  }
+  return af::SymbolicUtils::StaticCheckGt(input.strides[axis], af::sym::kSymbolZero) == af::TriBool::kTrue;
+}
+}  // namespace
+
+af::Status AnalyzeIndirectLoadAccess(const af::AscNodePtr &node, const TemplateLogicalView &logical_view,
+                                     IndirectLoadAccessInfo &info) {
+  GE_ASSERT_NOTNULL(node);
+  const auto &input = logical_view.input;
+  const auto &index = logical_view.index;
+  const auto &output = logical_view.output;
+  GE_ASSERT_TRUE(input.sizes.size() == index.sizes.size() && input.sizes.size() == output.sizes.size(),
+                 "IndirectLoad access analysis rank mismatch.");
+  const size_t rank = input.sizes.size();
+  const auto *ir_attr = node->attr.ir_attr == nullptr
+                            ? nullptr
+                            : node->attr.ir_attr->DownCastTo<af::ascir_op::IndirectLoad::AscIndirectLoadIrAttrDef>();
+  GE_ASSERT_NOTNULL(ir_attr, "IndirectLoad access analysis axis attribute is missing.");
+  int64_t axis = 0L;
+  GE_ASSERT_SUCCESS(ir_attr->GetAxis(axis));
+  GE_ASSERT_TRUE(axis >= -static_cast<int64_t>(rank) && axis < static_cast<int64_t>(rank),
+                 "IndirectLoad access analysis axis is invalid.");
+  const size_t axis_index = static_cast<size_t>(axis < 0L ? axis + static_cast<int64_t>(rank) : axis);
+
+  info = {};
+  info.axis = static_cast<int64_t>(axis_index);
+  const af::Expression input_inner_span = ProductFrom(input, axis_index + 1UL);
+  const auto indirect_load_inputs = node->inputs();
+  GE_ASSERT_TRUE(indirect_load_inputs.size() > kInputTensorIndex, "IndirectLoad access analysis input is missing.");
+  const af::Expression dtype_bytes =
+      af::Symbol(af::GetSizeByDataType(indirect_load_inputs[kInputTensorIndex]->attr.dtype));
+  info.input_slice_bytes = input_inner_span * dtype_bytes;
+  info.index_varying_extent = af::sym::kSymbolOne;
+  for (size_t dim = 0UL; dim < rank; ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(index.strides[dim], af::sym::kSymbolZero) != af::TriBool::kTrue) {
+      info.index_varying_extent = info.index_varying_extent * index.sizes[dim];
+    }
+  }
+  // The index is invariant on the payload axes when proven from IL's view or from source
+  // Load/Data views reached through the x2 producer subgraph (pointwise outputs can be
+  // dense even when their values repeat along a payload axis).
+  const bool index_has_zero_stride_on_inner_axes = HasZeroStrideOnInputPayload(input, index, axis_index) ||
+                                                   IsIndexPayloadInvariantFromSources(node, input, index, axis_index);
+  const bool input_axis_stride_is_positive =
+      af::SymbolicUtils::StaticCheckGt(input.strides[axis_index], af::sym::kSymbolZero) == af::TriBool::kTrue;
+  // An Embedding-like access must have a non-empty payload suffix after the
+  // gather axis.  Without this guard, a last-axis gather vacuously satisfies
+  // the zero-stride/contiguous-payload checks and is misclassified as
+  // Embedding-like, although it has no payload to copy as a unit.  The suffix
+  // must also carry real data: when every suffix dimension of the input is
+  // zero-stride (broadcast), the payload-invariance proof is vacuous and the
+  // index may legitimately vary along the inner axes, which the Embedding
+  // address policy cannot express.
+  bool input_suffix_has_payload = false;
+  af::Expression input_axis_dense_stride;
+  IsContiguousSuffixImpl(input, axis_index, true, input_suffix_has_payload, input_axis_dense_stride);
+  const bool has_payload_suffix = axis_index + 1UL < rank && input_suffix_has_payload;
+  const bool embedding_like = has_payload_suffix && index_has_zero_stride_on_inner_axes &&
+                              IsContiguousPayloadSuffix(input, axis_index) && IsContiguousSuffix(output, axis_index) &&
+                              input_axis_stride_is_positive;
+  info.kind = embedding_like ? IndirectLoadAccessInfo::Kind::kEmbeddingLike : IndirectLoadAccessInfo::Kind::kGeneric;
+  info.can_use_simt_structured = embedding_like;
+  info.can_use_simd_embedding = IsSimdEmbeddingAccess(logical_view, info);
   return af::SUCCESS;
 }
 

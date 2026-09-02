@@ -2304,6 +2304,18 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
                           "Codegen parse workspace tensor failed");
         kernel.has_workspace_node = true;
       } else if (IsOps<Store>(node)) {
+        if (ascgen_utils::indirect_load::ShouldSkipTpipeTensorCollection(node)) {
+          // Skipped Store still needs a GM tensor entry for the downstream Output binding.
+          std::string dtype_name;
+          GE_CHK_STATUS_RET(Tensor::DtypeName(output->attr.dtype, dtype_name), "Codegen get output dtype failed");
+          Tensor gm_output(*output, dtype_name, tensor_name);
+          gm_output.alloc_type = af::AllocType::kAllocTypeGlobal;
+          gm_output.position = af::Position::kPositionGM;
+          gm_output.que_id = af::kIdNone;
+          GE_CHK_STATUS_RET(gm_output.Init(), "Codegen init direct-GM output tensor failed");
+          GE_CHK_STATUS_RET(kernel.tpipe.AddTensor(gm_output), "Codegen add direct-GM output tensor failed");
+          continue;
+        }
         // 1. 多个Store节点写同一个Output的不同offset场景
         // 2. 多个schedule group之间通过workspace承接输出
         if (kernel.tpipe.tensors.find(output->attr.mem.tensor_id) == kernel.tpipe.tensors.cend()) {

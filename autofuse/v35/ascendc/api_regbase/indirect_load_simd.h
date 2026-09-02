@@ -327,29 +327,158 @@ __aicore__ inline void IndirectLoadSimdDenseImpl(const LocalTensor<X> &x, const 
                                                             shape_args...);
 }
 
-template <typename X, typename Index, int32_t Rank, int32_t Axis>
-__aicore__ inline bool TryIndirectLoadSimdEmbedding(const LocalTensor<X> &x, const LocalTensor<Index> &index,
-                                                    const LocalTensor<X> &y, uint32_t actual_size,
-                                                    int64_t output_offset, const int64_t (&shape)[3 * Rank]) {
-  if constexpr (Rank == 2 && Axis == 0 && (std::is_same_v<Index, int32_t> || std::is_same_v<Index, int64_t>) &&
-                sizeof(X) <= AscendC::ONE_BLK_SIZE) {
-    const int64_t embedding_size = shape[1];
-    const int64_t block_elements = static_cast<int64_t>(AscendC::ONE_BLK_SIZE / sizeof(X));
-    const int64_t input_row_stride = shape[2];
-    const int64_t index_row_stride = shape[4];
-    const bool full_rows = embedding_size > 0 && embedding_size % block_elements == 0 && shape[2] == embedding_size &&
-                           shape[3] == 1 && index_row_stride > 0 && shape[5] == 0 &&
-                           output_offset % embedding_size == 0 && actual_size % embedding_size == 0;
-    if (full_rows) {
-      const int64_t first_row = output_offset / embedding_size;
-      const uint32_t row_count = actual_size / static_cast<uint32_t>(embedding_size);
-      for (uint32_t row = 0; row < row_count; ++row) {
-        const int64_t index_value = static_cast<int64_t>(index.GetValue((first_row + row) * index_row_stride));
-        const int64_t source_offset = index_value * input_row_stride;
-        AscendC::DataCopy(y[row * embedding_size], x[source_offset], static_cast<uint32_t>(embedding_size));
-      }
-      return true;
+template <typename X>
+__aicore__ inline void IndirectLoadSimdCopyUnaligned(__ubuf__ X *dst, __ubuf__ X *src, uint32_t count) {
+  constexpr uint32_t elements_per_vector = VECTOR_REG_WIDTH / sizeof(X);
+  for (uint32_t offset = 0U; offset < count; offset += elements_per_vector) {
+    const uint32_t copy_count = (count - offset < elements_per_vector) ? count - offset : elements_per_vector;
+    __VEC_SCOPE__ {
+      MicroAPI::UnalignReg src_unalign;
+      MicroAPI::UnalignReg dst_unalign;
+      MicroAPI::RegTensor<X> value;
+      __ubuf__ X *src_ptr = src + offset;
+      __ubuf__ X *dst_ptr = dst + offset;
+      MicroAPI::DataCopyUnAlignPre(src_unalign, src_ptr);
+      MicroAPI::DataCopyUnAlign(value, src_unalign, src_ptr, copy_count);
+      MicroAPI::DataCopyUnAlign(dst_ptr, value, dst_unalign, copy_count);
+      MicroAPI::DataCopyUnAlignPost(dst_ptr, dst_unalign, 0);
     }
+  }
+}
+
+template <typename X>
+__aicore__ inline void IndirectLoadSimdCopyContiguous(const LocalTensor<X> &dst_tensor,
+                                                      const LocalTensor<X> &src_tensor, uint32_t count,
+                                                      int64_t source_offset, int64_t output_offset) {
+  const int64_t block_elements = static_cast<int64_t>(AscendC::ONE_BLK_SIZE / sizeof(X));
+  if (count == 0U || block_elements <= 0) {
+    return;
+  }
+  const int64_t source_alignment = source_offset % block_elements;
+  const int64_t output_alignment = output_offset % block_elements;
+  const bool can_align_block = source_alignment == output_alignment;
+  uint32_t head = 0U;
+  if (can_align_block) {
+    head = static_cast<uint32_t>((block_elements - source_alignment) % block_elements);
+    if (head > count) {
+      head = count;
+    }
+  }
+  __ubuf__ X *dst = (__ubuf__ X *)dst_tensor.GetPhyAddr() + output_offset;
+  __ubuf__ X *src = (__ubuf__ X *)src_tensor.GetPhyAddr() + source_offset;
+  IndirectLoadSimdCopyUnaligned<X>(dst, src, head);
+  const uint32_t aligned_count =
+      ((count - head) / static_cast<uint32_t>(block_elements)) * static_cast<uint32_t>(block_elements);
+  const bool block_addresses_aligned = ((source_offset + static_cast<int64_t>(head)) % block_elements == 0) &&
+                                       ((output_offset + static_cast<int64_t>(head)) % block_elements == 0);
+  if (aligned_count != 0U && block_addresses_aligned) {
+    AscendC::DataCopy(dst_tensor[output_offset + head], src_tensor[source_offset + head], aligned_count);
+  } else {
+    IndirectLoadSimdCopyUnaligned<X>(dst + head, src + head, aligned_count);
+  }
+  IndirectLoadSimdCopyUnaligned<X>(dst + head + aligned_count, src + head + aligned_count,
+                                   count - head - aligned_count);
+}
+
+template <typename X, typename Index, int32_t Rank, int32_t Axis, typename... ShapeArgs>
+__aicore__ inline bool TryIndirectLoadSimdEmbedding(const LocalTensor<X> &x, const LocalTensor<Index> &index,
+                                                    const LocalTensor<X> &y, uint32_t logical_size,
+                                                    int64_t output_offset, ShapeArgs... shape_args) {
+  static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(4 * Rank), "IndirectLoad SIMD Embedding shape is invalid.");
+  if constexpr (Rank > 1 && Axis >= 0 && Axis + 1 < Rank &&
+                (std::is_same_v<Index, int32_t> || std::is_same_v<Index, int64_t>) &&
+                sizeof(X) <= AscendC::ONE_BLK_SIZE) {
+    const int64_t shape[] = {static_cast<int64_t>(shape_args)...};
+    const int32_t input_stride_base = Rank;
+    const int32_t index_stride_base = 2 * Rank;
+    const int32_t output_stride_base = 3 * Rank;
+    int64_t payload_span = 1;
+    int64_t expected_input_stride = 1;
+    for (int32_t dim = Rank - 1; dim > Axis; --dim) {
+      if (shape[dim] <= 0 || shape[index_stride_base + dim] != 0 ||
+          shape[input_stride_base + dim] != expected_input_stride) {
+        return false;
+      }
+      payload_span *= shape[dim];
+      expected_input_stride *= shape[dim];
+    }
+    if (payload_span <= 0 || shape[input_stride_base + Axis] != expected_input_stride || output_offset < 0 ||
+        shape[output_stride_base + Axis] < payload_span) {
+      return false;
+    }
+    const int64_t output_slice_span = shape[Axis] * payload_span;
+    if (shape[Axis] <= 0 || output_slice_span <= 0) {
+      return false;
+    }
+    int64_t outer_index = output_offset / output_slice_span;
+    int64_t input_outer_base = 0;
+    for (int32_t dim = Axis - 1; dim >= 0; --dim) {
+      if (shape[dim] <= 0) {
+        return false;
+      }
+      if (shape[index_stride_base + dim] != 0) {
+        // The index source is compacted into UB by the producer-side copy.  This
+        // fast path only supports one index row per local tile; varying outer
+        // index dimensions require the general strided implementation.
+        return false;
+      }
+      const int64_t coordinate = outer_index % shape[dim];
+      outer_index /= shape[dim];
+      input_outer_base += coordinate * shape[input_stride_base + dim];
+    }
+
+    uint32_t copied = 0U;
+    int64_t output_local_offset = 0;
+    while (copied < logical_size) {
+      const int64_t output_index = output_offset + static_cast<int64_t>(copied);
+      const int64_t payload_offset = output_index % payload_span;
+      int64_t lookup_index = output_index / payload_span;
+      int64_t index_axis_coordinate = 0;
+      int64_t input_offset = -input_outer_base;
+      for (int32_t dim = Axis; dim >= 0; --dim) {
+        if (shape[dim] <= 0) {
+          return false;
+        }
+        const int64_t coordinate = lookup_index % shape[dim];
+        lookup_index /= shape[dim];
+        if (dim == Axis) {
+          index_axis_coordinate = coordinate;
+        }
+        if (dim != Axis) {
+          input_offset += coordinate * shape[input_stride_base + dim];
+        }
+      }
+      const int64_t index_value = static_cast<int64_t>(index.GetValue(index_axis_coordinate));
+      const int64_t source_offset = index_value * shape[input_stride_base + Axis] + input_offset + payload_offset;
+      const int64_t payload_remaining = payload_span - payload_offset;
+      const uint32_t copy_count = static_cast<uint32_t>(
+          (static_cast<int64_t>(logical_size - copied) < payload_remaining) ? logical_size - copied
+                                                                            : payload_remaining);
+      if constexpr (Axis == 0) {
+        // With axis 0 there are no outer coordinates.  The destination offset
+        // can therefore be advanced directly across payload slices.
+        IndirectLoadSimdCopyContiguous<X>(y, x, copy_count, source_offset, output_local_offset);
+        copied += copy_count;
+        output_local_offset += copy_count;
+        if (static_cast<int64_t>(copy_count) == payload_remaining && copied < logical_size) {
+          output_local_offset += shape[output_stride_base + Axis] - payload_span;
+        }
+      } else {
+        int64_t output_coordinate = output_index;
+        int64_t output_base = output_offset;
+        output_local_offset = 0;
+        for (int32_t dim = Rank - 1; dim >= 0; --dim) {
+          const int64_t coordinate = output_coordinate % shape[dim];
+          const int64_t base_coordinate = output_base % shape[dim];
+          output_coordinate /= shape[dim];
+          output_base /= shape[dim];
+          output_local_offset += (coordinate - base_coordinate) * shape[output_stride_base + dim];
+        }
+        IndirectLoadSimdCopyContiguous<X>(y, x, copy_count, source_offset, output_local_offset);
+        copied += copy_count;
+      }
+    }
+    return true;
   }
   return false;
 }
