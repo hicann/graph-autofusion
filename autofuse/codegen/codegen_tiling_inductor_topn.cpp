@@ -289,9 +289,11 @@ void TilingLib::GenMultiGroupPerfAggregation(std::stringstream &ss,
   ss << "  uint32_t cur_block = 0;" << std::endl;
   ss << "  uint32_t limited_block = tiling_data.get_block_dim();" << std::endl;
   bool first_result = true;
+  bool all_results_empty = true;
   for (size_t asc_graph_id = 0; asc_graph_id < node_results.size(); ++asc_graph_id) {
     const auto &scheduled_results = node_results[asc_graph_id];
     for (size_t result_id = 0; result_id < scheduled_results.size(); ++result_id) {
+      all_results_empty = false;
       if (first_result) {
         ss << "  if (tiling_data.get_graph" << asc_graph_id << "_tiling_key() == " << result_id << ") {" << std::endl;
         first_result = false;
@@ -301,7 +303,7 @@ void TilingLib::GenMultiGroupPerfAggregation(std::stringstream &ss,
       }
       GenGroupPerfForScheduleResult(ss, asc_graph_id, result_id, scheduled_results[result_id]);
     }
-    if (!scheduled_results.empty()) {
+    if ((!all_results_empty) && (asc_graph_id == node_results.size() - 1)) {
       ss << "  }" << std::endl;
     }
   }
