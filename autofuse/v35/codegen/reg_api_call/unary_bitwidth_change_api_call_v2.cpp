@@ -9,6 +9,7 @@
  */
 #include "unary_bitwidth_change_api_call_v2.h"
 
+#include <memory>
 #include <sstream>
 #include "attr_utils.h"
 #include "ascir_ops.h"
@@ -18,6 +19,7 @@
 #include "common/checker.h"
 #include "api_call/utils/api_call_factory.h"
 #include "api_call/utils/api_call_utils.h"
+#include "ascir_node_param/ascir_node_param.h"
 #include "codegen/expression_convert_struct.h"
 #include "reg_api_call_utils.h"
 namespace codegen {
@@ -25,6 +27,39 @@ using namespace std;
 using namespace af::ops;
 using namespace af::ascir_op;
 using namespace ascgen_utils;
+
+namespace {
+constexpr const char *kAscirNodeParams = "AscirNodeParams";
+
+af::Status FillUnaryBitWidthChangeNodeParams(const af::AscNodePtr &node, const ApiLoopParams &param,
+                                             const VectorizedAxisLoopMergeStatus &merge_info) {
+  GE_ASSERT_NOTNULL(node);
+  auto params = ascir_param::GetOrCreateAscirNodeParams(node);
+
+  auto *unary_params = std::get_if<ascir_param::UnaryBitWidthChangeNodeParams>(&params->specific_params);
+  if (unary_params == nullptr) {
+    params->specific_params = ascir_param::UnaryBitWidthChangeNodeParams{};
+    unary_params = std::get_if<ascir_param::UnaryBitWidthChangeNodeParams>(&params->specific_params);
+  }
+  GE_ASSERT_NOTNULL(unary_params, "Unary bitwidth change specific params is null, node[%s].", node->GetNamePtr());
+  params->api_name = node->GetType();
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+
+  *unary_params = ascir_param::UnaryBitWidthChangeNodeParams{};
+  unary_params->valid = true;
+  unary_params->cal_count = param.cal_count;
+  if (!param.inputs_strides.empty()) {
+    unary_params->input_strides = param.inputs_strides[0];
+  }
+  if (!param.outputs_strides.empty()) {
+    unary_params->output_strides = param.outputs_strides[0];
+  }
+  if (!merge_info.merge_repeats.empty()) {
+    unary_params->outer_repeats.assign(merge_info.merge_repeats.begin(), merge_info.merge_repeats.end() - 1);
+  }
+  return af::SUCCESS;
+}
+}  // namespace
 
 Status UnaryBitWidthChangeApiCallV2::Generate(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis,
                                               const std::vector<std::reference_wrapper<const Tensor>> &inputs,
@@ -47,6 +82,7 @@ Status UnaryBitWidthChangeApiCallV2::Generate(const TPipe &tpipe, const std::vec
   bool status = GenerateVectorizedAxisMergeStatus(ub_inputs, ub_outputs, merge_info, tpipe);
   GE_ASSERT_TRUE(status, "GenerateVectorizedAxisMergeStatus failed");
   SaveApiLoopAxisParams(merge_info, param);
+  GE_ASSERT_SUCCESS(FillUnaryBitWidthChangeNodeParams(this->node, param, merge_info));
   if (param.outer_repeats.size() == 0) {
     ss << this->api_name_ << "(" << y << "_cast[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x
        << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, x) << "], "

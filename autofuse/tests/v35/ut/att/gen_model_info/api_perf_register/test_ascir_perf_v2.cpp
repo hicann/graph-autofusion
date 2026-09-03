@@ -54,6 +54,18 @@ class UTestAscirPerfV2 : public ::testing::Test {
 };
 ge::RuntimeStubV2 UTestAscirPerfV2::stub_v_2;
 
+TEST_F(UTestAscirPerfV2, IsFiniteUsesFixedMaxLatency) {
+  NodeDetail node_info;
+  node_info.input_dtype = {kFloat32};
+  node_info.output_dtype = {kBool};
+  node_info.input_dims = {CreateExpr(64)};
+  node_info.output_dims = {CreateExpr(64)};
+  PerfOutputInfo perf;
+
+  ASSERT_EQ(ascendcperf_v2::IsFinitePerf(node_info, perf), af::SUCCESS);
+  EXPECT_EQ(Str(perf.pipe_res[PipeType::AIV_VEC]), "44");
+}
+
 void SetSingleReduceSpecificParams(NodeInfo &node) {
   auto &params = node.reduce_specific_params;
   params.canonical_params.valid = true;
@@ -75,6 +87,130 @@ att::TensorShapeInfo MakeCastShape(const std::string &data_type, const Expr &dim
   shape.strides = {CreateExpr(1)};
   shape.gm_strides = shape.strides;
   return shape;
+}
+
+std::string GetUnaryPerfExpr(const std::string &api_name, const std::string &input_dtype,
+                             const std::string &output_dtype, const Expr &dim) {
+  auto api = ApiPerfFactory::Instance().Create(api_name);
+  EXPECT_NE(api, nullptr);
+  NodeDetail node_info;
+  node_info.input_dtype = {input_dtype};
+  node_info.output_dtype = {output_dtype};
+  node_info.input_dims = {dim};
+  node_info.output_dims = {dim};
+  node_info.unary_bitwidth_change_node_params.valid = true;
+  node_info.unary_bitwidth_change_node_params.cal_count = dim;
+  node_info.unary_bitwidth_change_node_params.outer_repeats = {CreateExpr(1)};
+  PerfOutputInfo perf_res;
+  if (api_name == kIsnan) {
+    EXPECT_EQ(ascendcperf_v2::IsNanPerf(node_info, perf_res), af::SUCCESS);
+  } else {
+    EXPECT_EQ(ascendcperf_v2::IsFinitePerf(node_info, perf_res), af::SUCCESS);
+  }
+  return Str(perf_res.pipe_res[PipeType::AIV_VEC]);
+}
+
+struct TransposePerfResult {
+  std::string pipe_expr;
+  std::string ternary_expr;
+};
+
+TransposePerfResult GetTransposePerfExpr(uint32_t total_dim, uint32_t inner_dim, const std::vector<Expr> &output_dims,
+                                         const std::vector<Expr> &outer_loop_axes,
+                                         const std::vector<Expr> &input_strides, bool valid = true) {
+  auto api = ApiPerfFactory::Instance().Create("TransposeV2");
+  EXPECT_NE(api, nullptr);
+  NodeDetail node_info;
+  node_info.input_dtype = {kFloat16};
+  node_info.input_dims = output_dims;
+  node_info.transpose_node_params.valid = valid;
+  node_info.transpose_node_params.total_dim = total_dim;
+  node_info.transpose_node_params.inner_dim = inner_dim;
+  node_info.transpose_node_params.output_dims = output_dims;
+  node_info.transpose_node_params.outer_loop_axes = outer_loop_axes;
+  node_info.transpose_node_params.input_strides = input_strides;
+  PerfOutputInfo perf_res;
+  EXPECT_EQ(ascendcperf_v2::TransposePerf(node_info, perf_res), af::SUCCESS);
+
+  std::string ternary_expr;
+  if (!perf_res.ternary_ops.empty()) {
+    const auto &ternary = perf_res.ternary_ops.begin()->second;
+    ternary_expr = ternary.GetTernaryOpStr();
+  }
+  return {Str(perf_res.pipe_res[PipeType::AIV_VEC]), ternary_expr};
+}
+
+TEST_F(UTestAscirPerfV2, IsNanPerfUsesFloat32BoolFormula) {
+  EXPECT_EQ(GetUnaryPerfExpr(kIsnan, kFloat32, kBool, CreateExpr(64)), "52");
+}
+
+TEST_F(UTestAscirPerfV2, IsNanPerfUsesFloat16BoolFormula) {
+  EXPECT_EQ(GetUnaryPerfExpr(kIsnan, kFloat16, kBool, CreateExpr(64)), "50");
+}
+
+TEST_F(UTestAscirPerfV2, IsNanPerfUsesNonBoolOutputFormula) {
+  EXPECT_EQ(GetUnaryPerfExpr(kIsnan, kFloat32, kFloat32, CreateExpr(64)), "48");
+}
+
+TEST_F(UTestAscirPerfV2, IsFinitePerfUsesFloat16BoolFormula) {
+  EXPECT_EQ(GetUnaryPerfExpr(kIsFinite, kFloat16, kBool, CreateExpr(64)), "42");
+}
+
+TEST_F(UTestAscirPerfV2, IsFinitePerfUsesNonBoolOutputFormula) {
+  EXPECT_EQ(GetUnaryPerfExpr(kIsFinite, kFloat32, kFloat32, CreateExpr(64)), "40");
+}
+
+TEST_F(UTestAscirPerfV2, TransposePerfUsesDim2Inner1Formula) {
+  const auto result =
+      GetTransposePerfExpr(2, 1, {CreateExpr(2), CreateExpr(64)}, {CreateExpr(3)}, {CreateExpr(64), CreateExpr(1)});
+  EXPECT_EQ(result.pipe_expr, "(((4 * transpose_stride_count) + 94) * 3)");
+}
+
+TEST_F(UTestAscirPerfV2, TransposePerfUsesDim3Inner1Formula) {
+  const auto result = GetTransposePerfExpr(3, 1, {CreateExpr(2), CreateExpr(3), CreateExpr(64)}, {CreateExpr(4)},
+                                           {CreateExpr(192), CreateExpr(64), CreateExpr(1)});
+  EXPECT_EQ(result.pipe_expr, "(((12 * transpose_stride_count) + 98) * 4)");
+}
+
+TEST_F(UTestAscirPerfV2, TransposePerfUsesDim3Inner2Formula) {
+  const auto result = GetTransposePerfExpr(3, 2, {CreateExpr(2), CreateExpr(3), CreateExpr(64)}, {CreateExpr(4)},
+                                           {CreateExpr(192), CreateExpr(64), CreateExpr(1)});
+  EXPECT_EQ(result.pipe_expr, "(((8 * transpose_stride_count) + 225) * 4)");
+}
+
+TEST_F(UTestAscirPerfV2, TransposePerfUsesDim4Inner1Formula) {
+  const auto result =
+      GetTransposePerfExpr(4, 1, {CreateExpr(2), CreateExpr(2), CreateExpr(2), CreateExpr(64)}, {CreateExpr(3)},
+                           {CreateExpr(256), CreateExpr(128), CreateExpr(64), CreateExpr(1)});
+  EXPECT_EQ(result.pipe_expr, "(((16 * transpose_stride_count) + 100) * 3)");
+}
+
+TEST_F(UTestAscirPerfV2, TransposePerfUsesDim4Inner2Formula) {
+  const auto result =
+      GetTransposePerfExpr(4, 2, {CreateExpr(2), CreateExpr(2), CreateExpr(2), CreateExpr(64)}, {CreateExpr(3)},
+                           {CreateExpr(256), CreateExpr(128), CreateExpr(64), CreateExpr(1)});
+  EXPECT_EQ(result.pipe_expr, "(((8 * transpose_stride_count) + 208) * 3)");
+}
+
+TEST_F(UTestAscirPerfV2, TransposePerfUsesDim4Inner3Formula) {
+  const auto result =
+      GetTransposePerfExpr(4, 3, {CreateExpr(2), CreateExpr(2), CreateExpr(2), CreateExpr(64)}, {CreateExpr(3)},
+                           {CreateExpr(256), CreateExpr(128), CreateExpr(64), CreateExpr(1)});
+  EXPECT_EQ(result.pipe_expr, "((((1 + transpose_stride_count) * 4) + 442) * 3)");
+}
+
+TEST_F(UTestAscirPerfV2, TransposePerfUsesGenericFormulaAndStrideTernary) {
+  const auto result = GetTransposePerfExpr(
+      5, 4, {CreateExpr(1), CreateExpr(1), CreateExpr(1), CreateExpr(1), CreateExpr(64)}, {},
+      {CreateExpr(256), CreateExpr(128), CreateExpr(64), CreateExpr(32), CreateExpr("transpose_stride")});
+  EXPECT_EQ(result.pipe_expr, "(22 + transpose_stride_count)");
+  EXPECT_EQ(result.ternary_expr, "TernaryOp(IsEqual(Mod(transpose_stride, 64), 0), 64, Mod(transpose_stride, 64))");
+}
+
+TEST_F(UTestAscirPerfV2, TransposePerfFallsBackToUnitVectorWhenParamsInvalid) {
+  const auto result = GetTransposePerfExpr(1, 1, {CreateExpr(64)}, {}, {CreateExpr(1)}, false);
+  EXPECT_EQ(result.pipe_expr, "20");
+  EXPECT_TRUE(result.ternary_expr.empty());
 }
 
 std::string GetCastPerfExpr(const std::string &input_dtype, const std::string &output_dtype,
@@ -2444,7 +2580,7 @@ TEST_F(UTestAscirPerfV2, TestPowV2) {
   pow_v2_perf(input_shapes, output_shapes, node, perf_res);
   Expr res = perf_res.pipe_res[PipeType::AIV_VEC];
   std::cout << Str(res) << std::endl;
-  EXPECT_EQ(Str(res), "301");
+  EXPECT_EQ(Str(res), "307");
 }
 
 TEST_F(UTestAscirPerfV2, TestErfV2) {

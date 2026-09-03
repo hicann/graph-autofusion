@@ -101,8 +101,27 @@ struct WhereNodeParams {
   std::vector<ge::Expression> input_strides;
 };
 
-using AnySpecificParams = std::variant<std::monostate, ReduceNodeParams, VectorFuncNodeParams, CastNodeParams,
-                                       CompareNodeParams, WhereNodeParams>;
+struct UnaryBitWidthChangeNodeParams {
+  bool valid{false};
+  ge::Expression cal_count{ge::Symbol(1U)};
+  std::vector<ge::Expression> outer_repeats;
+  std::vector<ge::Expression> output_strides;
+  std::vector<ge::Expression> input_strides;
+};
+
+struct TransposeNodeParams {
+  bool valid{false};
+  uint32_t inner_dim{0U};
+  uint32_t total_dim{0U};
+  std::vector<ge::Expression> outer_loop_axes;
+  std::vector<ge::Expression> output_dims;
+  std::vector<ge::Expression> input_strides;
+  std::vector<ge::Expression> output_strides;
+};
+
+using AnySpecificParams =
+    std::variant<std::monostate, ReduceNodeParams, VectorFuncNodeParams, CastNodeParams, CompareNodeParams,
+                 WhereNodeParams, UnaryBitWidthChangeNodeParams, TransposeNodeParams>;
 
 struct AscirNodeParams {
   // 扩展属性载荷版本，用于后续兼容。

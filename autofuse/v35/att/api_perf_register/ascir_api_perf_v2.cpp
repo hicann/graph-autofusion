@@ -520,6 +520,36 @@ af::Status FloorDivApi([[maybe_unused]] const std::vector<TensorShapeInfo> &inpu
   GE_ASSERT_SUCCESS(ascendcperf_v2::FloorDivPerf(node_info, perf_res));
   return af::SUCCESS;
 }
+
+af::Status IsNanApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_shapes,
+                    [[maybe_unused]] const std::vector<TensorShapeInfo> &output_shapes, const NodeInfo &node,
+                    PerfOutputInfo &perf_res) {
+  NodeDetail node_info;
+  GE_ASSERT_SUCCESS(SetNodeDetail(input_shapes, output_shapes, node_info));
+  node_info.unary_bitwidth_change_node_params = node.unary_bitwidth_change_node_params;
+  GE_ASSERT_SUCCESS(ascendcperf_v2::IsNanPerf(node_info, perf_res));
+  return af::SUCCESS;
+}
+
+af::Status IsFiniteApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_shapes,
+                       [[maybe_unused]] const std::vector<TensorShapeInfo> &output_shapes, const NodeInfo &node,
+                       PerfOutputInfo &perf_res) {
+  NodeDetail node_info;
+  GE_ASSERT_SUCCESS(SetNodeDetail(input_shapes, output_shapes, node_info));
+  node_info.unary_bitwidth_change_node_params = node.unary_bitwidth_change_node_params;
+  GE_ASSERT_SUCCESS(ascendcperf_v2::IsFinitePerf(node_info, perf_res));
+  return af::SUCCESS;
+}
+
+af::Status TransposeApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_shapes,
+                        [[maybe_unused]] const std::vector<TensorShapeInfo> &output_shapes, const NodeInfo &node,
+                        PerfOutputInfo &perf_res) {
+  NodeDetail node_info;
+  GE_ASSERT_SUCCESS(SetNodeDetail(input_shapes, output_shapes, node_info));
+  node_info.transpose_node_params = node.transpose_node_params;
+  GE_ASSERT_SUCCESS(ascendcperf_v2::TransposePerf(node_info, perf_res));
+  return af::SUCCESS;
+}
 }  // namespace ascir_v2
 
 REGISTER_EVAL_FUNC_TAG(kStore, V2, ascir_v2::StoreApiV2);
@@ -575,6 +605,9 @@ REGISTER_EVAL_FUNC_TAG(kLogicalAnd, V2, ascir_v2::LogicalAndApi);
 REGISTER_EVAL_FUNC_TAG(kClipByValue, V2, ascir_v2::ClipByValueApi);
 REGISTER_EVAL_FUNC_TAG(kBitwiseAnd, V2, ascir_v2::BitwiseAndApi);
 REGISTER_EVAL_FUNC_TAG(kFloorDiv, V2, ascir_v2::FloorDivApi);
+REGISTER_EVAL_FUNC_TAG(kIsnan, V2, ascir_v2::IsNanApi);
+REGISTER_EVAL_FUNC_TAG(kIsFinite, V2, ascir_v2::IsFiniteApi);
+REGISTER_EVAL_FUNC_TAG(kTranspose, V2, ascir_v2::TransposeApi);
 ApiPerfRegister<ApiPerf> add_api_perf_v2(ApiPerfRegisterV2(kAdd, kAdd + "V2", nullptr, &perf_param_table_v2,
                                                            &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> gather_api_perf_v2(ApiPerfRegisterV2(kGather, kGather, nullptr, &perf_param_table_v2,
@@ -786,9 +819,10 @@ ApiPerfRegister<ApiPerf> lShift_api_perf_v2(ApiPerfRegisterV2(kLShift, kLShift +
                                                               &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> mod_api_perf_v2(ApiPerfRegisterV2(kMod, kMod + "V2", nullptr, &perf_param_table_v2,
                                                            &tiling_schedule_config_table_v2));
-ApiPerfRegister<ApiPerf> isnan_api_perf_v2(ApiPerfRegisterV2(kIsnan, kUnitVector, nullptr, &perf_param_table_v2,
+ApiPerfRegister<ApiPerf> isnan_api_perf_v2(ApiPerfRegisterV2(kIsnan, kIsnan + "V2", nullptr, &perf_param_table_v2,
                                                              &tiling_schedule_config_table_v2));
-ApiPerfRegister<ApiPerf> isfinite_api_perf_v2(ApiPerfRegisterV2(kIsFinite, kUnitVector, nullptr, &perf_param_table_v2,
+ApiPerfRegister<ApiPerf> isfinite_api_perf_v2(ApiPerfRegisterV2(kIsFinite, kIsFinite + "V2", nullptr,
+                                                                &perf_param_table_v2,
                                                                 &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> isinf_api_perf_v2(ApiPerfRegisterV2(kIsInf, kUnitVector, nullptr, &perf_param_table_v2,
                                                              &tiling_schedule_config_table_v2));
@@ -812,7 +846,8 @@ ApiPerfRegister<ApiPerf> leaky_relu_api_perf_v2(ApiPerfRegisterV2(kLeakyRelu, kL
 ApiPerfRegister<ApiPerf> bitwise_and_api_perf_v2(ApiPerfRegisterV2(kBitwiseAnd, kBitwiseAnd + "V2", nullptr,
                                                                    &perf_param_table_v2,
                                                                    &tiling_schedule_config_table_v2));
-ApiPerfRegister<ApiPerf> transpose_api_perf_v2(ApiPerfRegisterV2(kTranspose, kUnitVector, nullptr, &perf_param_table_v2,
+ApiPerfRegister<ApiPerf> transpose_api_perf_v2(ApiPerfRegisterV2(kTranspose, kTranspose + "V2", nullptr,
+                                                                 &perf_param_table_v2,
                                                                  &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> floor_div_api_perf_v2(ApiPerfRegisterV2(kFloorDiv, kFloorDiv + "V2", nullptr,
                                                                  &perf_param_table_v2,

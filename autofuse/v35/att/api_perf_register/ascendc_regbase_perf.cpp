@@ -24,6 +24,9 @@ RepeatParams CalculateRepeatParams(const std::string &input_dtype, const Expr &c
 }
 
 namespace {
+constexpr uint32_t kIsNanMaxLatency = 26U;
+constexpr uint32_t kIsFiniteMaxLatency = 16U;
+
 af::Status RegVfPerf(const std::string &vf_instruct_type, const NodeDetail &node_info, PerfOutputInfo &perf) {
   GELOGD("[ATT Reduce] %s node info is %s.", vf_instruct_type.c_str(), node_info.ToString().c_str());
   Expr cal_count = node_info.input_dims[kNumZero];
@@ -174,7 +177,392 @@ bool IsB64TransferCast(const NodeDetail &node_info) {
   return IsCastPair(node_info, kInt64, kFloat16) || IsCastPair(node_info, kFloat16, kInt64);
 }
 
+Expr GetUnaryBitWidthChangeCallCount(const NodeDetail &node_info, Expr &cal_count) {
+  const auto &params = node_info.unary_bitwidth_change_node_params;
+  if (!params.valid) {
+    GE_ASSERT_TRUE(!node_info.input_dims.empty(), "Unary bitwidth change input dims is empty.");
+    cal_count = ProductExprs(node_info.input_dims, node_info.input_dims.size());
+    return CreateExpr(1);
+  }
+  cal_count = params.cal_count;
+  return ProductExprs(params.outer_repeats, params.outer_repeats.size());
+}
+
+af::Status AddUnaryBitWidthChangeCommonPerf(const NodeDetail &node_info, Expr repeat_count, Expr &max_latency,
+                                            Expr &all_vf_instruct_cost) {
+  // IsNan: Actual 6 repeat, Duplicate(2)、UpdateMask(1 repeat)、Select(1 repeat) are not recorded.
+  // IsFinite: Actual 8 repeat, Duplicate(2)、UpdateMask(1 repeat)、Select(1 repeat)、CompareScalarEQ(2 repeat) are not
+  // recorded.
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kLoad, node_info.input_dtype[0], max_latency, all_vf_instruct_cost, repeat_count));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kNe, kUInt8, max_latency, all_vf_instruct_cost, repeat_count));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kStore, kFloat32, max_latency, all_vf_instruct_cost, repeat_count));
+  return af::SUCCESS;
+}
+
+af::Status FinishUnaryBitWidthChangePerf(Expr max_latency, Expr all_vf_instruct_cost, Expr call_count,
+                                         PerfOutputInfo &perf) {
+  Expr res = (VfPerfUtils::GetVFHeadCost() + max_latency + all_vf_instruct_cost) * call_count;
+  res.Simplify();
+  perf.pipe_res[PipeType::AIV_VEC] = res;
+  return af::SUCCESS;
+}
+
 }  // namespace
+
+af::Status IsNanPerf(const NodeDetail &node_info, PerfOutputInfo &perf) {
+  GE_ASSERT_TRUE(!node_info.input_dtype.empty() && !node_info.output_dtype.empty());
+  Expr cal_count;
+  const Expr call_count = GetUnaryBitWidthChangeCallCount(node_info, cal_count);
+  const RepeatParams params = CalculateRepeatParams(node_info.input_dtype[0], cal_count);
+  const Expr repeat_time = params.repeat_time;
+  const bool output_is_bool = node_info.output_dtype[0] == kBool;
+  Expr max_latency = CreateExpr(0);
+  Expr all_vf_instruct_cost = CreateExpr(0);
+
+  GE_ASSERT_SUCCESS(AddUnaryBitWidthChangeCommonPerf(node_info, repeat_time, max_latency, all_vf_instruct_cost));
+  if (output_is_bool) {
+    if (node_info.input_dtype[0] == kFloat32) {
+      GE_ASSERT_SUCCESS(
+          VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, repeat_time * kSymTwo));
+      GE_ASSERT_SUCCESS(
+          VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, repeat_time * kSymTwo));
+    } else if (node_info.input_dtype[0] == kFloat16) {
+      GE_ASSERT_SUCCESS(
+          VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, repeat_time));
+      GE_ASSERT_SUCCESS(
+          VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, repeat_time));
+    }
+  }
+  return FinishUnaryBitWidthChangePerf(CreateExpr(kIsNanMaxLatency), all_vf_instruct_cost, call_count, perf);
+}
+
+af::Status IsFinitePerf(const NodeDetail &node_info, PerfOutputInfo &perf) {
+  GE_ASSERT_TRUE(!node_info.input_dtype.empty() && !node_info.output_dtype.empty());
+  Expr cal_count;
+  const Expr call_count = GetUnaryBitWidthChangeCallCount(node_info, cal_count);
+  const RepeatParams params = CalculateRepeatParams(node_info.input_dtype[0], cal_count);
+  const Expr repeat_time = params.repeat_time;
+  const bool output_is_bool = node_info.output_dtype[0] == kBool;
+  const std::string scalar_dtype = node_info.input_dtype[0] == kFloat32 ? kUInt32 : kUInt16;
+  Expr max_latency = CreateExpr(0);
+  Expr all_vf_instruct_cost = CreateExpr(0);
+
+  GE_ASSERT_SUCCESS(AddUnaryBitWidthChangeCommonPerf(node_info, repeat_time, max_latency, all_vf_instruct_cost));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kMaskOr, node_info.input_dtype[0], max_latency, all_vf_instruct_cost,
+                                                   repeat_time));
+  if (output_is_bool) {
+    const Expr mask_pack_count = node_info.input_dtype[0] == kFloat32 ? repeat_time * kSymTwo : repeat_time;
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, mask_pack_count));
+    GE_ASSERT_SUCCESS(
+        VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, mask_pack_count));
+  }
+  return FinishUnaryBitWidthChangePerf(CreateExpr(kIsFiniteMaxLatency), all_vf_instruct_cost, call_count, perf);
+}
+
+namespace {
+constexpr uint32_t kTransposeDim2Inner1MaxLatency = 69U;
+constexpr uint32_t kTransposeDim3Inner1MaxLatency = 69U;
+constexpr uint32_t kTransposeDim3Inner2MaxLatency = 167U;
+constexpr uint32_t kTransposeDim4Inner1MaxLatency = 69U;
+constexpr uint32_t kTransposeDim4Inner2MaxLatency = 167U;
+constexpr uint32_t kTransposeDim4Inner3MaxLatency = 386U;
+
+Expr GetTransposeOuterCount(const ascir_param::TransposeNodeParams &params) {
+  if (params.outer_loop_axes.empty()) {
+    return CreateExpr(1);
+  }
+  return ProductExprs(params.outer_loop_axes, params.outer_loop_axes.size());
+}
+
+Expr GetTransposeInnerCount(const ascir_param::TransposeNodeParams &params) {
+  const size_t outer_dim = params.total_dim - params.inner_dim;
+  Expr count = CreateExpr(1);
+  for (size_t i = outer_dim; i < params.output_dims.size(); ++i) {
+    count = count * params.output_dims[i];
+  }
+  return count;
+}
+
+af::Status AddGenOneInnerDimTransposeIndexPerf(const std::string &data_dtype, const Expr &repeat_time,
+                                               Expr &max_latency, Expr &all_vf_instruct_cost) {
+  // Actual 3 repeat, UpdateMask(1 repeat) is not recorded.
+  // GenOneInnerDimTransposeIndex: MicroAPI::Arange is outside the repeat loop.
+  // MicroAPI::Arange generates the index sequence; no exact Reg::Arange performance-table entry exists, so use
+  // kPlaceholder.
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kPlaceholder, data_dtype, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kMuls, data_dtype, max_latency, all_vf_instruct_cost, repeat_time));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kAdds, data_dtype, max_latency, all_vf_instruct_cost, repeat_time));
+  // MicroAPI::DataCopy stores generated indices; no exact performance-table entry exists, so use kPlaceholder.
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kPlaceholder, data_dtype, max_latency, all_vf_instruct_cost, repeat_time));
+  return af::SUCCESS;
+}
+
+af::Status AddGenTwoInnerDimTransposeIndexPerf(const std::string &data_dtype, const Expr &tail_repeat,
+                                               Expr &max_latency, Expr &all_vf_instruct_cost) {
+  // Actual 17 + 17 repeat, Duplicate(2)、Add(1 repeat) are not recorded.
+  // GenTwoInnerDimTransposeIndex: the first vector is calculated before the tail repeat loop.
+  // MicroAPI::Arange generates the index sequence; no exact Reg::Arange performance-table entry exists, so use
+  // kPlaceholder.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kArange, kInt32, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kDuplicate, data_dtype, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kCopy, data_dtype, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kDiv, kFloat32, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kMul, data_dtype, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kSub, data_dtype, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kMuls, data_dtype, max_latency, all_vf_instruct_cost, kSymTwo));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kAdd, data_dtype, max_latency, all_vf_instruct_cost, kSymOne));
+  // MicroAPI::DataCopy stores generated indices; no exact performance-table entry exists, so use kPlaceholder.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kStore, kUInt8, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kUpdateMask, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kAdds, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kCompareScalarGE, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kSelect, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kMuls, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kSub, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kAdds, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kAdd, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kMuls, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat * kSymTwo));
+  // MicroAPI::DataCopy stores generated indices; no exact performance-table entry exists, so use kPlaceholder.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kStore, kUInt8, max_latency, all_vf_instruct_cost, tail_repeat));
+  return af::SUCCESS;
+}
+
+af::Status AddGenThreeInnerDimTransposeIndexPerf(const std::string &data_dtype, const Expr &tail_repeat,
+                                                 Expr &max_latency, Expr &all_vf_instruct_cost) {
+  // Actual 17 + 17 repeat, Sub(2 + 2repeat)、Duplicate(2)、Adds(2 repeat)、CompareScalarGE(2 repeat) is not recorded.
+  // GenThreeInnerDimTransposeIndex: count the initialization sequence before the tail repeat loop.
+  // MicroAPI::Arange generates the index sequence; no exact Reg::Arange performance-table entry exists, so use
+  // kPlaceholder.
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kPlaceholder, data_dtype, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kDuplicate, data_dtype, max_latency, all_vf_instruct_cost, kSymTwo));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kCopy, data_dtype, max_latency, all_vf_instruct_cost, kSymTwo));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kDiv, kFloat32, max_latency, all_vf_instruct_cost, kSymThree));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kMul, data_dtype, max_latency, all_vf_instruct_cost, kSymThree));
+  // MicroAPI::DataCopy stores generated indices; no exact performance-table entry exists, so use kPlaceholder.
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kPlaceholder, data_dtype, max_latency, all_vf_instruct_cost, kSymOne));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kUpdateMask, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kSelect, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat * kSymTwo));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kMuls, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat * kSymFive));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kAdd, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat * kSymFour));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kMuls, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat * kSymThree));
+  // MicroAPI::DataCopy stores generated indices; no exact performance-table entry exists, so use kPlaceholder.
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kPlaceholder, data_dtype, max_latency, all_vf_instruct_cost, tail_repeat));
+  return af::SUCCESS;
+}
+
+af::Status AddTransposeExtendPerf(const std::string &data_dtype, const Expr &repeat_time, const Expr &gather_count,
+                                  Expr &max_latency, Expr &all_vf_instruct_cost) {
+  // Actual 3 repeat, UpdateMask(1 repeat) is not recorded.
+  // TransposeExtendImpl: every vector repeat loads one index vector and gathers/stores one data vector.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kLoad, data_dtype, max_latency, all_vf_instruct_cost, repeat_time));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kGather2, data_dtype, max_latency, all_vf_instruct_cost,
+                                                   repeat_time * gather_count));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kStore, kFloat32, max_latency, all_vf_instruct_cost, repeat_time));
+  return af::SUCCESS;
+}
+
+af::Status AddTransposeOneOuterDimExtendPerf(const std::string &data_dtype, const Expr &outer_dim0,
+                                             const Expr &repeat_time, const Expr &gather_count, Expr &max_latency,
+                                             Expr &all_vf_instruct_cost) {
+  // Actual 3 repeat, UpdateMask(1 repeat) is not recorded.
+  // TransposeOneOuterDimExtendImpl: Gather/Store are inside the dst_dim0 loop.
+  const Expr movement_count = repeat_time * outer_dim0;
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kLoad, data_dtype, max_latency, all_vf_instruct_cost, repeat_time));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kGather2, data_dtype, max_latency, all_vf_instruct_cost,
+                                                   movement_count * gather_count));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kStore, kFloat32, max_latency, all_vf_instruct_cost, movement_count));
+  return af::SUCCESS;
+}
+
+af::Status AddTransposeTwoOuterDimExtendPerf(const std::string &data_dtype, const Expr &outer_dim0,
+                                             const Expr &outer_dim1, const Expr &repeat_time, const Expr &gather_count,
+                                             Expr &max_latency, Expr &all_vf_instruct_cost) {
+  // Actual 3 repeat, UpdateMask(1 repeat) is not recorded.
+  // TransposeTwoOuterDimExtendImpl: Gather/Store are inside the dst_dim0 * dst_dim1 loops.
+  const Expr movement_count = repeat_time * outer_dim0 * outer_dim1;
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kLoad, data_dtype, max_latency, all_vf_instruct_cost, repeat_time));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kGather2, data_dtype, max_latency, all_vf_instruct_cost,
+                                                   movement_count * gather_count));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kStore, kFloat32, max_latency, all_vf_instruct_cost, movement_count));
+  return af::SUCCESS;
+}
+
+af::Status AddTransposeThreeOuterDimExtendPerf(const std::string &data_dtype, const Expr &outer_dim0,
+                                               const Expr &outer_dim1, const Expr &outer_dim2, const Expr &repeat_time,
+                                               const Expr &gather_count, Expr &max_latency,
+                                               Expr &all_vf_instruct_cost) {
+  // Actual 3 repeat, UpdateMask(1 repeat) is not recorded.
+  // TransposeThreeOuterDimExtendImpl: Gather/Store are inside the three nested outer loops.
+  const Expr movement_count = repeat_time * outer_dim0 * outer_dim1 * outer_dim2;
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kLoad, data_dtype, max_latency, all_vf_instruct_cost, repeat_time));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kGather2, data_dtype, max_latency, all_vf_instruct_cost,
+                                                   movement_count * gather_count));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kStore, kFloat32, max_latency, all_vf_instruct_cost, movement_count));
+  return af::SUCCESS;
+}
+
+af::Status AddTransposeDim2Inner1Perf(const NodeDetail &node_info, const std::string &data_dtype,
+                                      const Expr &repeat_time, const Expr &gather_count, Expr &max_latency,
+                                      Expr &all_vf_instruct_cost) {
+  const auto &params = node_info.transpose_node_params;
+  GE_ASSERT_SUCCESS(AddGenOneInnerDimTransposeIndexPerf(data_dtype, repeat_time, max_latency, all_vf_instruct_cost));
+  GE_ASSERT_SUCCESS(AddTransposeOneOuterDimExtendPerf(data_dtype, params.output_dims[0], repeat_time, gather_count,
+                                                      max_latency, all_vf_instruct_cost));
+  return af::SUCCESS;
+}
+
+af::Status AddTransposeDim3Inner1Perf(const NodeDetail &node_info, const std::string &data_dtype,
+                                      const Expr &repeat_time, const Expr &gather_count, Expr &max_latency,
+                                      Expr &all_vf_instruct_cost) {
+  const auto &params = node_info.transpose_node_params;
+  GE_ASSERT_SUCCESS(AddGenOneInnerDimTransposeIndexPerf(data_dtype, repeat_time, max_latency, all_vf_instruct_cost));
+  GE_ASSERT_SUCCESS(AddTransposeTwoOuterDimExtendPerf(data_dtype, params.output_dims[0], params.output_dims[1],
+                                                      repeat_time, gather_count, max_latency, all_vf_instruct_cost));
+  return af::SUCCESS;
+}
+
+af::Status AddTransposeDim3Inner2Perf(const NodeDetail &node_info, const std::string &data_dtype,
+                                      const Expr &repeat_time, const Expr &tail_repeat, const Expr &gather_count,
+                                      Expr &max_latency, Expr &all_vf_instruct_cost) {
+  const auto &params = node_info.transpose_node_params;
+  GE_ASSERT_SUCCESS(AddGenTwoInnerDimTransposeIndexPerf(data_dtype, tail_repeat, max_latency, all_vf_instruct_cost));
+  GE_ASSERT_SUCCESS(AddTransposeOneOuterDimExtendPerf(data_dtype, params.output_dims[0], repeat_time, gather_count,
+                                                      max_latency, all_vf_instruct_cost));
+  return af::SUCCESS;
+}
+
+af::Status AddTransposeDim4Inner1Perf(const NodeDetail &node_info, const std::string &data_dtype,
+                                      const Expr &repeat_time, const Expr &gather_count, Expr &max_latency,
+                                      Expr &all_vf_instruct_cost) {
+  const auto &params = node_info.transpose_node_params;
+  GE_ASSERT_SUCCESS(AddGenOneInnerDimTransposeIndexPerf(data_dtype, repeat_time, max_latency, all_vf_instruct_cost));
+  GE_ASSERT_SUCCESS(AddTransposeThreeOuterDimExtendPerf(data_dtype, params.output_dims[0], params.output_dims[1],
+                                                        params.output_dims[2], repeat_time, gather_count, max_latency,
+                                                        all_vf_instruct_cost));
+  return af::SUCCESS;
+}
+
+af::Status AddTransposeDim4Inner2Perf(const NodeDetail &node_info, const std::string &data_dtype,
+                                      const Expr &repeat_time, const Expr &tail_repeat, const Expr &gather_count,
+                                      Expr &max_latency, Expr &all_vf_instruct_cost) {
+  const auto &params = node_info.transpose_node_params;
+  GE_ASSERT_SUCCESS(AddGenTwoInnerDimTransposeIndexPerf(data_dtype, tail_repeat, max_latency, all_vf_instruct_cost));
+  GE_ASSERT_SUCCESS(AddTransposeTwoOuterDimExtendPerf(data_dtype, params.output_dims[0], params.output_dims[1],
+                                                      repeat_time, gather_count, max_latency, all_vf_instruct_cost));
+  return af::SUCCESS;
+}
+
+af::Status AddTransposeDim4Inner3Perf(const NodeDetail &node_info, const std::string &data_dtype,
+                                      const Expr &repeat_time, const Expr &tail_repeat, const Expr &gather_count,
+                                      Expr &max_latency, Expr &all_vf_instruct_cost) {
+  const auto &params = node_info.transpose_node_params;
+  GE_ASSERT_SUCCESS(AddGenThreeInnerDimTransposeIndexPerf(data_dtype, tail_repeat, max_latency, all_vf_instruct_cost));
+  GE_ASSERT_SUCCESS(AddTransposeOneOuterDimExtendPerf(data_dtype, params.output_dims[0], repeat_time, gather_count,
+                                                      max_latency, all_vf_instruct_cost));
+  return af::SUCCESS;
+}
+
+}  // namespace
+
+Expr GetTransposeGatherCount(const NodeDetail &node_info, const std::string &data_dtype, PerfOutputInfo &perf) {
+  const auto &params = node_info.transpose_node_params;
+  GE_ASSERT_TRUE(!params.input_strides.empty());
+  const Expr data_size = kDataTypeSizeMap.at(data_dtype);
+  const Expr alignment = kRptSizeHalf / data_size;
+  const Expr stride_remainder = af::sym::Mod(params.input_strides.back(), alignment);
+  Expr stride_count = CreateExpr("transpose_stride_count");
+  perf.ternary_ops[stride_count] =
+      TernaryOp(CondType::K_EQ, stride_remainder, CreateExpr(0), alignment, stride_remainder);
+  return (params.inner_dim == 1U || params.inner_dim == 2U) ? kSymTwo * stride_count : stride_count + CreateExpr(1);
+}
+
+af::Status TransposePerf(const NodeDetail &node_info, PerfOutputInfo &perf) {
+  GE_ASSERT_TRUE(!node_info.input_dtype.empty());
+  const auto &params = node_info.transpose_node_params;
+  if (!params.valid) {
+    return RegVfPerf(kUnitVector, node_info, perf);
+  }
+
+  const Expr cal_count = GetTransposeInnerCount(params);
+  const RepeatParams repeat_params = CalculateRepeatParams(node_info.input_dtype[0], cal_count);
+  const Expr repeat_time = repeat_params.repeat_time;
+  const Expr tail_repeat =
+      af::sym::Ceiling(af::sym::Max(cal_count - repeat_params.repeat_elm, CreateExpr(0)) / repeat_params.repeat_elm);
+  const Expr outer_count = GetTransposeOuterCount(params);
+  const std::string &input_dtype = node_info.input_dtype[0];
+  const Expr gather_count = GetTransposeGatherCount(node_info, input_dtype, perf);
+  uint32_t latency = 0U;
+  Expr all_vf_instruct_cost = CreateExpr(0);
+  Expr max_latency = CreateExpr(0);
+
+  if (params.total_dim == 2U && params.inner_dim == 1U) {
+    GE_ASSERT_SUCCESS(AddTransposeDim2Inner1Perf(node_info, input_dtype, repeat_time, gather_count, max_latency,
+                                                 all_vf_instruct_cost));
+    latency = kTransposeDim2Inner1MaxLatency;
+  } else if (params.total_dim == 3U && params.inner_dim == 1U) {
+    GE_ASSERT_SUCCESS(AddTransposeDim3Inner1Perf(node_info, input_dtype, repeat_time, gather_count, max_latency,
+                                                 all_vf_instruct_cost));
+    latency = kTransposeDim3Inner1MaxLatency;
+  } else if (params.total_dim == 3U && params.inner_dim == 2U) {
+    GE_ASSERT_SUCCESS(AddTransposeDim3Inner2Perf(node_info, input_dtype, repeat_time, tail_repeat, gather_count,
+                                                 max_latency, all_vf_instruct_cost));
+    latency = kTransposeDim3Inner2MaxLatency;
+  } else if (params.total_dim == 4U && params.inner_dim == 1U) {
+    GE_ASSERT_SUCCESS(AddTransposeDim4Inner1Perf(node_info, input_dtype, repeat_time, gather_count, max_latency,
+                                                 all_vf_instruct_cost));
+    latency = kTransposeDim4Inner1MaxLatency;
+  } else if (params.total_dim == 4U && params.inner_dim == 2U) {
+    GE_ASSERT_SUCCESS(AddTransposeDim4Inner2Perf(node_info, input_dtype, repeat_time, tail_repeat, gather_count,
+                                                 max_latency, all_vf_instruct_cost));
+    latency = kTransposeDim4Inner2MaxLatency;
+  } else if (params.total_dim == 4U && params.inner_dim == 3U) {
+    GE_ASSERT_SUCCESS(AddTransposeDim4Inner3Perf(node_info, input_dtype, repeat_time, tail_repeat, gather_count,
+                                                 max_latency, all_vf_instruct_cost));
+    latency = kTransposeDim4Inner3MaxLatency;
+  } else {
+    if (params.inner_dim == 1U) {
+      GE_ASSERT_SUCCESS(
+          AddGenOneInnerDimTransposeIndexPerf(input_dtype, repeat_time, max_latency, all_vf_instruct_cost));
+      latency = kTransposeDim3Inner1MaxLatency;
+    } else if (params.inner_dim == 2U) {
+      GE_ASSERT_SUCCESS(
+          AddGenTwoInnerDimTransposeIndexPerf(input_dtype, tail_repeat, max_latency, all_vf_instruct_cost));
+      latency = kTransposeDim3Inner2MaxLatency;
+    } else if (params.inner_dim == 3U) {
+      GE_ASSERT_SUCCESS(
+          AddGenThreeInnerDimTransposeIndexPerf(input_dtype, tail_repeat, max_latency, all_vf_instruct_cost));
+      latency = kTransposeDim4Inner3MaxLatency;
+    }
+    // inner_dim >= 4: index generation not modeled, only extend cost
+    GE_ASSERT_SUCCESS(
+        AddTransposeExtendPerf(input_dtype, repeat_time, gather_count, max_latency, all_vf_instruct_cost));
+  }
+
+  Expr res = (VfPerfUtils::GetVFHeadCost() + CreateExpr(latency) + all_vf_instruct_cost) * outer_count;
+  res.Simplify();
+  perf.pipe_res[PipeType::AIV_VEC] = res;
+
+  return af::SUCCESS;
+}
 
 /*
 ===========================================================================

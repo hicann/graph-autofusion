@@ -132,6 +132,24 @@ af::Status RegisterCompareAscirNodeParams(const af::AscNodePtr &node) {
   return RegisterAscirNodeParams(node, params);
 }
 
+af::Status RegisterUnaryBitWidthChangeAscirNodeParams(const af::AscNodePtr &node) {
+  GE_ASSERT_NOTNULL(node);
+  auto params = std::make_shared<AscirNodeParams>();
+  params->api_name = node->GetType();
+  params->status = ParamBuildStatus::kBuilt;
+  params->specific_params = UnaryBitWidthChangeNodeParams{};
+  return RegisterAscirNodeParams(node, params);
+}
+
+af::Status RegisterTransposeAscirNodeParams(const af::AscNodePtr &node) {
+  GE_ASSERT_NOTNULL(node);
+  auto params = std::make_shared<AscirNodeParams>();
+  params->api_name = node->GetType();
+  params->status = ParamBuildStatus::kBuilt;
+  params->specific_params = TransposeNodeParams{};
+  return RegisterAscirNodeParams(node, params);
+}
+
 std::map<int64_t, af::AxisPtr> BuildAxisMap(const af::AscGraph &graph) {
   std::map<int64_t, af::AxisPtr> axis_map;
   for (const auto &axis : graph.GetAllAxis()) {
@@ -533,6 +551,12 @@ af::Status EnrichAscirNodeParams(const AscirParamSourceContext &source) {
   }
   if (IsCompareParamSupported(source.node->GetType())) {
     return RegisterCompareAscirNodeParams(source.node);
+  }
+  if (source.node->GetType() == "Isnan" || source.node->GetType() == "IsFinite") {
+    return RegisterUnaryBitWidthChangeAscirNodeParams(source.node);
+  }
+  if (source.node->GetType() == "Transpose") {
+    return RegisterTransposeAscirNodeParams(source.node);
   }
   if (!IsReduceParamSupported(source.node->GetType())) {
     return RegisterSkippedAscirNodeParams(source.node);

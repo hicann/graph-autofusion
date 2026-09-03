@@ -43,6 +43,8 @@ struct NodeDetail {
   ascir_param::CastNodeParams cast_node_params;
   ascir_param::CompareNodeParams compare_node_params;
   ascir_param::WhereNodeParams where_node_params;
+  ascir_param::UnaryBitWidthChangeNodeParams unary_bitwidth_change_node_params;
+  ascir_param::TransposeNodeParams transpose_node_params;
   int32_t block_count_idx{0};                      // 用于 LoadStoreStrideV2Func，表示发生非连续的轴索引
   std::map<Expr, TernaryOp, ExprCmp> ternary_ops;  // 动态shape表达式
   std::optional<NddmaDescriptorInfo> nddma_descriptor;
