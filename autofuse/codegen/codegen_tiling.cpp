@@ -1084,8 +1084,9 @@ void TilingLib::TilingSetShapeDim(std::stringstream &tiling_set_shape_dim, const
                                   const std::string &tiling_expr) const {
   for (size_t i = 0; i < fused_schedule_result.node_idx_to_scheduled_results.size(); i++) {
     auto scheduled_results = fused_schedule_result.node_idx_to_scheduled_results[i];
-    if ((scheduled_results.empty()) ||
-        ((scheduled_results.size() == 1) && (scheduled_results[0].schedule_groups.size() == 1))) {
+    if ((fused_schedule_result.node_idx_to_scheduled_results.size() == 1) &&
+        (scheduled_results.empty() ||
+         ((scheduled_results.size() == 1) && (scheduled_results[0].schedule_groups.size() == 1)))) {
       // 检查变量是否被此 schedule_group 使用
       if (!IsVarUsedInScheduleGroup(var_define, scheduled_results[0].schedule_groups[0])) {
         continue;

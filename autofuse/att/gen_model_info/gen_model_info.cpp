@@ -67,6 +67,21 @@ bool HasGatherNode(const std::vector<std::vector<af::AscGraph>> &schedule_groups
   return false;
 }
 
+void FilterOutputAliasWorkspace(ModelInfo &model_info) {
+  for (const auto &output_node : model_info.output_nodes) {
+    if (output_node == nullptr || !af::ops::IsOps<af::ascir_op::Output>(output_node)) {
+      continue;
+    }
+    const int64_t tensor_id = output_node->inputs[0].attr.mem.tensor_id;
+    const auto workspace_iter = model_info.workspace_size_map.find(tensor_id);
+    if (workspace_iter == model_info.workspace_size_map.end()) {
+      continue;
+    }
+    GELOGD("Filter output alias tensor id [%ld] from workspace size map.", tensor_id);
+    model_info.workspace_size_map.erase(workspace_iter);
+  }
+}
+
 bool ShouldEnableGatherReducePenalty(const std::vector<std::vector<af::AscGraph>> &schedule_groups,
                                      const size_t group_id, const bool enable_group_parallel) {
   if (enable_group_parallel) {
@@ -539,6 +554,7 @@ af::Status ProcessAndSetScheduleGroupInfo(const std::vector<std::vector<af::AscG
       model_info.schedule_group_ident.group_id = schedule_group_id;
       model_info.input_nodes = schedule_results.input_nodes;
       model_info.output_nodes = schedule_results.output_nodes;
+      FilterOutputAliasWorkspace(model_info);
       auto it = all_graph_score_funcs.find(model_info.graph_name);
       if (it != all_graph_score_funcs.end()) {
         model_info.score_func = it->second;

@@ -127,6 +127,9 @@ class TilingCodeGenImpl {
                                       const std::string &schedule_result_prefix);
   void GenGetScheduleResultTail(const std::map<size_t, std::pair<std::string, std::string>> &graph_info);
   void GenUpdateWorkspace(const size_t asc_graph_id, const size_t impl_graph_id);
+  void GenWorkspaceOffsetHelpers();
+  void GenWorkspaceOffsetReset(const std::string &tiling_data_name);
+  void GenWorkspaceOffsetFinalize(const std::string &tiling_data_name);
   // 生成DoGroupTiling公共函数，支持首次Tiling和二次Tiling
   af::Status GenDoGroupTilingFunction(const size_t asc_graph_id, const size_t impl_graph_id,
                                       const std::map<size_t, std::pair<std::string, std::string>> &graph_info);

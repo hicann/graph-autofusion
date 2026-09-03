@@ -30,7 +30,7 @@
 
 #include "common/ge_common/fmk_types.h"
 #include "register/register_error_codes.h"
-#include "ge_common_af/ge_error_codes_af.h"
+#include "ge_common_af/ge_common_error_codes_af.h"
 
 // Each module uses the following four macros to define error codes:
 #define DECLARE_ERRORNO_OMG(name, value) DECLARE_ERRORNO(SYSID_FWK, MODID_OMG, name, value)

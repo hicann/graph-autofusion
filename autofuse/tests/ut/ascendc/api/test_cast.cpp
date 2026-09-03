@@ -30,6 +30,55 @@ constexpr int gen_index_five = 5;
 constexpr int gen_index_div = 1000;
 constexpr float gen_float_suffix = 0.12;
 
+TEST(TestApiCast, LargeDstRepeatStrideFallsBackToLoop) {
+  constexpr uint32_t kFirstDim = 2;
+  constexpr uint32_t kLastDim = 8;
+  constexpr uint32_t kInputLastDimStride = 16;
+  constexpr uint32_t kOutputLastDimStride = 2048;
+  constexpr uint32_t kInputSize = kFirstDim * kInputLastDimStride;
+  constexpr uint32_t kOutputSize = kFirstDim * kOutputLastDimStride;
+  constexpr float kSentinel = -1.0F;
+  auto *x = static_cast<half *>(AscendC::GmAlloc(sizeof(half) * kInputSize));
+  auto *y = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kOutputSize));
+  for (uint32_t i = 0; i < kInputSize; ++i) {
+    x[i] = 0;
+  }
+  for (uint32_t i = 0; i < kLastDim; ++i) {
+    x[i] = 1;
+    x[kInputLastDimStride + i] = 2;
+  }
+  for (uint32_t i = 0; i < kOutputSize; ++i) {
+    y[i] = kSentinel;
+  }
+
+  auto kernel = [](half *x, float *y) {
+    TPipe tpipe;
+    TBuf<TPosition::VECCALC> xbuf, ybuf, tmp;
+    tpipe.InitBuffer(xbuf, sizeof(half) * kInputSize);
+    tpipe.InitBuffer(ybuf, sizeof(float) * kOutputSize);
+    tpipe.InitBuffer(tmp, 8192);
+    auto l_x = xbuf.Get<half>();
+    auto l_y = ybuf.Get<float>();
+    auto l_tmp = tmp.Get<uint8_t>();
+    GmToUb(l_x, x, kInputSize);
+    GmToUb(l_y, y, kOutputSize);
+    CastExtend(l_y, l_x, l_tmp, kFirstDim, kLastDim, kInputLastDimStride, kOutputLastDimStride, sizeof(float));
+    UbToGm(y, l_y, kOutputSize);
+  };
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(kernel, 1, x, y);
+
+  for (uint32_t i = 0; i < kLastDim; ++i) {
+    EXPECT_EQ(y[i], 1.0F);
+    EXPECT_EQ(y[kOutputLastDimStride + i], 2.0F);
+  }
+  EXPECT_EQ(y[kLastDim], kSentinel);
+  EXPECT_EQ(y[kOutputLastDimStride + kLastDim], kSentinel);
+  AscendC::GmFree(x);
+  AscendC::GmFree(y);
+}
+
 template <typename InT, typename OutT>
 void CastExtendCalc(InT *x, OutT *y, int size) {
   TPipe tpipe;

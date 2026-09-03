@@ -15,7 +15,7 @@
 
 #include <map>
 #include <string>
-#include "ge_error_codes_af.h"
+#include "ge_common_error_codes_af.h"
 #include "ge_api_types_af.h"
 #include "graph/ascend_string_af.h"
 

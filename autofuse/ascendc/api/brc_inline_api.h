@@ -28,7 +28,8 @@ inline __aicore__ void BinaryBrcInlineApiWithTwoVectorizedAxis(
   int64_t elem_in_one_block = 32 / dtype_size;
   int64_t cut_quotient = element / elem_in_one_repeat;
   int64_t cut_reminder = element - cut_quotient * elem_in_one_repeat;
-  if (cut_quotient >= block) {
+  int64_t repeat_stride_in_blocks = first_axis_v_stride / elem_in_one_block;
+  if (cut_quotient >= block || repeat_stride_in_blocks > 255) {
     // 将block层外抛作为for循环，原有的element整体使用counter模式
     for (int64_t outer_for = 0; outer_for < block; outer_for++) {
       FUNC1(dstLocal[outer_for * first_axis_v_stride], src0Local[outer_for * first_axis_v_stride * is_input0_block_brc],
@@ -40,7 +41,7 @@ inline __aicore__ void BinaryBrcInlineApiWithTwoVectorizedAxis(
   constexpr uint8_t dst_block_stride = 1;
   constexpr uint8_t src0_block_stride = 1;
   constexpr uint8_t src1_block_stride = 1;
-  uint8_t dst_repeat_stride = first_axis_v_stride / elem_in_one_block;
+  uint8_t dst_repeat_stride = static_cast<uint8_t>(repeat_stride_in_blocks);
   uint8_t src0_repeat_stride = dst_repeat_stride * is_input0_block_brc;
   uint8_t src1_repeat_stride = dst_repeat_stride * is_input1_block_brc;
   uint32_t calcSize = 0;

@@ -135,3 +135,26 @@ TEST_F(RegbaseApiConcatTest, ConcatSuccess) {
   ConcatTest<uint8_t, 2>(16, {31, 33});
   ConcatTest<uint8_t, 2>(16, {255, 257});
 }
+
+TEST_F(RegbaseApiConcatTest, GenMaskRegPreservesHighBits) {
+  constexpr uint32_t kMaskWordCount = 8;
+  constexpr uint32_t kExpectedMask = 0x000fffffU;
+  auto output = static_cast<uint32_t *>(AscendC::GmAlloc(kMaskWordCount * sizeof(uint32_t)));
+  auto kernel = [output] {
+    TPipe tpipe;
+    TBuf<TPosition::VECCALC> index_buf;
+    tpipe.InitBuffer(index_buf, kMaskWordCount * sizeof(uint32_t));
+    auto index = index_buf.Get<uint32_t>();
+
+    concat::GenMaskReg<uint16_t>(16, 16, 10, index.GetPhyAddr());
+    UbToGm(output, index, kMaskWordCount);
+  };
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(kernel, 1);
+
+  for (uint32_t i = 0; i < kMaskWordCount; ++i) {
+    EXPECT_EQ(output[i], kExpectedMask);
+  }
+  AscendC::GmFree(output);
+}
