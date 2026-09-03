@@ -70,7 +70,7 @@ if [ "${target_branch}" == "master" ] || [ "${target_branch}" == "develop" ]; th
 			coverage_save="false"
 			;;
 		ST_Test_autofuse_ascendc_api)
-			bash build.sh -s -c --module=autofuse_ascendc_api --cann_3rd_lib_path="/home/jenkins/opensource" -f ${WORKSPACE}/pr_filelist.txt -j20 | tee test_ascendc_api.log
+			bash build.sh -s -c --module=autofuse_ascendc_api --cann_3rd_lib_path="/home/jenkins/opensource" -f ${WORKSPACE}/pr_filelist.txt -j20
 			ret=$?
 			coverage_save="false"
 			;;
