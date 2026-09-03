@@ -49,6 +49,6 @@ TEST_F(TestBackendFloortointFloatE2e, FloortointFloatE2eCodegen) {
     EXPECT_NE(kernel.find("AscendC::Cast(local_3[0], local_2[0], AscendC::RoundMode::CAST_FLOOR, "
                           "local_2_actual_size);"),
               std::string::npos);
-    EXPECT_NE(kernel.find("DataCopyPadExtend<int32_t, AscendC::PaddingMode::Normal>"), std::string::npos);
+    EXPECT_NE(kernel.find("DataCopyPadExtend<int32_t, AscendC::PaddingMode::Compact>"), std::string::npos);
   });
 }

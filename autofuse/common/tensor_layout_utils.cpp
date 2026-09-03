@@ -15,9 +15,8 @@
 #include "ascgen_log.h"
 #include "ascir_ops.h"
 #include "common_utils.h"
-#include "schedule_utils.h"
 
-namespace optimize {
+namespace ascgen_utils {
 af::Status TensorLayoutUtils::AnalyzeLoadDiscontinuity(const af::AscTensorAttr &attr, DiscontinuityInfo &info) {
   const auto &axis = attr.axis;
   const auto &repeats = attr.repeats;
@@ -64,4 +63,4 @@ af::Status TensorLayoutUtils::AnalyzeLoadDiscontinuity(const af::AscTensorAttr &
 
   return af::SUCCESS;
 }
-}  // namespace optimize
+}  // namespace ascgen_utils

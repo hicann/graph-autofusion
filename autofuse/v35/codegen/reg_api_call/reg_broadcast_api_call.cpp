@@ -27,7 +27,10 @@ static void GenParams(const TPipe &tpipe, const Tensor &input, const Tensor &out
   // 只保证在仅对张量尾轴做32B对齐的场景下有效，若对中间轴做了对齐，则还需要增加处理逻辑
   auto vectorized_axis_size = input.vectorized_axis.size();
   const char *shape_prefix = is_src ? "src_shape_" : "dst_shape_";
-
+  DataCopyParams data_copy_param;
+  (void)CalculateDmaParams(tpipe, output, output, data_copy_param);
+  constexpr char kCompactPddingMode[] = "AscendC::PaddingMode::Compact";
+  std::string padding_mode = GetPaddingMode(output, data_copy_param);
   ss << "const uint32_t " << shape_prefix << input.id << "_brc_to_" << output.id << "[" << vectorized_axis_size
      << "] = {";
   const char *sep = "";
@@ -65,7 +68,7 @@ static void GenParams(const TPipe &tpipe, const Tensor &input, const Tensor &out
     ascir::AxisId axis_id = output.vectorized_axis[pos];
     auto last_dim_size = output.vectorized_strides[pre_pos];
     if (tpipe.tiler.GetAxis(axis_id).type != ascir::Axis::Type::kAxisTypeTileInner ||
-        output.vectorized_axis[0] == axis_id) {
+        output.vectorized_axis[0] == axis_id || padding_mode == kCompactPddingMode) {
       ss << tpipe.tiler.ActualSize(last_dim_size);
     } else {
       ss << tpipe.tiler.Size(last_dim_size);
