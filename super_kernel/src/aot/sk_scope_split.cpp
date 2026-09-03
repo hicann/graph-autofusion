@@ -1176,6 +1176,7 @@ ScopeProcessResult DeadlockRefinePass::HandleDeadlockSplit(SuperKernelScopeInfo 
   SuperKernelScopeInfo scopeBefore;
   SuperKernelScopeInfo scopeAfter;
   SplitScopeAtWaitNode(workingScope, deadlockWaitNode, scopeBefore, scopeAfter);
+  RecordDeadlockSplitResult(deadlockNode, deadlockWaitNode);
   deadlockNode->SetFusionFailReason(FusionFailReason::EXIST_DEADLOCK);
 
   SK_LOGI("[DeadlockRefine] Deadlock detected at node %s, splitting at Wait node %s", deadlockNode->Format().c_str(),
@@ -1439,6 +1440,7 @@ ScheModeScopeProcessResult ScheModeKernelSplitPass::ProcessSingleScope(
       SuperKernelScopeInfo scopeBefore;
       SuperKernelScopeInfo scopeAfter;
       SplitScopeAtNode(workingScope, node, scopeBefore, scopeAfter);
+      RecordScheModeSplitResult(node);
 
       const std::string coreMismatchDetail =
           BuildScheModeCoreMismatchDetail(currentCoreInfo, candidateCoreInfo, scopeBefore, *node);

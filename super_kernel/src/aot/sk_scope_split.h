@@ -393,6 +393,12 @@ class DeadlockRefinePass : public ScopeSplitPass {
     return "DeadlockRefinePass";
   }
 
+ protected:
+  virtual void RecordDeadlockSplitResult(SuperKernelBaseNode *deadlockNode, SuperKernelBaseNode *deadlockWaitNode) {
+    (void)deadlockNode;
+    (void)deadlockWaitNode;
+  }
+
  private:
   /*!
    * \brief Find deadlock point in a scope
@@ -483,6 +489,11 @@ class ScheModeKernelSplitPass : public ScopeSplitPass {
   bool Run(std::vector<SuperKernelScopeInfo> &scopes) override;
   std::string GetName() const override {
     return "ScheModeKernelSplitPass";
+  }
+
+ protected:
+  virtual void RecordScheModeSplitResult(SuperKernelBaseNode *splitNode) {
+    (void)splitNode;
   }
 
  private:
