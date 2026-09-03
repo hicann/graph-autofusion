@@ -53,6 +53,57 @@ inline __aicore__ void wait_all_flag_aiv_aic(void) {
   }
 }
 
+#if defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510
+constexpr int INTRA_FLAG_ID_OFFSET = 16;
+
+inline __aicore__ void test_intra_core_sync_flag(int flag_id) {
+  // AIC -> AIV0/AIV1: AIC flag_id and flag_id + 16 map to the same
+  // flag_id on AIV0 and AIV1 respectively.
+  AscendC::SyncAll<false>();
+  if ASCEND_IS_AIC {
+    for (int j = 0; j < 15; j++) {
+      AscendC::CrossCoreSetFlag<0x4, PIPE_FIX>(flag_id);
+      AscendC::CrossCoreSetFlag<0x4, PIPE_FIX>(flag_id + INTRA_FLAG_ID_OFFSET);
+    }
+  }
+  AscendC::SyncAll<false>();
+  if ASCEND_IS_AIV {
+    for (int j = 0; j < 15; j++) {
+      AscendC::CrossCoreWaitFlag<0x4>(flag_id);
+    }
+  }
+
+  // AIV0/AIV1 -> AIC: each AIV sets flag_id, which maps to the AIC
+  // flag_id and flag_id + 16 wait slots respectively.
+  AscendC::SyncAll<false>();
+  if ASCEND_IS_AIV {
+    for (int j = 0; j < 15; j++) {
+      AscendC::CrossCoreSetFlag<0x4, PIPE_MTE3>(flag_id);
+    }
+  }
+  AscendC::SyncAll<false>();
+  if ASCEND_IS_AIC {
+    for (int j = 0; j < 15; j++) {
+      AscendC::CrossCoreWaitFlag<0x4>(flag_id);
+      AscendC::CrossCoreWaitFlag<0x4>(flag_id + INTRA_FLAG_ID_OFFSET);
+    }
+  }
+}
+
+inline __aicore__ void test_intra_core_sync_flags(int flag_id = -1) {
+  if (flag_id >= 0) {
+    if (flag_id <= 10) {
+      test_intra_core_sync_flag(flag_id);
+    }
+    return;
+  }
+
+  for (int i = 0; i <= 10; i++) {
+    test_intra_core_sync_flag(i);
+  }
+}
+#endif
+
 inline __aicore__ void test_cross_core_sync_flags(int flag_id = -1) {
   if (flag_id >= 0 && flag_id <= 15) {
     // only diag one single event id
@@ -96,6 +147,9 @@ inline __aicore__ void test_cross_core_sync_flags(int flag_id = -1) {
     AscendC::SyncAll<false>();
     wait_all_flag_aiv_aic();
   }
+#if defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510
+  test_intra_core_sync_flags(flag_id);
+#endif
 }
 
 #endif  // SK_FLAG_DIAG_H_
