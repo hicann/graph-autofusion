@@ -56,20 +56,21 @@ inline __aicore__ void wait_all_flag_aiv_aic(void) {
 #if defined(__NPU_ARCH__) && __NPU_ARCH__ == 3510
 constexpr int INTRA_FLAG_ID_OFFSET = 16;
 
-inline __aicore__ void test_intra_core_sync_flag(int flag_id) {
+template <pipe_t aic_pipe, pipe_t aiv_pipe>
+inline __aicore__ void test_intra_core_sync_flag_pair(int flag_id) {
   // AIC -> AIV0/AIV1: AIC flag_id and flag_id + 16 map to the same
   // flag_id on AIV0 and AIV1 respectively.
   AscendC::SyncAll<false>();
   if ASCEND_IS_AIC {
     for (int j = 0; j < 15; j++) {
-      AscendC::CrossCoreSetFlag<0x4, PIPE_FIX>(flag_id);
-      AscendC::CrossCoreSetFlag<0x4, PIPE_FIX>(flag_id + INTRA_FLAG_ID_OFFSET);
+      AscendC::CrossCoreSetFlag<0x4, aic_pipe>(flag_id);
+      AscendC::CrossCoreSetFlag<0x4, aic_pipe>(flag_id + INTRA_FLAG_ID_OFFSET);
     }
   }
   AscendC::SyncAll<false>();
   if ASCEND_IS_AIV {
     for (int j = 0; j < 15; j++) {
-      AscendC::CrossCoreWaitFlag<0x4>(flag_id);
+      AscendC::CrossCoreWaitFlag<0x4, aiv_pipe>(flag_id);
     }
   }
 
@@ -78,16 +79,29 @@ inline __aicore__ void test_intra_core_sync_flag(int flag_id) {
   AscendC::SyncAll<false>();
   if ASCEND_IS_AIV {
     for (int j = 0; j < 15; j++) {
-      AscendC::CrossCoreSetFlag<0x4, PIPE_MTE3>(flag_id);
+      AscendC::CrossCoreSetFlag<0x4, aiv_pipe>(flag_id);
     }
   }
   AscendC::SyncAll<false>();
   if ASCEND_IS_AIC {
     for (int j = 0; j < 15; j++) {
-      AscendC::CrossCoreWaitFlag<0x4>(flag_id);
-      AscendC::CrossCoreWaitFlag<0x4>(flag_id + INTRA_FLAG_ID_OFFSET);
+      AscendC::CrossCoreWaitFlag<0x4, aic_pipe>(flag_id);
+      AscendC::CrossCoreWaitFlag<0x4, aic_pipe>(flag_id + INTRA_FLAG_ID_OFFSET);
     }
   }
+}
+
+inline __aicore__ void test_intra_core_sync_flag(int flag_id) {
+  // The eight pairs cover every valid AIC and AIV pipe once as both a
+  // producer and consumer without enumerating redundant pipe pairs.
+  test_intra_core_sync_flag_pair<PIPE_S, PIPE_S>(flag_id);
+  test_intra_core_sync_flag_pair<PIPE_M, PIPE_S>(flag_id);
+  test_intra_core_sync_flag_pair<PIPE_MTE1, PIPE_S>(flag_id);
+  test_intra_core_sync_flag_pair<PIPE_MTE2, PIPE_S>(flag_id);
+  test_intra_core_sync_flag_pair<PIPE_FIX, PIPE_S>(flag_id);
+  test_intra_core_sync_flag_pair<PIPE_FIX, PIPE_MTE2>(flag_id);
+  test_intra_core_sync_flag_pair<PIPE_FIX, PIPE_MTE3>(flag_id);
+  test_intra_core_sync_flag_pair<PIPE_FIX, PIPE_V>(flag_id);
 }
 
 inline __aicore__ void test_intra_core_sync_flags(int flag_id = -1) {
