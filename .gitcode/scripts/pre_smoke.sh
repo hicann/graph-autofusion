@@ -39,7 +39,11 @@ wget -nv ${arm_run_url} && chmod 777 ${arm_package}
 /opt/conda/envs/python39/bin/python3 -m pip install packaging
 /opt/conda/envs/python39/bin/python3 -m pip install build
 /opt/conda/envs/python39/bin/python3 -m pip install 'setuptools>=68,<80'
-chmod +x ${arm_package}
+wget -nv https://ascend-ci.obs.cn-north-4.myhuaweicloud.com/CANN/ge/ci/package/4698/cann-ge-compiler_9.2.0_linux-aarch64_ubuntu24.run
+wget -nv https://ascend-ci.obs.cn-north-4.myhuaweicloud.com/CANN/ge/ci/package/4698/cann-ge-executor_9.2.0_linux-aarch64_ubuntu24.run
+chmod +x ${arm_package} *.run
+echo 'y' | bash cann-ge-compiler_9.2.0_linux-aarch64_ubuntu24.run --full --quiet --pylocal --install-path=/usr/local/Ascend
+echo 'y' | bash cann-ge-executor_9.2.0_linux-aarch64_ubuntu24.run --full --quiet --pylocal --install-path=/usr/local/Ascend
 echo 'y' | bash ${arm_package} --full --quiet --pylocal
 echo "bash ${arm_package} bash build.sh --run_example --no-autofuse"
 source /opt/conda/bin/activate python39
