@@ -52,6 +52,20 @@ af::Status FillWhereParams(const ascir_param::AscirNodeParams &params, NodeInfo 
   return af::SUCCESS;
 }
 
+af::Status FillUnaryBitWidthChangeParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
+  const auto *unary_params = ascir_param::GetSpecificParams<ascir_param::UnaryBitWidthChangeNodeParams>(params);
+  GE_ASSERT_NOTNULL(unary_params, "Unary bitwidth change specific params is null, node[%s].", node_info.name.c_str());
+  node_info.unary_bitwidth_change_node_params = *unary_params;
+  return af::SUCCESS;
+}
+
+af::Status FillTransposeParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
+  const auto *transpose_params = ascir_param::GetSpecificParams<ascir_param::TransposeNodeParams>(params);
+  GE_ASSERT_NOTNULL(transpose_params, "Transpose specific params is null, node[%s].", node_info.name.c_str());
+  node_info.transpose_node_params = *transpose_params;
+  return af::SUCCESS;
+}
+
 }  // namespace
 
 af::Status FillSpecificParams(const af::AscNodePtr &ge_node, NodeInfo &node_info) {
@@ -79,6 +93,12 @@ af::Status FillSpecificParams(const af::AscNodePtr &ge_node, NodeInfo &node_info
   }
   if (node_info.node_type == kWhere || node_info.node_type == kSelect) {
     return FillWhereParams(*params, node_info);
+  }
+  if (node_info.node_type == kIsnan || node_info.node_type == kIsFinite) {
+    return FillUnaryBitWidthChangeParams(*params, node_info);
+  }
+  if (node_info.node_type == kTranspose) {
+    return FillTransposeParams(*params, node_info);
   }
   return af::SUCCESS;
 }

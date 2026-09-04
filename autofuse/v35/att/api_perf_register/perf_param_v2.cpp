@@ -277,6 +277,14 @@ const std::map<std::string, std::vector<VfInstructPerf>> &PerfParamTableV2::GetV
               {VfInstructPerf{{kUInt8, kInt8, kUInt16, kInt16, kUInt32, kInt32, kFloat16, kFloat32, kBfloat16}, 8, 1}},
           },
       },
+      // VCI
+      {
+          kArange,
+          {
+              {VfInstructPerf{{kInt8, kInt16, kInt32}, 4, 2}},
+              {VfInstructPerf{{kFloat16, kFloat32}, 4, 1}},
+          },
+      },
       {
           kCompareScalarNE,
           {
@@ -291,6 +299,12 @@ const std::map<std::string, std::vector<VfInstructPerf>> &PerfParamTableV2::GetV
       },
       {
           kCompareScalarLT,
+          {
+              {VfInstructPerf{{kUInt8, kInt8, kUInt16, kInt16, kUInt32, kInt32, kFloat16, kFloat32, kBfloat16}, 3, 1}},
+          },
+      },
+      {
+          kCompareScalarGE,
           {
               {VfInstructPerf{{kUInt8, kInt8, kUInt16, kInt16, kUInt32, kInt32, kFloat16, kFloat32, kBfloat16}, 3, 1}},
           },
@@ -423,6 +437,16 @@ const std::map<std::string, std::vector<VfInstructPerf>> &PerfParamTableV2::GetV
           kVmAdd,
           {
               {VfInstructPerf{{kBfloat16, kFloat16, kFloat32}, 6, 1}},
+          },
+      },
+      // vgather2
+      {
+          kGather2,
+          {
+              {VfInstructPerf{
+                  {kUInt8, kInt8, kUInt16, kInt16, kBfloat16, kFloat16, kUInt32, kInt32, kFloat32, kUInt64, kInt64},
+                  0,
+                  1}},
           },
       },
       {

@@ -38,7 +38,7 @@ AutoFuse 选择 **JIT 自动融合** 方案：优先考虑**泛化能力**，通
 
 ## 关键技术方案
 
-AutoFuse 按计算特征将网络算子分为两类：一类是 Elemwise、Broadcast 和 View 类（Transpose、Slice）等基础计算类型；另一类是 Reduce、Concat、Gather 和 MatMul 等在基础计算类型上扩展融合能力的计算类型。这意味着，各类扩展融合能力都需要支持与基础计算类型进行融合。
+AutoFuse 按计算特征将网络算子分为两类：一类是 Elemwise、Broadcast 和 View 类（Transpose、Slice、Split）等基础计算类型；另一类是 Reduce、Concat、Gather 和 MatMul 等在基础计算类型上扩展融合能力的计算类型。这意味着，各类扩展融合能力都需要支持与基础计算类型进行融合。
 
 ### 支持的算子类型
 
@@ -48,9 +48,7 @@ AutoFuse 按计算特征将网络算子分为两类：一类是 Elemwise、Broad
 | :------------------ | :-------------------------------------------------------------------------------- | :--------- | :------------------------------ |
 | **Elemwise**  | 逐元素计算，每个输出元素与输入元素一一对应                                        | Vector     | Add、Mul、Abs、Exp、Relu、Cast  |
 | **Broadcast** | 广播计算，将较小 Shape 的数据沿广播轴扩展，再执行逐元素计算                       | Vector     | BroadcastTo、BiasAdd            |
-| **View**      | 视图变换，改变数据的逻辑形状、轴序或切分方式                                      | MTE/Vector | Transpose、Slice                |
-| **Transpose** | 轴重排，改变数据的轴序或内存排布                                                  | MTE        | Transpose                       |
-| **Slice**     | 切片，从 Tensor 中按指定范围截取子 Tensor                                         | MTE/Vector | Slice                           |
+| **View**      | 视图变换，改变数据的逻辑形状、轴序或切分方式                                      | MTE/Vector | Transpose、Slice、Split         |
 | **Reduce**    | 规约计算，沿指定轴对多个元素进行聚合                                              | Vector     | ReduceSum、ReduceMax、ReduceMin |
 | **泛 Norm**   | 由同轴 Reduce、Broadcast 和 Elemwise 等计算组合形成的归一化计算模式，并非单一算子 | Vector     | LayerNorm、RMSNorm              |
 | **Concat**    | 拼接计算，沿指定轴将多个 Tensor 拼接为一个 Tensor                                 | MTE/Vector | Concat                          |
@@ -64,7 +62,7 @@ AutoFuse 当前支持的主要融合能力及约束如下：
 | 融合能力                                              | 约束说明                                                                                                                                                                                                                                   |
 | :---------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Elemwise / Broadcast**                        | 仅支持显式 Broadcast。                                                                                                                                                                                                                     |
-| **View 类**（Transpose、Slice）                 | Kernel 内支持任意数量，5 轴以内任意轴的 Transpose、Elemwise、Broadcast 和 Slice 融合。                                                                                                                                                     |
+| **View 类**（Transpose、Slice、Split）           | Kernel 内支持任意数量，5 轴以内任意轴的 Transpose、Slice、Split、Elemwise 和 Broadcast 融合。                                                                                                                                               |
 | **Reduce / 泛 Norm** | 1. Reduce 融合（不论前向或后向）支持 Elemwise、Reduce、Slice，以及任意数量、任意轴的 Broadcast。<br>2. View 类算子中仅 Transpose 不支持融合。                                                                                             |
 | **Concat**                                      | 1. 前向融合仅支持 Elemwise、Broadcast 和 Slice。<br>2. 后向融合仅支持 Elemwise。<br>3. 静态 Shape 场景下，Concat 的输入数量不超过 64；输入过多可能导致编译时间过长。<br>4. 动态 Shape 场景下，若 Concat 轴及其后的轴存在动态轴，则不支持 Concat 融合。 |
 | **Gather**                                      | 1. Gather 前向融合支持 Elemwise 和 Broadcast。<br>2. Gather 后向融合支持任意数量的 Elemwise，以及单个置于末尾的 Reduce；G 轴须位于 R 轴外侧或与 R 轴重合。 |

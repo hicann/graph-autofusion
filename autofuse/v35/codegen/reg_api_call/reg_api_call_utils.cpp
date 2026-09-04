@@ -10,6 +10,7 @@
 
 #include "reg_api_call_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
+#include "tensor_layout_utils.h"
 
 namespace {
 constexpr size_t kDmaMaxLen = 2U;
@@ -98,23 +99,29 @@ void SetLoopModeParamsExpr(const DataCopyParams &data_copy_param, LoopModeParams
   }
 }
 
-// 根据ub上最后一维的对齐信息以及切分轴信息判断，是否使用Compact模式，如果能明确判断出来，stride与repeat相同且ub切分轴是首轴，则使用compact模式，否则使用normal模式
-std::string GetPaddingMode(const TPipe &tpipe, const Tensor &ub_tensor, const DataCopyParams &data_copy_param) {
-  for (auto axis_pos : ub_tensor.vectorized_axis_pos) {
-    ascir::AxisId axis_id = ub_tensor.axis[axis_pos];
-    const Axis &axis = tpipe.tiler.GetAxis(axis_id);
-    if (axis.type == ascir::Axis::Type::kAxisTypeTileInner && ub_tensor.vectorized_axis[0] != axis_id) {
-      GELOGD("The TileInner axis is not the first axis, use normal mode.");
-      return kNormalPddingMode;
-    }
-  }
+std::string GetPaddingMode(const Tensor &ub_tensor, const DataCopyParams &data_copy_param) {
+  af::AscTensorAttr attr;
+  attr.axis = ub_tensor.axis;
+  attr.repeats = ub_tensor.axis_size;
+  attr.strides = ub_tensor.axis_strides;
+  attr.vectorized_axis = ub_tensor.vectorized_axis;
+
   if (data_copy_param.repeats.size() <= 1) {
     return kNormalPddingMode;
   }
   ascir::SizeExpr repeat = data_copy_param.repeats.back();
   ascir::SizeExpr stride = data_copy_param.ub_strides[data_copy_param.ub_strides.size() - kDmaMaxLen];
   bool status = af::SymbolicUtils::StaticCheckEq(repeat, stride) == af::TriBool::kTrue;
-  return status ? kCompactPddingMode : kNormalPddingMode;
+
+  ascgen_utils::DiscontinuityInfo info;
+  auto analyze_success = ascgen_utils::TensorLayoutUtils::AnalyzeLoadDiscontinuity(attr, info) == af::SUCCESS;
+  auto no_multiple_discontinuities = !info.has_multiple_discontinuities;
+  GELOGD("GetPaddingMode conditions: analyze_success=%d, no_multiple_discontinuities=%d", analyze_success,
+         no_multiple_discontinuities);
+  if (analyze_success && no_multiple_discontinuities && status) {
+    return kCompactPddingMode;
+  }
+  return kNormalPddingMode;
 }
 
 std::string GenLoopModeParams(const LoopModeParams &loop_mode_param, int64_t input_dtype_size,
@@ -170,7 +177,7 @@ void CreateEnhanceDmaCall(const TPipe &tpipe, const Tensor &input, const Tensor 
   LoopModeParams loop_mode_param;
   SetLoopModeParams(tpipe, data_copy_param, loop_mode_param, copy_in);
   const Tensor &ub_tensor = copy_in ? output : input;
-  std::string padding_mode = GetPaddingMode(tpipe, ub_tensor, data_copy_param);
+  std::string padding_mode = GetPaddingMode(ub_tensor, data_copy_param);
   if (total_len <= kDmaMaxLen) {
     CreateBaseDmaCall(input, output, dma_param, padding_mode, ss, copy_in);
     return;
@@ -349,7 +356,7 @@ Status BuildDataCopyApiParamInNormal(const TPipe &tpipe, CodegenApiParam &api_pa
   GE_ASSERT_TRUE(CalculateDmaParams(tpipe, dst, dst, data_copy_param), "CalculateDmaParams failed");
   size_t total_len = data_copy_param.repeats.size();
   const Tensor &ub_tensor = copy_in ? dst : src;
-  std::string padding_mode = GetPaddingMode(tpipe, ub_tensor, data_copy_param);
+  std::string padding_mode = GetPaddingMode(ub_tensor, data_copy_param);
   api_param.template_params.emplace_back(padding_mode);
 
   BuildDataCopyBaseParams(tpipe, data_copy_param, dma_specific_params, copy_in);

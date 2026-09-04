@@ -38,7 +38,7 @@ AutoFuse chooses the **JIT automatic fusion** scheme: it prioritizes **generaliz
 
 ## Key Technical Solutions
 
-AutoFuse classifies network operators into two categories based on their computational characteristics. The first category consists of basic computation types, including Elemwise, Broadcast and View operators (Transpose and Slice). The second category consists of computation types such as Reduce, Concat, Gather and MatMul, which extend the fusion capabilities based on the basic computation types.
+AutoFuse classifies network operators into two categories based on their computational characteristics. The first category consists of basic computation types, including Elemwise, Broadcast and View operators (Transpose, Slice and Split). The second category consists of computation types such as Reduce, Concat, Gather and MatMul, which extend the fusion capabilities based on the basic computation types.
 This means that each extended fusion capability needs to support fusion with the basic computation types.
 
 ### Supported Operator Types
@@ -49,9 +49,7 @@ The following table lists the main supported operator types and their correspond
 | :------------------- | :--------------------------------------------- | :--------- | :------------------------------ |
 | **Elemwise**    | Element-wise computation, each output element corresponds to one input element one-to-one | Vector     | Add, Mul, Abs, Exp, Relu, Cast  |
 | **Broadcast**  | Broadcast computation, extend small shape data along the broadcast axis to target shape for element-wise computation | Vector     | BroadcastTo, BiasAdd            |
-| **View**       | View transformation that changes the logical shape, axis order or partitioning method of data | MTE/Vector | Transpose, Slice                |
-| **Transpose**  | Axis permutation that changes the axis order or memory layout of data | MTE        | Transpose                       |
-| **Slice**      | Slicing that extracts a sub-tensor from a Tensor according to a specified range | MTE/Vector | Slice                           |
+| **View**       | View transformation that changes the logical shape, axis order or partitioning method of data | MTE/Vector | Transpose, Slice, Split         |
 | **Reduce**     | Reduction computation, aggregate multiple elements along specified axis | Vector     | ReduceSum, ReduceMax, ReduceMin |
 | **Generic Norm** | Normalization computation formed by combining same-axis Reduce, Broadcast and Elemwise operations; not a single operator | Vector | LayerNorm, RMSNorm              |
 | **Concat**     | Concatenation, concatenate multiple Tensors into one along the specified axis         | MTE/Vector | Concat                          |
@@ -65,7 +63,7 @@ The following table lists the main fusion capabilities and constraints currently
 | Fusion Capability | Constraint Description |
 | :--- | :--- |
 | **Elemwise / Broadcast** | Only explicit Broadcast is supported. |
-| **View** (Transpose, Slice) | A Kernel supports fusion of any number of Transpose, Elemwise, Broadcast and Slice operators on any axes within 5 axes. |
+| **View** (Transpose, Slice, Split) | A Kernel supports fusion of any number of Transpose, Slice, Split, Elemwise and Broadcast operators on any axes within 5 axes. |
 | **Reduce / Generic Norm** | 1. Reduce fusion, whether forward or backward, supports Elemwise, Reduce, Slice, and any number of Broadcast operators on any axes.<br>2. Among View operators, only Transpose is unsupported. |
 | **Concat** | 1. Forward fusion supports only Elemwise, Broadcast and Slice.<br>2. Backward fusion supports only Elemwise.<br>3. For static Shape, the number of Concat inputs must not exceed 64; too many inputs may result in a long compilation time.<br>4. For dynamic Shape, Concat fusion is unsupported if the Concat axis or any following axis is dynamic. |
 | **Gather** | 1. Gather forward fusion supports Elemwise and Broadcast.<br>2. Gather backward fusion supports any number of Elemwise operators and one Reduce operator at the end; the G axis must be outside the R axis or coincide with the R axis. |

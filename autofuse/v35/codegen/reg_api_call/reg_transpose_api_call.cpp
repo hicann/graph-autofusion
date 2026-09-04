@@ -19,6 +19,7 @@
 #include "codegen_api_param/codegen_api_param.h"
 #include "codegen/expression_convert_struct.h"
 #include "api_call/utils/api_call_utils.h"
+#include "ascir_node_param/ascir_node_param.h"
 
 namespace codegen {
 using namespace std;
@@ -73,6 +74,39 @@ void BuildTransposeLoopParams(TransposeSpecificParams &transpose_specific_params
     transpose_specific_params.output_strides.emplace_back(
         CombinedExpression(ExprItemFactory::Size(out_vectorized_strides[i])));
   }
+}
+
+af::Status FillTransposeNodeParams(const af::AscNodePtr &node,
+                                   const std::vector<ascir::SizeExpr> &out_vectorized_repeats,
+                                   const std::vector<ascir::SizeExpr> &reordered_input_strides,
+                                   const std::vector<ascir::SizeExpr> &out_vectorized_strides,
+                                   uint32_t transpose_inner_axis_num, uint32_t transpose_total_axis_num) {
+  GE_ASSERT_NOTNULL(node);
+  auto params = ascir_param::GetOrCreateAscirNodeParams(node);
+
+  auto *transpose_params = std::get_if<ascir_param::TransposeNodeParams>(&params->specific_params);
+  if (transpose_params == nullptr) {
+    params->specific_params = ascir_param::TransposeNodeParams{};
+    transpose_params = std::get_if<ascir_param::TransposeNodeParams>(&params->specific_params);
+  }
+  GE_ASSERT_NOTNULL(transpose_params, "Transpose specific params is null, node[%s].", node->GetNamePtr());
+  params->api_name = node->GetType();
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+
+  *transpose_params = ascir_param::TransposeNodeParams{};
+  transpose_params->valid = true;
+  transpose_params->inner_dim = transpose_inner_axis_num;
+  transpose_params->total_dim = transpose_total_axis_num;
+  const std::vector<ascir::SizeExpr> out_loop_repeats(out_vectorized_repeats.begin(),
+                                                      out_vectorized_repeats.end() - transpose_total_axis_num);
+  transpose_params->outer_loop_axes.assign(out_loop_repeats.begin(), out_loop_repeats.end());
+  const size_t begin = out_vectorized_repeats.size() - transpose_total_axis_num;
+  for (size_t i = begin; i < out_vectorized_repeats.size(); ++i) {
+    transpose_params->output_dims.emplace_back(out_vectorized_repeats[i]);
+    transpose_params->input_strides.emplace_back(reordered_input_strides[i]);
+    transpose_params->output_strides.emplace_back(out_vectorized_strides[i]);
+  }
+  return af::SUCCESS;
 }
 
 // 构建带循环偏移的 inner_offset 表达式（简化表达式合并操作）
@@ -133,6 +167,8 @@ Status TransposeRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<
   BuildTransposeLoopParams(transpose_specific_params, out_vectorized_repeats, reordered_in_vectorized_strides,
                            y.vectorized_strides, transpose_total_axis_num);
   api_param->specific_params = transpose_specific_params;
+  GE_ASSERT_SUCCESS(FillTransposeNodeParams(this->node, out_vectorized_repeats, reordered_in_vectorized_strides,
+                                            y.vectorized_strides, transpose_inner_axis_num, transpose_total_axis_num));
 
   GE_CHK_STATUS_RET(CodegenApiParam::Register(this->node, api_param));
   return af::SUCCESS;

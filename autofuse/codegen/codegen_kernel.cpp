@@ -3800,6 +3800,9 @@ Status Kernel::GlobalTensorAssign(std::string &result) const {
     const auto &tensor = this->tpipe.tensors.find(this->input_tensors[i]);
     GE_ASSERT_TRUE((tensor != this->tpipe.tensors.end()), "Codegen input tensor id[%ld] not found",
                    this->input_tensors[i]);
+    if (tensor->second.is_constant) {
+      continue;
+    }
     std::string local_result;
     GE_CHK_STATUS_RET(tensor->second.SetGlobalBuffer(this->inputs[i], "", local_result),
                       "Codegen set global buffer failed");
@@ -4078,7 +4081,8 @@ class AutoFusionVector {
 
   result << "    struct Arguments {" << std::endl;
   for (auto &input : this->inputs) {
-    result << "     " << input.AsArg() << "{nullptr};" << std::endl;
+    const bool is_gm_input = input.type.name == kGmAddrT.name;
+    result << "     " << input.AsArg() << (is_gm_input ? "{nullptr};" : "{0};") << std::endl;
   }
   for (auto &output : this->outputs) {
     result << "     " << output.AsArg() << "{nullptr};" << std::endl;
@@ -4095,7 +4099,8 @@ class AutoFusionVector {
 
   result << "    struct Params {" << std::endl;
   for (auto &input : this->inputs) {
-    result << "     " << input.AsArg() << "{nullptr};" << std::endl;
+    const bool is_gm_input = input.type.name == kGmAddrT.name;
+    result << "     " << input.AsArg() << (is_gm_input ? "{nullptr};" : "{0};") << std::endl;
   }
   for (auto &output : this->outputs) {
     result << "     " << output.AsArg() << "{nullptr};" << std::endl;
@@ -4110,7 +4115,8 @@ class AutoFusionVector {
   }
   result << "    };" << std::endl;
   for (auto &input : this->inputs) {
-    result << "    " << input.AsArg() << "{nullptr};" << std::endl;
+    const bool is_gm_input = input.type.name == kGmAddrT.name;
+    result << "    " << input.AsArg() << (is_gm_input ? "{nullptr};" : "{0};") << std::endl;
   }
   for (auto &output : this->outputs) {
     result << "    " << output.AsArg() << "{nullptr};" << std::endl;

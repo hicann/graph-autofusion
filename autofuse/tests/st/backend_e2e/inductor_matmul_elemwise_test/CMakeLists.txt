@@ -27,7 +27,7 @@ target_compile_definitions(inductor_matmul_elemwise_test_codegen PRIVATE
 add_test(NAME inductor_matmul_elemwise_test_codegen
     COMMAND ${CMAKE_COMMAND} -E env
             "LD_LIBRARY_PATH=${INDUCTOR_MATMUL_ELEMWISE_RUNTIME_LD_LIBRARY_PATH}"
-            inductor_matmul_elemwise_test_codegen
+            $<TARGET_FILE:inductor_matmul_elemwise_test_codegen>
             --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/inductor_matmul_elemwise_test_codegen.xml)
 set_tests_properties(inductor_matmul_elemwise_test_codegen PROPERTIES
     LABELS "st;build_backend_test1;inductor_matmul_elemwise_test_codegen")
