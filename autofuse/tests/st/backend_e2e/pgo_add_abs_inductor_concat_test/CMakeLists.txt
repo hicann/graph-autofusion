@@ -28,7 +28,7 @@ target_compile_definitions(pgo_add_abs_inductor_concat_test_codegen PRIVATE
 add_test(NAME pgo_add_abs_inductor_concat_test_codegen
     COMMAND ${CMAKE_COMMAND} -E env
             "LD_LIBRARY_PATH=${PGO_ADD_ABS_INDUCTOR_CONCAT_RUNTIME_LD_LIBRARY_PATH}"
-            pgo_add_abs_inductor_concat_test_codegen --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/pgo_add_abs_inductor_concat_test_codegen.xml)
+            $<TARGET_FILE:pgo_add_abs_inductor_concat_test_codegen> --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/pgo_add_abs_inductor_concat_test_codegen.xml)
 set_tests_properties(pgo_add_abs_inductor_concat_test_codegen PROPERTIES LABELS "st;build_backend_test1;pgo_add_abs_inductor_concat_test_codegen")
 
 file(MAKE_DIRECTORY ${PGO_ADD_ABS_INDUCTOR_CONCAT_OUTPUT_DIR})

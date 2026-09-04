@@ -25,7 +25,7 @@
 #include "common/platform_context.h"
 
 namespace {
-constexpr int64_t kExpm1SimtDcacheSize = 32 * 1024;
+constexpr int64_t kExpm1SimtDcacheSize = 40 * 1024;
 }
 
 class TestBackendExpm1E2e : public testing::Test {

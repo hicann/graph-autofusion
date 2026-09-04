@@ -61,7 +61,7 @@ function(do_backend_e2e_st_test)
     add_test(NAME ${E2E_ST1_GENERATOR_EXE_NAME}
              COMMAND ${CMAKE_COMMAND} -E env
                      "LD_LIBRARY_PATH=${BACKEND_RUNTIME_LD_LIBRARY_PATH}"
-                     ${E2E_ST1_GENERATOR_EXE_NAME}
+                     $<TARGET_FILE:${E2E_ST1_GENERATOR_EXE_NAME}>
                      --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/${E2E_ST1_GENERATOR_EXE_NAME}.xml)
     set_tests_properties(${E2E_ST1_GENERATOR_EXE_NAME} PROPERTIES LABELS "st;build_backend_test1;${E2E_ST1_GENERATOR_EXE_NAME}")
 

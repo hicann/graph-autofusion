@@ -24,7 +24,7 @@ set(INDUCTOR_TOPN_RUNTIME_LD_LIBRARY_PATH
 add_test(NAME inductor_topn_test_codegen
     COMMAND ${CMAKE_COMMAND} -E env
             "LD_LIBRARY_PATH=${INDUCTOR_TOPN_RUNTIME_LD_LIBRARY_PATH}"
-            inductor_topn_test_codegen --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/inductor_topn_test_codegen.xml)
+            $<TARGET_FILE:inductor_topn_test_codegen> --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/inductor_topn_test_codegen.xml)
 set_tests_properties(inductor_topn_test_codegen PROPERTIES LABELS "st;build_backend_test1;inductor_topn_test_codegen")
 
 # e2e target: split compile chain verification
