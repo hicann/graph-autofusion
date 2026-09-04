@@ -296,7 +296,7 @@ aclError aclrtMemset(void *devPtr, size_t maxCount, int value, size_t count);
 aclError aclmdlRIDestroyRegisterCallback(aclmdlRI modelRI, aclmdlRIDestroyCallbackFunc callback, void *userData);
 
 // Exception handling
-aclError aclrtSetExceptionInfoCallback(aclrtExceptionInfoCallbackFunc callback);
+aclError aclrtExceptionInfoCallbackRegister(aclrtExceptionInfoCallbackFunc callback);
 aclError aclrtGetFuncHandleFromExceptionInfo(const aclrtExceptionInfo *exceptionInfo, aclrtFuncHandle *funcHandle);
 aclError aclrtGetArgsFromExceptionInfo(const aclrtExceptionInfo *exceptionInfo, void **args, uint32_t *argsLen);
 

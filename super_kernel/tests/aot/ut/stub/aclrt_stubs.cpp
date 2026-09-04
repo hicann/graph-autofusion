@@ -387,7 +387,7 @@ aclError aclmdlRIDestroyRegisterCallback(aclmdlRI modelRI, aclmdlRIDestroyCallba
 }
 
 // Exception handling
-aclError aclrtSetExceptionInfoCallback(aclrtExceptionInfoCallbackFunc callback) {
+aclError aclrtExceptionInfoCallbackRegister(aclrtExceptionInfoCallbackFunc callback) {
   if (callback == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
