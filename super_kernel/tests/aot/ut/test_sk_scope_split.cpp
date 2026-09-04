@@ -20,6 +20,7 @@
 #include "super_kernel.h"
 #include "sk_graph.h"
 #include "sk_scope_split.h"
+#include "sk_scope_split_result_reporter.h"
 #include "sk_node.h"
 #include "sk_lock_detector.h"
 #include "sk_options_manager.h"
@@ -4928,4 +4929,47 @@ TEST_F(SuperKernelScopeSplitterTest, PerOpMaxCoreSplitPass_DoesNotSetBreakReason
   EXPECT_EQ(splitter.GetScopeInfos().size(), 1);
   EXPECT_TRUE(splitter.IsDebugPerOpMaxCoreEnabled());
   EXPECT_EQ(splitter.GetScopeInfos()[0].GetBreakInfo().GetReason(), ScopeBreakReason::NONE);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScopeSplitResultReporter_RestoreOnlyMatchesCompleteScopeStructure) {
+  auto *kernel = CreateKernelNode(1, 0);
+  auto *defaultNode = CreateDefaultNode(2, 0);
+  std::bitset<MAX_SCOPE_NUM> scopeFlags;
+  scopeFlags.set(1);
+
+  SuperKernelScopeInfo originalScope;
+  originalScope.SetNodes({kernel, defaultNode});
+  originalScope.SetScopeBitFlags(scopeFlags);
+  originalScope.SetBreakInfo(ScopeBreakInfo()
+                                 .SetReason(ScopeBreakReason::UNFUSIBLE_NODE)
+                                 .SetTriggerNode(3, 0)
+                                 .SetDetail("unfused node causes scope break"));
+  const uint16_t originalScopeId = originalScope.GetScopeId();
+
+  std::vector<SuperKernelScopeInfo> previousScopes;
+  previousScopes.push_back(std::move(originalScope));
+  ScopeSplitResultReporter reporter;
+  reporter.CaptureResplitScopes(previousScopes);
+
+  SuperKernelScopeInfo matchedScope;
+  matchedScope.SetNodes({kernel, defaultNode});
+  matchedScope.SetScopeBitFlags(scopeFlags);
+  SuperKernelScopeInfo defaultChangedScope;
+  defaultChangedScope.SetNodes({kernel});
+  defaultChangedScope.SetScopeBitFlags(scopeFlags);
+  SuperKernelScopeInfo flagsChangedScope;
+  flagsChangedScope.SetNodes({kernel, defaultNode});
+  scopeFlags.set(2);
+  flagsChangedScope.SetScopeBitFlags(scopeFlags);
+
+  std::vector<SuperKernelScopeInfo> currentScopes;
+  currentScopes.push_back(std::move(matchedScope));
+  currentScopes.push_back(std::move(defaultChangedScope));
+  currentScopes.push_back(std::move(flagsChangedScope));
+  reporter.RestoreResplitBreakInfos(currentScopes);
+
+  EXPECT_EQ(currentScopes[0].GetBreakInfo().GetReason(), ScopeBreakReason::UNFUSIBLE_NODE);
+  EXPECT_EQ(currentScopes[0].GetBreakInfo().GetParentScopeId(), originalScopeId);
+  EXPECT_EQ(currentScopes[1].GetBreakInfo().GetReason(), ScopeBreakReason::NONE);
+  EXPECT_EQ(currentScopes[2].GetBreakInfo().GetReason(), ScopeBreakReason::NONE);
 }
