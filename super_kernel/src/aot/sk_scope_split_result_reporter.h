@@ -21,8 +21,7 @@
 
 class ScopeSplitResultReporter {
  public:
-  bool HasSameScopeStructure(const SuperKernelScopeInfo &sourceScope,
-                             const SuperKernelScopeInfo &targetScope) const;
+  bool HasSameScopeStructure(const SuperKernelScopeInfo &sourceScope, const SuperKernelScopeInfo &targetScope) const;
 
   void ReportNewBreak(SuperKernelScopeInfo &scope, ScopeBreakInfo breakInfo) const;
   void ReportInheritedBreak(SuperKernelScopeInfo &scope, const ScopeBreakInfo &sourceBreakInfo,
@@ -41,8 +40,7 @@ class ScopeSplitResultReporter {
     uint16_t scopeId = INVALID_SCOPE_ID;
   };
 
-  static std::vector<uint64_t> GetNodeIds(const SuperKernelScopeInfo &scope, SkNodeType nodeType,
-                                          bool skipScopeNode);
+  static std::vector<uint64_t> GetNodeIds(const SuperKernelScopeInfo &scope, SkNodeType nodeType, bool skipScopeNode);
   static ScopeSnapshot MakeSnapshot(const SuperKernelScopeInfo &scope);
   static bool HasSameScopeStructure(const ScopeSnapshot &snapshot, const SuperKernelScopeInfo &scope);
 

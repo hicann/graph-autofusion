@@ -12,7 +12,7 @@
 #include <algorithm>
 
 std::vector<uint64_t> ScopeSplitResultReporter::GetNodeIds(const SuperKernelScopeInfo &scope, SkNodeType nodeType,
-                                                            bool skipScopeNode) {
+                                                           bool skipScopeNode) {
   std::vector<uint64_t> nodeIds;
   for (const auto *node : scope.GetNodes()) {
     if (node != nullptr && node->GetNodeType() == nodeType && (!skipScopeNode || !node->IsScopeNode())) {
@@ -28,15 +28,14 @@ ScopeSplitResultReporter::ScopeSnapshot ScopeSplitResultReporter::MakeSnapshot(c
           scope.GetScopeBitFlags(), scope.GetBreakInfo(), scope.GetScopeId()};
 }
 
-bool ScopeSplitResultReporter::HasSameScopeStructure(const ScopeSnapshot &snapshot,
-                                                      const SuperKernelScopeInfo &scope) {
+bool ScopeSplitResultReporter::HasSameScopeStructure(const ScopeSnapshot &snapshot, const SuperKernelScopeInfo &scope) {
   return snapshot.kernelNodeIds == GetNodeIds(scope, SkNodeType::NODE_KERNEL, true) &&
          snapshot.defaultNodeIds == GetNodeIds(scope, SkNodeType::NODE_DEFAULT, false) &&
          snapshot.scopeBitFlags == scope.GetScopeBitFlags();
 }
 
 bool ScopeSplitResultReporter::HasSameScopeStructure(const SuperKernelScopeInfo &sourceScope,
-                                                      const SuperKernelScopeInfo &targetScope) const {
+                                                     const SuperKernelScopeInfo &targetScope) const {
   return HasSameScopeStructure(MakeSnapshot(sourceScope), targetScope);
 }
 
@@ -45,9 +44,8 @@ void ScopeSplitResultReporter::ReportNewBreak(SuperKernelScopeInfo &scope, Scope
   scope.SetBreakInfo(std::move(breakInfo));
 }
 
-void ScopeSplitResultReporter::ReportInheritedBreak(SuperKernelScopeInfo &scope,
-                                                     const ScopeBreakInfo &sourceBreakInfo,
-                                                     uint16_t parentScopeId) const {
+void ScopeSplitResultReporter::ReportInheritedBreak(SuperKernelScopeInfo &scope, const ScopeBreakInfo &sourceBreakInfo,
+                                                    uint16_t parentScopeId) const {
   ScopeBreakInfo breakInfo = sourceBreakInfo;
   breakInfo.SetParentScopeId(parentScopeId);
   scope.SetBreakInfo(std::move(breakInfo));
@@ -64,10 +62,9 @@ void ScopeSplitResultReporter::CaptureResplitScopes(const std::vector<SuperKerne
 
 void ScopeSplitResultReporter::RestoreResplitBreakInfos(std::vector<SuperKernelScopeInfo> &scopes) const {
   for (auto &scope : scopes) {
-    const auto snapshotIt = std::find_if(resplitScopeSnapshots_.begin(), resplitScopeSnapshots_.end(),
-                                         [&scope](const ScopeSnapshot &snapshot) {
-                                           return HasSameScopeStructure(snapshot, scope);
-                                         });
+    const auto snapshotIt =
+        std::find_if(resplitScopeSnapshots_.begin(), resplitScopeSnapshots_.end(),
+                     [&scope](const ScopeSnapshot &snapshot) { return HasSameScopeStructure(snapshot, scope); });
     if (snapshotIt != resplitScopeSnapshots_.end()) {
       ReportInheritedBreak(scope, snapshotIt->breakInfo, snapshotIt->scopeId);
     }

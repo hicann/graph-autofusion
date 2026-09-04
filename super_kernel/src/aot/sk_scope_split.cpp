@@ -1178,8 +1178,8 @@ ScopeProcessResult DeadlockRefinePass::HandleDeadlockSplit(SuperKernelScopeInfo 
           workingScope.GetNodes().size(), scopeBefore.GetNodes().size(), scopeAfter.GetNodes().size());
 
   bool hasSameStructureAsOriginal = reporter_->HasSameScopeStructure(workingScope, scopeBefore);
-  SetupScopeBeforeBreakInfo(*reporter_, scopeBefore, originalBreakInfo, originalScopeId, deadlockNode,
-                            deadlockWaitNode, hasSameStructureAsOriginal);
+  SetupScopeBeforeBreakInfo(*reporter_, scopeBefore, originalBreakInfo, originalScopeId, deadlockNode, deadlockWaitNode,
+                            hasSameStructureAsOriginal);
 
   hasSameStructureAsOriginal = reporter_->HasSameScopeStructure(workingScope, scopeAfter);
   SetupScopeAfterBreakInfo(*reporter_, scopeAfter, originalBreakInfo, originalScopeId, hasSameStructureAsOriginal);
@@ -1441,8 +1441,7 @@ ScheModeScopeProcessResult ScheModeKernelSplitPass::ProcessSingleScope(
                                         coreMismatchDetail, hasSameStructureAsOriginal);
 
       hasSameStructureAsOriginal = reporter_->HasSameScopeStructure(workingScope, scopeAfter);
-      SetupScopeAfterBreakInfo(*reporter_, scopeAfter, originalBreakInfo, originalScopeId,
-                               hasSameStructureAsOriginal);
+      SetupScopeAfterBreakInfo(*reporter_, scopeAfter, originalBreakInfo, originalScopeId, hasSameStructureAsOriginal);
 
       SK_LOGI("[ScheModeSplit] split before kernel %lu because no SK core candidate remains", node->GetNodeId());
 
