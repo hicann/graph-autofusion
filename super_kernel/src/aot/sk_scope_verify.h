@@ -15,6 +15,9 @@
 
 #include "super_kernel.h"
 
+// Print scope verify input graph and nodes.
+void LogScopeVerifyInput(const aclskScopeVerifyGraphInfo *verifyGraph, size_t maxSplitResultCount);
+
 // Run scope verify workflow and fill split results for aclskScopeVerify.
 aclError RunScopeVerify(const aclskScopeVerifyGraphInfo *verifyGraph, size_t maxSplitResultCount,
                         aclskScopeVerifySplitResult *splitResults, size_t *realSplitResultCount);

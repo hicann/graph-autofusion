@@ -212,6 +212,7 @@ aclError aclskScopeVerify(const aclskScopeVerifyGraphInfo *verifyGraph, size_t m
                           aclskScopeVerifySplitResult *splitResults, size_t *realSplitResultCount) {
   SK_DLOGI("aclskScopeVerify start");
   sk::logger::FileLogSuppressGuard fileLogSuppressGuard;
+  LogScopeVerifyInput(verifyGraph, maxSplitResultCount);
   return RunScopeVerify(verifyGraph, maxSplitResultCount, splitResults, realSplitResultCount);
 }
 

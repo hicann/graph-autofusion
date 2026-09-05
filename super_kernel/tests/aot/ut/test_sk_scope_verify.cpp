@@ -687,6 +687,13 @@ TEST_F(ScopeVerifyTest, NoSplitGraphReturnsZeroResults) {
   ASSERT_EQ(aclskScopeVerify(&verifyGraph, 0, nullptr, &realSplitResultCount), ACL_SUCCESS);
 
   EXPECT_EQ(realSplitResultCount, 0);
+  EXPECT_NE(ut_log::LogBuffer::Instance().GetContent().find(
+                "aclskScopeVerify input node[0]: taskId=1, streamId=0, eventId=0, scopeId=1, taskType=2, "
+                "kernelType=1, numBlocks=4, taskRatio={1,0}, scheMode=0, flag=0x0, coreLimit={0,0}"),
+            std::string::npos);
+  EXPECT_NE(ut_log::LogBuffer::Instance().GetContent().find(
+                "aclskScopeVerify split result: No risk of Superkernel fusion caused by deadlock or Syncall"),
+            std::string::npos);
 }
 
 TEST_F(ScopeVerifyTest, ScheModeSplitFillsBeforeNodeResult) {
@@ -706,6 +713,11 @@ TEST_F(ScopeVerifyTest, ScheModeSplitFillsBeforeNodeResult) {
   EXPECT_EQ(splitResults[0].splitReason, ACLSK_SCOPE_VERIFY_SYNCALL_OP_DROP);
   EXPECT_EQ(splitResults[0].extendType, 0);
   EXPECT_EQ(splitResults[0].extendInfo, nullptr);
+  EXPECT_NE(
+      ut_log::LogBuffer::Instance().GetContent().find(
+          "aclskScopeVerify split result[0]: taskId=2, scopeId=1, splitType=ACLSK_SCOPE_VERIFY_SPLIT_BEFORE_NODE, "
+          "splitReason=ACLSK_SCOPE_VERIFY_SYNCALL_OP_DROP"),
+      std::string::npos);
 }
 
 TEST_F(ScopeVerifyTest, ResultBufferTooSmallReturnsInvalidParamAndDoesNotWriteResults) {
@@ -755,6 +767,11 @@ TEST_F(ScopeVerifyTest, DeadlockSplitFillsExcludeNodeResult) {
   EXPECT_EQ(splitResults[0].splitReason, ACLSK_SCOPE_VERIFY_DEADLOCK_DETECTED);
   EXPECT_EQ(splitResults[0].extendType, 0);
   EXPECT_EQ(splitResults[0].extendInfo, nullptr);
+  EXPECT_NE(
+      ut_log::LogBuffer::Instance().GetContent().find(
+          "aclskScopeVerify split result[0]: taskId=2, scopeId=1, splitType=ACLSK_SCOPE_VERIFY_SPLIT_EXCLUDE_NODE, "
+          "splitReason=ACLSK_SCOPE_VERIFY_DEADLOCK_DETECTED"),
+      std::string::npos);
 }
 
 TEST_F(ScopeVerifyTest, ScheModeSplitBeforeDeadlockOnRefinedScope) {
