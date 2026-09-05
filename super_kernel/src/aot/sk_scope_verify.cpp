@@ -21,6 +21,28 @@
 
 namespace {
 
+const char *ScopeVerifySplitTypeToString(aclskScopeVerifySplitType splitType) {
+  switch (splitType) {
+    case ACLSK_SCOPE_VERIFY_SPLIT_BEFORE_NODE:
+      return "ACLSK_SCOPE_VERIFY_SPLIT_BEFORE_NODE";
+    case ACLSK_SCOPE_VERIFY_SPLIT_EXCLUDE_NODE:
+      return "ACLSK_SCOPE_VERIFY_SPLIT_EXCLUDE_NODE";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+const char *ScopeVerifySplitReasonToString(aclskScopeVerifySplitReason splitReason) {
+  switch (splitReason) {
+    case ACLSK_SCOPE_VERIFY_DEADLOCK_DETECTED:
+      return "ACLSK_SCOPE_VERIFY_DEADLOCK_DETECTED";
+    case ACLSK_SCOPE_VERIFY_SYNCALL_OP_DROP:
+      return "ACLSK_SCOPE_VERIFY_SYNCALL_OP_DROP";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 class ScopeVerifyRunner {
  public:
   ScopeVerifyRunner(const aclskScopeVerifyGraphInfo *verifyGraph, size_t maxSplitResultCount,
@@ -82,6 +104,10 @@ class ScopeVerifyRunner {
                maxSplitResultCount_, splitRecords_.size());
       return ACL_ERROR_INVALID_PARAM;
     }
+    if (splitRecords_.empty()) {
+      SK_DLOGI("aclskScopeVerify split result: No risk of Superkernel fusion caused by deadlock or Syncall");
+      return ACL_SUCCESS;
+    }
     for (size_t i = 0; i < splitRecords_.size(); ++i) {
       auto it = verifyNodesById_.find(splitRecords_[i].nodeId);
       if (it == verifyNodesById_.end()) {
@@ -93,6 +119,10 @@ class ScopeVerifyRunner {
       splitResults_[i].splitReason = splitRecords_[i].splitReason;
       splitResults_[i].extendType = 0;
       splitResults_[i].extendInfo = nullptr;
+      SK_DLOGI("aclskScopeVerify split result[%zu]: taskId=%ld, scopeId=%d, splitType=%s, splitReason=%s", i,
+               splitResults_[i].splitNode->taskId, splitResults_[i].splitNode->scopeId,
+               ScopeVerifySplitTypeToString(splitResults_[i].splitType),
+               ScopeVerifySplitReasonToString(splitResults_[i].splitReason));
     }
     return ACL_SUCCESS;
   }
@@ -108,6 +138,23 @@ class ScopeVerifyRunner {
 };
 
 }  // namespace
+
+void LogScopeVerifyInput(const aclskScopeVerifyGraphInfo *verifyGraph, size_t maxSplitResultCount) {
+  if (verifyGraph == nullptr || verifyGraph->nodes == nullptr) {
+    return;
+  }
+  SK_DLOGI("aclskScopeVerify input: nodeCount=%zu, maxSplitResultCount=%zu", verifyGraph->nodeCount,
+           maxSplitResultCount);
+  for (size_t i = 0; i < verifyGraph->nodeCount; ++i) {
+    const aclskScopeVerifyNodeInfo &node = verifyGraph->nodes[i];
+    SK_DLOGI(
+        "aclskScopeVerify input node[%zu]: taskId=%ld, streamId=%ld, eventId=%ld, scopeId=%d, taskType=%d, "
+        "kernelType=%d, numBlocks=%u, taskRatio={%u,%u}, scheMode=%d, flag=0x%x, coreLimit={%d,%d}",
+        i, node.taskId, node.streamId, node.eventId, node.scopeId, static_cast<int32_t>(node.taskType),
+        static_cast<int32_t>(node.kernelType), node.numBlocks, node.taskRatio[0], node.taskRatio[1], node.scheMode,
+        node.flag, node.coreLimit[0], node.coreLimit[1]);
+  }
+}
 
 aclError RunScopeVerify(const aclskScopeVerifyGraphInfo *verifyGraph, size_t maxSplitResultCount,
                         aclskScopeVerifySplitResult *splitResults, size_t *realSplitResultCount) {
