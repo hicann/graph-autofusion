@@ -110,7 +110,10 @@ void GeneralSolverGen::SetBufferCons(const std::map<HardwareDef, Expr> &buffer_c
       std::string hardware = iter->second;
       hardware_expr = CreateExpr(hardware.c_str());
       cons_expr = af::sym::Sub(pair.second, hardware_expr);
-      if (IsRelated(cons_expr)) {
+      // CORENUM is the launch/core budget and must remain an explicit solver
+      // constraint even when the expression only depends on input/container
+      // variables (and therefore is not searchable by this solver).
+      if (IsRelated(cons_expr) || pair.first == HardwareDef::CORENUM) {
         hardware_cost = hardware;
         remain = af::sym::Min(cons_expr, af::sym::kSymbolZero);
         penalty = af::sym::Max(cons_expr, af::sym::kSymbolZero);

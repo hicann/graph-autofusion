@@ -644,6 +644,8 @@ def static_shape_compile(
             ctypes.c_int(int(get_soc_spec("ub_size"))),
         )
 
+    if not result:
+        raise RuntimeError("GenConstTilingData returned empty const tiling data")
     const_tiling_data = result.decode("utf-8")
     if hasattr(lib, "GetCVUBFusionStageSizeName"):
         stage_size_name = get_cv_ub_fusion_stage_size_name(

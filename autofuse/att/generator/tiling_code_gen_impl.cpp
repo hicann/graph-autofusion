@@ -1340,6 +1340,12 @@ af::Status TilingCodeGenImpl::GenGetTiling() {
   tiling_func_.AddLine("    }");
   tiling_func_.AddLine("    DoApiTiling(tiling_data);");
   tiling_func_.AddLine("    GeneralTiling(tiling_data);");
+  tiling_func_.AddLine("    if (tiling_data.get_block_dim() > corenum_) {");
+  tiling_func_.AddLine(
+      "      OP_LOGW(OP_NAME, \"Generated block_dim %u exceeds core budget %u.\", "
+      "tiling_data.get_block_dim(), corenum_);");
+  tiling_func_.AddLine("      return false;");
+  tiling_func_.AddLine("    }");
   if (config_.gen_extra_infos) {
     tiling_func_.AddLine("    GetWorkSpaceSize(tiling_data);");
     tiling_func_.AddLine("    ExtraTilingData(tiling_data);");
@@ -4043,7 +4049,7 @@ void TilingCodeGenImpl::GenPGOByCoreNumGetScheduleResult(
   tiling_func_.AddLine("  tiling_data_list.insert(tiling_data_list.end(), tiling_data_list_tmp" +
                        std::to_string(group_index) + ".begin(), tiling_data_list_tmp" + std::to_string(group_index) +
                        ".end());");
-  tiling_func_.AddLine("  return true;");
+  tiling_func_.AddLine("  return !tiling_data_list_tmp" + std::to_string(group_index) + ".empty();");
   tiling_func_.AddLine("}");
 }
 
@@ -4124,22 +4130,24 @@ af::Status TilingCodeGenImpl::GenPGOGetScheduleResultPerGroup(
   tiling_func_.AddLine("        workspaceSize = workspaceSizeTmp;");
   tiling_func_.AddLine("      }");
   tiling_func_.AddLine("    }");
-  tiling_func_.AddLine("    workspaceSize += 16 * 1024 * 1024;");
-  tiling_func_.AddLine("    if (PgoConfig::Instance().batch_callback) {");
-  tiling_func_.AddLine(
-      "      if (PgoConfig::Instance().batch_callback(PgoConfig::Instance().tensor_args, stream, "
-      "workspaceSize, &tiling_data_list_tmp) != 0) {");
-  tiling_func_.AddLine("        return false;");
-  tiling_func_.AddLine("      }");
-  tiling_func_.AddLine("    }");
+  tiling_func_.AddLine("    std::vector<AutofuseTilingDataPerf> valid_tiling_data_list;");
+  tiling_func_.AddLine("    valid_tiling_data_list.reserve(valid_candidates.size());");
   tiling_func_.AddLine("    for (size_t candidate_index = " + candidate_begin_name +
                        "; candidate_index < tiling_data_list_tmp.size(); ++candidate_index) {");
   tiling_func_.AddLine("      const size_t candidate_offset = candidate_index - " + candidate_begin_name + ";");
-  tiling_func_.AddLine(
-      "      if (candidate_offset >= valid_candidates.size() || !valid_candidates[candidate_offset]) {");
-  tiling_func_.AddLine("        continue;");
+  tiling_func_.AddLine("      if (candidate_offset < valid_candidates.size() && valid_candidates[candidate_offset]) {");
+  tiling_func_.AddLine("        valid_tiling_data_list.push_back(tiling_data_list_tmp[candidate_index]);");
   tiling_func_.AddLine("      }");
-  tiling_func_.AddLine("      auto &tiling_data_perf = tiling_data_list_tmp[candidate_index];");
+  tiling_func_.AddLine("    }");
+  tiling_func_.AddLine("    workspaceSize += 16 * 1024 * 1024;");
+  tiling_func_.AddLine("    if (PgoConfig::Instance().batch_callback && !valid_tiling_data_list.empty()) {");
+  tiling_func_.AddLine(
+      "      if (PgoConfig::Instance().batch_callback(PgoConfig::Instance().tensor_args, stream, "
+      "workspaceSize, &valid_tiling_data_list) != 0) {");
+  tiling_func_.AddLine("        return false;");
+  tiling_func_.AddLine("      }");
+  tiling_func_.AddLine("    }");
+  tiling_func_.AddLine("    for (auto &tiling_data_perf : valid_tiling_data_list) {");
   tiling_func_.AddLine("      tiling_data_list.push_back(tiling_data_perf);");
   tiling_func_.AddLine("      if (tiling_data_perf.best_perf < best_perf) {");
   tiling_func_.AddLine("        tiling_data = tiling_data_perf.tiling_data;");
@@ -4161,8 +4169,9 @@ af::Status TilingCodeGenImpl::GenPGOScheduleGroupSearchEntry(
     return af::SUCCESS;
   }
   GenSetHardwareCodes(group_info.second.second, hardware_iter->second);
-  auto [input_vars_set_code, need_update] = ProcessVarRelationsStatement(
-      graph_info, var_relations_[asc_graph_id][impl_graph_id], group_info.first, "  tiling_data.", {"return true;"});
+  auto [input_vars_set_code, need_update] =
+      ProcessVarRelationsStatement(graph_info, var_relations_[asc_graph_id][impl_graph_id], group_info.first,
+                                   "  tiling_data.", {"return tiling_data_list.size() > candidate_count_before;"});
   if (need_update) {
     RequireVarRelationSystemHeaders();
     tiling_func_.AddLine(input_vars_set_code);
@@ -4206,6 +4215,7 @@ af::Status TilingCodeGenImpl::GenPGOGetScheduleResult(
           "SearchConfig *search_cfg=nullptr) {");
   tiling_func_.AddLine(func_define);
   tiling_func_.AddLine("  (void)cur_perf; (void)cur_block_dim;");
+  tiling_func_.AddLine("  const size_t candidate_count_before = tiling_data_list.size();");
   uint32_t group_index = 0U;
   tiling_func_.AddLine("  std::vector<AutofuseTilingDataPerf> tiling_data_list_tmp{};");
   tiling_func_.AddLine("  workspaceSize = 0;");
@@ -4218,7 +4228,7 @@ af::Status TilingCodeGenImpl::GenPGOGetScheduleResult(
         GenPGOScheduleGroupSearchEntry(asc_graph_id, impl_graph_id, graph_info, hardware_map, group_info, result_name));
     group_index++;
   }
-  tiling_func_.AddLine("  return true;");
+  tiling_func_.AddLine("  return tiling_data_list.size() > candidate_count_before;");
   tiling_func_.AddLine("}");
   return af::SUCCESS;
 }
@@ -4411,6 +4421,11 @@ af::Status TilingCodeGenImpl::GenFusedScheduleResultsGetTilingDefine(const Fused
         "max_block_dim;");
     asc_graph_id++;
   }
+  tiling_func_.AddLine("  if (org_block_dim > 0U && max_block_dim > org_block_dim) {");
+  tiling_func_.AddLine("    " + failed_log_level +
+                       "(OP_NAME, \"Aggregated block_dim %u exceeds core budget %u.\", max_block_dim, org_block_dim);");
+  tiling_func_.AddLine("    return false;");
+  tiling_func_.AddLine("  }");
   GenWorkspaceOffsetFinalize("tiling_data");
   tiling_func_.AddLine("  tiling_data.set_block_dim(max_block_dim);");
 
@@ -4458,6 +4473,7 @@ af::Status TilingCodeGenImpl::GenPGOByCoreNumFusedScheduleResultsGetTilingDefine
 
   tiling_func_.AddLine("  OP_LOGI(OP_NAME, \"End PGOSearchTilingKey root.\");");
 
+  tiling_func_.AddLine("  ret = !tiling_data_list.empty();");
   tiling_func_.AddLine("  return ret;");
   tiling_func_.AddLine("}");
   return af::SUCCESS;
@@ -4528,6 +4544,7 @@ af::Status TilingCodeGenImpl::GenPGOFusedScheduleResultsGetTilingDefine(const Fu
 void TilingCodeGenImpl::GenPGOByCoreNumGetAllSchedulesResults(const size_t asc_graph_id,
                                                               const AscGraphNamepspaceMap &namespace_map) {
   std::string tiling_key_prefix = "graph" + std::to_string(asc_graph_id) + "_";
+  tiling_func_.AddLine("  bool has_valid_tiling = false;");
   tiling_func_.AddLine("  for (int32_t index = 0; index < " + std::to_string(namespace_map.size()) + "; index++) {");
   tiling_func_.AddLine("    tiling_data.set_" + tiling_key_prefix + "tiling_key(index);");
   for (const auto &result_id_and_groups : namespace_map) {
@@ -4535,7 +4552,9 @@ void TilingCodeGenImpl::GenPGOByCoreNumGetAllSchedulesResults(const size_t asc_g
       tiling_func_.AddLine("    tiling_data." + group_info.second.second + "_tiling_data = {};");
     }
   }
-  tiling_func_.AddLine("    (void)kScheduleResultFunctionsPGOByCoreNum[index](tiling_data_list, tiling_data);");
+  tiling_func_.AddLine("    if (kScheduleResultFunctionsPGOByCoreNum[index](tiling_data_list, tiling_data)) {");
+  tiling_func_.AddLine("      has_valid_tiling = true;");
+  tiling_func_.AddLine("    }");
   tiling_func_.AddLine("  }");
 }
 
@@ -4544,6 +4563,7 @@ void TilingCodeGenImpl::GenPGOGetAllSchedulesResults(const size_t asc_graph_id,
   std::string tiling_key_prefix = "graph" + std::to_string(asc_graph_id) + "_";
 
   tiling_func_.AddLine("  AutofuseTilingData tilingTmp;");
+  tiling_func_.AddLine("  bool has_valid_tiling = false;");
   tiling_func_.AddLine("  for (int32_t index = 0; index < " + std::to_string(namespace_map.size()) + "; index++) {");
   tiling_func_.AddLine("    tilingTmp = tiling_data;");
   tiling_func_.AddLine("    tilingTmp.set_" + tiling_key_prefix + "tiling_key(index);");
@@ -4554,9 +4574,11 @@ void TilingCodeGenImpl::GenPGOGetAllSchedulesResults(const size_t asc_graph_id,
   tiling_func_.AddLine("      continue;");
   tiling_func_.AddLine("    }");
   tiling_func_.AddLine(
-      "    (void)kScheduleResultFunctionsPGO[index](tiling_data_list, ori_block_dim, "
+      "    if (kScheduleResultFunctionsPGO[index](tiling_data_list, ori_block_dim, "
       "tiling_case_id, tilingTmp, cur_perf, best_perf, cur_block_dim, "
-      "stream, workspaceSize, block_dim_vec, search_cfg);");
+      "stream, workspaceSize, block_dim_vec, search_cfg)) {");
+  tiling_func_.AddLine("      has_valid_tiling = true;");
+  tiling_func_.AddLine("    }");
   tiling_func_.AddLine("  }");
 }
 
@@ -4576,11 +4598,11 @@ af::Status TilingCodeGenImpl::GenGetTilingForAllSchedulesResults(const uint32_t 
     GenGetMaxScoreIndex(asc_graph_map);
   }
   GE_ASSERT_SUCCESS(GenGetAllSchedulesResults(asc_graph_map));
-  tiling_func_.AddLine("  GetResultSummary(best_perf, tiling_data);");
+  tiling_func_.AddLine("  const bool result = GetResultSummary(best_perf, tiling_data);");
   GE_ASSERT_SUCCESS(GenDurationEndCode(TilingFuncDurationType::TILING_FUNC_DURATION_TOTAL, "  "), "Generate end code!");
   GE_ASSERT_SUCCESS(GenDurationPrintCode("  "), "Generate print code failed.");
   GE_ASSERT_SUCCESS(GenDurationClearCode("  "), "Generate clear code failed.");
-  tiling_func_.AddLine("  return true;");
+  tiling_func_.AddLine("  return result;");
   tiling_func_.AddLine("}");
   tiling_func_.AddLine("} // namespace AscGraph" + std::to_string(asc_graph_id) + " {");
   return af::SUCCESS;
@@ -4650,7 +4672,7 @@ af::Status TilingCodeGenImpl::GenPGOGetTilingForAll() {
     tiling_func_.AddLine("  OP_LOGI(OP_NAME, \"End PGOSearchTilingKey in AscGraph.\");");
     GE_ASSERT_SUCCESS(GenDurationPrintCode("  "), "Generate print code failed.");
     GE_ASSERT_SUCCESS(GenDurationClearCode("  "), "Generate clear code failed.");
-    tiling_func_.AddLine("  return true;");
+    tiling_func_.AddLine("  return has_valid_tiling;");
     tiling_func_.AddLine("}");
     tiling_func_.AddLine("} // namespace AscGraph" + std::to_string(asc_graph_id) + " {");
   }
@@ -4679,7 +4701,7 @@ af::Status TilingCodeGenImpl::GenPGOByCoreNumTilingForAll() {
     tiling_func_.AddLine("  OP_LOGI(OP_NAME, \"End PGOSearchTilingKey in AscGraph.\");");
     GE_ASSERT_SUCCESS(GenDurationPrintCode("  "), "Generate print code failed.");
     GE_ASSERT_SUCCESS(GenDurationClearCode("  "), "Generate clear code failed.");
-    tiling_func_.AddLine("  return true;");
+    tiling_func_.AddLine("  return has_valid_tiling;");
     tiling_func_.AddLine("}");
     tiling_func_.AddLine("} // namespace AscGraph" + std::to_string(asc_graph_id));
   }

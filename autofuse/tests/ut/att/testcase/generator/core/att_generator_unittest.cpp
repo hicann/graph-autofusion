@@ -1033,6 +1033,10 @@ TEST(GeneratorUT, TilingCodeGenImplPGO) {
     }
     DoApiTiling(tiling_data);
     GeneralTiling(tiling_data);
+    if (tiling_data.get_block_dim() > corenum_) {
+      OP_LOGW(OP_NAME, "Generated block_dim %u exceeds core budget %u.", tiling_data.get_block_dim(), corenum_);
+      return false;
+    }
     TilingSummary(tiling_data);
     return true;
   }
@@ -1137,6 +1141,8 @@ TEST(GeneratorUT, RootGetTilingFailuresUseWarningLogOnlyForPGOPath) {
   std::string tiling_func_output = genImpl.tiling_func_.GetOutputStr();
   EXPECT_NE(tiling_func_output.find("OP_LOGE(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("OP_LOGW(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("OP_LOGE(OP_NAME, \"Aggregated block_dim %u exceeds core budget %u.\""),
+            std::string::npos);
 
   genImpl.config_.is_inductor_scene = true;
   genImpl.tiling_func_.Reset();
@@ -1144,6 +1150,8 @@ TEST(GeneratorUT, RootGetTilingFailuresUseWarningLogOnlyForPGOPath) {
   tiling_func_output = genImpl.tiling_func_.GetOutputStr();
   EXPECT_NE(tiling_func_output.find("OP_LOGW(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("OP_LOGE(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("OP_LOGW(OP_NAME, \"Aggregated block_dim %u exceeds core budget %u.\""),
+            std::string::npos);
 
   genImpl.tiling_func_.Reset();
   EXPECT_EQ(genImpl.GenPGOByCoreNumFusedScheduleResultsGetTilingDefine(namespace_map), af::SUCCESS);
@@ -1192,7 +1200,39 @@ TEST(GeneratorUT, PGOByCoreNumSerialGroupsUseMaximumBlockDim) {
   EXPECT_NE(
       output.find("result_block_dim = std::max(result_block_dim, tiling_data_tmp.group1_tiling_data.get_block_dim());"),
       std::string::npos);
+  EXPECT_EQ(output.find("result_block_dim = std::min(result_block_dim, block_dim_i);"), std::string::npos);
   EXPECT_EQ(output.find("result_block_dim += tiling_data_tmp.group1_tiling_data.get_block_dim();"), std::string::npos);
+  EXPECT_NE(output.find("ret = !tiling_data_list.empty();"), std::string::npos);
+}
+
+TEST(GeneratorUT, GetTilingRejectsBlockDimAboveCoreBudget) {
+  TilingCodeGenConfig config;
+  TilingModelInfo tiling_model_info;
+  ScoreFuncs score_funcs;
+  ModelInfo model_info;
+  model_info.hardware_cons[HardwareDef::CORENUM] = CreateExpr("128");
+  tiling_model_info.push_back(model_info);
+
+  MockHighPerfTilingCodeGenImpl genImpl("test", config, tiling_model_info, score_funcs, true);
+  ASSERT_EQ(genImpl.GenGetTiling(), af::SUCCESS);
+  const std::string output = genImpl.tiling_func_.GetOutputStr();
+  EXPECT_NE(output.find("tiling_data.get_block_dim() > corenum_"), std::string::npos);
+}
+
+TEST(GeneratorUT, GetTilingPropagatesScheduleSummaryFailure) {
+  TilingCodeGenConfig config;
+  TilingModelInfo tiling_model_info;
+  ModelInfo model_info;
+  tiling_model_info.push_back(model_info);
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl genImpl("test", config, tiling_model_info, score_funcs, true);
+  std::map<size_t, std::map<size_t, std::pair<std::string, std::string>>> namespace_map;
+  namespace_map[0] = {};
+
+  ASSERT_EQ(genImpl.GenGetTilingForAllSchedulesResults(0, namespace_map), af::SUCCESS);
+  const std::string output = genImpl.tiling_func_.GetOutputStr();
+  EXPECT_NE(output.find("const bool result = GetResultSummary(best_perf, tiling_data);"), std::string::npos);
+  EXPECT_NE(output.find("return result;"), std::string::npos);
 }
 
 TEST(GeneratorUT, PGOGetTilingKeyFailureUsesWarningLog) {
@@ -1326,6 +1366,8 @@ TEST(GeneratorUT, PGOGetAllSchedulesResultsDoesNotPushGraphTilingTmpOutsideSched
   EXPECT_EQ(tiling_func_output.find("tiling_data_list.push_back(tiling_perf);"), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("PgoConfig::Instance().single_callback("), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("*tilingData = tilingTmp;"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("bool has_valid_tiling = false;"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("has_valid_tiling = true;"), std::string::npos);
 }
 
 static const std::string kExpectPGOCode =
@@ -1610,6 +1652,12 @@ TEST(GeneratorUT, GenPGOGetScheduleResultGuardsInvalidVarRelationBeforeSet) {
   ASSERT_NE(set_pos, std::string::npos);
   ASSERT_NE(invalid_pos, std::string::npos);
   ASSERT_NE(search_pos, std::string::npos);
+  EXPECT_NE(tiling_func_output.find("const size_t candidate_count_before = tiling_data_list.size();"),
+            std::string::npos);
+  EXPECT_NE(tiling_func_output.find("return tiling_data_list.size() > candidate_count_before;"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("std::vector<AutofuseTilingDataPerf> valid_tiling_data_list;"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("&valid_tiling_data_list) != 0"), std::string::npos);
+  EXPECT_EQ(tiling_func_output.find("workspaceSize, &tiling_data_list_tmp) != 0"), std::string::npos);
   EXPECT_LT(guard_pos, value_pos);
   EXPECT_LT(value_pos, finite_pos);
   EXPECT_LT(finite_pos, set_pos);
@@ -1686,6 +1734,17 @@ TEST(GeneratorUT, GenHardwareCheckCode_UseDoubleType) {
     }
   }
   EXPECT_TRUE(found_double_type) << "Generated hardware check code should contain 'double ' type to prevent overflow";
+}
+
+TEST(GeneratorUT, GenHardwareJudgeSkipsRelatedCoreNumExpression) {
+  TilingModelInfo model_infos{CreateModelInfo(1U, ge::ExprType::kExprVariable)};
+  TilingCodeGenConfig config;
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", config, model_infos, score_funcs, true);
+
+  ASSERT_EQ(gen_impl.GenHardwareJudge(model_infos.front()), af::SUCCESS);
+  const std::string output = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_EQ(output.find("block_dim expr"), std::string::npos);
 }
 
 // Task 3: Inductor scene triggers ATT PGO main search skeleton, PGOSearchTilingKey and perf extraction

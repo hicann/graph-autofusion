@@ -391,12 +391,12 @@ void TilingLib::GenTopnInitSearchTiling(std::stringstream &ss, const ascir::Fuse
   ss << "    return -1;" << std::endl;
   ss << "  }" << std::endl;
   ss << std::endl;
+  ss << "  const uint32_t available_aiv_num = std::min(limit->aiv_num, g_no_limit_res.aiv_num);" << std::endl;
   if (use_measured_perf) {
-    ss << "  const uint32_t measured_aiv_num = std::min(limit->aiv_num, g_no_limit_res.aiv_num);" << std::endl;
+    ss << "  const uint32_t measured_aiv_num = available_aiv_num;" << std::endl;
   }
   ss << "  " << tiling << " search_tiling = {};" << std::endl;
-  ss << "  search_tiling.set_block_dim(" << (use_measured_perf ? "measured_aiv_num" : "limit->aiv_num") << ");"
-     << std::endl;
+  ss << "  search_tiling.set_block_dim(available_aiv_num);" << std::endl;
   ss << "  search_tiling.set_ub_size(limit->ub_size - 256);" << std::endl;
   {
     int idx = 0;

@@ -656,9 +656,13 @@ std::string codegen::TilingData::GenCVConstTilingData(const std::string &tiling_
     ss << "    set_g_basen_basem_align(basen_align);" << std::endl;
     ss << "    OP_LOGI(OP_NAME, \"set_g_basen_basem_align=%d, ub_size=%u\", get_g_basen_basem_align(), ub_size);"
        << std::endl;
-    ss << "    (void)AutofuseTilingWithConfig(config_file, &" << tiling_data_struct_name;
+    ss << "    ret = AutofuseTilingWithConfig(config_file, &" << tiling_data_struct_name;
     ss << ", &workspace_size, &block_dim, ";
     ss << "&limit, 1);" << std::endl;
+    ss << "    if (ret == -1) {" << std::endl;
+    ss << "      OP_LOGE(OP_NAME, \"AutofuseTilingWithConfig fallback failed: %ld\", ret);" << std::endl;
+    ss << "      return \"\";" << std::endl;
+    ss << "    }" << std::endl;
     ss << "  }" << std::endl;
   }
 
@@ -753,12 +757,16 @@ std::string codegen::TilingData::GenerateConst(const ascir::FusedScheduledResult
   if (IsCubeFusedScheduled(fused_schedule_result)) {
     const_gen_ss << GenCVConstTilingData(tiling_data_struct_name, is_inductor_scene);
   } else {
-    const_gen_ss << "  (void)AutofuseTilingWithConfig(config_file, &" << tiling_data_struct_name;
+    const_gen_ss << "  auto ret = AutofuseTilingWithConfig(config_file, &" << tiling_data_struct_name;
     if (is_inductor_scene) {
       const_gen_ss << ", &workspace_size, &block_dim, nullptr);" << std::endl;
     } else {
       const_gen_ss << ", &workspace_size, &block_dim, &limit);" << std::endl;
     }
+    const_gen_ss << "  if (ret != 0) {" << std::endl;
+    const_gen_ss << "    OP_LOGE(OP_NAME, \"AutofuseTilingWithConfig failed: %ld\", ret);" << std::endl;
+    const_gen_ss << "    return \"\";" << std::endl;
+    const_gen_ss << "  }" << std::endl;
   }
 
   pre_func_ss << GenGenTilingDataFieldConstDefFunc() << std::endl;
