@@ -13346,13 +13346,22 @@ static void CreateRandStoreAscGraph(af::AscGraph &graph, size_t dims_size) {
   *rand_op.y.repeats = {s0};
   *rand_op.y.strides = {One};
 
-  rand_op.attr.api.compute_type = af::ComputeType::kComputeElewise;
-  rand_op.attr.api.type = af::ApiType::kAPITypeCompute;
-  rand_op.attr.api.unit = af::ComputeUnit::kUnitVector;
   rand_op.attr.sched.axis = {z0.id};
 
+  af::ascir_op::Abs abs_op("abs");
+  graph.AddNode(abs_op);
+  abs_op.x = rand_op.y;
+  *abs_op.y.axis = {z0.id};
+  *abs_op.y.repeats = {s0};
+  *abs_op.y.strides = {One};
+
+  abs_op.attr.api.compute_type = af::ComputeType::kComputeElewise;
+  abs_op.attr.api.type = af::ApiType::kAPITypeCompute;
+  abs_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  abs_op.attr.sched.axis = {z0.id};
+
   af::ascir_op::Store store("store");
-  store.x = rand_op.y;
+  store.x = abs_op.y;
   store.attr.api.compute_type = ComputeType::kComputeStore;
   store.attr.api.type = af::ApiType::kAPITypeCompute;
   store.attr.api.unit = ComputeUnit::kUnitMTE3;
