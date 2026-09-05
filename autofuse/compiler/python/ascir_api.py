@@ -263,14 +263,68 @@ def Output(
 
 
 def IndexExpr(
-    owner_graph: ascir.HintGraph, *, dtype: ascir.dtypes, expr: Optional[int] = None
+    owner_graph: ascir.HintGraph,
+    *,
+    dtype: ascir.dtypes,
+    expr: ascir.SizeExpr,
 ) -> ascir.OpsOperatorOutput:
+    if not isinstance(expr, ascir.SizeExpr):
+        raise TypeError("IndexExpr expr must be SizeExpr")
     meta = _get_metadata(owner_graph)
     name = _generate_op_name(owner_graph, "indexexpr")
     op = ascir.ops.IndexExpr(name, owner_graph)
     meta.ops.append(op)
     op.attr.ir_attr.expr = expr
     op.y.dtype = dtype
+    op.infer_dtype()
+    return op.y
+
+
+def arange(
+    owner_graph: ascir.HintGraph,
+    *,
+    dtype: ascir.dtypes,
+    base: ascir.SizeExpr,
+    step: ascir.SizeExpr,
+    axis: List[ascir.Axis],
+    size: Optional[List[ascir.SizeExpr]] = None,
+    stride: Optional[List[ascir.SizeExpr]] = None,
+) -> ascir.OpsOperatorOutput:
+    if not isinstance(base, ascir.SizeExpr) or not isinstance(step, ascir.SizeExpr):
+        raise TypeError("Arange base and step must be SizeExpr")
+    if not axis:
+        raise ValueError("Arange axis must not be empty")
+    if stride is not None and len(stride) != len(axis):
+        raise ValueError("stride should be same with axis len")
+    if stride is not None:
+        last_nonzero = next(
+            (
+                (index, value)
+                for index, value in reversed(list(enumerate(stride)))
+                if not (value == ascir.SizeExpr(0))
+            ),
+            None,
+        )
+        if last_nonzero is not None and not (last_nonzero[1] == ascir.SizeExpr(1)):
+            raise ValueError(
+                "Arange requires unit physical stride on the vectorized axis"
+            )
+        effective_size = size if size is not None else [item.size for item in axis]
+        singleton_start = 0 if last_nonzero is None else last_nonzero[0] + 1
+        if any(
+            not (value == ascir.SizeExpr(1))
+            for value in effective_size[singleton_start:]
+        ):
+            raise ValueError("Arange zero strides require singleton dimensions")
+    meta = _get_metadata(owner_graph)
+    name = _generate_op_name(owner_graph, "arange")
+    op = ascir.ops.Arange(name, owner_graph)
+    meta.ops.append(op)
+    op.attr.ir_attr.base = base
+    op.attr.ir_attr.step = step
+    op.y.dtype = dtype
+    _infer_or_set_view(op.y, axis, size, stride)
+    op.attr.sched.axis = axis
     op.infer_dtype()
     return op.y
 

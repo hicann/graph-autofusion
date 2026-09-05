@@ -35,6 +35,7 @@ PyMODINIT_FUNC PyInit_pyautofuse(void);
   OP(Workspace)                   \
   OP(Output)                      \
   OP(IndexExpr)                   \
+  OP(Arange)                      \
   OP(Load)                        \
   OP(Broadcast)                   \
   OP(Store)                       \

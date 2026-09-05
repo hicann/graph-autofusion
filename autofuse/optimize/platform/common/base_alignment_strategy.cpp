@@ -14,12 +14,22 @@
 #include "graph/symbolizer/symbolic_utils.h"
 #include "indirect_load_utils.h"
 #include "platform/platform_factory.h"
+#include "graph/ascendc_ir/ascir_registry.h"
 
 namespace optimize {
 namespace {
 bool ShouldSkipRegularAlignment(const af::AscNodePtr &node) {
   return ScheduleUtils::IsBuffer(node) ||
          ascgen_utils::indirect_load::GetTemplateBehavior(node).uses_direct_gm_pipeline;
+}
+
+bool IsLegalZeroInputNode(const af::AscNodePtr &node) {
+  if (!node->inputs().empty()) {
+    return true;
+  }
+  const auto &definitions = af::ascir::AscirRegistry::GetInstance().GetAll();
+  const auto definition = definitions.find(node->GetType());
+  return definition != definitions.end() && definition->second.IsStartNode();
 }
 }  // namespace
 
@@ -487,10 +497,8 @@ af::Status BaseAlignmentStrategy::AlignVectorizedStrides(ascir::ImplGraph &impl_
 }
 
 af::Status BaseAlignmentStrategy::InferAlignmentForOneNode(ascir::ImplGraph &, const af::AscNodePtr &node, bool &) {
-  GE_ASSERT_TRUE(
-      !node->inputs().empty() || af::ops::IsOps<af::ascir_op::Rand>(node) || af::ops::IsOps<af::ascir_op::Randn>(node),
-      "The inputs of %s(%s) is empty.", node->GetTypePtr(), node->GetNamePtr());
   GE_ASSERT_TRUE(!node->outputs().empty(), "The output of %s(%s) is empty.", node->GetTypePtr(), node->GetNamePtr());
+  GE_ASSERT_TRUE(IsLegalZeroInputNode(node), "The inputs of %s(%s) are empty.", node->GetTypePtr(), node->GetNamePtr());
   af::ComputeType compute_type = node->attr.api.compute_type;
   auto it = compute_type_to_infer_func_.find(compute_type);
   if (it != compute_type_to_infer_func_.end()) {

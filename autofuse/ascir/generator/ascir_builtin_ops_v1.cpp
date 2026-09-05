@@ -97,7 +97,7 @@ REG_ASC_IR(IndexExpr)
     .Inputs({})
     .Output("y", "T")
     .StartNode()
-    .Attr<int64_t>("expr")
+    .Attr<Expression>("expr")
     .ComputeType(ComputeType::kComputeInvalid)
     .Impl(v1_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::IndexExprAscIrAttImpl>(),
                             af::ascir::AscIrImplCreator<af::ascir::IndexExprAscIrCodegenImpl>(),

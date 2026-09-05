@@ -51,6 +51,76 @@ std::string GetUbAddrOffset(const TPipe &tpipe, const MicroApiTensor *&reg_tenso
   return offset_expr.str();
 }
 
+Status CollectArangeLogicalAxisIndices(const TPipe &tpipe, const MicroApiTensor *reg_tensor,
+                                       const std::vector<ascir::AxisId> &axis_ids,
+                                       std::vector<int64_t> &logical_axis_indices) {
+  const auto collect = [&tpipe, reg_tensor](ascir::AxisId axis_id, auto &self, std::vector<int64_t> &indices) -> bool {
+    const auto direct = std::find(reg_tensor->axis_.begin(), reg_tensor->axis_.end(), axis_id);
+    if (direct != reg_tensor->axis_.end()) {
+      indices.push_back(std::distance(reg_tensor->axis_.begin(), direct));
+      return true;
+    }
+    const auto &source_axes = tpipe.tiler.GetAxis(axis_id).from;
+    if (source_axes.empty()) {
+      return false;
+    }
+    for (const auto source_id : source_axes) {
+      if (!self(source_id, self, indices)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  for (const auto axis_id : axis_ids) {
+    GE_ASSERT_TRUE(collect(axis_id, collect, logical_axis_indices),
+                   "Arange vectorized axis must map to its logical view.");
+  }
+  GE_ASSERT_TRUE(std::adjacent_find(logical_axis_indices.begin(), logical_axis_indices.end(),
+                                    std::greater_equal<int64_t>()) == logical_axis_indices.end(),
+                 "Arange merged axis sources must follow logical axis order.");
+  return af::SUCCESS;
+}
+
+Status GetArangeBlockOffset(const TPipe &tpipe, const MicroApiTensor *reg_tensor,
+                            const std::vector<ascir::AxisId> &current_axis, std::string &result) {
+  GE_ASSERT_TRUE(reg_tensor->vectorized_axis_.size() == reg_tensor->vectorized_strides_.size(),
+                 "Arange vectorized axis and stride sizes must match.");
+  size_t lane_axis_index = reg_tensor->vectorized_strides_.size();
+  for (size_t i = reg_tensor->vectorized_strides_.size(); i > 0UL; --i) {
+    if (!IsStrideZero(reg_tensor->vectorized_strides_[i - 1UL])) {
+      lane_axis_index = i - 1UL;
+      break;
+    }
+  }
+  std::stringstream offset;
+  bool has_offset = false;
+  for (size_t i = 0; i < reg_tensor->vectorized_strides_.size(); ++i) {
+    if (std::find(current_axis.begin(), current_axis.end(), reg_tensor->vectorized_axis_[i]) == current_axis.end()) {
+      continue;
+    }
+    const auto &axis = tpipe.tiler.GetAxis(reg_tensor->vectorized_axis_[i]);
+    if (has_offset) {
+      offset << " + ";
+    }
+    offset << axis.Variable::name << " * ";
+    std::vector<int64_t> logical_axis_indices;
+    GE_ASSERT_SUCCESS(
+        CollectArangeLogicalAxisIndices(tpipe, reg_tensor, {reg_tensor->vectorized_axis_[i]}, logical_axis_indices));
+    if (i == lane_axis_index) {
+      offset << "ELEMENT_PER_VECTOR_LENGTH";
+      has_offset = true;
+      continue;
+    }
+    GE_ASSERT_TRUE(!logical_axis_indices.empty(), "Arange vectorized axis has no logical source.");
+    const auto axis_index = static_cast<size_t>(logical_axis_indices.back());
+    GE_ASSERT_TRUE(axis_index < reg_tensor->axis_strides_.size(), "Arange logical axis stride is missing.");
+    offset << tpipe.tiler.Size(reg_tensor->axis_strides_[axis_index]);
+    has_offset = true;
+  }
+  result = has_offset ? offset.str() : "0";
+  return af::SUCCESS;
+}
+
 std::string GetOriginPregName(const std::vector<ascir::AxisId> &current_axis, int32_t depth) {
   if (current_axis.empty() || static_cast<int32_t>(current_axis.size()) < depth) {
     return "preg_main";
@@ -72,8 +142,8 @@ void GetUbStorePreg(const Tensor *&ub_tensor, std::string &preg_name) {
   preg_name = "preg_vl1";
 }
 
-void GenerateMicroApiCall(const TPipe &tpipe, const TensorManager &tensor_mgr, const VFLoopBody &body,
-                          const std::string &max_dtype_size, std::string &preg_name, std::stringstream &ss) {
+Status GenerateMicroApiCall(const TPipe &tpipe, const TensorManager &tensor_mgr, const VFLoopBody &body,
+                            const std::string &max_dtype_size, std::string &preg_name, std::stringstream &ss) {
   std::string ub_offset = "";
   if (body.call_->GetMicroApiName() == "Load") {
     const MicroApiTensor *reg_tensor_ptr = tensor_mgr.GetTensor(body.call_->GetOutputTensorIdByIndex(0));
@@ -87,11 +157,25 @@ void GenerateMicroApiCall(const TPipe &tpipe, const TensorManager &tensor_mgr, c
   }
 
   std::string micro_api_call_str;
-  CallParam param = {preg_name, ub_offset, max_dtype_size};
-  body.call_->Generate(tensor_mgr, tpipe, param, micro_api_call_str);
+  CallParam param = {preg_name, ub_offset, max_dtype_size, {}};
+  GE_CHK_STATUS_RET(body.call_->Generate(tensor_mgr, tpipe, param, micro_api_call_str),
+                    "Generate CV UBFuse MicroAPI call failed");
   ss << micro_api_call_str;
+  return af::SUCCESS;
 }
 }  // namespace
+
+Status GetArangeLogicalStride(const TPipe &tpipe, const MicroApiTensor *reg_tensor,
+                              const std::vector<ascir::AxisId> &axis_ids, std::string &result) {
+  GE_ASSERT_NOTNULL(reg_tensor);
+  std::vector<int64_t> logical_axis_indices;
+  GE_ASSERT_SUCCESS(CollectArangeLogicalAxisIndices(tpipe, reg_tensor, axis_ids, logical_axis_indices));
+  GE_ASSERT_TRUE(!logical_axis_indices.empty(), "Arange vectorized axis has no logical source.");
+  const auto axis_index = static_cast<size_t>(logical_axis_indices.back());
+  GE_ASSERT_TRUE(axis_index < reg_tensor->axis_strides_.size(), "Arange logical axis stride is missing.");
+  result = tpipe.tiler.Size(reg_tensor->axis_strides_[axis_index]);
+  return af::SUCCESS;
+}
 
 std::string GenCvUbFuseVfFuncDimParams() {
   return "uint32_t curAivM, uint32_t curAivN, uint32_t curAlignN";
@@ -158,7 +242,8 @@ void VFLoop::AddCall(MicroApiCall *call) {
 }
 
 /* 图解析阶段调用 */
-Status VFLoop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const ascir::NodeView &vf_node) {
+Status VFLoop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const ascir::NodeView &vf_node,
+                                  const VFInputMapping &input_mapping) {
   auto current_loop = this;
   std::vector<ascir::AxisId> current_axis;
   std::map<ascir::TensorId, MicroApiCall *> tensor_calls;
@@ -209,13 +294,23 @@ Status VFLoop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const ascir
       auto data_node = std::dynamic_pointer_cast<af::AscNode>(in->anchor.GetOwnerNode());
       GE_CHK_BOOL_RET_STATUS(data_node != nullptr, af::FAILED, "Codegen node[%s] data_node is nullptr",
                              node->GetNamePtr());
-      if (IsOps<Data>(data_node) || IsOps<Scalar>(data_node)) {
+      if (IsOps<Scalar>(data_node) || IsOps<IndexExpr>(data_node)) {
+        call->AddInput(data_node->outputs[0].attr.mem.tensor_id, TensorType::UB_TENSOR);
+      } else if (IsOps<Data>(data_node) || IsOps<ScalarData>(data_node)) {
         int64_t index = 0;
         GE_CHK_BOOL_RET_STATUS(data_node->attr.ir_attr != nullptr, af::FAILED,
                                "Codegen node[%s] data_node->attr.ir_attr is nullptr", node->GetNamePtr());
         GE_CHK_GRAPH_STATUS_RET(data_node->attr.ir_attr->GetAttrValue("index", index),
                                 "Get Data index failed, node:%s, index:%ld", data_node->GetNamePtr(), index);
-        call->AddInput(vf_node->inputs[index].attr.mem.tensor_id, TensorType::UB_TENSOR);
+        const auto mapping_iter = input_mapping.find(index);
+        GE_CHK_BOOL_RET_STATUS(mapping_iter != input_mapping.end(), af::FAILED,
+                               "Codegen data node[%s] has no root input mapping for boundary index:%ld",
+                               data_node->GetNamePtr(), index);
+        const uint32_t root_input_index = mapping_iter->second;
+        GE_CHK_BOOL_RET_STATUS(root_input_index < vf_node->inputs.Size(), af::FAILED,
+                               "Codegen data node[%s] has invalid root input index:%u", data_node->GetNamePtr(),
+                               root_input_index);
+        call->AddInput(vf_node->inputs[root_input_index].attr.mem.tensor_id, TensorType::UB_TENSOR);
       } else {
         call->AddInput(in->attr.mem.tensor_id);  // 默认为REG_TENSOR
       }
@@ -266,13 +361,13 @@ void VFLoop::Destruct() {
 /********************************** 生成阶段调用 ***********************************/
 Status VFLoop::Generate(const TPipe &tpipe, const TensorManager &tensor_mgr, int32_t depth, std::string &result,
                         std::string &loop_size_result, int32_t &only_loop_max_depth,
-                        std::vector<std::string> &loop_size_vec) const {
+                        std::vector<std::string> &loop_size_vec, const ArangeOffsetMap &arange_offsets) const {
   std::vector<ascir::AxisId> current_axis;
   std::stringstream ss;
   std::stringstream loop_size_ss;
-  GE_CHK_STATUS_RET(
-      this->GenerateLoop(tpipe, tensor_mgr, depth, current_axis, ss, loop_size_ss, only_loop_max_depth, loop_size_vec),
-      "Generate loop failed");
+  GE_CHK_STATUS_RET(this->GenerateLoop(tpipe, tensor_mgr, depth, current_axis, ss, loop_size_ss, only_loop_max_depth,
+                                       loop_size_vec, arange_offsets),
+                    "Generate loop failed");
   result = ss.str();
   loop_size_result = loop_size_ss.str();
   return af::SUCCESS;
@@ -303,10 +398,10 @@ Status VFLoop::GenerateCvUbFuse(const TPipe &tpipe, const TensorManager &tensor_
 Status VFLoop::GenerateLoop(const TPipe &tpipe, const TensorManager &tensor_mgr, int32_t depth,
                             std::vector<ascir::AxisId> &current_axis, std::stringstream &ss,
                             std::stringstream &loop_size_ss, int32_t &only_loop_max_depth,
-                            std::vector<std::string> &loop_size_vec) const {
+                            std::vector<std::string> &loop_size_vec, const ArangeOffsetMap &arange_offsets) const {
   if (this->axis_id_ == af::kIdNone) {
     GE_CHK_STATUS_RET(this->GenerateBody(tpipe, tensor_mgr, depth, current_axis, ss, loop_size_ss, only_loop_max_depth,
-                                         loop_size_vec),
+                                         loop_size_vec, arange_offsets),
                       "Codegen generate body failed when axis id is none");
     return af::SUCCESS;
   }
@@ -330,9 +425,9 @@ Status VFLoop::GenerateLoop(const TPipe &tpipe, const TensorManager &tensor_mgr,
     ss << "    preg_" << current_depth << " = " << "AscendC::MicroAPI::UpdateMask<" << this->max_dtype_size_ << ">("
        << "sreg_" << current_depth << ");\n";
   }
-  GE_CHK_STATUS_RET(
-      this->GenerateBody(tpipe, tensor_mgr, depth, current_axis, ss, loop_size_ss, only_loop_max_depth, loop_size_vec),
-      "Codegen generate body failed for normal loop");
+  GE_CHK_STATUS_RET(this->GenerateBody(tpipe, tensor_mgr, depth, current_axis, ss, loop_size_ss, only_loop_max_depth,
+                                       loop_size_vec, arange_offsets),
+                    "Codegen generate body failed for normal loop");
   ss << "}" << std::endl;
 
   current_axis.pop_back();
@@ -342,13 +437,13 @@ Status VFLoop::GenerateLoop(const TPipe &tpipe, const TensorManager &tensor_mgr,
 Status VFLoop::GenerateBody(const TPipe &tpipe, const TensorManager &tensor_mgr, int32_t depth,
                             std::vector<ascir::AxisId> &current_axis, std::stringstream &ss,
                             std::stringstream &loop_size_ss, int32_t &only_loop_max_depth,
-                            std::vector<std::string> &loop_size_vec) const {
+                            std::vector<std::string> &loop_size_vec, const ArangeOffsetMap &arange_offsets) const {
   bool has_loop = false;
   bool has_call = false;
   for (const auto &body : this->bodys_) {
     if (body.type_ == LoopType::LOOP) {
       GE_CHK_STATUS_RET(body.loop_->GenerateLoop(tpipe, tensor_mgr, depth, current_axis, ss, loop_size_ss,
-                                                 only_loop_max_depth, loop_size_vec),
+                                                 only_loop_max_depth, loop_size_vec, arange_offsets),
                         "Generate loop for body failed");
       has_loop = true;
     } else if (body.type_ == LoopType::CALL) {
@@ -356,7 +451,38 @@ Status VFLoop::GenerateBody(const TPipe &tpipe, const TensorManager &tensor_mgr,
         continue;
       }
       std::string preg_name = GetOriginPregName(current_axis, depth);
-      GenerateMicroApiCall(tpipe, tensor_mgr, body, this->max_dtype_size_, preg_name, ss);
+      std::string ub_offset = "";
+      if (body.call_->GetMicroApiName() == "Load") {
+        const MicroApiTensor *reg_tensor_ptr = tensor_mgr.GetTensor(body.call_->GetOutputTensorIdByIndex(0));
+        const Tensor *ub_tensor_ptr = tpipe.GetTensor(body.call_->GetInputTensorIdByIndex(0));
+        ub_offset = GetUbAddrOffset(tpipe, reg_tensor_ptr, ub_tensor_ptr);
+      } else if (body.call_->GetMicroApiName() == "Store") {
+        const Tensor *ub_tensor_ptr = tpipe.GetTensor(body.call_->GetOutputTensorIdByIndex(0));
+        const MicroApiTensor *reg_tensor_ptr = tensor_mgr.GetTensor(body.call_->GetOutputTensorIdByIndex(1));
+        ub_offset = GetUbAddrOffset(tpipe, reg_tensor_ptr, ub_tensor_ptr);
+        GetUbStorePreg(ub_tensor_ptr, preg_name);
+      } else if (body.call_->GetMicroApiName() == "Arange") {
+        const auto *reg_tensor_ptr = tensor_mgr.GetTensor(body.call_->GetOutputTensorIdByIndex(0));
+        GE_ASSERT_NOTNULL(reg_tensor_ptr);
+        GE_CHK_STATUS_RET(GetArangeBlockOffset(tpipe, reg_tensor_ptr, current_axis, ub_offset),
+                          "Generate Arange block offset failed");
+        const auto tensor_id = body.call_->GetOutputTensorIdByIndex(0);
+        const auto external_offset = arange_offsets.find(tensor_id);
+        if (external_offset != arange_offsets.end() && external_offset->second != "0") {
+          ub_offset = external_offset->second + " + (" + ub_offset + ")";
+        }
+      }
+      std::string micro_api_call_str;
+      CallParam param = {preg_name, ub_offset, this->max_dtype_size_, {}};
+      if (body.call_->HasArangeParam()) {
+        const auto tensor_id = body.call_->GetOutputTensorIdByIndex(0);
+        param.arange.valid = true;
+        param.arange.base = "arange_base_" + std::to_string(tensor_id);
+        param.arange.step = "arange_step_" + std::to_string(tensor_id);
+      }
+      GE_CHK_STATUS_RET(body.call_->Generate(tensor_mgr, tpipe, param, micro_api_call_str),
+                        "Generate micro api call failed");
+      ss << micro_api_call_str;
       has_call = true;
     }
   }
@@ -364,6 +490,19 @@ Status VFLoop::GenerateBody(const TPipe &tpipe, const TensorManager &tensor_mgr,
     only_loop_max_depth = std::max(only_loop_max_depth, static_cast<int32_t>(current_axis.size()));
   }
   return af::SUCCESS;
+}
+
+void VFLoop::CollectArangeParams(const TPipe &tpipe, std::vector<ArangeParam> &params) const {
+  for (const auto &body : bodys_) {
+    if (body.type_ == LoopType::CALL && body.call_->HasArangeParam()) {
+      std::string base;
+      std::string step;
+      body.call_->GetArangeParams(tpipe, base, step);
+      params.push_back({body.call_->GetOutputTensorIdByIndex(0), std::move(base), std::move(step), "0"});
+    } else if (body.type_ == LoopType::LOOP) {
+      body.loop_->CollectArangeParams(tpipe, params);
+    }
+  }
 }
 
 Status VFLoop::GenerateCvUbFuseBody(const TPipe &tpipe, const TensorManager &tensor_mgr,
@@ -379,7 +518,8 @@ Status VFLoop::GenerateCvUbFuseBody(const TPipe &tpipe, const TensorManager &ten
     }
 
     std::string preg_name = GetOriginPregName(current_axis, 0);
-    GenerateMicroApiCall(tpipe, tensor_mgr, body, this->max_dtype_size_, preg_name, ss);
+    GE_CHK_STATUS_RET(GenerateMicroApiCall(tpipe, tensor_mgr, body, this->max_dtype_size_, preg_name, ss),
+                      "Generate CV UBFuse MicroAPI call failed");
   }
   return af::SUCCESS;
 }

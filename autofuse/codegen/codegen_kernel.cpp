@@ -2062,8 +2062,8 @@ Status Kernel::AppendConstTensorInit(std::stringstream &ss) const {
     }
     GELOGI("const_value_expr: %s", tensor->second.const_value_expr.Str().get());
 
-    string const_value = tensor->second.const_value_expr == 0 ? tensor->second.const_value
-                                                              : tiler.Size(tensor->second.const_value_expr, true);
+    string const_value = tensor->second.const_value.empty() ? tiler.Size(tensor->second.const_value_expr, true)
+                                                            : tensor->second.const_value;
     ss << tensor->second.DefineConst(const_value.c_str()) << std::endl;
     GELOGI("Define ss value: %s", ss.str().c_str());
   }
@@ -2285,17 +2285,13 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
         GE_CHK_STATUS_RET(kernel.tpipe.AddTensor(const_value, *output, tensor_name), "Codegen add tensor failed");
         GE_CHK_STATUS_RET(kernel.ParseOptimizeInfo(node, *output));
       } else if (IsOps<IndexExpr>(node)) {
-        int64_t size_id = 0;
+        af::Expression expr;
         auto ir_attr = node->attr.ir_attr.get();
-        if (ir_attr->GetAttrValue("expr", size_id) != af::GRAPH_SUCCESS) {
-          GELOGE(af::FAILED, "GetAttrValue index expr failed, size_id = %lld", size_id);
+        if (ir_attr->GetAttrValue("expr", expr) != af::GRAPH_SUCCESS) {
+          GELOGE(af::FAILED, "GetAttrValue index expr failed");
           return af::FAILED;
         }
-        GELOGI("size_id = %lld", size_id);
-        // todo index在Expression上是指什么？  暂时按照AddSizeVar顺序
-        auto all_sizevar = graph.GetAllSizeVar();
-        GE_CHK_STATUS_RET(kernel.tpipe.AddTensor(*output, all_sizevar.at(size_id)->expr, tensor_name),
-                          "Codegen add tensor failed");
+        GE_CHK_STATUS_RET(kernel.tpipe.AddTensor(*output, expr, tensor_name), "Codegen add tensor failed");
       } else if (IsOps<Workspace>(node)) {
         GE_CHK_STATUS_RET(kernel.ParseWorkspaceTensor(output, fused_schedule_result, output_indices,
                                                       output_tensorid_to_index, output_index_to_name),
@@ -3773,8 +3769,8 @@ Status Kernel::GlobalTensorDefine(std::string &result) const {
                    this->constant_tensors[i]);
     GELOGI("const_value_expr: %s", tensor->second.const_value_expr.Str().get());
 
-    string const_value = tensor->second.const_value_expr == 0 ? tensor->second.const_value
-                                                              : tiler.Size(tensor->second.const_value_expr, true);
+    string const_value = tensor->second.const_value.empty() ? tiler.Size(tensor->second.const_value_expr, true)
+                                                            : tensor->second.const_value;
     ss << "    " << tensor->second.DefineConst(const_value.c_str()) << std::endl;
     GELOGI("Define ss value: %s", ss.str().c_str());
   }

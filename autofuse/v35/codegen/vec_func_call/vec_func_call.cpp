@@ -184,17 +184,22 @@ void CreateDimAndStrideParmas(const TPipe &tpipe, const VectorizedAxisLoopMergeS
 void CreateVFCall(const TPipe &tpipe, const std::string &vf_call_name, const std::vector<Tensor> &inputs,
                   const std::vector<Tensor> &outputs, const std::vector<std::string> &input_ub_offsets,
                   const std::vector<std::string> &output_ub_offsets, const std::vector<Tensor> &tensors_scalar,
-                  const VectorizedAxisLoopMergeStatus &merge_info, std::stringstream &ss) {
+                  const VectorizedAxisLoopMergeStatus &merge_info, const std::vector<ArangeParam> &arange_params,
+                  std::stringstream &ss) {
   ss << vf_call_name << "(";
   CreateTensorAddr(outputs, output_ub_offsets, {}, ss);
   CreateTensorAddr(inputs, input_ub_offsets, tensors_scalar, ss);
   CreateDimAndStrideParmas(tpipe, merge_info, ss);
+  for (const auto &param : arange_params) {
+    ss << ", " << param.offset << ", " << param.base << ", " << param.step;
+  }
   ss << ");" << std::endl;
 }
 
 void CreateOuterForVFCall(const TPipe &tpipe, const std::string &vf_call_name, const std::vector<Tensor> &inputs,
                           const std::vector<Tensor> &outputs, const std::vector<Tensor> &tensors_scalar,
-                          const VectorizedAxisLoopMergeStatus &merge_info, std::stringstream &ss) {
+                          const VectorizedAxisLoopMergeStatus &merge_info,
+                          const std::vector<ArangeParam> &arange_params, std::stringstream &ss) {
   std::vector<std::string> repeats(merge_info.merge_repeats_str.begin(),
                                    merge_info.merge_repeats_str.end() - kVFMaxLoop);
   std::vector<std::vector<ascir::SizeExpr>> inputs_strides;
@@ -207,7 +212,7 @@ void CreateOuterForVFCall(const TPipe &tpipe, const std::string &vf_call_name, c
   GetOuterForOffset(tpipe, outputs_strides, outputs_ub_offsets);
   std::stringstream ss1;
   CreateVFCall(tpipe, vf_call_name, inputs, outputs, inputs_ub_offsets, outputs_ub_offsets, tensors_scalar, merge_info,
-               ss1);
+               arange_params, ss1);
   CreateComputeNodeOuterFor(repeats, ss1, ss, 0);
 }
 
@@ -300,9 +305,35 @@ Status VfCall::ParseSubGraph(const ascir::NodeView &vf_node, const ascir::ImplGr
   GELOGI("VF node:%s, sub_graph_name:%s", vf_node->GetNamePtr(), graph_name->c_str());
 
   uint32_t max_dtype_size = 0;
+  VFInputMapping input_mapping;
   for (auto node : sub_graph.GetAllNodes()) {
     // subgraph上的Load api直接使用Tpipe上保存的UB tensor, 因此vf子图上Data节点的输出Tensor不必保存在tensor manager中.
-    if (IsOps<Output>(node) || IsOps<Data>(node) || IsOps<Scalar>(node)) {
+    if (IsOps<Output>(node) || IsOps<Data>(node) || IsOps<Scalar>(node) || IsOps<ScalarData>(node) ||
+        IsOps<IndexExpr>(node)) {
+      if (IsOps<Scalar>(node)) {
+        const auto scalar_tensor_id = node->outputs[0].attr.mem.tensor_id;
+        if (scalar_tensor_id != af::kIdNone) {
+          subgraph_scalar_ids_.emplace_back(scalar_tensor_id);
+        }
+      }
+      if (IsOps<Data>(node) || IsOps<ScalarData>(node)) {
+        int64_t boundary_index = 0;
+        int64_t root_input_index = 0;
+        GE_CHK_GRAPH_STATUS_RET(node->attr.ir_attr->GetAttrValue("index", boundary_index),
+                                "Get boundary index failed, node:%s", node->GetNamePtr());
+        if (!af::AttrUtils::GetInt(node->GetOpDesc(), "vf_root_input_index", root_input_index)) {
+          // vf_root_input_index 由 VectorFuncPartitioner 在建边后写入; 缺失说明该子图未经过分区
+          // (如手工构造的UT fixture)。回退用 boundary index, 对"按序连接边界"的子图语义等价。
+          GELOGW("Node [%s] lacks vf_root_input_index; fall back to boundary index [%ld].", node->GetNamePtr(),
+                 boundary_index);
+          root_input_index = boundary_index;
+        }
+        GE_CHK_BOOL_RET_STATUS(
+            root_input_index >= 0 && static_cast<uint64_t>(root_input_index) < vf_node->inputs.Size(), af::FAILED,
+            "Invalid root input index:%ld for node:%s", root_input_index, node->GetNamePtr());
+        GE_CHK_BOOL_RET_STATUS(input_mapping.emplace(boundary_index, static_cast<uint32_t>(root_input_index)).second,
+                               af::FAILED, "Duplicate root input mapping for boundary index:%ld", boundary_index);
+      }
       continue;
     }
     // broadcast inline场景,子图内会对轴进行重排序,生成vf代码时,需要找到原始最内层轴所在的位置,用于生成UpdateMask动作
@@ -328,7 +359,7 @@ Status VfCall::ParseSubGraph(const ascir::NodeView &vf_node, const ascir::ImplGr
   }
   root_loop_.SetMaxDtypeSize(this->max_dtype_size_);
   // Parse for loop
-  return root_loop_.ConstructFromNodes(sub_graph.GetAllNodes(), vf_node);
+  return root_loop_.ConstructFromNodes(sub_graph.GetAllNodes(), vf_node, input_mapping);
 }
 
 Status VfCall::ParseInputOutputInfo(const TPipe &tpipe) const {
@@ -346,6 +377,18 @@ Status VfCall::ParseInputOutputInfo(const TPipe &tpipe) const {
     auto tensor_ptr = tpipe.GetTensor(out.id);
     GE_CHK_BOOL_RET_STATUS(tensor_ptr != nullptr, af::FAILED, "Check[Param] tensor_ptr is nullptr");
     ub_outputs_.emplace_back(*tensor_ptr);
+  }
+
+  // VF子图内消费的常量Scalar副本不是根图边界输入, 其const tensor需单独补入scalar参数。
+  for (const auto scalar_id : subgraph_scalar_ids_) {
+    bool already_collected = false;
+    for (const auto &scalar : scalar_inputs_) {
+      already_collected = already_collected || (scalar.id == scalar_id);
+    }
+    const auto tensor_ptr = already_collected ? nullptr : tpipe.GetTensor(scalar_id);
+    if ((tensor_ptr != nullptr) && tensor_ptr->IsConstScalar()) {
+      scalar_inputs_.emplace_back(*tensor_ptr);
+    }
   }
   // 处理合轴信息
   return af::SUCCESS;
@@ -448,12 +491,19 @@ void GenerateTensorDefs(const TPipe &tpipe, const TensorManager &tensor_mgr, con
 
 void GenerateVfCallFuncHeader(const TPipe &tpipe, const std::string &vf_call_name, const std::vector<Tensor> &inputs,
                               const std::vector<Tensor> &scalar_inputs, const std::vector<Tensor> &outputs,
-                              const VectorizedAxisLoopMergeStatus &merge_info, std::stringstream &ss) {
+                              const VectorizedAxisLoopMergeStatus &merge_info,
+                              const std::vector<ArangeParam> &arange_params, std::stringstream &ss) {
   ss << "#if defined(__DAV_C310__) || "
         "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))"
      << std::endl;
   ss << "\ninline __simd_vf__ void " << vf_call_name << "(";
   CreateVFCallDimAndStrideParmas(tpipe, inputs, scalar_inputs, outputs, merge_info, ss);
+  if (!arange_params.empty()) {
+    for (const auto &arange_param : arange_params) {
+      ss << ", int64_t arange_offset_" << arange_param.tensor_id << ", int64_t arange_base_" << arange_param.tensor_id
+         << ", int64_t arange_step_" << arange_param.tensor_id;
+    }
+  }
   ss << ")" << std::endl;
 }
 
@@ -510,9 +560,18 @@ Status GenerateVfCallLoopBody(const TPipe &tpipe, const TensorManager &tensor_mg
   int32_t only_loop_max_depth = -1;
   std::vector<std::string> loop_size_vec;
   if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
-    root_loop.GenerateCvUbFuse(tpipe, tensor_mgr, loop_body, loop_size);
+    GE_CHK_STATUS_RET(root_loop.GenerateCvUbFuse(tpipe, tensor_mgr, loop_body, loop_size),
+                      "Generate CV UBFuse VectorFunc body failed");
   } else {
-    root_loop.Generate(tpipe, tensor_mgr, stride_depth, loop_body, loop_size, only_loop_max_depth, loop_size_vec);
+    ArangeOffsetMap arange_offsets;
+    std::vector<ArangeParam> arange_params;
+    root_loop.CollectArangeParams(tpipe, arange_params);
+    for (const auto &param : arange_params) {
+      arange_offsets.emplace(param.tensor_id, "arange_offset_" + std::to_string(param.tensor_id));
+    }
+    GE_CHK_STATUS_RET(root_loop.Generate(tpipe, tensor_mgr, stride_depth, loop_body, loop_size, only_loop_max_depth,
+                                         loop_size_vec, arange_offsets),
+                      "Generate VectorFunc body failed");
   }
   const bool is_double_loop = tpipe.cv_fusion_type != ascir::CubeTemplateType::kUBFuse &&
                               stride_depth == MAX_VF_AXIS_MERGE_SIZE - 1 &&
@@ -544,6 +603,10 @@ af::Status UpdateVectorFuncNodeParams(const af::AscNodePtr &node, const Vectoriz
 }
 
 Status VfCall::GenerateFuncDefinition(const TPipe &tpipe, const Tiler &tiler, std::stringstream &ss) const {
+  std::vector<ArangeParam> arange_params;
+  root_loop_.CollectArangeParams(tpipe, arange_params);
+  GE_ASSERT_TRUE(tpipe.cv_fusion_type != ascir::CubeTemplateType::kUBFuse || arange_params.empty(),
+                 "Arange is not supported in CV UBFuse VectorFunc.");
   // 收集输入输出信息，由于GenInnerLoopSizeAndActualSize函数中会刷新tiler对象中的actual_sizes字段,
   // 导致生成函数签名和函数调用时，获取到的size信息不一致，因此生成函数签名和函数调用时均需要调用合轴函数
   GE_ASSERT_SUCCESS(ParseInputOutputInfo(tpipe));
@@ -554,7 +617,7 @@ Status VfCall::GenerateFuncDefinition(const TPipe &tpipe, const Tiler &tiler, st
   GE_ASSERT_TRUE(status, "GenerateVectorizedAxisMergeStatus failed");
 
   GenerateVfCallFuncHeader(tpipe, this->vf_call_name_, this->ub_inputs_, this->scalar_inputs_, this->ub_outputs_,
-                           merge_info, ss);
+                           merge_info, arange_params, ss);
 
   // func body
   std::stringstream params;
@@ -589,7 +652,25 @@ Status VfCall::Generate(const TPipe &tpipe, [[maybe_unused]] const std::vector<a
   GE_ASSERT_TRUE(status, "GenerateVectorizedAxisMergeStatus failed");
 
   std::stringstream ss;
+  std::vector<ArangeParam> arange_params;
+  root_loop_.CollectArangeParams(tpipe, arange_params);
   size_t loop_num = merge_info.merge_repeats_str.size();
+  const size_t outer_loop_num = loop_num > kVFMaxLoop ? loop_num - kVFMaxLoop : 0UL;
+  for (auto &param : arange_params) {
+    const auto *arange_tensor = tensor_mgr_.GetTensor(param.tensor_id);
+    GE_ASSERT_NOTNULL(arange_tensor);
+    std::stringstream offset;
+    offset << (current_axis.empty()
+                   ? "0"
+                   : tpipe.tiler.Offset(current_axis, arange_tensor->axis_, arange_tensor->axis_strides_));
+    for (size_t i = 0UL; i < outer_loop_num; ++i) {
+      std::string stride;
+      GE_CHK_STATUS_RET(GetArangeLogicalStride(tpipe, arange_tensor, merge_info.merge_axis_ids[i], stride),
+                        "Generate Arange outer-for stride failed");
+      offset << " + outer_for_" << i << " * " << stride;
+    }
+    param.offset = offset.str();
+  }
   ss << "#if defined(__DAV_C310__) || "
         "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))"
      << std::endl;
@@ -598,10 +679,10 @@ Status VfCall::Generate(const TPipe &tpipe, [[maybe_unused]] const std::vector<a
     std::vector<std::string> inputs_ub_offsets = {};
     std::vector<std::string> outputs_ub_offsets = {};
     CreateVFCall(tpipe, this->vf_call_name_, this->ub_inputs_, this->ub_outputs_, inputs_ub_offsets, outputs_ub_offsets,
-                 this->scalar_inputs_, merge_info, ss);
+                 this->scalar_inputs_, merge_info, arange_params, ss);
   } else {
     CreateOuterForVFCall(tpipe, this->vf_call_name_, this->ub_inputs_, this->ub_outputs_, this->scalar_inputs_,
-                         merge_info, ss);
+                         merge_info, arange_params, ss);
   }
   ss << "#endif" << std::endl;
   result = ss.str();

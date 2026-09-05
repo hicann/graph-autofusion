@@ -26,15 +26,16 @@ Status MicroCompareApiCall::Generate(const codegen::TensorManager &tensor_mng, [
   // Compare 输出到 MaskReg（实际输出或临时）
   std::string output_name = is_mask_reg ? output_tensor->name : (output_tensor->name + "_temp_mask");
 
-  auto dtype = tensor_mng.GetTensor(this->inputs_[0].second)->dtype_;
+  const auto *first_input = tensor_mng.GetTensor(this->inputs_[0].second);
+  GE_ASSERT_NOTNULL(first_input);
+  auto dtype = first_input->dtype_;
   string dtype_name;
   Tensor::DtypeName(dtype, dtype_name);
   ss << "AscendC::MicroAPI::" << "Compare" << (this->second_input_scalar_ ? "s" : "");
   ss << "<" << dtype_name << ", CMPMODE::" << this->api_name_ << ">(";
   ss << output_name << ", ";
 
-  GE_ASSERT_NOTNULL(tensor_mng.GetTensor(this->inputs_[0].second));
-  ss << *(tensor_mng.GetTensor(this->inputs_[0].second)) << ", ";
+  ss << *first_input << ", ";
   if (inputs_[1].first != TensorType::REG_TENSOR) {
     GE_ASSERT_NOTNULL(tpipe.GetTensor(this->inputs_[1].second));
     ss << *(tpipe.GetTensor(inputs_[1].second)) << ", ";
@@ -57,7 +58,8 @@ Status MicroCompareApiCall::Generate(const codegen::TensorManager &tensor_mng, [
 
 Status MicroCompareApiCall::Init(const ascir::NodeView &node) {
   // 判断第二个输入是否是scalar
-  if (node->GetInDataNodes().at(1)->GetType() == "Scalar") {
+  if (node->GetInDataNodes().at(1)->GetType() == "Scalar" ||
+      node->GetInDataNodes().at(1)->GetType() == af::ascir_op::IndexExpr::Type) {
     this->second_input_scalar_ = true;
   }
   GELOGI("name:%s, second input scalar:%d", node->GetNamePtr(), this->second_input_scalar_);

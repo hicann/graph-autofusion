@@ -35,7 +35,7 @@ namespace optimize {
 using namespace ge;
 
 namespace {
-void SetupGraphAxes(af::AscGraph &graph, const std::vector<af::Symbol> &loops) {
+void SetupGraphAxes(af::AscGraph &graph, const std::vector<af::Expression> &loops) {
   for (size_t i = 0UL; i < loops.size(); ++i) {
     graph.CreateAxis("z" + std::to_string(i), loops[i]);
   }
@@ -65,8 +65,9 @@ void SetupGraphAxes(af::AscGraph &graph, const std::vector<af::Symbol> &loops) {
   for (const auto &node : graph.GetAllNodes()) {
     node->attr.sched.axis = axis_ids;
     if (ScheduleUtils::IsBuffer(node)) continue;
-    bool is_follow_input = (node->attr.api.compute_type == af::ComputeType::kComputeElewise ||
-                            node->attr.api.compute_type == af::ComputeType::kComputeStore);
+    bool is_follow_input =
+        !node->inputs().empty() && (node->attr.api.compute_type == af::ComputeType::kComputeElewise ||
+                                    node->attr.api.compute_type == af::ComputeType::kComputeStore);
     for (auto &output : node->outputs()) {
       output->attr.axis = axis_ids;
       output->attr.vectorized_axis = axis_ids;
@@ -108,6 +109,75 @@ af::AscGraph BuildParallelVfGraph(bool reverse_branch_order) {
       output->attr.vectorized_strides = output->attr.strides;
     }
   }
+  return graph;
+}
+
+af::AscGraph BuildIndexExprArangeCompositionGraph() {
+  af::AscGraph graph("index_expr_arange_composition_python");
+  const auto row = af::Symbol("row");
+  const auto col = af::Symbol("col");
+  const auto row_axis = graph.CreateAxis("row", row);
+  const auto col_axis = graph.CreateAxis("col", col);
+  const std::vector<af::AxisId> axes = {row_axis.id, col_axis.id};
+  const std::vector<af::Expression> shape = {row, col};
+  const std::vector<af::Expression> strides = {col, One};
+
+  af::ascir_op::Data data("data_0", graph);
+  data.ir_attr.SetIndex(0);
+  data.y.dtype = af::DT_INT32;
+  auto data_node = graph.FindNode("data_0");
+  af::ascir_op::Load load("load_0");
+  load.y.dtype = af::DT_INT32;
+  auto load_node = graph.AddNode(load);
+  af::ascir_op::Arange arange("arange_0", graph);
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = af::DT_INT32;
+  auto arange_node = graph.FindNode("arange_0");
+  af::ascir_op::IndexExpr index_expr("indexexpr_0", graph);
+  index_expr.ir_attr.SetExpr(row + col);
+  index_expr.y.dtype = af::DT_INT32;
+  auto index_expr_node = graph.FindNode("indexexpr_0");
+  af::ascir_op::Broadcast broadcast("broadcast_0");
+  broadcast.y.dtype = af::DT_INT32;
+  auto broadcast_node = graph.AddNode(broadcast);
+  af::ascir_op::Add offset("add_0");
+  offset.y.dtype = af::DT_INT32;
+  auto offset_node = graph.AddNode(offset);
+  af::ascir_op::Add add("add_1");
+  add.y.dtype = af::DT_INT32;
+  auto add_node = graph.AddNode(add);
+  af::ascir_op::Store store("store_0");
+  store.y.dtype = af::DT_INT32;
+  auto store_node = graph.AddNode(store);
+  af::ascir_op::Output output("output_0");
+  output.ir_attr.SetIndex(0);
+  output.y.dtype = af::DT_INT32;
+  auto output_node = graph.AddNode(output);
+  if (data_node == nullptr || load_node == nullptr || arange_node == nullptr || index_expr_node == nullptr ||
+      broadcast_node == nullptr || offset_node == nullptr || add_node == nullptr || store_node == nullptr ||
+      output_node == nullptr) {
+    return af::AscGraph("invalid_index_expr_arange_composition");
+  }
+  load.x = data.y;
+  broadcast.x = index_expr.y;
+  offset.x1 = arange.y;
+  offset.x2 = broadcast.y;
+  add.x1 = load.y;
+  add.x2 = offset.y;
+  store.x = add.y;
+  output.x = store.y;
+  SetupGraphAxes(graph, {row, col});
+  index_expr_node->outputs[0].attr.axis.clear();
+  index_expr_node->outputs[0].attr.repeats.clear();
+  index_expr_node->outputs[0].attr.strides.clear();
+  index_expr_node->outputs[0].attr.vectorized_axis.clear();
+  index_expr_node->outputs[0].attr.vectorized_strides.clear();
+  broadcast_node->outputs[0].attr.axis = axes;
+  broadcast_node->outputs[0].attr.repeats = shape;
+  broadcast_node->outputs[0].attr.vectorized_axis = axes;
+  broadcast_node->outputs[0].attr.strides = {Zero, Zero};
+  broadcast_node->outputs[0].attr.vectorized_strides = {Zero, Zero};
   return graph;
 }
 
@@ -162,6 +232,7 @@ std::vector<std::string> GetGraphNodeNames(const af::AscGraph &graph) {
   }
   return node_names;
 }
+
 }  // namespace
 
 class VfPartition : public testing::Test {
@@ -338,6 +409,419 @@ TEST_F(VfPartition, brc_only_revert) {
   std::vector<af::AscGraph> sub_graphs;
   graph.GetAllSubGraphs(sub_graphs);
   EXPECT_TRUE(sub_graphs.empty());
+}
+
+TEST_F(VfPartition, ArangeStoreControlEdgeRejectsSingletonPartition) {
+  af::AscGraph graph("arange_store_control");
+  const auto size = af::Symbol(32);
+  const auto axis = graph.CreateAxis("z0", size);
+  af::ascir_op::Arange arange("arange");
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = af::DT_INT32;
+  af::ascir_op::Store store("store");
+  store.y.dtype = af::DT_INT32;
+  af::ascir_op::Output output("output");
+  ASSERT_NE(graph.AddNode(arange), nullptr);
+  ASSERT_NE(graph.AddNode(store), nullptr);
+  ASSERT_NE(graph.AddNode(output), nullptr);
+  store.x = arange.y;
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  for (const auto &node : graph.GetAllNodes()) {
+    node->attr.sched.axis = {axis.id};
+    for (auto &node_output : node->outputs()) {
+      node_output->attr.axis = {axis.id};
+      node_output->attr.repeats = {size};
+      node_output->attr.strides = {One};
+      node_output->attr.vectorized_axis = {axis.id};
+      node_output->attr.vectorized_strides = {One};
+    }
+  }
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  ASSERT_EQ(af::GraphUtils::AddEdge(graph.FindNode("arange")->GetOutControlAnchor(),
+                                    graph.FindNode("store")->GetInControlAnchor()),
+            af::GRAPH_SUCCESS);
+
+  auto cluster = std::make_shared<Cluster>(graph.FindNode("arange"), 0UL);
+  cluster->meta_data_.enable_vf = true;
+  cluster->out_nodes_.insert(graph.FindNode("arange"));
+  VectorFuncPartitioner partitioner(graph);
+  partitioner.cluster_dict_.AddCluster(cluster);
+  ASSERT_NE(partitioner.BuildSubgraphs(), af::SUCCESS);
+  std::vector<af::AscGraph> subgraphs;
+  ASSERT_EQ(graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  EXPECT_TRUE(subgraphs.empty());
+  EXPECT_EQ(graph.FindNode("arange")->GetOutControlNodesSize(), 1UL);
+  EXPECT_EQ(graph.FindNode("store")->GetInControlNodesSize(), 1UL);
+}
+
+TEST_F(VfPartition, ArangeWithMismatchedVectorizedLayoutIsNotPartitioned) {
+  af::AscGraph graph("arange_invalid_vectorized_layout");
+  const auto size = af::Symbol(32);
+  const auto axis = graph.CreateAxis("z0", size);
+  af::ascir_op::Arange arange("arange", graph);
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = af::DT_INT32;
+  af::ascir_op::Store store("store");
+  store.x = arange.y;
+  store.y.dtype = af::DT_INT32;
+  af::ascir_op::Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  for (const auto &node : graph.GetAllNodes()) {
+    node->attr.sched.axis = {axis.id};
+    for (auto &node_output : node->outputs()) {
+      node_output->attr.axis = {axis.id};
+      node_output->attr.repeats = {size};
+      node_output->attr.strides = {One};
+      node_output->attr.vectorized_axis = {axis.id};
+      node_output->attr.vectorized_strides = {One};
+    }
+  }
+  graph.FindNode("arange")->outputs[0].attr.vectorized_strides.clear();
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+
+  VectorFuncPartitioner partitioner(graph);
+  ASSERT_EQ(partitioner.Partition(), af::SUCCESS);
+
+  std::vector<af::AscGraph> subgraphs;
+  ASSERT_EQ(graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  EXPECT_TRUE(subgraphs.empty());
+  EXPECT_NE(graph.FindNode("arange"), nullptr);
+}
+
+TEST_F(VfPartition, ArangeVectorFunctionRequiresUnitStride) {
+  af::AscGraph graph("arange_vf_capability");
+  const auto size = af::Symbol(32);
+  const auto axis = graph.CreateAxis("z0", size);
+  af::ascir_op::Arange arange("arange", graph);
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = af::DT_INT32;
+  *arange.y.vectorized_axis = {axis.id};
+  *arange.y.vectorized_strides = {One};
+  auto arange_node = graph.FindNode("arange");
+  ASSERT_NE(arange_node, nullptr);
+  auto codegen_impl = ascgen_utils::GetAscIrCodegenImpl(arange_node->GetType());
+  ASSERT_NE(codegen_impl, nullptr);
+  EXPECT_TRUE(codegen_impl->IsVectorFunctionSupported(*arange_node));
+
+  arange_node->outputs[0].attr.vectorized_strides = {Zero};
+  EXPECT_FALSE(codegen_impl->IsVectorFunctionSupported(*arange_node));
+  arange_node->outputs[0].attr.vectorized_strides = {af::Symbol(2)};
+  EXPECT_FALSE(codegen_impl->IsVectorFunctionSupported(*arange_node));
+  arange_node->outputs[0].attr.vectorized_strides.clear();
+  EXPECT_FALSE(codegen_impl->IsVectorFunctionSupported(*arange_node));
+}
+
+TEST_F(VfPartition, ArangeVectorFunctionSupportsContiguousMultiAxisLayout) {
+  af::AscGraph graph("arange_contiguous_multi_axis");
+  const auto rows = af::Symbol(4);
+  const auto cols = af::Symbol(8);
+  const auto row_axis = graph.CreateAxis("row", rows);
+  const auto col_axis = graph.CreateAxis("col", cols);
+  af::ascir_op::Arange arange("arange", graph);
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = af::DT_INT64;
+  *arange.y.axis = {row_axis.id, col_axis.id};
+  *arange.y.repeats = {rows, cols};
+  *arange.y.strides = {cols, One};
+  *arange.y.vectorized_axis = {row_axis.id, col_axis.id};
+  *arange.y.vectorized_strides = {cols, One};
+
+  auto arange_node = graph.FindNode("arange");
+  ASSERT_NE(arange_node, nullptr);
+  auto codegen_impl = ascgen_utils::GetAscIrCodegenImpl(arange_node->GetType());
+  ASSERT_NE(codegen_impl, nullptr);
+  EXPECT_TRUE(codegen_impl->IsVectorFunctionSupported(*arange_node));
+}
+
+TEST_F(VfPartition, ArangeVectorFunctionSupportsAlignedOuterVectorizedStride) {
+  af::AscGraph graph("arange_aligned_outer_stride");
+  const auto rows = af::Symbol(4);
+  const auto cols = af::Symbol(8);
+  const auto row_axis = graph.CreateAxis("row", rows);
+  const auto col_axis = graph.CreateAxis("col", cols);
+  af::ascir_op::Arange arange("arange", graph);
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = af::DT_INT64;
+  *arange.y.axis = {row_axis.id, col_axis.id};
+  *arange.y.repeats = {rows, cols};
+  *arange.y.strides = {cols, One};
+  *arange.y.vectorized_axis = {row_axis.id, col_axis.id};
+  *arange.y.vectorized_strides = {af::Symbol(16), One};
+
+  auto arange_node = graph.FindNode("arange");
+  ASSERT_NE(arange_node, nullptr);
+  auto codegen_impl = ascgen_utils::GetAscIrCodegenImpl(arange_node->GetType());
+  ASSERT_NE(codegen_impl, nullptr);
+  EXPECT_TRUE(codegen_impl->IsVectorFunctionSupported(*arange_node));
+}
+
+TEST_F(VfPartition, ArangeVectorFunctionUsesLastNonZeroStride) {
+  af::AscGraph graph("arange_trailing_singleton");
+  const auto rows = af::Symbol(8);
+  const auto row_axis = graph.CreateAxis("row", rows);
+  const auto singleton_axis = graph.CreateAxis("singleton", One);
+  af::ascir_op::Arange arange("arange", graph);
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = af::DT_INT64;
+  *arange.y.axis = {row_axis.id, singleton_axis.id};
+  *arange.y.repeats = {rows, One};
+  *arange.y.strides = {One, Zero};
+  *arange.y.vectorized_axis = {row_axis.id, singleton_axis.id};
+  *arange.y.vectorized_strides = {One, Zero};
+
+  auto arange_node = graph.FindNode("arange");
+  ASSERT_NE(arange_node, nullptr);
+  auto codegen_impl = ascgen_utils::GetAscIrCodegenImpl(arange_node->GetType());
+  ASSERT_NE(codegen_impl, nullptr);
+  EXPECT_TRUE(codegen_impl->IsVectorFunctionSupported(*arange_node));
+
+  arange_node->outputs[0].attr.vectorized_strides = {af::Symbol(2), Zero};
+  EXPECT_FALSE(codegen_impl->IsVectorFunctionSupported(*arange_node));
+  arange_node->outputs[0].attr.vectorized_strides = {Zero, Zero};
+  EXPECT_FALSE(codegen_impl->IsVectorFunctionSupported(*arange_node));
+}
+
+TEST_F(VfPartition, ArangeWithMoreThanFourUnmergedAxesSupportsPartition) {
+  af::AscGraph graph("high_rank_arange");
+  std::vector<af::AxisId> axes;
+  for (size_t i = 0UL; i < 5UL; ++i) {
+    axes.push_back(graph.CreateAxis("z" + std::to_string(i), af::Symbol(2)).id);
+  }
+  af::ascir_op::Arange arange("arange", graph);
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = af::DT_INT32;
+  af::ascir_op::Store store("store");
+  store.y.dtype = af::DT_INT32;
+  af::ascir_op::Output output("output");
+  output.ir_attr.SetIndex(0);
+  output.y.dtype = af::DT_INT32;
+  ASSERT_NE(graph.AddNode(store), nullptr);
+  ASSERT_NE(graph.AddNode(output), nullptr);
+  store.x = arange.y;
+  output.x = store.y;
+  const std::vector<af::Expression> repeats(5UL, af::Symbol(2));
+  const std::vector<af::Expression> strides = {af::Symbol(16), af::Symbol(8), af::Symbol(4), af::Symbol(2), One};
+  for (const auto &node : graph.GetAllNodes()) {
+    node->attr.sched.axis = axes;
+    for (auto &node_output : node->outputs()) {
+      node_output->attr.axis = axes;
+      node_output->attr.repeats = repeats;
+      node_output->attr.strides = strides;
+      node_output->attr.vectorized_axis = axes;
+      node_output->attr.vectorized_strides = strides;
+    }
+  }
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+
+  VectorFuncPartitioner partitioner(graph);
+  ASSERT_EQ(partitioner.Partition(), af::SUCCESS);
+  EXPECT_EQ(graph.FindNode("arange"), nullptr);
+  EXPECT_NE(graph.FindNode("store"), nullptr);
+  EXPECT_NE(graph.FindNode("output"), nullptr);
+  const auto vf_node = graph.FindNode("high_rank_arange_VfNode_0");
+  ASSERT_NE(vf_node, nullptr);
+  EXPECT_EQ(vf_node->GetAllInDataAnchorsSize(), 0UL);
+  EXPECT_EQ(vf_node->GetAllOutDataAnchorsSize(), 1UL);
+  std::vector<af::AscGraph> subgraphs;
+  ASSERT_EQ(graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  ASSERT_EQ(subgraphs.size(), 1UL);
+  EXPECT_NE(subgraphs[0].FindNode("arange"), nullptr);
+  const auto store_inputs = graph.FindNode("store")->GetInDataNodes();
+  ASSERT_EQ(store_inputs.size(), 1UL);
+  EXPECT_EQ((*store_inputs.begin())->GetName(), "high_rank_arange_VfNode_0");
+  const auto output_inputs = graph.FindNode("output")->GetInDataNodes();
+  ASSERT_EQ(output_inputs.size(), 1UL);
+  EXPECT_EQ((*output_inputs.begin())->GetName(), "store");
+}
+
+TEST_F(VfPartition, SingletonArangeIsPartitionedByFullPipeline) {
+  af::AscGraph graph("singleton_arange");
+  af::ascir_op::Arange arange("arange", graph);
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = af::DT_INT32;
+  af::ascir_op::Store store("store");
+  store.y.dtype = af::DT_INT32;
+  af::ascir_op::Output output("output");
+  output.ir_attr.SetIndex(0);
+  output.y.dtype = af::DT_INT32;
+  ASSERT_NE(graph.AddNode(store), nullptr);
+  ASSERT_NE(graph.AddNode(output), nullptr);
+  store.x = arange.y;
+  output.x = store.y;
+  SetupGraphAxes(graph, {One, One});
+  ASSERT_EQ(AlignmentHandler::AlignVectorizedStrides(graph), af::SUCCESS);
+
+  VectorFuncPartitioner partitioner(graph);
+  ASSERT_EQ(partitioner.Partition(), af::SUCCESS);
+
+  EXPECT_EQ(graph.FindNode("arange"), nullptr);
+  EXPECT_NE(graph.FindNode("singleton_arange_VfNode_0"), nullptr);
+  std::vector<af::AscGraph> subgraphs;
+  ASSERT_EQ(graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  ASSERT_EQ(subgraphs.size(), 1UL);
+  EXPECT_NE(subgraphs[0].FindNode("arange"), nullptr);
+}
+
+TEST_F(VfPartition, CompareRejectsIndexExprOnlyOnFirstInput) {
+  const auto is_supported = [](bool index_expr_is_first) {
+    af::AscGraph graph(index_expr_is_first ? "index_expr_first" : "index_expr_second");
+    const auto size = af::Symbol(32);
+    const auto axis = graph.CreateAxis("z0", size);
+    af::ascir_op::Arange arange("arange", graph);
+    arange.ir_attr.SetBase(af::Symbol(0));
+    arange.ir_attr.SetStep(af::Symbol(1));
+    arange.y.dtype = af::DT_INT32;
+    af::ascir_op::IndexExpr index_expr("index_expr", graph);
+    index_expr.ir_attr.SetExpr(af::Symbol(7));
+    index_expr.y.dtype = af::DT_INT32;
+    af::ascir_op::Lt compare("compare");
+    compare.y.dtype = af::DT_UINT8;
+    EXPECT_NE(graph.AddNode(compare), nullptr);
+    if (index_expr_is_first) {
+      compare.x1 = index_expr.y;
+      compare.x2 = arange.y;
+    } else {
+      compare.x1 = arange.y;
+      compare.x2 = index_expr.y;
+    }
+    for (const auto &node : graph.GetAllNodes()) {
+      if (node->outputs().empty()) {
+        continue;
+      }
+      node->outputs[0].attr.vectorized_axis = {axis.id};
+      node->outputs[0].attr.vectorized_strides = {One};
+    }
+    auto compare_node = graph.FindNode("compare");
+    EXPECT_NE(compare_node, nullptr);
+    auto codegen_impl = ascgen_utils::GetAscIrCodegenImpl(compare_node->GetType());
+    EXPECT_NE(codegen_impl, nullptr);
+    return codegen_impl->IsVectorFunctionSupported(*compare_node);
+  };
+
+  EXPECT_FALSE(is_supported(true));
+  EXPECT_TRUE(is_supported(false));
+}
+
+TEST_F(VfPartition, ArangeZeroInputClusterBuildsSubgraphWithoutDynamicInputs) {
+  af::AscGraph graph("arange_store_zero_input");
+  const auto size = af::Symbol(65);
+  const auto axis = graph.CreateAxis("z0", size);
+  af::ascir_op::Arange arange("arange");
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = af::DT_INT32;
+  af::ascir_op::Store store("store");
+  store.y.dtype = af::DT_INT32;
+  af::ascir_op::Output output("output");
+  ASSERT_NE(graph.AddNode(arange), nullptr);
+  ASSERT_NE(graph.AddNode(store), nullptr);
+  ASSERT_NE(graph.AddNode(output), nullptr);
+  store.x = arange.y;
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  for (const auto &node : graph.GetAllNodes()) {
+    node->attr.sched.axis = {axis.id};
+    for (auto &node_output : node->outputs()) {
+      node_output->attr.axis = {axis.id};
+      node_output->attr.repeats = {size};
+      node_output->attr.strides = {One};
+      node_output->attr.vectorized_axis = {axis.id};
+      node_output->attr.vectorized_strides = {One};
+    }
+  }
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+
+  auto cluster = std::make_shared<Cluster>(graph.FindNode("arange"), 0UL);
+  cluster->meta_data_.enable_vf = true;
+  cluster->out_nodes_.insert(graph.FindNode("arange"));
+  VectorFuncPartitioner partitioner(graph);
+  partitioner.root_graph_ = af::AscGraphUtils::GetComputeGraph(graph);
+  partitioner.cluster_dict_.AddCluster(cluster);
+  ASSERT_EQ(partitioner.BuildSubgraphs(), af::SUCCESS);
+
+  std::vector<af::AscGraph> subgraphs;
+  ASSERT_EQ(graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  ASSERT_EQ(subgraphs.size(), 1UL);
+  const auto vf_node = graph.FindNode("arange_store_zero_input_VfNode_0");
+  ASSERT_NE(vf_node, nullptr);
+  EXPECT_EQ(vf_node->GetAllInDataAnchorsSize(), 0UL);
+  EXPECT_EQ(vf_node->GetAllOutDataAnchorsSize(), 1UL);
+  EXPECT_NE(subgraphs[0].FindNode("arange"), nullptr);
+  EXPECT_EQ(subgraphs[0].FindNode("store"), nullptr);
+}
+
+TEST_F(VfPartition, IndexExprBoundaryBuildsScalarPlaceholder) {
+  af::AscGraph graph("index_expr_boundary");
+  af::ascir_op::IndexExpr index_expr("index_expr", graph);
+  index_expr.ir_attr.SetExpr(af::Symbol(7));
+  index_expr.y.dtype = af::DT_INT32;
+  af::ascir_op::Add add("add");
+  add.y.dtype = af::DT_INT32;
+  ASSERT_NE(graph.AddNode(add), nullptr);
+  add.x1 = index_expr.y;
+
+  auto index_node = graph.FindNode("index_expr");
+  auto add_node = graph.FindNode("add");
+  ASSERT_NE(index_node, nullptr);
+  ASSERT_NE(add_node, nullptr);
+  af::AscGraph vf_graph("index_expr_boundary_vf");
+  ASSERT_EQ(VectorFuncPartitioner::InsertScalarNode(vf_graph, index_node->GetOutDataAnchor(0),
+                                                    {add_node->GetInDataAnchor(0)}, 0),
+            af::SUCCESS);
+
+  auto scalar_node = vf_graph.FindNode("Scalar_index_expr");
+  ASSERT_NE(scalar_node, nullptr);
+  int64_t index = -1;
+  ASSERT_EQ(scalar_node->attr.ir_attr->GetAttrValue("index", index), af::GRAPH_SUCCESS);
+  EXPECT_EQ(index, 0);
+}
+
+TEST_F(VfPartition, IndexExprArangeCompositionPreservesStoreOutputBoundary) {
+  auto graph = BuildIndexExprArangeCompositionGraph();
+  ASSERT_EQ(AlignmentHandler::AlignVectorizedStrides(graph), af::SUCCESS);
+
+  VectorFuncPartitioner partitioner(graph);
+  ASSERT_EQ(partitioner.Partition(), af::SUCCESS);
+
+  // Partition 阶段不做 FinalizeIndexedGraphs 的图名重排(_B0Y0_S0G0C0 后缀由 Optimize
+  // 主流程追加), 此处使用 Partition 直接产出的原始 VF 节点名。
+  const auto vf_node = graph.FindNode("index_expr_arange_composition_python_VfNode_0");
+  ASSERT_NE(vf_node, nullptr);
+  ASSERT_EQ(vf_node->GetAllOutDataAnchorsSize(), 1UL);
+  const auto peers = vf_node->GetOutDataAnchor(0)->GetPeerInDataAnchors();
+  ASSERT_EQ(peers.size(), 1UL);
+  EXPECT_EQ((*peers.begin())->GetOwnerNodeBarePtr()->GetName(), "store_0");
+  std::vector<af::AscGraph> subgraphs;
+  ASSERT_EQ(graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  ASSERT_EQ(subgraphs.size(), 1UL);
+  EXPECT_EQ(subgraphs[0].FindNode("index_expr_arange_composition_python_VfNode_0"), nullptr);
+  // 子图出口副本命名: kNamePrefix + 源节点名 + parent_out_idx(无分隔符拼接)。
+  EXPECT_NE(subgraphs[0].FindNode("Store_add_10"), nullptr);
+  EXPECT_NE(subgraphs[0].FindNode("Output_add_10"), nullptr);
+
+  std::vector<int64_t> tensor_ids;
+  for (const auto &node : subgraphs[0].GetAllNodes()) {
+    if (ScheduleUtils::IsBuffer(node)) {
+      continue;
+    }
+    for (const auto &node_output : node->outputs()) {
+      tensor_ids.push_back(node_output->attr.mem.tensor_id);
+    }
+  }
+  std::sort(tensor_ids.begin(), tensor_ids.end());
+  for (size_t i = 0UL; i < tensor_ids.size(); ++i) {
+    EXPECT_EQ(tensor_ids[i], static_cast<int64_t>(i));
+  }
 }
 
 TEST_F(VfPartition, brc_with_cycle) {
@@ -1852,6 +2336,67 @@ TEST_F(VfPartition, tail_axis_stride_not_one_disable_vf) {
   std::vector<af::AscGraph> sub_graphs;
   EXPECT_EQ(graph.GetAllSubGraphs(sub_graphs), af::SUCCESS);
   EXPECT_EQ(sub_graphs.size(), 0UL);
+}
+
+TEST_F(VfPartition, OriginalTailStrideDoesNotDisableContinuousVectorizedVf) {
+  af::AscGraph graph("original_tail_stride_test");
+  const auto s0 = af::Symbol(10);
+  const auto s1 = af::Symbol(10);
+  const auto axis0 = graph.CreateAxis("z0", s0);
+  const auto axis1 = graph.CreateAxis("z1", s1);
+  af::ascir_op::Data data("data", graph);
+  data.ir_attr.SetIndex(0);
+  af::ascir_op::Load load("load");
+  load.x = data.y;
+  load.y.dtype = ge::DT_FLOAT;
+  af::ascir_op::Abs abs("abs");
+  abs.x = load.y;
+  abs.y.dtype = ge::DT_FLOAT;
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+
+  auto abs_node = graph.FindNode("abs");
+  ASSERT_NE(abs_node, nullptr);
+  abs_node->outputs[0].attr.axis = {axis0.id, axis1.id};
+  abs_node->outputs[0].attr.repeats = {s0, s1};
+  abs_node->outputs[0].attr.strides = {s1 * af::Symbol(2), af::Symbol(2)};
+  abs_node->outputs[0].attr.vectorized_axis = {axis0.id, axis1.id};
+  abs_node->outputs[0].attr.vectorized_strides = {s1, One};
+
+  auto cluster = std::make_shared<Cluster>(abs_node, 0UL);
+  cluster->meta_data_.enable_vf = true;
+  auto codegen_impl = ascgen_utils::GetAscIrCodegenImpl(abs_node->GetType());
+  ASSERT_NE(codegen_impl, nullptr);
+  ASSERT_EQ(VectorFuncPartitioner::InitClusterAttr(codegen_impl, abs_node, cluster), af::SUCCESS);
+  EXPECT_TRUE(cluster->meta_data_.enable_vf);
+}
+
+TEST_F(VfPartition, EmptyVectorizedAxisDoesNotSkipTensorId) {
+  af::AscGraph graph("empty_vectorized_axis_tensor_id");
+  const auto size = af::Symbol(16);
+  const auto axis = graph.CreateAxis("z0", size);
+  af::ascir_op::Data data("data", graph);
+  data.ir_attr.SetIndex(0);
+  af::ascir_op::Load load("load");
+  load.x = data.y;
+  load.y.dtype = ge::DT_FLOAT;
+  af::ascir_op::Abs abs("abs");
+  abs.x = load.y;
+  abs.y.dtype = ge::DT_FLOAT;
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+
+  auto load_node = graph.FindNode("load");
+  auto abs_node = graph.FindNode("abs");
+  ASSERT_NE(load_node, nullptr);
+  ASSERT_NE(abs_node, nullptr);
+  load_node->outputs[0].attr.vectorized_axis.clear();
+  load_node->outputs[0].attr.vectorized_strides.clear();
+  abs_node->outputs[0].attr.vectorized_axis = {axis.id};
+  abs_node->outputs[0].attr.vectorized_strides = {One};
+
+  VectorFuncPartitioner partitioner(graph);
+  ASSERT_EQ(partitioner.SetSubGraphAttrs(graph), af::SUCCESS);
+  EXPECT_EQ(load_node->outputs[0].attr.mem.tensor_id, 0);
+  EXPECT_EQ(abs_node->outputs[0].attr.mem.tensor_id, 1);
 }
 
 TEST_F(VfPartition, topological_sort_for_vf_graph_keeps_load_before_consumer) {

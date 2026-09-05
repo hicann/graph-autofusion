@@ -489,11 +489,20 @@ REG_ASC_IR(ScalarData)
                             {{"T", TensorType{DT_INT8, DT_UINT8, DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_INT64,
                                               DT_UINT64, DT_FLOAT16, DT_FLOAT, DT_BF16, DT_BOOL}}}});
 
-REG_ASC_IR(IndexExpr).Impl(v2_soc_versions,
-                           {af::ascir::AscIrImplCreator<af::ascir::IndexExprAscIrAttImplV2>(),
-                            af::ascir::AscIrImplCreator<af::ascir::IndexExprAscIrCodegenImplV2>(),
-                            {{"T", TensorType{DT_INT8, DT_UINT8, DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_INT64,
-                                              DT_UINT64, DT_FLOAT16, DT_FLOAT}}}});
+REG_ASC_IR(IndexExpr).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::IndexExprAscIrAttImplV2>(),
+                                             af::ascir::AscIrImplCreator<af::ascir::IndexExprAscIrCodegenImplV2>(),
+                                             {{"T", TensorType{DT_INT32, DT_INT64}}}});
+
+REG_ASC_IR(Arange)
+    .Inputs({})
+    .Output("y", "T")
+    .StartNode()
+    .Attr<Expression>("base")
+    .Attr<Expression>("step")
+    .ComputeType(ComputeType::kComputeElewise)
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::AscIrAttStubV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::ArangeAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_INT32, DT_INT64}}}});
 
 REG_ASC_IR(Output).Impl(v2_soc_versions,
                         {af::ascir::AscIrImplCreator<af::ascir::OutputAscIrAttImplV2>(),

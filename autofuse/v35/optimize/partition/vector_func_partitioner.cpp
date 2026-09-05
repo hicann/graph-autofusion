@@ -29,7 +29,6 @@ constexpr size_t kMaxIONum = 8UL;
 constexpr int32_t kMaxBitWidthGap = 2;
 constexpr int64_t kOutLoopAxisId = -1L;
 constexpr size_t kMinVfNodesNum = 2UL;
-
 af::Status ValidateUniqueNodeNames(const af::AscGraph &graph) {
   std::unordered_set<std::string> node_names;
   for (const auto &node : graph.GetAllNodes()) {
@@ -217,7 +216,11 @@ std::unordered_set<size_t> IdentifyZeroStrideVectorAxisIndices(const ascir::Impl
       continue;
     }
 
-    for (size_t axis_index = 0UL; axis_index < is_zero_stride_axis.size(); ++axis_index) {
+    // 各节点 vectorized_strides 数量可能不同(如 ScalarData 无向量化轴):
+    // 以本节点实际 strides 数量为界判定, 防止对空/短 vector 越界索引触发未定义行为。
+    const size_t node_axis_count = node->outputs().empty() ? 0UL : node->outputs[0].attr.vectorized_strides.size();
+    for (size_t axis_index = 0UL; axis_index < is_zero_stride_axis.size() && axis_index < node_axis_count;
+         ++axis_index) {
       bool has_non_zero_stride = false;
       for (const auto &output : node->outputs()) {
         if (af::SymbolicUtils::StaticCheckEq(output->attr.vectorized_strides[axis_index], af::sym::kSymbolZero) !=
@@ -934,10 +937,9 @@ af::Status VectorFuncPartitioner::InsertScalarNode(af::AscGraph &asc_graph, cons
   af::ascir_op::Scalar scalar(scalar_name.c_str());
   auto scalar_node = asc_graph.AddNode(scalar);
   GE_ASSERT_NOTNULL(scalar_node);
-  scalar.attr = pre_node->attr;
-  auto ir_attr = scalar.attr.ir_attr->DownCastTo<af::AscDataIrAttrDef>();
-  GE_ASSERT_NOTNULL(ir_attr);
-  GE_ASSERT_SUCCESS(ir_attr->SetIndex(parent_in_index));
+  scalar_node->attr.sched = pre_node->attr.sched;
+  scalar_node->attr.api = pre_node->attr.api;
+  GE_ASSERT_SUCCESS(scalar.ir_attr.SetIndex(parent_in_index));
   scalar_node->outputs[0].attr = pre_node->outputs[0].attr;
   GELOGD("Set Scalar [%s] attr from node [%s] out_anchor:[%d].", scalar_name.c_str(), pre_node->GetName().c_str(),
          out_anchor->GetIdx());
@@ -1011,30 +1013,64 @@ af::Status VectorFuncPartitioner::BuildSubgraph(const ClusterPtr &cluster, af::A
   outputs.reserve(load_to_peer_in_anchors.size());
   ops.reserve(load_to_peer_in_anchors.size());
   size_t parent_in_idx = 0UL;
+  std::vector<std::pair<af::OutDataAnchorPtr, int64_t>> external_boundaries;
   for (auto &iter : load_to_peer_in_anchors) {
     auto out_anchor = iter.first;
     auto pre_node = out_anchor->GetOwnerNodeBarePtr();
     GE_ASSERT_NOTNULL(pre_node);
-    if (ScheduleUtils::IsConstantScalar(pre_node) || af::ops::IsOps<af::ascir_op::ScalarData>(pre_node)) {
-      // 常量 Scalar 或 ScalarData(运行时标量输入) 在子图内都保持为 Scalar
+    if (ScheduleUtils::IsConstantScalar(pre_node) && !af::ops::IsOps<af::ascir_op::ScalarData>(pre_node)) {
+      // 常量标量(IndexExpr/Scalar)在子图内物化为 Scalar 副本; 同时作为 VF 的值参数输入:
+      // codegen 侧 ParseInputOutputInfo 会将 const tensor 归入 scalar 参数链传递。
+      // 副本必须与 dynamic input 共享 parent 序号空间, 否则子图内 index 越界。
       GE_ASSERT_SUCCESS(InsertScalarNode(vf_graph, out_anchor, iter.second, parent_in_idx));
+      ops.push_back(af::OpDescUtils::CreateOperatorFromNode(out_anchor->GetOwnerNode()));
+      af::AscOpOutput op_out(&ops.back(), out_anchor->GetIdx());
+      outputs.push_back(std::move(op_out));
     } else {
+      external_boundaries.emplace_back(out_anchor, static_cast<int64_t>(parent_in_idx));
       GE_ASSERT_SUCCESS(InsertDataAndLoadNode(vf_graph, out_anchor, iter.second, parent_in_idx));
+      ops.push_back(af::OpDescUtils::CreateOperatorFromNode(out_anchor->GetOwnerNode()));
+      af::AscOpOutput op_out(&ops.back(), out_anchor->GetIdx());
+      outputs.push_back(std::move(op_out));
     }
-    ops.push_back(af::OpDescUtils::CreateOperatorFromNode(out_anchor->GetOwnerNode()));
-    af::AscOpOutput op_out(&ops[parent_in_idx], out_anchor->GetIdx());
-    outputs.push_back(std::move(op_out));
     ++parent_in_idx;
   }
-  // link in node to vf node
-  vf_op.x = outputs;
-
+  // vf_op.x = outputs 经 AssignImpl 一次性完成动态输入实例声明与建边:
+  // 此时 vf_op 尚未入图, AddEdgeForNode 会在 impl_graph_ 隐式创建 vf 节点并绑定 operator,
+  // 后续不得再次 AddNode(重复绑定失败)。
+  // 空 outputs(zero-input cluster)时无任何连接, 显式 AddNode 入图。
+  if (!outputs.empty()) {
+    vf_op.x = outputs;
+  } else {
+    GE_ASSERT_NOTNULL(impl_graph_.AddNode(vf_op));
+  }
   ge::AscendString str;
   vf_op.GetName(str);
-  // add node to impl graph
   auto vf_node = impl_graph_.FindNode(str.GetString());
   GE_ASSERT_NOTNULL(vf_node, "Failed to find vf node %s from graph %s.", str.GetString(),
                     impl_graph_.GetName().c_str());
+
+  // Boundary ordinals belong to the subgraph namespace. Resolve them against
+  // the actual root input peer anchors after dynamic inputs are connected.
+  const auto root_inputs = vf_node->GetAllInDataAnchors();
+  for (const auto &boundary : external_boundaries) {
+    const auto out_anchor = boundary.first;
+    const auto pre_node = out_anchor->GetOwnerNodeBarePtr();
+    GE_ASSERT_NOTNULL(pre_node);
+    const auto root_input = std::find_if(root_inputs.begin(), root_inputs.end(), [&out_anchor](const auto &in_anchor) {
+      return in_anchor->GetPeerOutAnchor() == out_anchor;
+    });
+    GE_ASSERT_TRUE(root_input != root_inputs.end(), "Root VF input peer anchor is missing for boundary source[%s:%d]",
+                   pre_node->GetNamePtr(), out_anchor->GetIdx());
+    const auto root_input_index =
+        static_cast<int64_t>(std::count_if(root_inputs.begin(), root_input, [](const auto &in_anchor) {
+          return in_anchor->GetPeerOutAnchor() != nullptr;
+        }));
+    const auto data_name = kNamePrefixData + pre_node->GetName() + std::to_string(boundary.second);
+    auto data_node = vf_graph.FindNode(data_name.c_str());
+    GE_ASSERT_NOTNULL(data_node);
+    GE_ASSERT_TRUE(af::AttrUtils::SetInt(data_node->GetOpDesc(), "vf_root_input_index", root_input_index));
+  }
 
   int64_t parent_out_idx = 0;
   bool is_all_input_same_cache = true;
@@ -1147,7 +1183,12 @@ af::Status VectorFuncPartitioner::SetSubGraphAttrs(af::AscGraph &vf_graph) {
 
       auto &strides = tensor->attr.vectorized_strides;
       auto &axes = tensor->attr.vectorized_axis;
-      GE_ASSERT_TRUE(!axes.empty(), " vectorized axis of [%s] should not be empty.", node->GetNamePtr());
+      // 标量输入(如 ScalarData 经 Data/Load 副本进子图)的 vectorized axis 可为空:
+      // 其全零 stride 轴被 RemoveAllZeroStrideVectorizedAxis 清理后不参与向量化循环,
+      // 属合法形态, 不构成断言错误。
+      if (axes.empty()) {
+        continue;
+      }
       int64_t loop_axis = kOutLoopAxisId;
       if (is_scalar_brc) {
         // scalar brc在循环外，stride全设置成0
@@ -1195,7 +1236,6 @@ af::Status VectorFuncPartitioner::ModifySubgraphAttrs(af::AscGraph &vf_graph) {
   GE_ASSERT_SUCCESS(RemoveAllZeroStrideVectorizedAxis(vf_graph), "Failed to remove all zero stride vectorized axis");
   // step2 merge_axis
   GE_ASSERT_SUCCESS(MergeContinuousVectorAxis(vf_graph), "Failed to merge continuous vectorized axis");
-
   // step3 set loop_axis && tensor id tensor attr include position && alloc type
   GE_ASSERT_SUCCESS(SetSubGraphAttrs(vf_graph), "Failed to set tensor attr.");
 
@@ -1212,8 +1252,18 @@ af::Status VectorFuncPartitioner::ModifySubgraphAttrs(af::AscGraph &vf_graph) {
 af::Status VectorFuncPartitioner::BuildSubgraphs() {
   for (const auto &cluster : cluster_dict_.GetAllClusters()) {
     // 不包含隐式广播的单节点不融合
-    if (!cluster->meta_data_.enable_vf ||
-        (cluster->Nodes().size() < kMinVfNodesNum && !ascgen_utils::IsNodeContainsBrcInline(cluster->Nodes().back()))) {
+    const auto out_data_nodes = cluster->Nodes().front()->GetOutDataNodes();
+    const bool is_arange_single_node =
+        cluster->Nodes().size() == 1UL && af::ops::IsOps<af::ascir_op::Arange>(cluster->Nodes().front());
+    if (cluster->meta_data_.enable_vf && is_arange_single_node &&
+        (cluster->Nodes().front()->GetInControlNodesSize() != 0UL ||
+         cluster->Nodes().front()->GetOutControlNodesSize() != 0UL)) {
+      GELOGE(af::FAILED, "Arange VF cluster [%zu] has unsupported control edges.", cluster->Id());
+      return af::FAILED;
+    }
+    const bool is_arange_singleton = is_arange_single_node && !out_data_nodes.empty();
+    if (!cluster->meta_data_.enable_vf || (cluster->Nodes().size() < kMinVfNodesNum && !is_arange_singleton &&
+                                           !ascgen_utils::IsNodeContainsBrcInline(cluster->Nodes().back()))) {
       continue;
     }
     // 1. create vf op && subgraph

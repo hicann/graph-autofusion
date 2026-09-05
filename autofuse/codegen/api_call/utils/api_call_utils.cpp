@@ -126,6 +126,9 @@ bool CalculateDmaParams(const TPipe &tpipe, const Tensor &gm_tensor, const Tenso
     const auto pos = std::find(gm_tensor.axis.begin(), gm_tensor.axis.end(), ub_tensor.vectorized_axis[vec_axis_pos]);
     GE_ASSERT_TRUE((pos != gm_tensor.axis.end()), "Codegen vectorized axis[%zu] not found", vec_axis_pos);
     const auto axis_pos = std::distance(gm_tensor.axis.begin(), pos);
+    if (af::SymbolicUtils::StaticCheckEq(gm_tensor.axis_size[axis_pos], af::ops::One) == af::TriBool::kTrue) {
+      continue;
+    }
     // 如果当前轴gm和ub上对应的stride均为0，如果前序轴的stride不为1，则保留当前轴
     const bool ignore_zero_axis =
         ascgen_utils::ShouldIgnoreDataCopyZeroAxis(has_non_zero_axis, vec_axis_pos, ub_tensor.vectorized_strides);

@@ -4192,11 +4192,12 @@ TEST(CodegenKernel, Kernel_ConstantTensorInit) {
 TEST(CodegenKernel, Kernel_IndexExprTensorInit) {
   af::AscGraph graph("test_graph");
   auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
 
   af::ascir_op::IndexExpr index("index");
   graph.AddNode(index);
-  index.ir_attr.SetExpr(0);
-  index.y.dtype = ge::DT_FLOAT16;
+  index.ir_attr.SetExpr(s0 + s1 * af::Symbol(2));
+  index.y.dtype = ge::DT_INT64;
 
   // graph.SetInputs({index});
 
@@ -4210,7 +4211,96 @@ TEST(CodegenKernel, Kernel_IndexExprTensorInit) {
   codegen::Kernel::ParseGraph(graph, fused_schedule_result, kernel);
   std::string result;
   kernel.GlobalTensorInit(result);
-  EXPECT_EQ(result, std::string{"const half scalar_0 = (t->s0)/(1);\n"});
+  EXPECT_EQ(result, std::string{"const int64_t scalar_0 = (((2 * t->s1) + t->s0))/(1);\n"});
+}
+
+TEST(CodegenKernel, Kernel_ZeroIndexExprTensorInit) {
+  af::AscGraph graph("test_graph");
+  af::ascir_op::IndexExpr index("index", graph);
+  index.ir_attr.SetExpr(af::Symbol(0));
+  index.y.dtype = ge::DT_INT32;
+
+  auto index_node = graph.FindNode("index");
+  index_node->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeInvalid;
+  index_node->outputs[0].attr.mem.tensor_id = 0;
+  index_node->outputs[0].attr.mem.position = af::Position::kPositionInvalid;
+
+  ::ascir::FusedScheduledResult fused_schedule_result;
+  codegen::Kernel kernel(graph.GetName());
+  ASSERT_EQ(codegen::Kernel::ParseGraph(graph, fused_schedule_result, kernel), af::SUCCESS);
+  std::string result;
+  ASSERT_EQ(kernel.GlobalTensorInit(result), af::SUCCESS);
+  EXPECT_EQ(result, std::string{"const int32_t scalar_0 = 0;\n"});
+  ASSERT_NE(kernel.tpipe.GetTensor(0), nullptr);
+  EXPECT_EQ(kernel.tpipe.GetTensor(0)->GetScalarValue(), "scalar_0");
+}
+
+TEST(CodegenKernel, Kernel_IndexExprScalarConsumerDoesNotAllocateVectorTensor) {
+  af::AscGraph graph("index_expr_scalar_consumer");
+  const auto s1 = graph.CreateSizeVar("s1");
+  const auto z0 = graph.CreateAxis("z0", s1);
+  af::ascir_op::Data data("data", graph);
+  data.ir_attr.SetIndex(0);
+  data.y.dtype = ge::DT_INT32;
+  af::ascir_op::Load load("load");
+  graph.AddNode(load);
+  load.x = data.y;
+  load.y.dtype = ge::DT_INT32;
+  af::ascir_op::IndexExpr index("index", graph);
+  index.ir_attr.SetExpr(s1 + af::Symbol(2));
+  index.y.dtype = ge::DT_INT32;
+  af::ascir_op::Add add("add");
+  graph.AddNode(add);
+  add.x1 = load.y;
+  add.x2 = index.y;
+  add.y.dtype = ge::DT_INT32;
+
+  auto data_node = graph.FindNode("data");
+  auto load_node = graph.FindNode("load");
+  auto index_node = graph.FindNode("index");
+  auto add_node = graph.FindNode("add");
+  data_node->outputs[0].attr.mem.tensor_id = 0;
+  data_node->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeGlobal;
+  load_node->outputs[0].attr.axis = {z0.id};
+  load_node->outputs[0].attr.vectorized_axis = {z0.id};
+  load_node->outputs[0].attr.vectorized_strides = {One};
+  load_node->outputs[0].attr.repeats = {s1};
+  load_node->outputs[0].attr.strides = {One};
+  load_node->outputs[0].attr.mem.tensor_id = 1;
+  load_node->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeBuffer;
+  load_node->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
+  load_node->outputs[0].attr.buf.id = 0;
+  index_node->outputs[0].attr.mem.tensor_id = 2;
+  index_node->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeInvalid;
+  index_node->outputs[0].attr.mem.position = af::Position::kPositionInvalid;
+  add_node->outputs[0].attr.axis = {z0.id};
+  add_node->outputs[0].attr.vectorized_axis = {z0.id};
+  add_node->outputs[0].attr.vectorized_strides = {One};
+  add_node->outputs[0].attr.repeats = {s1};
+  add_node->outputs[0].attr.strides = {One};
+  add_node->outputs[0].attr.mem.tensor_id = 3;
+  add_node->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeBuffer;
+  add_node->outputs[0].attr.mem.position = af::Position::kPositionVecCalc;
+  add_node->outputs[0].attr.buf.id = 1;
+
+  ::ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.input_nodes.push_back(data_node);
+  codegen::Kernel kernel(graph.GetName());
+  ASSERT_EQ(codegen::Kernel::ParseGraph(graph, fused_schedule_result, kernel), af::SUCCESS);
+  ASSERT_NE(kernel.tpipe.GetTensor(2), nullptr);
+  EXPECT_TRUE(kernel.tpipe.GetTensor(2)->is_constant);
+
+  std::string scalar_init;
+  ASSERT_EQ(kernel.GlobalTensorInit(scalar_init), af::SUCCESS);
+  EXPECT_NE(scalar_init.find("const int32_t scalar_2 = ((2 + t->s1))/(1);"), std::string::npos);
+
+  std::string local_tensors;
+  ASSERT_EQ(kernel.tpipe.LocalTensorDefine(local_tensors), af::SUCCESS);
+  EXPECT_EQ(local_tensors.find("LocalTensor<int32_t> local_2"), std::string::npos);
+
+  std::string consumer_code;
+  ASSERT_EQ(kernel.root_loop.Generate(kernel.tiler, kernel.tpipe, consumer_code), af::SUCCESS);
+  EXPECT_NE(consumer_code.find("Adds(local_3[0], local_1[0], (int32_t)scalar_2"), std::string::npos) << consumer_code;
 }
 
 TEST(CodegenKernel, Kernel_KernelFunctionDeclare) {

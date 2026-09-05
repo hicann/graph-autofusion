@@ -487,3 +487,63 @@ TEST(CodegenLoadStore, CalculateDmaParams_LastAxisDisContinuous) {
   EXPECT_EQ(param.gm_strides.size(), 2);
   EXPECT_EQ(param.ub_strides.size(), 2);
 }
+
+TEST(CodegenLoadStore, CalculateDmaParams_IgnoresStaticSingletonAxes) {
+  af::Axis z0{.id = 0, .name = "z0", .type = af::Axis::Type::kAxisTypeOriginal, .size = af::Symbol(8)};
+  af::Axis z1{.id = 1, .name = "z1", .type = af::Axis::Type::kAxisTypeOriginal, .size = One};
+  af::Axis z2{.id = 2, .name = "z2", .type = af::Axis::Type::kAxisTypeOriginal, .size = One};
+  codegen::Tiler tiler;
+  tiler.AddAxis(z0);
+  tiler.AddAxis(z1);
+  tiler.AddAxis(z2);
+  codegen::TPipe tpipe("tpipe", tiler);
+
+  af::AscGraph graph("static_singleton_dma");
+  af::ascir_op::Data x("x", graph);
+  auto tensor = graph.FindNode("x")->outputs[0];
+  tensor.attr.axis = {z0.id, z1.id, z2.id};
+  tensor.attr.vectorized_axis = tensor.attr.axis;
+  tensor.attr.repeats = {z0.size, One, One};
+  tensor.attr.strides = {af::Symbol(6), af::Symbol(3), One};
+  tensor.attr.vectorized_strides = {One, Zero, Zero};
+
+  std::string dtype_name;
+  Tensor::DtypeName(tensor.attr.dtype, dtype_name);
+  Tensor gm_tensor(tensor, dtype_name);
+  Tensor ub_tensor(tensor, dtype_name);
+  gm_tensor.vectorized_axis_pos = {0, 1, 2};
+  ub_tensor.vectorized_axis_pos = {0, 1, 2};
+  DataCopyParams param;
+  ASSERT_TRUE(CalculateDmaParams(tpipe, gm_tensor, ub_tensor, param, true));
+  ASSERT_EQ(param.repeats.size(), 1UL);
+  EXPECT_EQ(param.repeats[0], af::Symbol(8));
+}
+
+TEST(CodegenLoadStore, CalculateDmaParams_KeepsDynamicAxes) {
+  af::SizeVar dynamic_size(af::Symbol("dynamic_size"));
+  af::Axis z0{.id = 0, .name = "z0", .type = af::Axis::Type::kAxisTypeOriginal, .size = af::Symbol(8)};
+  af::Axis z1{.id = 1, .name = "z1", .type = af::Axis::Type::kAxisTypeOriginal, .size = dynamic_size.expr};
+  codegen::Tiler tiler;
+  tiler.AddAxis(z0);
+  tiler.AddAxis(z1);
+  tiler.AddSizeVar(dynamic_size);
+  codegen::TPipe tpipe("tpipe", tiler);
+
+  af::AscGraph graph("dynamic_dma");
+  af::ascir_op::Data x("x", graph);
+  auto tensor = graph.FindNode("x")->outputs[0];
+  tensor.attr.axis = {z0.id, z1.id};
+  tensor.attr.vectorized_axis = tensor.attr.axis;
+  tensor.attr.repeats = {z0.size, z1.size};
+  tensor.attr.strides = {z1.size, One};
+  tensor.attr.vectorized_strides = {z1.size, One};
+
+  std::string dtype_name;
+  Tensor::DtypeName(tensor.attr.dtype, dtype_name);
+  Tensor gm_tensor(tensor, dtype_name);
+  Tensor ub_tensor(tensor, dtype_name);
+  DataCopyParams param;
+  ASSERT_TRUE(CalculateDmaParams(tpipe, gm_tensor, ub_tensor, param, true));
+  ASSERT_EQ(param.repeats.size(), 1UL);
+  EXPECT_EQ(param.repeats[0], af::Symbol(8) * dynamic_size.expr);
+}

@@ -99,6 +99,44 @@ static ascir::FusedScheduledResult MakeFusedScheduledResultWithGraphs(std::vecto
   return fused_result;
 }
 
+TEST_F(BufQueAllocatorUT, ArangeOutputUsesNormalUbBufferAllocation) {
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  af::AscGraph graph("arange_ub_allocation");
+  const auto size = graph.CreateSizeVar("size");
+  const auto axis = graph.CreateAxis("axis", size);
+
+  af::ascir_op::Arange arange("arange");
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.attr.api.unit = af::ComputeUnit::kUnitVector;
+  arange.attr.sched.axis = {axis.id};
+  arange.y.dtype = af::DT_INT32;
+  *arange.y.axis = {axis.id};
+  *arange.y.repeats = {size};
+  *arange.y.strides = {af::ops::One};
+
+  ASSERT_NE(graph.AddNode(arange), nullptr);
+  ASSERT_EQ(BufQueAllocator().SetOutputTensorAttr(graph), af::SUCCESS);
+
+  const auto arange_node = graph.FindNode("arange");
+  ASSERT_NE(arange_node, nullptr);
+  EXPECT_EQ(arange_node->outputs[0].attr.mem.hardware, af::MemHardware::kMemHardwareUB);
+  EXPECT_EQ(arange_node->outputs[0].attr.mem.alloc_type, af::AllocType::kAllocTypeBuffer);
+  EXPECT_EQ(arange_node->outputs[0].attr.mem.position, af::Position::kPositionVecCalc);
+}
+
+TEST_F(BufQueAllocatorUT, IndexExprKeepsScalarNoUbAllocation) {
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  af::AscGraph graph("index_expr_no_ub");
+  (void)af::ascir::cg::IndexExpr("index", graph, af::DT_INT32, {}, {}, {}, af::Symbol(3));
+  ASSERT_EQ(BufQueAllocator().SetOutputTensorAttr(graph), af::SUCCESS);
+
+  const auto index_node = graph.FindNode("index");
+  ASSERT_NE(index_node, nullptr);
+  EXPECT_NE(index_node->outputs[0].attr.mem.hardware, af::MemHardware::kMemHardwareUB);
+  EXPECT_NE(index_node->outputs[0].attr.mem.alloc_type, af::AllocType::kAllocTypeBuffer);
+}
+
 TEST_F(BufQueAllocatorUT, ShortenVecoutLifetimeInsertsUb2ubBeforeStore) {
   auto graph = MakeStaticLoadStoreGraph("shorten_vecout", 32);
   ASSERT_EQ(ScheduleUtils::TopologicalSorting(graph), af::GRAPH_SUCCESS);

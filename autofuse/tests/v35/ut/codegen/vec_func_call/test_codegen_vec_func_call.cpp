@@ -20,6 +20,8 @@
 #include "codegen_kernel.h"
 #include "utils/api_call_factory.h"
 #include "vec_func_call.h"
+#include "micro_api_call/micro_api_call_factory.h"
+#include "micro_api_call/micro_arange_api_call.h"
 #include "../common.h"
 #include "codegen_graph_check.h"
 
@@ -30,6 +32,47 @@ using namespace af::ascir_op;
 using namespace codegen;
 
 namespace {
+std::string GetLineContaining(const std::string &text, const std::string &needle) {
+  const auto offset = text.find(needle);
+  if (offset == std::string::npos) {
+    return {};
+  }
+  const auto line_begin = text.rfind('\n', offset);
+  const auto line_end = text.find('\n', offset);
+  return text.substr(line_begin == std::string::npos ? 0UL : line_begin + 1UL,
+                     line_end == std::string::npos ? std::string::npos : line_end - line_begin - 1UL);
+}
+
+class FailingMicroApiCall final : public MicroApiCall {
+ public:
+  FailingMicroApiCall() : MicroApiCall("FailingMicroApiCall") {}
+
+  Status Generate(const TensorManager &, const TPipe &, CallParam &, std::string &) override {
+    return af::FAILED;
+  }
+};
+
+class FixedArangeMicroApiCall final : public MicroApiCall {
+ public:
+  FixedArangeMicroApiCall(int64_t tensor_id, std::string base, std::string step)
+      : MicroApiCall("FixedArangeMicroApiCall"), base_(std::move(base)), step_(std::move(step)) {
+    AddOutput(tensor_id);
+  }
+
+  bool HasArangeParam() const override {
+    return true;
+  }
+
+  void GetArangeParams(const TPipe &, std::string &base, std::string &step) const override {
+    base = base_;
+    step = step_;
+  }
+
+ private:
+  std::string base_;
+  std::string step_;
+};
+
 template <typename TensorLike>
 void SetTwoDimSchedule(TensorLike &tensor, const af::Axis &z0, const af::Axis &z1, const af::Expression &s0,
                        const af::Expression &s1) {
@@ -63,7 +106,7 @@ codegen::Tensor MakeCvUbFuseTensor(af::AscGraph &graph, ge::DataType dtype, int6
 }
 
 void InitScalarDataVfGraph(VectorFunc &vf_op, Store &store_op, Broadcast &sub_brc_op, Abs &abs_op, Store &sub_store_op,
-                           Output &sub_output_op, const ScalarData &scalar_data_op, const Scalar &sub_scalar_op,
+                           Output &sub_output_op, const ScalarData &scalar_data_op, Scalar &sub_scalar_op,
                            const af::Axis &z0, const af::Axis &z1, const af::Expression &s0, const af::Expression &s1) {
   vf_op.InstanceOutputy(1);
   vf_op.x = {scalar_data_op.y};
@@ -75,6 +118,7 @@ void InitScalarDataVfGraph(VectorFunc &vf_op, Store &store_op, Broadcast &sub_br
   SetTwoDimSchedule(store_op.y, z0, z1, s0, s1);
 
   sub_brc_op.x = sub_scalar_op.y;
+  sub_scalar_op.attr.api.unit = af::ComputeUnit::kUnitNone;
   sub_brc_op.attr.sched.axis = {z0.id, z1.id};
   SetTwoDimSchedule(sub_brc_op.y, z0, z1, s0, s1);
 
@@ -86,6 +130,7 @@ void InitScalarDataVfGraph(VectorFunc &vf_op, Store &store_op, Broadcast &sub_br
   sub_store_op.attr.sched.axis = {z0.id, z1.id};
   SetTwoDimSchedule(sub_store_op.y, z0, z1, s0, s1);
   sub_output_op.x = sub_store_op.y;
+  sub_output_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 }
 
 void InitScalarDataVfTensorAttrs(AscGraph &graph, AscGraph &vf_sub_graph, const af::Axis &z0, const af::Axis &z1,
@@ -130,8 +175,9 @@ std::string GenerateScalarDataVfCall(AscGraph &graph, const af::Axis &z0, const 
   auto vf = graph.FindNode("vf");
   codegen::Tiler tiler;
   codegen::TPipe tpipe("tpipe", tiler);
+  EXPECT_EQ(tpipe.CollectQues(graph), af::SUCCESS);
   EXPECT_EQ(tpipe.AddTensor(scalar_data->outputs[0], "scalar_data_y"), 0);
-  tpipe.AddTensor(vf->outputs[0]);
+  EXPECT_EQ(tpipe.AddTensor(vf->outputs[0]), af::SUCCESS);
 
   tiler.AddAxis(z0);
   tiler.AddAxis(z1);
@@ -237,6 +283,9 @@ void PrepareDoubleLoopCodegen(AscGraph &graph, const std::vector<af::Axis> &axes
                               codegen::VfCall &call, std::stringstream &func_def) {
   auto load = graph.FindNode("load");
   auto vf = graph.FindNode("vf");
+  // 模拟生产 Kernel::ParseGraph 流程: queue 类型 tensor 入 tpipe 前需先从图收集 que 定义,
+  // 否则 AddTensor 报 "Cannot find que"。
+  ASSERT_EQ(tpipe.CollectQues(graph), af::SUCCESS);
   tpipe.AddTensor(load->outputs[0]);
   tpipe.AddTensor(vf->outputs[0]);
   for (const auto &axis : axes) {
@@ -259,6 +308,10 @@ void RegisterDoubleLoopNodes(AscGraph &graph, AscGraph &vf_sub_graph, VectorFunc
   vf_op.SetAttr("sub_graph_name", sub_graph_name);
   sub_x_op.ir_attr.SetIndex(0);
   sub_output_op.ir_attr.SetIndex(0);
+  // 生产图 CompleteApiInfo 会将 Data/Output 的 api.unit 置为 kUnitNone(不发射代码);
+  // 手工 fixture 需显式设置, 否则 base MicroApiCall 会参与 Generate 并失败。
+  sub_x_op.attr.api.unit = af::ComputeUnit::kUnitNone;
+  sub_output_op.attr.api.unit = af::ComputeUnit::kUnitNone;
   graph.AddNode(load_op);
   graph.AddSubGraph(vf_sub_graph);
   graph.AddNode(store_op);
@@ -278,6 +331,588 @@ void CheckDoubleLoopVectorFuncParams(const af::AscNodePtr &vf) {
   EXPECT_STREQ(vector_func_params->output_dims[3].Serialize().get(), "s4");
 }
 }  // namespace
+
+TEST(VFLoopTest, PropagatesFailureWhenMicroApiCallFails) {
+  // 生成失败必须上抛: 吞错会在真机产生未初始化寄存器参与计算的静默错误数据。
+  VFLoop loop(af::kIdNone);
+  loop.AddCall(new FailingMicroApiCall());
+
+  Tiler tiler;
+  TPipe tpipe("tpipe", tiler);
+  TensorManager tensor_manager;
+  std::string result;
+  std::string loop_size;
+  int32_t max_depth = -1;
+  std::vector<std::string> loop_sizes;
+  EXPECT_NE(loop.Generate(tpipe, tensor_manager, 0, result, loop_size, max_depth, loop_sizes), af::SUCCESS);
+  EXPECT_NE(loop.GenerateCvUbFuse(tpipe, tensor_manager, result, loop_size), af::SUCCESS);
+  loop.Destruct();
+}
+
+TEST(VFLoopTest, GeneratesInt64ArangeAcrossVectorBlocks) {
+  ge::SetupRuntimeStub();
+  af::AscGraph graph("arange_vf_loop");
+  const auto size = graph.CreateSizeVar("size");
+  const auto axis = graph.CreateAxis("axis", size);
+  af::AscGraph vf_sub_graph("arange_vf_sub_graph");
+  VectorFunc vf_op("vf");
+  vf_op.InstanceOutputy(1);
+  vf_op.SetAttr("sub_graph_name", "arange_vf_sub_graph");
+  graph.AddSubGraph(vf_sub_graph);
+  graph.AddNode(vf_op);
+
+  Arange arange_op("arange");
+  Abs abs_op("abs");
+  Output output_op("output");
+  arange_op.ir_attr.SetBase(af::Symbol(3));
+  arange_op.ir_attr.SetStep(af::Symbol(2));
+  arange_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  arange_op.attr.sched.axis = {axis.id};
+  arange_op.y.dtype = af::DT_INT64;
+  *arange_op.y.axis = {axis.id};
+  *arange_op.y.repeats = {size};
+  *arange_op.y.strides = {One};
+  *arange_op.y.vectorized_axis = {axis.id};
+  *arange_op.y.vectorized_strides = {One};
+  abs_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  abs_op.attr.sched.axis = {axis.id};
+  abs_op.y.dtype = af::DT_INT64;
+  *abs_op.y.axis = {axis.id};
+  *abs_op.y.repeats = {size};
+  *abs_op.y.strides = {One};
+  *abs_op.y.vectorized_axis = {axis.id};
+  *abs_op.y.vectorized_strides = {One};
+  output_op.ir_attr.SetIndex(0);
+  vf_sub_graph.AddNode(arange_op);
+  vf_sub_graph.AddNode(abs_op);
+  vf_sub_graph.AddNode(output_op);
+  abs_op.x = arange_op.y;
+  output_op.x = abs_op.y;
+  const auto node = vf_sub_graph.FindNode("arange");
+  node->outputs[0].attr.mem.tensor_id = 0;
+  auto abs_node = vf_sub_graph.FindNode("abs");
+  abs_node->outputs[0].attr.mem.tensor_id = 2;
+  auto vf_node = graph.FindNode("vf");
+  vf_node->outputs[0].attr.dtype = af::DT_INT64;
+  vf_node->outputs[0].attr.mem.tensor_id = 1;
+  vf_node->outputs[0].attr.mem.position = af::Position::kPositionVecOut;
+
+  std::string dtype_name;
+  ASSERT_EQ(codegen::Tensor::DtypeName(af::DT_INT64, dtype_name), af::SUCCESS);
+  TensorManager tensor_manager;
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(node->outputs[0], dtype_name)), af::SUCCESS);
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(vf_node->outputs[0], dtype_name)), af::SUCCESS);
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(abs_node->outputs[0], dtype_name)), af::SUCCESS);
+  Tiler tiler;
+  tiler.AddAxis(axis);
+  tiler.AddSizeVar(af::SizeVar(size));
+  TPipe tpipe("tpipe", tiler);
+  ASSERT_EQ(tpipe.AddTensor(vf_node->outputs[0]), af::SUCCESS);
+
+  VfCall vf_call;
+  ASSERT_EQ(vf_call.Init(vf_node), af::SUCCESS);
+  tpipe.cv_fusion_type = ::ascir::CubeTemplateType::kUBFuse;
+  std::stringstream ub_fuse_definition;
+  EXPECT_NE(vf_call.GenerateFuncDefinition(tpipe, tiler, ub_fuse_definition), af::SUCCESS);
+  tpipe.cv_fusion_type = ::ascir::CubeTemplateType::kDefault;
+
+  VFLoop loop(axis.id);
+  loop.SetMaxDtypeSize("int64_t");
+  ASSERT_EQ(loop.ConstructFromNodes(vf_sub_graph.GetAllNodes(), vf_node), af::SUCCESS);
+
+  std::string result;
+  std::string loop_size;
+  int32_t max_depth = -1;
+  std::vector<std::string> loop_sizes;
+  ASSERT_EQ(
+      loop.Generate(tpipe, tensor_manager, 0, result, loop_size, max_depth, loop_sizes, {{0, "device_block_offset"}}),
+      af::SUCCESS);
+  EXPECT_NE(result.find("for (uint16_t axis"), std::string::npos);
+  const auto arange_adds = GetLineContaining(result, "AscendC::Reg::Adds");
+  ASSERT_FALSE(arange_adds.empty());
+  EXPECT_EQ(arange_adds,
+            "AscendC::Reg::Adds(vreg_0, vreg_0, static_cast<int64_t>((arange_base_0 + (device_block_offset + "
+            "(axis * ELEMENT_PER_VECTOR_LENGTH)) * (arange_step_0))), preg_0);");
+  loop.Destruct();
+}
+
+TEST(CodegenKernel, HighRankArangeOuterForUsesLogicalOffset) {
+  for (const size_t rank : {5UL, 6UL}) {
+    ge::SetupRuntimeStub();
+    af::AscGraph graph(("high_rank_arange_" + std::to_string(rank)).c_str());
+    std::vector<af::Axis> axes;
+    std::vector<af::AxisId> axis_ids;
+    std::vector<af::Expression> logical_strides;
+    for (size_t i = 0UL; i < rank; ++i) {
+      axes.push_back(graph.CreateAxis("axis" + std::to_string(i), af::Symbol(2)));
+      axis_ids.push_back(axes.back().id);
+      logical_strides.push_back(af::Symbol(static_cast<int64_t>(1UL << (rank - i - 1UL))));
+    }
+    const std::vector<af::Expression> repeats(rank, af::Symbol(2));
+    const std::vector<af::Expression> physical_strides =
+        rank == 5UL ? std::vector<af::Expression>{af::Symbol(64), af::Symbol(24), af::Symbol(10), af::Symbol(3), One}
+                    : std::vector<af::Expression>{af::Symbol(180), af::Symbol(70), af::Symbol(26),
+                                                  af::Symbol(10),  af::Symbol(3),  One};
+
+    af::AscGraph subgraph(("high_rank_arange_subgraph_" + std::to_string(rank)).c_str());
+    VectorFunc vf_op("vf");
+    vf_op.InstanceOutputy(1);
+    vf_op.SetAttr("sub_graph_name", "high_rank_arange_subgraph_" + std::to_string(rank));
+    graph.AddSubGraph(subgraph);
+    graph.AddNode(vf_op);
+
+    Arange arange_op("arange");
+    arange_op.ir_attr.SetBase(af::Symbol(3));
+    arange_op.ir_attr.SetStep(af::Symbol(2));
+    arange_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+    arange_op.attr.sched.axis = axis_ids;
+    arange_op.attr.sched.loop_axis = axes.back().id;
+    arange_op.y.dtype = af::DT_INT64;
+    *arange_op.y.axis = axis_ids;
+    *arange_op.y.repeats = repeats;
+    *arange_op.y.strides = logical_strides;
+    *arange_op.y.vectorized_axis = axis_ids;
+    *arange_op.y.vectorized_strides = physical_strides;
+
+    Abs abs_op("abs");
+    abs_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+    abs_op.attr.sched.axis = axis_ids;
+    abs_op.attr.sched.loop_axis = axes.back().id;
+    abs_op.y.dtype = af::DT_INT64;
+    *abs_op.y.axis = axis_ids;
+    *abs_op.y.repeats = repeats;
+    *abs_op.y.strides = logical_strides;
+    *abs_op.y.vectorized_axis = axis_ids;
+    *abs_op.y.vectorized_strides = physical_strides;
+
+    Store store_op("store");
+    store_op.attr.api.unit = af::ComputeUnit::kUnitMTE3;
+    store_op.attr.sched.axis = axis_ids;
+    store_op.y.dtype = af::DT_INT64;
+    *store_op.y.axis = axis_ids;
+    *store_op.y.repeats = repeats;
+    *store_op.y.strides = logical_strides;
+    *store_op.y.vectorized_axis = axis_ids;
+    *store_op.y.vectorized_strides = physical_strides;
+
+    Output output_op("output");
+    output_op.ir_attr.SetIndex(0);
+    subgraph.AddNode(arange_op);
+    subgraph.AddNode(abs_op);
+    subgraph.AddNode(store_op);
+    subgraph.AddNode(output_op);
+    abs_op.x = arange_op.y;
+    store_op.x = abs_op.y;
+    output_op.x = store_op.y;
+
+    const auto arange_node = subgraph.FindNode("arange");
+    const auto abs_node = subgraph.FindNode("abs");
+    ASSERT_NE(arange_node, nullptr);
+    ASSERT_NE(abs_node, nullptr);
+    arange_node->outputs[0].attr.mem.tensor_id = 0;
+    abs_node->outputs[0].attr.mem.tensor_id = 1;
+    const auto store_node = subgraph.FindNode("store");
+    ASSERT_NE(store_node, nullptr);
+    store_node->outputs[0].attr.mem.tensor_id = 2;
+    const auto vf_node = graph.FindNode("vf");
+    ASSERT_NE(vf_node, nullptr);
+    vf_node->outputs[0].attr.dtype = af::DT_INT64;
+    vf_node->outputs[0].attr.axis = axis_ids;
+    vf_node->outputs[0].attr.repeats = repeats;
+    vf_node->outputs[0].attr.strides = physical_strides;
+    vf_node->outputs[0].attr.vectorized_axis = axis_ids;
+    vf_node->outputs[0].attr.vectorized_strides = physical_strides;
+    vf_node->outputs[0].attr.mem.tensor_id = 3;
+    vf_node->outputs[0].attr.mem.position = af::Position::kPositionVecOut;
+
+    Tiler tiler;
+    for (const auto &axis : axes) {
+      ASSERT_EQ(tiler.AddAxis(axis), af::SUCCESS);
+    }
+    TPipe tpipe("tpipe", tiler);
+    ASSERT_EQ(tpipe.AddTensor(vf_node->outputs[0]), af::SUCCESS);
+    VfCall call;
+    ASSERT_EQ(call.Init(vf_node), af::SUCCESS);
+
+    std::stringstream definition;
+    ASSERT_EQ(call.GenerateFuncDefinition(tpipe, tiler, definition), af::SUCCESS);
+    std::string invocation;
+    ASSERT_EQ(call.Generate(tpipe, {}, invocation), af::SUCCESS);
+    EXPECT_NE(invocation.find("for(int outer_for_0 = 0;"), std::string::npos) << invocation;
+    const auto vf_call = GetLineContaining(invocation, "VFCallvf(");
+    ASSERT_FALSE(vf_call.empty()) << invocation;
+    EXPECT_NE(vf_call.find("outer_for_0 * " + std::to_string(1UL << (rank - 1UL))), std::string::npos) << vf_call;
+    EXPECT_EQ(vf_call.find("0 + outer_for_0 * " + std::to_string(rank == 5UL ? 64UL : 180UL)), std::string::npos)
+        << vf_call;
+    if (rank == 6UL) {
+      EXPECT_NE(invocation.find("for(int outer_for_1 = 0;"), std::string::npos) << invocation;
+      EXPECT_NE(vf_call.find("outer_for_1 * 16"), std::string::npos) << vf_call;
+    }
+  }
+}
+
+TEST(VFLoopTest, UsesLogicalOuterStrideForAlignedArangeLayout) {
+  ge::SetupRuntimeStub();
+  af::AscGraph graph("aligned_arange_vf_loop");
+  const auto rows = graph.CreateSizeVar("rows");
+  const auto cols = graph.CreateSizeVar("cols");
+  const auto row_axis = graph.CreateAxis("row", rows);
+  const auto col_axis = graph.CreateAxis("col", cols);
+  af::AscGraph vf_sub_graph("aligned_arange_vf_sub_graph");
+  VectorFunc vf_op("vf");
+  vf_op.InstanceOutputy(1);
+  vf_op.SetAttr("sub_graph_name", "aligned_arange_vf_sub_graph");
+  graph.AddSubGraph(vf_sub_graph);
+  graph.AddNode(vf_op);
+
+  Arange arange_op("arange");
+  Abs abs_op("abs");
+  Output output_op("output");
+  arange_op.ir_attr.SetBase(af::Symbol(0));
+  arange_op.ir_attr.SetStep(af::Symbol(1));
+  arange_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  arange_op.attr.sched.axis = {row_axis.id, col_axis.id};
+  arange_op.attr.sched.loop_axis = col_axis.id;
+  arange_op.y.dtype = af::DT_INT64;
+  *arange_op.y.axis = {row_axis.id, col_axis.id};
+  *arange_op.y.repeats = {rows, cols};
+  *arange_op.y.strides = {cols, One};
+  *arange_op.y.vectorized_axis = {row_axis.id, col_axis.id};
+  *arange_op.y.vectorized_strides = {af::Symbol(16), One};
+  abs_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  abs_op.attr.sched.axis = {row_axis.id, col_axis.id};
+  abs_op.attr.sched.loop_axis = col_axis.id;
+  abs_op.y.dtype = af::DT_INT64;
+  *abs_op.y.axis = {row_axis.id, col_axis.id};
+  *abs_op.y.repeats = {rows, cols};
+  *abs_op.y.strides = {cols, One};
+  *abs_op.y.vectorized_axis = {row_axis.id, col_axis.id};
+  *abs_op.y.vectorized_strides = {af::Symbol(16), One};
+  output_op.ir_attr.SetIndex(0);
+  vf_sub_graph.AddNode(arange_op);
+  vf_sub_graph.AddNode(abs_op);
+  vf_sub_graph.AddNode(output_op);
+  abs_op.x = arange_op.y;
+  output_op.x = abs_op.y;
+  const auto arange_node = vf_sub_graph.FindNode("arange");
+  arange_node->outputs[0].attr.mem.tensor_id = 0;
+  const auto abs_node = vf_sub_graph.FindNode("abs");
+  abs_node->outputs[0].attr.mem.tensor_id = 2;
+  auto vf_node = graph.FindNode("vf");
+  vf_node->outputs[0].attr.dtype = af::DT_INT64;
+  vf_node->outputs[0].attr.mem.tensor_id = 1;
+  vf_node->outputs[0].attr.mem.position = af::Position::kPositionVecOut;
+
+  std::string dtype_name;
+  ASSERT_EQ(codegen::Tensor::DtypeName(af::DT_INT64, dtype_name), af::SUCCESS);
+  TensorManager tensor_manager;
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(arange_node->outputs[0], dtype_name)), af::SUCCESS);
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(vf_node->outputs[0], dtype_name)), af::SUCCESS);
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(abs_node->outputs[0], dtype_name)), af::SUCCESS);
+  Tiler tiler;
+  tiler.AddAxis(row_axis);
+  tiler.AddAxis(col_axis);
+  tiler.AddSizeVar(af::SizeVar(rows));
+  tiler.AddSizeVar(af::SizeVar(cols));
+  TPipe tpipe("tpipe", tiler);
+  ASSERT_EQ(tpipe.AddTensor(vf_node->outputs[0]), af::SUCCESS);
+
+  VFLoop loop(af::kIdNone);
+  loop.SetMaxDtypeSize("int64_t");
+  ASSERT_EQ(loop.ConstructFromNodes(vf_sub_graph.GetAllNodes(), vf_node), af::SUCCESS);
+
+  std::string result;
+  std::string loop_size;
+  int32_t max_depth = -1;
+  std::vector<std::string> loop_sizes;
+  ASSERT_EQ(
+      loop.Generate(tpipe, tensor_manager, 0, result, loop_size, max_depth, loop_sizes, {{0, "device_block_offset"}}),
+      af::SUCCESS);
+  const auto arange_call = GetLineContaining(result, "AscendC::Reg::Arange");
+  ASSERT_FALSE(arange_call.empty()) << result;
+  EXPECT_NE(arange_call.find("row * t->cols"), std::string::npos);
+  EXPECT_NE(arange_call.find("col * ELEMENT_PER_VECTOR_LENGTH"), std::string::npos);
+  EXPECT_EQ(arange_call.find("row * 16"), std::string::npos);
+  loop.Destruct();
+
+  arange_node->attr.sched.axis = {row_axis.id};
+  arange_node->attr.sched.loop_axis = row_axis.id;
+  arange_node->outputs[0].attr.repeats = {rows, One};
+  arange_node->outputs[0].attr.strides = {One, Zero};
+  arange_node->outputs[0].attr.vectorized_strides = {One, Zero};
+  abs_node->attr.sched.axis = {row_axis.id};
+  abs_node->attr.sched.loop_axis = row_axis.id;
+  abs_node->outputs[0].attr.repeats = {rows, One};
+  abs_node->outputs[0].attr.strides = {One, Zero};
+  abs_node->outputs[0].attr.vectorized_strides = {One, Zero};
+  TensorManager trailing_singleton_tensor_manager;
+  ASSERT_EQ(trailing_singleton_tensor_manager.AddTensor(MicroApiTensor(arange_node->outputs[0], dtype_name)),
+            af::SUCCESS);
+  ASSERT_EQ(trailing_singleton_tensor_manager.AddTensor(MicroApiTensor(abs_node->outputs[0], dtype_name)), af::SUCCESS);
+  ASSERT_EQ(trailing_singleton_tensor_manager.AddTensor(MicroApiTensor(vf_node->outputs[0], dtype_name)), af::SUCCESS);
+  VFLoop trailing_singleton_loop(af::kIdNone);
+  trailing_singleton_loop.SetMaxDtypeSize("int64_t");
+  ASSERT_EQ(trailing_singleton_loop.ConstructFromNodes(vf_sub_graph.GetAllNodes(), vf_node), af::SUCCESS);
+  result.clear();
+  loop_size.clear();
+  max_depth = -1;
+  loop_sizes.clear();
+  ASSERT_EQ(trailing_singleton_loop.Generate(tpipe, trailing_singleton_tensor_manager, 0, result, loop_size, max_depth,
+                                             loop_sizes),
+            af::SUCCESS);
+  const auto trailing_singleton_call = GetLineContaining(result, "AscendC::Reg::Arange");
+  ASSERT_FALSE(trailing_singleton_call.empty()) << result;
+  EXPECT_NE(trailing_singleton_call.find("row * ELEMENT_PER_VECTOR_LENGTH"), std::string::npos)
+      << trailing_singleton_call;
+  trailing_singleton_loop.Destruct();
+
+  arange_node->attr.sched.axis.clear();
+  arange_node->attr.sched.loop_axis = af::kIdNone;
+  abs_node->attr.sched.axis.clear();
+  abs_node->attr.sched.loop_axis = af::kIdNone;
+  VFLoop singleton_loop(af::kIdNone);
+  singleton_loop.SetMaxDtypeSize("int64_t");
+  ASSERT_EQ(singleton_loop.ConstructFromNodes(vf_sub_graph.GetAllNodes(), vf_node), af::SUCCESS);
+  result.clear();
+  loop_size.clear();
+  max_depth = -1;
+  loop_sizes.clear();
+  ASSERT_EQ(singleton_loop.Generate(tpipe, tensor_manager, 0, result, loop_size, max_depth, loop_sizes,
+                                    {{0, "device_block_offset"}}),
+            af::SUCCESS);
+  const auto singleton_arange_call = GetLineContaining(result, "AscendC::Reg::Arange");
+  ASSERT_FALSE(singleton_arange_call.empty()) << result;
+  EXPECT_NE(singleton_arange_call.find("device_block_offset + (0)"), std::string::npos);
+  EXPECT_EQ(singleton_arange_call.find("row *"), std::string::npos);
+  EXPECT_EQ(singleton_arange_call.find("col *"), std::string::npos);
+  singleton_loop.Destruct();
+}
+
+TEST(VFLoopTest, UsesInnermostLogicalStrideForPartiallyMergedArangeAxis) {
+  ge::SetupRuntimeStub();
+  af::AscGraph graph("partially_merged_arange");
+  const auto outer = graph.CreateAxis("outer", af::Symbol(2));
+  const auto middle = graph.CreateAxis("middle", af::Symbol(3));
+  const auto inner = graph.CreateAxis("inner", af::Symbol(3));
+  const auto merged = graph.MergeAxis({middle.id, outer.id});
+  ASSERT_NE(merged, nullptr);
+  af::AscGraph vf_sub_graph("partially_merged_arange_subgraph");
+  VectorFunc vf_op("vf");
+  vf_op.InstanceOutputy(1);
+  vf_op.SetAttr("sub_graph_name", "partially_merged_arange_subgraph");
+  graph.AddSubGraph(vf_sub_graph);
+  graph.AddNode(vf_op);
+  Arange arange_op("arange");
+  Abs abs_op("abs");
+  Output output_op("output");
+  arange_op.ir_attr.SetBase(af::Symbol(0));
+  arange_op.ir_attr.SetStep(af::Symbol(1));
+  arange_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  arange_op.attr.sched.axis = {merged->id, inner.id};
+  arange_op.attr.sched.loop_axis = inner.id;
+  arange_op.y.dtype = af::DT_INT64;
+  *arange_op.y.axis = {outer.id, middle.id, inner.id};
+  *arange_op.y.repeats = {af::Symbol(2), af::Symbol(3), af::Symbol(3)};
+  *arange_op.y.strides = {af::Symbol(9), af::Symbol(3), One};
+  *arange_op.y.vectorized_axis = {merged->id, inner.id};
+  *arange_op.y.vectorized_strides = {af::Symbol(4), One};
+  abs_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  abs_op.attr.sched.axis = {merged->id, inner.id};
+  abs_op.attr.sched.loop_axis = inner.id;
+  abs_op.y.dtype = af::DT_INT64;
+  *abs_op.y.axis = *arange_op.y.axis;
+  *abs_op.y.repeats = *arange_op.y.repeats;
+  *abs_op.y.strides = *arange_op.y.strides;
+  *abs_op.y.vectorized_axis = *arange_op.y.vectorized_axis;
+  *abs_op.y.vectorized_strides = *arange_op.y.vectorized_strides;
+  output_op.ir_attr.SetIndex(0);
+  vf_sub_graph.AddNode(arange_op);
+  vf_sub_graph.AddNode(abs_op);
+  vf_sub_graph.AddNode(output_op);
+  abs_op.x = arange_op.y;
+  output_op.x = abs_op.y;
+  const auto arange_node = vf_sub_graph.FindNode("arange");
+  arange_node->outputs[0].attr.mem.tensor_id = 0;
+  const auto abs_node = vf_sub_graph.FindNode("abs");
+  abs_node->outputs[0].attr.mem.tensor_id = 2;
+  const auto vf_node = graph.FindNode("vf");
+  vf_node->outputs[0].attr.dtype = af::DT_INT64;
+  vf_node->outputs[0].attr.axis = abs_node->outputs[0].attr.axis;
+  vf_node->outputs[0].attr.repeats = abs_node->outputs[0].attr.repeats;
+  vf_node->outputs[0].attr.strides = abs_node->outputs[0].attr.strides;
+  vf_node->outputs[0].attr.vectorized_axis = abs_node->outputs[0].attr.vectorized_axis;
+  vf_node->outputs[0].attr.vectorized_strides = abs_node->outputs[0].attr.vectorized_strides;
+  vf_node->outputs[0].attr.mem.tensor_id = 1;
+  vf_node->outputs[0].attr.mem.position = af::Position::kPositionVecOut;
+
+  std::string dtype_name;
+  ASSERT_EQ(codegen::Tensor::DtypeName(af::DT_INT64, dtype_name), af::SUCCESS);
+  TensorManager tensor_manager;
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(arange_node->outputs[0], dtype_name)), af::SUCCESS);
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(vf_node->outputs[0], dtype_name)), af::SUCCESS);
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(abs_node->outputs[0], dtype_name)), af::SUCCESS);
+  Tiler tiler;
+  for (const auto &axis : graph.GetAllAxis()) {
+    ASSERT_EQ(tiler.AddAxis(*axis), af::SUCCESS);
+  }
+  TPipe tpipe("tpipe", tiler);
+  VFLoop loop(af::kIdNone);
+  loop.SetMaxDtypeSize("int64_t");
+  ASSERT_EQ(loop.ConstructFromNodes(vf_sub_graph.GetAllNodes(), vf_node), af::SUCCESS);
+
+  std::string result;
+  std::string loop_size;
+  int32_t max_depth = -1;
+  std::vector<std::string> loop_sizes;
+  EXPECT_NE(loop.Generate(tpipe, tensor_manager, 0, result, loop_size, max_depth, loop_sizes), af::SUCCESS);
+  loop.Destruct();
+}
+
+TEST(VFLoopTest, RejectsInterleavedNestedMergedArangeAsOnlyVectorizedAxis) {
+  ge::SetupRuntimeStub();
+  af::AscGraph graph("interleaved_nested_merged_arange");
+  const auto axis0 = graph.CreateAxis("axis0", af::Symbol(2));
+  const auto axis1 = graph.CreateAxis("axis1", af::Symbol(2));
+  const auto axis2 = graph.CreateAxis("axis2", af::Symbol(2));
+  const auto axis3 = graph.CreateAxis("axis3", af::Symbol(2));
+  const auto left = graph.MergeAxis({axis0.id, axis2.id});
+  const auto right = graph.MergeAxis({axis1.id, axis3.id});
+  ASSERT_NE(left, nullptr);
+  ASSERT_NE(right, nullptr);
+  const auto merged = graph.MergeAxis({left->id, right->id});
+  ASSERT_NE(merged, nullptr);
+  af::AscGraph vf_sub_graph("interleaved_nested_merged_arange_subgraph");
+  VectorFunc vf_op("vf");
+  vf_op.InstanceOutputy(1);
+  vf_op.SetAttr("sub_graph_name", "interleaved_nested_merged_arange_subgraph");
+  graph.AddSubGraph(vf_sub_graph);
+  graph.AddNode(vf_op);
+  Arange arange_op("arange");
+  Abs abs_op("abs");
+  Output output_op("output");
+  arange_op.ir_attr.SetBase(af::Symbol(0));
+  arange_op.ir_attr.SetStep(af::Symbol(1));
+  arange_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  arange_op.attr.sched.axis = {merged->id};
+  arange_op.attr.sched.loop_axis = merged->id;
+  arange_op.y.dtype = af::DT_INT64;
+  *arange_op.y.axis = {axis0.id, axis1.id, axis2.id, axis3.id};
+  *arange_op.y.repeats = {af::Symbol(2), af::Symbol(2), af::Symbol(2), af::Symbol(2)};
+  *arange_op.y.strides = {af::Symbol(8), af::Symbol(4), af::Symbol(2), One};
+  *arange_op.y.vectorized_axis = {merged->id};
+  *arange_op.y.vectorized_strides = {One};
+  abs_op.attr.api.unit = af::ComputeUnit::kUnitVector;
+  abs_op.attr.sched.axis = {merged->id};
+  abs_op.attr.sched.loop_axis = merged->id;
+  abs_op.y.dtype = af::DT_INT64;
+  *abs_op.y.axis = *arange_op.y.axis;
+  *abs_op.y.repeats = *arange_op.y.repeats;
+  *abs_op.y.strides = *arange_op.y.strides;
+  *abs_op.y.vectorized_axis = *arange_op.y.vectorized_axis;
+  *abs_op.y.vectorized_strides = *arange_op.y.vectorized_strides;
+  output_op.ir_attr.SetIndex(0);
+  vf_sub_graph.AddNode(arange_op);
+  vf_sub_graph.AddNode(abs_op);
+  vf_sub_graph.AddNode(output_op);
+  abs_op.x = arange_op.y;
+  output_op.x = abs_op.y;
+  const auto arange_node = vf_sub_graph.FindNode("arange");
+  arange_node->outputs[0].attr.mem.tensor_id = 0;
+  const auto abs_node = vf_sub_graph.FindNode("abs");
+  abs_node->outputs[0].attr.mem.tensor_id = 2;
+  const auto vf_node = graph.FindNode("vf");
+  vf_node->outputs[0].attr.dtype = af::DT_INT64;
+  vf_node->outputs[0].attr.mem.tensor_id = 1;
+  vf_node->outputs[0].attr.mem.position = af::Position::kPositionVecOut;
+
+  std::string dtype_name;
+  ASSERT_EQ(codegen::Tensor::DtypeName(af::DT_INT64, dtype_name), af::SUCCESS);
+  TensorManager tensor_manager;
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(arange_node->outputs[0], dtype_name)), af::SUCCESS);
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(vf_node->outputs[0], dtype_name)), af::SUCCESS);
+  ASSERT_EQ(tensor_manager.AddTensor(MicroApiTensor(abs_node->outputs[0], dtype_name)), af::SUCCESS);
+  Tiler tiler;
+  for (const auto &axis : graph.GetAllAxis()) {
+    ASSERT_EQ(tiler.AddAxis(*axis), af::SUCCESS);
+  }
+  TPipe tpipe("tpipe", tiler);
+  ASSERT_EQ(tpipe.AddTensor(vf_node->outputs[0]), af::SUCCESS);
+  VFLoop loop(af::kIdNone);
+  loop.SetMaxDtypeSize("int64_t");
+  ASSERT_EQ(loop.ConstructFromNodes(vf_sub_graph.GetAllNodes(), vf_node), af::SUCCESS);
+
+  std::string result;
+  std::string loop_size;
+  int32_t max_depth = -1;
+  std::vector<std::string> loop_sizes;
+  EXPECT_NE(loop.Generate(tpipe, tensor_manager, 0, result, loop_size, max_depth, loop_sizes), af::SUCCESS);
+  loop.Destruct();
+}
+
+TEST(VFLoopTest, KeepsDistinctParamsForMultipleArangeCalls) {
+  Tiler tiler;
+  TPipe tpipe("tpipe", tiler);
+  VFLoop loop(af::kIdNone);
+  loop.AddCall(new FixedArangeMicroApiCall(10, "1", "2"));
+  loop.AddCall(new FixedArangeMicroApiCall(11, "7", "4"));
+
+  std::vector<ArangeParam> params;
+  loop.CollectArangeParams(tpipe, params);
+  ASSERT_EQ(params.size(), 2U);
+  EXPECT_EQ(params[0].tensor_id, 10);
+  EXPECT_EQ(params[0].base, "1");
+  EXPECT_EQ(params[0].step, "2");
+  EXPECT_EQ(params[1].tensor_id, 11);
+  EXPECT_EQ(params[1].base, "7");
+  EXPECT_EQ(params[1].step, "4");
+  loop.Destruct();
+}
+
+TEST(VFLoopTest, MapsBoundaryOrdinalsToConnectedRootInputs) {
+  ge::SetupRuntimeStub();
+  af::AscGraph graph("vf_input_mapping");
+  af::AscGraph subgraph("vf_subgraph");
+  const auto axis = graph.CreateAxis("axis", af::Symbol(8));
+  af::ascir_op::Data root_data("root_data", graph);
+  root_data.ir_attr.SetIndex(0);
+  root_data.y.dtype = af::DT_FLOAT;
+  af::ascir_op::VectorFunc vf("vf");
+  vf.InstanceOutputy(1);
+  // 与 VfCall_TwoDimLoad 相同的隐式入图模式: vf 由输入连接隐式创建并绑定 operator,
+  // 显式 AddNode 会使 operator 与节点绑定分裂(inputs 为空)。
+  vf.x = {root_data.y};
+  auto root = graph.FindNode("vf");
+  ASSERT_NE(root, nullptr);
+
+  af::ascir_op::Data data("data", subgraph);
+  data.ir_attr.SetIndex(1);
+  data.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load load("load");
+  load.x = data.y;
+  load.attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  load.attr.sched.axis = {axis.id};
+  load.y.dtype = af::DT_FLOAT;
+  *load.y.axis = {axis.id};
+  *load.y.repeats = {af::Symbol(8)};
+  *load.y.strides = {One};
+  *load.y.vectorized_axis = {axis.id};
+  *load.y.vectorized_strides = {One};
+  af::ascir_op::Output output("output");
+  subgraph.AddNode(output);
+  output.ir_attr.SetIndex(0);
+  output.x = load.y;
+  ASSERT_NE(subgraph.FindNode("data"), nullptr);
+  ASSERT_NE(subgraph.FindNode("load"), nullptr);
+  ASSERT_NE(subgraph.FindNode("output"), nullptr);
+  ASSERT_TRUE(af::AttrUtils::SetInt(subgraph.FindNode("data")->GetOpDesc(), "vf_root_input_index", 0));
+  root->outputs[0].attr.mem.tensor_id = 10;
+
+  VFLoop loop(af::kIdNone);
+  loop.SetMaxDtypeSize("float");
+  const VFInputMapping mapping = {{1, 0}};
+  EXPECT_EQ(loop.ConstructFromNodes(subgraph.GetAllNodes(), root, mapping), af::SUCCESS);
+  loop.Destruct();
+}
 
 TEST(CodegenKernel, VfCall_TwoDimLoad) {
   ge::SetupRuntimeStub();
@@ -303,12 +938,14 @@ TEST(CodegenKernel, VfCall_TwoDimLoad) {
 
   Data sub_x_op("sub_x", vf_sub_graph);
   sub_x_op.ir_attr.SetIndex(0);
+  sub_x_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Load sub_load_op("sub_load");
   Abs abs_op("abs");
   Store sub_store_op("sub_store");
   Output sub_output_op("sub_output");
   sub_output_op.ir_attr.SetIndex(0);
+  sub_output_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Store store_op("store");
   graph.AddNode(load_op);
@@ -421,8 +1058,9 @@ TEST(CodegenKernel, VfCall_TwoDimLoad) {
 
   codegen::Tiler tiler;
   codegen::TPipe tpipe("tpipe", tiler);
-  tpipe.AddTensor(load->outputs[0]);
-  tpipe.AddTensor(vf->outputs[0]);
+  ASSERT_EQ(tpipe.CollectQues(graph), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(load->outputs[0]), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(vf->outputs[0]), af::SUCCESS);
 
   tiler.AddAxis(z0);
   tiler.AddAxis(z1);
@@ -534,12 +1172,14 @@ TEST(CodegenKernel, VfCall_TwoDimLoad_VFLoop) {
 
   Data sub_x_op("sub_x", vf_sub_graph);
   sub_x_op.ir_attr.SetIndex(0);
+  sub_x_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Load sub_load_op("sub_load");
   Abs abs_op("abs");
   Store sub_store_op("sub_store");
   Output sub_output_op("sub_output");
   sub_output_op.ir_attr.SetIndex(0);
+  sub_output_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Store store_op("store");
   graph.AddNode(load_op);
@@ -647,8 +1287,9 @@ TEST(CodegenKernel, VfCall_TwoDimLoad_VFLoop) {
 
   codegen::Tiler tiler;
   codegen::TPipe tpipe("tpipe", tiler);
-  tpipe.AddTensor(load->outputs[0]);
-  tpipe.AddTensor(vf->outputs[0]);
+  ASSERT_EQ(tpipe.CollectQues(graph), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(load->outputs[0]), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(vf->outputs[0]), af::SUCCESS);
 
   tiler.AddAxis(z0);
   tiler.AddAxis(z1);
@@ -698,12 +1339,14 @@ TEST(CodegenKernel, VfCall_TwoDim_Scalar) {
   Scalar sub_x_op("sub_x", vf_sub_graph);
   sub_x_op.ir_attr.SetValue("2.0");
   sub_x_op.ir_attr.SetIndex(0);
+  sub_x_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Broadcast sub_brc_op("sub_brc");
   Abs abs_op("abs");
   Store sub_store_op("sub_store");
   Output sub_output_op("sub_output");
   sub_output_op.ir_attr.SetIndex(0);
+  sub_output_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Store store_op("store");
   graph.AddNode(x_op);
@@ -804,8 +1447,9 @@ TEST(CodegenKernel, VfCall_TwoDim_Scalar) {
 
   codegen::Tiler tiler;
   codegen::TPipe tpipe("tpipe", tiler);
-  tpipe.AddTensor("2.0", x->outputs[0], "scalar_x");
-  tpipe.AddTensor(vf->outputs[0]);
+  ASSERT_EQ(tpipe.CollectQues(graph), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor("2.0", x->outputs[0], "scalar_x"), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(vf->outputs[0]), af::SUCCESS);
 
   tiler.AddAxis(z0);
   tiler.AddAxis(z1);
@@ -904,12 +1548,14 @@ TEST(CodegenKernel, VfCall_ThreeDimLoad) {
 
   Data sub_x_op("sub_x", vf_sub_graph);
   sub_x_op.ir_attr.SetIndex(0);
+  sub_x_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Load sub_load_op("sub_load");
   Abs abs_op("abs");
   Store sub_store_op("sub_store");
   Output sub_output_op("sub_output");
   sub_output_op.ir_attr.SetIndex(0);
+  sub_output_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Store store_op("store");
   graph.AddNode(load_op);
@@ -1019,8 +1665,9 @@ TEST(CodegenKernel, VfCall_ThreeDimLoad) {
 
   codegen::Tiler tiler;
   codegen::TPipe tpipe("tpipe", tiler);
-  tpipe.AddTensor(load->outputs[0]);
-  tpipe.AddTensor(vf->outputs[0]);
+  ASSERT_EQ(tpipe.CollectQues(graph), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(load->outputs[0]), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(vf->outputs[0]), af::SUCCESS);
 
   tiler.AddAxis(z0);
   tiler.AddAxis(z1);
@@ -1086,12 +1733,14 @@ TEST(CodegenKernel, VfCall_FiveDimLoad) {
 
   Data sub_x_op("sub_x", vf_sub_graph);
   sub_x_op.ir_attr.SetIndex(0);
+  sub_x_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Load sub_load_op("sub_load");
   Abs abs_op("abs");
   Store sub_store_op("sub_store");
   Output sub_output_op("sub_output");
   sub_output_op.ir_attr.SetIndex(0);
+  sub_output_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Store store_op("store");
   graph.AddNode(load_op);
@@ -1196,8 +1845,9 @@ TEST(CodegenKernel, VfCall_FiveDimLoad) {
 
   codegen::Tiler tiler;
   codegen::TPipe tpipe("tpipe", tiler);
-  tpipe.AddTensor(load->outputs[0]);
-  tpipe.AddTensor(vf->outputs[0]);
+  ASSERT_EQ(tpipe.CollectQues(graph), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(load->outputs[0]), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(vf->outputs[0]), af::SUCCESS);
 
   tiler.AddAxis(z0);
   tiler.AddAxis(z1);
@@ -1313,12 +1963,14 @@ TEST(CodegenKernel, VfCall_OneDim_NoOptimization) {
 
   Data sub_x_op("sub_x", vf_sub_graph);
   sub_x_op.ir_attr.SetIndex(0);
+  sub_x_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Load sub_load_op("sub_load");
   Abs abs_op("abs");
   Store sub_store_op("sub_store");
   Output sub_output_op("sub_output");
   sub_output_op.ir_attr.SetIndex(0);
+  sub_output_op.attr.api.unit = af::ComputeUnit::kUnitNone;
 
   Store store_op("store");
   graph.AddNode(load_op);
@@ -1429,8 +2081,9 @@ TEST(CodegenKernel, VfCall_OneDim_NoOptimization) {
 
   codegen::Tiler tiler;
   codegen::TPipe tpipe("tpipe", tiler);
-  tpipe.AddTensor(load->outputs[0]);
-  tpipe.AddTensor(vf->outputs[0]);
+  ASSERT_EQ(tpipe.CollectQues(graph), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(load->outputs[0]), af::SUCCESS);
+  ASSERT_EQ(tpipe.AddTensor(vf->outputs[0]), af::SUCCESS);
 
   tiler.AddAxis(z0);
   tiler.AddSizeVar(af::SizeVar(s0));

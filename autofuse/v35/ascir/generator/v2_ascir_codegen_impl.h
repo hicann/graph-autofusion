@@ -206,6 +206,60 @@ class IndexExprAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 };
 
+class ArangeAscIrCodegenImplV2 : public AscIrCodegenV2 {
+ public:
+  [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
+    auto &mutable_node = const_cast<AscNode &>(node);
+    if (mutable_node.outputs().size() != 1UL) {
+      return false;
+    }
+    const auto &output = mutable_node.outputs[0].attr;
+    if (output.dtype != DT_INT32 && output.dtype != DT_INT64) {
+      return false;
+    }
+    if (output.vectorized_axis.empty() || output.vectorized_axis.size() != output.vectorized_strides.size()) {
+      return false;
+    }
+    for (auto iter = output.vectorized_strides.rbegin(); iter != output.vectorized_strides.rend(); ++iter) {
+      const auto stride = iter->Simplify();
+      if (af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
+        continue;
+      }
+      return af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolOne) == af::TriBool::kTrue;
+    }
+    for (size_t i = 0UL; i < output.vectorized_axis.size(); ++i) {
+      const auto axis_iter = std::find(output.axis.begin(), output.axis.end(), output.vectorized_axis[i]);
+      if (axis_iter == output.axis.end()) {
+        return false;
+      }
+      const auto axis_index = static_cast<size_t>(std::distance(output.axis.begin(), axis_iter));
+      if (axis_index >= output.repeats.size() ||
+          af::SymbolicUtils::StaticCheckEq(output.repeats[axis_index].Simplify(), af::sym::kSymbolOne) !=
+              af::TriBool::kTrue) {
+        return false;
+      }
+    }
+    return true;
+  }
+  [[nodiscard]] std::string GetApiCallName() const override {
+    return "";
+  }
+  [[nodiscard]] std::string GetApiName() const override {
+    return "Arange";
+  }
+  [[nodiscard]] std::string GetMicroApiCallName() const override {
+    return "MicroArangeApiCall";
+  }
+  [[nodiscard]] std::string GetMicroApiName() const override {
+    return "Arange";
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
+};
+
 class OutputAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
   [[nodiscard]] std::string GetApiCallName() const override {
@@ -2645,7 +2699,8 @@ class CompareAscIrCodegenImplV2 : public AscIrCodegenV2 {
     if (!IsAllVecAxisContinuous(node)) {
       return false;
     }
-    if (node.GetInDataNodes().at(0)->GetType() == "Scalar") {
+    const auto first_input_type = node.GetInDataNodes().at(0)->GetType();
+    if (first_input_type == "Scalar" || first_input_type == "IndexExpr") {
       return false;
     }
     return true;
