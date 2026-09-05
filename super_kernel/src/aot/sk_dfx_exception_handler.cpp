@@ -212,7 +212,7 @@ bool SuperKernelExceptionHandler::ValidateSkHeaderOffsets() {
       SK_LOGE("aicQueOffset(%u) >= totalSize(%lu), invalid offset", skHeaderInfoHost->aicQueOffset, totalSize);
       return false;
     }
-    uint64_t aicEnd = static_cast<uint64_t>(skHeaderInfoHost->aicQueOffset) + skHeaderInfoHost->aicQueSize;
+    const uint64_t aicEnd = static_cast<uint64_t>(skHeaderInfoHost->aicQueOffset) + skHeaderInfoHost->aicQueSize;
     if (aicEnd > totalSize) {
       SK_LOGE("aicQueOffset(%u) + aicQueSize(%u) exceeds totalSize(%lu), invalid offset",
               skHeaderInfoHost->aicQueOffset, skHeaderInfoHost->aicQueSize, totalSize);
@@ -226,7 +226,7 @@ bool SuperKernelExceptionHandler::ValidateSkHeaderOffsets() {
       SK_LOGE("aivQueOffset(%u) >= totalSize(%lu), invalid offset", skHeaderInfoHost->aivQueOffset, totalSize);
       return false;
     }
-    uint64_t aivEnd = static_cast<uint64_t>(skHeaderInfoHost->aivQueOffset) + skHeaderInfoHost->aivQueSize;
+    const uint64_t aivEnd = static_cast<uint64_t>(skHeaderInfoHost->aivQueOffset) + skHeaderInfoHost->aivQueSize;
     if (aivEnd > totalSize) {
       SK_LOGE("aivQueOffset(%u) + aivQueSize(%u) exceeds totalSize(%lu), invalid offset",
               skHeaderInfoHost->aivQueOffset, skHeaderInfoHost->aivQueSize, totalSize);
@@ -845,8 +845,8 @@ bool SuperKernelExceptionHandler::StartsWith(const char *source, const char *pre
     return false;
   }
 
-  size_t srcLen = strlen(source);
-  size_t prefixLen = strlen(prefix);
+  const size_t srcLen = strlen(source);
+  const size_t prefixLen = strlen(prefix);
   if (prefixLen > srcLen) {
     return false;
   }
@@ -951,7 +951,7 @@ aclError SuperKernelExceptionHandler::PopulateSkEntryFields(Adx::ExceptionDumpIn
   uint16_t modelIdIdx = static_cast<uint16_t>((skHeaderInfoHost->modelIdIndexAndSkScopeId >> 32) & 0xFFFF);
   uint16_t skScopeId = static_cast<uint16_t>((skHeaderInfoHost->modelIdIndexAndSkScopeId >> 16) & 0xFFFF);
   std::string modelId = SkEventRecorder::Instance().GetModelIdByIndex(modelIdIdx);
-  std::string skNameFromRecorder = SkEventRecorder::Instance().GetSkName(modelId, skScopeId);
+  const std::string skNameFromRecorder = SkEventRecorder::Instance().GetSkName(modelId, skScopeId);
   if (!skNameFromRecorder.empty()) {
     snprintf_s(dumpInfo.kernelDisplayName, Adx::MAX_KERNELNAME_LEN, Adx::MAX_KERNELNAME_LEN - 1, "%s",
                skNameFromRecorder.c_str());

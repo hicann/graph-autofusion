@@ -138,7 +138,7 @@ class LockDetector {
 
   std::pair<uint64_t, uint64_t> GetAvailableCores(bool isSuperKernel) const;
 
-  bool IsInSKStream(const SuperKernelBaseNode &node);
+  bool IsInSKStream(const SuperKernelBaseNode &node) const;
 
   void UpdateNodeInfo(const SuperKernelBaseNode &node);
 

@@ -1133,7 +1133,7 @@ bool SuperKernelGraph::ProcessAllStreamsAndTasks(const std::vector<uint32_t> &st
     return true;
   }
 
-  uint32_t streamNum = static_cast<uint32_t>(streams.size());
+  const uint32_t streamNum = static_cast<uint32_t>(streams.size());
   uint32_t maxTaskNum = *std::max_element(streamTaskNums.begin(), streamTaskNums.end());
   auto tasks = std::make_unique<aclmdlRITask[]>(maxTaskNum);
 
@@ -1302,7 +1302,7 @@ SuperKernelGraph::FusionFailStats SuperKernelGraph::CollectFusionFailStats() {
     }
 
     std::string reasonForLog = reasonKey;
-    std::string reasonDetail = FusionFailReasonDetailToStr(reasonInfo);
+    const std::string reasonDetail = FusionFailReasonDetailToStr(reasonInfo);
     if (!reasonDetail.empty()) {
       reasonForLog += ", reasonDetail: " + reasonDetail;
     }
