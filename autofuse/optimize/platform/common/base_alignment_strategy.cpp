@@ -303,14 +303,102 @@ af::Status BaseAlignmentStrategy::AddRemovePadForOneNode(ascir::ImplGraph &impl_
   return af::SUCCESS;
 }
 
+bool BaseAlignmentStrategy::FindCompactReduceInput(const af::AscNodePtr &node, af::InDataAnchorPtr &reduce_input,
+                                                   af::OutDataAnchorPtr &reduce_output) const {
+  if (node->attr.api.compute_type != af::ComputeType::kComputeElewise) {
+    return false;
+  }
+
+  bool has_aligned_broadcast = false;
+  size_t linked_input_count = 0UL;
+  for (const auto &in_anchor : node->GetAllInDataAnchorsPtr()) {
+    const auto peer_out = in_anchor->GetPeerOutAnchor();
+    if (peer_out == nullptr) {
+      continue;
+    }
+    ++linked_input_count;
+    const auto producer = std::dynamic_pointer_cast<af::AscNode>(peer_out->GetOwnerNode());
+    if (producer == nullptr) {
+      continue;
+    }
+    const auto state_iter = tensor_to_align_type_.find(&af::AscTensorAttr::GetTensorAttr(*peer_out));
+    if (state_iter == tensor_to_align_type_.end()) {
+      continue;
+    }
+    if (af::ops::IsOps<af::ascir_op::Broadcast>(producer) && state_iter->second.align_type == AlignmentType::kAligned) {
+      has_aligned_broadcast = true;
+    } else if (af::ops::IsOps<af::ascir_op::Sum>(producer)) {
+      const auto &reduce_attr = af::AscTensorAttr::GetTensorAttr(*peer_out);
+      if (!reduce_attr.vectorized_axis.empty()) {
+        const auto axis = reduce_attr.vectorized_axis.back();
+        const auto axis_iter = std::find(reduce_attr.axis.begin(), reduce_attr.axis.end(), axis);
+        const auto axis_index = static_cast<size_t>(std::distance(reduce_attr.axis.begin(), axis_iter));
+        const bool compact_output = axis_iter != reduce_attr.axis.end() && axis_index < reduce_attr.strides.size() &&
+                                    af::SymbolicUtils::StaticCheckEq(reduce_attr.strides[axis_index],
+                                                                     af::sym::kSymbolZero) == af::TriBool::kTrue;
+        // Compact Reduce 的尾轴 stride 为零，即使反向传播已把状态改成 kAligned，物理布局仍是 not-aligned。
+        if (compact_output) {
+          reduce_input = node->GetInDataAnchor(in_anchor->GetIdx());
+          reduce_output = peer_out;
+        }
+      }
+    }
+  }
+  return linked_input_count == 2UL && has_aligned_broadcast && reduce_input != nullptr && reduce_output != nullptr;
+}
+
+af::Status BaseAlignmentStrategy::InsertPadForCompactReduce(ascir::ImplGraph &impl_graph,
+                                                            const af::InDataAnchorPtr &reduce_input,
+                                                            const af::OutDataAnchorPtr &reduce_output, bool &inserted) {
+  const auto reduce_node = std::dynamic_pointer_cast<af::AscNode>(reduce_output->GetOwnerNode());
+  GE_ASSERT_NOTNULL(reduce_node);
+  const auto output_index = reduce_output->GetIdx();
+  auto &reduce_attr = reduce_node->outputs[output_index].attr;
+  bool is_no_need_pad = false;
+  GE_ASSERT_SUCCESS(CheckIsNoNeedPad(reduce_node, reduce_attr, is_no_need_pad));
+  if (is_no_need_pad) {
+    return af::SUCCESS;
+  }
+  std::vector<af::DataType> exp_dtypes{reduce_attr.dtype};
+  if (ScheduleUtils::CallAscirInferDataType<af::ascir_op::Pad>({reduce_attr.dtype}, exp_dtypes) != af::SUCCESS) {
+    GELOGW("Pad is unsupported for compact Reduce output in graph [%s].", impl_graph.GetName().c_str());
+    return af::UNSUPPORTED;
+  }
+
+  const std::string node_name = reduce_node->GetName() + "_" + std::to_string(output_index) + "_pad";
+  af::ascir_op::Pad pad_op(node_name.c_str());
+  const auto pad_node = impl_graph.AddNode(pad_op);
+  GE_ASSERT_NOTNULL(pad_node);
+  pad_node->attr = reduce_node->attr;
+  pad_node->outputs[0].attr = reduce_attr;
+  pad_node->attr.api.compute_type = af::ComputeType::kComputeElewise;
+  pad_node->attr.api.type = af::ApiType::kAPITypeCompute;
+  pad_node->attr.api.unit = af::ComputeUnit::kUnitVector;
+  tensor_to_align_type_[&pad_node->outputs[0].attr].align_type = AlignmentType::kAligned;
+  GE_ASSERT_SUCCESS(af::AscGraphUtils::InsertNodeAfter(reduce_output, {reduce_input}, pad_node));
+  inserted = true;
+  return af::SUCCESS;
+}
+
+af::Status BaseAlignmentStrategy::AddPadForCompactReduce(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node,
+                                                         bool &inserted) {
+  af::InDataAnchorPtr reduce_input;
+  af::OutDataAnchorPtr reduce_output;
+  if (!FindCompactReduceInput(node, reduce_input, reduce_output)) {
+    return af::SUCCESS;
+  }
+  return InsertPadForCompactReduce(impl_graph, reduce_input, reduce_output, inserted);
+}
+
 af::Status BaseAlignmentStrategy::CheckIsNoNeedPad(const af::AscNodePtr &node, af::AscTensorAttr &out_attr,
                                                    bool &is_no_need_pad) const {
-  size_t valid_axis_num = 0UL;
+  bool has_valid_outer_axis = false;
   bool tail_axis_aligned = false;
   for (auto axis_it = out_attr.vectorized_axis.rbegin(); axis_it != out_attr.vectorized_axis.rend(); ++axis_it) {
     auto it = std::find(out_attr.axis.begin(), out_attr.axis.end(), *axis_it);
     GE_ASSERT_TRUE(it != out_attr.axis.end());
     const size_t distance = std::distance(out_attr.axis.begin(), it);
+    GE_ASSERT_TRUE(distance < out_attr.repeats.size() && distance < out_attr.strides.size());
     if (axis_it == out_attr.vectorized_axis.rbegin()) {
       const auto dtype_size = af::GetSizeByDataType(out_attr.dtype);
       GE_ASSERT_TRUE(dtype_size > 0, "Node [%s]'s data type size:[%d] is invalid.", node->GetNamePtr(), dtype_size);
@@ -322,12 +410,17 @@ af::Status BaseAlignmentStrategy::CheckIsNoNeedPad(const af::AscNodePtr &node, a
                af::SymbolicUtils::ToString(repeat).c_str(), node->GetNamePtr());
         break;
       }
-    } else if (af::SymbolicUtils::StaticCheckNe(out_attr.strides[distance], af::sym::kSymbolZero) ==
-               af::TriBool::kTrue) {
-      valid_axis_num++;
+      continue;
+    }
+    const bool is_inactive_axis =
+        af::SymbolicUtils::StaticCheckEq(out_attr.strides[distance], af::sym::kSymbolZero) == af::TriBool::kTrue ||
+        af::SymbolicUtils::StaticCheckEq(out_attr.repeats[distance], af::sym::kSymbolOne) == af::TriBool::kTrue;
+    if (!is_inactive_axis) {
+      has_valid_outer_axis = true;
+      break;
     }
   }
-  is_no_need_pad = tail_axis_aligned || valid_axis_num == 0UL;
+  is_no_need_pad = tail_axis_aligned || !has_valid_outer_axis;
   return af::SUCCESS;
 }
 
@@ -385,6 +478,9 @@ af::Status BaseAlignmentStrategy::AlignVectorizedStrides(ascir::ImplGraph &impl_
   }
   GE_CHK_STATUS_RET_NOLOG(ForEachNode(impl_graph, &BaseAlignmentStrategy::AddRemovePadForOneNode));
   GE_CHK_STATUS_RET_NOLOG(ForEachNode(impl_graph, &BaseAlignmentStrategy::InferAlignmentForOneNode));
+  // Compact Reduce 依赖已推导的对齐状态，必须在对齐推导之后、通用冲突补 Pad 与向量化 stride 生成之前执行，
+  // 确保只改写原始 Reduce 边一次，并让新插入的 Pad 参与最终 stride 生成。
+  GE_CHK_STATUS_RET_NOLOG(ForEachNode(impl_graph, &BaseAlignmentStrategy::AddPadForCompactReduce));
   GE_CHK_STATUS_RET_NOLOG(ForEachNode(impl_graph, &BaseAlignmentStrategy::AddPadForAlignmentConflictOneNode));
   GE_CHK_STATUS_RET_NOLOG(ForEachNode(impl_graph, &BaseAlignmentStrategy::SetVectorizedStridesForOneNode));
   return af::SUCCESS;
@@ -428,9 +524,7 @@ void BaseAlignmentStrategy::SetAlignInfoForNodeInputs(AlignmentType aligned_type
       continue;
     }
 
-    const bool is_compact_reduce =
-        ScheduleUtils::IsReduce(asc_node) && align_info.align_type == AlignmentType::kNotAligned;
-    if (align_info.align_type == AlignmentType::kFixedNotAligned || is_compact_reduce) {
+    if (align_info.align_type == AlignmentType::kFixedNotAligned) {
       align_info.conflict_with_output = true;
       GELOGD("SetAlignInfoForNodeInputs: input[%s] is FixedNotAligned, set conflict_with_output=true.",
              asc_node->GetNamePtr());

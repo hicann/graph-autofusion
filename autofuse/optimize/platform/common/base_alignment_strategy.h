@@ -88,6 +88,11 @@ class BaseAlignmentStrategy {
                                   std::queue<af::Node *> &node_queue);
 
   af::Status AddRemovePadForOneNode(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node, bool &inserted);
+  af::Status AddPadForCompactReduce(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node, bool &inserted);
+  bool FindCompactReduceInput(const af::AscNodePtr &node, af::InDataAnchorPtr &reduce_input,
+                              af::OutDataAnchorPtr &reduce_output) const;
+  af::Status InsertPadForCompactReduce(ascir::ImplGraph &impl_graph, const af::InDataAnchorPtr &reduce_input,
+                                       const af::OutDataAnchorPtr &reduce_output, bool &inserted);
   af::Status CheckIsNoNeedPad(const af::AscNodePtr &node, af::AscTensorAttr &out_attr, bool &is_no_need_pad) const;
   af::Status AddPadForAlignmentConflictOneNode(ascir::ImplGraph &impl_graph, const af::AscNodePtr &node,
                                                bool &inserted);

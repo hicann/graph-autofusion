@@ -44,6 +44,28 @@ void SetTwoDimNodeAttr(Op &op, Dtype dtype, af::ComputeType compute_type, const 
   *op.y.vectorized_axis = axes;
 }
 
+void BuildCompactReduceAddGraph(af::AscGraph &graph, const af::Expression &reduce_tail_stride) {
+  auto rows = af::Symbol(8);
+  auto cols = af::Symbol(11);
+  auto row_axis = graph.CreateAxis("row", rows);
+  auto col_axis = graph.CreateAxis("col", cols);
+  std::vector<af::AxisId> axes = {row_axis.id, col_axis.id};
+
+  af::ascir_op::Data data("data", graph);
+  data.y.dtype = ge::DT_FLOAT;
+  data.attr.api.type = af::ApiType::kAPITypeBuffer;
+  af::ascir_op::Sum sum("sum");
+  sum.x = data.y;
+  SetTwoDimNodeAttr(sum, ge::DT_FLOAT, af::ComputeType::kComputeReduce, axes, {rows, One}, {One, reduce_tail_stride});
+  af::ascir_op::Broadcast broadcast("broadcast");
+  broadcast.x = data.y;
+  SetTwoDimNodeAttr(broadcast, ge::DT_FLOAT, af::ComputeType::kComputeBroadcast, axes, {rows, cols}, {cols, One});
+  af::ascir_op::Add add("add");
+  add.x1 = sum.y;
+  add.x2 = broadcast.y;
+  SetTwoDimNodeAttr(add, ge::DT_FLOAT, af::ComputeType::kComputeElewise, axes, {rows, cols}, {cols, One});
+}
+
 void ExpectCompactReduceBranch(const af::AscGraph &graph, const char *aligned_input) {
   std::vector<af::Expression> aligned_input_strides = {af::Symbol(24), One};
   std::vector<af::Expression> compact_output_strides = {One, Zero};
@@ -76,6 +98,13 @@ class VectorizedAlignmentUT : public testing::Test {
     }
     af::Status AccessInferAlignment(ImplGraph &impl_graph) {
       return ForEachNode(impl_graph, &AlignmentStrategyShadow::InferAlignmentForOneNode);
+    }
+    bool AccessFindCompactReduceInput(const af::AscNodePtr &node, af::InDataAnchorPtr &reduce_input,
+                                      af::OutDataAnchorPtr &reduce_output) const {
+      return FindCompactReduceInput(node, reduce_input, reduce_output);
+    }
+    void SetAlignmentType(const af::AscNodePtr &node, AlignmentType align_type) {
+      tensor_to_align_type_[&node->outputs[0].attr].align_type = align_type;
     }
     // 当前tensor的对齐行为只会出现在尾轴,如果没有新的对齐行为或者类型,该函数不应该修改
     af::Status AccessSetVectorizedStrides(ImplGraph &impl_graph) {
@@ -868,6 +897,106 @@ TEST_F(VectorizedAlignmentUT, sibling_reduce_keeps_compact_output_alignment) {
 
   ASSERT_EQ(AlignmentHandler::AlignVectorizedStrides(graph), af::SUCCESS);
   ExpectCompactReduceBranch(graph, "relu");
+}
+
+TEST_F(VectorizedAlignmentUT, compact_reduce_pad_for_aligned_broadcast_add) {
+  af::AscGraph graph("compact_reduce_pad_for_aligned_broadcast_add");
+  auto rows = af::Symbol(8);
+  auto cols = af::Symbol(11);
+  auto row_axis = graph.CreateAxis("row", rows);
+  auto col_axis = graph.CreateAxis("col", cols);
+  std::vector<af::AxisId> axes = {row_axis.id, col_axis.id};
+
+  af::ascir_op::Data data("data", graph);
+  data.y.dtype = ge::DT_FLOAT;
+  data.attr.api.type = af::ApiType::kAPITypeBuffer;
+  af::ascir_op::Load reduce_load("reduce_load");
+  reduce_load.x = data.y;
+  SetTwoDimNodeAttr(reduce_load, ge::DT_FLOAT, af::ComputeType::kComputeLoad, axes, {rows, cols}, {cols, One});
+  af::ascir_op::Sum reduce_sum("reduce_sum");
+  reduce_sum.x = reduce_load.y;
+  SetTwoDimNodeAttr(reduce_sum, ge::DT_FLOAT, af::ComputeType::kComputeReduce, axes, {rows, One}, {One, Zero});
+  af::ascir_op::Load aligned_load("aligned_load");
+  aligned_load.x = data.y;
+  SetTwoDimNodeAttr(aligned_load, ge::DT_FLOAT, af::ComputeType::kComputeLoad, axes, {rows, cols},
+                    {cols * af::Symbol(2), One});
+  af::ascir_op::Broadcast broadcast("broadcast");
+  broadcast.x = aligned_load.y;
+  SetTwoDimNodeAttr(broadcast, ge::DT_FLOAT, af::ComputeType::kComputeBroadcast, axes, {rows, cols},
+                    {cols * af::Symbol(2), One});
+  af::ascir_op::Add add("add");
+  add.x1 = reduce_sum.y;
+  add.x2 = broadcast.y;
+  SetTwoDimNodeAttr(add, ge::DT_FLOAT, af::ComputeType::kComputeElewise, axes, {rows, cols}, {cols, One});
+  af::ascir_op::Store store("store");
+  store.x = add.y;
+  SetTwoDimNodeAttr(store, ge::DT_FLOAT, af::ComputeType::kComputeStore, axes, {rows, cols}, {cols, One});
+
+  ASSERT_EQ(AlignmentHandler::AlignVectorizedStrides(graph), af::SUCCESS);
+  auto pad_node = graph.FindNode("reduce_sum_0_pad");
+  ASSERT_NE(pad_node, nullptr);
+  auto add_node = graph.FindNode("add");
+  ASSERT_NE(add_node, nullptr);
+  EXPECT_EQ(add_node->inputs[0].anchor.GetOwnerNodeBarePtr(), pad_node.get());
+}
+
+TEST_F(VectorizedAlignmentUT, scalar_reduce_skips_pad_for_aligned_broadcast_add) {
+  af::AscGraph graph("scalar_reduce_skips_pad_for_aligned_broadcast_add");
+  auto rows = af::Symbol(8);
+  auto cols = af::Symbol(11);
+  auto row_axis = graph.CreateAxis("row", rows);
+  auto col_axis = graph.CreateAxis("col", cols);
+  std::vector<af::AxisId> axes = {row_axis.id, col_axis.id};
+
+  af::ascir_op::Data data("data", graph);
+  data.y.dtype = ge::DT_FLOAT;
+  data.attr.api.type = af::ApiType::kAPITypeBuffer;
+  af::ascir_op::Load reduce_load("reduce_load");
+  reduce_load.x = data.y;
+  SetTwoDimNodeAttr(reduce_load, ge::DT_FLOAT, af::ComputeType::kComputeLoad, axes, {rows, cols}, {cols, One});
+  af::ascir_op::Sum reduce_sum("reduce_sum");
+  reduce_sum.x = reduce_load.y;
+  SetTwoDimNodeAttr(reduce_sum, ge::DT_FLOAT, af::ComputeType::kComputeReduce, axes, {One, One}, {One, Zero});
+  af::ascir_op::Load aligned_load("aligned_load");
+  aligned_load.x = data.y;
+  SetTwoDimNodeAttr(aligned_load, ge::DT_FLOAT, af::ComputeType::kComputeLoad, axes, {rows, cols},
+                    {cols * af::Symbol(2), One});
+  af::ascir_op::Broadcast broadcast("broadcast");
+  broadcast.x = aligned_load.y;
+  SetTwoDimNodeAttr(broadcast, ge::DT_FLOAT, af::ComputeType::kComputeBroadcast, axes, {rows, cols},
+                    {cols * af::Symbol(2), One});
+  af::ascir_op::Add add("add");
+  add.x1 = reduce_sum.y;
+  add.x2 = broadcast.y;
+  SetTwoDimNodeAttr(add, ge::DT_FLOAT, af::ComputeType::kComputeElewise, axes, {rows, cols}, {cols, One});
+
+  ASSERT_EQ(AlignmentHandler::AlignVectorizedStrides(graph), af::SUCCESS);
+  EXPECT_EQ(graph.FindNode("reduce_sum_0_pad"), nullptr);
+  auto add_node = graph.FindNode("add");
+  ASSERT_NE(add_node, nullptr);
+  EXPECT_EQ(add_node->inputs[0].anchor.GetOwnerNodeBarePtr(), graph.FindNode("reduce_sum").get());
+}
+
+TEST_F(VectorizedAlignmentUT, non_aligned_broadcast_skips_compact_reduce_pad) {
+  af::AscGraph graph("non_aligned_broadcast_skips_compact_reduce_pad");
+  BuildCompactReduceAddGraph(graph, Zero);
+  AlignmentStrategyShadow strategy;
+  strategy.SetAlignmentType(graph.FindNode("sum"), AlignmentType::kNotAligned);
+  strategy.SetAlignmentType(graph.FindNode("broadcast"), AlignmentType::kNotAligned);
+  af::InDataAnchorPtr reduce_input;
+  af::OutDataAnchorPtr reduce_output;
+  EXPECT_FALSE(strategy.AccessFindCompactReduceInput(graph.FindNode("add"), reduce_input, reduce_output));
+}
+
+TEST_F(VectorizedAlignmentUT, non_compact_sum_skips_compact_reduce_pad) {
+  af::AscGraph graph("non_compact_sum_skips_compact_reduce_pad");
+  BuildCompactReduceAddGraph(graph, One);
+  AlignmentStrategyShadow strategy;
+  strategy.SetAlignmentType(graph.FindNode("sum"), AlignmentType::kNotAligned);
+  strategy.SetAlignmentType(graph.FindNode("broadcast"), AlignmentType::kAligned);
+  af::InDataAnchorPtr reduce_input;
+  af::OutDataAnchorPtr reduce_output;
+  EXPECT_FALSE(strategy.AccessFindCompactReduceInput(graph.FindNode("add"), reduce_input, reduce_output));
 }
 
 }  // namespace optimize
