@@ -24,8 +24,7 @@ class ScopeSplitResultReporter {
   bool HasSameScopeStructure(const SuperKernelScopeInfo &sourceScope, const SuperKernelScopeInfo &targetScope) const;
 
   void ReportNewBreak(SuperKernelScopeInfo &scope, ScopeBreakInfo breakInfo) const;
-  void ReportInheritedBreak(SuperKernelScopeInfo &scope, const ScopeBreakInfo &sourceBreakInfo,
-                            uint16_t parentScopeId) const;
+  void ReportInheritedBreak(SuperKernelScopeInfo &scope, const ScopeBreakInfo &sourceBreakInfo) const;
 
   void CaptureResplitScopes(const std::vector<SuperKernelScopeInfo> &scopes);
   void RestoreResplitBreakInfos(std::vector<SuperKernelScopeInfo> &scopes) const;
@@ -37,7 +36,6 @@ class ScopeSplitResultReporter {
     std::vector<uint64_t> defaultNodeIds;
     std::bitset<MAX_SCOPE_NUM> scopeBitFlags;
     ScopeBreakInfo breakInfo;
-    uint16_t scopeId = INVALID_SCOPE_ID;
   };
 
   static std::vector<uint64_t> GetNodeIds(const SuperKernelScopeInfo &scope, SkNodeType nodeType, bool skipScopeNode);

@@ -4940,11 +4940,12 @@ TEST_F(SuperKernelScopeSplitterTest, ScopeSplitResultReporter_RestoreOnlyMatches
   SuperKernelScopeInfo originalScope;
   originalScope.SetNodes({kernel, defaultNode});
   originalScope.SetScopeBitFlags(scopeFlags);
-  originalScope.SetBreakInfo(ScopeBreakInfo()
-                                 .SetReason(ScopeBreakReason::UNFUSIBLE_NODE)
-                                 .SetTriggerNode(3, 0)
-                                 .SetDetail("unfused node causes scope break"));
-  const uint16_t originalScopeId = originalScope.GetScopeId();
+  ScopeBreakInfo originalBreakInfo;
+  originalBreakInfo.SetReason(ScopeBreakReason::UNFUSIBLE_NODE)
+      .SetTriggerNode(3, 0)
+      .SetDetail("unfused node causes scope break")
+      .SetParentScopeId(1);
+  originalScope.SetBreakInfo(originalBreakInfo);
 
   std::vector<SuperKernelScopeInfo> previousScopes;
   previousScopes.push_back(std::move(originalScope));
@@ -4969,7 +4970,28 @@ TEST_F(SuperKernelScopeSplitterTest, ScopeSplitResultReporter_RestoreOnlyMatches
   reporter.RestoreResplitBreakInfos(currentScopes);
 
   EXPECT_EQ(currentScopes[0].GetBreakInfo().GetReason(), ScopeBreakReason::UNFUSIBLE_NODE);
-  EXPECT_EQ(currentScopes[0].GetBreakInfo().GetParentScopeId(), originalScopeId);
+  EXPECT_EQ(currentScopes[0].GetBreakInfo().GetParentScopeId(), originalBreakInfo.GetParentScopeId());
   EXPECT_EQ(currentScopes[1].GetBreakInfo().GetReason(), ScopeBreakReason::NONE);
   EXPECT_EQ(currentScopes[2].GetBreakInfo().GetReason(), ScopeBreakReason::NONE);
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScopeSplitResultReporter_InheritedBreakPreservesCompleteBreakInfo) {
+  ScopeBreakInfo sourceBreakInfo;
+  sourceBreakInfo.SetReason(ScopeBreakReason::DEADLOCK_DETECTED)
+      .SetTriggerNode(3, 2)
+      .SetSyncAllNodeIds({1, 2, 3})
+      .SetDetail("deadlock causes scope break")
+      .SetParentScopeId(1);
+  SuperKernelScopeInfo inheritedScope;
+  ScopeSplitResultReporter reporter;
+
+  reporter.ReportInheritedBreak(inheritedScope, sourceBreakInfo);
+
+  const auto &inheritedBreakInfo = inheritedScope.GetBreakInfo();
+  EXPECT_EQ(inheritedBreakInfo.GetReason(), sourceBreakInfo.GetReason());
+  EXPECT_EQ(inheritedBreakInfo.GetTriggerNodeId(), sourceBreakInfo.GetTriggerNodeId());
+  EXPECT_EQ(inheritedBreakInfo.GetTriggerStreamIdx(), sourceBreakInfo.GetTriggerStreamIdx());
+  EXPECT_EQ(inheritedBreakInfo.GetSyncAllNodeIds(), sourceBreakInfo.GetSyncAllNodeIds());
+  EXPECT_EQ(inheritedBreakInfo.GetDetail(), sourceBreakInfo.GetDetail());
+  EXPECT_EQ(inheritedBreakInfo.GetParentScopeId(), sourceBreakInfo.GetParentScopeId());
 }

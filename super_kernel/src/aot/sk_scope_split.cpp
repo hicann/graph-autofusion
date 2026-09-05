@@ -1113,11 +1113,10 @@ void DeadlockRefinePass::SplitScopeAtWaitNode(const SuperKernelScopeInfo &scope,
  * @brief Setup break info for scopeAfter after deadlock split
  */
 static void SetupScopeBeforeBreakInfo(ScopeSplitResultReporter &reporter, SuperKernelScopeInfo &scopeBefore,
-                                      const ScopeBreakInfo &originalBreakInfo, uint16_t originalScopeId,
-                                      SuperKernelBaseNode *deadlockNode, SuperKernelBaseNode *deadlockWaitNode,
-                                      bool hasSameStructureAsOriginal) {
+                                      const ScopeBreakInfo &originalBreakInfo, SuperKernelBaseNode *deadlockNode,
+                                      SuperKernelBaseNode *deadlockWaitNode, bool hasSameStructureAsOriginal) {
   if (hasSameStructureAsOriginal) {
-    reporter.ReportInheritedBreak(scopeBefore, originalBreakInfo, originalScopeId);
+    reporter.ReportInheritedBreak(scopeBefore, originalBreakInfo);
     SK_LOGI("[DeadlockRefine] scopeBefore structure same as original, inherits break info");
   } else {
     ScopeBreakInfo breakInfo;
@@ -1133,15 +1132,9 @@ static void SetupScopeBeforeBreakInfo(ScopeSplitResultReporter &reporter, SuperK
 }
 
 static void SetupScopeAfterBreakInfo(ScopeSplitResultReporter &reporter, SuperKernelScopeInfo &scopeAfter,
-                                     const ScopeBreakInfo &originalBreakInfo, uint16_t originalScopeId,
-                                     bool hasSameStructureAsOriginal) {
-  if (hasSameStructureAsOriginal) {
-    reporter.ReportInheritedBreak(scopeAfter, originalBreakInfo, originalScopeId);
-    SK_LOGI("[DeadlockRefine] scopeAfter structure same as original, inherits break info");
-  } else {
-    reporter.ReportInheritedBreak(scopeAfter, originalBreakInfo, INVALID_SCOPE_ID);
-    SK_LOGI("[DeadlockRefine] scopeAfter structure different, keeps break info without parent link");
-  }
+                                     const ScopeBreakInfo &originalBreakInfo) {
+  reporter.ReportInheritedBreak(scopeAfter, originalBreakInfo);
+  SK_LOGI("[DeadlockRefine] scopeAfter inherits break info");
 
   SK_LOGI("[DeadlockRefine] scopeAfter break info: %s", scopeAfter.GetBreakInfo().Format().c_str());
 }
@@ -1163,7 +1156,6 @@ ScopeProcessResult DeadlockRefinePass::HandleDeadlockSplit(SuperKernelScopeInfo 
                                                            std::optional<SuperKernelScopeInfo> &pendingScope) {
   // Save original scope break information
   const ScopeBreakInfo &originalBreakInfo = workingScope.GetBreakInfo();
-  uint16_t originalScopeId = workingScope.GetScopeId();
 
   // Split the scope at the target wait node
   SuperKernelScopeInfo scopeBefore;
@@ -1178,11 +1170,10 @@ ScopeProcessResult DeadlockRefinePass::HandleDeadlockSplit(SuperKernelScopeInfo 
           workingScope.GetNodes().size(), scopeBefore.GetNodes().size(), scopeAfter.GetNodes().size());
 
   bool hasSameStructureAsOriginal = reporter_->HasSameScopeStructure(workingScope, scopeBefore);
-  SetupScopeBeforeBreakInfo(*reporter_, scopeBefore, originalBreakInfo, originalScopeId, deadlockNode, deadlockWaitNode,
+  SetupScopeBeforeBreakInfo(*reporter_, scopeBefore, originalBreakInfo, deadlockNode, deadlockWaitNode,
                             hasSameStructureAsOriginal);
 
-  hasSameStructureAsOriginal = reporter_->HasSameScopeStructure(workingScope, scopeAfter);
-  SetupScopeAfterBreakInfo(*reporter_, scopeAfter, originalBreakInfo, originalScopeId, hasSameStructureAsOriginal);
+  SetupScopeAfterBreakInfo(*reporter_, scopeAfter, originalBreakInfo);
   // Add valid scopeBefore to output
   if (!scopeBefore.GetNodes().empty()) {
     lockDetector_.SetNotifyNodesExpandNumForScope(scopeBefore, scopeBeforeCoreInfo);
@@ -1332,11 +1323,10 @@ void ScheModeKernelSplitPass::SplitScopeAtNode(const SuperKernelScopeInfo &scope
 }
 
 static void SetupScheModeScopeBeforeBreakInfo(ScopeSplitResultReporter &reporter, SuperKernelScopeInfo &scopeBefore,
-                                              const ScopeBreakInfo &originalBreakInfo, uint16_t originalScopeId,
-                                              SuperKernelBaseNode *splitNode, const std::string &coreMismatchDetail,
-                                              bool hasSameStructureAsOriginal) {
+                                              const ScopeBreakInfo &originalBreakInfo, SuperKernelBaseNode *splitNode,
+                                              const std::string &coreMismatchDetail, bool hasSameStructureAsOriginal) {
   if (hasSameStructureAsOriginal) {
-    reporter.ReportInheritedBreak(scopeBefore, originalBreakInfo, originalScopeId);
+    reporter.ReportInheritedBreak(scopeBefore, originalBreakInfo);
     SK_LOGI("[ScheModeSplit] scopeBefore structure same as original, inherits break info");
   } else {
     std::vector<uint64_t> syncAllNodeIds;
@@ -1427,8 +1417,6 @@ ScheModeScopeProcessResult ScheModeKernelSplitPass::ProcessSingleScope(
     if (!coreInfoCalculator.UpdateScopeCoreInfo(*node, candidateCoreInfo)) {
       // Save original scope's break info before split
       const ScopeBreakInfo &originalBreakInfo = workingScope.GetBreakInfo();
-      uint16_t originalScopeId = workingScope.GetScopeId();
-
       SuperKernelScopeInfo scopeBefore;
       SuperKernelScopeInfo scopeAfter;
       SplitScopeAtNode(workingScope, node, scopeBefore, scopeAfter);
@@ -1437,11 +1425,10 @@ ScheModeScopeProcessResult ScheModeKernelSplitPass::ProcessSingleScope(
       const std::string coreMismatchDetail =
           BuildScheModeCoreMismatchDetail(currentCoreInfo, candidateCoreInfo, scopeBefore, *node);
       bool hasSameStructureAsOriginal = reporter_->HasSameScopeStructure(workingScope, scopeBefore);
-      SetupScheModeScopeBeforeBreakInfo(*reporter_, scopeBefore, originalBreakInfo, originalScopeId, node,
-                                        coreMismatchDetail, hasSameStructureAsOriginal);
+      SetupScheModeScopeBeforeBreakInfo(*reporter_, scopeBefore, originalBreakInfo, node, coreMismatchDetail,
+                                        hasSameStructureAsOriginal);
 
-      hasSameStructureAsOriginal = reporter_->HasSameScopeStructure(workingScope, scopeAfter);
-      SetupScopeAfterBreakInfo(*reporter_, scopeAfter, originalBreakInfo, originalScopeId, hasSameStructureAsOriginal);
+      SetupScopeAfterBreakInfo(*reporter_, scopeAfter, originalBreakInfo);
 
       SK_LOGI("[ScheModeSplit] split before kernel %lu because no SK core candidate remains", node->GetNodeId());
 
