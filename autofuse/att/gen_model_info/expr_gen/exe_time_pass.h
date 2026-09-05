@@ -14,6 +14,7 @@
 #include <set>
 #include "util/ternary_op.h"
 #include "parser/tuning_space.h"
+#include "expr_gen/cache_guard_count.h"
 
 namespace att {
 class ExeTimePassManager {
@@ -39,6 +40,9 @@ class ExeTimePassManager {
   // 获取需要处理的节点
   TernaryOp UpdateNodeExeTime(const NodeInfo &node, const Expr &exe_time) const;
 
+  // 从 parser 已有的轴关系中重建 cache guard 元数据；无法唯一确定时返回 false。
+  bool TryBuildCacheGuardInfo(const NodeInfo &node, CacheGuardInfo &info) const;
+
  private:
   void CheckReduce(const NodeInfo &node);
   void CheckBroadcast(const NodeInfo &node);
@@ -47,6 +51,7 @@ class ExeTimePassManager {
   void UpdateBufNode(const std::vector<NodeInfo> &nodes);
   void GenLog(const std::string &type_name, const std::map<std::string, std::set<std::string>> &axis_list) const;
   bool GetRLoop(const NodeInfo &node, Expr &r_loop) const;
+  Expr GetBlockDimExpr() const;
   bool CheckAxisSplit(const NodeInfo &node, const SubAxis *axis, Expr *fused_axis) const;
   TernaryOp HandleBroadcastSplit(const NodeInfo &node, const Expr &exe_time, const Expr &fused_exe_time) const;
   TernaryOp HandleReduceOrNormalSplit(const NodeInfo &node, const Expr &exe_time, const SubAxis *axis, bool r_split,

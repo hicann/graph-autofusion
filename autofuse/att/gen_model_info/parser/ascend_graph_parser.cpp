@@ -40,6 +40,21 @@ bool HasComputeType(const ascir::ImplGraph &impl_graph, const af::ComputeType co
   return false;
 }
 
+bool ShouldPreserveCacheCondition(const af::AscNodePtr &node, const bool graph_has_reduce) {
+  if (!graph_has_reduce) {
+    return true;
+  }
+  if (node == nullptr) {
+    return false;
+  }
+  // Codegen evaluates cache eligibility per node in a Reduce graph.  Keep the
+  // condition for data movement/broadcast nodes so ATT models the same Nddma
+  // (Load converted to Nddma) execution count; reduction nodes retain the
+  // historical conservative behavior.
+  const auto &type = node->GetType();
+  return type == kLoad || type == "Nddma" || type == kBroadcast;
+}
+
 // 通过输出获取当前节点单次执行涉及到的轴的范围
 std::vector<int64_t> GetNodeVectorizedAxis(const af::AscNodePtr &ge_node, int64_t loop_axis_id) {
   std::vector<int64_t> total_vectorized_axis;
@@ -783,7 +798,9 @@ af::Status AscendGraphParser::ConvertNodeInfos(const af::AscNodePtr &ge_node, co
   NodeInfo node_info;
   node_info.name = ge_node->GetName();
   node_info.node_type = ge_node->GetType();
-  node_info.exec_condition = use_cache_flag ? attrs.exec_condition : af::ExecuteCondition::kNoCache;
+  const bool preserve_cache_condition =
+      use_cache_flag || ShouldPreserveCacheCondition(ge_node, /*graph_has_reduce=*/!use_cache_flag);
+  node_info.exec_condition = preserve_cache_condition ? attrs.exec_condition : af::ExecuteCondition::kNoCache;
   if (kUnitMap.find(ge_node->attr.api.unit) == kUnitMap.end()) {
     node_info.node_unit = "UnitInvalid";
   } else {

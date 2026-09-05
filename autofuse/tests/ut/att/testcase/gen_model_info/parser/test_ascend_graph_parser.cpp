@@ -267,17 +267,29 @@ TEST_F(TestAscendGraphParser, test_gather_graph_parse) {
 TEST_F(TestAscendGraphParser, test_reduce_graph_parse) {
   af::AscGraph graph1("reduce_graph");
   ASSERT_EQ(af::ascir::cg::BuildReduceAscendGraphND(graph1), af::SUCCESS);
+  auto load1_node = graph1.FindNode("load1");
+  ASSERT_NE(load1_node, nullptr);
+  load1_node->GetOpDesc()->SetType("Nddma");
+  load1_node->attr.type = "Nddma";
+  load1_node->attr.sched.exec_condition = af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis;
   att::TuningSpacePtr tuning_space = std::make_shared<att::TuningSpace>();
   EXPECT_NE(tuning_space, nullptr);
   att::AscendGraphParser ascend_graph_parser(tuning_space);
   EXPECT_EQ(ascend_graph_parser.GraphParser(graph1), af::SUCCESS);
   int32_t cache_count = 0;
+  int32_t load_cache_count = 0;
   for (const auto &node_info : ascend_graph_parser.tuning_space_->node_infos) {
     if (node_info.exec_condition == af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis) {
       cache_count++;
+      if (node_info.name == "load1") {
+        load_cache_count++;
+      }
     }
   }
-  EXPECT_EQ(cache_count, 0);
+  // Reduce nodes remain conservatively uncached, while codegen-compatible
+  // Load/Nddma/Broadcast nodes retain their explicit cache condition.
+  EXPECT_EQ(cache_count, 1);
+  EXPECT_EQ(load_cache_count, 1);
 }
 
 extern AxisPosition ConvertAxisType(const af::Axis::Type &type);

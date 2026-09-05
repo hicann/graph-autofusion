@@ -21,6 +21,7 @@
 #include "mmpa/mmpa_api.h"
 #include "base_types_printer.h"
 #include "base/att_const_values.h"
+#include "base/att_group_perf_config.h"
 #include "common_utils.h"
 #include "generator_utils/tilingdata_gen_utils.h"
 #include "tiling_data_gen/tiling_data_generator.h"
@@ -3597,12 +3598,102 @@ std::string TilingCodeGenImpl::GenPerfUpdateCode(const std::vector<std::string> 
   return update_code;
 }
 
+std::vector<std::pair<size_t, size_t>> TilingCodeGenImpl::GetSerializedGroupEdges(
+    const std::map<size_t, std::pair<std::string, std::string>> &graph_info,
+    const std::map<size_t, std::map<size_t, std::map<std::string, af::Expression>>> &var_relation,
+    const bool enable_group_parallel) const {
+  if (enable_group_parallel) {
+    return {};
+  }
+
+  std::set<std::pair<size_t, size_t>> edge_set;
+  for (const auto &dst_relation : var_relation) {
+    const size_t dst_id = dst_relation.first;
+    if (graph_info.find(dst_id) == graph_info.end()) {
+      continue;
+    }
+    for (const auto &src_relation : dst_relation.second) {
+      const size_t src_id = src_relation.first;
+      if (!src_relation.second.empty() && src_id != dst_id && graph_info.find(src_id) != graph_info.end()) {
+        edge_set.emplace(src_id, dst_id);
+      }
+    }
+  }
+  return {edge_set.begin(), edge_set.end()};
+}
+
+std::vector<std::pair<size_t, size_t>> TilingCodeGenImpl::GetWorkspaceSharedGroupEdges(
+    const size_t asc_graph_id, const size_t impl_graph_id,
+    const std::map<size_t, std::pair<std::string, std::string>> &graph_info) const {
+  std::map<size_t, std::set<int64_t>> group_workspace_ids;
+  for (const auto &model_info : tiling_model_info_) {
+    const auto &ident = model_info.schedule_group_ident;
+    if (ident.asc_graph_id != asc_graph_id || ident.impl_graph_id != impl_graph_id ||
+        graph_info.find(ident.group_id) == graph_info.end()) {
+      continue;
+    }
+    auto &tensor_ids = group_workspace_ids[ident.group_id];
+    for (const auto &workspace : model_info.workspace_size_map) {
+      tensor_ids.insert(workspace.first);
+    }
+  }
+  std::vector<std::pair<size_t, size_t>> edges;
+  for (auto lhs = group_workspace_ids.begin(); lhs != group_workspace_ids.end(); ++lhs) {
+    auto rhs = lhs;
+    for (++rhs; rhs != group_workspace_ids.end(); ++rhs) {
+      const auto &smaller = (lhs->second.size() <= rhs->second.size()) ? lhs->second : rhs->second;
+      const auto &larger = (lhs->second.size() <= rhs->second.size()) ? rhs->second : lhs->second;
+      const bool shared = std::any_of(smaller.cbegin(), smaller.cend(),
+                                      [&larger](const int64_t tensor_id) { return larger.count(tensor_id) != 0U; });
+      if (shared) {
+        edges.emplace_back(lhs->first, rhs->first);
+      }
+    }
+  }
+  return edges;
+}
+
+std::string TilingCodeGenImpl::GenSerializedEdgePenalty(const std::vector<std::string> &groups_perf,
+                                                        const std::vector<std::pair<size_t, size_t>> &serialized_edges,
+                                                        const std::string &indent) const {
+  std::vector<std::pair<size_t, size_t>> valid_edges;
+  valid_edges.reserve(serialized_edges.size());
+  for (const auto &edge : serialized_edges) {
+    if (edge.first >= groups_perf.size() || edge.second >= groups_perf.size()) {
+      return {};
+    }
+    valid_edges.emplace_back(edge);
+  }
+  if (valid_edges.empty()) {
+    return {};
+  }
+
+  const std::string ratio = std::to_string(SerializedEdgePenaltyConfig::kPenaltyRatio);
+  const std::string cap = std::to_string(SerializedEdgePenaltyConfig::kPenaltyCapCycles);
+  std::string code = indent + "double serialized_edge_base = 0.0;\n";
+  for (const auto &edge : valid_edges) {
+    code += indent + "serialized_edge_base += std::max(" + groups_perf[edge.first] + ", " + groups_perf[edge.second] +
+            ");\n";
+  }
+  code += indent + "double serialized_edge_penalty = std::min(" + cap + ", " + ratio + " * serialized_edge_base);\n";
+  code += indent + "cur_perf += serialized_edge_penalty;\n";
+  code += indent +
+          "OP_LOGD(OP_NAME, \"serialized_edge_model=" + std::string(SerializedEdgePenaltyConfig::kModelVersion) +
+          " serialized_edge_penalty=min(" + cap + ", " + ratio +
+          " * serialized_edge_base)=%lf (base=%lf)\", serialized_edge_penalty, serialized_edge_base);\n";
+  return code;
+}
+
 void TilingCodeGenImpl::GenBestPerfUpdateCode(const size_t asc_graph_id, const size_t impl_graph_id,
                                               const std::vector<std::string> &assign_max_block_num,
-                                              const std::string &indent) {
+                                              const std::string &indent, const std::string &objective_log) {
   std::string tiling_key_prefix = "graph" + std::to_string(asc_graph_id) + "_";
-  tiling_func_.AddLine(indent + "OP_LOGI(OP_NAME, \"The value of graph" + std::to_string(asc_graph_id) + "_result" +
-                       std::to_string(impl_graph_id) + " is %lf\", cur_perf);");
+  if (objective_log.empty()) {
+    tiling_func_.AddLine(indent + "OP_LOGI(OP_NAME, \"The value of graph" + std::to_string(asc_graph_id) + "_result" +
+                         std::to_string(impl_graph_id) + " is %lf\", cur_perf);");
+  } else {
+    tiling_func_.AddLine(objective_log);
+  }
   tiling_func_.AddLine(indent + "if (IsEqual(best_perf, -1) || cur_perf < best_perf) {");
   tiling_func_.AddLine(indent + "  best_perf = cur_perf;");
   for (const auto &code : assign_max_block_num) {
@@ -3623,14 +3714,58 @@ void TilingCodeGenImpl::GenBestPerfUpdateCode(const size_t asc_graph_id, const s
 
 af::Status TilingCodeGenImpl::GenUpdatePerf(const size_t asc_graph_id, const size_t impl_graph_id,
                                             const std::vector<std::string> &groups_perf,
+                                            const std::vector<std::pair<size_t, size_t>> &serialized_edges,
                                             const std::vector<std::string> &groups_block_num,
                                             const std::vector<std::string> &assign_max_block_num) {
+  std::string objective_log;
   if (!IsScheduleResultEnableParallel(asc_graph_id, impl_graph_id)) {
     tiling_func_.AddLine(GenSumAllGroupsPerf(groups_perf));
+    tiling_func_.AddLine("      double group_sum = cur_perf;");
+    bool edge_model_enabled = false;
+    if (!serialized_edges.empty()) {
+      const auto penalty_code = GenSerializedEdgePenalty(groups_perf, serialized_edges, "      ");
+      if (!penalty_code.empty()) {
+        edge_model_enabled = true;
+        tiling_func_.AddLine(penalty_code);
+        tiling_func_.AddLine(
+            "      OP_LOGD(OP_NAME, \"objective=group_sum(%lf)+edge_penalty(%lf)=%lf\", group_sum, "
+            "serialized_edge_penalty, cur_perf);");
+      }
+    }
+
+    std::string group_formula;
+    for (size_t i = 0U; i < groups_perf.size(); ++i) {
+      if (i != 0U) {
+        group_formula += " + ";
+      }
+      group_formula += "group" + std::to_string(i);
+    }
+    std::string edge_base_formula = "0";
+    if (edge_model_enabled) {
+      edge_base_formula.clear();
+      for (size_t i = 0U; i < serialized_edges.size(); ++i) {
+        if (i != 0U) {
+          edge_base_formula += " + ";
+        }
+        edge_base_formula += "max(group" + std::to_string(serialized_edges[i].first) + ", group" +
+                             std::to_string(serialized_edges[i].second) + ")";
+      }
+    }
+    objective_log = "    OP_LOGI(OP_NAME, \"The value of graph" + std::to_string(asc_graph_id) + "_result" +
+                    std::to_string(impl_graph_id) + " is %lf objective(group_sum(" + group_formula +
+                    ")=%lf + edge_model(" + std::string(SerializedEdgePenaltyConfig::kModelVersion) +
+                    ", base=" + edge_base_formula + "=%lf, penalty=min(" +
+                    std::to_string(SerializedEdgePenaltyConfig::kPenaltyCapCycles) + ", " +
+                    std::to_string(SerializedEdgePenaltyConfig::kPenaltyRatio) + "*base)=%lf)=%lf\", cur_perf, ";
+    if (edge_model_enabled) {
+      objective_log += "group_sum, serialized_edge_base, serialized_edge_penalty, cur_perf);";
+    } else {
+      objective_log += "group_sum, 0.0, 0.0, cur_perf);";
+    }
   } else {
     tiling_func_.AddLine(GenPerfUpdateCode(groups_perf, groups_block_num, "  "));
   }
-  GenBestPerfUpdateCode(asc_graph_id, impl_graph_id, assign_max_block_num, "    ");
+  GenBestPerfUpdateCode(asc_graph_id, impl_graph_id, assign_max_block_num, "    ", objective_log);
   tiling_func_.AddLine("  }");  // 闭合 GetScheduleResult 函数
   return af::SUCCESS;
 }
@@ -3817,11 +3952,12 @@ af::Status TilingCodeGenImpl::GenSingleGroupScheduleResult(
     const size_t asc_graph_id, const size_t impl_graph_id,
     const std::map<size_t, std::pair<std::string, std::string>> &graph_info,
     const std::map<std::string, std::set<std::string>> &hardware_map) {
-  const auto var_relation = var_relations_[asc_graph_id][impl_graph_id];
+  const auto &var_relation = var_relations_[asc_graph_id][impl_graph_id];
   std::string check_cond;
   std::vector<std::string> assign_max_block_num;
   std::vector<std::string> groups_perf;
   std::vector<std::string> groups_block_num;
+  std::map<size_t, size_t> group_perf_positions;
   for (const auto &group_info : graph_info) {
     auto [input_vars_set_code, need_update_second_group_input_vars] =
         ProcessVarRelations(graph_info, var_relation, group_info.first);
@@ -3840,6 +3976,7 @@ af::Status TilingCodeGenImpl::GenSingleGroupScheduleResult(
                         "Gen schedule group do tiling failed, graph id[%zu], impl id[%zu]", asc_graph_id,
                         impl_graph_id);
       groups_perf.emplace_back(GenGetScheduleGroupPerf(group_info.second.first, group_info.second.second));
+      group_perf_positions[group_info.first] = groups_perf.size() - 1U;
       assign_max_block_num.emplace_back(GenCurMaxBlockDim(group_info.second.second, groups_block_num, cur_block));
       groups_block_num.emplace_back(GenGetCurBlockDim(group_info.second.second));
     }
@@ -3848,8 +3985,27 @@ af::Status TilingCodeGenImpl::GenSingleGroupScheduleResult(
                  impl_graph_id);
   GE_ASSERT_EQ(groups_block_num.size(), groups_perf.size());
   tiling_func_.AddLine("  if (" + (check_cond.empty() ? "true" : check_cond) + ") {");
-  GE_ASSERT_SUCCESS(GenUpdatePerf(asc_graph_id, impl_graph_id, groups_perf, groups_block_num, assign_max_block_num),
-                    "Gen update perf failed, asc_graph_id %zu impl_graph_id %zu", asc_graph_id, impl_graph_id);
+  const bool enable_group_parallel = IsScheduleResultEnableParallel(asc_graph_id, impl_graph_id);
+  std::vector<std::pair<size_t, size_t>> group_edges =
+      GetSerializedGroupEdges(graph_info, var_relation, enable_group_parallel);
+  if (!enable_group_parallel) {
+    const auto workspace_edges = GetWorkspaceSharedGroupEdges(asc_graph_id, impl_graph_id, graph_info);
+    std::set<std::pair<size_t, size_t>> merged_edges(group_edges.cbegin(), group_edges.cend());
+    merged_edges.insert(workspace_edges.cbegin(), workspace_edges.cend());
+    group_edges.assign(merged_edges.cbegin(), merged_edges.cend());
+  }
+  std::vector<std::pair<size_t, size_t>> serialized_edges;
+  serialized_edges.reserve(group_edges.size());
+  for (const auto &edge : group_edges) {
+    const auto src_pos = group_perf_positions.find(edge.first);
+    const auto dst_pos = group_perf_positions.find(edge.second);
+    if (src_pos != group_perf_positions.end() && dst_pos != group_perf_positions.end()) {
+      serialized_edges.emplace_back(src_pos->second, dst_pos->second);
+    }
+  }
+  GE_ASSERT_SUCCESS(
+      GenUpdatePerf(asc_graph_id, impl_graph_id, groups_perf, serialized_edges, groups_block_num, assign_max_block_num),
+      "Gen update perf failed, asc_graph_id %zu impl_graph_id %zu", asc_graph_id, impl_graph_id);
   GenGetScheduleResultTail(graph_info);
   return af::SUCCESS;
 }

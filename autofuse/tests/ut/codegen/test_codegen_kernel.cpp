@@ -6154,6 +6154,48 @@ TEST(CodegenKernel, CacheGuardIsOnlyClosedWhenAConditionIsGenerated) {
   EXPECT_EQ(std::count(result.begin(), result.end(), '{'), std::count(result.begin(), result.end(), '}'));
 }
 
+TEST(CodegenKernel, CacheGuardPredicateUsesFirstMiddleAndLastTileForNineteen) {
+  af::SizeVar outer_size(af::Symbol("outer_size"));
+  af::SizeVar block_inner_extent(af::Symbol("19"));
+  af::Axis outer{.id = 0, .name = "outer", .size = outer_size.expr};
+  af::Axis guarded{.id = 1, .name = "guarded", .size = af::Symbol("19")};
+  af::Axis block_inner{
+      .id = 2, .name = "block_inner", .type = af::Axis::Type::kAxisTypeBlockInner, .size = block_inner_extent.expr};
+
+  codegen::Tiler tiler;
+  tiler.AddSizeVar(outer_size);
+  tiler.AddSizeVar(block_inner_extent);
+  tiler.AddAxis(outer);
+  tiler.AddAxis(guarded);
+  tiler.AddAxis(block_inner);
+  tiler.axis_map.at(outer.id).is_split_b = true;
+  tiler.axis_map.at(guarded.id).is_split_b = true;
+
+  codegen::Loop loop(guarded.id);
+  auto fused_call = new MockApiCall("fused_call");
+  fused_call->enable_cache = true;
+  fused_call->exec_condition = af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis;
+  fused_call->unit = af::ComputeUnit::kUnitVector;
+  auto origin_call = new MockApiCall("origin_call");
+  origin_call->enable_cache = true;
+  origin_call->exec_condition = af::ExecuteCondition::kCacheBlockSplitOriginBroadcastAxis;
+  origin_call->unit = af::ComputeUnit::kUnitVector;
+  loop.AddCall(fused_call);
+  loop.AddCall(origin_call);
+
+  codegen::TPipe tpipe("tpipe", tiler);
+  std::string result;
+  ASSERT_EQ(loop.Generate(tiler, tpipe, result), af::SUCCESS);
+
+  // Tile 0 is covered by the explicit axis < 1 term; tiles 9 and 18 exercise the
+  // middle and tail positions of the period-19 predicate respectively.
+  EXPECT_NE(result.find("bool enable_cache_fused_brc_axis = (guarded < 1) || ((block_dim * block_inner_axis_size + "
+                        "guarded) % guarded_loop_size < 1);"),
+            std::string::npos);
+  EXPECT_NE(result.find("bool enable_cache_origin_brc_axis = (guarded < 1);"), std::string::npos);
+  EXPECT_EQ(std::count(result.begin(), result.end(), '{'), std::count(result.begin(), result.end(), '}'));
+}
+
 TEST(CodegenKernel, ReduceDoubleTileUsesReduceSpecificCacheCondition) {
   af::SizeVar outer_size(af::Symbol("outer_size"));
   af::SizeVar tile0_size(af::Symbol("tile0_size"));
