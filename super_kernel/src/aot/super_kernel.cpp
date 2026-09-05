@@ -106,9 +106,9 @@ aclError aclskOptimize(aclmdlRI model, aclskOptions *options) {
   if (ret != ACL_SUCCESS) {
     return ret;
   }
-  ret = aclrtSetExceptionInfoCallback(SuperKernelExceptionCallBackFunc);
+  ret = aclrtExceptionInfoCallbackRegister(SuperKernelExceptionCallBackFunc);
   if (ret != ACL_SUCCESS) {
-    SK_LOGE("Failed to set exception callback.");
+    SK_LOGE("Failed to register exception callback.");
     return ACL_ERROR_FAILURE;
   }
   if (Adx::AdumpRegExceptionDumpCallback) {
