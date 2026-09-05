@@ -4812,6 +4812,26 @@ TEST_F(SuperKernelScopeSplitterTest, PerOpMaxCoreSplitPass_SingleKernel_CreatesS
   EXPECT_EQ(splitter.GetScopeInfos()[0].GetNodes().size(), 1);
 }
 
+TEST_F(SuperKernelScopeSplitterTest, PerOpMaxCoreSplitPass_PreservesScopeName) {
+  opts->AddOption(std::make_unique<NumberOptOption>("debug_per_op_max_core_num",
+                                                    aclskOptionType::DEBUG_PER_OP_MAX_CORE_NUM, 1, 0, 1));
+  CreateScopeBeginNode(1, 0, "scope_A", 2);
+  auto *kernel = CreateKernelNode(2, 0, 3);
+  CreateScopeEndNode(3, 0, "scope_A");
+  SetupStreams({{1, 2, 3}});
+  graph->scopeNameToIdx["scope_A"] = 0;
+  graph->scopeIdxToName[0] = "scope_A";
+  ASSERT_TRUE(graph->UpdateNodeScopeBitFlags());
+
+  SuperKernelScopeSplitter splitter(*graph, *opts);
+  ASSERT_TRUE(splitter.SplitGraph());
+  ASSERT_EQ(splitter.GetScopeInfos().size(), 3U);
+
+  const auto &scope = splitter.GetScopeInfos()[1];
+  EXPECT_EQ(scope.GetScopeBitFlags(), kernel->GetScopeBitFlags());
+  EXPECT_EQ(ScopeSplitPass::GetScopeNamesFromBitFlags(scope.GetScopeBitFlags(), *graph), "scope_A");
+}
+
 TEST_F(SuperKernelScopeSplitterTest, PerOpMaxCoreSplitPass_OddVectorScheModeKeepsAivResult) {
   opts->AddOption(std::make_unique<NumberOptOption>("debug_per_op_max_core_num",
                                                     aclskOptionType::DEBUG_PER_OP_MAX_CORE_NUM, 1, 0, 1));

@@ -110,13 +110,9 @@ bool SuperKernelExceptionHandler::CopySkDeviceEntryArgsToHost(
     return false;
   }
 
-  logContext = std::make_unique<sk::logger::LogContextGuard>(UNKNOWN_MODEL_ID);
   uint16_t modelIdIdx = static_cast<uint16_t>((skHeaderInfoHost->modelIdIndexAndSkScopeId >> 32) & 0xFFFF);
   std::string modelId = SkEventRecorder::Instance().GetModelIdByIndex(modelIdIdx);
-  if (!modelId.empty()) {
-    logContext.reset();
-    logContext = std::make_unique<sk::logger::LogContextGuard>(modelId);
-  }
+  logContext = std::make_unique<sk::logger::LogContextGuard>(modelId.empty() ? UNKNOWN_MODEL_ID : modelId);
 
   // Step 2: Now that we know totalSize, copy all SkDeviceEntryArgs data to host at once
   SK_LOGI("---Total SkDeviceEntryArgs size: %lu bytes", skHeaderInfoHost->totalSize);
