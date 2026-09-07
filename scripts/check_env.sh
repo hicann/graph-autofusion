@@ -491,6 +491,9 @@ print(v)
     # pytest-timeout>=2.4.0
     check_py_pkg_min "pytest-timeout" "pytest_timeout" "2.4.0" ""
 
+    # pytest-xdist>=3.0.0
+    check_py_pkg_min "pytest-xdist" "xdist" "3.0.0" ""
+
     # scipy>=1.7.3
     check_py_pkg_min "scipy" "scipy" "1.7.3" ""
 
