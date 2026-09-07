@@ -136,6 +136,54 @@ void CastExtendTest(int size, std::function<OutT(int index, InT src)> expectGen,
   EXPECT_EQ(diff_count, 0);
 }
 
+template <typename InT, typename OutT>
+void CastExtendWithMaskModeCalc(InT *x, OutT *y, int first_dim, int last_dim, int input_last_dim_stride,
+                                int output_last_dim_stride) {
+  TPipe tpipe;
+  TBuf<TPosition::VECCALC> xbuf, ybuf, tmp;
+  tpipe.InitBuffer(xbuf, sizeof(InT) * first_dim * input_last_dim_stride);
+  tpipe.InitBuffer(ybuf, sizeof(OutT) * first_dim * output_last_dim_stride);
+  tpipe.InitBuffer(tmp, 8192);
+
+  auto l_x = xbuf.Get<InT>();
+  auto l_y = ybuf.Get<OutT>();
+  auto l_tmp = tmp.Get<uint8_t>();
+
+  GmToUb(l_x, x, first_dim * input_last_dim_stride);
+  CastExtend(l_y, l_x, l_tmp, first_dim, last_dim, input_last_dim_stride, output_last_dim_stride,
+             std::max(sizeof(InT), sizeof(OutT)));
+  UbToGm(y, l_y, first_dim * output_last_dim_stride);
+}
+
+TEST(TestApiCast, Int64ToHalfWithPaddedLastDim) {
+  constexpr int first_dim = 2;
+  constexpr int last_dim = 3;
+  constexpr int input_last_dim_stride = ONE_BLK_SIZE / sizeof(int64_t);
+  constexpr int output_last_dim_stride = ONE_BLK_SIZE / sizeof(half);
+  auto *x = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * first_dim * input_last_dim_stride));
+  auto *y = static_cast<half *>(AscendC::GmAlloc(sizeof(half) * first_dim * output_last_dim_stride));
+
+  for (int row = 0; row < first_dim; ++row) {
+    for (int column = 0; column < last_dim; ++column) {
+      x[row * input_last_dim_stride + column] = row * last_dim + column;
+    }
+  }
+
+  auto kernel = [](int64_t *input, half *output) {
+    CastExtendWithMaskModeCalc<int64_t, half>(input, output, first_dim, last_dim, input_last_dim_stride,
+                                              output_last_dim_stride);
+  };
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(kernel, 1, x, y);
+
+  for (int row = 0; row < first_dim; ++row) {
+    for (int column = 0; column < last_dim; ++column) {
+      EXPECT_EQ(static_cast<int64_t>(static_cast<float>(y[row * output_last_dim_stride + column])),
+                row * last_dim + column);
+    }
+  }
+}
+
 constexpr uint8_t CastGen(const int index) {
   return index % gen_index_two;
 }

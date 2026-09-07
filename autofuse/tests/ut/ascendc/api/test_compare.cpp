@@ -334,6 +334,11 @@ TEST_F(TestApiCompareUT, Compare_Eq_float_uint8) {
                               CMPMODE::EQ);
 }
 
+TEST_F(TestApiCompareUT, Compare_Eq_float_float_with_small_tail) {
+  const uint32_t max_block_cnt = KernelUtils::BlkAlign<uint8_t>((64 * MAX_REPEAT_TIMES) / 8) / sizeof(float);
+  CompareTest<float, float>(max_block_cnt + ONE_BLK_SIZE / sizeof(float), CMPMODE::EQ);
+}
+
 // 场景02：EQ-half
 TEST_F(TestApiCompareUT, Compare_Eq_half_uint8) {
   CompareTest<uint8_t, half>(ONE_BLK_SIZE / sizeof(half), CMPMODE::EQ);
@@ -830,6 +835,11 @@ TEST_F(TestApiCompareUT, Compare_Eq_input_tensor_float_output_uint8) {
                                      (ONE_REPEAT_BYTE_SIZE - ONE_BLK_SIZE) + (ONE_BLK_SIZE - sizeof(float))) /
                                         sizeof(float),
                                     CMPMODE::EQ);
+}
+
+TEST_F(TestApiCompareUT, Compare_Eq_input_tensor_float_output_float_with_small_tail) {
+  const uint32_t max_block_cnt = KernelUtils::BlkAlign<uint8_t>((64 * MAX_REPEAT_TIMES) / 8) / sizeof(float);
+  TensorCompareTest<float, float>(max_block_cnt + ONE_BLK_SIZE / sizeof(float), CMPMODE::EQ);
 }
 
 // Tensor EQ-half

@@ -391,7 +391,8 @@ inline __aicore__ void CompareScalarExtend(const LocalTensor<T> &dst, const Loca
       AscendC::PipeBarrier<PIPE_V>();
       DataCopy(src_tmp[0], src[cnt], left_cnt);
       AscendC::PipeBarrier<PIPE_V>();
-      CompareScalar(compare_out[0], src_tmp[cnt], constant_y, mode, 256 / sizeof(T));
+      // 尾块数据拷贝到临时缓冲起始位置，因此下标改为 0。
+      CompareScalar(compare_out[0], src_tmp[0], constant_y, mode, 256 / sizeof(T));
     } else {
       AscendC::PipeBarrier<PIPE_V>();
       CompareScalar(compare_out[0], src[cnt], constant_y, mode, left_cnt);
@@ -657,7 +658,8 @@ inline __aicore__ void CompareExtend(const LocalTensor<T> &dst, const LocalTenso
       AscendC::PipeBarrier<PIPE_V>();
       DataCopy(src_tmp[256 / sizeof(T)], src1[cnt], left_cnt);
       AscendC::PipeBarrier<PIPE_V>();
-      Compare(compare_out[0], src_tmp[cnt], src_tmp[256 / sizeof(T)], mode, 256 / sizeof(T));
+      // 尾块数据拷贝到临时缓冲起始位置，因此下标改为 0。
+      Compare(compare_out[0], src_tmp[0], src_tmp[256 / sizeof(T)], mode, 256 / sizeof(T));
     } else {
       AscendC::PipeBarrier<PIPE_V>();
       Compare(compare_out[0], src0[cnt], src1[cnt], mode, left_cnt);
