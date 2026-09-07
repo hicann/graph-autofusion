@@ -9,6 +9,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------------------
+# fmt: off
 
 import os
 import json
@@ -351,3 +352,4 @@ def compile_superkernel(ctx: SkCompileContext, sub_kernels: list[KernelResult]):
             super_kernel.compile(kernel_info, kernel_name)
 
         return SuperkernelResult(kernel_meta_dir, kernel_name)
+# fmt: on

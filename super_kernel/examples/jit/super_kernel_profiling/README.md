@@ -10,7 +10,7 @@
 
 使用如下with语句块（super_kernel），语句块内算子均被融合为一个超级Kernel进行计算
 ```python
-with torchair.scope.super_kernel("sk1"): 
+with torchair.scope.super_kernel("sk1"):
 ```
 详细功能介绍见[图内标定SuperKernel范围](https://www.hiascend.com/document/redirect/PytorchTorchairSuperKernel)。
 ## 执行命令
@@ -29,14 +29,14 @@ execute sample success
 ```text
 prof_result
 ├── sk_model                             # 带superkernel结果
-│  ├── localhost.localdomain_ascend_pt   
-│     ├── PROF_*                         
-│        ├── mindstudio_profiler_output   
+│  ├── localhost.localdomain_ascend_pt
+│     ├── PROF_*
+│        ├── mindstudio_profiler_output
 │           ├── op_statistic.csv         # profiling数据
 ├── no_sk_model                          # 不带superkernel结果
-│  ├── localhost.localdomain_ascend_pt   
-│     ├── PROF_*                         
-│        ├── mindstudio_profiler_output   
+│  ├── localhost.localdomain_ascend_pt
+│     ├── PROF_*
+│        ├── mindstudio_profiler_output
 │           ├── op_statistic.csv         # profiling数据
 ```
 分别从两份op_statistic.csv表中得到如下数据

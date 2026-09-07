@@ -10,7 +10,7 @@ Compile models using super_kernel and not using super_kernel, output performance
 
 Use the following with statement block (super_kernel). Operators within the statement block are all fused into one super kernel for computation:
 ```python
-with torchair.scope.super_kernel("sk1"): 
+with torchair.scope.super_kernel("sk1"):
 ```
 For detailed function introduction, see [Mark SuperKernel Scope in Graph](https://www.hiascend.com/document/redirect/PytorchTorchairSuperKernel).
 
@@ -31,14 +31,14 @@ A prof_result folder is generated in execution directory with the following stru
 ```text
 prof_result
 ├── sk_model                             # with superkernel result
-│  ├── localhost.localdomain_ascend_pt   
-│     ├── PROF_*                         
-│        ├── mindstudio_profiler_output   
+│  ├── localhost.localdomain_ascend_pt
+│     ├── PROF_*
+│        ├── mindstudio_profiler_output
 │           ├── op_statistic.csv         # profiling data
 ├── no_sk_model                          # without superkernel result
-│  ├── localhost.localdomain_ascend_pt   
-│     ├── PROF_*                         
-│        ├── mindstudio_profiler_output   
+│  ├── localhost.localdomain_ascend_pt
+│     ├── PROF_*
+│        ├── mindstudio_profiler_output
 │           ├── op_statistic.csv         # profiling data
 ```
 

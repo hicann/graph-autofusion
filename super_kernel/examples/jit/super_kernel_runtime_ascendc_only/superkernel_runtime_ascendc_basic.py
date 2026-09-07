@@ -9,6 +9,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------------------
+# fmt: off
 
 import os
 import sys
@@ -148,3 +149,4 @@ if __name__ == '__main__':
     acl.aclrt_reset_device(DEVICE_ID)
     acl.acl_finalize()
     print("execute sample success")
+# fmt: on

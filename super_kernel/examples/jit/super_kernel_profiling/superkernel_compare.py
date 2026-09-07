@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 # ----------------------------------------------------------------------------------------------------------------------
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and contiditions of
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------------------
+# fmt: off
 
 import numpy as np
 import torch
@@ -38,11 +39,11 @@ def super_kernel_scope(enable_superkernel: bool, scope: str, options: str):
 
 
 def superkernel_compare():
-    src_graph = '''
+    _src_graph = '''
     |o>--------------------------------------------------
-    |o>test case: %s 
+    |o>test case: %s
     |o>              split+matmul+concat+permute+reducemean
-    |o>                      |              
+    |o>                      |
     |o>     sk1:GroupedMatmul+MoeGatingTopK+GroupedMatmul+DequantSwigluQuant+cast+GroupedMatmul
     |o>                      |
     |o>              cast+matmul+permute+concat+narrow+reducemean
@@ -67,12 +68,12 @@ def superkernel_compare():
     |o>--------------------------------------------------
     |o> sk fusion results：
     |o>     sk1:  scope1[GroupedMatmul+MoeGatingTopK+GroupedMatmul+GroupedMatmul]   scope2[DequantSwigluQuant]
-    |o>     sk2:  scope1[GroupedMatmul+MoeGatingTopK+GroupedMatmul+GroupedMatmul]   scope2[DequantSwigluQuant]   
-    |o>     sk3:  scope1[DequantSwigluQuant]   scope2[DequantSwigluQuant+DequantSwigluQuant]  
+    |o>     sk2:  scope1[GroupedMatmul+MoeGatingTopK+GroupedMatmul+GroupedMatmul]   scope2[DequantSwigluQuant]
+    |o>     sk3:  scope1[DequantSwigluQuant]   scope2[DequantSwigluQuant+DequantSwigluQuant]
     |o>     sk4:GroupedMatmul+MoeGatingTopK+GroupedMatmul+GroupedMatmul
-    |o>     sk5:GroupedMatmul+MoeGatingTopK+GroupedMatmul+GroupedMatmul   
-    |o>     sk6:GroupedMatmul+MoeGatingTopK+GroupedMatmul+GroupedMatmul                                                                  
-    |o>--------------------------------------------------                                 
+    |o>     sk5:GroupedMatmul+MoeGatingTopK+GroupedMatmul+GroupedMatmul
+    |o>     sk6:GroupedMatmul+MoeGatingTopK+GroupedMatmul+GroupedMatmul
+    |o>--------------------------------------------------
     '''
 
     torch.npu.set_device(0)
@@ -104,7 +105,7 @@ def superkernel_compare():
         def __init__(self, enable_superkernel: bool):
             super().__init__()
             self._enable_superkernel = enable_superkernel
-        
+
         def forward(self, data1, data2, gmm1_x1, gmm1_weight, moe1_bias, arn1_x2, arn1_gamma, gmm2_x, data3,
                     dsq1_activate_scale, dsq1_group_index, gmm3_weight):
             split = torch.split(data1, 8, dim=1)
@@ -174,14 +175,14 @@ def superkernel_compare():
                 add_01 = torch.add(dequant_swiglu_quant_03[0], dequant_swiglu_quant_04[0])
                 add_02 = torch.add(add_01, dequant_swiglu_quant_05[0])
                 cast_dsq_3 = add_02.to(torch.float32)
-                                        
+
             with super_kernel_scope(self._enable_superkernel, "sp4", ""):
                 grouped_matmul_07 = torch_npu.npu_grouped_matmul(group_type=-1, x=[repeat_01, repeat_02],
                     weight=[transpose_01, narrow_01], bias=[mean_05, moe1_bias])
                 moe_gating_top_k_03 = torch_npu.npu_moe_gating_top_k(x=grouped_matmul_07[1], bias=moe1_bias, k=8,
                     k_group=4, group_count=8, group_select_mode=1, norm_type=1)
                 grouped_matmul_08 = torch_npu.npu_grouped_matmul(group_type=-1, x=gmm2_x,
-                    weight=[moe_gating_top_k_03[0], moe_gating_top_k_03[0], moe_gating_top_k_03[2]]) 
+                    weight=[moe_gating_top_k_03[0], moe_gating_top_k_03[0], moe_gating_top_k_03[2]])
                 grouped_matmul_09 = torch_npu.npu_grouped_matmul(group_type=-1, x=[grouped_matmul_07[0],
                     cast_dsq_3, grouped_matmul_08[0]], weight=gmm3_weight)
             narrow_02 = grouped_matmul_06[2].narrow(0, 0, 8)
@@ -196,7 +197,7 @@ def superkernel_compare():
                 moe_gating_top_k_04 = torch_npu.npu_moe_gating_top_k(x=grouped_matmul_10[1], bias=moe1_bias, k=8,
                     k_group=4, group_count=8, group_select_mode=1, norm_type=1)
                 grouped_matmul_11 = torch_npu.npu_grouped_matmul(group_type=-1, x=gmm2_x,
-                    weight=[moe_gating_top_k_04[0], moe_gating_top_k_04[0], moe_gating_top_k_04[2]]) 
+                    weight=[moe_gating_top_k_04[0], moe_gating_top_k_04[0], moe_gating_top_k_04[2]])
                 grouped_matmul_12 = torch_npu.npu_grouped_matmul(group_type=-1, x=[grouped_matmul_10[0], cast_dsq_3,
                                                                  grouped_matmul_11[0]], weight=gmm3_weight)
             narrow_03 = grouped_matmul_12[2].narrow(0, 10, 8)
@@ -210,29 +211,29 @@ def superkernel_compare():
                 moe_gating_top_k_05 = torch_npu.npu_moe_gating_top_k(x=grouped_matmul_13[1], bias=moe1_bias,
                     k=8, k_group=4, group_count=8, group_select_mode=1, norm_type=1)
                 grouped_matmul_14 = torch_npu.npu_grouped_matmul(group_type=-1, x=gmm2_x,
-                    weight=[moe_gating_top_k_05[0], moe_gating_top_k_05[0], moe_gating_top_k_05[2]]) 
+                    weight=[moe_gating_top_k_05[0], moe_gating_top_k_05[0], moe_gating_top_k_05[2]])
                 grouped_matmul_15 = torch_npu.npu_grouped_matmul(group_type=-1, x=[grouped_matmul_13[0], cast_dsq_3,
                                                                  grouped_matmul_14[0]], weight=gmm3_weight)
             return grouped_matmul_15[0], grouped_matmul_15[1], grouped_matmul_15[2]
-    
+
     config = CompilerConfig()
     npu_backend = tng.get_npu_backend(compiler_config=config)
 
     #在npu上执行有superkernel配置的模型
     no_sk_model = Network(False).npu()
     sk_model = Network(True).npu()
-    
+
     #使能profiling
     experimental_config = torch_npu.profiler._ExperimentalConfig(
         export_type=[
             torch_npu.profiler.ExportType.Text
-        ], 
+        ],
         profiler_level=torch_npu.profiler.ProfilerLevel.Level1,
         aic_metrics=torch_npu.profiler.AiCMetrics.AiCoreNone,
         l2_cache=False,
         op_attr=False,
         record_op_args=False,
-        data_simplification=False  
+        data_simplification=False
     )
 
     #执行未配置super_kernel的模型并通过profiling采第二次执行的数据
@@ -255,7 +256,7 @@ def superkernel_compare():
             no_sk_model(data1, data2, gmm1_x1, gmm1_weight, moe1_bias, arn1_x2, arn1_gamma,
                         gmm2_x, data3, dsq1_activate_scale, dsq1_group_index, gmm3_weight)
             prof.step()
-    
+
     #执行配置super_kernel的模型并通过profiling采第二次执行的数据
     with torch_npu.profiler.profile(
         activities=[
@@ -280,3 +281,4 @@ def superkernel_compare():
     print("execute sample success")
 
 superkernel_compare()
+# fmt: on
