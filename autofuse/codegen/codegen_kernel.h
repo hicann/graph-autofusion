@@ -469,7 +469,8 @@ class Kernel {
   static std::vector<std::string> GenPackingFunctions(std::stringstream &ss_define,
                                                       const std::vector<Variable> &kernel_args,
                                                       const std::vector<std::vector<std::string>> &per_group_func_calls,
-                                                      int64_t max_group_per_compile_unit, uint32_t &function_id);
+                                                      int64_t max_group_per_compile_unit, uint32_t &function_id,
+                                                      bool support_parallel_compile);
   static void GenPackingFunctionCalls(std::stringstream &ss, const std::vector<Variable> &kernel_args,
                                       const std::vector<std::string> &func_names);
   static std::string PackingFuncDeclare(const std::string &func_name, const std::vector<Variable> &kernel_args);
