@@ -378,6 +378,7 @@ class SuperKernelScopeSplitterTest : public testing::Test {
 
   bool RunDeadlockRefine(std::vector<SuperKernelScopeInfo> &scopes) {
     DeadlockRefinePass pass(*graph, *opts);
+    pass.SetScopeSplitResultReporter(&reporter);
     return pass.Run(scopes);
   }
 
@@ -391,6 +392,7 @@ class SuperKernelScopeSplitterTest : public testing::Test {
 
   std::unique_ptr<SuperKernelGraph> graph;
   std::unique_ptr<SuperKernelOptionsManager> opts;
+  ScopeSplitResultReporter reporter;
 };
 
 TEST_F(SuperKernelScopeSplitterTest, ScopeCoreInfoCalculatorWholeScopeMatchesProgressiveResult) {
@@ -751,6 +753,7 @@ TEST_F(SuperKernelScopeSplitterTest, EventOnly_PassDetectsPureEventStream) {
   scopes.push_back(std::move(scope));
 
   EventOnlyStreamRemovePass removePass(*graph);
+  removePass.SetScopeSplitResultReporter(&reporter);
   bool result = removePass.Run(scopes);
 
   EXPECT_TRUE(result);
@@ -3279,6 +3282,7 @@ TEST_F(SuperKernelScopeSplitterTest, EventOnly_SingleEventOnlyStream) {
   scopes.push_back(std::move(scope));
 
   EventOnlyStreamRemovePass removePass(*graph);
+  removePass.SetScopeSplitResultReporter(&reporter);
   bool result = removePass.Run(scopes);
 
   EXPECT_TRUE(result);
@@ -3317,6 +3321,7 @@ TEST_F(SuperKernelScopeSplitterTest, EventOnly_AllEventOnlyStreams) {
   scopes.push_back(std::move(scope));
 
   EventOnlyStreamRemovePass removePass(*graph);
+  removePass.SetScopeSplitResultReporter(&reporter);
   bool result = removePass.Run(scopes);
 
   EXPECT_TRUE(result);
@@ -3370,6 +3375,7 @@ TEST_F(SuperKernelScopeSplitterTest, EventOnly_MixedStreamsPartialRemove) {
   scopes.push_back(std::move(scope));
 
   EventOnlyStreamRemovePass removePass(*graph);
+  removePass.SetScopeSplitResultReporter(&reporter);
   bool result = removePass.Run(scopes);
 
   EXPECT_TRUE(result);
@@ -3409,6 +3415,7 @@ TEST_F(SuperKernelScopeSplitterTest, EventOnly_NoEventNodesStreamKept) {
   scopes.push_back(std::move(scope));
 
   EventOnlyStreamRemovePass removePass(*graph);
+  removePass.SetScopeSplitResultReporter(&reporter);
   bool result = removePass.Run(scopes);
 
   EXPECT_TRUE(result);
@@ -3446,6 +3453,7 @@ TEST_F(SuperKernelScopeSplitterTest, EventOnly_KernelWithEventStreamKept) {
   scopes.push_back(std::move(scope));
 
   EventOnlyStreamRemovePass removePass(*graph);
+  removePass.SetScopeSplitResultReporter(&reporter);
   bool result = removePass.Run(scopes);
 
   EXPECT_TRUE(result);
@@ -3492,6 +3500,7 @@ TEST_F(SuperKernelScopeSplitterTest, EventOnly_MultipleScopesProcessed) {
   scopes.push_back(std::move(scope2));
 
   EventOnlyStreamRemovePass removePass(*graph);
+  removePass.SetScopeSplitResultReporter(&reporter);
   bool result = removePass.Run(scopes);
 
   EXPECT_TRUE(result);
@@ -3570,6 +3579,7 @@ TEST_F(SuperKernelScopeSplitterTest, EventOnly_AdjacentEventNodesRemoved) {
   scopes.push_back(std::move(scope));
 
   EventOnlyStreamRemovePass removePass(*graph);
+  removePass.SetScopeSplitResultReporter(&reporter);
   bool result = removePass.Run(scopes);
 
   EXPECT_TRUE(result);
@@ -3622,6 +3632,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_EmptyScope_Dropped) {
   inputScopes.push_back(BuildTestScope({}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3645,6 +3656,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_SingleNode_NoSplit) {
   inputScopes.push_back(BuildTestScope({k1}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3672,11 +3684,25 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_AllNonScheModeNodes_NoSplit) {
   inputScopes.push_back(BuildTestScope({k1, k2, k3}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
   EXPECT_EQ(inputScopes.size(), 1);            // 不分割，保持1个scope
   EXPECT_EQ(inputScopes[0].nodes_.size(), 3);  // 3个节点全部保留
+}
+
+TEST_F(SuperKernelScopeSplitterTest, ScheMode_NoReporterSkipsBreakInfoReporting) {
+  auto *k1 = CreateScheModeKernelNode(1, 0, 2, 1, true, 2);
+  auto *k2 = CreateScheModeKernelNode(2, 0, 4, 2, true);
+  std::vector<SuperKernelScopeInfo> inputScopes;
+  inputScopes.push_back(BuildTestScope({k1, k2}));
+
+  ScheModeKernelSplitPass pass(*graph);
+  ASSERT_TRUE(pass.Run(inputScopes));
+
+  ASSERT_EQ(inputScopes.size(), 2U);
+  EXPECT_EQ(inputScopes[0].GetBreakInfo().GetReason(), ScopeBreakReason::NONE);
 }
 
 // ==================== ScheMode: Core递增分割(CORE_RISE) ====================
@@ -3700,6 +3726,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_IncreasingCores_SplitAtRisePoint) 
   inputScopes.push_back(BuildTestScope({k1, k2, k3}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3736,6 +3763,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_EqualCores_NoSplit) {
   inputScopes.push_back(BuildTestScope({k1, k2, k3}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3763,6 +3791,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_DecreasingCube_SplitAtDropPoint) {
   inputScopes.push_back(BuildTestScope({k1, k2, k3}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3802,6 +3831,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_SameCubeDecreasingVec_DoesNotSplit
   inputScopes.push_back(BuildTestScope({k1, k2, k3}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3833,6 +3863,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_MixedWithNonScheMode_UsesUpperBoun
   inputScopes.push_back(BuildTestScope({k1, k2, k3}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3861,6 +3892,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_MultipleSplits_ConsecutiveDrops) {
   inputScopes.push_back(BuildTestScope({k1, k2, k3}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3896,6 +3928,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_IncreaseThenDecrease_SplitAtRiseAn
   inputScopes.push_back(BuildTestScope({k1, k2, k3, k4}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3933,6 +3966,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_MultipleInputScopes_ProcessedIndep
   inputScopes.push_back(BuildTestScope({k3, k4}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3969,6 +4003,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_SameCubeSmallerVec_Split) {
   inputScopes.push_back(BuildTestScope({k1, k2}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -3994,6 +4029,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_LargerCubeSmallerVec_Split) {
   inputScopes.push_back(BuildTestScope({k1, k2}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -4023,6 +4059,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_ZeroDimensionUsesNonZeroExactRequi
   inputScopes.push_back(BuildTestScope({k1, k2, k3}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -4051,6 +4088,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_NonScheModeCoreRise_Split) {
   inputScopes.push_back(BuildTestScope({k1, k2}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -4079,6 +4117,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_NonScheModeCubeRise_Split) {
   inputScopes.push_back(BuildTestScope({k1, k2}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -4103,6 +4142,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_NoScheModeCoreRise_NoSplit) {
   inputScopes.push_back(BuildTestScope({k1, k2}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -4130,6 +4170,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_CoreDropThenRise_SplitAtDropAndRis
   inputScopes.push_back(BuildTestScope({k1, k2, k3}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -4165,6 +4206,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_NonScheModeFirst_FitsFinalExactCor
   inputScopes.push_back(BuildTestScope({k1, k2}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   bool result = pass.Run(inputScopes);
 
   EXPECT_TRUE(result);
@@ -4181,6 +4223,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_OddVectorAndNativeMix12_SplitBefor
   scopes.push_back(BuildTestScope({vectorNode, mix12Node}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   ASSERT_TRUE(pass.Run(scopes));
   ASSERT_EQ(scopes.size(), 2);
   EXPECT_EQ(scopes[0].GetBreakInfo().GetDetail(),
@@ -4203,6 +4246,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_OddVectorAndNonScheCube_UseMix11) 
   scopes.push_back(BuildTestScope({vectorNode, cubeNode}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   ASSERT_TRUE(pass.Run(scopes));
   ASSERT_EQ(scopes.size(), 1);
   ASSERT_TRUE(FinalizeScopeCoreInfo(scopes));
@@ -4218,6 +4262,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_NonScheOddVectorAndCube_UseMix12) 
   scopes.push_back(BuildTestScope({vectorNode, cubeNode}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   ASSERT_TRUE(pass.Run(scopes));
   ASSERT_EQ(scopes.size(), 1U);
   ASSERT_TRUE(FinalizeScopeCoreInfo(scopes));
@@ -4235,6 +4280,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_OddVectorAndScheCube_SplitForExact
   scopes.push_back(BuildTestScope({vectorNode, cubeNode}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   ASSERT_TRUE(pass.Run(scopes));
   ASSERT_EQ(scopes.size(), 2);
   EXPECT_EQ(scopes[0].GetBreakInfo().GetDetail(),
@@ -4255,6 +4301,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_Mix11AdaptsVectorSideToMix12) {
   scopes.push_back(BuildTestScope({mix11Node, vectorNode}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   ASSERT_TRUE(pass.Run(scopes));
   ASSERT_EQ(scopes.size(), 1U);
   ASSERT_TRUE(FinalizeScopeCoreInfo(scopes));
@@ -4271,6 +4318,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_CandidatesUseRawTaskCoreRequiremen
   scopes.push_back(BuildTestScope({cube8, vector10, cube12}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   ASSERT_TRUE(pass.Run(scopes));
   ASSERT_EQ(scopes.size(), 1U);
   ASSERT_TRUE(FinalizeScopeCoreInfo(scopes));
@@ -4286,6 +4334,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_NativeMix12ConstrainsFinalSkType) 
   scopes.push_back(BuildTestScope({mix12, cube}));
 
   ScheModeKernelSplitPass pass(*graph);
+  pass.SetScopeSplitResultReporter(&reporter);
   ASSERT_TRUE(pass.Run(scopes));
   ASSERT_EQ(scopes.size(), 1U);
   ASSERT_TRUE(FinalizeScopeCoreInfo(scopes));
@@ -4318,6 +4367,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_RunReturnsTrueForEmptyAndValidScop
   {  // 空输入
     std::vector<SuperKernelScopeInfo> emptyScopes;
     ScheModeKernelSplitPass pass(*graph);
+    pass.SetScopeSplitResultReporter(&reporter);
     EXPECT_TRUE(pass.Run(emptyScopes));
   }
   {  // 正常输入
@@ -4325,6 +4375,7 @@ TEST_F(SuperKernelScopeSplitterTest, ScheMode_RunReturnsTrueForEmptyAndValidScop
     std::vector<SuperKernelScopeInfo> scopes;
     scopes.push_back(BuildTestScope({k1}));
     ScheModeKernelSplitPass pass(*graph);
+    pass.SetScopeSplitResultReporter(&reporter);
     EXPECT_TRUE(pass.Run(scopes));
   }
 }

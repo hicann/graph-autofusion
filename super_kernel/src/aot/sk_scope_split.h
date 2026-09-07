@@ -132,7 +132,7 @@ class ScopeCoreInfoCalculator {
 class ScopeSplitPass {
  public:
   explicit ScopeSplitPass(SuperKernelGraph &inputGraph)
-      : graph_(inputGraph), splitter_(nullptr), reporter_(&ownedResultReporter_) {}
+      : graph_(inputGraph), splitter_(nullptr), scopeSplitResultReporter_(nullptr) {}
   virtual ~ScopeSplitPass() = default;
 
   /*!
@@ -152,8 +152,8 @@ class ScopeSplitPass {
     splitter_ = splitter;
   }
 
-  void SetResultReporter(ScopeSplitResultReporter *reporter) {
-    reporter_ = reporter == nullptr ? &ownedResultReporter_ : reporter;
+  void SetScopeSplitResultReporter(ScopeSplitResultReporter *scopeSplitResultReporter) {
+    scopeSplitResultReporter_ = scopeSplitResultReporter;
   }
 
   /*!
@@ -220,8 +220,7 @@ class ScopeSplitPass {
  protected:
   SuperKernelGraph &graph_;
   SuperKernelScopeSplitter *splitter_;  ///< Reference to splitter for re-split requests
-  ScopeSplitResultReporter ownedResultReporter_;
-  ScopeSplitResultReporter *reporter_;
+  ScopeSplitResultReporter *scopeSplitResultReporter_;
 };
 
 // ============ Pass 3: Event-Only Stream Remove (after SK core calculation) ============
