@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 #include "mockcpp/mockcpp.hpp"
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -3002,6 +3003,8 @@ TEST_F(SkDfxExceptionHandlerTest, ExtractSkEntryArgs_RoutesToHeaderModelAndGuard
   ASSERT_TRUE(sk::logger::FileLogger::Instance().Initialize(config));
   sk::logger::FileLogger::SetCurrentModelId(previousModelId);
   sk::logger::FileHandleManager::Instance().SwitchToDefault();
+  const std::string unknownModelPath = GetSkMetaPath(UNKNOWN_MODEL_ID);
+  std::filesystem::remove_all(unknownModelPath);
 
   std::unique_ptr<sk::logger::LogContextGuard> logContext;
   aclrtExceptionInfo *exceptionInfo = reinterpret_cast<aclrtExceptionInfo *>(0x500);
@@ -3009,6 +3012,7 @@ TEST_F(SkDfxExceptionHandlerTest, ExtractSkEntryArgs_RoutesToHeaderModelAndGuard
   ASSERT_NE(logContext, nullptr);
   EXPECT_EQ(sk::logger::FileLogger::GetCurrentModelId(), modelId);
   EXPECT_EQ(sk::logger::FileHandleManager::Instance().GetCurrentHandle(), "default");
+  EXPECT_FALSE(std::filesystem::exists(unknownModelPath));
 
   handler->FreeResources();
   logContext.reset();

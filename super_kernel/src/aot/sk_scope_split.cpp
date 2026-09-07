@@ -276,6 +276,7 @@ bool PerOpMaxCoreSplitPass::Run(std::vector<SuperKernelScopeInfo> &scopes) {
       if (node->GetNodeType() == SkNodeType::NODE_KERNEL && node->IsFusible()) {
         SuperKernelScopeInfo scope;
         scope.AddNode(node);
+        scope.SetScopeBitFlags(node->GetScopeBitFlags());
         RebuildStreamInfos(scope);
         scope.SetScopeCoreInfo(BuildDebugPerOpScopeCoreInfo(*node, maxDeviceCubeNum, maxDeviceVectorNum));
         scopes.push_back(std::move(scope));
