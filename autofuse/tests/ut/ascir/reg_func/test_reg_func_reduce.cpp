@@ -179,5 +179,156 @@ TEST_F(CalcReduceTmpSizeTest, CalcReduceTmpSize_test_1) {
   std::vector<std::unique_ptr<af::TmpBufDesc>> result = CalcReduceTmpSize(*node);
   ASSERT_EQ(result.size(), 2);
 }
+
+// 复制自 CreateGraphReduce，算子换成 ArgMax（覆盖 CalcReduceTmpSize 的 ArgMax 分支）
+template <af::DataType T>
+void CreateGraphArgMax(af::AscGraph &graph, Expression &s1, Expression &s2) {
+  af::Expression One = af::Symbol(1);
+  af::Expression Zero = af::Symbol(0);
+  auto s0 = graph.CreateSizeVar("s0");
+  s1 = graph.CreateSizeVar("s1");
+  s2 = graph.CreateSizeVar("s2");
+
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  auto z2 = graph.CreateAxis("z2", s2);
+
+  Data x1("x1", graph);
+  Load load1("load1");
+  af::ascir_op::ArgMax argmax0("argmax0");
+  Store store("store");
+  Output y("y");
+
+  x1.attr.sched.axis = {z0.id, z1.id, z2.id};
+  x1.y.dtype = T;
+  *x1.y.axis = {z0.id, z1.id, z2.id};
+  *x1.y.repeats = {s0, s1, s2};
+  *x1.y.strides = {s1 * s2, s2, One};
+
+  load1.x = x1.y;
+  load1.attr.sched.axis = {z0.id, z1.id, z2.id};
+  load1.y.dtype = T;
+  *load1.y.axis = {z0.id, z1.id, z2.id};
+  *load1.y.repeats = {s0, s1, s2};
+  *load1.y.strides = {s1 * s2, s2, One};
+  *load1.y.vectorized_axis = {z1.id, z2.id};
+
+  argmax0.x = load1.y;
+  argmax0.attr.sched.axis = {z0.id, z1.id, z2.id};
+  argmax0.attr.sched.loop_axis = {z0.id};
+  argmax0.y.dtype = T;
+  *argmax0.y.axis = {z0.id, z1.id, z2.id};
+  *argmax0.y.repeats = {s0, s1, One};
+  *argmax0.y.strides = {s2, One, Zero};
+  *argmax0.y.vectorized_axis = {z1.id, z2.id};
+
+  store.x = argmax0.y;
+  store.attr.sched.axis = {z0.id, z1.id, z2.id};
+  store.y.dtype = T;
+  *store.y.axis = {z0.id, z1.id, z2.id};
+  *store.y.repeats = {s0, s1, s2};
+  *store.y.strides = {s1 * s2, s2, One};
+
+  y.x = store.y;
+  y.attr.sched.axis = {z0.id, z1.id, z2.id};
+  y.y.dtype = T;
+  *y.y.axis = {z0.id, z1.id, z2.id};
+  *y.y.repeats = {s0, s1, s2};
+  *y.y.strides = {s1 * s2, s2, One};
+}
+
+// 复制自 CreateGraphReduce，算子换成 ArgMaxMultiRPhase1（覆盖对应分支）
+template <af::DataType T>
+void CreateGraphArgMaxPhase1(af::AscGraph &graph, Expression &s1, Expression &s2) {
+  af::Expression One = af::Symbol(1);
+  af::Expression Zero = af::Symbol(0);
+  auto s0 = graph.CreateSizeVar("s0");
+  s1 = graph.CreateSizeVar("s1");
+  s2 = graph.CreateSizeVar("s2");
+
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  auto z2 = graph.CreateAxis("z2", s2);
+
+  Data x1("x1", graph);
+  Load load1("load1");
+  af::ascir_op::ArgMaxMultiRPhase1 argmaxp1("argmaxp1");
+  Store store("store");
+  Output y("y");
+
+  x1.attr.sched.axis = {z0.id, z1.id, z2.id};
+  x1.y.dtype = T;
+  *x1.y.axis = {z0.id, z1.id, z2.id};
+  *x1.y.repeats = {s0, s1, s2};
+  *x1.y.strides = {s1 * s2, s2, One};
+
+  load1.x = x1.y;
+  load1.attr.sched.axis = {z0.id, z1.id, z2.id};
+  load1.y.dtype = T;
+  *load1.y.axis = {z0.id, z1.id, z2.id};
+  *load1.y.repeats = {s0, s1, s2};
+  *load1.y.strides = {s1 * s2, s2, One};
+  *load1.y.vectorized_axis = {z1.id, z2.id};
+
+  argmaxp1.x = load1.y;
+  argmaxp1.attr.sched.axis = {z0.id, z1.id, z2.id};
+  argmaxp1.attr.sched.loop_axis = {z0.id};
+  argmaxp1.value.dtype = T;
+  *argmaxp1.value.axis = {z0.id, z1.id, z2.id};
+  *argmaxp1.value.repeats = {s0, s1, One};
+  *argmaxp1.value.strides = {s2, One, Zero};
+  *argmaxp1.value.vectorized_axis = {z1.id, z2.id};
+
+  store.x = argmaxp1.value;
+  store.attr.sched.axis = {z0.id, z1.id, z2.id};
+  store.y.dtype = T;
+  *store.y.axis = {z0.id, z1.id, z2.id};
+  *store.y.repeats = {s0, s1, s2};
+  *store.y.strides = {s1 * s2, s2, One};
+
+  y.x = store.y;
+  y.attr.sched.axis = {z0.id, z1.id, z2.id};
+  y.y.dtype = T;
+  *y.y.axis = {z0.id, z1.id, z2.id};
+  *y.y.repeats = {s0, s1, s2};
+  *y.y.strides = {s1 * s2, s2, One};
+}
+
+// ArgMax 型：返回 4 个 tmp buf，生命周期序列 -1,0,1,2 是该分支独有指纹
+TEST_F(CalcReduceTmpSizeTest, CalcReduceTmpSize_WhenNodeTypeIsArgMax) {
+  af::AscGraph graph("test_argmax");
+  af::Expression One = af::Symbol(1);
+  af::Expression Zero = af::Symbol(0);
+  Expression s1;
+  Expression s2;
+  CreateGraphArgMax<af::DT_FLOAT>(graph, s1, s2);
+  std::shared_ptr<af::AscNode> node = graph.FindNode("argmax0");
+  node->inputs[0].attr.vectorized_strides = {s2, One};
+  node->outputs[0].attr.vectorized_strides = {One, Zero};
+  std::vector<std::unique_ptr<af::TmpBufDesc>> result = CalcReduceTmpSize(*node);
+  ASSERT_EQ(result.size(), 4U);
+  ASSERT_EQ(result[0]->life_time_axis_id, -1);
+  ASSERT_EQ(result[1]->life_time_axis_id, 0);
+  ASSERT_EQ(result[2]->life_time_axis_id, 1);
+  ASSERT_EQ(result[3]->life_time_axis_id, 2);
+}
+
+// ArgMaxMultiRPhase1 型：返回 3 个 tmp buf，生命周期序列 -1,0,1
+TEST_F(CalcReduceTmpSizeTest, CalcReduceTmpSize_WhenNodeTypeIsArgMaxMultiRPhase1) {
+  af::AscGraph graph("test_argmax_p1");
+  af::Expression One = af::Symbol(1);
+  af::Expression Zero = af::Symbol(0);
+  Expression s1;
+  Expression s2;
+  CreateGraphArgMaxPhase1<af::DT_FLOAT>(graph, s1, s2);
+  std::shared_ptr<af::AscNode> node = graph.FindNode("argmaxp1");
+  node->inputs[0].attr.vectorized_strides = {s2, One};
+  node->outputs[0].attr.vectorized_strides = {One, Zero};
+  std::vector<std::unique_ptr<af::TmpBufDesc>> result = CalcReduceTmpSize(*node);
+  ASSERT_EQ(result.size(), 3U);
+  ASSERT_EQ(result[0]->life_time_axis_id, -1);
+  ASSERT_EQ(result[1]->life_time_axis_id, 0);
+  ASSERT_EQ(result[2]->life_time_axis_id, 1);
+}
 }  // namespace ascir
 }  // namespace af

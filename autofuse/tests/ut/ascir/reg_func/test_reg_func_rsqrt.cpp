@@ -95,5 +95,41 @@ TEST_F(CalcRsqrtTmpSizeTest, CalcRsqrtTmpSize_ShouldReturnCorrectSize_WhenNodels
   ASSERT_EQ(result[0]->size, sym::Min(af::Symbol(4) * s1 * s0, MAX_TMP_BUFFER_SIZE));
   ASSERT_EQ(result[0]->life_time_axis_id, -1);
 }
+
+// Test: all-scalar input -> GetInputDataSizeTmpBuffer falls back to the last input index
+TEST_F(CalcRsqrtTmpSizeTest, CalcRsqrtTmpSize_ShouldReturnTypeSize_WhenInputIsAllScalar) {
+  af::AscGraph graph("test");
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+
+  af::ascir_op::Scalar x1("x1", graph);
+  af::ascir_op::Rsqrt rsqrt("rsqrt");
+  af::ascir_op::Store store("store");
+  af::ascir_op::Output y("y");
+
+  x1.attr.sched.axis = {z0.id, z1.id};
+  x1.y.dtype = af::DT_FLOAT;
+  *x1.y.axis = {};
+  *x1.y.repeats = {};
+  *x1.y.strides = {};
+
+  rsqrt.x = x1.y;
+  rsqrt.attr.sched.axis = {z0.id, z1.id};
+  rsqrt.y.dtype = af::DT_FLOAT;
+  *rsqrt.y.axis = {z0.id, z1.id};
+  *rsqrt.y.repeats = {s0, s1};
+  *rsqrt.y.strides = {s1, Symbol(1)};
+
+  std::shared_ptr<af::AscNode> node = graph.FindNode("rsqrt");
+  std::vector<std::unique_ptr<af::TmpBufDesc>> result = CalcRsqrtTmpSize(*node);
+  ASSERT_EQ(result.size(), 1);
+  // all-scalar input: input_size=1, sizeof(float)=4 -> tmp size 4 (capped by GetTmpBuffer)
+  ASSERT_EQ(result[0]->size, af::Symbol(4));
+  ASSERT_EQ(result[0]->life_time_axis_id, -1);
+}
+
 }  // namespace ascir
 }  // namespace af
