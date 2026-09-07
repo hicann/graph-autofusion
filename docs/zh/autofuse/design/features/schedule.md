@@ -114,7 +114,7 @@ z1 = graph.create_axis("z1", s1)
 data = ascir.ops.Data('data', graph)
 data.y.dtype = ascir.dtypes.float32
 
-# 声明load算子
+# 声明 Load 算子
 load = ascir.ops.Load('load')
 load.attr.sched.axis = [z0, z1]  # 调度轴
 load.x = data.y
@@ -122,7 +122,7 @@ load.y.axis = [z0, z1]  # tensor的输出轴
 load.y.size = [s0, s1]  # tensor输出大小
 load.y.strides = [s1, 1]  # tensor的输出步长
 
-# 声明abs算子
+# 声明 Abs 算子
 abs = ascir.ops.Abs('abs')
 abs.attr.sched.axis = [z0, z1]
 abs.x = load.y
@@ -130,7 +130,7 @@ abs.y.axis = [z0, z1]
 abs.y.size = [s0, s1]
 abs.y.strides = [s1, 1]
 
-# 声明max算子
+# 声明 Max 算子
 max = ascir.ops.Max('max')
 max.attr.sched.axis = [z0, z1]
 max.x = abs.y
@@ -253,7 +253,7 @@ Inplace 复用后只需要 2 块内存：
 <img src="../../figures/schedule_mem_reuse_after.png" alt="内存复用后" style="width: 25%; max-width: 800px;">
 </div>
 
-## 多模版生成
+## 多模板生成
 
 针对一张计算图，可能存在多种实现方式。以尾轴 concat 为例，可以在 UB 上将多个小包做 ub_concat 先组成大包再完整搬出，也可以直接转成非连续搬运在 GM（Global Memory，全局内存）上完成重排。前者在小 shape 场景可以显著提高 MTE（Memory Transfer Engine，AI Core 的数据传递引擎）搬运效率，从而获得更好的性能优势。但 ub_concat 也存在需要内轴全载的限制，导致某些场景下无法使用。在 Schedule 阶段无法确定选择哪个模板时，通常会生成一个适用于任意 shape 的通用模板，以及特定场景下的性能优化模板，由 Auto Tiling 模块在 tiling 阶段决定具体使用哪个模板。
 
