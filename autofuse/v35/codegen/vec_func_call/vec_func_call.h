@@ -50,6 +50,7 @@ class VfCall final : public ApiCall {
   mutable std::vector<Tensor> ub_inputs_;
   mutable std::vector<Tensor> ub_outputs_;
   mutable std::vector<Tensor> scalar_inputs_;
+  mutable std::vector<ascir::TensorId> subgraph_scalar_ids_;
 };
 }  // namespace codegen
 #endif  // __AUTOFUSE_VEC_FUNC_CALL_H__

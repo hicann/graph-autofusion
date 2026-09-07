@@ -524,6 +524,22 @@ class TestStaticShapeCompileHasattrCheck:
         assert fake_lib.GenConstTilingData.calls[0][1].value == 4
 
     @staticmethod
+    def test_static_shape_compile_rejects_empty_const_tiling(
+        asc_codegen_compile_module, tmpdir, monkeypatch
+    ):
+        temp_dir = str(tmpdir)
+        fake_lib = SimpleNamespace(GenConstTilingData=FakeCFunc(b""))
+        TestStaticShapeCompileHasattrCheck._prepare_tiling_file(temp_dir)
+        TestStaticShapeCompileHasattrCheck._mock_static_compile_dependencies(
+            asc_codegen_compile_module, monkeypatch, fake_lib
+        )
+
+        with pytest.raises(RuntimeError, match="GenConstTilingData returned empty"):
+            asc_codegen_compile_module.static_shape_compile(
+                kernel_name="kernel", temp_dir=temp_dir, graph_name="graph"
+            )
+
+    @staticmethod
     def test_static_shape_cv_compile_uses_vector_core_num_when_provided(
         asc_codegen_compile_module, tmpdir, monkeypatch
     ):
@@ -583,14 +599,16 @@ class TestStaticShapeCompileHasattrCheck:
         monkeypatch.setattr(
             asc_codegen_compile_module,
             "static_shape_cv_compile",
-            lambda **kwargs: calls.append(("cv_compile", kwargs["vector_core_num"]))
-            or -1,
+            lambda **kwargs: (
+                calls.append(("cv_compile", kwargs["vector_core_num"])) or -1
+            ),
         )
         monkeypatch.setattr(
             asc_codegen_compile_module,
             "static_shape_cv_common_compile",
-            lambda **kwargs: calls.append(("cv_common", kwargs["vector_core_num"]))
-            or (4, 16),
+            lambda **kwargs: (
+                calls.append(("cv_common", kwargs["vector_core_num"])) or (4, 16)
+            ),
         )
 
         tiling_info = SimpleNamespace(tiling_key=2, file_content="")

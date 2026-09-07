@@ -3279,7 +3279,7 @@ TEST_F(TestCodegenTiling, SplitHeaderApiTilingSourceShouldIncludeApiHeaders) {
 }
 
 TEST_F(TestCodegenTiling, SplitHeaderGenerateForTfShouldGuardRuntimeHeadersForCceKtTest) {
-  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")}, af::Symbol(1));
   const std::map<std::string, std::string> shape_info;
   auto tiling_files = this->Generate(fused_schedule_result, shape_info, ".", "10");
 
@@ -3292,6 +3292,14 @@ TEST_F(TestCodegenTiling, SplitHeaderGenerateForTfShouldGuardRuntimeHeadersForCc
       "#endif\n";
   EXPECT_NE(entry.find(guarded_headers), std::string::npos);
   EXPECT_EQ(entry.find("#include \"platform_ascendc.h\""), std::string::npos);
+
+  const auto tiling_call = entry.find("auto ret = AutofuseTilingWithConfig");
+  const auto failure_check = entry.find("if (ret != 0) {", tiling_call);
+  const auto set_block_dim = entry.find("context->SetBlockDim(block_dim);", tiling_call);
+  ASSERT_NE(tiling_call, std::string::npos);
+  ASSERT_NE(failure_check, std::string::npos);
+  ASSERT_NE(set_block_dim, std::string::npos);
+  EXPECT_LT(failure_check, set_block_dim);
 }
 
 TEST_F(TestCodegenTiling, SplitHeaderGenerateForPgoShouldIncludeDirectEntryDependencies) {
@@ -3308,6 +3316,29 @@ TEST_F(TestCodegenTiling, SplitHeaderGenerateForPgoShouldIncludeDirectEntryDepen
   EXPECT_NE(entry.find("#include \"exe_graph/runtime/tiling_context.h\""), std::string::npos);
   EXPECT_NE(entry.find("#include \"autofuse_tiling_func_pgo.h\""), std::string::npos);
   EXPECT_NE(entry.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
+
+  bool found_pgo_core_budget_check = false;
+  bool found_pgo_config_validation = false;
+  bool found_pgo_tiling_isolation = false;
+  for (const auto &[name, source] : tiling_files) {
+    (void)name;
+    if (source.find("Loaded PGO block_dim %u is outside core budget [1, %u]") != std::string::npos) {
+      found_pgo_core_budget_check = true;
+    }
+    if (source.find("tiling_i32.size() != expect_num") != std::string::npos &&
+        source.find("memcpy_s(&tiling_data, sizeof(tiling_data), tiling_i32.data(), sizeof(tiling_data)) != EOK") !=
+            std::string::npos) {
+      found_pgo_config_validation = true;
+    }
+    if (source.find("auto pgo_tiling = *tiling;") != std::string::npos &&
+        source.find("PGOGetTilingKey(config_file, pgo_tiling)") != std::string::npos &&
+        source.find("*tiling = pgo_tiling;") != std::string::npos) {
+      found_pgo_tiling_isolation = true;
+    }
+  }
+  EXPECT_TRUE(found_pgo_core_budget_check);
+  EXPECT_TRUE(found_pgo_config_validation);
+  EXPECT_TRUE(found_pgo_tiling_isolation);
 }
 
 TEST_F(TestCodegenTiling, SplitHeaderGenerateForInductorPgoShouldIncludeDirectEntryDependencies) {
@@ -4571,6 +4602,8 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoFalseShouldKeepModeledTopn) {
   ASSERT_NE(modeled_search, std::string::npos);
   ASSERT_NE(modeled_entry, std::string::npos);
   const std::string modeled_body = result.tiling.substr(modeled_search, modeled_entry - modeled_search);
+  EXPECT_NE(modeled_body.find("const uint32_t available_aiv_num = std::min(limit->aiv_num, g_no_limit_res.aiv_num)"),
+            std::string::npos);
   EXPECT_EQ(modeled_body.find("PGOByCoreNumSearchTilingKey"), std::string::npos);
 }
 
@@ -4762,8 +4795,9 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldReuseTfAllCoreSearch) 
   ASSERT_NE(measured_search, std::string::npos);
   ASSERT_NE(measured_entry, std::string::npos);
   const std::string measured_body = result.tiling.substr(measured_search, measured_entry - measured_search);
-  EXPECT_NE(measured_body.find("const uint32_t measured_aiv_num = std::min(limit->aiv_num, g_no_limit_res.aiv_num)"),
+  EXPECT_NE(measured_body.find("const uint32_t available_aiv_num = std::min(limit->aiv_num, g_no_limit_res.aiv_num)"),
             std::string::npos);
+  EXPECT_NE(measured_body.find("const uint32_t measured_aiv_num = available_aiv_num"), std::string::npos);
   EXPECT_NE(measured_body.find("optiling::PGOByCoreNumSearchTilingKey(measured_tiling_datas, &cur_search_tiling, "
                                "measured_aiv_num)"),
             std::string::npos);

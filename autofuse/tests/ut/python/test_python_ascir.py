@@ -174,6 +174,103 @@ class TestAscir:
             )
 
     @staticmethod
+    def test_index_expr_and_arange_api():
+        ascir.utils.set_platform("3510", 1, 245760)
+        try:
+            graph = ascir.HintGraph("index_expr_arange_api")
+            size = graph.create_size("size")
+            axis = graph.create_axis("axis", size)
+
+            index = ascir_api.IndexExpr(graph, dtype=ascir.dtypes.int64, expr=size + 1)
+            values = ascir_api.arange(
+                graph,
+                dtype=ascir.dtypes.int64,
+                base=ascir.SizeExpr(3),
+                step=ascir.SizeExpr(2),
+                axis=[axis],
+                size=[size],
+                stride=[ascir.SizeExpr(1)],
+            )
+
+            assert index.dtype == ascir.dtypes.int64
+            assert values.dtype == ascir.dtypes.int64
+            assert values.axis == [axis.id]
+            assert values.size == [size]
+            assert values.strides == [ascir.SizeExpr(1)]
+            assert not hasattr(values, "vectorized_axis")
+            assert not hasattr(values, "vectorized_strides")
+
+            singleton = graph.create_axis("singleton", 1)
+            trailing_singleton = ascir_api.arange(
+                graph,
+                dtype=ascir.dtypes.int64,
+                base=ascir.SizeExpr(0),
+                step=ascir.SizeExpr(1),
+                axis=[axis, singleton],
+                size=[size, ascir.SizeExpr(1)],
+                stride=[ascir.SizeExpr(1), ascir.SizeExpr(0)],
+            )
+            assert trailing_singleton.strides == [ascir.SizeExpr(1), ascir.SizeExpr(0)]
+
+            stored = ascir_api.Store(
+                graph,
+                values,
+                axis=[axis],
+                size=[size],
+                stride=[ascir.SizeExpr(1)],
+            )
+            ascir_api.Output(graph, stored, dtype=ascir.dtypes.int64)
+            Autofuser(AutofuserOptions()).schedule(graph)
+
+            with pytest.raises(ValueError, match="axis must not be empty"):
+                ascir_api.arange(
+                    graph,
+                    dtype=ascir.dtypes.int32,
+                    base=ascir.SizeExpr(0),
+                    step=ascir.SizeExpr(1),
+                    axis=[],
+                )
+            with pytest.raises(ValueError, match="unit physical stride"):
+                ascir_api.arange(
+                    graph,
+                    dtype=ascir.dtypes.int32,
+                    base=ascir.SizeExpr(0),
+                    step=ascir.SizeExpr(1),
+                    axis=[axis],
+                    size=[size],
+                    stride=[ascir.SizeExpr(2)],
+                )
+            with pytest.raises(ValueError, match="zero strides require singleton"):
+                ascir_api.arange(
+                    graph,
+                    dtype=ascir.dtypes.int32,
+                    base=ascir.SizeExpr(0),
+                    step=ascir.SizeExpr(1),
+                    axis=[axis, singleton],
+                    size=[size, ascir.SizeExpr(2)],
+                    stride=[ascir.SizeExpr(1), ascir.SizeExpr(0)],
+                )
+            with pytest.raises(ValueError, match="same with axis len"):
+                ascir_api.arange(
+                    graph,
+                    dtype=ascir.dtypes.int32,
+                    base=ascir.SizeExpr(0),
+                    step=ascir.SizeExpr(1),
+                    axis=[axis],
+                    stride=[],
+                )
+            with pytest.raises(Exception, match="Check dtype failed"):
+                ascir_api.arange(
+                    graph,
+                    dtype=ascir.dtypes.float32,
+                    base=ascir.SizeExpr(0),
+                    step=ascir.SizeExpr(1),
+                    axis=[axis],
+                )
+        finally:
+            ascir.utils.set_platform("2201", 1, 245760)
+
+    @staticmethod
     def test_indirect_load_max_expression_attr():
         graph = ascir.HintGraph("test_indirect_load_max")
         dynamic_max = graph.create_size("dynamic_max")

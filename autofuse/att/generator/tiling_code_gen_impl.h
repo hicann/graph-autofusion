@@ -141,6 +141,7 @@ class TilingCodeGenImpl {
                                   const std::map<std::string, std::set<std::string>> &hardware_map);
   af::Status GenUpdatePerf(const size_t asc_graph_id, const size_t impl_graph_id,
                            const std::vector<std::string> &groups_perf,
+                           const std::vector<std::pair<size_t, size_t>> &serialized_edges,
                            const std::vector<std::string> &groups_block_num,
                            const std::vector<std::string> &assign_max_block_num);
   void GenGetMaxScoreIndex(const AscGraphNamepspaceMap &namespace_map);
@@ -320,9 +321,20 @@ class TilingCodeGenImpl {
   // 辅助函数：生成perf更新代码（消除GenUpdatePerf和GenGetScheduleResultPerfAndTail的重复）
   static std::string GenPerfUpdateCode(const std::vector<std::string> &groups_perf,
                                        const std::vector<std::string> &groups_block_num, const std::string &indent);
+  std::vector<std::pair<size_t, size_t>> GetSerializedGroupEdges(
+      const std::map<size_t, std::pair<std::string, std::string>> &graph_info,
+      const std::map<size_t, std::map<size_t, std::map<std::string, af::Expression>>> &var_relation,
+      bool enable_group_parallel) const;
+  std::vector<std::pair<size_t, size_t>> GetWorkspaceSharedGroupEdges(
+      const size_t asc_graph_id, const size_t impl_graph_id,
+      const std::map<size_t, std::pair<std::string, std::string>> &graph_info) const;
+  std::string GenSerializedEdgePenalty(const std::vector<std::string> &groups_perf,
+                                       const std::vector<std::pair<size_t, size_t>> &serialized_edges,
+                                       const std::string &indent) const;
   // 辅助函数：生成best perf更新代码
   void GenBestPerfUpdateCode(const size_t asc_graph_id, const size_t impl_graph_id,
-                             const std::vector<std::string> &assign_max_block_num, const std::string &indent);
+                             const std::vector<std::string> &assign_max_block_num, const std::string &indent,
+                             const std::string &objective_log = {});
 
   // 为所有group生成cache line冲突检测helper函数
   af::Status GenConflictGroupHelpers(const size_t asc_graph_id, const size_t impl_graph_id,

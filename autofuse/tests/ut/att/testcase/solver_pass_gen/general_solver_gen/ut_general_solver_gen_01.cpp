@@ -179,6 +179,16 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_01, test_set_buff_cons) {
   EXPECT_EQ(Str(solver->hardware_args_[0]), Str(gm));
 }
 
+TEST_F(UTTEST_GENERAL_SOLVER_GEN_01, test_set_core_num_cons_with_input_args) {
+  GeneralSolverGen solver("Case0", "TilingData");
+  const Expr input_axis = CreateExpr("input_axis");
+  solver.SetInputArgs({input_axis});
+  solver.SetBufferCons({{HardwareDef::CORENUM, input_axis * CreateExpr(2)}});
+
+  ASSERT_EQ(solver.leqs_.size(), 1U);
+  EXPECT_NE(Str(solver.leqs_.front()).find("block_dim"), std::string::npos);
+}
+
 TEST_F(UTTEST_GENERAL_SOLVER_GEN_01, test_set_cut_cons) {
   GeneralSolverGen *solver;
   std::vector<Expr> cut_cons;

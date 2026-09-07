@@ -340,6 +340,19 @@ const af::Expression SizeExpr::AsSizeExpr(PyObject *obj) {
   return af::Expression();
 }
 
+const af::Expression SizeExpr::AsExpression(PyObject *obj) {
+  if (PyObject_IsInstance(obj, reinterpret_cast<PyObject *>(&SizeExpr::type)) == kPythonSuccess) {
+    auto size = reinterpret_cast<SizeExpr::Object *>(obj);
+    if (size->expression == nullptr) {
+      PyErr_SetString(PyExc_ValueError, "Expression is not initialized");
+      return af::Expression();
+    }
+    return af::Expression(*size->expression);
+  }
+  PyErr_Format(PyExc_TypeError, "Only support type of Expression");
+  return af::Expression();
+}
+
 PyObject *SizeExpr::Add(PyObject *self, PyObject *args) {
   af::Expression left = SizeExpr::AsSizeExpr(self);
   PY_ASSERT_TRUE(left.IsValid(), "left operand of add is not a valid SizeExpr");

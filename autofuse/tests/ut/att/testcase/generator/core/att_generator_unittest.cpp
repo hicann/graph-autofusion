@@ -42,6 +42,7 @@ const std::string op_name = "OpTest";
 
 namespace att {
 namespace {
+
 size_t CountSubstr(const std::string &text, const std::string &pattern) {
   size_t count = 0U;
   size_t pos = text.find(pattern);
@@ -99,6 +100,229 @@ class MockTilingCodeGenerator : public TilingCodeGenerator {
 };
 
 class GeneratorUT : public testing::Test {};
+
+TEST(GeneratorUT, SerializedEdgeDiscoveryIsDeterministicAndDeduplicated) {
+  TilingCodeGenConfig config;
+  TilingModelInfo model_infos{CreateModelInfo()};
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", config, model_infos, score_funcs, false);
+  const std::map<size_t, std::pair<std::string, std::string>> graph_info = {
+      {0U, {"ScheduleResult0", "group0"}}, {1U, {"ScheduleResult1", "group1"}}, {2U, {"ScheduleResult2", "group2"}}};
+  std::map<size_t, std::map<size_t, std::map<std::string, af::Expression>>> var_relation;
+  var_relation[1U][0U]["dep"] = CreateExpr(1);
+  var_relation[1U][0U]["duplicate"] = CreateExpr(2);
+  var_relation[1U][1U]["self"] = CreateExpr(3);
+  var_relation[1U][99U]["unknown"] = CreateExpr(4);
+  var_relation[0U][1U]["reverse"] = CreateExpr(5);
+
+  EXPECT_EQ(gen_impl.GetSerializedGroupEdges(graph_info, var_relation, false),
+            (std::vector<std::pair<size_t, size_t>>{{0U, 1U}, {1U, 0U}}));
+  EXPECT_TRUE(gen_impl.GetSerializedGroupEdges(graph_info, var_relation, true).empty());
+}
+
+TEST(GeneratorUT, SerializedEdgeDiscoveryIgnoresEmptyInnerRelation) {
+  TilingCodeGenConfig config;
+  TilingModelInfo model_infos{CreateModelInfo()};
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", config, model_infos, score_funcs, false);
+  const std::map<size_t, std::pair<std::string, std::string>> graph_info = {{0U, {"ScheduleResult0", "group0"}},
+                                                                            {1U, {"ScheduleResult1", "group1"}}};
+  std::map<size_t, std::map<size_t, std::map<std::string, af::Expression>>> var_relation;
+  var_relation[1U][0U];
+
+  EXPECT_TRUE(gen_impl.GetSerializedGroupEdges(graph_info, var_relation, false).empty());
+
+  var_relation[1U][0U]["dep"] = CreateExpr(1);
+  EXPECT_EQ(gen_impl.GetSerializedGroupEdges(graph_info, var_relation, false),
+            (std::vector<std::pair<size_t, size_t>>{{0U, 1U}}));
+}
+
+TEST(GeneratorUT, SerializedEdgePenaltyEmitsCappedExpressionAndModelLog) {
+  TilingCodeGenConfig config;
+  TilingModelInfo model_infos{CreateModelInfo()};
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", config, model_infos, score_funcs, false);
+  const std::string source = gen_impl.GenSerializedEdgePenalty({"g0_perf", "g1_perf"}, {{0U, 1U}}, "  ");
+  EXPECT_NE(source.find("serialized_edge_base"), std::string::npos);
+  EXPECT_NE(source.find("min(8000.0"), std::string::npos);
+  EXPECT_NE(source.find("0.10"), std::string::npos);
+  EXPECT_NE(source.find("max(g0_perf, g1_perf)"), std::string::npos);
+  EXPECT_NE(source.find("serialized_edge_base += std::max(g0_perf, g1_perf)"), std::string::npos);
+  EXPECT_NE(source.find("std::min(8000.000000, 0.100000 * serialized_edge_base)"), std::string::npos);
+  EXPECT_NE(source.find("serialized_edge_model=serialized_edge_v1"), std::string::npos);
+  EXPECT_TRUE(gen_impl.GenSerializedEdgePenalty({"g0_perf"}, {{0U, 1U}}, "  ").empty());
+}
+
+namespace {
+struct ScheduleResultSourceCase {
+  TilingModelInfo model_infos;
+  std::map<size_t, std::pair<std::string, std::string>> graph_info;
+  std::map<std::string, std::set<std::string>> hardware_map;
+};
+
+ScheduleResultSourceCase MakeTwoGroupScheduleResultSourceCase(const bool enable_group_parallel) {
+  ScheduleResultSourceCase test_case;
+  auto group0 = CreateModelInfo();
+  group0.schedule_group_ident = {0U, 0U, 0U};
+  group0.enable_group_parallel = enable_group_parallel;
+  auto group1 = CreateModelInfo();
+  group1.schedule_group_ident = {0U, 0U, 1U};
+  group1.enable_group_parallel = enable_group_parallel;
+  test_case.model_infos = {group0, group1};
+  test_case.graph_info = {{0U, {"ScheduleResult0", "group0"}}, {1U, {"ScheduleResult1", "group1"}}};
+  test_case.hardware_map = {{"group0", {"block_dim"}}, {"group1", {"block_dim"}}};
+  return test_case;
+}
+}  // namespace
+
+TEST(GeneratorUT, GenUpdatePerfAddsSerializedEdgeToNonParallelObjective) {
+  const auto test_case = MakeTwoGroupScheduleResultSourceCase(false);
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), test_case.model_infos, score_funcs, false);
+  gen_impl.var_relations_[0U][0U][1U][0U]["dep"] = CreateExpr(1);
+
+  ASSERT_EQ(gen_impl.GenSingleGroupScheduleResult(0U, 0U, test_case.graph_info, test_case.hardware_map), af::SUCCESS);
+  const std::string source = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_NE(source.find("group_sum"), std::string::npos);
+  EXPECT_NE(source.find("serialized_edge_penalty"), std::string::npos);
+  EXPECT_NE(source.find("objective=group_sum"), std::string::npos);
+  EXPECT_NE(source.find("The value of graph0_result0 is %lf objective(group_sum(group0 + group1)=%lf + edge_model("),
+            std::string::npos);
+  EXPECT_NE(source.find("edge_model(serialized_edge_v1"), std::string::npos);
+  EXPECT_NE(source.find("base=max(group0, group1)=%lf, penalty=min(8000.000000, 0.100000*base)"), std::string::npos);
+}
+
+TEST(GeneratorUT, GenUpdatePerfSingleGroupHasNoSerializedEdgePenalty) {
+  auto test_case = MakeTwoGroupScheduleResultSourceCase(false);
+  test_case.graph_info.erase(1U);
+  test_case.hardware_map.erase("group1");
+  test_case.model_infos.resize(1U);
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), test_case.model_infos, score_funcs, false);
+  ASSERT_EQ(gen_impl.GenSingleGroupScheduleResult(0U, 0U, test_case.graph_info, test_case.hardware_map), af::SUCCESS);
+  const std::string source = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_EQ(source.find("serialized_edge_penalty"), std::string::npos);
+  EXPECT_NE(source.find("edge_model(serialized_edge_v1, base=0=%lf, penalty=min(8000.000000, 0.100000*base)=%lf)=%lf"),
+            std::string::npos);
+}
+
+TEST(GeneratorUT, GenUpdatePerfParallelHasNoSerializedEdgePenalty) {
+  const auto test_case = MakeTwoGroupScheduleResultSourceCase(true);
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), test_case.model_infos, score_funcs, false);
+  gen_impl.var_relations_[0U][0U][1U][0U]["dep"] = CreateExpr(1);
+  ASSERT_EQ(gen_impl.GenSingleGroupScheduleResult(0U, 0U, test_case.graph_info, test_case.hardware_map), af::SUCCESS);
+  EXPECT_EQ(gen_impl.tiling_func_.GetOutputStr().find("serialized_edge_penalty"), std::string::npos);
+}
+
+TEST(GeneratorUT, GenUpdatePerfEmptyRelationKeepsGroupSumCode) {
+  const auto test_case = MakeTwoGroupScheduleResultSourceCase(false);
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), test_case.model_infos, score_funcs, false);
+  gen_impl.var_relations_[0U][0U][1U][0U];
+  ASSERT_EQ(gen_impl.GenSingleGroupScheduleResult(0U, 0U, test_case.graph_info, test_case.hardware_map), af::SUCCESS);
+  const std::string source = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_NE(source.find("cur_perf = ScheduleResult0::GetPerf(group0_tiling_data);"), std::string::npos);
+  EXPECT_NE(source.find("cur_perf += ScheduleResult1::GetPerf(group1_tiling_data);"), std::string::npos);
+  EXPECT_EQ(source.find("serialized_edge_penalty"), std::string::npos);
+}
+
+TEST(GeneratorUT, GenUpdatePerfMapsNonContiguousGroupIdsToPerfPositions) {
+  auto test_case = MakeTwoGroupScheduleResultSourceCase(false);
+  test_case.graph_info = {{2U, {"ScheduleResult0", "group0"}}, {5U, {"ScheduleResult1", "group1"}}};
+  test_case.model_infos[0].schedule_group_ident.group_id = 2U;
+  test_case.model_infos[1].schedule_group_ident.group_id = 5U;
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), test_case.model_infos, score_funcs, false);
+  gen_impl.var_relations_[0U][0U][5U][2U]["dep"] = CreateExpr(1);
+
+  ASSERT_EQ(gen_impl.GenSingleGroupScheduleResult(0U, 0U, test_case.graph_info, test_case.hardware_map), af::SUCCESS);
+  const std::string source = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_NE(source.find("serialized_edge_base += std::max(ScheduleResult0::GetPerf(group0_tiling_data), "),
+            std::string::npos);
+  EXPECT_NE(source.find("ScheduleResult1::GetPerf(group1_tiling_data));"), std::string::npos);
+}
+
+TEST(GeneratorUT, GenUpdatePerfAddsSerializedEdgeFromSharedWorkspace) {
+  auto test_case = MakeTwoGroupScheduleResultSourceCase(false);
+  test_case.model_infos[0].workspace_size_map.emplace(5, CreateExpr(1024));
+  test_case.model_infos[1].workspace_size_map.emplace(5, CreateExpr(1024));
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), test_case.model_infos, score_funcs, false);
+
+  ASSERT_EQ(gen_impl.GenSingleGroupScheduleResult(0U, 0U, test_case.graph_info, test_case.hardware_map), af::SUCCESS);
+  const std::string source = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_NE(source.find("serialized_edge_penalty"), std::string::npos);
+  EXPECT_NE(source.find("objective=group_sum"), std::string::npos);
+  EXPECT_NE(source.find("serialized_edge_base += std::max(ScheduleResult0::GetPerf(group0_tiling_data), "),
+            std::string::npos);
+}
+
+TEST(GeneratorUT, GenUpdatePerfDistinctWorkspaceHasNoSerializedEdgePenalty) {
+  auto test_case = MakeTwoGroupScheduleResultSourceCase(false);
+  test_case.model_infos[0].workspace_size_map.emplace(5, CreateExpr(1024));
+  test_case.model_infos[1].workspace_size_map.emplace(7, CreateExpr(2048));
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), test_case.model_infos, score_funcs, false);
+
+  ASSERT_EQ(gen_impl.GenSingleGroupScheduleResult(0U, 0U, test_case.graph_info, test_case.hardware_map), af::SUCCESS);
+  const std::string source = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_NE(source.find("cur_perf = ScheduleResult0::GetPerf(group0_tiling_data);"), std::string::npos);
+  EXPECT_NE(source.find("cur_perf += ScheduleResult1::GetPerf(group1_tiling_data);"), std::string::npos);
+  EXPECT_EQ(source.find("serialized_edge_penalty"), std::string::npos);
+}
+
+TEST(GeneratorUT, GenUpdatePerfParallelSharedWorkspaceHasNoSerializedEdgePenalty) {
+  auto test_case = MakeTwoGroupScheduleResultSourceCase(true);
+  test_case.model_infos[0].workspace_size_map.emplace(5, CreateExpr(1024));
+  test_case.model_infos[1].workspace_size_map.emplace(5, CreateExpr(1024));
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), test_case.model_infos, score_funcs, false);
+
+  ASSERT_EQ(gen_impl.GenSingleGroupScheduleResult(0U, 0U, test_case.graph_info, test_case.hardware_map), af::SUCCESS);
+  EXPECT_EQ(gen_impl.tiling_func_.GetOutputStr().find("serialized_edge_penalty"), std::string::npos);
+}
+
+TEST(GeneratorUT, GenUpdatePerfWorkspaceEdgeDeduplicatedWithVarRelationEdge) {
+  auto test_case = MakeTwoGroupScheduleResultSourceCase(false);
+  test_case.model_infos[0].workspace_size_map.emplace(5, CreateExpr(1024));
+  test_case.model_infos[1].workspace_size_map.emplace(5, CreateExpr(1024));
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), test_case.model_infos, score_funcs, false);
+  gen_impl.var_relations_[0U][0U][1U][0U]["dep"] = CreateExpr(1);
+
+  ASSERT_EQ(gen_impl.GenSingleGroupScheduleResult(0U, 0U, test_case.graph_info, test_case.hardware_map), af::SUCCESS);
+  const std::string source = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_EQ(CountSubstr(source, "serialized_edge_base += std::max("), 1U);
+}
+
+TEST(GeneratorUT, GenUpdatePerfInvalidEdgeDoesNotEmitUndefinedPenaltyLog) {
+  auto model_info = CreateModelInfo();
+  model_info.schedule_group_ident = {0U, 0U, 0U};
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), {model_info}, score_funcs, false);
+
+  ASSERT_EQ(gen_impl.GenUpdatePerf(0U, 0U, {"g0_perf"}, {{0U, 1U}}, {"g0_block"}, {}), af::SUCCESS);
+  const std::string source = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_EQ(source.find("serialized_edge_penalty"), std::string::npos);
+  EXPECT_EQ(source.find("objective=group_sum"), std::string::npos);
+}
+
+TEST(GeneratorUT, GenUpdatePerfMissingHardwareGroupSkipsSerializedEdge) {
+  auto test_case = MakeTwoGroupScheduleResultSourceCase(false);
+  test_case.graph_info = {{2U, {"ScheduleResult0", "group0"}}, {5U, {"ScheduleResult1", "group1"}}};
+  test_case.model_infos[0].schedule_group_ident.group_id = 2U;
+  test_case.model_infos[1].schedule_group_ident.group_id = 5U;
+  test_case.hardware_map.erase("group1");
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", TilingCodeGenConfig(), test_case.model_infos, score_funcs, false);
+  gen_impl.var_relations_[0U][0U][5U][2U]["dep"] = CreateExpr(1);
+
+  ASSERT_EQ(gen_impl.GenSingleGroupScheduleResult(0U, 0U, test_case.graph_info, test_case.hardware_map), af::SUCCESS);
+  const std::string source = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_EQ(source.find("serialized_edge_penalty"), std::string::npos);
+  EXPECT_EQ(source.find("objective=group_sum"), std::string::npos);
+}
 
 TEST(GeneratorUT, SourceDependenciesMergeAndRenderIncludes) {
   autofuse::GeneratedCode target;
@@ -1033,6 +1257,10 @@ TEST(GeneratorUT, TilingCodeGenImplPGO) {
     }
     DoApiTiling(tiling_data);
     GeneralTiling(tiling_data);
+    if (tiling_data.get_block_dim() > corenum_) {
+      OP_LOGW(OP_NAME, "Generated block_dim %u exceeds core budget %u.", tiling_data.get_block_dim(), corenum_);
+      return false;
+    }
     TilingSummary(tiling_data);
     return true;
   }
@@ -1137,6 +1365,8 @@ TEST(GeneratorUT, RootGetTilingFailuresUseWarningLogOnlyForPGOPath) {
   std::string tiling_func_output = genImpl.tiling_func_.GetOutputStr();
   EXPECT_NE(tiling_func_output.find("OP_LOGE(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("OP_LOGW(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("OP_LOGE(OP_NAME, \"Aggregated block_dim %u exceeds core budget %u.\""),
+            std::string::npos);
 
   genImpl.config_.is_inductor_scene = true;
   genImpl.tiling_func_.Reset();
@@ -1144,6 +1374,8 @@ TEST(GeneratorUT, RootGetTilingFailuresUseWarningLogOnlyForPGOPath) {
   tiling_func_output = genImpl.tiling_func_.GetOutputStr();
   EXPECT_NE(tiling_func_output.find("OP_LOGW(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("OP_LOGE(OP_NAME, \"Failed to get tiling of AscGraph0.\");"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("OP_LOGW(OP_NAME, \"Aggregated block_dim %u exceeds core budget %u.\""),
+            std::string::npos);
 
   genImpl.tiling_func_.Reset();
   EXPECT_EQ(genImpl.GenPGOByCoreNumFusedScheduleResultsGetTilingDefine(namespace_map), af::SUCCESS);
@@ -1192,7 +1424,39 @@ TEST(GeneratorUT, PGOByCoreNumSerialGroupsUseMaximumBlockDim) {
   EXPECT_NE(
       output.find("result_block_dim = std::max(result_block_dim, tiling_data_tmp.group1_tiling_data.get_block_dim());"),
       std::string::npos);
+  EXPECT_EQ(output.find("result_block_dim = std::min(result_block_dim, block_dim_i);"), std::string::npos);
   EXPECT_EQ(output.find("result_block_dim += tiling_data_tmp.group1_tiling_data.get_block_dim();"), std::string::npos);
+  EXPECT_NE(output.find("ret = !tiling_data_list.empty();"), std::string::npos);
+}
+
+TEST(GeneratorUT, GetTilingRejectsBlockDimAboveCoreBudget) {
+  TilingCodeGenConfig config;
+  TilingModelInfo tiling_model_info;
+  ScoreFuncs score_funcs;
+  ModelInfo model_info;
+  model_info.hardware_cons[HardwareDef::CORENUM] = CreateExpr("128");
+  tiling_model_info.push_back(model_info);
+
+  MockHighPerfTilingCodeGenImpl genImpl("test", config, tiling_model_info, score_funcs, true);
+  ASSERT_EQ(genImpl.GenGetTiling(), af::SUCCESS);
+  const std::string output = genImpl.tiling_func_.GetOutputStr();
+  EXPECT_NE(output.find("tiling_data.get_block_dim() > corenum_"), std::string::npos);
+}
+
+TEST(GeneratorUT, GetTilingPropagatesScheduleSummaryFailure) {
+  TilingCodeGenConfig config;
+  TilingModelInfo tiling_model_info;
+  ModelInfo model_info;
+  tiling_model_info.push_back(model_info);
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl genImpl("test", config, tiling_model_info, score_funcs, true);
+  std::map<size_t, std::map<size_t, std::pair<std::string, std::string>>> namespace_map;
+  namespace_map[0] = {};
+
+  ASSERT_EQ(genImpl.GenGetTilingForAllSchedulesResults(0, namespace_map), af::SUCCESS);
+  const std::string output = genImpl.tiling_func_.GetOutputStr();
+  EXPECT_NE(output.find("const bool result = GetResultSummary(best_perf, tiling_data);"), std::string::npos);
+  EXPECT_NE(output.find("return result;"), std::string::npos);
 }
 
 TEST(GeneratorUT, PGOGetTilingKeyFailureUsesWarningLog) {
@@ -1326,6 +1590,8 @@ TEST(GeneratorUT, PGOGetAllSchedulesResultsDoesNotPushGraphTilingTmpOutsideSched
   EXPECT_EQ(tiling_func_output.find("tiling_data_list.push_back(tiling_perf);"), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("PgoConfig::Instance().single_callback("), std::string::npos);
   EXPECT_EQ(tiling_func_output.find("*tilingData = tilingTmp;"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("bool has_valid_tiling = false;"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("has_valid_tiling = true;"), std::string::npos);
 }
 
 static const std::string kExpectPGOCode =
@@ -1610,6 +1876,12 @@ TEST(GeneratorUT, GenPGOGetScheduleResultGuardsInvalidVarRelationBeforeSet) {
   ASSERT_NE(set_pos, std::string::npos);
   ASSERT_NE(invalid_pos, std::string::npos);
   ASSERT_NE(search_pos, std::string::npos);
+  EXPECT_NE(tiling_func_output.find("const size_t candidate_count_before = tiling_data_list.size();"),
+            std::string::npos);
+  EXPECT_NE(tiling_func_output.find("return tiling_data_list.size() > candidate_count_before;"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("std::vector<AutofuseTilingDataPerf> valid_tiling_data_list;"), std::string::npos);
+  EXPECT_NE(tiling_func_output.find("&valid_tiling_data_list) != 0"), std::string::npos);
+  EXPECT_EQ(tiling_func_output.find("workspaceSize, &tiling_data_list_tmp) != 0"), std::string::npos);
   EXPECT_LT(guard_pos, value_pos);
   EXPECT_LT(value_pos, finite_pos);
   EXPECT_LT(finite_pos, set_pos);
@@ -1686,6 +1958,17 @@ TEST(GeneratorUT, GenHardwareCheckCode_UseDoubleType) {
     }
   }
   EXPECT_TRUE(found_double_type) << "Generated hardware check code should contain 'double ' type to prevent overflow";
+}
+
+TEST(GeneratorUT, GenHardwareJudgeSkipsRelatedCoreNumExpression) {
+  TilingModelInfo model_infos{CreateModelInfo(1U, ge::ExprType::kExprVariable)};
+  TilingCodeGenConfig config;
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl gen_impl("test", config, model_infos, score_funcs, true);
+
+  ASSERT_EQ(gen_impl.GenHardwareJudge(model_infos.front()), af::SUCCESS);
+  const std::string output = gen_impl.tiling_func_.GetOutputStr();
+  EXPECT_EQ(output.find("block_dim expr"), std::string::npos);
 }
 
 // Task 3: Inductor scene triggers ATT PGO main search skeleton, PGOSearchTilingKey and perf extraction

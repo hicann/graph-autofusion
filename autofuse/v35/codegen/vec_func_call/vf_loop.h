@@ -9,11 +9,24 @@
  */
 #ifndef __AUTOFUSE_VF_LOOP_H__
 #define __AUTOFUSE_VF_LOOP_H__
+#include <map>
+
 #include "codegen_kernel.h"
 #include "../micro_api_call/micro_api_call.h"
 
 namespace codegen {
 
+struct ArangeParam {
+  ascir::TensorId tensor_id;
+  std::string base;
+  std::string step;
+  std::string offset;
+};
+
+using ArangeOffsetMap = std::map<ascir::TensorId, std::string>;
+using VFInputMapping = std::map<int64_t, uint32_t>;
+Status GetArangeLogicalStride(const TPipe &tpipe, const MicroApiTensor *reg_tensor,
+                              const std::vector<ascir::AxisId> &axis_ids, std::string &result);
 std::string GenCvUbFuseVfFuncDimParams();
 std::string GenCvUbFuseVfCallDimParams();
 std::string GenCvUbFuseRowStride(const TPipe &tpipe, const Tensor &ub_tensor);
@@ -35,18 +48,20 @@ class VFLoop {
   void AddCall(MicroApiCall *call);
 
   /* 图解析阶段调用 */
-  Status ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const ascir::NodeView &vf_node);
+  Status ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const ascir::NodeView &vf_node,
+                            const VFInputMapping &input_mapping = {});
   void Destruct();
 
   /* kernel生成阶段调用 */
   Status Generate(const TPipe &tpipe, const TensorManager &tensor_mgr, int32_t depth, std::string &result,
-                  std::string &loop_size_result, int32_t &only_loop_max_depth,
-                  std::vector<std::string> &loop_size_vec) const;
+                  std::string &loop_size_result, int32_t &only_loop_max_depth, std::vector<std::string> &loop_size_vec,
+                  const ArangeOffsetMap &arange_offsets = {}) const;
   Status GenerateCvUbFuse(const TPipe &tpipe, const TensorManager &tensor_mgr, std::string &result,
                           std::string &loop_size_result) const;
   void SetMaxDtypeSize(std::string dtype);
   void CollectMaskRegTempTensors(const TPipe &tpipe, const TensorManager &tensor_mgr,
                                  std::vector<std::string> &temp_tensors) const;
+  void CollectArangeParams(const TPipe &tpipe, std::vector<ArangeParam> &params) const;
 
  private:
   ascir::AxisId axis_id_;
@@ -56,10 +71,12 @@ class VFLoop {
 
   Status GenerateLoop(const TPipe &tpipe, const TensorManager &tensor_mgr, int32_t depth,
                       std::vector<ascir::AxisId> &current_axis, std::stringstream &ss, std::stringstream &loop_size_ss,
-                      int32_t &only_loop_max_depth, std::vector<std::string> &loop_size_vec) const;
+                      int32_t &only_loop_max_depth, std::vector<std::string> &loop_size_vec,
+                      const ArangeOffsetMap &arange_offsets) const;
   Status GenerateBody(const TPipe &tpipe, const TensorManager &tensor_mgr, int32_t depth,
                       std::vector<ascir::AxisId> &current_axis, std::stringstream &ss, std::stringstream &loop_size_ss,
-                      int32_t &only_loop_max_depth, std::vector<std::string> &loop_size_vec) const;
+                      int32_t &only_loop_max_depth, std::vector<std::string> &loop_size_vec,
+                      const ArangeOffsetMap &arange_offsets) const;
   Status GenerateCvUbFuseBody(const TPipe &tpipe, const TensorManager &tensor_mgr,
                               std::vector<ascir::AxisId> &current_axis, std::stringstream &ss) const;
 };

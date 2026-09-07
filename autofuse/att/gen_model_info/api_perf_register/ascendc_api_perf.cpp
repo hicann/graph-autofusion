@@ -1028,7 +1028,8 @@ af::Status DefaultMTE3Api([[maybe_unused]] const std::vector<TensorShapeInfo> &i
 af::Status DefaultVECApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_shapes,
                          [[maybe_unused]] const std::vector<TensorShapeInfo> &output_shapes,
                          [[maybe_unused]] const NodeInfo &node, PerfOutputInfo &perf_res) {
-  GE_ASSERT_TRUE(!input_shapes.empty() && !output_shapes.empty());
+  // rand/randn have no input shape, so check output shape only
+  GE_ASSERT_TRUE(!output_shapes.empty());
   perf_res.pipe_res[PipeType::AIV_VEC] = af::sym::kSymbolOne;
   return af::SUCCESS;
 }

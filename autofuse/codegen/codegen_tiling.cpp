@@ -1649,6 +1649,9 @@ std::string TilingLib::GenNonCubeFusionTilingBody(const ascir::FusedScheduledRes
   ss << "  auto ret = AutofuseTilingWithConfig(config_file, ";
   ss << shape_dim_param;
   ss << "tiling_data, &workspace_size, &block_dim, &limit);" << std::endl;
+  ss << "  if (ret != 0) {" << std::endl;
+  ss << "    return ge::GRAPH_FAILED;" << std::endl;
+  ss << "  }" << std::endl;
   ss << "  context->SetBlockDim(block_dim);" << std::endl;
 
   if (ascgen_utils::IsCubeFusedScheduled(fused_schedule_result) &&

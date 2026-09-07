@@ -214,7 +214,11 @@ extern "C" const char* GenConstTilingData(char* config_file, int aiv_num, int ub
   ResLimit limit;
   limit.aiv_num = aiv_num;
   limit.ub_size = ub_size - 256;
-  (void)AutofuseTilingWithConfig(config_file, &TilingDataValue, &workspace_size, &block_dim, nullptr);
+  auto ret = AutofuseTilingWithConfig(config_file, &TilingDataValue, &workspace_size, &block_dim, nullptr);
+  if (ret != 0) {
+    OP_LOGE(OP_NAME, "AutofuseTilingWithConfig failed: %ld", ret);
+    return "";
+  }
   std::string GenTilingDataValue_block_dim_field_DeclareFunc_def = GenTilingDataFieldConstDefFunc("block_dim", TilingDataValue.block_dim);
   std::string GenTilingDataValue_corenum_field_DeclareFunc_def = GenTilingDataFieldConstDefFunc("corenum", TilingDataValue.corenum);
   std::string GenTilingDataValue_ub_size_field_DeclareFunc_def = GenTilingDataFieldConstDefFunc("ub_size", TilingDataValue.ub_size);
@@ -373,7 +377,11 @@ extern "C" const char* GenConstTilingData(char* config_file, int aiv_num, int ub
   ResLimit limit;
   limit.aiv_num = aiv_num;
   limit.ub_size = ub_size - 256;
-  (void)AutofuseTilingWithConfig(config_file, &TilingDataValue, &workspace_size, &block_dim, nullptr);
+  auto ret = AutofuseTilingWithConfig(config_file, &TilingDataValue, &workspace_size, &block_dim, nullptr);
+  if (ret != 0) {
+    OP_LOGE(OP_NAME, "AutofuseTilingWithConfig failed: %ld", ret);
+    return "";
+  }
   std::string GenTilingDataValue_block_dim_field_DeclareFunc_def = GenTilingDataFieldConstDefFunc("block_dim", TilingDataValue.block_dim);
   std::string GenTilingDataValue_corenum_field_DeclareFunc_def = GenTilingDataFieldConstDefFunc("corenum", TilingDataValue.corenum);
   std::string GenTilingDataValue_ub_size_field_DeclareFunc_def = GenTilingDataFieldConstDefFunc("ub_size", TilingDataValue.ub_size);

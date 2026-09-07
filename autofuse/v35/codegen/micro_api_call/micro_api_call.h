@@ -17,10 +17,17 @@
 #include "codegen_kernel.h"
 namespace codegen {
 
+struct ArangeParams {
+  bool valid = false;
+  std::string base;
+  std::string step;
+};
+
 struct CallParam {
   std::string p_reg;
   std::string offset;
   std::string max_dtype_size;
+  ArangeParams arange;
 };
 
 enum class TensorType : int8_t {
@@ -68,6 +75,10 @@ class MicroApiCall {
 
   // 生成micro api的调用
   virtual Status Generate(const TensorManager &tensor_mng, const TPipe &tpipe, CallParam &param, std::string &result);
+  virtual bool HasArangeParam() const {
+    return false;
+  }
+  virtual void GetArangeParams(const TPipe &, std::string &, std::string &) const {}
 
   // 生成outputs;
   virtual Status Init([[maybe_unused]] const ascir::NodeView &node) {

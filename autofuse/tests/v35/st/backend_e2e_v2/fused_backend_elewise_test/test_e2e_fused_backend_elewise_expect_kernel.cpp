@@ -56,10 +56,6 @@ TEST_P(E2E_FusedBackendElewise_Code, CalculateCorrect) {
   // Launch
   uint32_t ws_size = 0;
   AutofuseTiling(test_shape[0], test_shape[1], &tiling_data, &ws_size, &block_dim, 48, 192 * 1024);
-  printf("g0_tiling_key: %d\n", tiling_data.graph0_tiling_key);
-  printf("g1_tiling_key: %d\n", tiling_data.graph1_tiling_key);
-  printf("g2_tiling_key: %d\n", tiling_data.graph2_tiling_key);
-  printf("ws_size: %d, ws3_size: %d, ws5_size: %d\n", ws_size, tiling_data.workspace3, tiling_data.workspace5);
   float *workspace = (float *)AscendC::GmAlloc(ws_size + 32);
 
   AscendC::SetKernelMode(KernelMode::AIV_MODE);

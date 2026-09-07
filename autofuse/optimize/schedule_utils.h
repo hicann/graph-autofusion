@@ -88,8 +88,10 @@ class ScheduleUtils {
   static bool HasComputeType(const ascir::ImplGraph &impl_graph, const af::ComputeType compute_type);
 
   static bool IsIOBuffer(const af::NodePtr &node) {
-    return af::ops::IsOps<af::ascir_op::Scalar>(node) || IsDataInput(node) ||
-           af::ops::IsOps<af::ascir_op::Output>(node);
+    // IndexExpr 是无输入标量表达式节点(sched.axis 为空), 与 Scalar 同属不参与
+    // 全 reduce 展维的标量路径, 需一并跳过, 否则空 axis 触发展维断言。
+    return af::ops::IsOps<af::ascir_op::Scalar>(node) || af::ops::IsOps<af::ascir_op::IndexExpr>(node) ||
+           IsDataInput(node) || af::ops::IsOps<af::ascir_op::Output>(node);
   }
 
   static bool IsDataInput(const af::NodePtr &node) {
@@ -100,12 +102,17 @@ class ScheduleUtils {
     return af::ops::IsOps<af::ascir_op::Data>(node) || af::ops::IsOps<af::ascir_op::ScalarData>(node);
   }
 
+  // IndexExpr 是标量表达式节点(输出无 axis/repeats), 与 Scalar/ScalarData 同属
+  // 标量语义; 标量路径的调度/缓存判定需将其一并识别, 否则以标量为输入的节点
+  // 会因空 axis 与输出轴数不一致而触发断言。
   static bool IsScalarLikeNode(const af::NodePtr &node) {
-    return af::ops::IsOps<af::ascir_op::Scalar>(node) || af::ops::IsOps<af::ascir_op::ScalarData>(node);
+    return af::ops::IsOps<af::ascir_op::Scalar>(node) || af::ops::IsOps<af::ascir_op::ScalarData>(node) ||
+           af::ops::IsOps<af::ascir_op::IndexExpr>(node);
   }
 
   static bool IsScalarLikeNode(const af::Node *const node) {
-    return af::ops::IsOps<af::ascir_op::Scalar>(node) || af::ops::IsOps<af::ascir_op::ScalarData>(node);
+    return af::ops::IsOps<af::ascir_op::Scalar>(node) || af::ops::IsOps<af::ascir_op::ScalarData>(node) ||
+           af::ops::IsOps<af::ascir_op::IndexExpr>(node);
   }
 
   static bool IsConstantScalar(const af::Node *const node) {

@@ -15,7 +15,8 @@
 namespace codegen {
 namespace {
 bool IsScalarNodeType(const std::string &node_type) {
-  return node_type == af::ascir_op::Scalar::Type || node_type == af::ascir_op::ScalarData::Type;
+  return node_type == af::ascir_op::Scalar::Type || node_type == af::ascir_op::ScalarData::Type ||
+         node_type == af::ascir_op::IndexExpr::Type;
 }
 
 Status GenerateInput(const std::pair<TensorType, ascir::TensorId> &input, const codegen::TensorManager &tensor_mng,

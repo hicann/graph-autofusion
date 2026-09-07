@@ -92,7 +92,19 @@ std::string TilingLib::GenPgoAutofuseTiling(const ascir::FusedScheduledResult &f
   }
   if (!ascgen_utils::IsJustCubeFixpip(fused_schedule_result)) {
     if (enable_autofuse_pgo_) {
-      ss << "  if (!PGOGetTilingKey(config_file, *tiling)) {" << std::endl;
+      ss << "  auto pgo_tiling = *tiling;" << std::endl;
+      ss << "  bool use_pgo_tiling = PGOGetTilingKey(config_file, pgo_tiling);" << std::endl;
+      ss << "  if (use_pgo_tiling && (pgo_tiling.get_block_dim() == 0U || "
+            "pgo_tiling.get_block_dim() > limit->aiv_num)) {"
+         << std::endl;
+      ss << "    OP_LOGW(OP_NAME, \"Loaded PGO block_dim %u is outside core budget [1, %u].\", "
+            "pgo_tiling.get_block_dim(), limit->aiv_num);"
+         << std::endl;
+      ss << "    use_pgo_tiling = false;" << std::endl;
+      ss << "  }" << std::endl;
+      ss << "  if (use_pgo_tiling) {" << std::endl;
+      ss << "    *tiling = pgo_tiling;" << std::endl;
+      ss << "  } else {" << std::endl;
       ss << "    if (!optiling::GetTiling(*tiling, tiling_case_id, nullptr)) {" << std::endl;
       ss << "      return -1;" << std::endl;
       ss << "    }" << std::endl;
@@ -378,7 +390,10 @@ std::string TilingLib::GenPGOGetTilingKey(const std::string tiling) const {
   ss << "    std::getline(config_file, line);" << std::endl;
   ss << "    std::istringstream iss0(line);" << std::endl;
   ss << "    int flag = -1;" << std::endl;
-  ss << "    iss0 >> flag;" << std::endl;
+  ss << "    if (!(iss0 >> flag) || (flag != 0 && flag != 1)) {" << std::endl;
+  ss << "      OP_LOGW(OP_NAME, \"Invalid PGO config flag.\");" << std::endl;
+  ss << "      return false;" << std::endl;
+  ss << "    }" << std::endl;
   ss << "    OP_LOGD(OP_NAME, \"best_config %d.\", flag);" << std::endl;
   ss << "    // second line: tiling_data dumped as int32 decimals, space-separated" << std::endl;
   ss << "    std::getline(config_file, line);" << std::endl;
@@ -393,8 +408,15 @@ std::string TilingLib::GenPGOGetTilingKey(const std::string tiling) const {
   ss << "      tiling_i32.push_back(static_cast<int32_t>(tmp));" << std::endl;
   ss << "    }" << std::endl;
   ss << "    const size_t expect_num = (sizeof(tiling_data) + sizeof(int32_t) - 1) / sizeof(int32_t);" << std::endl;
-  ss << "    tiling_i32.resize(expect_num, 0);" << std::endl;
-  ss << "    memcpy_s(&tiling_data, sizeof(tiling_data), tiling_i32.data(), sizeof(tiling_data));" << std::endl;
+  ss << "    if (!iss1.eof() || tiling_i32.size() != expect_num) {" << std::endl;
+  ss << "      OP_LOGW(OP_NAME, \"Invalid PGO tiling data length.\");" << std::endl;
+  ss << "      return false;" << std::endl;
+  ss << "    }" << std::endl;
+  ss << "    if (memcpy_s(&tiling_data, sizeof(tiling_data), tiling_i32.data(), sizeof(tiling_data)) != EOK) {"
+     << std::endl;
+  ss << "      OP_LOGW(OP_NAME, \"Failed to load PGO tiling data.\");" << std::endl;
+  ss << "      return false;" << std::endl;
+  ss << "    }" << std::endl;
   ss << "    config_file.close();" << std::endl;
   ss << "    if (flag == 1) {" << std::endl;
   ss << "      best_tiling = tiling_data;" << std::endl;

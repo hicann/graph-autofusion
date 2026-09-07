@@ -751,6 +751,42 @@ def test_try_static_shape_compile_records_stage_when_force_unknown(
     assert ["InductorCompile", "all", "PrepareStaticShapeRecompile", "graph"] in labels
 
 
+def test_try_static_shape_compile_rejects_empty_const_tiling(
+    ascendc_compile_module, tmpdir
+):
+    device_dir = tmpdir.mkdir("device")
+    device_dir.join("autofuse_tiling_data.h").write("old tiling")
+
+    def is_static_shape():
+        return True
+
+    def gen_const_tiling_data(*args):
+        return b""
+
+    fake_lib = types.SimpleNamespace(
+        AutofuseIsStaticShape=is_static_shape,
+        GenConstTilingData=gen_const_tiling_data,
+    )
+    ascendc_compile_module.module.ctypes.CDLL = lambda path: fake_lib
+    ascendc_compile_module.module.static_shape_kernel_proc = lambda *args: None
+    ascendc_compile_module.module.init_torch_npu_for_const_tiling = lambda: None
+    args = type(
+        "Args",
+        (),
+        {
+            "force_unknown": False,
+            "stage": "all",
+            "graph_name": "graph",
+            "config_file": "config.txt",
+        },
+    )()
+
+    with pytest.raises(
+        ascendc_compile_module.CompileError, match="GenConstTilingData returned empty"
+    ):
+        ascendc_compile_module.try_static_shape_compile(args, str(tmpdir), "kernel.so")
+
+
 def test_copy_so_to_output_records_stage(ascendc_compile_module, tmpdir):
     src_file = tmpdir.join("source.so")
     dst_file = tmpdir.mkdir("out").join("target.so")

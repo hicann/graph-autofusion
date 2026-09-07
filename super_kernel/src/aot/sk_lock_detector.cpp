@@ -66,7 +66,7 @@ std::pair<uint64_t, uint64_t> LockDetector::GetAvailableCores(bool isSuperKernel
   }
 }
 
-bool LockDetector::IsInSKStream(const SuperKernelBaseNode &node) {
+bool LockDetector::IsInSKStream(const SuperKernelBaseNode &node) const {
   return std::find(skStreamIds.begin(), skStreamIds.end(), node.GetStreamIdxInGraph()) != skStreamIds.end();
 }
 
@@ -287,7 +287,7 @@ void LockDetector::Reset() {
 }
 
 void LockDetector::UpdateSKRangeInStream(const SuperKernelBaseNode &curNode) {
-  uint64_t nodeId = curNode.GetNodeIdxInStream();
+  const uint64_t nodeId = curNode.GetNodeIdxInStream();
   uint32_t streamId = curNode.GetStreamIdxInGraph();
   if (skRangeInStream.find(streamId) == skRangeInStream.end()) {
     skRangeInStream[streamId].first = nodeId;
@@ -299,7 +299,7 @@ void LockDetector::UpdateSKRangeInStream(const SuperKernelBaseNode &curNode) {
 }
 
 bool LockDetector::IsBeforeSKRange(const SuperKernelBaseNode &curNode) {
-  uint64_t nodeId = curNode.GetNodeIdxInStream();
+  const uint64_t nodeId = curNode.GetNodeIdxInStream();
   uint32_t streamId = curNode.GetStreamIdxInGraph();
   if (skRangeInStream.find(streamId) == skRangeInStream.end()) {
     return false;

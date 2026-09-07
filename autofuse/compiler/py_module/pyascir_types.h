@@ -39,6 +39,7 @@ class SizeExpr {
   static int Init(PyObject *self_pyobject, const af::Expression &expr);
   static PyObject *FromSizeExpr(const af::Expression &expr);
   static const af::Expression AsSizeExpr(PyObject *obj);
+  static const af::Expression AsExpression(PyObject *obj);
   static PyObject *Add(PyObject *self, PyObject *args);
   static PyObject *Mul(PyObject *self, PyObject *args);
   static PyObject *Div(PyObject *self, PyObject *args);

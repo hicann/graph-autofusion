@@ -46,3 +46,14 @@ target_link_libraries(test_ascir_ut
     ascir_builtin_ops
     #ge_compiler
     GTest::gtest)
+
+add_executable(test_index_expr_arange_schema test_index_expr_arange_schema.cpp)
+target_link_libraries(test_index_expr_arange_schema PRIVATE
+    ascir
+    ascir_builtin_ops
+    ascir_ops_headers
+    aihac_symbolizer_af
+    metadef
+    GTest::gtest
+    GTest::gtest_main)
+gtest_discover_tests(test_index_expr_arange_schema)

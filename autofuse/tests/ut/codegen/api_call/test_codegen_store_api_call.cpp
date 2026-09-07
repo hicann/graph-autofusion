@@ -127,7 +127,7 @@ TEST(CodegenKernel, StoreApiCall_TwoStoreOneOutput) {
 
   std::string result;
   call_0.Generate(tpipe, vector<af::AxisId>{}, result);
-  EXPECT_EQ(result, std::string{"DataCopyPadExtend(local_1[0 + 0], local_0, 1, 1, 16 - 1, 0);\n"});
+  EXPECT_EQ(result, std::string{"DataCopyPadExtend(local_1[0 + 0], local_0, 1, 1, 0, 0);\n"});
 
   codegen::StoreApiCall call_1("Store");
   EXPECT_EQ(call_1.Init(store_1), 0);
@@ -238,7 +238,7 @@ TEST(CodegenKernel, StoreApiCall_NeetMte3SyncMte2) {
   call_1.inputs.push_back(&x1);
   x1.reads.push_back(&call_1);
   call_1.Generate(kernel.tpipe, vector<af::AxisId>{}, result);
-  EXPECT_EQ(result, std::string{"DataCopyPadExtend(local_1[0 + 0], local_0, 1, 1, 16 - 1, 0);\n"
+  EXPECT_EQ(result, std::string{"DataCopyPadExtend(local_1[0 + 0], local_0, 1, 1, 0, 0);\n"
                                 "auto local_0_e_mte3_2_mte2_t_0 = tpipe.AllocEventID<HardEvent::MTE3_MTE2>();\n"
                                 "TQueSync<PIPE_MTE3, PIPE_MTE2> local_0_s_mte3_2_mte2_t_0;\n"
                                 "local_0_s_mte3_2_mte2_t_0.SetFlag(local_0_e_mte3_2_mte2_t_0);\n"

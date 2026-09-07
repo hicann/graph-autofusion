@@ -11,6 +11,7 @@
 #include "gtest/gtest.h"
 
 #include <ascendc_ir.h>
+#include <array>
 #include <map>
 #include "ascir.h"
 #include <ascir_ops.h>
@@ -44,6 +45,8 @@
 #include "codegen.h"
 #include "optimize/graph_pass/pass_utils.h"
 #include "common/autofuse_backend_spec_api.h"
+#include "autoschedule/alignment_handler.h"
+#include "../../v35/ut/optimize/runtime_stub.h"
 
 using namespace af;
 using namespace af::ops;
@@ -53,6 +56,243 @@ using ge::InputValueSumSourceStub;
 using ge::RuntimeStub;
 
 namespace {
+enum class ArangeConsumer {
+  kAdd,
+  kSub,
+  kMul,
+  kCompare,
+  kFloorDiv,
+  kMinimum,
+  kMaximum,
+};
+
+std::vector<std::string> GetNodeNames(const af::AscGraph &graph) {
+  std::vector<std::string> names;
+  for (const auto &node : graph.GetAllNodes()) {
+    names.emplace_back(node->GetNamePtr());
+  }
+  return names;
+}
+
+std::string GetLineContaining(const std::string &text, const std::string &needle) {
+  const auto offset = text.find(needle);
+  if (offset == std::string::npos) {
+    return {};
+  }
+  const auto line_begin = text.rfind('\n', offset);
+  const auto line_end = text.find('\n', offset);
+  return text.substr(line_begin == std::string::npos ? 0UL : line_begin + 1UL,
+                     line_end == std::string::npos ? std::string::npos : line_end - line_begin - 1UL);
+}
+
+af::AscGraph CreateArangeConsumerGraph(const std::string &name, ArangeConsumer consumer,
+                                       const af::Expression &vector_stride = af::ops::One,
+                                       af::DataType dtype = af::DT_INT32,
+                                       const std::array<af::Expression, 4> &arange_params = {
+                                           af::Symbol(0), af::Symbol(1), af::Symbol(1), af::Symbol(1)}) {
+  af::AscGraph graph(name.c_str());
+  const auto size = graph.CreateSizeVar("size");
+  const auto axis = graph.CreateAxis("axis", size);
+
+  Arange arange("arange");
+  arange.ir_attr.SetBase(arange_params[0]);
+  arange.ir_attr.SetStep(arange_params[1]);
+  arange.attr.sched.axis = {axis.id};
+  arange.attr.api.unit = af::ComputeUnit::kUnitVector;
+  arange.y.dtype = dtype;
+  *arange.y.axis = {axis.id};
+  *arange.y.repeats = {size};
+  *arange.y.strides = {af::ops::One};
+  *arange.y.vectorized_axis = {axis.id};
+  *arange.y.vectorized_strides = {af::ops::One};
+  (void)graph.AddNode(arange);
+
+  Arange other_arange("other_arange");
+  other_arange.ir_attr.SetBase(arange_params[2]);
+  other_arange.ir_attr.SetStep(arange_params[3]);
+  other_arange.attr.sched.axis = {axis.id};
+  other_arange.attr.api.unit = af::ComputeUnit::kUnitVector;
+  other_arange.y.dtype = dtype;
+  *other_arange.y.axis = {axis.id};
+  *other_arange.y.repeats = {size};
+  *other_arange.y.strides = {af::ops::One};
+  *other_arange.y.vectorized_axis = {axis.id};
+  *other_arange.y.vectorized_strides = {af::ops::One};
+  (void)graph.AddNode(other_arange);
+
+  Store store("store");
+  if (consumer == ArangeConsumer::kCompare) {
+    Lt compare("compare");
+    compare.x1 = arange.y;
+    compare.x2 = other_arange.y;
+    compare.attr.sched.axis = {axis.id};
+    compare.attr.api.unit = af::ComputeUnit::kUnitVector;
+    compare.y.dtype = af::DT_UINT8;
+    *compare.y.axis = {axis.id};
+    *compare.y.repeats = {size};
+    *compare.y.strides = {vector_stride};
+    *compare.y.vectorized_axis = {axis.id};
+    *compare.y.vectorized_strides = {vector_stride};
+    store.x = compare.y;
+  } else if (consumer == ArangeConsumer::kFloorDiv) {
+    FloorDiv floor_div("floor_div");
+    floor_div.x1 = arange.y;
+    floor_div.x2 = other_arange.y;
+    floor_div.attr.sched.axis = {axis.id};
+    floor_div.attr.api.unit = af::ComputeUnit::kUnitVector;
+    floor_div.y.dtype = dtype;
+    *floor_div.y.axis = {axis.id};
+    *floor_div.y.repeats = {size};
+    *floor_div.y.strides = {af::ops::One};
+    *floor_div.y.vectorized_axis = {axis.id};
+    *floor_div.y.vectorized_strides = {af::ops::One};
+    store.x = floor_div.y;
+  } else {
+    auto configure = [&](auto &op) {
+      op.attr.sched.axis = {axis.id};
+      op.attr.api.unit = af::ComputeUnit::kUnitVector;
+      op.y.dtype = dtype;
+      *op.y.axis = {axis.id};
+      *op.y.repeats = {size};
+      *op.y.strides = {af::ops::One};
+      *op.y.vectorized_axis = {axis.id};
+      *op.y.vectorized_strides = {af::ops::One};
+      store.x = op.y;
+    };
+    if (consumer == ArangeConsumer::kAdd) {
+      Add op("add");
+      op.x1 = arange.y;
+      op.x2 = other_arange.y;
+      configure(op);
+    } else if (consumer == ArangeConsumer::kSub) {
+      Sub op("sub");
+      op.x1 = arange.y;
+      op.x2 = other_arange.y;
+      configure(op);
+    } else if (consumer == ArangeConsumer::kMul) {
+      Mul op("mul");
+      op.x1 = arange.y;
+      op.x2 = other_arange.y;
+      configure(op);
+    } else if (consumer == ArangeConsumer::kMinimum) {
+      Minimum op("minimum");
+      op.x1 = arange.y;
+      op.x2 = other_arange.y;
+      configure(op);
+    } else if (consumer == ArangeConsumer::kMaximum) {
+      Maximum op("maximum");
+      op.x1 = arange.y;
+      op.x2 = other_arange.y;
+      configure(op);
+    }
+  }
+
+  store.attr.sched.axis = {axis.id};
+  store.attr.api.unit = af::ComputeUnit::kUnitMTE3;
+  store.y.dtype = consumer == ArangeConsumer::kCompare ? af::DT_UINT8 : dtype;
+  *store.y.axis = {axis.id};
+  *store.y.repeats = {size};
+  *store.y.strides = {af::ops::One};
+  *store.y.vectorized_axis = {axis.id};
+  *store.y.vectorized_strides = {af::ops::One};
+
+  Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  return graph;
+}
+
+af::AscGraph CreateWindowMathGraph(const std::string &name) {
+  af::AscGraph graph(name.c_str());
+  const auto size = graph.CreateSizeVar("size");
+  const auto axis = graph.CreateAxis("axis", size);
+  auto set_tensor = [&](auto &tensor) {
+    tensor.dtype = af::DT_INT64;
+    *tensor.axis = {axis.id};
+    *tensor.repeats = {size};
+    *tensor.strides = {af::ops::One};
+    *tensor.vectorized_axis = {axis.id};
+    *tensor.vectorized_strides = {af::ops::One};
+  };
+
+  Arange arange("arange");
+  arange.ir_attr.SetBase(af::Symbol(-17));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.attr.sched.axis = {axis.id};
+  arange.attr.api.unit = af::ComputeUnit::kUnitVector;
+  set_tensor(arange.y);
+  (void)graph.AddNode(arange);
+  Arange divisor("divisor");
+  divisor.ir_attr.SetBase(af::Symbol(3));
+  divisor.ir_attr.SetStep(af::Symbol(0));
+  divisor.attr.sched.axis = {axis.id};
+  divisor.attr.api.unit = af::ComputeUnit::kUnitVector;
+  set_tensor(divisor.y);
+  (void)graph.AddNode(divisor);
+  FloorDiv floor_div("floor_div");
+  floor_div.x1 = arange.y;
+  floor_div.x2 = divisor.y;
+  floor_div.attr.sched.axis = {axis.id};
+  floor_div.attr.api.unit = af::ComputeUnit::kUnitVector;
+  set_tensor(floor_div.y);
+  Minimum minimum("minimum");
+  minimum.x1 = floor_div.y;
+  minimum.x2 = divisor.y;
+  minimum.attr.sched.axis = {axis.id};
+  minimum.attr.api.unit = af::ComputeUnit::kUnitVector;
+  set_tensor(minimum.y);
+  Maximum maximum("maximum");
+  maximum.x1 = minimum.y;
+  maximum.x2 = arange.y;
+  maximum.attr.sched.axis = {axis.id};
+  maximum.attr.api.unit = af::ComputeUnit::kUnitVector;
+  set_tensor(maximum.y);
+  Store store("store");
+  store.x = maximum.y;
+  store.attr.sched.axis = {axis.id};
+  store.attr.api.unit = af::ComputeUnit::kUnitMTE3;
+  set_tensor(store.y);
+  Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  return graph;
+}
+
+af::AscGraph CreateArangeStoreGraph(const std::string &name) {
+  af::AscGraph graph(name.c_str());
+  const auto size = graph.CreateSizeVar("size");
+  const auto axis = graph.CreateAxis("axis", size);
+
+  Arange arange("arange");
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.attr.sched.axis = {axis.id};
+  arange.attr.api.unit = af::ComputeUnit::kUnitVector;
+  arange.y.dtype = af::DT_INT32;
+  *arange.y.axis = {axis.id};
+  *arange.y.repeats = {size};
+  *arange.y.strides = {af::ops::One};
+  *arange.y.vectorized_axis = {axis.id};
+  *arange.y.vectorized_strides = {af::ops::One};
+  (void)graph.AddNode(arange);
+
+  Store store("store");
+  store.x = arange.y;
+  store.attr.sched.axis = {axis.id};
+  store.attr.api.unit = af::ComputeUnit::kUnitMTE3;
+  store.y.dtype = af::DT_INT32;
+  *store.y.axis = {axis.id};
+  *store.y.repeats = {size};
+  *store.y.strides = {af::ops::One};
+  *store.y.vectorized_axis = {axis.id};
+  *store.y.vectorized_strides = {af::ops::One};
+
+  Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  return graph;
+}
+
 class GraphBuilder {
  public:
   explicit GraphBuilder(const std::string &name) {
@@ -113,6 +353,10 @@ class TestOptimizer : public ::testing::Test {
   optimize::Optimizer optimizer;
 
   TestOptimizer() : optimizer(optimize::OptimizerOptions{}) {}
+
+  static void SetUpV2RuntimeStub() {
+    RuntimeStub::SetInstance(std::make_shared<af::RuntimeStubV2>());
+  }
 
   static std::stringstream &SizeExprListStr(std::stringstream &ss, const af::AscGraph &graph,
                                             const std::vector<af::Expression> &size_expr_list) {
@@ -200,6 +444,447 @@ TEST_F(TestOptimizer, TwoWorkspace) {
   optimizer.BufQueAlloc(graph, graph);
   EXPECT_EQ(workspace1->outputs[0].attr.mem.tensor_id, store1->outputs[0].attr.mem.tensor_id);
   EXPECT_EQ(workspace2->outputs[0].attr.mem.tensor_id, store2->outputs[0].attr.mem.tensor_id);
+}
+
+TEST_F(TestOptimizer, V2ArangeCompareOptimizeProducesDeterministicVectorFunc) {
+  SetUpV2RuntimeStub();
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  std::vector<std::string> expected_root_order;
+  std::vector<std::string> expected_vf_order;
+  for (size_t run = 0UL; run < 3UL; ++run) {
+    auto graph = CreateArangeConsumerGraph("arange_compare_vf", ArangeConsumer::kCompare);
+    ::ascir::FusedScheduledResult result;
+    ASSERT_EQ(optimizer.Optimize(graph, result), af::SUCCESS);
+    ASSERT_EQ(result.node_idx_to_scheduled_results.size(), 1UL);
+    ASSERT_EQ(result.node_idx_to_scheduled_results[0].size(), 1UL);
+    ASSERT_EQ(result.node_idx_to_scheduled_results[0][0].schedule_groups.size(), 1UL);
+    ASSERT_EQ(result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.size(), 1UL);
+    const auto &impl_graph = result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
+    std::vector<AscGraph> subgraphs;
+    ASSERT_EQ(impl_graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+    ASSERT_EQ(subgraphs.size(), 1UL);
+    const auto root_order = GetNodeNames(impl_graph);
+    const auto vf_order = GetNodeNames(subgraphs[0]);
+    EXPECT_EQ(root_order, (std::vector<std::string>{"arange_compare_vf_0_B0Y0_S0G0C0_VfNode_0", "store", "output"}));
+    EXPECT_EQ(vf_order,
+              (std::vector<std::string>{"arange", "other_arange", "compare", "Store_compare0", "Output_compare0"}));
+    if (run == 0UL) {
+      expected_root_order = root_order;
+      expected_vf_order = vf_order;
+    } else {
+      EXPECT_EQ(root_order, expected_root_order);
+      EXPECT_EQ(vf_order, expected_vf_order);
+    }
+  }
+}
+
+TEST_F(TestOptimizer, V2ArangeStoreOptimizeProducesSingletonVectorFunc) {
+  SetUpV2RuntimeStub();
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  auto graph = CreateArangeStoreGraph("arange_store_vf");
+  ::ascir::FusedScheduledResult result;
+
+  ASSERT_EQ(optimizer.Optimize(graph, result), af::SUCCESS);
+  ASSERT_EQ(result.node_idx_to_scheduled_results.size(), 1UL);
+  ASSERT_EQ(result.node_idx_to_scheduled_results[0].size(), 1UL);
+  ASSERT_EQ(result.node_idx_to_scheduled_results[0][0].schedule_groups.size(), 1UL);
+  ASSERT_EQ(result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.size(), 1UL);
+
+  const auto &impl_graph = result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
+  std::vector<AscGraph> subgraphs;
+  ASSERT_EQ(impl_graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  ASSERT_EQ(subgraphs.size(), 1UL);
+  EXPECT_EQ(GetNodeNames(impl_graph),
+            (std::vector<std::string>{"arange_store_vf_0_B0Y0_S0G0C0_VfNode_0", "store", "output"}));
+  EXPECT_EQ(GetNodeNames(subgraphs[0]), (std::vector<std::string>{"arange", "Store_arange0", "Output_arange0"}));
+}
+
+TEST_F(TestOptimizer, V2HighRankArangeOptimizeAndCodegenOuterFor) {
+  SetUpV2RuntimeStub();
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  af::AscGraph graph("high_rank_arange_pipeline");
+  std::vector<af::Expression> sizes;
+  std::vector<af::AxisId> axes;
+  for (size_t i = 0UL; i < 5UL; ++i) {
+    sizes.push_back(graph.CreateSizeVar("size" + std::to_string(i)));
+    axes.push_back(graph.CreateAxis("axis" + std::to_string(i), sizes.back()).id);
+  }
+  const std::vector<af::Expression> strides = {sizes[1] * sizes[2] * sizes[3] * sizes[4] * af::Symbol(5),
+                                               sizes[2] * sizes[3] * sizes[4] * af::Symbol(4),
+                                               sizes[3] * sizes[4] * af::Symbol(3), sizes[4] * af::Symbol(2), One};
+
+  Arange arange("arange");
+  arange.ir_attr.SetBase(af::Symbol(3));
+  arange.ir_attr.SetStep(af::Symbol(2));
+  arange.attr.sched.axis = axes;
+  arange.attr.api.unit = af::ComputeUnit::kUnitVector;
+  arange.y.dtype = af::DT_INT64;
+  *arange.y.axis = axes;
+  *arange.y.repeats = sizes;
+  *arange.y.strides = strides;
+  ASSERT_NE(graph.AddNode(arange), nullptr);
+
+  Abs abs("abs");
+  abs.x = arange.y;
+  abs.attr.sched.axis = axes;
+  abs.attr.api.unit = af::ComputeUnit::kUnitVector;
+  abs.y.dtype = af::DT_INT64;
+  *abs.y.axis = axes;
+  *abs.y.repeats = sizes;
+  *abs.y.strides = strides;
+
+  Store store("store");
+  store.x = abs.y;
+  store.attr.sched.axis = axes;
+  store.attr.api.unit = af::ComputeUnit::kUnitMTE3;
+  store.y.dtype = af::DT_INT64;
+  *store.y.axis = axes;
+  *store.y.repeats = sizes;
+  *store.y.strides = strides;
+
+  Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+
+  ::ascir::FusedScheduledResult scheduled;
+  ASSERT_EQ(optimizer.Optimize(graph, scheduled), af::SUCCESS);
+  ASSERT_EQ(scheduled.node_idx_to_scheduled_results.size(), 1UL);
+  ASSERT_EQ(scheduled.node_idx_to_scheduled_results[0].size(), 1UL);
+  ASSERT_EQ(scheduled.node_idx_to_scheduled_results[0][0].schedule_groups.size(), 1UL);
+  ASSERT_FALSE(scheduled.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.empty());
+
+  codegen::CodegenResult generated;
+  const std::map<std::string, std::string> shape_info = {
+      {"size0", "2"}, {"size1", "2"}, {"size2", "2"}, {"size3", "2"}, {"size4", "65"}};
+  ASSERT_EQ(codegen::Codegen(codegen::CodegenOptions{}).Generate(shape_info, scheduled, generated), af::SUCCESS);
+  EXPECT_NE(generated.kernel.find("outer_for_0"), std::string::npos) << generated.kernel;
+  EXPECT_NE(generated.kernel.find("arange_offset_"), std::string::npos) << generated.kernel;
+}
+
+TEST_F(TestOptimizer, V2ArangeFloorDivOptimizeProducesDeterministicKernel) {
+  SetUpV2RuntimeStub();
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  std::vector<std::string> expected_root_order;
+  for (size_t run = 0UL; run < 3UL; ++run) {
+    auto graph = CreateArangeConsumerGraph("arange_floor_div_vf", ArangeConsumer::kFloorDiv);
+    ::ascir::FusedScheduledResult result;
+    ASSERT_EQ(optimizer.Optimize(graph, result), af::SUCCESS);
+    ASSERT_EQ(result.node_idx_to_scheduled_results.size(), 1UL);
+    ASSERT_EQ(result.node_idx_to_scheduled_results[0].size(), 1UL);
+    ASSERT_EQ(result.node_idx_to_scheduled_results[0][0].schedule_groups.size(), 1UL);
+    ASSERT_EQ(result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.size(), 1UL);
+    const auto &impl_graph = result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
+    std::vector<AscGraph> subgraphs;
+    ASSERT_EQ(impl_graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+    ASSERT_EQ(subgraphs.size(), 2UL);
+    const auto root_order = GetNodeNames(impl_graph);
+    EXPECT_EQ(root_order,
+              (std::vector<std::string>{"arange_floor_div_vf_0_B0Y0_S0G0C0_VfNode_0",
+                                        "arange_floor_div_vf_0_B0Y0_S0G0C0_VfNode_1", "floor_div", "store", "output"}));
+    if (run == 0UL) {
+      expected_root_order = root_order;
+    } else {
+      EXPECT_EQ(root_order, expected_root_order);
+    }
+  }
+}
+
+TEST_F(TestOptimizer, V2Int64ArangeFloorDivKeepsInt64Composition) {
+  SetUpV2RuntimeStub();
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  auto graph =
+      CreateArangeConsumerGraph("arange_int64_floor_div", ArangeConsumer::kFloorDiv, af::ops::One, af::DT_INT64);
+  ::ascir::FusedScheduledResult result;
+  ASSERT_EQ(optimizer.Optimize(graph, result), af::SUCCESS);
+  ASSERT_EQ(result.node_idx_to_scheduled_results.size(), 1UL);
+  ASSERT_EQ(result.node_idx_to_scheduled_results[0].size(), 1UL);
+  ASSERT_EQ(result.node_idx_to_scheduled_results[0][0].schedule_groups.size(), 1UL);
+  ASSERT_EQ(result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.size(), 1UL);
+  const auto &impl_graph = result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
+  std::vector<AscGraph> subgraphs;
+  ASSERT_EQ(impl_graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  ASSERT_EQ(subgraphs.size(), 2UL);
+  EXPECT_EQ(GetNodeNames(impl_graph), (std::vector<std::string>{"arange_int64_floor_div_0_B0Y0_S0G0C0_VfNode_0",
+                                                                "arange_int64_floor_div_0_B0Y0_S0G0C0_VfNode_1",
+                                                                "floor_div", "store", "output"}));
+  EXPECT_EQ(subgraphs[0].FindNode("arange")->outputs[0].attr.dtype, af::DT_INT64);
+  EXPECT_EQ(subgraphs[1].FindNode("other_arange")->outputs[0].attr.dtype, af::DT_INT64);
+  EXPECT_EQ(impl_graph.FindNode("floor_div")->outputs[0].attr.dtype, af::DT_INT64);
+}
+
+TEST_F(TestOptimizer, V2WindowMathOptimizeProducesOneDeterministicKernel) {
+  SetUpV2RuntimeStub();
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  std::vector<std::string> expected_root_order;
+  std::vector<std::vector<std::string>> expected_vf_orders;
+  for (size_t run = 0UL; run < 3UL; ++run) {
+    auto graph = CreateWindowMathGraph("window_math");
+    ::ascir::FusedScheduledResult result;
+    ASSERT_EQ(optimizer.Optimize(graph, result), af::SUCCESS);
+    ASSERT_EQ(result.node_idx_to_scheduled_results.size(), 1UL);
+    ASSERT_EQ(result.node_idx_to_scheduled_results[0].size(), 1UL);
+    ASSERT_EQ(result.node_idx_to_scheduled_results[0][0].schedule_groups.size(), 1UL);
+    ASSERT_EQ(result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.size(), 1UL);
+    const auto &impl_graph = result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
+    std::vector<AscGraph> subgraphs;
+    ASSERT_EQ(impl_graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+    ASSERT_EQ(subgraphs.size(), 3UL);
+    const auto root_order = GetNodeNames(impl_graph);
+    std::vector<std::vector<std::string>> vf_orders;
+    for (const auto &subgraph : subgraphs) {
+      vf_orders.push_back(GetNodeNames(subgraph));
+    }
+    if (run == 0UL) {
+      expected_root_order = root_order;
+      expected_vf_orders = vf_orders;
+    } else {
+      EXPECT_EQ(root_order, expected_root_order);
+      EXPECT_EQ(vf_orders, expected_vf_orders);
+    }
+    EXPECT_EQ(root_order,
+              (std::vector<std::string>{"window_math_0_B0Y0_S0G0C0_VfNode_0", "window_math_0_B0Y0_S0G0C0_VfNode_1",
+                                        "floor_div", "window_math_0_B0Y0_S0G0C0_VfNode_2", "store", "output"}));
+    EXPECT_EQ(vf_orders[0], (std::vector<std::string>{"arange", "Store_arange0", "Output_arange0"}));
+    EXPECT_EQ(vf_orders[1], (std::vector<std::string>{"divisor", "Store_divisor0", "Output_divisor0"}));
+    EXPECT_EQ(vf_orders[2], (std::vector<std::string>{"Data_floor_div0", "Data_window_math_0_B0Y0_S0G0C0_VfNode_01",
+                                                      "Data_window_math_0_B0Y0_S0G0C0_VfNode_12", "Load_floor_div0",
+                                                      "Load_window_math_0_B0Y0_S0G0C0_VfNode_01",
+                                                      "Load_window_math_0_B0Y0_S0G0C0_VfNode_12", "minimum", "maximum",
+                                                      "Store_maximum0", "Output_maximum0"}));
+  }
+}
+
+TEST_F(TestOptimizer, V2MultiArangeOptimizeKeepsOrderEdgesAndParamsIsolated) {
+  SetUpV2RuntimeStub();
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  const std::vector<std::string> root_golden = {"multi_arange_0_B0Y0_S0G0C0_VfNode_0", "store", "output"};
+  const std::vector<std::string> edge_golden = {"arange:0->add:0", "other_arange:0->add:1"};
+  std::vector<std::string> expected_root_order;
+  std::vector<std::string> expected_vf_order;
+  std::vector<std::string> expected_add_edges;
+  for (size_t run = 0UL; run < 3UL; ++run) {
+    auto graph = CreateArangeConsumerGraph("multi_arange", ArangeConsumer::kAdd, af::ops::One, af::DT_INT64,
+                                           {af::Symbol(1), af::Symbol(2), af::Symbol(7), af::Symbol(4)});
+
+    ::ascir::FusedScheduledResult result;
+    ASSERT_EQ(optimizer.Optimize(graph, result), af::SUCCESS);
+    const auto &impl_graph = result.node_idx_to_scheduled_results.at(0).at(0).schedule_groups.at(0).impl_graphs.at(0);
+    std::vector<AscGraph> subgraphs;
+    ASSERT_EQ(impl_graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+    ASSERT_EQ(subgraphs.size(), 1UL);
+    const auto root_order = GetNodeNames(impl_graph);
+    const auto vf_order = GetNodeNames(subgraphs[0]);
+    EXPECT_EQ(root_order, root_golden);
+    EXPECT_EQ(vf_order, (std::vector<std::string>{"arange", "other_arange", "add", "Store_add0", "Output_add0"}));
+    auto vf_arange = subgraphs[0].FindNode("arange");
+    auto vf_other_arange = subgraphs[0].FindNode("other_arange");
+    auto vf_add = subgraphs[0].FindNode("add");
+    ASSERT_NE(vf_arange, nullptr);
+    ASSERT_NE(vf_other_arange, nullptr);
+    ASSERT_NE(vf_add, nullptr);
+    af::Expression base;
+    af::Expression step;
+    ASSERT_EQ(vf_arange->attr.ir_attr->GetAttrValue("base", base), af::GRAPH_SUCCESS);
+    ASSERT_EQ(vf_arange->attr.ir_attr->GetAttrValue("step", step), af::GRAPH_SUCCESS);
+    EXPECT_EQ(base, af::Symbol(1));
+    EXPECT_EQ(step, af::Symbol(2));
+    ASSERT_EQ(vf_other_arange->attr.ir_attr->GetAttrValue("base", base), af::GRAPH_SUCCESS);
+    ASSERT_EQ(vf_other_arange->attr.ir_attr->GetAttrValue("step", step), af::GRAPH_SUCCESS);
+    EXPECT_EQ(base, af::Symbol(7));
+    EXPECT_EQ(step, af::Symbol(4));
+    ASSERT_EQ(vf_add->GetAllInDataAnchorsSize(), 2UL);
+    ASSERT_NE(vf_add->GetInDataAnchor(0)->GetPeerOutAnchor(), nullptr);
+    ASSERT_NE(vf_add->GetInDataAnchor(1)->GetPeerOutAnchor(), nullptr);
+    EXPECT_EQ(vf_add->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "arange");
+    EXPECT_EQ(vf_add->GetInDataAnchor(1)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "other_arange");
+    const std::vector<std::string> add_edges = {
+        vf_add->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName() + ":" +
+            std::to_string(vf_add->GetInDataAnchor(0)->GetPeerOutAnchor()->GetIdx()) +
+            "->add:" + std::to_string(vf_add->GetInDataAnchor(0)->GetIdx()),
+        vf_add->GetInDataAnchor(1)->GetPeerOutAnchor()->GetOwnerNode()->GetName() + ":" +
+            std::to_string(vf_add->GetInDataAnchor(1)->GetPeerOutAnchor()->GetIdx()) +
+            "->add:" + std::to_string(vf_add->GetInDataAnchor(1)->GetIdx())};
+    EXPECT_EQ(add_edges, edge_golden);
+    if (run == 0UL) {
+      expected_root_order = root_order;
+      expected_vf_order = vf_order;
+      expected_add_edges = add_edges;
+    } else {
+      EXPECT_EQ(root_order, expected_root_order);
+      EXPECT_EQ(vf_order, expected_vf_order);
+      EXPECT_EQ(add_edges, expected_add_edges);
+    }
+  }
+}
+
+struct Int64ConsumerCodegenCase {
+  ArangeConsumer consumer;
+  const char *consumer_name;
+  const char *expected_api;
+  const char *expected_call;
+};
+
+class Int64ArangeConsumerCodegenTest : public TestOptimizer,
+                                       public ::testing::WithParamInterface<Int64ConsumerCodegenCase> {};
+
+TEST_P(Int64ArangeConsumerCodegenTest, GeneratesInt64ConsumerWithoutNarrowing) {
+  SetUpV2RuntimeStub();
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  const auto &test_case = GetParam();
+  auto graph = CreateArangeConsumerGraph("int64_consumer", test_case.consumer, af::ops::One, af::DT_INT64);
+  ::ascir::FusedScheduledResult scheduled;
+  ASSERT_EQ(optimizer.Optimize(graph, scheduled), af::SUCCESS);
+  const auto &impl_graph = scheduled.node_idx_to_scheduled_results.at(0).at(0).schedule_groups.at(0).impl_graphs.at(0);
+  std::vector<AscGraph> subgraphs;
+  ASSERT_EQ(impl_graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  ASSERT_EQ(subgraphs.size(), 1UL);
+  const auto consumer = subgraphs[0].FindNode(test_case.consumer_name);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->inputs.Size(), 2UL);
+  ASSERT_EQ(consumer->outputs().size(), 1UL);
+  EXPECT_EQ(consumer->inputs[0].attr.dtype, af::DT_INT64);
+  EXPECT_EQ(consumer->inputs[1].attr.dtype, af::DT_INT64);
+  EXPECT_EQ(consumer->outputs[0].attr.dtype, af::DT_INT64);
+  codegen::CodegenResult generated;
+  ASSERT_EQ(codegen::Codegen(codegen::CodegenOptions{}).Generate({{"size", "stub_size"}}, scheduled, generated),
+            af::SUCCESS);
+  const auto consumer_call = GetLineContaining(generated.kernel, test_case.expected_api);
+  ASSERT_FALSE(consumer_call.empty());
+  EXPECT_EQ(consumer_call, test_case.expected_call);
+  if (test_case.consumer == ArangeConsumer::kAdd) {
+    const auto vf_signature = GetLineContaining(generated.kernel, "int64_t arange_offset_0");
+    ASSERT_FALSE(vf_signature.empty());
+    EXPECT_EQ(vf_signature,
+              "inline __simd_vf__ void VFCallint64_consumer_0_B0Y0_S0G0C0_VfNode_0(__local_mem__ int64_t "
+              "*local_1_addr, uint32_t output_dims_0, int64_t arange_offset_0, int64_t arange_base_0, int64_t "
+              "arange_step_0, int64_t arange_offset_1, int64_t arange_base_1, int64_t arange_step_1)");
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Int64Consumers, Int64ArangeConsumerCodegenTest,
+    ::testing::Values(Int64ConsumerCodegenCase{ArangeConsumer::kAdd, "add", "AscendC::MicroAPI::Add",
+                                               "    AscendC::MicroAPI::Add(vreg_2, vreg_0, vreg_1, preg_0);"},
+                      Int64ConsumerCodegenCase{ArangeConsumer::kSub, "sub", "AscendC::MicroAPI::Sub",
+                                               "    AscendC::MicroAPI::Sub(vreg_2, vreg_0, vreg_1, preg_0);"},
+                      Int64ConsumerCodegenCase{ArangeConsumer::kMul, "mul", "AscendC::MicroAPI::Mul",
+                                               "    AscendC::MicroAPI::Mul(vreg_2, vreg_0, vreg_1, preg_0);"},
+                      Int64ConsumerCodegenCase{ArangeConsumer::kMinimum, "minimum", "AscendC::MicroAPI::Min",
+                                               "    AscendC::MicroAPI::Min(vreg_2, vreg_0, vreg_1, preg_0);"},
+                      Int64ConsumerCodegenCase{ArangeConsumer::kMaximum, "maximum", "AscendC::MicroAPI::Max",
+                                               "    AscendC::MicroAPI::Max(vreg_2, vreg_0, vreg_1, preg_0);"}));
+
+TEST_F(TestOptimizer, V2ScalarVectorFuncPreservesRootScalarThroughCodegen) {
+  SetUpV2RuntimeStub();
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  af::AscGraph graph("scalar_vf_regression");
+  const auto size = graph.CreateSizeVar("size");
+  const auto axis = graph.CreateAxis("axis", size);
+
+  Data data("data", graph);
+  data.ir_attr.SetIndex(0);
+  data.y.dtype = af::DT_FLOAT;
+
+  Load load("load");
+  load.x = data.y;
+  load.attr.sched.axis = {axis.id};
+  load.attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  load.y.dtype = af::DT_FLOAT;
+  *load.y.axis = {axis.id};
+  *load.y.repeats = {size};
+  *load.y.strides = {One};
+  *load.y.vectorized_axis = {axis.id};
+  *load.y.vectorized_strides = {One};
+
+  Scalar scalar("scalar", graph);
+  scalar.ir_attr.SetValue("2.0");
+  scalar.y.dtype = af::DT_FLOAT;
+
+  Add add("add");
+  add.x1 = load.y;
+  add.x2 = scalar.y;
+  add.attr.sched.axis = {axis.id};
+  add.attr.api.unit = af::ComputeUnit::kUnitVector;
+  add.y.dtype = af::DT_FLOAT;
+  *add.y.axis = {axis.id};
+  *add.y.repeats = {size};
+  *add.y.strides = {One};
+  *add.y.vectorized_axis = {axis.id};
+  *add.y.vectorized_strides = {One};
+
+  Abs abs("abs");
+  abs.x = add.y;
+  abs.attr.sched.axis = {axis.id};
+  abs.attr.api.unit = af::ComputeUnit::kUnitVector;
+  abs.y.dtype = af::DT_FLOAT;
+  *abs.y.axis = {axis.id};
+  *abs.y.repeats = {size};
+  *abs.y.strides = {One};
+  *abs.y.vectorized_axis = {axis.id};
+  *abs.y.vectorized_strides = {One};
+
+  Store store("store");
+  store.x = abs.y;
+  store.attr.sched.axis = {axis.id};
+  store.attr.api.unit = af::ComputeUnit::kUnitMTE3;
+  store.y.dtype = af::DT_FLOAT;
+  *store.y.axis = {axis.id};
+  *store.y.repeats = {size};
+  *store.y.strides = {One};
+  *store.y.vectorized_axis = {axis.id};
+  *store.y.vectorized_strides = {One};
+
+  Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+
+  ::ascir::FusedScheduledResult scheduled;
+  ASSERT_EQ(optimizer.Optimize(graph, scheduled), af::SUCCESS);
+  ASSERT_EQ(scheduled.node_idx_to_scheduled_results.size(), 1UL);
+  ASSERT_EQ(scheduled.node_idx_to_scheduled_results[0].size(), 1UL);
+  ASSERT_EQ(scheduled.node_idx_to_scheduled_results[0][0].schedule_groups.size(), 1UL);
+  ASSERT_EQ(scheduled.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.size(), 1UL);
+  const auto &impl_graph = scheduled.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
+
+  const auto root_scalar = impl_graph.FindNode("scalar");
+  ASSERT_NE(root_scalar, nullptr);
+  ASSERT_NE(root_scalar->outputs[0].attr.mem.tensor_id, af::kIdNone);
+  EXPECT_NE(root_scalar->outputs[0].attr.mem.alloc_type, af::AllocType::kAllocTypeBuffer);
+
+  af::AscNodePtr vf_node;
+  for (const auto &node : impl_graph.GetAllNodes()) {
+    if (node->GetType() == VectorFunc::Type) {
+      vf_node = node;
+      break;
+    }
+  }
+  ASSERT_NE(vf_node, nullptr);
+  std::vector<AscGraph> subgraphs;
+  ASSERT_EQ(impl_graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  ASSERT_EQ(subgraphs.size(), 1UL);
+  const auto sub_scalar = subgraphs[0].FindNode("Scalar_scalar");
+  ASSERT_NE(sub_scalar, nullptr);
+  EXPECT_EQ(sub_scalar->outputs[0].attr.mem.tensor_id, root_scalar->outputs[0].attr.mem.tensor_id);
+
+  codegen::CodegenResult generated;
+  ASSERT_EQ(codegen::Codegen(codegen::CodegenOptions{}).Generate({{"size", "stub_size"}}, scheduled, generated),
+            af::SUCCESS);
+  const std::string scalar_name = "scalar_" + std::to_string(root_scalar->outputs[0].attr.mem.tensor_id);
+  const std::string function_name = "VFCall" + vf_node->GetName();
+  const auto signature_offset = generated.kernel.find("inline __simd_vf__ void " + function_name + "(");
+  ASSERT_NE(signature_offset, std::string::npos);
+  const auto signature_end = generated.kernel.find('\n', signature_offset);
+  const auto signature = generated.kernel.substr(signature_offset, signature_end - signature_offset);
+  const std::string scalar_param = "float " + scalar_name;
+  const auto scalar_param_offset = signature.find(scalar_param);
+  ASSERT_NE(scalar_param_offset, std::string::npos) << signature;
+  EXPECT_EQ(signature.find(scalar_param, scalar_param_offset + scalar_param.size()), std::string::npos) << signature;
+
+  const auto call_offset = generated.kernel.find(function_name + "(", signature_end);
+  ASSERT_NE(call_offset, std::string::npos);
+  const auto call_end = generated.kernel.find('\n', call_offset);
+  const auto call = generated.kernel.substr(call_offset, call_end - call_offset);
+  EXPECT_NE(call.find(scalar_name), std::string::npos) << call;
 }
 
 TEST_F(TestOptimizer, ReOrderMergeAxisGraph_scheduler) {

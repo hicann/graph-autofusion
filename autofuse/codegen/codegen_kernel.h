@@ -162,7 +162,7 @@ class Tensor : public Variable {
     return IsUbScalar() || IsConstScalar();
   }
   std::string GetScalarValue() const {
-    return IsUbScalar() ? ub_scalar_name : const_value;
+    return IsUbScalar() ? ub_scalar_name : (const_value.empty() ? Str() : const_value);
   }
   inline ascir::SizeExpr GetTensorSize() const {
     ascir::SizeExpr size_expr = af::Symbol(1);

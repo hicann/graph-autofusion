@@ -1164,6 +1164,8 @@ def try_static_shape_compile(args: argparse.Namespace, temp_dir, so_path):
         result = lib.GenConstTilingData(
             config_file, ctypes.c_int(aiv_num), ctypes.c_int(ub_size)
         )
+    if not result:
+        raise CompileError("GenConstTilingData returned empty const tiling data")
     const_tiling_data = result.decode("utf-8")
     tiling_data = os.path.join(temp_dir, "device", "autofuse_tiling_data.h")
     tiling_data_bak = os.path.join(temp_dir, "device", "autofuse_tiling_data_bak.h")

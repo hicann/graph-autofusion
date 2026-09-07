@@ -380,6 +380,22 @@ Status BufQueAllocator::SetOutputTensorAttr(const af::AscGraph &impl_graph) cons
       }
     }
   }
+
+  // VF子图中的常量Scalar副本在分区时拷贝了未分配的tensor_id, 此处按命名映射回填根图分配结果。
+  constexpr std::string_view kSubgraphScalarPrefix = "Scalar_";
+  std::vector<af::AscGraph> sub_graphs;
+  GE_ASSERT_GRAPH_SUCCESS(impl_graph.GetAllSubGraphs(sub_graphs));
+  for (auto &sub_graph : sub_graphs) {
+    for (const auto &node : sub_graph.GetAllNodes()) {
+      if (!IsOps<Scalar>(node) || node->GetName().size() <= kSubgraphScalarPrefix.size()) {
+        continue;
+      }
+      const auto root_node = impl_graph.FindNode(node->GetName().substr(kSubgraphScalarPrefix.size()).c_str());
+      if ((root_node != nullptr) && (IsOps<Scalar>(root_node) || IsOps<IndexExpr>(root_node))) {
+        node->outputs[0].attr.mem.tensor_id = root_node->outputs[0].attr.mem.tensor_id;
+      }
+    }
+  }
   return ge::GRAPH_SUCCESS;
 }
 

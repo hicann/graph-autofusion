@@ -42,7 +42,103 @@ void InsertAxis(const SubAxis *cur_dim, const NodeInfo &node_info,
     }
   }
 }
+
+bool AxisStableLess(const SubAxis *lhs, const SubAxis *rhs) {
+  if (lhs->id != rhs->id) {
+    return lhs->id < rhs->id;
+  }
+  return lhs->name < rhs->name;
+}
+
+bool IsBindMultiCoreInner(const SubAxis *axis) {
+  return axis != nullptr && axis->is_bind_multi_core && axis->axis_type == AxisPosition::INNER;
+}
+
+bool SharesParent(const SubAxis *lhs, const SubAxis *rhs) {
+  for (const auto *parent : lhs->parent_axis) {
+    if (parent == nullptr) {
+      continue;
+    }
+    for (const auto *other_parent : rhs->parent_axis) {
+      if (other_parent != nullptr &&
+          (other_parent == parent || (!parent->name.empty() && parent->name == other_parent->name))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 }  // namespace
+
+bool ExeTimePassManager::TryBuildCacheGuardInfo(const NodeInfo &node, CacheGuardInfo &info) const {
+  info = CacheGuardInfo{};
+  if (node.is_cv_ub_fusion || (node.exec_condition != af::ExecuteCondition::kCacheBlockSplitOriginBroadcastAxis &&
+                               node.exec_condition != af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis)) {
+    return false;
+  }
+
+  std::vector<const SubAxis *> block_inner_axes;
+  for (const auto *axis : node.loop_axes) {
+    if (IsBindMultiCoreInner(axis)) {
+      block_inner_axes.emplace_back(axis);
+    }
+  }
+  std::sort(block_inner_axes.begin(), block_inner_axes.end(), AxisStableLess);
+  // NDDMA is issued once per block-inner iteration; trailing vector axes are
+  // consumed inside that operation and must not disable its cache guard.
+  const bool nddma_with_trailing_vector_axis = node.node_type == "Nddma";
+  if (block_inner_axes.size() != 1U || node.loop_axes.empty() ||
+      (!nddma_with_trailing_vector_axis && node.loop_axes.back() != block_inner_axes.front())) {
+    return false;
+  }
+  const auto *block_inner = block_inner_axes.front();
+  if (!block_inner->repeat.IsValid()) {
+    return false;
+  }
+
+  info.guard_axis = af::Symbol(block_inner->name.c_str());
+  info.loop_extent = block_inner->repeat;
+  info.address_invariant = true;
+  // Parser axis repeats are constrained to positive tile sizes by the
+  // scheduler.  Record that provenance so symbolic modulo/division is only
+  // emitted for metadata produced by this adapter, never for arbitrary
+  // caller-provided expressions.
+  info.positive_range_proven = true;
+  if (node.exec_condition == af::ExecuteCondition::kCacheBlockSplitOriginBroadcastAxis) {
+    info.kind = CacheGuardKind::kOriginBroadcast;
+    return ValidateCacheGuardInfo(info);
+  }
+
+  std::vector<const SubAxis *> outer_parents;
+  for (const auto *parent : block_inner->parent_axis) {
+    if (parent != nullptr && parent->axis_type == AxisPosition::OUTER && !parent->is_bind_multi_core) {
+      outer_parents.emplace_back(parent);
+    }
+  }
+  if (tuning_space_ != nullptr) {
+    for (const auto &axis_holder : tuning_space_->sub_axes) {
+      const auto *axis = axis_holder.get();
+      if (axis == nullptr || axis->axis_type != AxisPosition::OUTER || axis->is_bind_multi_core) {
+        continue;
+      }
+      const bool direct_parent =
+          std::find(axis->parent_axis.begin(), axis->parent_axis.end(), block_inner) != axis->parent_axis.end();
+      if ((direct_parent || SharesParent(axis, block_inner)) &&
+          std::find(outer_parents.begin(), outer_parents.end(), axis) == outer_parents.end()) {
+        outer_parents.emplace_back(axis);
+      }
+    }
+  }
+  std::sort(outer_parents.begin(), outer_parents.end(), AxisStableLess);
+  if (outer_parents.size() != 1U || !outer_parents.front()->repeat.IsValid()) {
+    return false;
+  }
+  info.kind = CacheGuardKind::kFusedBroadcast;
+  info.period = outer_parents.front()->repeat;
+  info.block_inner_extent = block_inner->repeat;
+  return ValidateCacheGuardInfo(info);
+}
+
 void ExeTimePassManager::AddBAxis(const std::string &dim_name, const Expr &repeat, const Expr &stride,
                                   const NodeInfo &node_info) {
   TensorPtr output_tensor = node_info.outputs[0];
@@ -77,7 +173,8 @@ void ExeTimePassManager::AddRAxis(const std::string &dim_name, const Expr &repea
 
 void ExeTimePassManager::CheckBroadcast(const NodeInfo &node) {
   const std::string kNodeBroadcast = "Broadcast";
-  if (node.node_type == kNodeBroadcast || ascgen_utils::IsGeneralizeBrcInlineScene(node.node_ptr)) {
+  if (node.node_type == kNodeBroadcast ||
+      (node.node_ptr != nullptr && ascgen_utils::IsGeneralizeBrcInlineScene(node.node_ptr))) {
     auto &tensor = node.inputs[0];
     for (size_t i = 0; i < tensor->dim_info.size(); i++) {
       AddBAxis(tensor->dim_info[i]->name, tensor->repeat[i], tensor->stride[i], node);
@@ -189,6 +286,30 @@ bool ExeTimePassManager::GetRLoop(const NodeInfo &node, Expr &r_loop) const {
   return false;
 }
 
+Expr ExeTimePassManager::GetBlockDimExpr() const {
+  if (tuning_space_ == nullptr || tuning_space_->block_dims.empty()) {
+    return Expr();
+  }
+  Expr block_dim;
+  bool has_block_dim = false;
+  for (const auto &block_axes : tuning_space_->block_dims) {
+    Expr group_dim = CreateExpr(1U);
+    for (const auto *axis : block_axes) {
+      if (axis == nullptr) {
+        return Expr();
+      }
+      Expr axis_dim = axis->repeat;
+      if (!axis_dim.IsValid()) {
+        return Expr();
+      }
+      group_dim = af::sym::Mul(group_dim, axis_dim);
+    }
+    block_dim = has_block_dim ? af::sym::Max(block_dim, group_dim) : group_dim;
+    has_block_dim = true;
+  }
+  return block_dim.Simplify();
+}
+
 /*
 brc缓存执行逻辑：
 1.递归计算节点的输入信息，将每一个节点与一个或多个Data节点绑定
@@ -243,6 +364,20 @@ TernaryOp ExeTimePassManager::HandleReduceOrNormalSplit(const NodeInfo &node, co
 }
 
 TernaryOp ExeTimePassManager::UpdateNodeExeTime(const NodeInfo &node, const Expr &exe_time) const {
+  const bool is_cache_guard = node.exec_condition == af::ExecuteCondition::kCacheBlockSplitOriginBroadcastAxis ||
+                              node.exec_condition == af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis;
+  CacheGuardInfo guard_info;
+  if (TryBuildCacheGuardInfo(node, guard_info) && guard_info.address_invariant) {
+    const auto block_dim = GetBlockDimExpr();
+    if (IsBlockCountUniform(guard_info, block_dim)) {
+      return TernaryOp(CountGuardHits(guard_info, CreateExpr(0U)));
+    }
+    if (is_cache_guard) {
+      GELOGD("Node[%s] cache guard exe-time fallback: block hit count is not uniform.", node.name.c_str());
+    }
+  } else if (is_cache_guard) {
+    GELOGD("Node[%s] cache guard exe-time fallback: metadata unavailable or address is variant.", node.name.c_str());
+  }
   if (brc_buf_node_.find(node.name) == brc_buf_node_.end()) {
     return TernaryOp(exe_time);
   }

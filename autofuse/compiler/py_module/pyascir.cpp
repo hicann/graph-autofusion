@@ -37,6 +37,8 @@ inline constexpr char kAscBackendType[] = "AscBackend";
 inline constexpr char kIndexAttr[] = "index";
 inline constexpr char kValueAttr[] = "value";
 inline constexpr char kExprAttr[] = "expr";
+inline constexpr char kBaseAttr[] = "base";
+inline constexpr char kStepAttr[] = "step";
 inline constexpr char kOffsetAttr[] = "offset";
 inline constexpr char kAxisAttr[] = "axis";
 inline constexpr char kHasRelu[] = "has_relu";
@@ -1177,14 +1179,46 @@ auto GetValidatedIrAttr(PyObject *self, const char *attr_type_name) -> AttrDefTy
     return attr ? (attr->SetMethod(ReverseConvFunc(value)), 0) : -1;                                               \
   }
 
+#define DEFINE_IR_EXPR_ATTR_ACCESSORS(OpType, AttrType, AttrName, SetMethod, GetMethod)                            \
+  template <>                                                                                                      \
+  PyObject *OpsOperatorIrAttr<af::ascir_op::OpType, AttrName>::_getter(PyObject *self, void *closure) {            \
+    (void)closure;                                                                                                 \
+    auto *attr = GetValidatedIrAttr<af::ascir_op::OpType, af::ascir_op::OpType::AttrType>(self, #AttrType);        \
+    af::Expression value;                                                                                          \
+    if (attr == nullptr) {                                                                                         \
+      return nullptr;                                                                                              \
+    }                                                                                                              \
+    PY_ASSERT_GRAPH_SUCCESS(attr->GetMethod(value), "%s attr %s getter failed", #OpType, AttrName);                \
+    return pyascir::SizeExpr::FromSizeExpr(value);                                                                 \
+  }                                                                                                                \
+  template <>                                                                                                      \
+  int OpsOperatorIrAttr<af::ascir_op::OpType, AttrName>::_setter(PyObject *self, PyObject *value, void *closure) { \
+    (void)closure;                                                                                                 \
+    if (PyObject_IsInstance(value, reinterpret_cast<PyObject *>(&pyascir::SizeExpr::type)) != kPythonSuccess) {    \
+      PyErr_Format(PyExc_TypeError, "%s attr %s expected Expression", #OpType, AttrName);                          \
+      return -1;                                                                                                   \
+    }                                                                                                              \
+    auto expression = pyascir::SizeExpr::AsExpression(value);                                                      \
+    if (PyErr_Occurred() != nullptr) {                                                                             \
+      return -1;                                                                                                   \
+    }                                                                                                              \
+    if (!expression.IsValid()) {                                                                                   \
+      PyErr_Format(PyExc_ValueError, "%s attr %s expected a valid Expression", #OpType, AttrName);                 \
+      return -1;                                                                                                   \
+    }                                                                                                              \
+    auto *attr = GetValidatedIrAttr<af::ascir_op::OpType, af::ascir_op::OpType::AttrType>(self, #AttrType);        \
+    return attr ? (attr->SetMethod(expression), 0) : -1;                                                           \
+  }
+
 DEFINE_IR_ATTR_ACCESSORS(Data, AscDataIrAttrDef, kIndexAttr, int64_t, PyLong_Check, PyLong_FromLong, PyLong_AsLong,
                          SetIndex, GetIndex)
 DEFINE_IR_ATTR_ACCESSORS(Output, AscOutputIrAttrDef, kIndexAttr, int64_t, PyLong_Check, PyLong_FromLong, PyLong_AsLong,
                          SetIndex, GetIndex)
 DEFINE_IR_ATTR_ACCESSORS(ScalarData, AscScalarDataIrAttrDef, kIndexAttr, int64_t, PyLong_Check, PyLong_FromLong,
                          PyLong_AsLong, SetIndex, GetIndex)
-DEFINE_IR_ATTR_ACCESSORS(IndexExpr, AscIndexExprIrAttrDef, kExprAttr, int64_t, PyLong_Check, PyLong_FromLong,
-                         PyLong_AsLong, SetExpr, GetExpr)
+DEFINE_IR_EXPR_ATTR_ACCESSORS(IndexExpr, AscIndexExprIrAttrDef, kExprAttr, SetExpr, GetExpr)
+DEFINE_IR_EXPR_ATTR_ACCESSORS(Arange, AscArangeIrAttrDef, kBaseAttr, SetBase, GetBase)
+DEFINE_IR_EXPR_ATTR_ACCESSORS(Arange, AscArangeIrAttrDef, kStepAttr, SetStep, GetStep)
 DEFINE_IR_ATTR_ACCESSORS(Gather, AscGatherIrAttrDef, kAxisAttr, int64_t, PyLong_Check, PyLong_FromLong, PyLong_AsLong,
                          SetAxis, GetAxis)
 DEFINE_IR_ATTR_ACCESSORS(IndirectLoad, AscIndirectLoadIrAttrDef, kAxisAttr, int64_t, PyLong_Check, PyLong_FromLong,
@@ -1359,6 +1393,7 @@ const std::map<std::string, typename IrAttr<OpType>::handler> IrAttr<OpType>::at
     {"Scalar", AutoRegAttrHandle<af::ascir_op::Scalar, kValueAttr>::RegHandle},
     {"ScalarData", AutoRegAttrHandle<af::ascir_op::ScalarData, kIndexAttr>::RegHandle},
     {"IndexExpr", AutoRegAttrHandle<af::ascir_op::IndexExpr, kExprAttr>::RegHandle},
+    {"Arange", AutoRegAttrHandle<af::ascir_op::Arange, kBaseAttr, kStepAttr>::RegHandle},
     {"Output", AutoRegAttrHandle<af::ascir_op::Output, kIndexAttr>::RegHandle},
     {"Load", AutoRegAttrHandle<af::ascir_op::Load, kOffsetAttr>::RegHandle},
     {"Store", AutoRegAttrHandle<af::ascir_op::Store, kOffsetAttr>::RegHandle},
