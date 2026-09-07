@@ -44,6 +44,7 @@
 #include "sk_lock_detector.h"
 #include "sk_options_manager.h"
 #include "sk_scope_info.h"
+#include "sk_scope_split_result_reporter.h"
 
 /*!
  * \struct StreamState
@@ -130,7 +131,8 @@ class ScopeCoreInfoCalculator {
  */
 class ScopeSplitPass {
  public:
-  explicit ScopeSplitPass(SuperKernelGraph &inputGraph) : graph_(inputGraph), splitter_(nullptr) {}
+  explicit ScopeSplitPass(SuperKernelGraph &inputGraph)
+      : graph_(inputGraph), splitter_(nullptr), scopeSplitResultReporter_(nullptr) {}
   virtual ~ScopeSplitPass() = default;
 
   /*!
@@ -148,6 +150,10 @@ class ScopeSplitPass {
    */
   void SetSplitter(SuperKernelScopeSplitter *splitter) {
     splitter_ = splitter;
+  }
+
+  void SetScopeSplitResultReporter(ScopeSplitResultReporter *scopeSplitResultReporter) {
+    scopeSplitResultReporter_ = scopeSplitResultReporter;
   }
 
   /*!
@@ -202,14 +208,6 @@ class ScopeSplitPass {
    */
   static std::vector<uint64_t> GetKernelNodeIds(const SuperKernelScopeInfo &scope);
 
-  /*!
-   * \brief Check if two scopes have the same kernel nodes
-   * \param originScope First scope
-   * \param currentScope Second scope
-   * \return true if kernel node sets are identical
-   */
-  static bool HasSameKernelNodes(const SuperKernelScopeInfo &originScope, const SuperKernelScopeInfo &currentScope);
-
  private:
   /*!
    * \brief Print detailed scope information to current log context
@@ -222,6 +220,7 @@ class ScopeSplitPass {
  protected:
   SuperKernelGraph &graph_;
   SuperKernelScopeSplitter *splitter_;  ///< Reference to splitter for re-split requests
+  ScopeSplitResultReporter *scopeSplitResultReporter_;
 };
 
 // ============ Pass 3: Event-Only Stream Remove (after SK core calculation) ============
@@ -637,6 +636,7 @@ class SuperKernelScopeSplitter {
   SuperKernelGraph &graph_;
   std::vector<SuperKernelScopeInfo> scopeInfos_;
   std::vector<std::unique_ptr<ScopeSplitPass>> passes_;
+  ScopeSplitResultReporter splitResultReporter_;
   bool needResplit_ = false;
 
  private:

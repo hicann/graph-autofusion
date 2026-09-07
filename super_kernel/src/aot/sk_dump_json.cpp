@@ -626,12 +626,6 @@ bool DumpGraphJsonToFile(Json graphJson, const SuperKernelOptionsManager &opts, 
 
 void PrintFusedScopes(const SuperKernelGraph &graph, const std::vector<SuperKernelScopeInfo> &processedScopeInfos,
                       bool debugPerOpMaxCoreEnabled) {
-  // Build scopeId -> scope index map for root tracing
-  std::unordered_map<uint16_t, size_t> scopeIdToIdx;
-  for (size_t i = 0; i < processedScopeInfos.size(); ++i) {
-    scopeIdToIdx[processedScopeInfos[i].GetScopeId()] = i;
-  }
-
   // Build original scope kernel node sets
   const auto &originalScopes = graph.GetOriginalScopeInfos();
   auto originalKernelSets = BuildOriginalKernelSets(graph, originalScopes);
@@ -651,7 +645,7 @@ void PrintFusedScopes(const SuperKernelGraph &graph, const std::vector<SuperKern
       continue;
     }
 
-    ScopeBreakInfo rootScopeBreakInfo = FindRootBreakInfo(scopeInfo, scopeIdToIdx, processedScopeInfos);
+    const auto &breakInfo = scopeInfo.GetBreakInfo();
     std::string scopeNames = ScopeSplitPass::GetScopeNamesFromBitFlags(scopeInfo.GetScopeBitFlags(), graph);
 
     // Line 0: scopeId and scopeBitFlag
@@ -670,10 +664,10 @@ void PrintFusedScopes(const SuperKernelGraph &graph, const std::vector<SuperKern
     }
 
     // Line 3: breakReason (if kernel set differs from original scope)
-    if (!debugPerOpMaxCoreEnabled && rootScopeBreakInfo.GetReason() != ScopeBreakReason::NONE &&
+    if (!debugPerOpMaxCoreEnabled && breakInfo.GetReason() != ScopeBreakReason::NONE &&
         !IsKernelSetMatch(scopeInfo, originalKernelSets, graph)) {
-      SK_LOGI("    breakReason=[%s], breakReasonDetail=%s, scopeName=[%s]", rootScopeBreakInfo.Format().c_str(),
-              ScopeBreakReasonDetail(rootScopeBreakInfo.GetReason()), scopeNames.c_str());
+      SK_LOGI("    breakReason=[%s], breakReasonDetail=%s, scopeName=[%s]", breakInfo.Format().c_str(),
+              ScopeBreakReasonDetail(breakInfo.GetReason()), scopeNames.c_str());
     }
   }
 }
