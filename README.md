@@ -1,5 +1,7 @@
 # Graph-autofusion
 
+简体中文 | [English](./README_en.md)
+
 ## 🔥Latest News
 
 - [2026/04] Autofuse 组件开源！

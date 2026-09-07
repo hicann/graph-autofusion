@@ -1,5 +1,7 @@
 # Graph-autofusion
 
+English | [简体中文](./README.md)
+
 ## 🔥Latest News
 
 - [2026/04] Autofuse component is open sourced!
