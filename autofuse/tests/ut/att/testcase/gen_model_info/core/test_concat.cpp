@@ -584,7 +584,8 @@ void PrepareStubAndCompile() {
 
 void CompileAndRunConcat() {
   auto ret = std::system(
-      "g++ -ggdb3 -O0 tiling_func_main_concat.cpp Concat_tiling_func.cpp -o tiling_func_main_concat -I ./ -DSTUB_LOG");
+      "g++ -std=c++17 -ggdb3 -O0 tiling_func_main_concat.cpp Concat_tiling_func.cpp -o tiling_func_main_concat"
+      " -I ./ -DSTUB_LOG");
   EXPECT_EQ(ret, 0);
   ret = std::system("./tiling_func_main_concat");
   EXPECT_EQ(ret, 0);
