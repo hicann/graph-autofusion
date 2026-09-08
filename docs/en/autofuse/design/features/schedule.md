@@ -114,7 +114,7 @@ z1 = graph.create_axis("z1", s1)
 data = ascir.ops.Data('data', graph)
 data.y.dtype = ascir.dtypes.float32
 
-# Declare load operator
+# Declare the Load operator
 load = ascir.ops.Load('load')
 load.attr.sched.axis = [z0, z1]  # Scheduling axis
 load.x = data.y
@@ -122,7 +122,7 @@ load.y.axis = [z0, z1]  # Tensor output axis
 load.y.size = [s0, s1]  # Tensor output size
 load.y.strides = [s1, 1]  # Tensor output stride
 
-# Declare abs operator
+# Declare the Abs operator
 abs = ascir.ops.Abs('abs')
 abs.attr.sched.axis = [z0, z1]
 abs.x = load.y
@@ -130,7 +130,7 @@ abs.y.axis = [z0, z1]
 abs.y.size = [s0, s1]
 abs.y.strides = [s1, 1]
 
-# Declare max operator
+# Declare the Max operator
 max = ascir.ops.Max('max')
 max.attr.sched.axis = [z0, z1]
 max.x = abs.y

@@ -37,8 +37,11 @@ add_library(test_ascir_ut OBJECT
     code_dumper_unittest.cc
     ascir_utils_unittest.cc
     test_asc_graph_utils.cpp
+    test_ascir_att_impl.cpp
+    test_ascir_common.cpp
 )
 target_include_directories(test_ascir_ut PRIVATE
+    ${CODE_ROOT_DIR}/ascir/generator
     ${ASCEND_ROOT}/x86_64-linux/include
     ${ASCEND_ROOT}/opp/built-in/op_proto/inc)
 target_link_libraries(test_ascir_ut

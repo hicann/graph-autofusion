@@ -175,5 +175,66 @@ TEST_F(CalcTrueDivTmpSizeTest, CalcTrueDivTmpSize_ShouldReturnCorrectSize_WhenIn
   ASSERT_EQ(result[0]->size, af::Symbol(8192));
   ASSERT_EQ(result[0]->life_time_axis_id, -1);
 }
+
+// Test: second input is ub_scalar (repeats all 1) -> HasScalarOrUbScalar is true -> default tmp size
+TEST_F(CalcTrueDivTmpSizeTest, CalcTrueDivTmpSize_ShouldReturnDefaultSize_WhenSecondInputIsUbScalar) {
+  af::AscGraph graph("test");
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+
+  af::ascir_op::Data x1("x1", graph);
+  af::ascir_op::Data x2("x2", graph);
+  af::ascir_op::Load load1("load1");
+  af::ascir_op::Load load2("load2");
+  af::ascir_op::TrueDiv true_div("true_div");
+  af::ascir_op::Store store("store");
+  af::ascir_op::Output y("y");
+
+  x1.attr.sched.axis = {z0.id, z1.id};
+  x1.y.dtype = af::DT_FLOAT;
+  *x1.y.axis = {z0.id, z1.id};
+  *x1.y.repeats = {s0, s1};
+  *x1.y.strides = {s1, Symbol(1)};
+
+  x2.attr.sched.axis = {z0.id, z1.id};
+  x2.y.dtype = af::DT_FLOAT;
+  *x2.y.axis = {z0.id, z1.id};
+  *x2.y.repeats = {Symbol(1), Symbol(1)};
+  *x2.y.strides = {Symbol(1), Symbol(1)};
+
+  load1.x = x1.y;
+  load1.attr.sched.axis = {z0.id, z1.id};
+  load1.y.dtype = af::DT_FLOAT;
+  *load1.y.axis = {z0.id, z1.id};
+  *load1.y.repeats = {s0, s1};
+  *load1.y.strides = {s1, Symbol(1)};
+  *load1.y.vectorized_axis = {z0.id, z1.id};
+
+  load2.x = x2.y;
+  load2.attr.sched.axis = {z0.id, z1.id};
+  load2.y.dtype = af::DT_FLOAT;
+  *load2.y.axis = {z0.id, z1.id};
+  *load2.y.repeats = {Symbol(1), Symbol(1)};
+  *load2.y.strides = {Symbol(1), Symbol(1)};
+  *load2.y.vectorized_axis = {z0.id, z1.id};
+
+  true_div.x1 = load1.y;
+  true_div.x2 = load2.y;
+  true_div.attr.sched.axis = {z0.id, z1.id};
+  true_div.y.dtype = af::DT_FLOAT;
+  *true_div.y.axis = {z0.id, z1.id};
+  *true_div.y.repeats = {s0, s1};
+  *true_div.y.strides = {s1, Symbol(1)};
+
+  std::shared_ptr<af::AscNode> node = graph.FindNode("true_div");
+  std::vector<std::unique_ptr<af::TmpBufDesc>> result = CalcTrueDivTmpSize(*node);
+  ASSERT_EQ(result.size(), 1);
+  ASSERT_EQ(result[0]->size, af::Symbol(8192));
+  ASSERT_EQ(result[0]->life_time_axis_id, -1);
+}
+
 }  // namespace ascir
 }  // namespace af

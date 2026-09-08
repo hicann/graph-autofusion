@@ -2992,6 +2992,7 @@ Status Kernel::GenMulGroupKernelWithParseTilingData(const ascir::FusedScheduledR
                                                     std::unordered_set<const std::string *> &kernel_file_ptr) {
   auto scheduled_results = fused_schedule_result.node_idx_to_scheduled_results[graph_id];
   uint32_t function_id = kFuncIdBegin;
+  const bool support_parallel_compile = !config.is_inductor;
   for (size_t i = 0; i < scheduled_results.size(); i++) {
     auto schedule_groups = scheduled_results[i].schedule_groups;
     auto enable_group_parallel = scheduled_results[i].enable_group_parallel;
@@ -3052,19 +3053,21 @@ Status Kernel::GenMulGroupKernelWithParseTilingData(const ascir::FusedScheduledR
       }
     }
     auto max_group_per_compile_unit = GetMaxGroupPerCompileUnit(enable_parallel_compile);
-    if (config.is_inductor || (per_group_func_calls.size() <= static_cast<size_t>(max_group_per_compile_unit))) {
+    if (per_group_func_calls.size() <= static_cast<size_t>(max_group_per_compile_unit)) {
       AppendFuncCall(ss1, per_group_func_calls.cbegin(), per_group_func_calls.cend());
     } else {
-      const auto kernel_args = PackingFuncArgs("AutofuseTilingData", fused_schedule_result, use_list_tensor);
-      const auto packing_func_names =
-          Kernel::GenPackingFunctions(ss, kernel_args, per_group_func_calls, max_group_per_compile_unit, function_id);
+      const auto kernel_args = PackingFuncArgs("const AutofuseTilingData", fused_schedule_result, use_list_tensor);
+      const auto packing_func_names = Kernel::GenPackingFunctions(
+          ss, kernel_args, per_group_func_calls, max_group_per_compile_unit, function_id, support_parallel_compile);
       GenPackingFunctionCalls(ss1, kernel_args, packing_func_names);
     }
     if (cv_fusion_type == ascir::CubeTemplateType::kDefault) {
       ss1 << "  }";
     }
   }
-  FakeTilingIds(ss, function_id);
+  if (support_parallel_compile) {
+    FakeTilingIds(ss, function_id);
+  }
   return af::SUCCESS;
 }
 
@@ -3186,6 +3189,7 @@ Status Kernel::GenCVKernelFuncWithMulGroup(const ascir::FusedScheduledResult &fu
                                            const CodegenConfig &config, std::stringstream &ss, std::stringstream &ss1,
                                            bool use_list_tensor) {
   std::unordered_set<const std::string *> kernel_file_ptr;
+  const bool support_parallel_compile = !config.is_inductor;
   if (config.is_inductor) {
     ss1 << "#ifdef INDUCTOR_CONST_TILING_DATA" << std::endl;
     ss1 << "const CVAutofuseTilingData& gm_tiling_data = kConstTilingData;" << std::endl;
@@ -3275,16 +3279,18 @@ Status Kernel::GenCVKernelFuncWithMulGroup(const ascir::FusedScheduledResult &fu
       if (per_group_func_calls.size() <= static_cast<size_t>(max_group_per_compile_unit)) {
         AppendFuncCall(ss1, per_group_func_calls.cbegin(), per_group_func_calls.cend());
       } else {
-        const auto kernel_args = PackingFuncArgs("AutofuseTilingData", fused_schedule_result, use_list_tensor);
-        const auto packing_func_names =
-            Kernel::GenPackingFunctions(ss, kernel_args, per_group_func_calls, max_group_per_compile_unit, function_id);
+        const auto kernel_args = PackingFuncArgs("const AutofuseTilingData", fused_schedule_result, use_list_tensor);
+        const auto packing_func_names = Kernel::GenPackingFunctions(
+            ss, kernel_args, per_group_func_calls, max_group_per_compile_unit, function_id, support_parallel_compile);
         GenPackingFunctionCalls(ss1, kernel_args, packing_func_names);
       }
       if (cv_fusion_type == ascir::CubeTemplateType::kDefault) {
         ss1 << "  }";
       }
     }
-    FakeTilingIds(ss, function_id);
+    if (support_parallel_compile) {
+      FakeTilingIds(ss, function_id);
+    }
     return af::SUCCESS;
   }
   return af::SUCCESS;
@@ -3608,7 +3614,8 @@ std::vector<Variable> Kernel::PackingFuncArgs(const std::string &tiling_data_typ
 std::vector<std::string> Kernel::GenPackingFunctions(std::stringstream &ss_define,
                                                      const std::vector<Variable> &kernel_args,
                                                      const std::vector<std::vector<std::string>> &per_group_func_calls,
-                                                     int64_t max_group_per_compile_unit, uint32_t &function_id) {
+                                                     int64_t max_group_per_compile_unit, uint32_t &function_id,
+                                                     bool support_parallel_compile) {
   std::vector<std::string> func_names;
   auto remaining_groups = static_cast<int64_t>(per_group_func_calls.size());
   auto begin = per_group_func_calls.cbegin();
@@ -3617,13 +3624,17 @@ std::vector<std::string> Kernel::GenPackingFunctions(std::stringstream &ss_defin
     const auto end = begin + num;
     // 函数名需要以数字结尾, 但不能与tiling_key相同, 否则rts加载kernel会失败
     const auto &func_name = "packed_functions_8" + std::to_string(function_id);
-    // codegen packing func definition
-    ss_define << PackingFuncDeclare(func_name, kernel_args) << ";" << std::endl;
-    ss_define << "#if TILING_KEY_VAR == " << function_id << std::endl;
+    if (support_parallel_compile) {
+      // codegen packing func definition
+      ss_define << PackingFuncDeclare(func_name, kernel_args) << ";" << std::endl;
+      ss_define << "#if TILING_KEY_VAR == " << function_id << std::endl;
+    }
     ss_define << PackingFuncDeclare(func_name, kernel_args) << "{" << std::endl;
     AppendFuncCall(ss_define, begin, end);
     ss_define << "}" << std::endl;
-    ss_define << "#endif" << std::endl;
+    if (support_parallel_compile) {
+      ss_define << "#endif" << std::endl;
+    }
     remaining_groups -= num;
     begin += num;
     function_id += 1;

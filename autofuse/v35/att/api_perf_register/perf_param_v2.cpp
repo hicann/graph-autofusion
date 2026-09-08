@@ -950,6 +950,13 @@ const std::string kParamV2Info = R"(
     "LoadStride": {
         "model_type": "LoadStoreStrideV2Func",
         "model_params": {
+            "int8toint8": {"k": 0.005, "u": 4096.0, "penalty_coeff": 0.0},
+            "int16toint16": {"k": 0.005, "u": 4096.0, "penalty_coeff": 0.0},
+            "uint16touint16": {"k": 0.005, "u": 4096.0, "penalty_coeff": 0.0},
+            "int32toint32": {"k": 0.005, "u": 4096.0, "penalty_coeff": 0.0},
+            "uint32touint32": {"k": 0.005, "u": 4096.0, "penalty_coeff": 0.0},
+            "uint64touint64": {"k": 0.005, "u": 4096.0, "penalty_coeff": 0.0},
+            "booltobool": {"k": 0.005, "u": 4096.0, "penalty_coeff": 0.0},
             "int64toint64": {"k": 0.005, "u": 4096.0, "penalty_coeff": 0.0},
             "float16tofloat16": {"k": 0.005, "u": 4096.0, "penalty_coeff": 0.0},
             "float32tofloat32": {"k": 0.005, "u": 4096.0, "penalty_coeff": 0.0},
@@ -980,6 +987,13 @@ const std::string kParamV2Info = R"(
     "StoreStride": {
         "model_type": "LoadStoreStrideV2Func",
         "model_params": {
+            "int8toint8": {"k": 0.0385, "u": 4096.0, "penalty_coeff": 0.0},
+            "int16toint16": {"k": 0.0385, "u": 4096.0, "penalty_coeff": 0.0},
+            "uint16touint16": {"k": 0.0385, "u": 4096.0, "penalty_coeff": 0.0},
+            "int32toint32": {"k": 0.0385, "u": 4096.0, "penalty_coeff": 0.0},
+            "uint32touint32": {"k": 0.0385, "u": 4096.0, "penalty_coeff": 0.0},
+            "uint64touint64": {"k": 0.0385, "u": 4096.0, "penalty_coeff": 0.0},
+            "booltobool": {"k": 0.0385, "u": 4096.0, "penalty_coeff": 0.0},
             "int64toint64": {"k": 0.0385, "u": 4096.0, "penalty_coeff": 0.0},
             "float16tofloat16": {"k": 0.0385, "u": 4096.0, "penalty_coeff": 0.0},
             "float32tofloat32": {"k": 0.0385, "u": 4096.0, "penalty_coeff": 0.0},

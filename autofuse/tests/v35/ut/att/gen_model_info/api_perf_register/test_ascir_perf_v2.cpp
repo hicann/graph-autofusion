@@ -33,6 +33,11 @@ using namespace att;
 using namespace af::sym;
 using namespace af::ascir;
 
+namespace att {
+af::Status LoadStoreStrideV2Func(const std::map<std::string, float> &param_map, const std::vector<Expr> &dims,
+                                 const Expr &stride, Expr &res);
+}
+
 class UTestAscirPerfV2 : public ::testing::Test {
  public:
   static ge::RuntimeStubV2 stub_v_2;
@@ -877,14 +882,14 @@ TEST_F(UTestAscirPerfV2, TestNddmaApiSmallBlockLen) {
   const std::string kLastAxisLen = "TernaryOp(" + kIsSmallBlockLen + ", z6t_size, 16)";
   // NddmaStride with penalty: penalty + stride calculation
   // penalty = block_count_idx * stride_used * penalty_coeff = 2 * Abs((32-z6t_size))*8) * 4 = 64.0 * Abs((32-z6t_size))
-  // stride = k * block_count * stride_used = 0.005 * (238*z0z1t_size) * Abs((32-z6t_size))*8) = 9.52... *
-  // Abs((32-z6t_size)) * z0z1t_size
+  // stride = k * block_count * stride_used
+  //        = 0.005 * (238*z0z1t_size) * Min(4096, Abs((32-z6t_size))*8)
   const std::string kPenalty = "(64.0 * Abs((32 - z6t_size)))";
-  const std::string kStride = "(9.51999978721142 * Abs((32 - z6t_size)) * z0z1t_size)";
-  // Note: SymEngine may reorder additive terms; nddma_perf comes before penalty and stride
-  EXPECT_EQ(Str(res.Replace(ret)), "((1904 * " + kLastAxisLen +
+  const std::string kStride = "(1.18999997340143 * Min(4096.0, (8 * Abs((32 - z6t_size)))) * z0z1t_size)";
+  // Note: SymEngine may reorder additive terms; the stride term comes before nddma_perf and penalty.
+  EXPECT_EQ(Str(res.Replace(ret)), "(" + kStride + " + (1904 * " + kLastAxisLen +
                                        " * z0z1t_size / (((6.3899998664856 / (block_dim)) + 7.6100001335144))) + " +
-                                       kPenalty + " + " + kStride + " + 418.978912353516)");
+                                       kPenalty + " + 418.978912353516)");
 }
 
 TEST_F(UTestAscirPerfV2, TestNddmaApiGmStrideTranspose) {
@@ -1284,6 +1289,41 @@ TEST_F(UTestAscirPerfV2, TestGetUb2ubApiPerf) {
 TEST_F(UTestAscirPerfV2, TestGetMicroApiPerfTableInvalid) {
   PerfParamTableV2 perf_param_table_v2;
   EXPECT_EQ(perf_param_table_v2.GetVfInstructPerfTable("invalid").size(), 0);
+}
+
+TEST_F(UTestAscirPerfV2, TestLoadStoreStrideModelParamsCoverSupportedTypes) {
+  const auto table = Json::parse(kParamV2Info);
+  const std::vector<std::string> dtypes = {"int8",  "uint8",  "int16",   "uint16",   "int32",   "uint32",
+                                           "int64", "uint64", "float16", "bfloat16", "float32", "bool"};
+  for (const auto &op : {"LoadStride", "StoreStride"}) {
+    const auto &params = table.at(op).at("model_params");
+    EXPECT_EQ(params.size(), dtypes.size());
+    for (const auto &dtype : dtypes) {
+      SCOPED_TRACE(std::string(op) + ":" + dtype);
+      const auto key = dtype + "to" + dtype;
+      ASSERT_TRUE(params.contains(key));
+      EXPECT_FLOAT_EQ(params.at(key).at("k").get<float>(), std::string(op) == "LoadStride" ? 0.005f : 0.0385f);
+      EXPECT_FLOAT_EQ(params.at(key).at("u").get<float>(), 4096.0f);
+      EXPECT_FLOAT_EQ(params.at(key).at("penalty_coeff").get<float>(), 0.0f);
+    }
+    EXPECT_FALSE(params.contains("int4toint4"));
+  }
+}
+
+TEST_F(UTestAscirPerfV2, TestLoadStoreStrideUsesConfiguredUpperBound) {
+  const Expr dynamic_stride = CreateExpr("stride");
+  for (const float upper_bound : {2048.0f, 8192.0f}) {
+    const std::map<std::string, float> params = {{"k", 1.0f}, {"u", upper_bound}, {"data_type_size", 2.0f}};
+    for (const Expr &stride : {CreateExpr(100), CreateExpr(5000), dynamic_stride}) {
+      SCOPED_TRACE(std::to_string(upper_bound) + ":" + Str(stride));
+      Expr result;
+      ASSERT_EQ(LoadStoreStrideV2Func(params, {CreateExpr(1)}, stride, result), af::SUCCESS);
+      Expr expected = CreateExpr(1.0f) * af::sym::Min(stride * CreateExpr(2), CreateExpr(upper_bound));
+      result.Simplify();
+      expected.Simplify();
+      EXPECT_EQ(Str(result), Str(expected));
+    }
+  }
 }
 
 TEST_F(UTestAscirPerfV2, TestApiNameNotRegistered) {

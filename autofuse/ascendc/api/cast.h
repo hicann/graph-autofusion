@@ -249,11 +249,11 @@ inline __aicore__ void CastExtendWithOneTransferWithMaskMode(const AscendC::Loca
     uint32_t mid_last_dim_stride = elem_in_one_block * blocks_for_last_dim_elems;
     auto mid_ub = tmp_buf[0].template ReinterpretCast<float>();
     if constexpr (AscendC::IsSameType<InT, int64_t>::value) {
-      uint32_t max_dtype_size_between_src_and_mid = 8;
-      uint32_t max_dtype_size_between_mid_and_dst = 4;
+      max_dtype_size_between_src_and_mid = 8;
+      max_dtype_size_between_mid_and_dst = 4;
     } else {
-      uint32_t max_dtype_size_between_src_and_mid = 4;
-      uint32_t max_dtype_size_between_mid_and_dst = 8;
+      max_dtype_size_between_src_and_mid = 4;
+      max_dtype_size_between_mid_and_dst = 8;
     }
     CastExtendWithMaskMode<InT, float>(mid_ub, src, first_dim, last_dim, input_last_dim_stride, mid_last_dim_stride,
                                        max_dtype_size_between_src_and_mid, tmp_buf);

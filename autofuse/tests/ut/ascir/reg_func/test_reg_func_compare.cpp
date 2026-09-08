@@ -841,5 +841,51 @@ TEST_F(CalcCompareTmpSizeTest, CalcEQTmpSize_INT64_ShouldReturnCorrectSize_WhenN
   ASSERT_EQ(result[0]->size, sym::Min(af::Symbol(512) * s0 + af::Symbol(256), MAX_TMP_BUFFER_SIZE));
   ASSERT_EQ(result[0]->life_time_axis_id, -1);
 }
+
+// Test: two vectorized axes with BF16 dtype hits the default-size fallback branch
+TEST_F(CalcCompareTmpSizeTest, CalcGeTmpSize_ShouldReturnDefaultSize_WhenTwoAxesAndBf16Dtype) {
+  af::AscGraph graph("test");
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+
+  af::ascir_op::Data x1("x1", graph);
+  af::ascir_op::Load load1("load1");
+  af::ascir_op::Ge ge("compare");
+  af::ascir_op::Store store("store");
+  af::ascir_op::Output y("y");
+
+  x1.attr.sched.axis = {z0.id, z1.id};
+  x1.y.dtype = af::DT_BF16;
+  *x1.y.axis = {z0.id, z1.id};
+  *x1.y.repeats = {s0, s1};
+  *x1.y.strides = {s1, Symbol(1)};
+
+  load1.x = x1.y;
+  load1.attr.sched.axis = {z0.id, z1.id};
+  load1.y.dtype = af::DT_BF16;
+  *load1.y.axis = {z0.id, z1.id};
+  *load1.y.repeats = {s0, s1};
+  *load1.y.strides = {s1, Symbol(1)};
+  *load1.y.vectorized_axis = {z0.id, z1.id};
+
+  ge.x1 = load1.y;
+  ge.x2 = load1.y;
+  ge.attr.sched.axis = {z0.id, z1.id};
+  ge.y.dtype = af::DT_BF16;
+  *ge.y.axis = {z0.id, z1.id};
+  *ge.y.repeats = {s0, s1};
+  *ge.y.strides = {s1, Symbol(1)};
+
+  std::shared_ptr<af::AscNode> node = graph.FindNode("compare");
+  node->inputs[0].attr.vectorized_strides = {s1, Symbol(1)};
+  std::vector<std::unique_ptr<af::TmpBufDesc>> result = CalcGeTmpSize(*node);
+  ASSERT_EQ(result.size(), 1);
+  ASSERT_EQ(result[0]->size, af::Symbol(8192));
+  ASSERT_EQ(result[0]->life_time_axis_id, -1);
+}
+
 }  // namespace ascir
 }  // namespace af

@@ -261,6 +261,7 @@ af::Status LoadStoreStrideV2Func(const std::map<std::string, float> &param_map, 
   // Stride惩罚项：k * block_count * stride * data_type_size
   Expr block_count = CalculateBlockCountByIndex(dims, block_count_idx);
   Expr stride_used = LimitedStrideUpperBound(stride * GetDataTypeSizeExpr(param_map), upper_val);
+  stride_used = af::sym::Min(stride_used, upper_val);
   res = af::sym::Mul(k, af::sym::Mul(block_count, stride_used));
   GELOGD(
       "LoadStoreStrideV2: dims[%s], k=%s, block_count=%s, block_count_idx=%d, "
