@@ -603,9 +603,7 @@ class SuperKernelKernelNode : public SuperKernelBaseNode {
 
  private:
   void IdentifyAndHandleSimtKernel(const SuperKernelOptionsManager *opts);
-  bool SetupLaunchKernelCfg(aclrtFuncHandle funcHandle, size_t skMaxDcacheSize,
-                            std::vector<aclrtLaunchKernelAttr> &launchKernelAttrs,
-                            aclrtLaunchKernelCfg &launchKernelCfg) const;
+  bool SetupLaunchKernelCfg(const SkLaunchInfo &launchInfo);
 
   bool isScopeBegin = false;
   bool isScopeEnd = false;

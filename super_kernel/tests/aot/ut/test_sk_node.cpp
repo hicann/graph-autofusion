@@ -628,7 +628,7 @@ TEST_F(SkNodeTest, KernelUpdate_CustomParamsStoredSeparatelyForDump) {
   EXPECT_EQ(node.GetUpdateParams().valueWriteTaskParams.value, 0x1234U);
 }
 
-TEST_F(SkNodeTest, KernelUpdate_LaunchInfoBuildsIndependentDynUbufCfg) {
+TEST_F(SkNodeTest, KernelUpdate_LaunchInfoBuildsBatchAndDynUbufCfg) {
   UtSkNodeRITaskInternal task{};
   task.taskId = 18;
   task.type = ACL_MODEL_RI_TASK_KERNEL;
@@ -662,25 +662,18 @@ TEST_F(SkNodeTest, KernelUpdate_LaunchInfoBuildsIndependentDynUbufCfg) {
   launchInfo.skMaxDcacheSize = 32768;
   SetFunctionAllocUbufSize(4096);
 
-  std::vector<aclrtLaunchKernelAttr> launchKernelAttrs;
-  aclrtLaunchKernelCfg launchKernelCfg{};
-  ASSERT_TRUE(node.SetupLaunchKernelCfg(task.params.kernelTaskParams.funcHandle, launchInfo.skMaxDcacheSize,
-                                        launchKernelAttrs, launchKernelCfg));
-  ASSERT_EQ(launchKernelCfg.numAttrs, 1U);
-  ASSERT_NE(launchKernelCfg.attrs, nullptr);
-  EXPECT_EQ(launchKernelCfg.attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
-  EXPECT_EQ(launchKernelCfg.attrs[0].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
-
   UpdateContext ctx{};
   ctx.launchInfo = &launchInfo;
   EXPECT_TRUE(node.Update(ctx));
 
   const auto &params = node.GetUpdateParams();
   ASSERT_NE(params.kernelTaskParams.cfg, nullptr);
-  ASSERT_EQ(params.kernelTaskParams.cfg->numAttrs, 1U);
+  ASSERT_EQ(params.kernelTaskParams.cfg->numAttrs, 2U);
   ASSERT_NE(params.kernelTaskParams.cfg->attrs, nullptr);
-  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
-  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
+  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE);
+  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].value.schemMode, 1U);
+  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[1].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
+  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[1].value.dynUBufSize, SK_TOTAL_UB_SIZE - 32768U - 4096U);
   EXPECT_EQ(params.reserved0[0], 0U);
   EXPECT_EQ(params.reserved1[0], 0);
   EXPECT_EQ(params.kernelTaskParams.rsv[0], 0U);
@@ -692,7 +685,7 @@ TEST_F(SkNodeTest, KernelUpdate_LaunchInfoBuildsIndependentDynUbufCfg) {
   EXPECT_EQ(task.params.reserved1[0], 0U);
   EXPECT_EQ(task.params.kernelTaskParams.rsv[0], 0U);
   ASSERT_NE(task.params.kernelTaskParams.cfg, nullptr);
-  EXPECT_EQ(task.params.kernelTaskParams.cfg->numAttrs, 1U);
+  EXPECT_EQ(task.params.kernelTaskParams.cfg->numAttrs, 2U);
 }
 
 TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDoesNotInheritOriginParams) {
@@ -705,7 +698,12 @@ TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDoesNotInheritOriginParams) {
   task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x3019);
   task.params.kernelTaskParams.numBlocks = 1;
   task.params.kernelTaskParams.rsv[0] = 0x56;
+  aclrtLaunchKernelAttr originAttr{};
+  originAttr.id = ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE;
+  originAttr.value.schemMode = 0;
   aclrtLaunchKernelCfg originCfg{};
+  originCfg.attrs = &originAttr;
+  originCfg.numAttrs = 1;
   task.params.kernelTaskParams.cfg = &originCfg;
 
   SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
@@ -734,7 +732,11 @@ TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDoesNotInheritOriginParams) {
   EXPECT_EQ(params.kernelTaskParams.argsSize, sizeof(SkDeviceEntryArgs));
   EXPECT_EQ(params.kernelTaskParams.isHostArgs, 1U);
   EXPECT_EQ(params.kernelTaskParams.numBlocks, launchInfo.entryInfo.numBlocks);
-  EXPECT_EQ(params.kernelTaskParams.cfg, nullptr);
+  ASSERT_NE(params.kernelTaskParams.cfg, nullptr);
+  ASSERT_EQ(params.kernelTaskParams.cfg->numAttrs, 1U);
+  ASSERT_NE(params.kernelTaskParams.cfg->attrs, nullptr);
+  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE);
+  EXPECT_EQ(params.kernelTaskParams.cfg->attrs[0].value.schemMode, 1U);
   EXPECT_EQ(params.reserved0[0], 0U);
   EXPECT_EQ(params.reserved1[0], 0);
   EXPECT_EQ(params.kernelTaskParams.rsv[0], 0U);
@@ -745,7 +747,8 @@ TEST_F(SkNodeTest, KernelUpdate_LaunchInfoDoesNotInheritOriginParams) {
   EXPECT_EQ(task.params.reserved0[0], 0U);
   EXPECT_EQ(task.params.reserved1[0], 0U);
   EXPECT_EQ(task.params.kernelTaskParams.rsv[0], 0U);
-  EXPECT_EQ(task.params.kernelTaskParams.cfg, nullptr);
+  EXPECT_EQ(task.params.kernelTaskParams.cfg, params.kernelTaskParams.cfg);
+  EXPECT_EQ(originAttr.value.schemMode, 0U);
 }
 
 TEST_F(SkNodeTest, MemoryUpdate_CustomParamsSyncTaskParamsForDump) {
