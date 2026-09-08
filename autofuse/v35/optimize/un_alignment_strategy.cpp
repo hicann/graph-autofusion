@@ -447,8 +447,12 @@ Status UnAlignmentStrategy::ModifyTransposeFusionVectorizedStrides(af::AscGraph 
       // Transpose及后续节点或无Transpose：按 Store 轴判断
       GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByStore(node, continuous_tail_axis_num));
     }
-    if (continuous_tail_axis_num <= 1U ||
-        continuous_tail_axis_num == UINT32_MAX) {  // 小于一个连续轴，不需要调整strides
+    // 如果是ub-Transpose模板，则可以走Compact模式搬运，连续轴数量调整为2。
+    // 实际上nddma模板也可以走Compact模式，但是codegen目前只能判断显式Transpose节点，暂时不放开。
+    if (!transpose_pre_nodes.empty() && continuous_tail_axis_num <= 1U) {
+      continuous_tail_axis_num = 2U;
+    }
+    if (continuous_tail_axis_num <= 1 || continuous_tail_axis_num == UINT32_MAX) {
       continue;
     }
     for (const auto &output : node->outputs()) {

@@ -22,15 +22,15 @@ namespace codegen {
 using namespace std;
 using namespace ascgen_utils;
 
-static void GenParams(const TPipe &tpipe, const Tensor &input, const Tensor &output, std::stringstream &ss,
-                      bool is_src) {
+static void GenParams(const TPipe &tpipe, const Tensor &input, const Tensor &output, std::stringstream &ss, bool is_src,
+                      bool has_transpose) {
   // 只保证在仅对张量尾轴做32B对齐的场景下有效，若对中间轴做了对齐，则还需要增加处理逻辑
   auto vectorized_axis_size = input.vectorized_axis.size();
   const char *shape_prefix = is_src ? "src_shape_" : "dst_shape_";
   DataCopyParams data_copy_param;
   (void)CalculateDmaParams(tpipe, output, output, data_copy_param);
   constexpr char kCompactPddingMode[] = "AscendC::PaddingMode::Compact";
-  std::string padding_mode = GetPaddingMode(output, data_copy_param);
+  std::string padding_mode = GetPaddingMode(output, data_copy_param, has_transpose);
   ss << "const uint32_t " << shape_prefix << input.id << "_brc_to_" << output.id << "[" << vectorized_axis_size
      << "] = {";
   const char *sep = "";
@@ -115,9 +115,10 @@ Status BroadcastRegApiCall::Generate(const TPipe &tpipe, const std::vector<ascir
   std::stringstream ss;
   // 生成参数 const uint32_t *dst_shape;
   std::stringstream params_name;
-  GenParams(tpipe, x, y, ss, false);
+  auto has_transpose = IsGraphHasTransposeNode(this->node);
+  GenParams(tpipe, x, y, ss, false, has_transpose);
   // 生成参数 const uint32_t *src_shape;
-  GenParams(tpipe, x, y, ss, true);
+  GenParams(tpipe, x, y, ss, true, has_transpose);
 
   std::string dtype_name;
   Tensor::DtypeName(x.dtype, dtype_name);
