@@ -222,6 +222,8 @@ class SkTaskBuilder {
 
   SkHostEntryInfo GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, const ScopeCoreInfo &scopeCoreInfo,
                                bool useSimtEntry = false);
+  bool CalculateSkScheMode(const std::vector<SuperKernelBaseNode *> &tasks, const SkTask &aicTask,
+                           const SkTask &aivTask) const;
   DeviceArgsPtr GenEntryArgs(const SkTask &skTaskCube, const SkTask &skTaskVec, const SkDfxInfo *dfxInfos,
                              uint32_t dfxCount, const SkEventConfig *eventConfig = nullptr);
 

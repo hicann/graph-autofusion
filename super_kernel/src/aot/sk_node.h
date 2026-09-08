@@ -236,7 +236,6 @@ struct KernelCapBits {
 };
 
 KernelCapBits ParseKernelCapBits(uint64_t cap);
-bool ShouldDisableScheMode(const KernelCapBits &capBits);
 
 struct KernelInfos {
   SkKernelType kernelType = SkKernelType::DEFAULT;

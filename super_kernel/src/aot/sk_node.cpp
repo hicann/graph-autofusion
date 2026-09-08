@@ -116,10 +116,6 @@ KernelCapBits ParseKernelCapBits(uint64_t cap) {
   return bits;
 }
 
-bool ShouldDisableScheMode(const KernelCapBits &capBits) {
-  return capBits.disableScheMode || capBits.blockDimScaleUp;
-}
-
 // Implementation of FusionFailReasonInfo methods (requires complete ScopeProcessStatus/DeadlockFailReason definition)
 FusionFailReasonInfo::FusionFailReasonInfo()
     : scopeProcessStatus(ScopeProcessStatus::INIT),
@@ -577,14 +573,6 @@ bool InitKernelResolvedFuncs(KernelInfos &kernelInfos) {
       "earlyStartSetFlag=%d, disableDcci=%d, disableScheMode=%d, blockDimScaleUp=%d",
       bindMap.size(), aicItor != bindMap.end(), aivItor != bindMap.end(), capBits.earlyStartWaitFlag,
       capBits.earlyStartSetFlag, capBits.disableDcci, capBits.disableScheMode, capBits.blockDimScaleUp);
-  if (ShouldDisableScheMode(capBits)) {
-    const bool originScheModeOn = kernelInfos.isScheModeOn;
-    kernelInfos.isScheModeOn = false;
-    SK_LOGI(
-        "Disable ScheMode by kernel cap, funcName=%s, cap=0x%lx, originIsScheModeOn=%d, "
-        "currentIsScheModeOn=%d",
-        kernelInfos.funcName.c_str(), kernelInfos.cap, originScheModeOn, kernelInfos.isScheModeOn);
-  }
   kernelInfos.resolvedNum = 0;
   for (size_t i = 0; i < K_MAX_SPLIT_BIN_COUNT; ++i) {
     ResolvedFunctionInfo info{};
@@ -685,6 +673,7 @@ Json KernelInfosToJson(const KernelInfos &kernelInfos) {
   kernelJson["kernelTypeInt"] = kernelInfos.kernelTypeInt;
   kernelJson["kernelType"] = to_string(kernelInfos.kernelType);
   kernelJson["needMixKernelSplit"] = kernelInfos.needMixKernelSplit;
+  kernelJson["isScheModeOn"] = kernelInfos.isScheModeOn;
   kernelJson["isSimtOp"] = kernelInfos.isSimtOp;
   kernelJson["taskRatio"] = Json::array({kernelInfos.taskRatio[0], kernelInfos.taskRatio[1]});
   kernelJson["opInfoPtr"] = PtrToHexString(kernelInfos.opInfoPtr);
@@ -1116,14 +1105,14 @@ void SuperKernelKernelNode::IdentifyAndHandleSimtKernel(const SuperKernelOptions
 
 bool SuperKernelKernelNode::SetupLaunchKernelCfg(const SkLaunchInfo &launchInfo) {
   launchKernelAttrs_.clear();
-  launchKernelAttrs_.reserve(2);
+  size_t skEntryDynUbufSize = 0;
 
-  // SK can synchronize across cores even when its sub-kernels do not enable ScheMode.
-  // Batch scheduling waits until all required cores are available before starting SK.
-  aclrtLaunchKernelAttr schemAttr{};
-  schemAttr.id = ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE;
-  schemAttr.value.schemMode = 1;
-  launchKernelAttrs_.push_back(schemAttr);
+  if (launchInfo.isScheModeOn) {
+    aclrtLaunchKernelAttr schemAttr{};
+    schemAttr.id = ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE;
+    schemAttr.value.schemMode = 1;
+    launchKernelAttrs_.push_back(schemAttr);
+  }
 
   if (launchInfo.useSimtEntry) {
     aclrtLaunchKernelAttr dynUbufAttr{};
@@ -1140,19 +1129,15 @@ bool SuperKernelKernelNode::SetupLaunchKernelCfg(const SkLaunchInfo &launchInfo)
           Format().c_str(), SK_TOTAL_UB_SIZE, skMaxDcacheSize, skAllocUbufSize);
       return false;
     }
-    size_t skEntryDynUbufSize = SK_TOTAL_UB_SIZE - skMaxDcacheSize - skAllocUbufSize;
+    skEntryDynUbufSize = SK_TOTAL_UB_SIZE - skMaxDcacheSize - skAllocUbufSize;
     dynUbufAttr.value.dynUBufSize = static_cast<uint32_t>(skEntryDynUbufSize);
     launchKernelAttrs_.push_back(dynUbufAttr);
-    SK_LOGI(
-        "Set dyn ubuf launch cfg for %s, skMaxDcacheSize=%zu, skAllocUbufSize=%zu, "
-        "skEntryDynUbufSize=%zu, attrCount=%zu",
-        Format().c_str(), skMaxDcacheSize, skAllocUbufSize, skEntryDynUbufSize, launchKernelAttrs_.size());
   }
 
   launchKernelCfg_.attrs = launchKernelAttrs_.data();
   launchKernelCfg_.numAttrs = launchKernelAttrs_.size();
-  SK_LOGI("Set SK launch cfg for %s, schemMode=%u, attrCount=%zu", Format().c_str(), schemAttr.value.schemMode,
-          launchKernelCfg_.numAttrs);
+  SK_LOGI("Set SK launch cfg: nodeId=%lu, isScheModeOn=%d, useSimtEntry=%d, skEntryDynUbufSize=%zu, attrCount=%zu",
+          nodeId, launchInfo.isScheModeOn, launchInfo.useSimtEntry, skEntryDynUbufSize, launchKernelCfg_.numAttrs);
   return true;
 }
 
@@ -1238,7 +1223,7 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
       SK_LOGE("Failed to setup SK launch cfg for kernel node %s", Format().c_str());
       return false;
     }
-    updateParams.kernelTaskParams.cfg = &launchKernelCfg_;
+    updateParams.kernelTaskParams.cfg = launchKernelCfg_.numAttrs == 0 ? nullptr : &launchKernelCfg_;
 
     aclError aclRet = aclmdlRITaskSetParams(*originTask, &updateParams);
 

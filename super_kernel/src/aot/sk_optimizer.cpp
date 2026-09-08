@@ -284,9 +284,9 @@ bool SuperKernelOptimizer::Schedule(SuperKernelScopeInfo &scopeInfo, SuperKernel
   }
   SK_LOGI(
       "schedule scope: build finished, entryType=%s, entryFuncHandle=%p, skFuncName=%s, useSimtEntry=%d, "
-      "skMaxDcacheSize=%zu",
+      "skMaxDcacheSize=%zu, isScheModeOn=%d",
       to_string(launchInfo.entryInfo.entryType), launchInfo.entryInfo.skEntryFunc, launchInfo.skFuncName.c_str(),
-      static_cast<int>(launchInfo.useSimtEntry), launchInfo.skMaxDcacheSize);
+      static_cast<int>(launchInfo.useSimtEntry), launchInfo.skMaxDcacheSize, launchInfo.isScheModeOn);
 
   if (!Update(scopeInfo, graph, launchInfo)) {
     SK_LOGE("schedule failed: scope update failed");
