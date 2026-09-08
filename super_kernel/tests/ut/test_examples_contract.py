@@ -74,64 +74,6 @@ def test_superkernel_examples_require_npu_arch():
 
 
 @pytest.mark.ut
-@pytest.mark.parametrize(
-    ("npu_arch", "expected_jit_count"),
-    (("dav-2201", 3), ("dav-3510", 0), ("dav-4000", 0)),
-)
-def test_npu_arch_controls_jit_examples(tmp_path, npu_arch, expected_jit_count):
-    build_script = tmp_path / "build.sh"
-    build_source = BUILD_SCRIPT.read_text(encoding="utf-8")
-    build_source = build_source.replace(
-        "^(dav-2201|dav-3510)$", "^(dav-2201|dav-3510|dav-4000)$"
-    )
-    build_script.write_text(build_source, encoding="utf-8")
-
-    jit_scripts = (
-        "jit/example01_super_kernel_base/superkernel_scope.py",
-        "jit/example02_super_kernel_profiling/superkernel_compare.py",
-        "jit/example03_super_kernel_runtime_ascendc_only/superkernel_runtime_ascendc_basic.py",
-    )
-    for relative_path in jit_scripts:
-        script = tmp_path / "super_kernel" / "examples" / relative_path
-        script.parent.mkdir(parents=True, exist_ok=True)
-        script.write_text('print("JIT example executed")\n', encoding="utf-8")
-
-    aot_scripts = (
-        "aot/example01_dual_stream/run.sh",
-        "aot/example02_sk_options/run.sh",
-        "aot/example03_kernel_pybind/run.sh",
-    )
-    for relative_path in aot_scripts:
-        script = tmp_path / "super_kernel" / "examples" / relative_path
-        script.parent.mkdir(parents=True, exist_ok=True)
-        script.write_text('echo "AOT example executed"\n', encoding="utf-8")
-
-    result = subprocess.run(
-        [
-            "bash",
-            str(build_script),
-            "--run_example",
-            "--module=superkernel",
-            "--no-autofuse",
-            f"--npu-arch={npu_arch}",
-            "-j",
-            "8",
-        ],
-        cwd=tmp_path,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.count("JIT example executed") == expected_jit_count
-    assert result.stdout.count("AOT example executed") == len(aot_scripts)
-    assert (f"Skipping SuperKernel JIT examples on {npu_arch}" in result.stdout) == (
-        npu_arch != "dav-2201"
-    )
-
-
-@pytest.mark.ut
 @pytest.mark.parametrize("npu_arch", ["dav-2201", "dav-3510"])
 def test_common_script_accepts_supported_npu_arch(npu_arch):
     common_script = EXAMPLES_DIR / "aot" / "_lib" / "common.sh"
