@@ -91,7 +91,7 @@ REG_ASC_IR(ScalarData)
     .Impl(v1_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::ScalarAscIrAttImpl>(),
                             af::ascir::AscIrImplCreator<af::ascir::ScalarAscIrCodegenImpl>(),
                             {{"T", TensorType{DT_INT8, DT_UINT8, DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_INT64,
-                                              DT_UINT64, DT_FLOAT16, DT_FLOAT, DT_BF16}}}});
+                                              DT_UINT64, DT_FLOAT16, DT_FLOAT}}}});
 
 REG_ASC_IR(IndexExpr)
     .Inputs({})
