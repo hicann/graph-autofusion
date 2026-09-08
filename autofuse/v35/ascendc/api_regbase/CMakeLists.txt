@@ -63,6 +63,7 @@ set(ascendc_api_regbase_extend_src
         transpose.h
         frexp.h
         zeta.h
+        check_bounds.h
         ndtri.h
         shifted_chebyshev_polynomial_utils.h
         shifted_chebyshev_polynomial_t.h
