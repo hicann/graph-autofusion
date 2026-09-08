@@ -36,7 +36,7 @@ bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-22
 bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-3510 -j 8
 ```
 
-The command runs every JIT and AOT Python sample in sequence. An explicit `--npu-arch` is required to avoid guessing the AOT compilation target.
+With `dav-2201`, the command runs every JIT and AOT Python sample in sequence. The JIT samples do not support `dav-3510`, so that target skips JIT and runs only the AOT samples. An explicit `--npu-arch` is required to avoid guessing the AOT compilation target.
 
 ## References
 

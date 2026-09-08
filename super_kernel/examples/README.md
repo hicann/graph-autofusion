@@ -36,7 +36,7 @@ bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-22
 bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-3510 -j 8
 ```
 
-命令会依次运行全部 JIT 和 AOT Python 样例。运行 SuperKernel 样例时必须显式传入 `--npu-arch`，避免为 AOT 编译猜测目标架构。
+`dav-2201` 会依次运行全部 JIT 和 AOT Python 样例；`dav-3510` 不支持这些 JIT 样例，因此会跳过 JIT，仅运行 AOT 样例。运行 SuperKernel 样例时必须显式传入 `--npu-arch`，避免为 AOT 编译猜测目标架构。
 
 ## 参考
 
