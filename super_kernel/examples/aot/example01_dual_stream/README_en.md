@@ -9,3 +9,5 @@ bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-22
 ```
 
 Use `dav-3510` for that compilation target. Select the device with `NPU_DEVICE_ID` or `ASCEND_DEVICE_ID`.
+
+For options, see the [TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md).

@@ -9,3 +9,5 @@ bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-22
 ```
 
 `build.sh` forwards the target to `bisheng --npu-arch`. The extension is installed into an isolated Python user base and uninstalled after the sample exits.
+
+For options, see the [TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md).

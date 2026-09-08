@@ -9,3 +9,5 @@ bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-22
 ```
 
 `build.sh` 会把架构传递给 `bisheng --npu-arch`。扩展安装在样例隔离的 Python user base 中，运行结束后自动卸载。
+
+option 参考 [TorchAir SuperKernel 使用说明](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md)。

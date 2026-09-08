@@ -11,12 +11,12 @@ This directory contains two groups of Python samples:
 
 ```text
 examples/
-├── _lib/                                  # Shared Bash functions for AOT samples
 ├── jit/
 │   ├── example01_super_kernel_base/                 # Basic SuperKernel usage
 │   ├── example02_super_kernel_profiling/            # Profiling comparison
 │   └── example03_super_kernel_runtime_ascendc_only/ # Minimal AscendC and Runtime sample
 └── aot/
+    ├── _lib/                              # Shared Bash functions for AOT samples
     ├── example01_dual_stream/             # Two streams with NPU events
     ├── example02_net01_sk_options/        # SuperKernel options
     └── example03_net03_pybind/            # Pybind custom operator fusion
@@ -40,5 +40,5 @@ The command runs every JIT and AOT Python sample in sequence. An explicit `--npu
 
 ## References
 
-- [TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md)
+- For SuperKernel options, see the [TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md).
 - [Ascend Extension for PyTorch user guide](https://www.hiascend.com/document/redirect/pytorchuserguide)

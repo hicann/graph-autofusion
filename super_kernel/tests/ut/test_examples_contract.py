@@ -32,7 +32,7 @@ def test_examples_are_grouped_by_compile_mode():
         "aot/example01_dual_stream",
         "aot/example02_net01_sk_options",
         "aot/example03_net03_pybind",
-        "_lib",
+        "aot/_lib",
     )
 
     for relative_path in expected_directories:
@@ -76,7 +76,7 @@ def test_superkernel_examples_require_npu_arch():
 @pytest.mark.ut
 @pytest.mark.parametrize("npu_arch", ["dav-2201", "dav-3510"])
 def test_common_script_accepts_supported_npu_arch(npu_arch):
-    common_script = EXAMPLES_DIR / "_lib" / "common.sh"
+    common_script = EXAMPLES_DIR / "aot" / "_lib" / "common.sh"
     result = subprocess.run(
         [
             "bash",
@@ -96,7 +96,7 @@ def test_common_script_accepts_supported_npu_arch(npu_arch):
 
 @pytest.mark.ut
 def test_common_script_rejects_unsupported_npu_arch():
-    common_script = EXAMPLES_DIR / "_lib" / "common.sh"
+    common_script = EXAMPLES_DIR / "aot" / "_lib" / "common.sh"
     result = subprocess.run(
         [
             "bash",
@@ -116,7 +116,7 @@ def test_common_script_rejects_unsupported_npu_arch():
 
 @pytest.mark.ut
 def test_common_script_rejects_compile_errors_without_run_package(tmp_path):
-    common_script = EXAMPLES_DIR / "_lib" / "common.sh"
+    common_script = EXAMPLES_DIR / "aot" / "_lib" / "common.sh"
     compile_outputs = tmp_path / "static_kernel_compile_outputs"
     compile_log = compile_outputs / "ts_outputs" / "compile_log"
     compile_log.mkdir(parents=True)
@@ -143,7 +143,7 @@ def test_common_script_rejects_compile_errors_without_run_package(tmp_path):
 
 @pytest.mark.ut
 def test_common_script_accepts_partial_compile_with_run_package(tmp_path):
-    common_script = EXAMPLES_DIR / "_lib" / "common.sh"
+    common_script = EXAMPLES_DIR / "aot" / "_lib" / "common.sh"
     compile_outputs = tmp_path / "static_kernel_compile_outputs"
     compile_result = compile_outputs / "ts_outputs"
     compile_log = compile_result / "compile_log"
@@ -171,7 +171,7 @@ def test_common_script_accepts_partial_compile_with_run_package(tmp_path):
 
 @pytest.mark.ut
 def test_common_script_requires_run_package_when_requested(tmp_path):
-    common_script = EXAMPLES_DIR / "_lib" / "common.sh"
+    common_script = EXAMPLES_DIR / "aot" / "_lib" / "common.sh"
     compile_outputs = tmp_path / "static_kernel_compile_outputs"
     compile_outputs.mkdir()
     result = subprocess.run(

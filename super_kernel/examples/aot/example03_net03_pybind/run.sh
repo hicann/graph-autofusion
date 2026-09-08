@@ -10,7 +10,7 @@
 # ----------------------------------------------------------------------------------------------------------
 
 cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
-source ../../_lib/common.sh
+source ../_lib/common.sh
 
 sk_require_npu_arch || exit $?
 sk_cleanup_local || exit 1
