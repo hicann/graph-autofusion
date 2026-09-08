@@ -26,12 +26,12 @@ BUILD_SCRIPT = REPO_ROOT / "build.sh"
 @pytest.mark.ut
 def test_examples_are_grouped_by_compile_mode():
     expected_directories = (
-        "jit/super_kernel_base",
-        "jit/super_kernel_profiling",
-        "jit/super_kernel_runtime_ascendc_only",
-        "aot/dual_stream",
-        "aot/net01_sk_options",
-        "aot/net03_pybind",
+        "jit/example01_super_kernel_base",
+        "jit/example02_super_kernel_profiling",
+        "jit/example03_super_kernel_runtime_ascendc_only",
+        "aot/example01_dual_stream",
+        "aot/example02_net01_sk_options",
+        "aot/example03_net03_pybind",
         "_lib",
     )
 
@@ -43,10 +43,10 @@ def test_examples_are_grouped_by_compile_mode():
 @pytest.mark.parametrize(
     "relative_path",
     (
-        "aot/dual_stream/log/run.log",
-        "aot/dual_stream/tmp/run.log",
-        "aot/dual_stream/static_kernel_compile_outputs/kernel.run",
-        "aot/net01_sk_options/__pycache__/main.pyc",
+        "aot/example01_dual_stream/log/run.log",
+        "aot/example01_dual_stream/tmp/run.log",
+        "aot/example01_dual_stream/static_kernel_compile_outputs/kernel.run",
+        "aot/example02_net01_sk_options/__pycache__/main.pyc",
     ),
 )
 def test_aot_generated_files_are_ignored(relative_path):
@@ -212,7 +212,7 @@ def test_aot_examples_do_not_use_unsupported_superkernel_options():
 
 @pytest.mark.ut
 def test_net03_explicitly_registers_custom_operator():
-    source = (EXAMPLES_DIR / "aot" / "net03_pybind" / "main.py").read_text(
+    source = (EXAMPLES_DIR / "aot" / "example03_net03_pybind" / "main.py").read_text(
         encoding="utf-8"
     )
 

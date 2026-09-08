@@ -13,13 +13,13 @@ This directory contains two groups of Python samples:
 examples/
 ├── _lib/                                  # Shared Bash functions for AOT samples
 ├── jit/
-│   ├── super_kernel_base/                 # Basic SuperKernel usage
-│   ├── super_kernel_profiling/            # Profiling comparison
-│   └── super_kernel_runtime_ascendc_only/ # Minimal AscendC and Runtime sample
+│   ├── example01_super_kernel_base/                 # Basic SuperKernel usage
+│   ├── example02_super_kernel_profiling/            # Profiling comparison
+│   └── example03_super_kernel_runtime_ascendc_only/ # Minimal AscendC and Runtime sample
 └── aot/
-    ├── dual_stream/                       # Two streams with NPU events
-    ├── net01_sk_options/                  # SuperKernel options
-    └── net03_pybind/                      # Pybind custom operator fusion
+    ├── example01_dual_stream/             # Two streams with NPU events
+    ├── example02_net01_sk_options/        # SuperKernel options
+    └── example03_net03_pybind/            # Pybind custom operator fusion
 ```
 
 ## Prerequisites

@@ -1,4 +1,4 @@
-# net01_sk_options
+# example02_net01_sk_options
 
 This sample demonstrates SuperKernel optimize and debug options. It checks the statically compiled outputs against eager execution. The `dav-2201` and `dav-3510` targets use their respective supported attention networks.
 

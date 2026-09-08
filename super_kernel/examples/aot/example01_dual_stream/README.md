@@ -1,4 +1,4 @@
-# dual_stream
+# example01_dual_stream
 
 该样例使用两个 NPU stream 和 event 建立控制依赖，并通过 `auto_op_parallel` 启用 SuperKernel 自动算子并行。样例分别运行启用和关闭 SuperKernel 的网络，并检查输出一致性。
 

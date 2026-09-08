@@ -9,7 +9,7 @@ Core features:
 
 ## Directory Structure
 ```text
-super_kernel_runtime_ascendc_only/
+example03_super_kernel_runtime_ascendc_only/
 ├── README.md                                     # Chinese documentation
 ├── README_en.md                                  # English documentation
 ├── compile_sk.py                                 # Compile sub-kernel and SuperKernel operators

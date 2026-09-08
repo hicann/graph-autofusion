@@ -1,4 +1,4 @@
-# dual_stream
+# example01_dual_stream
 
 This sample creates control dependencies with two NPU streams and events, and enables automatic SuperKernel operator parallelism through `auto_op_parallel`. It compares the outputs produced with and without SuperKernel optimization.
 

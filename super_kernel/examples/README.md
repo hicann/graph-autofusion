@@ -13,13 +13,13 @@
 examples/
 ├── _lib/                                  # AOT 样例公共 Bash 函数
 ├── jit/
-│   ├── super_kernel_base/                 # SuperKernel 基础功能
-│   ├── super_kernel_profiling/            # SuperKernel profiling 对比
-│   └── super_kernel_runtime_ascendc_only/ # AscendC + Runtime 极简样例
+│   ├── example01_super_kernel_base/                 # SuperKernel 基础功能
+│   ├── example02_super_kernel_profiling/            # SuperKernel profiling 对比
+│   └── example03_super_kernel_runtime_ascendc_only/ # AscendC + Runtime 极简样例
 └── aot/
-    ├── dual_stream/                       # 双流与 NPU Event 控制边
-    ├── net01_sk_options/                  # SuperKernel options
-    └── net03_pybind/                      # Pybind 自定义算子融合
+    ├── example01_dual_stream/             # 双流与 NPU Event 控制边
+    ├── example02_net01_sk_options/        # SuperKernel options
+    └── example03_net03_pybind/            # Pybind 自定义算子融合
 ```
 
 ## 前置说明

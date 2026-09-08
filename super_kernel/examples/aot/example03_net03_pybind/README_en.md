@@ -1,4 +1,4 @@
-# net03_pybind
+# example03_net03_pybind
 
 This sample compiles an AscendC custom add kernel with `SK_BIND` by using `bisheng`, registers it as a PyTorch operator through pybind, and enables SuperKernel during `npugraph_ex` static compilation.
 

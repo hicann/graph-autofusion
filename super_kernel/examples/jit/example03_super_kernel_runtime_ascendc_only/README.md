@@ -8,7 +8,7 @@
 
 ## 目录结构
 ```text
-super_kernel_runtime_ascendc_only/
+example03_super_kernel_runtime_ascendc_only/
 ├── README.md                                     # 中文说明文档
 ├── README_en.md                                  # 英文说明文档
 ├── compile_sk.py                                 # 编译sub_kernel、super_kernel算子
