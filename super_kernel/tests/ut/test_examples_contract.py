@@ -193,7 +193,7 @@ def test_common_script_requires_run_package_when_requested(tmp_path):
 
 
 @pytest.mark.ut
-def test_aot_examples_only_use_public_superkernel_options():
+def test_aot_examples_do_not_use_unsupported_superkernel_options():
     unsupported_options = {
         "clone_input",
         "debug_extend",

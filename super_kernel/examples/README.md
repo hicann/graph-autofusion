@@ -18,7 +18,7 @@ examples/
 │   └── super_kernel_runtime_ascendc_only/ # AscendC + Runtime 极简样例
 └── aot/
     ├── dual_stream/                       # 双流与 NPU Event 控制边
-    ├── net01_sk_options/                  # SuperKernel 公开 options
+    ├── net01_sk_options/                  # SuperKernel options
     └── net03_pybind/                      # Pybind 自定义算子融合
 ```
 

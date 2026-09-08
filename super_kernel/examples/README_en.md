@@ -18,7 +18,7 @@ examples/
 │   └── super_kernel_runtime_ascendc_only/ # Minimal AscendC and Runtime sample
 └── aot/
     ├── dual_stream/                       # Two streams with NPU events
-    ├── net01_sk_options/                  # Public SuperKernel options
+    ├── net01_sk_options/                  # SuperKernel options
     └── net03_pybind/                      # Pybind custom operator fusion
 ```
 
