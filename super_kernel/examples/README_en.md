@@ -18,8 +18,8 @@ examples/
 └── aot/
     ├── _lib/                              # Shared Bash functions for AOT samples
     ├── example01_dual_stream/             # Two streams with NPU events
-    ├── example02_net01_sk_options/        # SuperKernel options
-    └── example03_net03_pybind/            # Pybind custom operator fusion
+    ├── example02_sk_options/              # SuperKernel options
+    └── example03_kernel_pybind/           # Pybind custom operator fusion
 ```
 
 ## Prerequisites

@@ -18,8 +18,8 @@ examples/
 └── aot/
     ├── _lib/                              # AOT 样例公共 Bash 函数
     ├── example01_dual_stream/             # 双流与 NPU Event 控制边
-    ├── example02_net01_sk_options/        # SuperKernel options
-    └── example03_net03_pybind/            # Pybind 自定义算子融合
+    ├── example02_sk_options/              # SuperKernel options
+    └── example03_kernel_pybind/           # Pybind 自定义算子融合
 ```
 
 ## 前置说明

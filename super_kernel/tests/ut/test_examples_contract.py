@@ -30,8 +30,8 @@ def test_examples_are_grouped_by_compile_mode():
         "jit/example02_super_kernel_profiling",
         "jit/example03_super_kernel_runtime_ascendc_only",
         "aot/example01_dual_stream",
-        "aot/example02_net01_sk_options",
-        "aot/example03_net03_pybind",
+        "aot/example02_sk_options",
+        "aot/example03_kernel_pybind",
         "aot/_lib",
     )
 
@@ -46,7 +46,7 @@ def test_examples_are_grouped_by_compile_mode():
         "aot/example01_dual_stream/log/run.log",
         "aot/example01_dual_stream/tmp/run.log",
         "aot/example01_dual_stream/static_kernel_compile_outputs/kernel.run",
-        "aot/example02_net01_sk_options/__pycache__/main.pyc",
+        "aot/example02_sk_options/__pycache__/main.pyc",
     ),
 )
 def test_aot_generated_files_are_ignored(relative_path):
@@ -76,11 +76,15 @@ def test_superkernel_examples_require_npu_arch():
 @pytest.mark.ut
 @pytest.mark.parametrize(
     ("npu_arch", "expected_jit_count"),
-    (("dav-2201", 3), ("dav-3510", 0)),
+    (("dav-2201", 3), ("dav-3510", 0), ("dav-4000", 0)),
 )
 def test_npu_arch_controls_jit_examples(tmp_path, npu_arch, expected_jit_count):
     build_script = tmp_path / "build.sh"
-    build_script.write_text(BUILD_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+    build_source = BUILD_SCRIPT.read_text(encoding="utf-8")
+    build_source = build_source.replace(
+        "^(dav-2201|dav-3510)$", "^(dav-2201|dav-3510|dav-4000)$"
+    )
+    build_script.write_text(build_source, encoding="utf-8")
 
     jit_scripts = (
         "jit/example01_super_kernel_base/superkernel_scope.py",
@@ -94,8 +98,8 @@ def test_npu_arch_controls_jit_examples(tmp_path, npu_arch, expected_jit_count):
 
     aot_scripts = (
         "aot/example01_dual_stream/run.sh",
-        "aot/example02_net01_sk_options/run.sh",
-        "aot/example03_net03_pybind/run.sh",
+        "aot/example02_sk_options/run.sh",
+        "aot/example03_kernel_pybind/run.sh",
     )
     for relative_path in aot_scripts:
         script = tmp_path / "super_kernel" / "examples" / relative_path
@@ -122,8 +126,8 @@ def test_npu_arch_controls_jit_examples(tmp_path, npu_arch, expected_jit_count):
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.count("JIT example executed") == expected_jit_count
     assert result.stdout.count("AOT example executed") == len(aot_scripts)
-    assert ("Skipping SuperKernel JIT examples on dav-3510" in result.stdout) == (
-        npu_arch == "dav-3510"
+    assert (f"Skipping SuperKernel JIT examples on {npu_arch}" in result.stdout) == (
+        npu_arch != "dav-2201"
     )
 
 
@@ -265,8 +269,8 @@ def test_aot_examples_do_not_use_unsupported_superkernel_options():
 
 
 @pytest.mark.ut
-def test_net03_explicitly_registers_custom_operator():
-    source = (EXAMPLES_DIR / "aot" / "example03_net03_pybind" / "main.py").read_text(
+def test_example03_explicitly_registers_custom_operator():
+    source = (EXAMPLES_DIR / "aot" / "example03_kernel_pybind" / "main.py").read_text(
         encoding="utf-8"
     )
 

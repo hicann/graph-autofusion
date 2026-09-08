@@ -1,4 +1,4 @@
-# example03_net03_pybind
+# example03_kernel_pybind
 
 该样例使用 `bisheng` 编译带 `SK_BIND` 的 AscendC custom add kernel，通过 pybind 注册为 PyTorch 算子，再由 `npugraph_ex` 静态编译并启用 SuperKernel。
 

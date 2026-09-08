@@ -553,20 +553,20 @@ build_package() {
 
 superkernel_py_run_example() {
   echo "---------------- Start running examples ----------------"
-  if [[ "${NPU_ARCH}" == "dav-3510" ]]; then
-    echo "[INFO] Skipping SuperKernel JIT examples on dav-3510."
-  else
+  if [[ "${NPU_ARCH}" == "dav-2201" ]]; then
     "${PYTHON_CMD}" "${BASEPATH}/super_kernel/examples/jit/example01_super_kernel_base/superkernel_scope.py" || return $?
     "${PYTHON_CMD}" "${BASEPATH}/super_kernel/examples/jit/example02_super_kernel_profiling/superkernel_compare.py" || return $?
     "${PYTHON_CMD}" \
       "${BASEPATH}/super_kernel/examples/jit/example03_super_kernel_runtime_ascendc_only/superkernel_runtime_ascendc_basic.py" || return $?
+  else
+    echo "[INFO] Skipping SuperKernel JIT examples on ${NPU_ARCH}."
   fi
   SK_NPU_ARCH="${NPU_ARCH}" PYTHON_CMD="${PYTHON_CMD}" \
     bash "${BASEPATH}/super_kernel/examples/aot/example01_dual_stream/run.sh" &&
   SK_NPU_ARCH="${NPU_ARCH}" PYTHON_CMD="${PYTHON_CMD}" \
-    bash "${BASEPATH}/super_kernel/examples/aot/example02_net01_sk_options/run.sh" &&
+    bash "${BASEPATH}/super_kernel/examples/aot/example02_sk_options/run.sh" &&
   SK_NPU_ARCH="${NPU_ARCH}" PYTHON_CMD="${PYTHON_CMD}" \
-    bash "${BASEPATH}/super_kernel/examples/aot/example03_net03_pybind/run.sh" &&
+    bash "${BASEPATH}/super_kernel/examples/aot/example03_kernel_pybind/run.sh" &&
   echo "Run all examples success"
 }
 
