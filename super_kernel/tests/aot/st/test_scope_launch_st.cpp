@@ -35,3 +35,35 @@ TEST_F(AotSystemTest, EmptyScopeNameDoesNotDispatchKernel) {
     EXPECT_TRUE(model.Launches().empty());
     EXPECT_TRUE(model.Tasks(stream).empty());
 }
+
+TEST_F(AotSystemTest, ScopeMarkerCopyFailuresPreserveAlreadyDispatchedPrefix) {
+    for (bool begin : {false, true}) {
+        for (int failOnCall : {1, 2, 3}) {
+            SCOPED_TRACE(begin);
+            SCOPED_TRACE(failOnCall);
+            SkUtResetTestControls();
+            sk::test::Model model;
+            const auto stream = model.AddStream();
+            SkUtSetSecurecMemcpyFailOnCall(failOnCall);
+            const auto result = begin ? aclskScopeBegin("copy_failure", stream) : aclskScopeEnd("copy_failure", stream);
+            EXPECT_EQ(result, ACL_ERROR_INVALID_PARAM);
+            const auto launches = model.Launches();
+            ASSERT_EQ(launches.size(), static_cast<size_t>(failOnCall - 1));
+            for (size_t i = 0; i < launches.size(); ++i) {
+                EXPECT_EQ(launches[i].scope, "copy_failure");
+                EXPECT_EQ(launches[i].stream, stream);
+                EXPECT_EQ(launches[i].function,
+                          begin && i == 0 ? "sk_scope_kernel_begin_dav_2201" : "sk_placeholder_kernel_dav_2201");
+            }
+        }
+    }
+}
+
+TEST_F(AotSystemTest, OversizedScopeNameFailsWithoutDispatchingMarkers) {
+    sk::test::Model model;
+    const auto stream = model.AddStream();
+    const std::string name(4096, 'x');
+    EXPECT_EQ(aclskScopeBegin(name.c_str(), stream), ACL_ERROR_INVALID_PARAM);
+    EXPECT_EQ(aclskScopeEnd(name.c_str(), stream), ACL_ERROR_INVALID_PARAM);
+    EXPECT_TRUE(model.Launches().empty());
+}

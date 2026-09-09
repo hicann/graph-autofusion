@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -24,7 +25,16 @@ struct KernelSpec {
     uint16_t cubeRatio = 0;
     uint16_t vectorRatio = 0;
     uint32_t scheMode = 0;
+    uint64_t capability = 0;
 };
+// Compiler-to-Runtime SK binding metadata, expressed as offsets within a binary.
+struct BinaryBinding {
+    uint64_t capability;
+    uint64_t globalOffset;
+    std::array<uint64_t, 4> entryOffsets;
+};
+// Set before the binary is first consumed; production caches binary metadata.
+void SetKernelBindings(aclmdlRITask task, const std::vector<BinaryBinding> &bindings);
 struct TaskSnapshot {
     uint32_t id = 0;
     aclmdlRITaskType type = ACL_MODEL_RI_TASK_DEFAULT;
@@ -56,6 +66,8 @@ class Model {
     aclrtStream AddStream();
     aclmdlRITask AddKernel(aclrtStream stream, const std::string &name, const KernelSpec &spec = {});
     aclmdlRITask AddEvent(aclrtStream stream, aclmdlRITaskType type, aclrtEvent event);
+    // Non-kernel task parameters are copied; referenced external addresses stay caller-owned.
+    aclmdlRITask AddTask(aclrtStream stream, const aclmdlRITaskParams &params);
     TaskSnapshot Snapshot(aclmdlRITask task) const;
     std::vector<TaskSnapshot> Tasks(aclrtStream stream) const;
     // Stream creation order, then launch order within each stream.

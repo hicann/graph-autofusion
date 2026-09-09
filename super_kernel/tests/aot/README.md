@@ -9,7 +9,7 @@
 
 | 目录 | 职责 |
 | --- | --- |
-| `ut/` | 内部类和函数的单元测试，保留 gtest/mockcpp；包括共享模型夹具的四个 UT |
+| `ut/` | 内部类和函数的单元测试，保留 gtest/mockcpp；包括共享模型夹具的七个 UT |
 | `st/` | 从四个公开 API 验证跨模块行为，只包含公开 API 与测试依赖头文件 |
 | `depends/` | `super_kernel_aot_stub` 共享库、Runtime/ACL stub 和外部 RI 模型夹具 |
 | `cmake/` | 公共测试选项、运行与覆盖率脚本 |
@@ -29,9 +29,16 @@ ST 可执行文件和 `ascendsk_st` 链接同一个 `super_kernel_aot_stub` 共�
 融合 record 后外部 wait/reset 重写与同步内存清理、未配对 scope、模型 update 失败、
 begin/end marker 和 verify。扩展场景包括 cube/MIX 1:1/MIX 1:2 入口选择、逐算子调试、
 跨流同名 scope 合并、调试 JSON 的选项和任务顺序、Runtime 查询/入口解析/同步内存初始化失败，
-以及 Verify 的输出容量、动态核限制、跨流死锁和非法输入。夹具 UT 覆盖查询容量与状态保持、
+以及 Verify 的输出容量、动态核限制、跨流死锁和非法输入。进一步覆盖 SIMT 动态 UBUF、
+多流 scope 与内存 wait/write、选项边界、编译器能力及入口绑定、混合流水线、DFX 异常回调，
+以及 profiling 启停、退出导出和失败清理。夹具 UT 覆盖查询容量与状态保持、
 多模型隔离和参数快照所有权、同名不同核类型的元数据隔离、参数深拷贝，
-以及旧 UT 使用的不透明设备地址兼容行为。
+非 kernel 参数复制、编译器 metadata 字节协议，以及旧 UT 使用的不透明设备地址兼容行为。
+
+profiling 和 SIMT 场景在独立子进程中运行，隔离生产单例；子进程正常退出以验证 recorder
+清理并写回覆盖率，超时 15 秒则失败并回收进程。子进程不继承 GTest 分片配置，以免精确过滤的
+用例被再次分片后漏跑。DFX 仅复制真实融合入口参数并提供外部异常寄存器和标准 ELF 符号，
+不拼装或解析私有 SK 参数。profiling 当前验证空事件导出，不模拟设备生成的事件记录。
 
 测试执行不需要 NPU。当前顶层 CMake 配置仍会查找 CANN 包并配置 ASC 编译器，因此仍需可用的
 CANN Toolkit 和环境配置。这些测试验证主机流程与 stub 契约，不能证明真实 Runtime ABI
@@ -80,14 +87,17 @@ UT 保留 `collect_coverage_data`。直接配置过滤器时使用
 ## 扩展夹具与用例
 
 新增 ST 放入 `st/test_*.cpp`，CMake 会自动发现；复用 `st_fixture.h` 的 `AotSystemTest`。
-通过 `sk::test::Model` 创建外部模型，使用 `AddStream`、`AddKernel`、`AddEvent` 构造输入，
+通过 `sk::test::Model` 创建外部模型，使用 `AddStream`、`AddKernel`、`AddEvent`、`AddTask` 构造输入，
 调用公开 API 后使用 `Tasks`、`Snapshot`、`Launches` 和更新计数观察结果。
 不要包含生产私有头文件，也不要直接构造内部 `SkGraph` 或调用内部优化器替代公开入口。
 
 新增 Runtime 行为应在 `depends/` 中表达外部 API 契约，并补充夹具 UT，再以 ST 验证生产流程。
 夹具负责句柄有效性、参数所有权和可观察状态，不应复制融合算法来计算预期结果。
 `SetParams` 保存 host 参数、配置属性与 opInfo 的副本；函数元数据在进程内保持稳定，
-避免生产 binary cache 引用失效。当前模型夹具提供单 AIV 元数据与 record/wait/reset 事件，
+避免生产 binary cache 引用失效。`KernelSpec` 描述核类型、比例和编译器 capability，
+`SetKernelBindings` 覆盖外部二进制绑定，必须在首次 Optimize 消费该 binary 之前设置。
+`AddTask` 只接受非 kernel 任务；其中引用的外部地址由调用方保持有效。
+当前模型夹具提供 AIC/AIV/MIX 元数据、record/wait/reset 事件与内存 wait/write，
 用例串行运行，不提供通用设备模拟或并发 Runtime 状态。
 
 资源生命周期必须先 destroy、后 reset：让 `Model` 析构或显式调用 `Model::Destroy()`，
@@ -110,3 +120,8 @@ bash build.sh -s --module=superkernel --impl=cpp --no-autofuse -j 8 \
 先区分 CANN/第三方依赖配置失败、编译链接失败和用例断言失败。链接出现 `testing::*`
 未定义符号时检查 gtest 核心库是否进入链接命令；资源断言失败时检查模型销毁与 stub reset
 顺序。断言信息中的任务类型、disabled 状态、参数更新次数和同步地址可帮助定位改写差异。
+
+当前保留两处生产问题的复现：混合流水线的末尾任务同时声明 wait/set 能力时，early-start
+可能构造没有关联节点的同步并返回失败；单 kernel 核数超出设备上限时，scope 拆分可能不终止。
+后者用例 `DISABLED_RuntimeCoreLimitKeepsOversizedKernelOutsideFusion` 默认禁用，不能计入通过数量，
+修复生产代码前不要在常规测试中启用。详见 `docs/zh/superkernel-aot-host-st-design.md` 的主机验证结果。

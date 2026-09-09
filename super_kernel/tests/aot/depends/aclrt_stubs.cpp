@@ -16,6 +16,7 @@
 #include "acl/acl.h"
 #include "ut_common_stubs.h"
 #include "model_fixture_internal.h"
+#include "exception_fixture.h"
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -272,6 +273,9 @@ aclError aclrtGetFunctionName(aclrtFuncHandle funcHandle, uint32_t maxLen, char 
 
 // 内存复制
 aclError aclrtMemcpy(void *dst, size_t destMax, const void *src, size_t count, aclrtMemcpyKind kind) {
+  if (SkUtFailAclrtMemcpy()) {
+    return ACL_ERROR_FAILURE;
+  }
   if (dst == nullptr || src == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
@@ -373,6 +377,9 @@ aclError aclrtFree(void *devPtr) {
 }
 
 aclError aclrtMallocHost(void **hostPtr, size_t size) {
+  if (SkUtFailAclrtMallocHost()) {
+    return ACL_ERROR_FAILURE;
+  }
   if (hostPtr == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
@@ -412,7 +419,7 @@ aclError aclrtExceptionInfoCallbackRegister(aclrtExceptionInfoCallbackFunc callb
   if (callback == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
-  // Stub: just return success, don't actually register the callback
+  sk::test::RegisterExceptionCallback(callback);
   return ACL_ERROR_NONE;
 }
 
@@ -420,7 +427,11 @@ aclError aclrtGetFuncHandleFromExceptionInfo(const aclrtExceptionInfo *exception
   if (exceptionInfo == nullptr || funcHandle == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
-  // Stub: return a fake function handle
+  if (auto *exception = sk::test::FindException(exceptionInfo)) {
+    *funcHandle = exception->function;
+    return exception->functionResult;
+  }
+  // Preserve legacy UT behavior for exceptions not owned by the fixture.
   *funcHandle = reinterpret_cast<aclrtFuncHandle>(0x3000);
   return ACL_ERROR_NONE;
 }
@@ -429,7 +440,12 @@ aclError aclrtGetArgsFromExceptionInfo(const aclrtExceptionInfo *exceptionInfo, 
   if (exceptionInfo == nullptr || args == nullptr || argsLen == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
-  // Stub: return fake args pointer and length
+  if (auto *exception = sk::test::FindException(exceptionInfo)) {
+    *args = exception->args;
+    *argsLen = exception->argsSize;
+    return exception->argsResult;
+  }
+  // Preserve legacy UT behavior for exceptions not owned by the fixture.
   *args = nullptr;
   *argsLen = 0;
   return ACL_ERROR_NONE;

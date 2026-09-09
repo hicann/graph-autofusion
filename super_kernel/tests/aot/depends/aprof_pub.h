@@ -73,10 +73,7 @@ inline char *MsprofId2Str(size_t id) {
  * @brief Get profiling path (stub implementation)
  * @return Static string of profiling path
  */
-inline char *MsprofGetPath() {
-  static char profPath[] = "/tmp/prof_output/mindstudio_profiler_output";
-  return profPath;
-}
+char *MsprofGetPath();
 
 /**
  * @brief Register profiling callback (stub implementation)
@@ -84,10 +81,6 @@ inline char *MsprofGetPath() {
  * @param callback Callback function pointer
  * @return 0 on success
  */
-inline int32_t MsprofRegisterCallback(uint32_t type, int32_t (*callback)(uint32_t, void *, uint32_t)) {
-  (void)type;
-  (void)callback;
-  return 0;
-}
+int32_t MsprofRegisterCallback(uint32_t type, int32_t (*callback)(uint32_t, void *, uint32_t));
 
 #endif  // APROF_PUB_H

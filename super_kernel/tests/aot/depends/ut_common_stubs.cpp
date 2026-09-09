@@ -24,6 +24,8 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <atomic>
+#include "ut_common_stubs.h"
 
 ut_log::LogBuffer &ut_log::LogBuffer::Instance() {
   static LogBuffer instance;
@@ -37,6 +39,10 @@ int g_securecMemcpyFailOnCall = -1;
 int g_securecMemcpySeen = 0;
 int g_securecMemsetFailOnCall = -1;
 int g_securecMemsetSeen = 0;
+std::atomic<int> g_aclrtMemcpyFailOnCall{0};
+std::atomic<int> g_aclrtMemcpySeen{0};
+std::atomic<int> g_aclrtMallocHostFailOnCall{0};
+std::atomic<int> g_aclrtMallocHostSeen{0};
 
 aclError g_aclmdlRIGetStreamsRet[2] = {ACL_SUCCESS, ACL_SUCCESS};
 aclError g_aclrtStreamGetTasksRet[2] = {ACL_SUCCESS, ACL_SUCCESS};
@@ -123,11 +129,29 @@ void SkUtResetCommonStubControls() {
   g_streamIds.clear();
   g_debugJsonPrintPaths.clear();
   SetFunctionAllocUbufSize(0);
+  SetSimtAivType(0);
   SetRtFunctionGetMetaInfoRet(0);
 }
 
 void SkUtResetTestControls() {
+  SkUtSetAclrtMemcpyFailOnCall(0);
+  SkUtSetAclrtMallocHostFailOnCall(0);
   SkUtResetCommonStubControls();
+}
+
+void SkUtSetAclrtMemcpyFailOnCall(int call) {
+  g_aclrtMemcpySeen = 0;
+  g_aclrtMemcpyFailOnCall = call;
+}
+void SkUtSetAclrtMallocHostFailOnCall(int call) {
+  g_aclrtMallocHostSeen = 0;
+  g_aclrtMallocHostFailOnCall = call;
+}
+bool SkUtFailAclrtMemcpy() {
+  return g_aclrtMemcpySeen.fetch_add(1) + 1 == g_aclrtMemcpyFailOnCall.load();
+}
+bool SkUtFailAclrtMallocHost() {
+  return g_aclrtMallocHostSeen.fetch_add(1) + 1 == g_aclrtMallocHostFailOnCall.load();
 }
 
 void SkUtSetAclmdlRIGetStreamsRet(int phase, aclError ret) {

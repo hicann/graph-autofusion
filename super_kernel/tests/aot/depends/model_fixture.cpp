@@ -16,6 +16,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <tuple>
 #include <unordered_map>
 
@@ -24,6 +25,7 @@ namespace {
 struct Function {
     std::string name;
     KernelSpec spec;
+    std::optional<std::vector<BinaryBinding>> bindings;
     // The fake code is never executed; offsets describe the SK binary metadata.
     std::array<unsigned char, 256> code{};
 };
@@ -53,7 +55,7 @@ std::unordered_map<aclrtStream, Stream *> streams;
 std::unordered_map<aclmdlRITask, OwnedTask *> tasks;
 // Function identities remain stable for the process, matching production's
 // binary metadata cache. Reuse names instead of recycling binary addresses.
-using FunctionKey = std::tuple<std::string, aclrtKernelType, uint16_t, uint16_t, uint32_t>;
+using FunctionKey = std::tuple<std::string, aclrtKernelType, uint16_t, uint16_t, uint32_t, uint64_t>;
 std::map<FunctionKey, Function> functions;
 std::unordered_map<void *, Function *> functionHandles;
 std::map<uintptr_t, size_t> memory;
@@ -71,7 +73,7 @@ bool ContainsMemory(const void *address, size_t size) {
 }
 
 Function *GetFunction(const std::string &name, const KernelSpec &spec = {}) {
-    auto &function = functions[{name, spec.type, spec.cubeRatio, spec.vectorRatio, spec.scheMode}];
+    auto &function = functions[{name, spec.type, spec.cubeRatio, spec.vectorRatio, spec.scheMode, spec.capability}];
     function.name = name;
     function.spec = spec;
     functionHandles[&function] = &function;
@@ -168,6 +170,17 @@ aclmdlRITask Model::AddEvent(aclrtStream stream, aclmdlRITaskType type, aclrtEve
     } else {
         owned.task.params.eventResetTaskParams.event = event;
     }
+    return &owned.task;
+}
+aclmdlRITask Model::AddTask(aclrtStream stream, const aclmdlRITaskParams &params) {
+    if (!impl_) {
+        throw std::logic_error("model destroyed");
+    }
+    if (params.type == ACL_MODEL_RI_TASK_KERNEL) {
+        throw std::invalid_argument("use AddKernel for owned kernel arguments and metadata");
+    }
+    auto &owned = AppendTask(RequireStream(*impl_, stream), params.type);
+    owned.task.params = params;
     return &owned.task;
 }
 TaskSnapshot Model::Snapshot(aclmdlRITask handle) const {
@@ -439,7 +452,19 @@ bool BinaryAddress(aclrtBinHandle handle, void **address, size_t *size) {
     *size = it->second->code.size();
     return true;
 }
+void SetKernelBindings(aclmdlRITask task, const std::vector<BinaryBinding> &bindings) {
+    const auto owned = tasks.find(task);
+    if (owned == tasks.end() || owned->second->task.params.type != ACL_MODEL_RI_TASK_KERNEL) {
+        throw std::invalid_argument("metadata requires an owned kernel task");
+    }
+    const auto function = owned->second->task.params.kernelTaskParams.funcHandle;
+    functionHandles.at(function)->bindings = bindings;
+}
 size_t BinaryMetadataCount(aclrtBinHandle handle) {
+    const auto function = functionHandles.find(handle);
+    if (function != functionHandles.end() && function->second->bindings) {
+        return function->second->bindings->size();
+    }
     void *cube = nullptr;
     void *vector = nullptr;
     if (!FunctionAddress(handle, &cube, &vector)) {
@@ -454,6 +479,7 @@ bool BinaryMetadata(aclrtBinHandle handle, size_t count, void **data, size_t *si
     // RT_BINARY_TYPE_SK_INFO wire payload: reserved u32, cap u64, global
     // function offset, then four SK function offsets. All offsets stay in code.
     std::array<uint64_t, 6> values{0, 16, 32, 32, 32, 32};
+    values[0] = functionHandles.at(handle)->spec.capability;
     const size_t payloadSize = sizeof(uint32_t) + sizeof(values);
     result = -1;
     if (count != BinaryMetadataCount(handle) || data == nullptr || sizes == nullptr) {
@@ -466,6 +492,13 @@ bool BinaryMetadata(aclrtBinHandle handle, size_t count, void **data, size_t *si
         values[1] = 16 + i * 8;
         for (size_t j = 2; j < values.size(); ++j) {
             values[j] = 32 + i * 8;
+        }
+        const auto &bindings = functionHandles.at(handle)->bindings;
+        if (bindings) {
+            const auto &binding = bindings->at(i);
+            values[0] = binding.capability;
+            values[1] = binding.globalOffset;
+            std::copy(binding.entryOffsets.begin(), binding.entryOffsets.end(), values.begin() + 2);
         }
         std::memset(data[i], 0, sizeof(uint32_t));
         std::memcpy(static_cast<unsigned char *>(data[i]) + sizeof(uint32_t), values.data(), sizeof(values));

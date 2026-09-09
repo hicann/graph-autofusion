@@ -18,6 +18,7 @@
 #include "acl/acl.h"
 #include "ut_common_stubs.h"
 #include "model_fixture_internal.h"
+#include "exception_fixture.h"
 #include "runtime/kernel.h"
 #include "runtime/base.h"
 #include <cstring>
@@ -54,6 +55,10 @@ int rtBinaryGetMetaInfo(void *binHdl, int type_enum, size_t metaNum, void **data
 
 // rtGetBinBuffer - stub implementation for unit tests
 int rtGetBinBuffer(void *binHdl, int addrType, void **buffer, uint32_t *size) {
+  if (addrType == RT_BIN_HOST_ADDR && buffer != nullptr && size != nullptr &&
+      sk::test::ExceptionBinaryBuffer(binHdl, buffer, size)) {
+    return RT_SUCCESS;
+  }
   if (buffer != nullptr) {
     *buffer = nullptr;
   }
@@ -94,6 +99,11 @@ void rt_sk_replay(void) {
 // rtGetExceptionRegInfo - stub implementation for unit tests
 // Returns success with no cores in error
 rtError_t rtGetExceptionRegInfo(const void *exception, rtExceptionErrRegInfo_t **errRegInfo, uint32_t *coreNum) {
+  if (auto *fixture = sk::test::FindException(exception)) {
+    *errRegInfo = fixture->registers.data();
+    *coreNum = static_cast<uint32_t>(fixture->registers.size());
+    return fixture->registersResult;
+  }
   (void)exception;
   (void)errRegInfo;
   *coreNum = 0;

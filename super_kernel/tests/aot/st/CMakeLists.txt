@@ -11,7 +11,15 @@ configure_ascendsk_host(ascendsk_st)
 target_link_libraries(ascendsk_st PRIVATE intf_llt_options super_kernel_aot_stub json)
 
 file(GLOB ST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test_*.cpp")
+add_executable(super_kernel_aot_profiling_process profiling_process.cpp)
+target_link_libraries(super_kernel_aot_profiling_process PRIVATE
+    intf_llt_options ascendsk_st super_kernel_aot_stub
+)
 add_executable(super_kernel_aot_stest ${ST_SOURCES})
+add_dependencies(super_kernel_aot_stest super_kernel_aot_profiling_process)
+target_compile_definitions(super_kernel_aot_stest PRIVATE
+    SK_PROFILING_PROCESS_PATH="$<TARGET_FILE:super_kernel_aot_profiling_process>"
+)
 target_link_libraries(super_kernel_aot_stest PRIVATE
     intf_llt_options GTest::gtest_main GTest::gtest ascendsk_st super_kernel_aot_stub json
 )

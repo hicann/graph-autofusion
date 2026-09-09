@@ -223,6 +223,12 @@ UT 源码迁移只改必要 include；保留原函数名及注错默认。测试
 | 功能 | 逐算子调试、跨流同名 scope | 检查独立调试入口和跨流合并结果；STREAM_FUSION=0 按当前告警但仍合并的行为验证 | ST |
 | 功能 | 调试产物与选项 | 临时目录中解析生产输出 JSON，核对持久化选项、FUNC 任务顺序与调试标志；恢复环境并禁用文件日志 | ST |
 | 异常 | Runtime 枚举、入口解析、同步内存初始化失败 | 检查返回失败且不提交模型；内存初始化失败释放已分配资源 | ST |
+| 功能 | SIMT、编译器 capability 与入口绑定 | 子进程隔离架构缓存，检查动态 UBUF、入口类型、scale-up、DCCI 和四分入口；非法 metadata 保留原任务 | ST |
+| 功能 | 多流 scope 与内存同步 | 覆盖内存 wait/write、内部 notify/wait、外部 reset、未配对 wait 策略及不一致条件；检查地址关联和资源清理 | ST |
+| 功能 | 混合流水线与 early-start | 解析生产任务队列 JSON，核对 AIC/AIV 队列和节点集合；覆盖有效尾节点及无关联同步失败 | ST |
+| 功能/异常 | DFX 回调与 dump | 复制真实融合参数，提供外部异常寄存器及标准 ELF 符号；验证 PC 定位、COND 状态、去重、非法参数和分配/拷贝失败清理 | ST |
+| 功能/异常 | profiling 生命周期 | 子进程验证启停、缺失 stop、正常退出导出及目录/内存/路径失败；不伪造设备事件记录 | ST |
+| 边界 | 选项与 marker | 表驱动覆盖字符串/数值/列表边界、重复选项、DCCI 冲突和持久化；验证 marker 拷贝失败与超长名称 | ST |
 | 边界 | Verify 容量、动态核、死锁、非法节点 | 核对所需容量及缓冲区不被覆盖、动态核改变拆分结果、死锁排除 wait、失败清空结果数量 | ST |
 | 兼容性 | 同名不同核类型 | 后创建的 kernel 不改变已有 kernel 的核类型、比例、调度模式和 block 数 | UT |
 | 兼容性 | 共享桩与原有 mockcpp | 迁移前后原 UT 全量运行，特别检查函数 mock 与回调 | UT |
@@ -247,14 +253,23 @@ cmake --build build --target run_super_kernel_aot_stest -j 8
 
 ### 主机验证结果
 
-在首版提交 `3d2e2a63` 上增加 11 个 ST 和 1 个桩契约 UT 后，全量 21 个 ST、1086 个 UT 通过，ST 随机顺序重复 10 轮通过。清空 ST 的 gcda 后运行 `collect_coverage_data_cpp_st`，报告如下：
+上一轮扩展已提交为 `d25eecb6`（21 个 ST、1086 个 UT）。本轮增加 39 个启用 ST 和 2 个桩契约 UT，全量 60 个 ST、1088 个 UT 通过；另有 1 个死循环复现默认禁用，不计入通过数量。ST 随机顺序重复 10 轮通过，分片运行验证子进程确实执行对应测试。清空 ST 的 gcda 后独立运行 `collect_coverage_data_cpp_st`，报告如下：
 
-| 指标 | 首版 | 扩展后 |
-|---|---|---|
-| 生产代码行覆盖率 | 3350/8219（40.8%） | 4318/8219（52.5%） |
-| 生产函数覆盖率 | 512/953（53.7%） | 598/953（62.7%） |
+| 指标 | 首版 `3d2e2a63` | 已提交 `d25eecb6` | 本轮扩展 |
+|---|---|---|---|
+| 生产代码行覆盖率 | 3350/8219（40.8%） | 4318/8219（52.5%） | 6255/8227（76.0%） |
+| 生产函数覆盖率 | 512/953（53.7%） | 598/953（62.7%） | 782/955（81.9%） |
 
-两次均统计同一组 39 个 `super_kernel/src/aot` 文件，不计入测试和桩。主要增量来自核类型处理、选项持久化、调试日志/JSON、Verify 校验及死锁处理。DFX 异常回调和 profiling 仍是低覆盖区域；当前结果不代表设备执行或硬件故障流程已验证。
+各次均统计同一组 39 个 `super_kernel/src/aot` 文件，不计入测试、桩或 UT 数据。Msprof 桩由内联空实现改为外部实现后，编译器生成的可计数行/函数略有变化；未修改生产源码、`-O2` 编译级别或过滤范围。报告位于 `super_kernel/coverage/cpp_st/html/index.html`，数值以 `lcov --summary super_kernel/coverage/cpp_st/coverage.info_filtered` 为准。
+
+本轮行覆盖率尚未达到 80%，按当前分母还需覆盖 327 行。新增覆盖主要来自 DFX、profiling 生命周期、SIMT、选项边界、编译器 metadata、多流同步和流水线任务生成。剩余缺口包括设备生成的 profiling 事件处理、更多节点/同步组合和失败路径；部分小函数受生产 `-O2` 内联影响，不能以调整优化级别代替补充场景。当前结果不代表设备执行、数值正确性或真实硬件故障流程已验证。
+
+### 补测发现的生产问题
+
+1. `MixedKernelPipelineBuildsBothQueuesAndReportsUnpairedEarlyStartSync`：混合流水线末尾 AIC 任务同时声明 wait/set capability 时，`sk_task_builder.cpp` 为其生成 AIC-to-AIC wait，但没有后继关联节点；`DispatchSyncTasks` 报 `related node is null`，Optimize 失败且没有提交更新。保留当前失败行为复现；另以 wait-only 尾任务验证 early-start 成功路径，不能将此错误返回记为功能成功。
+2. `DISABLED_RuntimeCoreLimitKeepsOversizedKernelOutsideFusion`：单 CUBE kernel 请求 33 核、设备上限 32 核时，`ScheModeKernelSplitPass::ProcessSingleScope` 在首节点前拆分，空的前半段被丢弃，原样的后半段重新进入 `Run` 的内部循环，导致无法返回。默认禁用复现，避免常规 ST 卡死；修复后应启用并验证无法融合的 kernel 保持原状。
+
+本轮只扩展测试与外部桩，未混入上述生产算法修复。下一轮补测可继续围绕合法的多流节点/同步组合推进；设备事件记录路径需要明确外部设备协议，不能通过拼装私有 SK 数据或直接调用内部函数绕过 ST 边界。
 
 ## 验收标准
 
@@ -285,7 +300,8 @@ cmake --build build --target run_super_kernel_aot_stest -j 8
 
 - [x] 编码红线：已检查资源、参数所有权、模型销毁回调和 ABI；生产算法未改动。
 - [x] 跨特性交叉影响：已检查 SuperKernel 主机测试、构建和交付边界；Autofuse/Python 行为不变。
-- [x] 贡献规范：已检查 CONTRIBUTING.md；首版按用户要求本地提交为 `3d2e2a63`，未推送。覆盖率扩展保留为工作区增量。
+- [x] 贡献规范：已检查 CONTRIBUTING.md；首版及上一轮扩展提交为 `3d2e2a63`、`d25eecb6`；本轮覆盖率扩展单独提交，与前两次提交一并更新 PR 1995。
 - [x] 代码格式：新增 C++ 按用户要求采用 4 空格，使用 clang-format 18.1.8；迁移文件仅格式化本次修改处。
 - [x] Pre-commit：已核对配置并执行 OAT；仍有五处原有许可证头拼写问题，未顺带修改：`super_kernel/CMakeLists.txt`、`aot/CMakeLists.txt`、`depends/aprof_pub.h`、`depends/runtime/base.h`、`depends/dump/adump_pub.h`（后三者位于 `super_kernel/tests/aot` 下）。新增文件的许可证检查通过。
-- [x] 增量合规：覆盖率扩展的 9 个代码/构建文件 OAT 检查通过。
+- [x] 增量合规：本轮 23 个代码/构建文件 OAT 检查仅报告 `depends/aprof_pub.h` 的原有许可证头问题，其余通过；新增/扩展用例格式检查和 `git diff --check` 通过。
+- [x] 独立检视：复核外部 metadata 契约、注错 reset、资源清理及子进程分片隔离，未发现新增阻断问题。

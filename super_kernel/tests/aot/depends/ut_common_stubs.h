@@ -19,6 +19,10 @@ extern "C" {
 
 // UT control hooks used by unit tests and stubs.
 void SkUtResetTestControls();
+void SkUtSetAclrtMemcpyFailOnCall(int call);
+void SkUtSetAclrtMallocHostFailOnCall(int call);
+bool SkUtFailAclrtMemcpy();
+bool SkUtFailAclrtMallocHost();
 
 void SkUtSetAclmdlRIGetStreamsRet(int phase, aclError ret);
 void SkUtSetAclrtStreamGetTasksRet(int phase, aclError ret);

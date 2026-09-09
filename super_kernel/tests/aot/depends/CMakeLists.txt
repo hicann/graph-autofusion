@@ -5,7 +5,9 @@
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
-add_library(super_kernel_aot_stub SHARED aclrt_stubs.cpp rt_stub.cpp ut_common_stubs.cpp model_fixture.cpp)
+add_library(super_kernel_aot_stub SHARED
+    aclrt_stubs.cpp rt_stub.cpp ut_common_stubs.cpp model_fixture.cpp exception_fixture.cpp profiling_fixture.cpp
+)
 target_include_directories(super_kernel_aot_stub PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/acl

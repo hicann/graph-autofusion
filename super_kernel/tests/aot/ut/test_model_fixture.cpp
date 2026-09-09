@@ -9,6 +9,9 @@
  */
 #include <gtest/gtest.h>
 #include "model_fixture.h"
+#include "runtime/kernel.h"
+#include <array>
+#include <cstring>
 
 TEST(AotModelFixture, QueriesPreserveTaskChangesAndCheckCapacity) {
     sk::test::Model model;
@@ -118,4 +121,45 @@ TEST(AotModelFixture, DeviceCopyDoesNotDereferenceLegacyOpaqueDeviceAddress) {
               ACL_SUCCESS);
     EXPECT_EQ(*static_cast<uint64_t *>(host), 17U);
     EXPECT_EQ(aclrtFreeHost(host), ACL_SUCCESS);
+}
+
+TEST(AotModelFixture, NonKernelParametersAreCopiedWithoutRecordingAnUpdate) {
+    sk::test::Model model;
+    auto stream = model.AddStream();
+    uint64_t memory = 1;
+    aclmdlRITaskParams params{};
+    params.type = ACL_MODEL_RI_TASK_VALUE_WAIT;
+    params.valueWaitTaskParams = {&memory, 7, 1};
+    auto task = model.AddTask(stream, params);
+    params.valueWaitTaskParams.value = 99;
+    aclmdlRITaskParams actual{};
+    ASSERT_EQ(aclmdlRITaskGetParams(task, &actual), ACL_SUCCESS);
+    EXPECT_EQ(actual.valueWaitTaskParams.value, 7U);
+    EXPECT_EQ(actual.valueWaitTaskParams.devAddr, &memory);
+    EXPECT_EQ(actual.valueWaitTaskParams.flag, 1U);
+    EXPECT_EQ(model.Snapshot(task).setParamsCount, 0U);
+    params.type = ACL_MODEL_RI_TASK_KERNEL;
+    EXPECT_THROW(model.AddTask(stream, params), std::invalid_argument);
+}
+
+TEST(AotModelFixture, CompilerBindingsPreserveWireCapabilityAndDistinctEntryOffsets) {
+    sk::test::Model model;
+    auto task = model.AddKernel(model.AddStream(), "metadata_contract");
+    sk::test::SetKernelBindings(task, {{3, 16, {32, 48, 64, 80}}});
+    aclmdlRITaskParams params{};
+    ASSERT_EQ(aclmdlRITaskGetParams(task, &params), ACL_SUCCESS);
+    aclrtBinHandle binary = nullptr;
+    ASSERT_EQ(aclrtFunctionGetBinary(params.kernelTaskParams.funcHandle, &binary), ACL_SUCCESS);
+    size_t count = 0;
+    ASSERT_EQ(rtBinaryGetMetaNum(binary, RT_BINARY_TYPE_SK_INFO, &count), 0);
+    ASSERT_EQ(count, 1U);
+    std::array<unsigned char, 52> payload{};
+    void *data = payload.data();
+    size_t size = payload.size();
+    ASSERT_EQ(rtBinaryGetMetaInfo(binary, RT_BINARY_TYPE_SK_INFO, 1, &data, &size), 0);
+    std::array<uint64_t, 6> values{};
+    std::memcpy(values.data(), payload.data() + sizeof(uint32_t), sizeof(values));
+    EXPECT_EQ(values, (std::array<uint64_t, 6>{3, 16, 32, 48, 64, 80}));
+    size = payload.size() - 1;
+    EXPECT_NE(rtBinaryGetMetaInfo(binary, RT_BINARY_TYPE_SK_INFO, 1, &data, &size), 0);
 }
