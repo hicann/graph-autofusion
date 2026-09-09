@@ -76,7 +76,8 @@ Status GenerateDefaultNddma(const TPipe &tpipe, const std::vector<ascir::AxisId>
       ub.is_ub_scalar ? "0" : tpipe.tiler.Offset(current_axis, ub.axis, ub.axis_strides);  // 每次从gm搬到ub的偏移量
   if (param.repeats.size() <= kNddmaMaxLen) {
     NddmaParams nddma_param;
-    SetNddmaParams(tpipe, param, nddma_param, ub.id, ss);
+    std::string padding_mode = GetPaddingMode(ub, param, false);
+    SetNddmaParams(tpipe, param, nddma_param, ub.id, padding_mode, ss);
     ss << api_name << "(" << ub << ", " << gm << "[" << gm_offset << " + " << tpipe.tiler.Size(offset) << "], "
        << "output_dims_" << ub.id << ", " << "output_stride_" << ub.id << ", " << "input_stride_" << ub.id << ");"
        << std::endl;

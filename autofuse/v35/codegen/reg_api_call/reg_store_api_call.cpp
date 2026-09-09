@@ -58,10 +58,29 @@ Status StoreRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<asci
   } else {
     std::string gm_offset = tpipe.tiler.Offset(current_axis, gm.axis, gm.axis_strides);
     gm_offset = gm_offset + " + " + tpipe.tiler.Size(offset_);
-    BuildDataCopyApiParamInNormal(tpipe, *api_param, dma_specific_params, ub, gm, gm_offset, false);
+    auto has_transpose = IsGraphHasTransposeNode(this->node);
+    BuildDataCopyApiParamInNormal(tpipe, *api_param, dma_specific_params, ub, gm, gm_offset, false, has_transpose);
   }
   api_param->specific_params = dma_specific_params;
-  if (IsUnitLastRead(*(this->inputs[0])) && ub.is_load_link_store_and_vec) {
+  if (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse && ub.id == tpipe.cube_output_tensor_id) {
+    // Cube readiness and buffer release use PIPE_V; bridge both to the direct MTE3 Store.
+    api_param->api_pre_process.emplace_back(
+        "{\n"
+        "auto event = tpipe.AllocEventID<HardEvent::V_MTE3>();\n"
+        "TQueSync<PIPE_V, PIPE_MTE3> sync;\n"
+        "sync.SetFlag(event);\n"
+        "sync.WaitFlag(event);\n"
+        "tpipe.ReleaseEventID<HardEvent::V_MTE3>(event);\n"
+        "}\n");
+    api_param->api_post_process.emplace_back(
+        "{\n"
+        "auto event = tpipe.AllocEventID<HardEvent::MTE3_V>();\n"
+        "TQueSync<PIPE_MTE3, PIPE_V> sync;\n"
+        "sync.SetFlag(event);\n"
+        "sync.WaitFlag(event);\n"
+        "tpipe.ReleaseEventID<HardEvent::MTE3_V>(event);\n"
+        "}\n");
+  } else if (IsUnitLastRead(*(this->inputs[0])) && ub.is_load_link_store_and_vec) {
     std::stringstream ss;
     std::string offset = offset_.Str().get();
     offset = GenValidName(offset);

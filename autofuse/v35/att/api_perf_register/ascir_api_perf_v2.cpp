@@ -32,6 +32,12 @@ af::Status TryNewNddmaModel(const TensorShapeInfo &shape_info, const NodeInfo &n
   selected = false;
   NddmaDescriptorInfo descriptor;
   NddmaModelResult result;
+  GELOGD(
+      "[ATT NDDMA] evaluate: node=%s, cv_ub_fusion=%d, raw_rank=%zu, repeats=[%s], gm_strides=[%s], "
+      "ub_strides=[%s]",
+      node_detail.name.c_str(), node.is_cv_ub_fusion, shape_info.repeats.size(),
+      GetVecString(shape_info.repeats).c_str(), GetVecString(shape_info.gm_strides).c_str(),
+      GetVecString(shape_info.strides).c_str());
   // kUBFuse Codegen 分支生成 {curAivM, curAlignN} 和固定 2D stride，与下方 raw 描述不等价；
   // 在专用 2D 模型接入前保守回退 legacy ATT 模型。
   if (node.is_cv_ub_fusion) {

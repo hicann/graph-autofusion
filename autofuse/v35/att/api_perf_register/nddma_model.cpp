@@ -31,6 +31,18 @@ struct Nddma1DParams {
   double a1, a2, b1, b2, b3, b4, c1, c2, c3, c4;
 };
 
+struct NddmaNg2Params {
+  double g10;
+  double g11_m;
+  double g00;
+  double g01_m;
+};
+
+struct NddmaNg2Config {
+  size_t n_pos;
+  size_t m_pos;
+};
+
 const Nddma1DParams *GetNddma1DParams(uint64_t dtype_size) {
   static constexpr Nddma1DParams kB8 = {11.7626,      194.421,     6.05735,     373.274,      1.1117457,
                                         0.0081160848, -140.60967,  -0.85102455, 6.9134822,    -0.0081240796,
@@ -44,6 +56,29 @@ const Nddma1DParams *GetNddma1DParams(uint64_t dtype_size) {
   static constexpr Nddma1DParams kB64 = {57.2346,       243.205,     29.3906,      468.971,     0.32660604,
                                          0.00087486841, -62.346718,  -0.089369196, 0.10364992,  -0.00088051835,
                                          0.75774914,    0.021509891, 1.1274142,    -0.021494907};
+  switch (dtype_size) {
+    case 1U:
+      return &kB8;
+    case 2U:
+      return &kB16;
+    case 4U:
+      return &kB32;
+    case 8U:
+      return &kB64;
+    default:
+      return nullptr;
+  }
+}
+
+const NddmaNg2Params *GetNddmaNg2Params(uint64_t dtype_size) {
+  static constexpr NddmaNg2Params kB8 = {-0.06039712817453574, 0.00467772443260011, 1.281461196372088,
+                                         0.014332739676824502};
+  static constexpr NddmaNg2Params kB16 = {-0.05693488761155549, 0.008823119329968787, 1.103023683074922,
+                                          0.01764753973017271};
+  static constexpr NddmaNg2Params kB32 = {-0.11894926551255973, 0.028937376089839803, 1.0747230861274883,
+                                          0.03250931041018008};
+  static constexpr NddmaNg2Params kB64 = {0.10673179701001924, 0.03378241324387062, -0.7898886688080862,
+                                          0.20468913791703064};
   switch (dtype_size) {
     case 1U:
       return &kB8;
@@ -82,6 +117,10 @@ bool IsStaticNonPositive(const Expr &expr) {
 
 bool IsStaticNegative(const Expr &expr) {
   return expr.IsConstExpr() && af::SymbolicUtils::StaticCheckLt(expr, af::sym::kSymbolZero) == af::TriBool::kTrue;
+}
+
+bool IsStaticallyEqualOrUnknown(const Expr &lhs, const Expr &rhs) {
+  return af::SymbolicUtils::StaticCheckEq(lhs, rhs) != af::TriBool::kFalse;
 }
 
 bool HasInvalidStaticValue(const NddmaNormalizedDesc &descriptor) {
@@ -269,6 +308,58 @@ NddmaFallbackReason BuildNddmaCoreCycles(const NddmaNormalizedDesc &normalized, 
   }
   return NddmaFallbackReason::kNone;
 }
+
+bool IsNg2Eligible(const NddmaNormalizedDesc &normalized, NddmaNg2Config &config) {
+  std::vector<size_t> non_unit_positions;
+  for (size_t pos = 0U; pos < normalized.output_dims.size(); ++pos) {
+    // A symbolic tiling dimension cannot always be proven greater than one. Treat only statically unit dimensions
+    // as excluded; codegen guarantees active tiling dimensions are represented by this path.
+    if (af::SymbolicUtils::StaticCheckLe(normalized.output_dims[pos], af::sym::kSymbolOne) != af::TriBool::kTrue) {
+      non_unit_positions.emplace_back(pos);
+    }
+  }
+  if (non_unit_positions.size() != 2U) {
+    return false;
+  }
+  config.n_pos = non_unit_positions[0U];
+  config.m_pos = non_unit_positions[1U];
+  const auto &dims = normalized.output_dims;
+  const auto &input_strides = normalized.input_strides;
+  const auto &output_strides = normalized.output_strides;
+  const auto input_order = af::SymbolicUtils::StaticCheckLt(input_strides[config.m_pos], input_strides[config.n_pos]);
+  const auto output_unit = af::SymbolicUtils::StaticCheckEq(output_strides[config.n_pos], af::sym::kSymbolOne);
+  const auto output_dim_eq = af::SymbolicUtils::StaticCheckEq(output_strides[config.m_pos], dims[config.n_pos]);
+  GELOGD("[ATT NDDMA] NG2 eligibility: n_pos=%zu, m_pos=%zu, input_order=%d, output_unit=%d, output_dim_eq=%d",
+         config.n_pos, config.m_pos, static_cast<int>(input_order), static_cast<int>(output_unit),
+         static_cast<int>(output_dim_eq));
+  return input_order == af::TriBool::kTrue && output_unit == af::TriBool::kTrue &&
+         IsStaticallyEqualOrUnknown(output_strides[config.m_pos], dims[config.n_pos]);
+}
+
+NddmaFallbackReason BuildNg2Cycles(const NddmaNormalizedDesc &normalized, const Nddma1DParams &params,
+                                   const NddmaNg2Params &ng2_params, uint64_t dtype_size, Expr &low_core,
+                                   Expr &high_core, const NddmaNg2Config &config) {
+  const Expr m = normalized.output_dims[config.m_pos];
+  const Expr n = normalized.output_dims[config.n_pos];
+  const Expr total_bytes = m * n * CreateExpr(dtype_size);
+  if (HasStaticByteCountOverflow(m * n, dtype_size)) {
+    return NddmaFallbackReason::kSchemaMismatch;
+  }
+  const Expr ng2 =
+      (CreateExpr(ng2_params.g10) + CreateExpr(ng2_params.g11_m) * m) * normalized.input_strides[config.m_pos] +
+      CreateExpr(ng2_params.g00) + CreateExpr(ng2_params.g01_m) * m;
+  if (IsStaticNonPositive(ng2)) {
+    return NddmaFallbackReason::kSchemaMismatch;
+  }
+  const Expr b1 = n * CreateExpr(dtype_size);
+  const Expr low_ng1 =
+      BuildNddma1DResidual(params, b1, normalized.input_strides[config.n_pos], CreateExpr(1), dtype_size, false);
+  const Expr high_ng1 =
+      BuildNddma1DResidual(params, b1, normalized.input_strides[config.n_pos], CreateExpr(1), dtype_size, true);
+  low_core = total_bytes / CreateExpr(params.t1) + CreateExpr(params.h1) + low_ng1 * ng2;
+  high_core = total_bytes / CreateExpr(params.t2) + CreateExpr(params.h2) + high_ng1 * ng2;
+  return NddmaFallbackReason::kNone;
+}
 }  // namespace
 
 const char *NddmaFallbackReasonToString(NddmaFallbackReason reason) {
@@ -354,7 +445,15 @@ af::Status EvaluateNddmaModel(const NddmaDescriptorInfo &descriptor, const std::
   }
   Expr low_core;
   Expr high_core;
-  result.fallback_reason = BuildNddmaCoreCycles(normalized, *params, dtype_size, low_core, high_core);
+  NddmaNg2Config ng2_config{};
+  const auto *ng2_params = IsNg2Eligible(normalized, ng2_config) ? GetNddmaNg2Params(dtype_size) : nullptr;
+  if (ng2_params != nullptr) {
+    result.fallback_reason =
+        BuildNg2Cycles(normalized, *params, *ng2_params, dtype_size, low_core, high_core, ng2_config);
+    result.model_name = "NDDMA_ND_MULTICORE_NG2";
+  } else {
+    result.fallback_reason = BuildNddmaCoreCycles(normalized, *params, dtype_size, low_core, high_core);
+  }
   if (result.fallback_reason != NddmaFallbackReason::kNone) {
     return af::SUCCESS;
   }
@@ -368,7 +467,9 @@ af::Status EvaluateNddmaModel(const NddmaDescriptorInfo &descriptor, const std::
     return af::SUCCESS;
   }
   result.selected = true;
-  result.model_name = normalized.effective_rank == 1U ? "NDDMA_1D_MULTICORE_V2" : "NDDMA_ND_MULTICORE_V1";
+  if (ng2_params == nullptr) {
+    result.model_name = normalized.effective_rank == 1U ? "NDDMA_1D_MULTICORE_V2" : "NDDMA_ND_MULTICORE_V1";
+  }
   result.fallback_reason = NddmaFallbackReason::kNone;
   return af::SUCCESS;
 }

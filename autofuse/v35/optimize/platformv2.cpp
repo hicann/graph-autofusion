@@ -18,7 +18,7 @@
 #include "task_generator/cube_schedule_case_generator.h"
 #include "task_generator/schedule_task_generator.h"
 #include "task_generator/concat_schedule_case_generator.h"
-#include "task_generator/transpose_schedule_case_generator.h"
+#include "task_generator/transpose_schedule_case_generator_v2.h"
 #include "task_generator/reduce_schedule_case_generator.h"
 #include "task_generator/recompute_case_generator.h"
 #include "task_generator/split_schedule_case_generator.h"
@@ -94,7 +94,7 @@ Status PlatformV2::GenerateTasks(ascir::ImplGraph &optimize_graph, const Optimiz
                     "Failed to generate tasks for cube");
   GE_ASSERT_SUCCESS(ConcatFusionCaseGenerator().GeneratorTask(optimize_graph, tasks, options),
                     "Failed to generate tasks for concat");
-  GE_ASSERT_SUCCESS(TransposeFusionCaseGenerator().GeneratorTask(optimize_graph, tasks, options),
+  GE_ASSERT_SUCCESS(TransposeFusionCaseGeneratorV2().GeneratorTask(optimize_graph, tasks, options),
                     "Failed to generate tasks for Transpose");
   GE_ASSERT_SUCCESS(ReducePartitionCaseGenerator().GeneratorTask(optimize_graph, tasks, options),
                     "Failed to generate tasks for Reduce");

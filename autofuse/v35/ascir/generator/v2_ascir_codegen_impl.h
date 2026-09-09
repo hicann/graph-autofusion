@@ -2703,6 +2703,13 @@ class CompareAscIrCodegenImplV2 : public AscIrCodegenV2 {
     if (first_input_type == "Scalar" || first_input_type == "IndexExpr") {
       return false;
     }
+    // MicroAPI::Compare 不支持 bool，BOOL 输入不走 VF，回落到 CompareV2ApiCall（regbase 内部按 uint8 执行）
+    AscNodeInputs node_inputs = node.inputs;
+    for (size_t i = 0; i < node_inputs().size(); i++) {
+      if (node_inputs[i].attr.dtype == ge::DT_BOOL) {
+        return false;
+      }
+    }
     return true;
   }
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {

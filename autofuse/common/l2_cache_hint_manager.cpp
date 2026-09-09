@@ -53,6 +53,24 @@ bool IsSmallTensor(const af::AscNodePtr &node) {
   return is_small;
 }
 
+bool NeedSkipL2CacheHint(const af::AscNodePtr &node) {
+  const auto &out_data_nodes = node->GetOutDataNodes();
+  if (out_data_nodes.empty()) {
+    return false;
+  }
+  const auto out_node = std::dynamic_pointer_cast<af::AscNode>(out_data_nodes.at(0));
+  GE_ASSERT_NOTNULL(out_node);
+  GE_CHK_BOOL_RET_SPECIAL_STATUS(out_data_nodes.size() > 1UL, true,
+                                 "NeedSkipL2CacheHint node[%s] has multiple out data nodes.", node->GetNamePtr());
+  GE_CHK_BOOL_RET_SPECIAL_STATUS(ascgen_utils::IsNodeCacheable(out_data_nodes.at(0)), true,
+                                 "NeedSkipL2CacheHint node[%s] out node is cacheable.", node->GetNamePtr());
+  GE_CHK_BOOL_RET_SPECIAL_STATUS(IsSmallTensor(out_node), true,
+                                 "NeedSkipL2CacheHint node[%s] out node is small tensor.", node->GetNamePtr());
+  GE_CHK_BOOL_RET_SPECIAL_STATUS(!af::ops::IsOps<af::ascir_op::Load>(out_node), true,
+                                 "NeedSkipL2CacheHint node[%s] out node is not Load.", node->GetNamePtr());
+  return false;
+}
+
 // 按index属性建立的IO节点映射: index -> 节点
 struct IoNodeIndexMap {
   std::map<int64_t, af::NodePtr> inputs;
@@ -380,7 +398,7 @@ af::Status L2CacheHintManager::MarkInternal(af::AscGraph &impl_graph) {
     index_to_data_nodes[index].emplace_back(std::dynamic_pointer_cast<af::AscNode>(node));
   }
 
-  // 再次遍历所有Data节点: 若该节点的index对应多个Data节点, 或该节点有多个OutDataNodes, 则标记_skip_l2_cache_hint
+  // 再次遍历所有Data节点: 若该节点的index对应多个Data节点, 或其输出节点满足跳过条件(见NeedSkipL2CacheHint), 则标记
   for (const auto &node : impl_graph.GetAllNodes()) {
     GE_ASSERT_NOTNULL(node, "MarkInternal node is nullptr.");
     if (!af::ops::IsOps<af::ascir_op::Data>(node)) {
@@ -392,9 +410,7 @@ af::Status L2CacheHintManager::MarkInternal(af::AscGraph &impl_graph) {
     if (out_data_nodes.empty()) {
       continue;
     }
-    const auto out_node = std::dynamic_pointer_cast<af::AscNode>(out_data_nodes.at(0));
-    const bool need_skip = (index_to_data_nodes[index].size() > 1UL) || (out_data_nodes.size() > 1UL) ||
-                           ascgen_utils::IsNodeCacheable(out_data_nodes.at(0)) || IsSmallTensor(out_node);
+    const bool need_skip = (index_to_data_nodes[index].size() > 1UL) || NeedSkipL2CacheHint(node);
     if (!need_skip) {
       continue;
     }
