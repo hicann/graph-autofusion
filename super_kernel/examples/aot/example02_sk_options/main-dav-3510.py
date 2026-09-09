@@ -10,7 +10,6 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-import os
 import sys
 
 import numpy as np
@@ -174,9 +173,6 @@ def build_model():
 
 
 def main():
-    device_id = os.getenv("NPU_DEVICE_ID") or os.getenv("ASCEND_DEVICE_ID") or "0"
-    torch_npu.npu.set_device(f"npu:{device_id}")
-
     seed = 1234
     torch.manual_seed(seed)
     np.random.seed(seed)

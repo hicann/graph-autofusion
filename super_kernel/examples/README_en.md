@@ -30,7 +30,7 @@ Follow the [source build guide](../../docs/en/build.md), then install the Python
 
 ## Running the Samples
 
-`--npu-arch` specifies the AOT compilation target. Supported values are `dav-2201` and `dav-3510`. It does not select a device; use `NPU_DEVICE_ID` or `ASCEND_DEVICE_ID` for that purpose.
+`--npu-arch` specifies the AOT compilation target. Supported values are `dav-2201` and `dav-3510`. The samples use the currently visible NPU.
 
 ```bash
 bash super_kernel/examples/run_example.sh --npu-arch=dav-2201

@@ -8,6 +8,6 @@
 bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
 ```
 
-该样例支持 `dav-2201` 和 `dav-3510`。设备由 `NPU_DEVICE_ID` 或 `ASCEND_DEVICE_ID` 选择。
+该样例支持 `dav-2201` 和 `dav-3510`，并使用当前可见 NPU。
 
 option 参考 [TorchAir SuperKernel 使用说明](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md)。

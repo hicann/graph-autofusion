@@ -17,7 +17,7 @@ import traceback
 
 import numpy as np
 import torch
-import torch_npu
+import torch_npu  # noqa: F401
 from op_extension import register_torch_ops
 
 
@@ -47,12 +47,6 @@ def compile_options():
             "debug_per_op_max_core_num": 1,
         },
     }
-
-
-def setup_device():
-    device_id = os.getenv("NPU_DEVICE_ID") or os.getenv("ASCEND_DEVICE_ID") or "0"
-    torch_npu.npu.set_device(f"npu:{device_id}")
-    log(f"setup device: npu:{device_id}")
 
 
 def create_cpu_inputs(shape, cpu_generator):
@@ -112,7 +106,6 @@ def main():
     cpu_generator.manual_seed(seed)
 
     shape = [8, 2048]
-    setup_device()
     x_cpu, y_cpu = create_cpu_inputs(shape, cpu_generator)
     golden = torch.add(x_cpu, y_cpu)
 

@@ -8,6 +8,6 @@ Run from the repository root:
 bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
 ```
 
-This sample supports `dav-2201` and `dav-3510`. `run_example.sh` forwards the target to `bisheng --npu-arch`. The extension is installed into an isolated Python user base and uninstalled after the sample exits. Select the device with `NPU_DEVICE_ID` or `ASCEND_DEVICE_ID`.
+This sample supports `dav-2201` and `dav-3510`. `run_example.sh` forwards the target to `bisheng --npu-arch`. The extension is installed into an isolated Python user base and uninstalled after the sample exits. The sample uses the currently visible NPU.
 
 For options, see the [TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md).

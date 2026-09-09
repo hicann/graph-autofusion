@@ -30,7 +30,7 @@ examples/
 
 ## 运行样例
 
-`--npu-arch` 指定 AOT 编译目标，当前支持 `dav-2201` 和 `dav-3510`。该参数不用于选择设备；如需指定设备，请设置 `NPU_DEVICE_ID` 或 `ASCEND_DEVICE_ID`。
+`--npu-arch` 指定 AOT 编译目标，当前支持 `dav-2201` 和 `dav-3510`。样例使用当前可见 NPU。
 
 ```bash
 bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
