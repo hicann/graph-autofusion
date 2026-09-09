@@ -1896,7 +1896,7 @@ TEST_F(OptimizerSt, MultiBroadcastCancellation_All_One) {
   auto impl_grp_0_brc4 = impl_graphs[0].FindNode("brc4");
   EXPECT_NE(impl_grp_0_brc4, nullptr);
   EXPECT_EQ(impl_grp_0_brc4->GetAllInDataAnchorsSize(), 1);
-  EXPECT_EQ(impl_grp_0_brc4->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "add0");
+  EXPECT_EQ(impl_grp_0_brc4->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "abs0");
 
   EXPECT_EQ(impl_graphs[1].FindNode("brc0"), nullptr);
   EXPECT_EQ(impl_graphs[1].FindNode("brc1"), nullptr);
@@ -1905,7 +1905,7 @@ TEST_F(OptimizerSt, MultiBroadcastCancellation_All_One) {
   auto impl_grp_1_brc3 = impl_graphs[1].FindNode("brc3");
   EXPECT_NE(impl_grp_1_brc3, nullptr);
   EXPECT_EQ(impl_grp_1_brc3->GetAllInDataAnchorsSize(), 1);
-  EXPECT_EQ(impl_grp_1_brc3->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "add0");
+  EXPECT_EQ(impl_grp_1_brc3->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "abs0");
 
   EXPECT_EQ(impl_graphs[2].FindNode("brc0"), nullptr);
   EXPECT_EQ(impl_graphs[2].FindNode("brc3"), nullptr);
@@ -1913,7 +1913,7 @@ TEST_F(OptimizerSt, MultiBroadcastCancellation_All_One) {
   auto impl_grp_2_brc2 = impl_graphs[2].FindNode("brc2");
   EXPECT_NE(impl_grp_2_brc2, nullptr);
   EXPECT_EQ(impl_grp_2_brc2->GetAllInDataAnchorsSize(), 1);
-  EXPECT_EQ(impl_grp_2_brc2->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "add0");
+  EXPECT_EQ(impl_grp_2_brc2->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "abs0");
 
   EXPECT_EQ(impl_graphs[3].FindNode("brc0"), nullptr);
   EXPECT_EQ(impl_graphs[3].FindNode("brc2"), nullptr);
@@ -1922,7 +1922,7 @@ TEST_F(OptimizerSt, MultiBroadcastCancellation_All_One) {
   auto impl_grp_3_brc1 = impl_graphs[3].FindNode("brc1");
   EXPECT_NE(impl_grp_3_brc1, nullptr);
   EXPECT_EQ(impl_grp_3_brc1->GetAllInDataAnchorsSize(), 1);
-  EXPECT_EQ(impl_grp_3_brc1->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "add0");
+  EXPECT_EQ(impl_grp_3_brc1->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "abs0");
 
   EXPECT_EQ(impl_graphs[4].FindNode("brc1"), nullptr);
   EXPECT_EQ(impl_graphs[4].FindNode("brc2"), nullptr);
@@ -1931,7 +1931,7 @@ TEST_F(OptimizerSt, MultiBroadcastCancellation_All_One) {
   auto impl_grp_4_exp0 = impl_graphs[4].FindNode("exp0");
   EXPECT_NE(impl_grp_4_exp0, nullptr);
   EXPECT_EQ(impl_grp_4_exp0->GetAllInDataAnchorsSize(), 1);
-  EXPECT_EQ(impl_grp_4_exp0->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "abs0");
+  EXPECT_EQ(impl_grp_4_exp0->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "brc0");
 }
 
 TEST_F(OptimizerSt, ScalarBroadcastOptimization_Two_Scalar) {
@@ -1967,10 +1967,10 @@ TEST_F(OptimizerSt, ScalarBroadcastOptimization_Two_Scalar) {
   EXPECT_EQ(impl_graphs.size(), 3);
   auto impl_graph0 = af::AscGraphUtils::GetComputeGraph(impl_graphs[0]);
   EXPECT_EQ(impl_graph0->GetAllNodesSize(), 8);
-  EXPECT_NE(impl_graph0->FindNode("brc1"), nullptr);
+  EXPECT_EQ(impl_graph0->FindNode("brc1"), nullptr);
   EXPECT_EQ(impl_graph0->FindNode("brc2"), nullptr);
   EXPECT_EQ(impl_graph0->FindNode("brc3"), nullptr);
-  EXPECT_EQ(impl_graph0->FindNode("brc4"), nullptr);
+  EXPECT_NE(impl_graph0->FindNode("brc4"), nullptr);
   EXPECT_EQ(impl_graph0->FindNode("brc5"), nullptr);
   EXPECT_EQ(impl_graph0->FindNode("brc6"), nullptr);
 }
@@ -2001,23 +2001,23 @@ TEST_F(OptimizerSt, RemoveRedundantBroadcast) {
   EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0].size(), 1UL);
   EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups.size(), 1UL);
   auto impl_graphs = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs;
-  EXPECT_EQ(impl_graphs.size(), 4);
-  // consumer split creates clone for exp1; common-axis backward removes brc0/brc1 from add0's chain
+  EXPECT_EQ(impl_graphs.size(), 3);
+  // check don't remove brc
   auto impl_grp_0_exp1 = impl_graphs[0].FindNode("exp1");
   EXPECT_NE(impl_grp_0_exp1, nullptr);
   EXPECT_EQ(impl_grp_0_exp1->GetAllInDataAnchorsSize(), 1);
-  EXPECT_EQ(impl_grp_0_exp1->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(),
-            "brc0_consumer_split_1");
+  EXPECT_EQ(impl_grp_0_exp1->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "brc0");
 
   auto impol_grp_0_add0 = impl_graphs[0].FindNode("add0");
   EXPECT_NE(impol_grp_0_add0, nullptr);
   EXPECT_EQ(impol_grp_0_add0->GetAllInDataAnchorsSize(), 2);
-  EXPECT_EQ(impol_grp_0_add0->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "abs0");
-  EXPECT_EQ(impol_grp_0_add0->GetInDataAnchor(1)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "exp0");
+  EXPECT_EQ(impol_grp_0_add0->GetInDataAnchor(0)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "brc0");
+  EXPECT_EQ(impol_grp_0_add0->GetInDataAnchor(1)->GetPeerOutAnchor()->GetOwnerNode()->GetName(), "brc1");
 
-  EXPECT_NE(impl_graphs[0].FindNode("brc0_consumer_split_1"), nullptr);
+  EXPECT_NE(impl_graphs[0].FindNode("brc0"), nullptr);
+  EXPECT_NE(impl_graphs[0].FindNode("brc1"), nullptr);
 
-  // check remove brc in unaligned template
+  // check remove brc
   auto impl_grp_1_exp1 = impl_graphs[1].FindNode("exp1");
   EXPECT_NE(impl_grp_1_exp1, nullptr);
   EXPECT_EQ(impl_grp_1_exp1->GetAllInDataAnchorsSize(), 1);
@@ -2262,9 +2262,20 @@ TEST_F(OptimizerSt, BufQueAllocator_RemovePad_MemUnique) {
   broadcast1.y.dtype = af::DataType::DT_FLOAT;
   broadcast1.attr.api.unit = ComputeUnit::kUnitVector;
 
+  af::ascir_op::Abs abs0("abs0");
+  abs0.x = broadcast1.y;
+  abs0.attr.api.compute_type = ComputeType::kComputeElewise;
+  abs0.attr.api.type = af::ApiType::kAPITypeCompute;
+  abs0.attr.sched.axis = {z0.id, z1.id};
+  *abs0.y.axis = {z0.id, z1.id};
+  *abs0.y.repeats = {s0, s1};
+  *abs0.y.strides = {s1, One};
+  abs0.y.dtype = af::DataType::DT_FLOAT;
+  abs0.attr.api.unit = ComputeUnit::kUnitVector;
+
   af::ascir_op::Add add0("add0");
   add0.x1 = load0.y;
-  add0.x2 = broadcast1.y;
+  add0.x2 = abs0.y;
   add0.attr.api.compute_type = ComputeType::kComputeElewise;
   add0.attr.api.type = af::ApiType::kAPITypeCompute;
   add0.attr.sched.axis = {z0.id, z1.id};
@@ -2328,20 +2339,23 @@ TEST_F(OptimizerSt, BufQueAllocator_RemovePad_MemUnique) {
   EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups.size(), 1UL);
   EXPECT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.size(), 3UL);
 
-  auto impl_graph1 = af::AscGraphUtils::GetComputeGraph(
-      fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[1]);
-  EXPECT_EQ(impl_graph1->GetAllNodesSize(), 12);
-  EXPECT_NE(impl_graph1->FindNode("broadcast1"), nullptr);
-  EXPECT_NE(impl_graph1->FindNode("broadcast1_remove_pad_0"), nullptr);
-  EXPECT_NE(impl_graph1->FindNode("add0"), nullptr);
-  const auto &impl_graph1_brc1 = std::dynamic_pointer_cast<af::AscNode>(impl_graph1->FindNode("broadcast1"));
-  const auto &impl_graph1_rpd =
-      std::dynamic_pointer_cast<af::AscNode>(impl_graph1->FindNode("broadcast1_remove_pad_0"));
-  const auto &impl_graph1_add0 = std::dynamic_pointer_cast<af::AscNode>(impl_graph1->FindNode("add0"));
-  const auto &impl_graph1_mul0 = std::dynamic_pointer_cast<af::AscNode>(impl_graph1->FindNode("mul0"));
-  EXPECT_EQ(impl_graph1_brc1->outputs[0].attr.buf.id, 1);
-  EXPECT_EQ(impl_graph1_rpd->outputs[0].attr.buf.id, 2);
-  EXPECT_EQ(impl_graph1_add0->outputs[0].attr.que.id, impl_graph1_mul0->outputs[0].attr.que.id);
+  auto impl_graph2 = af::AscGraphUtils::GetComputeGraph(
+      fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[2]);
+  EXPECT_EQ(impl_graph2->GetAllNodesSize(), 13);
+  EXPECT_NE(impl_graph2->FindNode("broadcast1"), nullptr);
+  EXPECT_NE(impl_graph2->FindNode("broadcast1_remove_pad_0"), nullptr);
+  EXPECT_NE(impl_graph2->FindNode("add0"), nullptr);
+  EXPECT_NE(impl_graph2->FindNode("abs0"), nullptr);
+  const auto &impl_graph2_brc1 = std::dynamic_pointer_cast<af::AscNode>(impl_graph2->FindNode("broadcast1"));
+  const auto &impl_graph2_rpd =
+      std::dynamic_pointer_cast<af::AscNode>(impl_graph2->FindNode("broadcast1_remove_pad_0"));
+  const auto &impl_graph2_add0 = std::dynamic_pointer_cast<af::AscNode>(impl_graph2->FindNode("add0"));
+  const auto &impl_graph2_abs0 = std::dynamic_pointer_cast<af::AscNode>(impl_graph2->FindNode("abs0"));
+  const auto &impl_graph2_mul0 = std::dynamic_pointer_cast<af::AscNode>(impl_graph2->FindNode("mul0"));
+  EXPECT_EQ(impl_graph2_brc1->outputs[0].attr.buf.id, 1);
+  EXPECT_EQ(impl_graph2_rpd->outputs[0].attr.buf.id, 2);
+  EXPECT_EQ(impl_graph2_abs0->outputs[0].attr.buf.id, 3);
+  EXPECT_EQ(impl_graph2_add0->outputs[0].attr.que.id, impl_graph2_mul0->outputs[0].attr.que.id);
 }
 
 TEST_F(OptimizerSt, BufQueAllocator_Inplace) {

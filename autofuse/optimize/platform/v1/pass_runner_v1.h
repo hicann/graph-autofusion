@@ -12,7 +12,6 @@
 #define AUTOFUSE_PATTERN_FUSION_UNITTEST_CPP_O_D_PASS_RUNNER_V1_H
 
 #include "optimize/platform/common/pass_runner.h"
-#include "optimize/graph_pass/broadcast_backward_pass.h"
 #include "optimize/graph_pass/broadcast_const_to_store.h"
 #include "optimize/graph_pass/duplicate_elewise_cse_pass.h"
 #include "optimize/graph_pass/scalar_to_1d_tensor.h"
@@ -28,11 +27,10 @@ class PassRunnerV1 final : public BasePassRunner {
     this->RegisterPass<PowEquivSubstitutionPass>();
     this->RegisterPass<BroadcastConstToStorePass>();
     this->RegisterPass<ScalarTo1DTensorPass>();
-    this->RegisterPass<DuplicateElewiseCsePass>();
-    this->RegisterPass<BroadcastBackwardPass>();
     this->RegisterPass<ScalarBroadcastOptimizationPass>();
     this->RegisterPass<MaskedFillInputReorderPass>();
     this->RegisterPass<ExpandDimsForAllReducePass>();
+    this->RegisterPass<DuplicateElewiseCsePass>();
   }
 };
 }  // namespace optimize
