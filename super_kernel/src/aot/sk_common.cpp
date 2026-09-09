@@ -113,7 +113,7 @@ struct ElfSymbolTables {
 };
 
 static bool ValidateElfSectionRange(size_t binSize, uint64_t offset, uint64_t size) {
-  return offset <= binSize && offset + size <= binSize;
+  return offset <= binSize && size <= binSize - offset;
 }
 
 static bool FindElfSymbolTables(const char *binAddr, size_t binSize, ElfSymbolTables &tables) {
