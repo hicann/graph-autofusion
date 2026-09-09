@@ -28,25 +28,6 @@ constexpr char kTransposePrefix[] = "transpose_";
 bool IsNddma(const af::AscNodePtr &node) {
   return ScheduleUtils::IsLoad(node) && node->attr.type == "Nddma";
 }
-
-Status UpdateSimdIndirectLoadDenseInputLayouts(const af::OutDataAnchorPtr &producer_anchor) {
-  for (const auto &consumer_anchor : producer_anchor->GetPeerInDataAnchors()) {
-    const auto consumer = std::dynamic_pointer_cast<af::AscNode>(consumer_anchor->GetOwnerNode());
-    if (!af::ops::IsOps<af::ascir_op::IndirectLoad>(consumer) ||
-        ascir::GetTemplateIdOrDefault(*consumer) != ascir::TemplateId::kIndirectLoadSimd) {
-      continue;
-    }
-    ascgen_utils::indirect_load::TemplateLogicalView logical_view;
-    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateLogicalView(consumer, logical_view));
-    const auto input_index = static_cast<size_t>(consumer_anchor->GetIdx());
-    auto &layout =
-        input_index == ascgen_utils::indirect_load::kInputTensorIndex ? logical_view.input : logical_view.index;
-    GE_ASSERT_SUCCESS(ScheduleUtils::RecalculateStridesFromRepeats(layout.sizes, layout.strides));
-    layout.kind = ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense;
-    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateLogicalView(consumer, logical_view));
-  }
-  return af::SUCCESS;
-}
 }  // namespace
 
 std::string NddmaTemplate::GenName(const std::string &general_case_name) {
@@ -162,7 +143,6 @@ Status NddmaTemplate::MergeLoadAndTranspose(const af::AscNodePtr &load_node, af:
   load_node->attr.type = "Nddma";
   // 删除transpose节点
   GE_ASSERT_SUCCESS(ScheduleUtils::RemoveNode(new_case, out_node, load_node->GetOutDataAnchor(0)));
-  GE_ASSERT_SUCCESS(UpdateSimdIndirectLoadDenseInputLayouts(load_out_anchor));
   return af::SUCCESS;
 }
 
@@ -261,14 +241,6 @@ af::Status NddmaTemplate::ProcessTransposeNodes(af::AscGraph &new_case, bool &is
 
 af::Status NddmaTemplate::Generate([[maybe_unused]] const af::AscGraph &origin_graph,
                                    [[maybe_unused]] const af::AscGraph &based_case, af::AscGraph &new_case) {
-  const auto indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(new_case);
-  const bool is_simd_indirect_load =
-      indirect_load != nullptr && ascir::GetTemplateIdOrDefault(*indirect_load) == ascir::TemplateId::kIndirectLoadSimd;
-  if (indirect_load != nullptr && !is_simd_indirect_load &&
-      ScheduleUtils::HasComputeType(origin_graph, af::ComputeType::kComputeTranspose)) {
-    GELOGD("Skip NDDMA transpose template for IndirectLoad graph[%s].", new_case.GetName().c_str());
-    return af::FAILED;
-  }
   bool is_nddma_generated = false;
   GE_ASSERT_SUCCESS(ProcessTransposeNodes(new_case, is_nddma_generated));
   bool is_transpose_nddma_generated = is_nddma_generated;
@@ -311,7 +283,7 @@ af::Status NddmaTemplate::Generate([[maybe_unused]] const af::AscGraph &origin_g
     GELOGD("No nddma template generated.");
     return af::FAILED;
   }
-  if (is_transpose_nddma_generated && indirect_load == nullptr) {
+  if (is_transpose_nddma_generated) {
     GE_ASSERT_SUCCESS(
         UnAlignmentStrategy::ModifyTransposeFusionVectorizedStrides(new_case, BaseAlignmentStrategy::GetAlignWidth()));
   }

@@ -13,36 +13,10 @@
 #include <stack>
 #include "ascir_utils.h"
 #include "common_utils.h"
-#include "indirect_load_utils.h"
 #include "tensor_layout_utils.h"
 #include "platform/v1/alignment_strategy.h"
 
 namespace optimize {
-namespace {
-af::Status NormalizeStoreSingletonStrides(const af::AscNodePtr &node) {
-  GE_ASSERT_TRUE(node->outputs().size() == 1UL);
-  auto &attr = node->outputs[0].attr;
-  GE_ASSERT_TRUE(attr.vectorized_axis.size() == attr.vectorized_strides.size());
-  GE_ASSERT_TRUE(attr.axis.size() == attr.repeats.size());
-  af::Expression inner_span = af::sym::kSymbolOne;
-  for (size_t index = attr.vectorized_axis.size(); index > 0UL; --index) {
-    const size_t vector_index = index - 1UL;
-    const auto axis_iter = std::find(attr.axis.begin(), attr.axis.end(), attr.vectorized_axis[vector_index]);
-    GE_ASSERT_TRUE(axis_iter != attr.axis.end());
-    const size_t axis_index = static_cast<size_t>(std::distance(attr.axis.begin(), axis_iter));
-    auto &stride = attr.vectorized_strides[vector_index];
-    if (af::SymbolicUtils::StaticCheckEq(attr.repeats[axis_index], af::sym::kSymbolOne) == af::TriBool::kTrue &&
-        af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
-      stride = inner_span;
-    }
-    if (af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) != af::TriBool::kTrue) {
-      inner_span = af::sym::Mul(stride, attr.repeats[axis_index]);
-    }
-  }
-  return af::SUCCESS;
-}
-}  // namespace
-
 AlignmentType UnAlignmentStrategy::GetDefaultAlignmentType() {
   return AlignmentType::kNotAligned;
 }
@@ -466,45 +440,7 @@ Status UnAlignmentStrategy::ModifyTransposeFusionVectorizedStrides(af::AscGraph 
   return af::SUCCESS;
 }
 
-Status UnAlignmentStrategy::ModifyIndirectLoadVectorizedStrides(ascir::ImplGraph &impl_graph) {
-  bool has_transpose = false;
-  bool has_nddma_load = false;
-  for (const auto &node : impl_graph.GetAllNodes()) {
-    has_transpose = has_transpose || node->attr.api.compute_type == af::ComputeType::kComputeTranspose;
-    has_nddma_load = has_nddma_load || (ScheduleUtils::IsLoad(node) && node->attr.type == "Nddma");
-    const auto role = ascgen_utils::indirect_load::GetTemplateRole(node);
-    if (role != ascgen_utils::indirect_load::TemplateRole::kStridedUbPath &&
-        role != ascgen_utils::indirect_load::TemplateRole::kSimdInputPreStridedUbPath) {
-      continue;
-    }
-    for (const auto &output : node->outputs()) {
-      if (!output->attr.vectorized_axis.empty()) {
-        GE_ASSERT_SUCCESS(
-            BaseAlignmentStrategy::SetVectorizedStridesForTensor(node, output->attr, AlignmentType::kAligned));
-      }
-    }
-  }
-  // Only the direct IL->Store boundary inherits the transposed/NDDMA layout.
-  // Other IL stores (for example, stores after elementwise or reduce nodes) use
-  // their own layout and must not be normalized here.
-  if (has_transpose || has_nddma_load) {
-    for (const auto &node : impl_graph.GetAllNodes()) {
-      if (!af::ops::IsOps<af::ascir_op::Store>(node) || node->inputs.Size() != 1UL || node->outputs().size() != 1UL) {
-        continue;
-      }
-      const auto producer = ascgen_utils::indirect_load::GetInputProducer(node, 0UL);
-      if (af::ops::IsOps<af::ascir_op::IndirectLoad>(producer)) {
-        GE_ASSERT_SUCCESS(NormalizeStoreSingletonStrides(node));
-      }
-    }
-  }
-  return af::SUCCESS;
-}
-
 Status UnAlignmentStrategy::ModifyVectorizedStrides(af::AscGraph &impl_graph) {
-  if (ascgen_utils::indirect_load::FindIndirectLoadNode(impl_graph) != nullptr) {
-    return ModifyIndirectLoadVectorizedStrides(impl_graph);
-  }
   bool has_transpose = false;
   for (auto node : impl_graph.GetAllNodes()) {
     if (af::ops::IsOps<af::ascir_op::Transpose>(node)) {

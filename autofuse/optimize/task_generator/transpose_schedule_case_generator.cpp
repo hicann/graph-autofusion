@@ -17,7 +17,6 @@
 #include "ascir_utils.h"
 #include "ascir_ops_utils.h"
 #include "ascir_ops.h"
-#include "indirect_load_utils.h"
 #include "schedule_utils.h"
 #include "graph_properties_cache.h"
 
@@ -98,12 +97,6 @@ Status TransposeFusionCaseGenerator::TransposeConvertProcess(ascir::HintGraph &g
 
 Status TransposeFusionCaseGenerator::Generate(ascir::HintGraph &graph, std::vector<ascir::ImplGraph> &graphs,
                                               std::vector<std::string> &score_functions) {
-  const auto indirect_load = ascgen_utils::indirect_load::FindIndirectLoadNode(graph);
-  if (indirect_load != nullptr) {
-    GELOGI("Graph %s has indirect load, skip transpose task generation; handled by IndirectLoad tasks.",
-           graph.GetName().c_str());
-    return af::SUCCESS;
-  }
   /*
   单个Transpose场景：
     场景1： 尾轴转置， 需要UB重排，Transpose节点保留；

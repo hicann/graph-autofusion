@@ -11,61 +11,7 @@
 #ifndef AUTOFUSE_V35_ASCENDC_API_REGBASE_INDIRECT_LOAD_SIMT_H_
 #define AUTOFUSE_V35_ASCENDC_API_REGBASE_INDIRECT_LOAD_SIMT_H_
 
-#include <type_traits>
-
 namespace AscendC {
-enum class IndirectLoadSimtCase : uint8_t {
-  kStaticPowerOfTwo = 0,
-  kStaticInner = 1,
-  kStructuredMagic = 2,
-  kEmbedding = 3,
-  kRecursive = 4,
-  kStrided = 5,
-};
-
-template <IndirectLoadSimtCase Case, typename OffsetT, int32_t Rank, int32_t Axis, uint64_t InnerSpan = 0U,
-          uint64_t OutputAxisSpan = 0U, uint64_t InputAxisStride = 0U, uint64_t InputAxisSpan = 0U,
-          uint64_t InputStrideMask = 0U, uint64_t IndexStrideMask = 0U>
-struct IndirectLoadSimtCaseTag {};
-
-template <int32_t Rank>
-struct IndirectLoadSimtShapeLayout {
-  static constexpr int32_t kInputStrideBase = Rank;
-  static constexpr int32_t kIndexStrideBase = kInputStrideBase + Rank;
-  static constexpr int32_t kRecursiveShapeSize = kIndexStrideBase;
-  static constexpr int32_t kStridedShapeSize = kIndexStrideBase + Rank;
-};
-
-struct IndirectLoadSimtStaticPowerOfTwoParams {};
-
-template <typename OffsetT>
-struct IndirectLoadSimtStaticInnerParams {
-  OffsetT output_axis_span;
-};
-
-template <typename OffsetT>
-struct IndirectLoadSimtStructuredMagicParams {
-  OffsetT inner_span;
-  OffsetT output_axis_span;
-  OffsetT input_axis_stride;
-  OffsetT input_axis_span;
-};
-
-template <typename OffsetT, int32_t Rank>
-struct IndirectLoadSimtEmbeddingParams {
-  OffsetT shape[IndirectLoadSimtShapeLayout<Rank>::kStridedShapeSize];
-};
-
-template <typename OffsetT, int32_t Rank>
-struct IndirectLoadSimtRecursiveParams {
-  OffsetT shape[IndirectLoadSimtShapeLayout<Rank>::kRecursiveShapeSize];
-};
-
-template <typename OffsetT, int32_t Rank>
-struct IndirectLoadSimtStridedParams {
-  OffsetT shape[IndirectLoadSimtShapeLayout<Rank>::kStridedShapeSize];
-};
-
 namespace Internal {
 __aicore__ inline uint64_t IndirectLoadGetUintDivMagic(uint64_t dividend, uint64_t divisor) {
   uint64_t quotient = 0U;
@@ -213,7 +159,6 @@ template <typename OffsetT, int32_t Rank = 2, int32_t Axis = 0, uint64_t InputSt
           uint64_t IndexStrideMask = 0U>
 struct IndirectLoadSimtEmbeddingPolicy {
   using OffsetType = OffsetT;
-  using ShapeLayout = IndirectLoadSimtShapeLayout<Rank>;
   static constexpr bool kStructured = true;
   static constexpr bool kUsesInputAxis = true;
 
@@ -221,7 +166,7 @@ struct IndirectLoadSimtEmbeddingPolicy {
   __aicore__ explicit IndirectLoadSimtEmbeddingPolicy(ShapeArgs... shape_args)
       : shape{static_cast<OffsetT>(shape_args)...} {
     static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMT embedding rank or axis is invalid.");
-    static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(ShapeLayout::kStridedShapeSize),
+    static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(3 * Rank),
                   "IndirectLoad SIMT embedding shape is invalid.");
     if constexpr (Rank == 2 && Axis == 0 && InputStrideMask == 0U && IndexStrideMask == 0U) {
       Internal::IndirectLoadGetUintDivMagicAndShift(magic[1], shift[1], shape[1]);
@@ -230,29 +175,14 @@ struct IndirectLoadSimtEmbeddingPolicy {
         Internal::IndirectLoadGetUintDivMagicAndShift(magic[dim], shift[dim], shape[dim]);
       }
     }
-    input_axis_stride = shape[ShapeLayout::kInputStrideBase + Axis];
-  }
-
-  __aicore__ explicit IndirectLoadSimtEmbeddingPolicy(const IndirectLoadSimtEmbeddingParams<OffsetT, Rank> &params)
-      : shape{} {
-    for (int32_t dim = 0; dim < ShapeLayout::kStridedShapeSize; ++dim) {
-      shape[dim] = params.shape[dim];
-    }
-    if constexpr (Rank == 2 && Axis == 0 && InputStrideMask == 0U && IndexStrideMask == 0U) {
-      Internal::IndirectLoadGetUintDivMagicAndShift(magic[1], shift[1], shape[1]);
-    } else {
-      for (int32_t dim = 0; dim < Rank; ++dim) {
-        Internal::IndirectLoadGetUintDivMagicAndShift(magic[dim], shift[dim], shape[dim]);
-      }
-    }
-    input_axis_stride = shape[ShapeLayout::kInputStrideBase + Axis];
+    input_axis_stride = shape[Rank + Axis];
   }
 
   __simt_callee__ __aicore__ inline Internal::IndirectLoadSimtAddress<OffsetT> GetAddress(OffsetT output_index) const {
     if constexpr (Rank == 2 && Axis == 0 && InputStrideMask == 0U && IndexStrideMask == 0U) {
       const OffsetT row = Simt::UintDiv(output_index, magic[1], shift[1]);
       const OffsetT inner = output_index - row * shape[1];
-      return {row * shape[ShapeLayout::kIndexStrideBase], inner * shape[ShapeLayout::kInputStrideBase + 1]};
+      return {row * shape[4], inner * shape[3]};
     } else {
       Internal::IndirectLoadSimtAddress<OffsetT> address{0U, 0U};
       Internal::IndirectLoadSimtAddressDecoder<Rank - 1, OffsetT, IndirectLoadSimtEmbeddingPolicy>::Call(
@@ -265,14 +195,14 @@ struct IndirectLoadSimtEmbeddingPolicy {
   __simt_callee__ __aicore__ inline void AddCoordinate(OffsetT coordinate,
                                                        Internal::IndirectLoadSimtAddress<OffsetT> &address) const {
     if constexpr ((IndexStrideMask & (1ULL << Dim)) != 0U) {
-      address.index_offset += coordinate * shape[ShapeLayout::kIndexStrideBase + Dim];
+      address.index_offset += coordinate * shape[2 * Rank + Dim];
     }
     if constexpr (Dim != Axis && (InputStrideMask & (1ULL << Dim)) != 0U) {
-      address.input_base += coordinate * shape[ShapeLayout::kInputStrideBase + Dim];
+      address.input_base += coordinate * shape[Rank + Dim];
     }
   }
 
-  OffsetT shape[ShapeLayout::kStridedShapeSize];
+  OffsetT shape[3 * Rank];
   OffsetT magic[Rank];
   OffsetT shift[Rank];
   OffsetT input_axis_stride{0U};
@@ -281,7 +211,6 @@ struct IndirectLoadSimtEmbeddingPolicy {
 template <typename OffsetT, int32_t Rank, int32_t Axis>
 struct IndirectLoadSimtRecursivePolicy {
   using OffsetType = OffsetT;
-  using ShapeLayout = IndirectLoadSimtShapeLayout<Rank>;
   static constexpr bool kStructured = false;
   static constexpr bool kUsesInputAxis = true;
 
@@ -289,23 +218,11 @@ struct IndirectLoadSimtRecursivePolicy {
   __aicore__ explicit IndirectLoadSimtRecursivePolicy(ShapeArgs... shape_args)
       : shape{static_cast<OffsetT>(shape_args)...} {
     static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMT rank or axis is invalid.");
-    static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(ShapeLayout::kRecursiveShapeSize),
-                  "IndirectLoad SIMT shape is invalid.");
+    static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(2 * Rank), "IndirectLoad SIMT shape is invalid.");
     for (int32_t dim = 0; dim < Rank; ++dim) {
       Internal::IndirectLoadGetUintDivMagicAndShift(magic[dim], shift[dim], shape[dim]);
     }
-    input_axis_stride = shape[ShapeLayout::kInputStrideBase + Axis];
-  }
-
-  __aicore__ explicit IndirectLoadSimtRecursivePolicy(const IndirectLoadSimtRecursiveParams<OffsetT, Rank> &params)
-      : shape{} {
-    for (int32_t dim = 0; dim < ShapeLayout::kRecursiveShapeSize; ++dim) {
-      shape[dim] = params.shape[dim];
-    }
-    for (int32_t dim = 0; dim < Rank; ++dim) {
-      Internal::IndirectLoadGetUintDivMagicAndShift(magic[dim], shift[dim], shape[dim]);
-    }
-    input_axis_stride = shape[ShapeLayout::kInputStrideBase + Axis];
+    input_axis_stride = shape[Rank + Axis];
   }
 
   __simt_callee__ __aicore__ inline Internal::IndirectLoadSimtAddress<OffsetT> GetAddress(OffsetT output_index) const {
@@ -319,11 +236,11 @@ struct IndirectLoadSimtRecursivePolicy {
   __simt_callee__ __aicore__ inline void AddCoordinate(OffsetT coordinate,
                                                        Internal::IndirectLoadSimtAddress<OffsetT> &address) const {
     if constexpr (Dim != Axis) {
-      address.input_base += coordinate * shape[ShapeLayout::kInputStrideBase + Dim];
+      address.input_base += coordinate * shape[Rank + Dim];
     }
   }
 
-  OffsetT shape[ShapeLayout::kRecursiveShapeSize];
+  OffsetT shape[2 * Rank];
   OffsetT magic[Rank];
   OffsetT shift[Rank];
   OffsetT input_axis_stride{0U};
@@ -332,7 +249,6 @@ struct IndirectLoadSimtRecursivePolicy {
 template <typename OffsetT, int32_t Rank, int32_t Axis, uint64_t InputStrideMask, uint64_t IndexStrideMask>
 struct IndirectLoadSimtStridedPolicy {
   using OffsetType = OffsetT;
-  using ShapeLayout = IndirectLoadSimtShapeLayout<Rank>;
   static constexpr bool kStructured = false;
   static constexpr bool kUsesInputAxis = (InputStrideMask & (1ULL << Axis)) != 0U;
 
@@ -340,23 +256,11 @@ struct IndirectLoadSimtStridedPolicy {
   __aicore__ explicit IndirectLoadSimtStridedPolicy(ShapeArgs... shape_args)
       : shape{static_cast<OffsetT>(shape_args)...} {
     static_assert(Rank > 0 && Axis >= 0 && Axis < Rank, "IndirectLoad SIMT rank or axis is invalid.");
-    static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(ShapeLayout::kStridedShapeSize),
-                  "IndirectLoad SIMT shape is invalid.");
+    static_assert(sizeof...(ShapeArgs) == static_cast<size_t>(3 * Rank), "IndirectLoad SIMT shape is invalid.");
     for (int32_t dim = 0; dim < Rank; ++dim) {
       Internal::IndirectLoadGetUintDivMagicAndShift(magic[dim], shift[dim], shape[dim]);
     }
-    input_axis_stride = shape[ShapeLayout::kInputStrideBase + Axis];
-  }
-
-  __aicore__ explicit IndirectLoadSimtStridedPolicy(const IndirectLoadSimtStridedParams<OffsetT, Rank> &params)
-      : shape{} {
-    for (int32_t dim = 0; dim < ShapeLayout::kStridedShapeSize; ++dim) {
-      shape[dim] = params.shape[dim];
-    }
-    for (int32_t dim = 0; dim < Rank; ++dim) {
-      Internal::IndirectLoadGetUintDivMagicAndShift(magic[dim], shift[dim], shape[dim]);
-    }
-    input_axis_stride = shape[ShapeLayout::kInputStrideBase + Axis];
+    input_axis_stride = shape[Rank + Axis];
   }
 
   __simt_callee__ __aicore__ inline Internal::IndirectLoadSimtAddress<OffsetT> GetAddress(OffsetT output_index) const {
@@ -367,20 +271,20 @@ struct IndirectLoadSimtStridedPolicy {
       const OffsetT outer = Simt::UintDiv(axis_and_inner, magic[1], shift[1]);
       const OffsetT axis = axis_and_inner - outer * shape[1];
       if constexpr ((InputStrideMask & 1U) != 0U) {
-        address.input_base += outer * shape[ShapeLayout::kInputStrideBase];
+        address.input_base += outer * shape[3];
       }
       if constexpr ((InputStrideMask & 4U) != 0U) {
-        address.input_base += inner * shape[ShapeLayout::kInputStrideBase + 2];
+        address.input_base += inner * shape[5];
       }
-      address.index_offset = axis * shape[ShapeLayout::kIndexStrideBase + 1];
+      address.index_offset = axis * shape[7];
       return address;
     }
     if constexpr (Rank == 2 && Axis == 0 && IndexStrideMask == 1U) {
       const OffsetT row = Simt::UintDiv(output_index, magic[1], shift[1]);
       const OffsetT column = output_index - row * shape[1];
-      address.index_offset = row * shape[ShapeLayout::kIndexStrideBase];
+      address.index_offset = row * shape[2 * Rank];
       if constexpr ((InputStrideMask & 2U) != 0U) {
-        address.input_base += column * shape[ShapeLayout::kInputStrideBase + 1];
+        address.input_base += column * shape[Rank + 1];
       }
       return address;
     }
@@ -393,110 +297,74 @@ struct IndirectLoadSimtStridedPolicy {
   __simt_callee__ __aicore__ inline void AddCoordinate(OffsetT coordinate,
                                                        Internal::IndirectLoadSimtAddress<OffsetT> &address) const {
     if constexpr ((IndexStrideMask & (1ULL << Dim)) != 0U) {
-      address.index_offset += coordinate * shape[ShapeLayout::kIndexStrideBase + Dim];
+      address.index_offset += coordinate * shape[2 * Rank + Dim];
     }
     if constexpr (Dim != Axis && (InputStrideMask & (1ULL << Dim)) != 0U) {
-      address.input_base += coordinate * shape[ShapeLayout::kInputStrideBase + Dim];
+      address.input_base += coordinate * shape[Rank + Dim];
     }
   }
 
-  OffsetT shape[ShapeLayout::kStridedShapeSize];
+  OffsetT shape[3 * Rank];
   OffsetT magic[Rank];
   OffsetT shift[Rank];
   OffsetT input_axis_stride{0U};
 };
 
 namespace Internal {
-template <typename CaseTag>
-struct IndirectLoadSimtCaseSelector;
-
-template <typename OffsetT, int32_t Rank, int32_t Axis, uint64_t InnerSpan, uint64_t OutputAxisSpan,
-          uint64_t InputAxisStride, uint64_t InputAxisSpan, uint64_t InputStrideMask, uint64_t IndexStrideMask>
-struct IndirectLoadSimtCaseSelector<
-    IndirectLoadSimtCaseTag<IndirectLoadSimtCase::kStaticPowerOfTwo, OffsetT, Rank, Axis, InnerSpan, OutputAxisSpan,
-                            InputAxisStride, InputAxisSpan, InputStrideMask, IndexStrideMask>> {
-  using OffsetType = OffsetT;
-  using Params = IndirectLoadSimtStaticPowerOfTwoParams;
-  using Policy =
-      IndirectLoadSimtStaticPowerOfTwoPolicy<OffsetT, InnerSpan, OutputAxisSpan, InputAxisStride, InputAxisSpan>;
-
-  __aicore__ inline static Policy MakePolicy(const Params &) {
-    return {};
+template <typename X, typename Y, typename FusedBody, typename Context, typename AddressPolicy>
+__simt_callee__ __aicore__ inline Y IndirectLoadSimtCompute(__gm__ X *x, Context context,
+                                                            typename AddressPolicy::OffsetType output_index,
+                                                            const AddressPolicy &address_policy) {
+  using OffsetT = typename AddressPolicy::OffsetType;
+  const IndirectLoadSimtAddress<OffsetT> address = address_policy.GetAddress(output_index);
+  const OffsetT indirect_index = static_cast<OffsetT>(FusedBody::Index(address.index_offset, context));
+  OffsetT input_offset = address.input_base;
+  if constexpr (AddressPolicy::kUsesInputAxis) {
+    input_offset += indirect_index * address_policy.input_axis_stride;
   }
-};
+  return FusedBody::Output(x[input_offset], output_index, address.index_offset, context);
+}
 
-template <typename OffsetT, int32_t Rank, int32_t Axis, uint64_t InnerSpan, uint64_t OutputAxisSpan,
-          uint64_t InputAxisStride, uint64_t InputAxisSpan, uint64_t InputStrideMask, uint64_t IndexStrideMask>
-struct IndirectLoadSimtCaseSelector<
-    IndirectLoadSimtCaseTag<IndirectLoadSimtCase::kStaticInner, OffsetT, Rank, Axis, InnerSpan, OutputAxisSpan,
-                            InputAxisStride, InputAxisSpan, InputStrideMask, IndexStrideMask>> {
-  using OffsetType = OffsetT;
-  using Params = IndirectLoadSimtStaticInnerParams<OffsetT>;
-  using Policy = IndirectLoadSimtStaticInnerPolicy<OffsetT, InnerSpan, InputAxisStride, InputAxisSpan>;
-
-  __aicore__ inline static Policy MakePolicy(const Params &params) {
-    return Policy{params.output_axis_span};
+template <typename X, typename Y, typename FusedBody, typename Context, uint32_t ThreadNum, typename AddressPolicy>
+__simt_vf__ __aicore__ LAUNCH_BOUND(ThreadNum) inline void IndirectLoadSimtKernel(
+    __gm__ X *x, __gm__ Y *y, Context context, uint32_t actual_size, typename AddressPolicy::OffsetType output_offset,
+    AddressPolicy address_policy) {
+  using OffsetT = typename AddressPolicy::OffsetType;
+  for (uint32_t i = threadIdx.x; i < actual_size; i += blockDim.x) {
+    const OffsetT output_index = output_offset + static_cast<OffsetT>(i);
+    y[output_index] = IndirectLoadSimtCompute<X, Y, FusedBody>(x, context, output_index, address_policy);
   }
-};
+}
 
-template <typename OffsetT, int32_t Rank, int32_t Axis, uint64_t InnerSpan, uint64_t OutputAxisSpan,
-          uint64_t InputAxisStride, uint64_t InputAxisSpan, uint64_t InputStrideMask, uint64_t IndexStrideMask>
-struct IndirectLoadSimtCaseSelector<
-    IndirectLoadSimtCaseTag<IndirectLoadSimtCase::kStructuredMagic, OffsetT, Rank, Axis, InnerSpan, OutputAxisSpan,
-                            InputAxisStride, InputAxisSpan, InputStrideMask, IndexStrideMask>> {
-  using OffsetType = OffsetT;
-  using Params = IndirectLoadSimtStructuredMagicParams<OffsetT>;
-  using Policy = IndirectLoadSimtStructuredMagicPolicy<OffsetT>;
-
-  __aicore__ inline static Policy MakePolicy(const Params &params) {
-    return Policy{params.inner_span, params.output_axis_span, params.input_axis_stride, params.input_axis_span};
+template <typename X, typename Y, typename FusedBody, typename Context, uint32_t ThreadNum, typename AddressPolicy>
+__simt_vf__ __aicore__ LAUNCH_BOUND(ThreadNum) inline void IndirectLoadSimtUbKernel(
+    __gm__ X *x, __ubuf__ Y *y, Context context, uint32_t actual_size, typename AddressPolicy::OffsetType output_offset,
+    AddressPolicy address_policy) {
+  using OffsetT = typename AddressPolicy::OffsetType;
+  for (uint32_t i = threadIdx.x; i < actual_size; i += blockDim.x) {
+    const OffsetT output_index = output_offset + static_cast<OffsetT>(i);
+    y[i] = IndirectLoadSimtCompute<X, Y, FusedBody>(x, context, output_index, address_policy);
   }
-};
+}
 
-template <typename OffsetT, int32_t Rank, int32_t Axis, uint64_t InnerSpan, uint64_t OutputAxisSpan,
-          uint64_t InputAxisStride, uint64_t InputAxisSpan, uint64_t InputStrideMask, uint64_t IndexStrideMask>
-struct IndirectLoadSimtCaseSelector<
-    IndirectLoadSimtCaseTag<IndirectLoadSimtCase::kEmbedding, OffsetT, Rank, Axis, InnerSpan, OutputAxisSpan,
-                            InputAxisStride, InputAxisSpan, InputStrideMask, IndexStrideMask>> {
-  using OffsetType = OffsetT;
-  using Params = IndirectLoadSimtEmbeddingParams<OffsetT, Rank>;
-  using Policy = IndirectLoadSimtEmbeddingPolicy<OffsetT, Rank, Axis, InputStrideMask, IndexStrideMask>;
+template <uint32_t ThreadNum, typename X, typename Y, typename FusedBody, typename Context, typename AddressPolicy>
+__aicore__ inline void LaunchIndirectLoadSimt(__gm__ X *x, __gm__ Y *y, Context context, uint32_t actual_size,
+                                              typename AddressPolicy::OffsetType output_offset,
+                                              AddressPolicy address_policy) {
+  Simt::VF_CALL<IndirectLoadSimtKernel<X, Y, FusedBody, Context, ThreadNum, AddressPolicy>>(
+      Simt::Dim3(ThreadNum), x, y, context, actual_size, output_offset, address_policy);
+}
 
-  __aicore__ inline static Policy MakePolicy(const Params &params) {
-    return Policy{params};
-  }
-};
-
-template <typename OffsetT, int32_t Rank, int32_t Axis, uint64_t InnerSpan, uint64_t OutputAxisSpan,
-          uint64_t InputAxisStride, uint64_t InputAxisSpan, uint64_t InputStrideMask, uint64_t IndexStrideMask>
-struct IndirectLoadSimtCaseSelector<
-    IndirectLoadSimtCaseTag<IndirectLoadSimtCase::kRecursive, OffsetT, Rank, Axis, InnerSpan, OutputAxisSpan,
-                            InputAxisStride, InputAxisSpan, InputStrideMask, IndexStrideMask>> {
-  using OffsetType = OffsetT;
-  using Params = IndirectLoadSimtRecursiveParams<OffsetT, Rank>;
-  using Policy = IndirectLoadSimtRecursivePolicy<OffsetT, Rank, Axis>;
-
-  __aicore__ inline static Policy MakePolicy(const Params &params) {
-    return Policy{params};
-  }
-};
-
-template <typename OffsetT, int32_t Rank, int32_t Axis, uint64_t InnerSpan, uint64_t OutputAxisSpan,
-          uint64_t InputAxisStride, uint64_t InputAxisSpan, uint64_t InputStrideMask, uint64_t IndexStrideMask>
-struct IndirectLoadSimtCaseSelector<
-    IndirectLoadSimtCaseTag<IndirectLoadSimtCase::kStrided, OffsetT, Rank, Axis, InnerSpan, OutputAxisSpan,
-                            InputAxisStride, InputAxisSpan, InputStrideMask, IndexStrideMask>> {
-  using OffsetType = OffsetT;
-  using Params = IndirectLoadSimtStridedParams<OffsetT, Rank>;
-  using Policy = IndirectLoadSimtStridedPolicy<OffsetT, Rank, Axis, InputStrideMask, IndexStrideMask>;
-
-  __aicore__ inline static Policy MakePolicy(const Params &params) {
-    return Policy{params};
-  }
-};
+template <uint32_t ThreadNum, typename X, typename Y, typename FusedBody, typename Context, typename AddressPolicy>
+__aicore__ inline void LaunchIndirectLoadSimt(__gm__ X *x, LocalTensor<Y> y, Context context, uint32_t actual_size,
+                                              typename AddressPolicy::OffsetType output_offset,
+                                              AddressPolicy address_policy) {
+  Simt::VF_CALL<IndirectLoadSimtUbKernel<X, Y, FusedBody, Context, ThreadNum, AddressPolicy>>(
+      Simt::Dim3(ThreadNum), x, (__ubuf__ Y *)y.GetPhyAddr(), context, actual_size, output_offset, address_policy);
+}
 
 template <uint32_t ThreadNum, typename X, typename FusedBody, typename Context, typename AddressPolicy>
-__simt_vf__ __aicore__ LAUNCH_BOUND(ThreadNum) inline void IndirectLoadSimtKernel(
+__simt_vf__ __aicore__ LAUNCH_BOUND(ThreadNum) inline void IndirectLoadSimtMultiKernel(
     __gm__ X *x, typename FusedBody::OutputTargets targets, Context context, uint32_t actual_size,
     typename AddressPolicy::OffsetType output_offset, AddressPolicy address_policy) {
   using OffsetT = typename AddressPolicy::OffsetType;
@@ -508,18 +376,18 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(ThreadNum) inline void IndirectLoadSimtKerne
     if constexpr (AddressPolicy::kUsesInputAxis) {
       input_offset += indirect_index * address_policy.input_axis_stride;
     }
-    const X value = x[input_offset];
     const typename FusedBody::OutputPack outputs =
-        FusedBody::Outputs(value, output_index, address.index_offset, context);
+        FusedBody::Outputs(x[input_offset], output_index, address.index_offset, context);
     FusedBody::Store(targets, output_index, static_cast<OffsetT>(i), outputs);
   }
 }
 
 template <uint32_t ThreadNum, typename X, typename FusedBody, typename Context, typename AddressPolicy>
-__aicore__ inline void LaunchIndirectLoadSimt(__gm__ X *x, typename FusedBody::OutputTargets targets, Context context,
-                                              uint32_t actual_size, typename AddressPolicy::OffsetType output_offset,
-                                              AddressPolicy address_policy) {
-  Simt::VF_CALL<IndirectLoadSimtKernel<ThreadNum, X, FusedBody, Context, AddressPolicy>>(
+__aicore__ inline void LaunchIndirectLoadSimtMulti(__gm__ X *x, typename FusedBody::OutputTargets targets,
+                                                   Context context, uint32_t actual_size,
+                                                   typename AddressPolicy::OffsetType output_offset,
+                                                   AddressPolicy address_policy) {
+  Simt::VF_CALL<IndirectLoadSimtMultiKernel<ThreadNum, X, FusedBody, Context, AddressPolicy>>(
       Simt::Dim3(ThreadNum), x, targets, context, actual_size, output_offset, address_policy);
 }
 
@@ -528,65 +396,96 @@ inline __aicore__ constexpr bool IndirectLoadUse2048Threads() {
   return sizeof(typename AddressPolicy::OffsetType) == sizeof(uint32_t);
 }
 
-template <typename X, typename FusedBody, typename Context, typename AddressPolicy>
-__aicore__ inline void DispatchIndirectLoadSimt(__gm__ X *x, typename FusedBody::OutputTargets targets, Context context,
-                                                uint32_t actual_size, typename AddressPolicy::OffsetType output_offset,
+template <typename X, typename Y, typename FusedBody, typename Context, typename AddressPolicy, typename Output>
+__aicore__ inline void DispatchIndirectLoadSimt(__gm__ X *x, Output y, Context context, uint32_t actual_size,
+                                                typename AddressPolicy::OffsetType output_offset,
                                                 AddressPolicy address_policy) {
   if (actual_size <= 128U) {
-    LaunchIndirectLoadSimt<128U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    LaunchIndirectLoadSimt<128U, X, Y, FusedBody>(x, y, context, actual_size, output_offset, address_policy);
     return;
   }
   if (actual_size <= 256U) {
-    LaunchIndirectLoadSimt<256U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    LaunchIndirectLoadSimt<256U, X, Y, FusedBody>(x, y, context, actual_size, output_offset, address_policy);
     return;
   }
   if (actual_size <= 512U) {
-    LaunchIndirectLoadSimt<512U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    LaunchIndirectLoadSimt<512U, X, Y, FusedBody>(x, y, context, actual_size, output_offset, address_policy);
     return;
   }
   if (actual_size <= 1024U) {
-    LaunchIndirectLoadSimt<1024U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    LaunchIndirectLoadSimt<1024U, X, Y, FusedBody>(x, y, context, actual_size, output_offset, address_policy);
     return;
   }
   if constexpr (IndirectLoadUse2048Threads<AddressPolicy>()) {
-    LaunchIndirectLoadSimt<2048U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    LaunchIndirectLoadSimt<2048U, X, Y, FusedBody>(x, y, context, actual_size, output_offset, address_policy);
   } else {
-    LaunchIndirectLoadSimt<1024U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    LaunchIndirectLoadSimt<1024U, X, Y, FusedBody>(x, y, context, actual_size, output_offset, address_policy);
+  }
+}
+
+template <typename X, typename FusedBody, typename Context, typename AddressPolicy>
+__aicore__ inline void DispatchIndirectLoadSimtMulti(__gm__ X *x, typename FusedBody::OutputTargets targets,
+                                                     Context context, uint32_t actual_size,
+                                                     typename AddressPolicy::OffsetType output_offset,
+                                                     AddressPolicy address_policy) {
+  if (actual_size <= 128U) {
+    LaunchIndirectLoadSimtMulti<128U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    return;
+  }
+  if (actual_size <= 256U) {
+    LaunchIndirectLoadSimtMulti<256U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    return;
+  }
+  if (actual_size <= 512U) {
+    LaunchIndirectLoadSimtMulti<512U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    return;
+  }
+  if (actual_size <= 1024U) {
+    LaunchIndirectLoadSimtMulti<1024U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    return;
+  }
+  if constexpr (IndirectLoadUse2048Threads<AddressPolicy>()) {
+    LaunchIndirectLoadSimtMulti<2048U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+  } else {
+    LaunchIndirectLoadSimtMulti<1024U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
   }
 }
 }  // namespace Internal
 
-template <typename CaseTag>
-using IndirectLoadSimtParams = typename Internal::IndirectLoadSimtCaseSelector<CaseTag>::Params;
-
-template <typename X, typename FusedBody, typename CaseTag, typename Context>
-__aicore__ inline void IndirectLoadSimt(
-    __gm__ X *x, typename FusedBody::OutputTargets targets, Context context, uint32_t actual_size,
-    typename Internal::IndirectLoadSimtCaseSelector<CaseTag>::OffsetType output_offset,
-    const IndirectLoadSimtParams<CaseTag> &params) {
-  static_assert(FusedBody::kGmOutputCount + FusedBody::kUbOutputCount > 0U,
-                "IndirectLoad SIMT requires at least one output target.");
-  static_assert(FusedBody::kUbOutputCount <= 1U, "IndirectLoad SIMT supports at most one UB output target.");
-  using Selector = Internal::IndirectLoadSimtCaseSelector<CaseTag>;
+template <typename X, typename FusedBody, typename AddressPolicy, typename Context, typename... PolicyArgs>
+__aicore__ inline void IndirectLoadSimtMulti(__gm__ X *x, typename FusedBody::OutputTargets targets, Context context,
+                                             uint32_t actual_size, typename AddressPolicy::OffsetType output_offset,
+                                             PolicyArgs... policy_args) {
   if (actual_size != 0U) {
-    const typename Selector::Policy address_policy = Selector::MakePolicy(params);
-    Internal::DispatchIndirectLoadSimt<X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
+    const AddressPolicy address_policy{static_cast<typename AddressPolicy::OffsetType>(policy_args)...};
+    Internal::DispatchIndirectLoadSimtMulti<X, FusedBody>(x, targets, context, actual_size, output_offset,
+                                                          address_policy);
   }
-  if constexpr (FusedBody::kGmOutputCount > 0U) {
-    const int32_t event_id = static_cast<int32_t>(GetTPipePtr()->FetchEventID(HardEvent::V_MTE3));
-    SetFlag<HardEvent::V_MTE3>(event_id);
-    WaitFlag<HardEvent::V_MTE3>(event_id);
-  } else {
-    PipeBarrier<PIPE_V>();
-  }
+  const int32_t event_id = static_cast<int32_t>(GetTPipePtr()->FetchEventID(HardEvent::V_MTE3));
+  SetFlag<HardEvent::V_MTE3>(event_id);
+  WaitFlag<HardEvent::V_MTE3>(event_id);
 }
 
-template <typename X, typename FusedBody, typename CaseTag, typename Context>
-__aicore__ inline void IndirectLoadSimtMulti(
-    __gm__ X *x, typename FusedBody::OutputTargets targets, Context context, uint32_t actual_size,
-    typename Internal::IndirectLoadSimtCaseSelector<CaseTag>::OffsetType output_offset,
-    const IndirectLoadSimtParams<CaseTag> &params) {
-  IndirectLoadSimt<X, FusedBody, CaseTag>(x, targets, context, actual_size, output_offset, params);
+template <typename X, typename Y, typename FusedBody, typename AddressPolicy, typename Context, typename... PolicyArgs>
+__aicore__ inline void IndirectLoadSimt(__gm__ X *x, __gm__ Y *y, Context context, uint32_t actual_size,
+                                        typename AddressPolicy::OffsetType output_offset, PolicyArgs... policy_args) {
+  if (actual_size != 0U) {
+    const AddressPolicy address_policy{static_cast<typename AddressPolicy::OffsetType>(policy_args)...};
+    Internal::DispatchIndirectLoadSimt<X, Y, FusedBody>(x, y, context, actual_size, output_offset, address_policy);
+  }
+  const int32_t event_id = static_cast<int32_t>(GetTPipePtr()->FetchEventID(HardEvent::V_MTE3));
+  SetFlag<HardEvent::V_MTE3>(event_id);
+  WaitFlag<HardEvent::V_MTE3>(event_id);
+}
+
+template <typename X, typename Y, typename FusedBody, typename AddressPolicy, typename Context, typename... PolicyArgs>
+__aicore__ inline void IndirectLoadSimt(__gm__ X *x, LocalTensor<Y> y, Context context, uint32_t actual_size,
+                                        typename AddressPolicy::OffsetType output_offset, PolicyArgs... policy_args) {
+  if (actual_size != 0U) {
+    const AddressPolicy address_policy{static_cast<typename AddressPolicy::OffsetType>(policy_args)...};
+    Internal::DispatchIndirectLoadSimt<X, Y, FusedBody>(x, y, context, actual_size, output_offset, address_policy);
+  }
+  PipeBarrier<PIPE_V>();
 }
 
 }  // namespace AscendC

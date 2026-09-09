@@ -37,7 +37,6 @@ class UnAlignmentStrategy : public BaseAlignmentStrategy {
   static af::Status CollectTransposePreNodes(const af::AscGraph &graph, std::set<af::AscNodePtr> &transpose_pre_nodes);
   static af::Status UpdateOutputVectorizedStrides(const af::AscNodePtr &node, uint32_t continuous_tail_axis_num,
                                                   uint32_t align_width);
-  static af::Status ModifyIndirectLoadVectorizedStrides(ascir::ImplGraph &impl_graph);
 };
 
 Status GenLoadToGenNddmaNode(const af::AscNodePtr &node_load);

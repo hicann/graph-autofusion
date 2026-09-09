@@ -309,7 +309,7 @@ void BuildBroadcastInputPreChain(const af::AscOpOutput &broadcast_output, const 
 }
 
 af::AscGraph BuildIndirectLoadBroadcastGraph(bool with_input_element = true, bool with_index_broadcast = false,
-                                             int64_t axis = 1L, bool transpose_input = false) {
+                                             int64_t axis = 1L) {
   af::AscGraph graph("indirect_load_broadcast_ut_graph");
   const BroadcastGraphView view = CreateBroadcastGraphView(graph);
   const std::vector<af::Expression> source_strides = {view.source_repeats[2], view.source_repeats[2], af::ops::One};
@@ -325,20 +325,9 @@ af::AscGraph BuildIndirectLoadBroadcastGraph(bool with_input_element = true, boo
   af::ascir_op::Load input_load("broadcast_input_load");
   input_load.x = x.y;
   SetNodeView(input_load, af::DT_FLOAT16, view.source_axes, view.source_repeats, source_strides);
-  af::ascir_op::Transpose transpose("broadcast_input_transpose");
-  if (transpose_input) {
-    auto physical_axes = view.source_axes;
-    auto physical_repeats = view.source_repeats;
-    std::swap(physical_axes[0], physical_axes[2]);
-    std::swap(physical_repeats[0], physical_repeats[2]);
-    SetNodeView(input_load, af::DT_FLOAT16, physical_axes, physical_repeats,
-                {af::Symbol(2), af::Symbol(2), af::ops::One});
-    transpose.x = input_load.y;
-    SetNodeView(transpose, af::DT_FLOAT16, view.source_axes, view.source_repeats, source_strides);
-  }
   af::ascir_op::Broadcast broadcast("input_broadcast");
   broadcast.attr.api.compute_type = af::ComputeType::kComputeBroadcast;
-  broadcast.x = transpose_input ? transpose.y : input_load.y;
+  broadcast.x = input_load.y;
   SetNodeView(broadcast, af::DT_FLOAT16, view.input_axes, view.input_repeats, input_strides);
   auto index_source_repeats = view.output_repeats;
   auto index_source_strides = index_strides;
@@ -1148,91 +1137,6 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimtRewritesInputBroadcastAndSetsTem
   EXPECT_EQ(ascir::GetDcacheSize(*indirect_load), kSimtDcacheSize);
   EXPECT_TRUE(indirect_load->outputs()[0]->attr.vectorized_axis.empty());
   EXPECT_TRUE(indirect_load->outputs()[0]->attr.vectorized_strides.empty());
-}
-
-TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastAfterTransposePreservesSourcePhysicalView) {
-  PlatformContextReset platform_reset;
-  ge::PlatformContext::GetInstance().Reset();
-  ge::PlatformInfo platform_info;
-  platform_info.soc_ver = "3510";
-  platform_info.ub_size = 256 * 1024;
-  platform_info.aiv_num = 48;
-  ge::PlatformContext::GetInstance().SetPlatformInfo(platform_info);
-  auto graph = BuildIndirectLoadBroadcastGraph(false, false, 2L, true);
-  const auto source = graph.FindNode("broadcast_input_load")->outputs[0].attr;
-  optimize::IndirectLoadScheduleCaseGenerator generator;
-  std::vector<af::AscGraph> graphs;
-  std::vector<std::string> score_functions;
-  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
-  ASSERT_EQ(graphs.size(), 3UL);
-  for (auto &candidate : graphs) {
-    const auto il = candidate.FindNode("indirect_load");
-    ASSERT_NE(il, nullptr);
-    EXPECT_NE(ascir::GetTemplateIdOrDefault(*il), ascir::TemplateId::kIndirectLoadSK);
-    const auto load = candidate.FindNode("broadcast_input_load");
-    ASSERT_NE(load, nullptr);
-    const auto transpose = candidate.FindNode("broadcast_input_transpose");
-    ascgen_utils::indirect_load::TemplateLogicalView view;
-    ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateLogicalView(il, view), af::SUCCESS);
-    // The scheduler must publish the final GM address strides for SIMT as well as SIMD.
-    EXPECT_EQ(view.input.strides, (std::vector<af::Expression>{af::ops::One, af::ops::Zero, af::Symbol(2)}));
-    if (ascir::GetTemplateIdOrDefault(*il) == ascir::TemplateId::kIndirectLoadSimd) {
-      EXPECT_EQ(transpose, nullptr);
-      EXPECT_EQ(load->outputs[0].attr.strides, view.input.strides);
-      continue;
-    }
-    ASSERT_NE(transpose, nullptr);
-    EXPECT_EQ(load->outputs[0].attr.axis.front(), transpose->outputs[0].attr.axis.back());
-    EXPECT_EQ(load->outputs[0].attr.axis.back(), transpose->outputs[0].attr.axis.front());
-    EXPECT_EQ(load->outputs[0].attr.repeats, source.repeats);
-    EXPECT_EQ(load->outputs[0].attr.strides, source.strides);
-  }
-}
-
-TEST(IndirectLoadScheduleCaseGeneratorTest, PreservesSharedOrControlledTransposeLoadBoundary) {
-  PlatformContextReset platform_reset;
-  ge::PlatformContext::GetInstance().Reset();
-  ge::PlatformInfo platform_info;
-  platform_info.soc_ver = "3510";
-  platform_info.ub_size = 256 * 1024;
-  platform_info.aiv_num = 48;
-  ge::PlatformContext::GetInstance().SetPlatformInfo(platform_info);
-  for (const bool control_edge : {false, true}) {
-    SCOPED_TRACE(control_edge);
-    auto graph = BuildIndirectLoadBroadcastGraph(false, false, 2L, true);
-    const auto load = graph.FindNode("broadcast_input_load");
-    ASSERT_NE(load, nullptr);
-    const auto source = load->outputs[0].attr;
-    if (control_edge) {
-      const auto index = graph.FindNode("broadcast_index_load");
-      ASSERT_NE(index, nullptr);
-      ASSERT_EQ(af::GraphUtils::AddEdge(load->GetOutControlAnchor(), index->GetInControlAnchor()), af::SUCCESS);
-    } else {
-      af::ascir_op::Store shared_store("shared_store");
-      graph.AddNode(shared_store);
-      SetNodeView(shared_store, source.dtype, source.axis, source.repeats, source.strides);
-      ASSERT_EQ(af::GraphUtils::AddEdge(load->GetOutDataAnchor(0), graph.FindNode("shared_store")->GetInDataAnchor(0)),
-                af::SUCCESS);
-      af::ascir_op::Output shared_output("shared_output");
-      graph.AddNode(shared_output);
-      shared_output.ir_attr.SetIndex(1);
-      shared_output.x = shared_store.y;
-      SetNodeView(shared_output, source.dtype, source.axis, source.repeats, source.strides);
-    }
-    optimize::IndirectLoadScheduleCaseGenerator generator;
-    std::vector<af::AscGraph> graphs;
-    std::vector<std::string> score_functions;
-    ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
-    ASSERT_EQ(graphs.size(), 2UL);
-    for (auto &candidate : graphs) {
-      const auto input_load = candidate.FindNode("broadcast_input_load");
-      ASSERT_NE(input_load, nullptr);
-      EXPECT_NE(candidate.FindNode("broadcast_input_transpose"), nullptr);
-      EXPECT_EQ(input_load->outputs[0].attr.repeats, source.repeats);
-      EXPECT_EQ(input_load->outputs[0].attr.strides, source.strides);
-      EXPECT_TRUE(ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(input_load));
-    }
-  }
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastDirectPathUsesPhysicalViewForAllTemplates) {

@@ -56,7 +56,6 @@ struct RewrittenGraphAnalysis {
   NodePath input_path;
   NodePath index_path;
   af::AscNodePtr input_root;
-  af::AscNodePtr input_boundary;
   af::AscNodePtr index_root;
   af::AscNodePtr output_store;
   af::AscNodePtr post_reduce;
@@ -67,7 +66,6 @@ struct RewrittenGraphAnalysis {
 
 struct InputViewPlan {
   NodePath path;
-  af::AscNodePtr load_transpose;
   ascgen_utils::indirect_load::IndirectLoadTensorLayout layout;
   int64_t path_broadcast_index = kInvalidBroadcastIndex;
   bool simd_index_uses_output_inner_axis = false;
@@ -87,22 +85,8 @@ struct PostReduceLayout {
   size_t first_reduce;
 };
 
-bool IsInputDataSource(const af::AscNodePtr &node) {
-  return ScheduleUtils::IsDataInput(node) || af::ops::IsOps<af::ascir_op::Scalar>(node);
-}
-
-// A retained Transpose separates two physical coordinate systems. Do not overwrite its source GM view.
 bool IsInputRegionBoundary(const af::AscNodePtr &node) {
-  if (IsInputDataSource(node)) {
-    return true;
-  }
-  if (!af::ops::IsOps<af::ascir_op::Load>(node)) {
-    return false;
-  }
-  const auto consumers = node->GetOutDataNodes();
-  return std::any_of(consumers.begin(), consumers.end(), [](const af::NodePtr &consumer) {
-    return af::ops::IsOps<af::ascir_op::Transpose>(std::dynamic_pointer_cast<af::AscNode>(consumer));
-  });
+  return ScheduleUtils::IsDataInput(node) || af::ops::IsOps<af::ascir_op::Scalar>(node);
 }
 
 bool HasControlEdge(const af::AscNodePtr &node) {
@@ -257,7 +241,7 @@ bool NeedsAlignedUbWindow(const ascgen_utils::indirect_load::IndirectLoadTensorL
 
 af::Status AnnotateStridedUbPath(const NodePath &path) {
   for (const af::AscNodePtr &node : path) {
-    if (IsInputDataSource(node) || ScheduleUtils::IsBuffer(node)) {
+    if (IsInputRegionBoundary(node) || ScheduleUtils::IsBuffer(node)) {
       continue;
     }
     const auto role = ascgen_utils::indirect_load::GetTemplateRole(node);
@@ -331,28 +315,12 @@ af::Status TraverseOutputConsumers(const NodePath &roots, NodeSet &visited, cons
   return af::SUCCESS;
 }
 
-af::AscNodePtr GetLoadTransposeSource(const af::AscNodePtr &node) {
-  if (node == nullptr || !af::ops::IsOps<af::ascir_op::Transpose>(node)) {
-    return nullptr;
-  }
-  const auto producer = ascgen_utils::indirect_load::GetInputProducer(node, 0UL);
-  return producer != nullptr && af::ops::IsOps<af::ascir_op::Load>(producer) ? producer : nullptr;
-}
-
-af::AscNodePtr GetFoldableLoadTransposeSource(const af::AscNodePtr &node) {
-  const auto load = GetLoadTransposeSource(node);
-  return IsSingleConsumerWithoutControlEdge(node) && IsSingleConsumerWithoutControlEdge(load) ? load : nullptr;
-}
-
 bool IsSupportedIndirectLoadTopologyNode(const af::AscNodePtr &node) {
   if (node == nullptr) {
     return false;
   }
   if (ScheduleUtils::IsIOBuffer(node) || ScheduleUtils::IsBuffer(node) ||
       af::ops::IsOps<af::ascir_op::IndirectLoad>(node)) {
-    return true;
-  }
-  if (GetLoadTransposeSource(node) != nullptr) {
     return true;
   }
   return ScheduleUtils::IsLoad(node) || ScheduleUtils::IsStore(node) || ScheduleUtils::IsElewise(node) ||
@@ -398,7 +366,7 @@ bool CollectSimtBackwardRegion(const NodePath &roots, const af::AscNodePtr &indi
     if (node == nullptr) {
       return false;
     }
-    if (node == indirect_load || IsInputDataSource(node)) {
+    if (node == indirect_load || IsInputRegionBoundary(node)) {
       continue;
     }
     if (!region.emplace(node.get()).second || af::ops::IsOps<af::ascir_op::Load>(node)) {
@@ -953,7 +921,7 @@ af::Status ReplaceAxisPrefix(std::vector<af::AxisId> &target_axes, const std::ve
 af::Status ReplaceRegionAxisPrefix(const NodePath &region, const std::vector<af::AxisId> &output_axes,
                                    size_t axis_index, bool is_input_region) {
   for (const af::AscNodePtr &node : region) {
-    if (!is_input_region && IsInputDataSource(node)) {
+    if (!is_input_region && IsInputRegionBoundary(node)) {
       continue;
     }
     const auto role = ascgen_utils::indirect_load::GetTemplateRole(node);
@@ -1044,27 +1012,6 @@ bool CanEmitSimtScalar(const af::AscNodePtr &node) {
   return v2_impl != nullptr && v2_impl->IsSimtScalarSupported(*node);
 }
 
-// The IndirectLoad logical view is expressed in the Transpose output order,
-// while the direct-GM boundary still reads the original Load buffer. Map the
-// source Load strides into that output order for the strided address policy.
-af::Status BuildLoadTransposeSourceView(const af::AscNodePtr &transpose, const af::AscTensorAttr &logical_attr,
-                                        ascgen_utils::indirect_load::LogicalTensorView &view) {
-  const auto load = ascgen_utils::indirect_load::GetInputProducer(transpose, 0UL);
-  const auto &source = load->outputs[0].attr;
-  GE_ASSERT_TRUE(source.axis.size() == source.strides.size() &&
-                     logical_attr.axis.size() == logical_attr.repeats.size() &&
-                     logical_attr.axis.size() == logical_attr.strides.size(),
-                 "IndirectLoad Load->Transpose tensor metadata rank mismatch.");
-  view = {logical_attr.axis, logical_attr.repeats, logical_attr.strides};
-  for (size_t output_dim = 0UL; output_dim < logical_attr.axis.size(); ++output_dim) {
-    const auto source_axis = std::find(source.axis.begin(), source.axis.end(), logical_attr.axis[output_dim]);
-    GE_ASSERT_TRUE(source_axis != source.axis.end(), "IndirectLoad Transpose output axis is absent from Load source.");
-    const size_t source_dim = static_cast<size_t>(std::distance(source.axis.begin(), source_axis));
-    view.strides[output_dim] = source.strides[source_dim];
-  }
-  return af::SUCCESS;
-}
-
 af::Status ValidateReduceOutput(const af::AscNodePtr &reduce) {
   const auto reduce_outputs = reduce->GetOutDataNodes();
   GE_ASSERT_TRUE(reduce_outputs.size() == 1UL, "[IndirectLoad] Reduce[%s] must have one Store output, got %zu.",
@@ -1120,10 +1067,6 @@ af::Status CollectOutputBoundaries(const af::AscNodePtr &indirect_load, Rewritte
 af::Status CollectRewrittenBoundaries(const af::AscNodePtr &indirect_load, RewrittenGraphAnalysis &analysis) {
   analysis.input_root =
       ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kInputTensorIndex);
-  analysis.input_boundary = GetLoadTransposeSource(analysis.input_root);
-  if (analysis.input_boundary == nullptr) {
-    analysis.input_boundary = analysis.input_root;
-  }
   analysis.index_root =
       ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kIndexTensorIndex);
   GE_ASSERT_SUCCESS(CollectOutputBoundaries(indirect_load, analysis));
@@ -1215,14 +1158,6 @@ af::Status RewriteInputPreNodes(af::AscGraph &graph, const af::AscNodePtr &indir
     const auto &output_shape = indirect_load->outputs()[0]->attr.repeats;
     GELOGI("[IndirectLoad] Skip moving SIMD input-pre nodes for node[%s]: input shape[%s], output shape[%s].",
            indirect_load->GetNamePtr(), af::ToString(input_shape).c_str(), af::ToString(output_shape).c_str());
-    return af::SUCCESS;
-  }
-  // Keep a direct Load->Transpose boundary on the SIMT input side.  Its
-  // permutation is represented by the SIMT address policy; moving it across
-  // IndirectLoad would discard the source physical view.
-  const auto input_producer =
-      ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kInputTensorIndex);
-  if (template_id == ascir::TemplateId::kIndirectLoadSimt && GetLoadTransposeSource(input_producer) != nullptr) {
     return af::SUCCESS;
   }
   NodePath movable_nodes;
@@ -1327,71 +1262,47 @@ void CollectInputPaths(const af::AscNodePtr &indirect_load, ascir::TemplateId te
   }
 }
 
-af::Status ResolveInputPhysicalView(const af::AscTensorAttr &logical_attr, ascir::TemplateId template_id,
-                                    InputViewPlan &plan, af::AscTensorAttr &physical_attr, bool &is_supported) {
-  physical_attr = logical_attr;
-  plan.load_transpose = nullptr;
-  const bool has_broadcast = plan.path_broadcast_index != kInvalidBroadcastIndex;
-  af::AscNodePtr source = plan.path.empty() ? nullptr : plan.path.front();
-  if (has_broadcast) {
-    const auto broadcast = plan.path[static_cast<size_t>(plan.path_broadcast_index)];
-    source = ascgen_utils::indirect_load::GetInputProducer(broadcast, 0UL);
-    if (source == nullptr) {
-      GELOGI("[IndirectLoad] Reject candidate[%d]: Broadcast node[%s] source is invalid.",
-             static_cast<int32_t>(template_id), broadcast->GetNamePtr());
-      is_supported = false;
-      return af::SUCCESS;
-    }
-    GE_ASSERT_SUCCESS(GetBroadcastPhysicalAttr(broadcast, template_id, physical_attr));
-  }
-  if (template_id == ascir::TemplateId::kIndirectLoadSK || GetLoadTransposeSource(source) == nullptr) {
-    return af::SUCCESS;
-  }
-  // SIMD may use the source Load only when the intervening Transpose can be folded safely.
-  // SIMT already reads GM directly, so it only needs the axis-mapped view, not a graph rewrite.
-  if (has_broadcast && template_id == ascir::TemplateId::kIndirectLoadSimd &&
-      GetFoldableLoadTransposeSource(source) == nullptr) {
-    return af::SUCCESS;
-  }
-  plan.load_transpose = source;
-  ascgen_utils::indirect_load::LogicalTensorView source_view;
-  GE_ASSERT_SUCCESS(BuildLoadTransposeSourceView(source, physical_attr, source_view));
-  physical_attr.strides = std::move(source_view.strides);
-  return af::SUCCESS;
-}
-
 af::Status AnalyzeInputPath(const af::AscNodePtr &indirect_load, size_t input_idx, ascir::TemplateId template_id,
-                            InputViewPlan &plan, bool &is_path_supported) {
+                            InputViewPlan *const plans[], bool &is_path_supported) {
+  // 返回 SUCCESS 表示分析流程正常；is_path_supported 为 false 表示当前模板淘汰，不中止 Generate。
   is_path_supported = true;
   const auto inputs = indirect_load->inputs();
+  const size_t axis_index = GetIndirectLoadAxisIndex(indirect_load);
+  GE_ASSERT_TRUE(axis_index != kIndirectLoadInvalidAxisIndex, "IndirectLoad axis index is invalid.");
+  InputViewPlan &plan = *plans[input_idx];
   const auto &logical_attr = inputs[input_idx]->attr;
-  af::AscTensorAttr physical_attr;
-  GE_ASSERT_SUCCESS(ResolveInputPhysicalView(logical_attr, template_id, plan, physical_attr, is_path_supported));
-  if (!is_path_supported) {
-    return af::SUCCESS;
-  }
+  plan.simd_index_uses_output_inner_axis = false;
+  ascgen_utils::indirect_load::LogicalTensorView view;
   const bool has_broadcast = plan.path_broadcast_index != kInvalidBroadcastIndex;
-  ascgen_utils::indirect_load::LogicalTensorView view{logical_attr.axis, logical_attr.repeats, physical_attr.strides};
-  if (has_broadcast) {
+  if (!has_broadcast) {
+    // 无直连广播（SIMD/SIMT）或无广播（SK）：按逻辑视图直接分类，非直连广播由通用逻辑承载。
+    view = {logical_attr.axis, logical_attr.repeats, logical_attr.strides};
+  } else {
+    const size_t broadcast_index = static_cast<size_t>(plan.path_broadcast_index);
+    const af::AscNodePtr &broadcast = plan.path[broadcast_index];
+    // 取源物理属性前保留源存在性检查。
+    if (ascgen_utils::indirect_load::GetInputProducer(broadcast, 0UL) == nullptr) {
+      GELOGI("[IndirectLoad] Reject candidate[%d]: Broadcast node[%s] source is invalid.",
+             static_cast<int32_t>(template_id), broadcast->GetNamePtr());
+      is_path_supported = false;
+      return af::SUCCESS;
+    }
+    // 基于广播源物理属性构造执行视图：源形状为 1 而逻辑视图非 1 的维度置 stride 0。
+    af::AscTensorAttr physical_attr;
+    GE_ASSERT_SUCCESS(GetBroadcastPhysicalAttr(broadcast, template_id, physical_attr));
     GE_ASSERT_SUCCESS(BuildBroadcastLogicalView(logical_attr, physical_attr, template_id, view));
   }
-  plan.simd_index_uses_output_inner_axis = template_id == ascir::TemplateId::kIndirectLoadSimd &&
-                                           input_idx == ascgen_utils::indirect_load::kIndexTensorIndex &&
-                                           (has_broadcast || plan.load_transpose != nullptr);
-  if (plan.load_transpose != nullptr) {
-    // Permutations are valid non-overlapping strided views even when strides are not monotonically decreasing.
-    plan.layout = {{view.axis_ids, view.sizes, view.strides},
-                   ascgen_utils::indirect_load::IndirectLoadLayoutKind::kStrided,
-                   physical_attr.repeats};
-  } else {
-    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(
-        view, plan.layout, template_id == ascir::TemplateId::kIndirectLoadSimt && has_broadcast));
-  }
+
+  const bool allow_simt_strided_broadcast = template_id == ascir::TemplateId::kIndirectLoadSimt && has_broadcast;
+  GE_ASSERT_SUCCESS(
+      ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(view, plan.layout, allow_simt_strided_broadcast));
   if (plan.layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported) {
     GELOGI("[IndirectLoad] Reject candidate[%d]: input path layout%s is unsupported.",
            static_cast<int32_t>(template_id), has_broadcast ? " with Broadcast source view" : "");
     is_path_supported = false;
   }
+  plan.simd_index_uses_output_inner_axis = template_id == ascir::TemplateId::kIndirectLoadSimd &&
+                                           input_idx == ascgen_utils::indirect_load::kIndexTensorIndex && has_broadcast;
   return af::SUCCESS;
 }
 
@@ -1408,24 +1319,6 @@ af::Status RewriteSkInputPaths(PhysicalViewPreparation &preparation, RewrittenGr
   return af::SUCCESS;
 }
 
-af::Status RewriteSimdInputLayouts(PhysicalViewPreparation &preparation) {
-  for (InputViewPlan *plan : {&preparation.input, &preparation.index}) {
-    if (plan->path_broadcast_index == kInvalidBroadcastIndex || plan->load_transpose == nullptr) {
-      continue;
-    }
-    const auto broadcast = plan->path[static_cast<size_t>(plan->path_broadcast_index)];
-    const auto &transpose = plan->load_transpose;
-    const auto load = ascgen_utils::indirect_load::GetInputProducer(transpose, 0UL);
-    GE_ASSERT_NOTNULL(load);
-    const auto owner = transpose->GetOwnerComputeGraph();
-    GE_ASSERT_GRAPH_SUCCESS(af::GraphUtils::IsolateNodeOneIO(transpose));
-    GE_ASSERT_GRAPH_SUCCESS(af::GraphUtils::RemoveNodeWithoutRelink(owner, transpose));
-    // Once the Transpose is removed, the Load and Broadcast share the resolved physical view.
-    GE_ASSERT_SUCCESS(ApplyPhysicalView(NodePath{load, broadcast}, plan->layout));
-  }
-  return af::SUCCESS;
-}
-
 af::Status RewriteBroadcastPaths(const af::AscNodePtr &indirect_load, ascir::TemplateId template_id,
                                  PhysicalViewPreparation &preparation, RewrittenGraphAnalysis &analysis,
                                  bool &is_candidate_legal) {
@@ -1435,7 +1328,7 @@ af::Status RewriteBroadcastPaths(const af::AscNodePtr &indirect_load, ascir::Tem
   if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
     return RewriteSimtInputBroadcast(indirect_load, preparation.input, is_candidate_legal);
   }
-  return RewriteSimdInputLayouts(preparation);
+  return af::SUCCESS;
 }
 
 af::Status PreparePhysicalViews(const af::AscNodePtr &indirect_load, ascir::TemplateId template_id,
@@ -1443,11 +1336,10 @@ af::Status PreparePhysicalViews(const af::AscNodePtr &indirect_load, ascir::Temp
   // 输入/输出个数已在 Generate 入口统一校验，axis 由 AnalyzeRewrittenGraph 统一获取，此处不再重复获取。
   is_candidate_legal = true;
   CollectInputPaths(indirect_load, template_id, preparation);
+  InputViewPlan *const plans[] = {&preparation.input, &preparation.index};
   for (size_t input_idx = 0UL; input_idx < kIndirectLoadInputCount; ++input_idx) {
-    InputViewPlan &plan =
-        input_idx == ascgen_utils::indirect_load::kInputTensorIndex ? preparation.input : preparation.index;
     bool is_path_supported = true;
-    GE_ASSERT_SUCCESS(AnalyzeInputPath(indirect_load, input_idx, template_id, plan, is_path_supported));
+    GE_ASSERT_SUCCESS(AnalyzeInputPath(indirect_load, input_idx, template_id, plans, is_path_supported));
     if (!is_path_supported) {
       is_candidate_legal = false;
       const char *const path_name = input_idx == ascgen_utils::indirect_load::kIndexTensorIndex ? "index" : "input";
@@ -1558,7 +1450,7 @@ af::Status AnalyzeRewrittenGraph(af::AscGraph &graph, const af::AscNodePtr &indi
 
 af::Status AnnotateSimdTemplateRoles(const RewrittenGraphAnalysis &analysis) {
   for (const af::AscNodePtr &node : analysis.input_region) {
-    if (IsInputDataSource(node)) {
+    if (IsInputRegionBoundary(node)) {
       continue;
     }
     const auto role = ascgen_utils::indirect_load::GetTemplateRole(node);
@@ -1569,7 +1461,7 @@ af::Status AnnotateSimdTemplateRoles(const RewrittenGraphAnalysis &analysis) {
   }
   if (analysis.simd_index_uses_output_inner_axis) {
     for (const af::AscNodePtr &node : analysis.index_region) {
-      if (IsInputDataSource(node)) {
+      if (IsInputRegionBoundary(node)) {
         continue;
       }
       GE_ASSERT_SUCCESS(
@@ -1581,13 +1473,10 @@ af::Status AnnotateSimdTemplateRoles(const RewrittenGraphAnalysis &analysis) {
 
 af::Status ValidateSimtTemplateRegion(const RewrittenGraphAnalysis &analysis, bool &is_candidate_legal) {
   is_candidate_legal = false;
-  if (!af::ops::IsOps<af::ascir_op::Load>(analysis.input_boundary) || analysis.index_region.empty()) {
+  if (!af::ops::IsOps<af::ascir_op::Load>(analysis.input_root) || analysis.index_region.empty()) {
     return af::SUCCESS;
   }
   for (const af::AscNodePtr &node : analysis.index_region) {
-    if (GetLoadTransposeSource(node) != nullptr) {
-      continue;
-    }
     // Compile-time Scalar values are emitted as local constants by the SIMT evaluator.
     // ScalarData is runtime input and still requires an explicit context/GM binding.
     if (af::ops::IsOps<af::ascir_op::ScalarData>(node) || HasControlEdge(node)) {
@@ -1605,13 +1494,8 @@ af::Status ValidateSimtTemplateRegion(const RewrittenGraphAnalysis &analysis, bo
 }
 
 af::Status AnnotateSimtTemplateRoles(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis) {
-  GE_ASSERT_NOTNULL(analysis.input_boundary, "IndirectLoad SIMT input boundary is missing.");
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
-      analysis.input_boundary, ascgen_utils::indirect_load::TemplateRole::kSimtInputBoundary));
-  if (analysis.input_boundary != analysis.input_root) {
-    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
-        analysis.input_root, ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform));
-  }
+      analysis.input_root, ascgen_utils::indirect_load::TemplateRole::kSimtInputBoundary));
   GE_ASSERT_SUCCESS(
       ascgen_utils::indirect_load::SetTemplateRole(indirect_load, ascgen_utils::indirect_load::TemplateRole::kSimtOp));
   for (const af::AscNodePtr &node : analysis.index_region) {
@@ -1642,7 +1526,7 @@ af::Status AnnotateSimtMainOutputPath(const af::AscNodePtr &indirect_load, const
     if (node == nullptr || node == indirect_load || !visited.emplace(node.get()).second) {
       continue;
     }
-    if (!IsInputDataSource(node) && !ScheduleUtils::IsReduce(node) && !ScheduleUtils::IsStore(node)) {
+    if (!IsInputRegionBoundary(node) && !ScheduleUtils::IsReduce(node) && !ScheduleUtils::IsStore(node)) {
       GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
           node, ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform));
     }
@@ -1671,7 +1555,7 @@ af::Status AnnotateSimtSideInputClosure(const af::AscNodePtr &branch_node, const
         ScheduleUtils::IsReduce(producer) || !visited.emplace(producer.get()).second) {
       continue;
     }
-    if (IsInputDataSource(producer) && !af::ops::IsOps<af::ascir_op::Load>(producer)) {
+    if (IsInputRegionBoundary(producer) && !af::ops::IsOps<af::ascir_op::Load>(producer)) {
       continue;
     }
     const auto role = ascgen_utils::indirect_load::GetTemplateRole(producer);
@@ -1717,7 +1601,7 @@ af::Status AnnotateSimtFanoutBranches(const af::AscNodePtr &indirect_load, const
   }
   const auto visit = [&](const af::AscNodePtr &node, bool &stop) -> af::Status {
     const bool is_fanout_branch =
-        selected.count(node.get()) == 0UL && !IsInputDataSource(node) && !ScheduleUtils::IsReduce(node);
+        selected.count(node.get()) == 0UL && !IsInputRegionBoundary(node) && !ScheduleUtils::IsReduce(node);
     if (is_fanout_branch) {
       GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
           node, ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch));
@@ -1777,20 +1661,8 @@ af::Status FinalizeTemplate(const af::AscNodePtr &indirect_load, ascir::Template
   GE_ASSERT_TRUE(false, "IndirectLoad template id %d is invalid.", static_cast<int32_t>(template_id));
 }
 
-af::Status ApplySkGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_load, bool &is_candidate_legal) {
-  is_candidate_legal = false;
-  for (const auto &node : graph.GetAllNodes()) {
-    if (af::ops::IsOps<af::ascir_op::Transpose>(node)) {
-      GELOGI("[IndirectLoad] Skip SK candidate: Transpose is only supported by SIMD/SIMT.");
-      return af::SUCCESS;
-    }
-  }
-  RewrittenGraphAnalysis analysis;
-  GE_ASSERT_SUCCESS(
-      AnalyzeRewrittenGraph(graph, indirect_load, ascir::TemplateId::kIndirectLoadSK, is_candidate_legal, analysis));
-  if (!is_candidate_legal) {
-    return af::SUCCESS;
-  }
+af::Status ApplySkGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_load,
+                            const RewrittenGraphAnalysis &analysis, bool &is_candidate_legal) {
   is_candidate_legal = false;
   if (!IsSkTemplateCandidateLegal(indirect_load)) {
     GELOGI("[IndirectLoad] Reject SK candidate for node[%s]: candidate legality check failed.",
@@ -1819,13 +1691,13 @@ af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_lo
   GELOGD("[IndirectLoad] Apply graph pass for node[%s], template_id[%d].", indirect_load->GetNamePtr(),
          static_cast<int32_t>(template_id));
   is_candidate_legal = true;
-  if (template_id == ascir::TemplateId::kIndirectLoadSK) {
-    return ApplySkGraphPass(graph, indirect_load, is_candidate_legal);
-  }
   RewrittenGraphAnalysis analysis;
   GE_ASSERT_SUCCESS(AnalyzeRewrittenGraph(graph, indirect_load, template_id, is_candidate_legal, analysis));
   if (!is_candidate_legal) {
     return af::SUCCESS;
+  }
+  if (template_id == ascir::TemplateId::kIndirectLoadSK) {
+    return ApplySkGraphPass(graph, indirect_load, analysis, is_candidate_legal);
   }
   GE_ASSERT_SUCCESS(CompleteInputDataTensorAttrs(analysis));
 
@@ -1844,13 +1716,7 @@ af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_lo
   }
   GE_ASSERT_SUCCESS(NormalizeTemplateAxes(graph, indirect_load, template_id, analysis, boundary));
   GE_ASSERT_SUCCESS(CompletePreservedVectorizedViews(graph, indirect_load));
-  GE_ASSERT_SUCCESS(FinalizeTemplate(indirect_load, template_id));
-  bool metadata_supported = false;
-  GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::FinalizeLoweringMetadata(indirect_load, metadata_supported));
-  if (!metadata_supported) {
-    is_candidate_legal = false;
-  }
-  return af::SUCCESS;
+  return FinalizeTemplate(indirect_load, template_id);
 }
 
 bool IsEmbeddingFastPathCapable(const TemplateCase &template_case,
@@ -1937,25 +1803,6 @@ af::Status ReduceTaskGraphCount(std::vector<ascir::ImplGraph> &grouped_graphs, c
   GE_ASSERT_NOTNULL(backend_spec);
   return ScheduleGroupGraphPartitioner::ReduceGraphCount(grouped_graphs, backend_spec->max_group_num_per_compile_unit);
 }
-
-af::Status FinalizeGroupedGraphLoweringMetadata(std::vector<ascir::ImplGraph> &grouped_graphs) {
-  for (auto &graph : grouped_graphs) {
-    af::AscNodePtr indirect_load;
-    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ValidateSingleIndirectLoadNode(graph, indirect_load));
-    if (indirect_load == nullptr) {
-      continue;
-    }
-    const auto template_id = ascir::GetTemplateIdOrDefault(*indirect_load);
-    if (template_id != ascir::TemplateId::kIndirectLoadSimd && template_id != ascir::TemplateId::kIndirectLoadSimt) {
-      continue;
-    }
-    bool metadata_supported = false;
-    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::FinalizeLoweringMetadata(indirect_load, metadata_supported));
-    GE_ASSERT_TRUE(metadata_supported, "IndirectLoad lowering metadata is unsupported in grouped graph[%s], node[%s].",
-                   graph.GetName().c_str(), indirect_load->GetNamePtr());
-  }
-  return af::SUCCESS;
-}
 }  // namespace
 
 Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std::vector<ascir::ImplGraph> &graphs,
@@ -2020,7 +1867,6 @@ Status IndirectLoadScheduleCaseGenerator::GeneratorTask(ascir::HintGraph &optimi
                       "Failed to partition graph");
     GE_ASSERT_SUCCESS(RefreshTaskAxisSizes(task.grouped_graphs, need_update_axis, is_sk_template));
     GE_CHK_STATUS_RET(ReduceTaskGraphCount(task.grouped_graphs, options), "Failed to reduce graph count");
-    GE_ASSERT_SUCCESS(FinalizeGroupedGraphLoweringMetadata(task.grouped_graphs));
     tasks.emplace_back(std::move(task));
   }
   return af::SUCCESS;
