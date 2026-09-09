@@ -33,6 +33,7 @@ declare -A MODULE_ACTION_HANDLERS=(
   ["superkernel:py_ut"]="superkernel_py_ut"
   ["superkernel:cpp_ut"]="superkernel_cpp_ut"
   ["superkernel:py_st"]="superkernel_py_st"
+  ["superkernel:cpp_st"]="superkernel_cpp_st"
   ["autofuse_framework:all_ut"]="autofuse_module_test_suite"
   ["autofuse_framework:all_st"]="autofuse_module_test_suite"
   ["autofuse_ascendc_api:all_ut"]="autofuse_module_test_suite"
@@ -446,6 +447,7 @@ function cmake_config()
 {
   local extra_option="$1"
   local cmake_option="${CUSTOM_OPTION} -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DCANN_3RD_LIB_PATH=${CANN_3RD_LIB_PATH} -DPACKAGE_TYPE=${PACKAGE_TYPE}"
+  cmake_option="${cmake_option} -DENABLE_CPP_UTEST=OFF -DENABLE_CPP_STEST=OFF"
   if [ "X$ENABLE_AUTOFUSE" == "Xon" ]; then
     extra_option="${extra_option} -DBUILD_AUTOFUSE=ON"
   fi
@@ -488,7 +490,7 @@ clean_coverage_artifacts() {
 
   if [ "X$has_cpp_tests" == "Xon" ]; then
     echo "---------------- Clean AOT C++ Coverage Artifacts ----------------"
-    rm -rf ${BASEPATH}/super_kernel/coverage/cpp_ut
+    rm -rf ${BASEPATH}/super_kernel/coverage/cpp_ut ${BASEPATH}/super_kernel/coverage/cpp_st
     find ${BUILD_PATH} -name "*.gcda" -delete 2>/dev/null || true
   fi
 }
@@ -544,31 +546,47 @@ superkernel_py_st() {
 }
 
 function superkernel_cpp_ut() {
-  echo "---------------- Start run cpp utest ----------------"
+  superkernel_cpp_test ut
+}
 
-  CUSTOM_OPTION="${CUSTOM_OPTION} -DENABLE_CPP_UTEST=ON"
+function superkernel_cpp_st() {
+  superkernel_cpp_test st
+}
+
+function superkernel_cpp_test() {
+  local suite="$1"
+  local test_options="-DENABLE_CPP_UTEST=OFF -DENABLE_CPP_STEST=OFF -DENABLE_GCOV=OFF"
+  local coverage_target="collect_coverage_data"
+  echo "---------------- Start run cpp ${suite}est ----------------"
+
+  if [ "${suite}" == "ut" ]; then
+    test_options="${test_options} -DENABLE_CPP_UTEST=ON"
+  else
+    test_options="${test_options} -DENABLE_CPP_STEST=ON"
+    coverage_target="collect_coverage_data_cpp_st"
+  fi
 
   if [ "X$ENABLE_COVERAGE" == "Xon" ]; then
-    CUSTOM_OPTION="${CUSTOM_OPTION} -DENABLE_GCOV=ON"
+    test_options="${test_options} -DENABLE_GCOV=ON"
   fi
 
   # Pass gtest filter to cmake if specified
   if [ -n "${CPP_UTEST_FILTER}" ]; then
-    CUSTOM_OPTION="${CUSTOM_OPTION} -DGTEST_FILTER=--gtest_filter=${CPP_UTEST_FILTER}"
+    test_options="${test_options} -DGTEST_FILTER=--gtest_filter=${CPP_UTEST_FILTER}"
   else
-    CUSTOM_OPTION="${CUSTOM_OPTION} -DGTEST_FILTER="
+    test_options="${test_options} -DGTEST_FILTER="
   fi
 
   mkdir -pv ${BUILD_PATH} &&
   cd ${BUILD_PATH} &&
-  cmake_config &&
+  cmake_config "${test_options}" &&
   if [ "X$ENABLE_COVERAGE" == "Xon" ]; then
     build clean &&
-    build collect_coverage_data
+    build "${coverage_target}"
   else
-    build run_super_kernel_aot_utest
+    build "run_super_kernel_aot_${suite}est"
   fi &&
-  echo "Build run cpp utest success!"
+  echo "Build run cpp ${suite}est success!"
 }
 
 autofuse_module_test_suite() {

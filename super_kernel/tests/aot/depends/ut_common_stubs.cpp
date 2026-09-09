@@ -16,12 +16,19 @@
 #include "acl/acl.h"
 #include "runtime/kernel.h"
 #include "sk_common.h"
+#include "model_fixture_internal.h"
+#include "dlog_pub.h"
 #include <chrono>
 #include <deque>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+ut_log::LogBuffer &ut_log::LogBuffer::Instance() {
+  static LogBuffer instance;
+  return instance;
+}
 
 namespace {
 
@@ -409,33 +416,27 @@ extern "C" aclrtBinHandle AscendGetEntryBinHandle() {
 }
 
 void sk_scope_kernel_begin_do_dav_2201(void *stream, ScopeKernelArgs args) {
-  (void)stream;
-  (void)args;
+  sk::test::RecordLaunch(stream, "sk_scope_kernel_begin_dav_2201", args.name, sizeof(args));
 }
 
 void sk_scope_kernel_end_do_dav_2201(void *stream, ScopeKernelArgs args) {
-  (void)stream;
-  (void)args;
+  sk::test::RecordLaunch(stream, "sk_scope_kernel_end_dav_2201", args.name, sizeof(args));
 }
 
 void sk_placeholder_kernel_do_dav_2201(void *stream, ScopeKernelArgs args) {
-  (void)stream;
-  (void)args;
+  sk::test::RecordLaunch(stream, "sk_placeholder_kernel_dav_2201", args.name, sizeof(args));
 }
 
 void sk_scope_kernel_begin_do_dav_3510(void *stream, ScopeKernelArgs args) {
-  (void)stream;
-  (void)args;
+  sk::test::RecordLaunch(stream, "sk_scope_kernel_begin_dav_3510", args.name, sizeof(args));
 }
 
 void sk_scope_kernel_end_do_dav_3510(void *stream, ScopeKernelArgs args) {
-  (void)stream;
-  (void)args;
+  sk::test::RecordLaunch(stream, "sk_scope_kernel_end_dav_3510", args.name, sizeof(args));
 }
 
 void sk_placeholder_kernel_do_dav_3510(void *stream, ScopeKernelArgs args) {
-  (void)stream;
-  (void)args;
+  sk::test::RecordLaunch(stream, "sk_placeholder_kernel_dav_3510", args.name, sizeof(args));
 }
 
 void SkUtSetAclrtGetSocName(const char *socName) {

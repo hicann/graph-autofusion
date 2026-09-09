@@ -52,10 +52,7 @@ namespace ut_log {
 // 日志缓冲区类（每个测试用例独立）
 class LogBuffer {
  public:
-  static LogBuffer &Instance() {
-    static LogBuffer instance;
-    return instance;
-  }
+  __attribute__((visibility("default"))) static LogBuffer &Instance();
 
   // 添加日志
   void Append(const std::string &level, const char *format, va_list args) {

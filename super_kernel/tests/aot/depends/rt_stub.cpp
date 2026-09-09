@@ -17,6 +17,7 @@
 
 #include "acl/acl.h"
 #include "ut_common_stubs.h"
+#include "model_fixture_internal.h"
 #include "runtime/kernel.h"
 #include "runtime/base.h"
 #include <cstring>
@@ -31,7 +32,7 @@ extern "C" {
 // Always returns success for UT stub mode
 int rtBinaryGetMetaNum(void *binHdl, int type_enum, size_t *metaNum) {
   if (metaNum != nullptr) {
-    *metaNum = 0;
+    *metaNum = type_enum == RT_BINARY_TYPE_SK_INFO && sk::test::HasBinary(binHdl) ? 1 : 0;
   }
   return RT_SUCCESS;
 }
@@ -39,6 +40,10 @@ int rtBinaryGetMetaNum(void *binHdl, int type_enum, size_t *metaNum) {
 // rtBinaryGetMetaInfo - stub implementation for unit tests
 // Always returns success for UT stub mode
 int rtBinaryGetMetaInfo(void *binHdl, int type_enum, size_t metaNum, void **data_list, size_t *size_list) {
+  int result;
+  if (type_enum == RT_BINARY_TYPE_SK_INFO && sk::test::BinaryMetadata(binHdl, metaNum, data_list, size_list, result)) {
+    return result;
+  }
   (void)binHdl;
   (void)type_enum;
   (void)metaNum;

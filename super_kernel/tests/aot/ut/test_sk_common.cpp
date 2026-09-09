@@ -18,7 +18,7 @@
 #include "mockcpp/mockcpp.hpp"
 #include "acl/acl.h"
 #include "sk_common.h"
-#include "stub/ut_common_stubs.h"
+#include "ut_common_stubs.h"
 
 #define private public
 #define protected public

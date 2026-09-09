@@ -15,6 +15,7 @@
 
 #include "acl/acl.h"
 #include "ut_common_stubs.h"
+#include "model_fixture_internal.h"
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -27,14 +28,9 @@ extern "C" {
 #ifndef ACL_ERROR_NONE
 #define ACL_ERROR_NONE 0
 #endif
-#define ACL_ERROR_INVALID_PARAM 100001
 
 // Internal RI task structure for stub implementation
-typedef struct AclmdlRITaskInternal {
-  uint32_t task_id;
-  aclmdlRITaskType type;
-  aclmdlRITaskParams params;
-} AclmdlRITaskInternal;
+using AclmdlRITaskInternal = sk::test::RuntimeTask;
 
 static inline AclmdlRITaskInternal *RITaskToInternal(aclmdlRITask task) {
   return reinterpret_cast<AclmdlRITaskInternal *>(task);
@@ -67,6 +63,10 @@ aclError aclmdlRIGetStreams(aclmdlRI modelRI, aclrtStream *streams, uint32_t *nu
   }
   if (numStreams == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
+  }
+  aclError modelResult;
+  if (sk::test::ModelStreams(modelRI, streams, numStreams, modelResult)) {
+    return modelResult;
   }
   uint32_t streamNum = SkUtGetModelStreamNum();
   if (streams == nullptr) {
@@ -135,6 +135,7 @@ aclError aclrtTaskGetType(aclrtTask task, aclrtTaskType *type) {
 aclError aclmdlRIUpdate(aclmdlRI modelRI) {
   (void)modelRI;
   aclError forcedRet = SkUtGetAclmdlRIUpdateRet();
+  sk::test::RecordUpdate(modelRI, forcedRet);
   if (forcedRet != ACL_SUCCESS) {
     return forcedRet;
   }
@@ -186,7 +187,7 @@ aclError aclrtBinaryGetFunction(aclrtBinHandle binHdl, const char *funcName, acl
     *funcHdl = nullptr;
     return ACL_ERROR_NONE;
   }
-  *funcHdl = reinterpret_cast<aclrtFuncHandle>(0x1000);
+  *funcHdl = sk::test::ResolveFunction(funcName);
   return ACL_ERROR_NONE;
 }
 
@@ -195,6 +196,7 @@ aclError aclrtGetFunctionAddr(aclrtFuncHandle funcHdl, void **addrAicore, void *
   if (addrAicore == nullptr || addrAiv == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
+  (void)sk::test::FunctionAddress(funcHdl, addrAicore, addrAiv);
   return ACL_ERROR_NONE;
 }
 
@@ -258,7 +260,13 @@ aclError aclrtGetFunctionName(aclrtFuncHandle funcHandle, uint32_t maxLen, char 
   if (name == nullptr || maxLen == 0) {
     return ACL_ERROR_INVALID_PARAM;
   }
-  const char *funcName = "test_function";
+  std::string functionName;
+  if (sk::test::FunctionName(funcHandle, functionName)) {
+    if (functionName.size() >= maxLen) {
+      return ACL_ERROR_INVALID_PARAM;
+    }
+    std::memcpy(name, functionName.c_str(), functionName.size() + 1);
+  }
   return ACL_ERROR_NONE;
 }
 
@@ -270,6 +278,7 @@ aclError aclrtMemcpy(void *dst, size_t destMax, const void *src, size_t count, a
   if (count > destMax) {
     return ACL_ERROR_INVALID_PARAM;
   }
+  (void)sk::test::CopyRegisteredMemory(dst, src, count, kind);
   return ACL_ERROR_NONE;
 }
 
@@ -285,6 +294,7 @@ aclError aclrtMemset(void *devPtr, size_t maxCount, int value, size_t count) {
   if (count > maxCount) {
     return ACL_ERROR_INVALID_PARAM;
   }
+  sk::test::SetRegisteredMemory(devPtr, value, count);
   return ACL_ERROR_NONE;
 }
 
@@ -295,10 +305,18 @@ aclError aclrtBinaryGetDevAddress(aclrtBinHandle binHdl, void **devAddr, size_t 
   }
   *devAddr = nullptr;
   *devSize = 0;
+  (void)sk::test::BinaryAddress(binHdl, devAddr, devSize);
   return ACL_ERROR_NONE;
 }
 
 aclError aclrtGetFunctionAttribute(aclrtFuncHandle funcHandle, aclrtFuncAttribute attrType, int64_t *attrValue) {
+  if (attrValue == nullptr) {
+    return ACL_ERROR_INVALID_PARAM;
+  }
+  if (sk::test::HasBinary(funcHandle)) {
+    *attrValue = attrType == ACL_FUNC_ATTR_KERNEL_TYPE ? ACL_KERNEL_TYPE_VECTOR : 0;
+    return ACL_SUCCESS;
+  }
   if (attrType == ACL_FUNC_ATTR_KERNEL_TYPE) {
     *attrValue = 0;  // 默认内核类型
   } else {
@@ -339,6 +357,7 @@ aclError aclrtMalloc(void **devPtr, size_t size, aclrtMemMallocPolicy policy) {
   if (*devPtr == nullptr) {
     return ACL_ERROR_FAILURE;
   }
+  sk::test::TrackAllocation(*devPtr, size);
   return ACL_ERROR_NONE;
 }
 
@@ -348,6 +367,7 @@ aclError aclrtFree(void *devPtr) {
     return forcedRet;
   }
   if (devPtr != nullptr) {
+    sk::test::ForgetAllocation(devPtr);
     free(devPtr);
   }
   return ACL_ERROR_NONE;
@@ -365,11 +385,13 @@ aclError aclrtMallocHost(void **hostPtr, size_t size) {
   if (*hostPtr == nullptr) {
     return ACL_ERROR_FAILURE;
   }
+  sk::test::TrackAllocation(*hostPtr, size);
   return ACL_ERROR_NONE;
 }
 
 aclError aclrtFreeHost(void *hostPtr) {
   if (hostPtr != nullptr) {
+    sk::test::ForgetAllocation(hostPtr);
     free(hostPtr);
   }
   return ACL_ERROR_NONE;
@@ -438,8 +460,12 @@ aclError aclmdlRITaskSetParams(aclmdlRITask task, aclmdlRITaskParams *params) {
   if (params == nullptr || task == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
+  if (!sk::test::ValidTaskUpdate(task, *params)) {
+    return ACL_ERROR_INVALID_PARAM;
+  }
   AclmdlRITaskInternal *internal = RITaskToInternal(task);
   internal->params = *params;
+  sk::test::RecordTaskUpdate(task, *params);
   return ACL_ERROR_NONE;
 }
 
@@ -447,6 +473,7 @@ aclError aclmdlRITaskDisable(aclmdlRITask task) {
   if (task == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
+  sk::test::RecordDisable(task);
   return ACL_ERROR_NONE;
 }
 
@@ -498,6 +525,10 @@ aclError aclmdlRIGetTasksByStream(aclrtStream stream, aclmdlRITask *tasks, uint3
   if (numTasks == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
+  aclError modelResult;
+  if (sk::test::StreamTasks(stream, tasks, numTasks, modelResult)) {
+    return modelResult;
+  }
 
   uint32_t streamIdx = 0;
   if (stream != nullptr) {
@@ -543,6 +574,7 @@ aclError aclrtFunctionGetBinary(aclrtFuncHandle funcHandle, aclrtBinHandle *binH
     return ACL_ERROR_INVALID_PARAM;
   }
   *binHandle = nullptr;
+  (void)sk::test::FunctionBinary(funcHandle, *binHandle);
   return ACL_ERROR_NONE;
 }
 
@@ -562,6 +594,9 @@ aclError aclrtStreamGetId(aclrtStream stream, int32_t *streamId) {
   }
   if (streamId == nullptr || stream == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
+  }
+  if (sk::test::StreamId(stream, *streamId)) {
+    return ACL_SUCCESS;
   }
   uint32_t streamIdx = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(stream) - 1U);
   *streamId = SkUtGetStreamId(streamIdx);
