@@ -11,6 +11,7 @@
 
 ```text
 examples/
+├── run_example.sh                                      # 样例统一运行入口
 ├── jit/
 │   ├── example01_super_kernel_base/                 # SuperKernel 基础功能
 │   ├── example02_super_kernel_profiling/            # SuperKernel profiling 对比
@@ -32,8 +33,8 @@ examples/
 `--npu-arch` 指定 AOT 编译目标，当前支持 `dav-2201` 和 `dav-3510`。该参数不用于选择设备；如需指定设备，请设置 `NPU_DEVICE_ID` 或 `ASCEND_DEVICE_ID`。
 
 ```bash
-bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-2201 -j 8
-bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-3510 -j 8
+bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
+bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
 ```
 
 `dav-2201` 会依次运行全部 JIT 和 AOT Python 样例；`dav-3510` 不支持这些 JIT 样例，因此会跳过 JIT，仅运行 AOT 样例。运行 SuperKernel 样例时必须显式传入 `--npu-arch`，避免为 AOT 编译猜测目标架构。

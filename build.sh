@@ -33,7 +33,6 @@ declare -A MODULE_ACTION_HANDLERS=(
   ["superkernel:py_ut"]="superkernel_py_ut"
   ["superkernel:cpp_ut"]="superkernel_cpp_ut"
   ["superkernel:py_st"]="superkernel_py_st"
-  ["superkernel:py_run_example"]="superkernel_py_run_example"
   ["autofuse_framework:all_ut"]="autofuse_module_test_suite"
   ["autofuse_framework:all_st"]="autofuse_module_test_suite"
   ["autofuse_ascendc_api:all_ut"]="autofuse_module_test_suite"
@@ -55,7 +54,7 @@ usage() {
   echo "  sh build.sh [-h|--help] [--pkg] [-u|--ut] [-s|--st] [--impl=<py|cpp|all>]"
   echo "              [--module=<name>] [-c|--coverage] [-j]"
   echo "              [--output_path=<PATH>] [--cann_3rd_lib_path=<PATH>] [--build-type=<TYPE>] [--no-autofuse]"
-  echo "              [--pkg-type=<TYPE>] [--npu-arch=<dav-2201|dav-3510>]"
+  echo "              [--pkg-type=<TYPE>]"
   echo "              [-f <FILE>]"
   echo ""
   echo "Options:"
@@ -71,8 +70,6 @@ usage() {
   echo "                          Without explicit test selection, run supported tests for the selected module"
   echo "    --output_path=<PATH>"
   echo "                          Set output path, where the run package will be generated, default ./build_out"
-  echo "    --run_example         Run examples for the selected module"
-  echo "    --npu-arch=<ARCH>     Set NPU architecture for SuperKernel examples: dav-2201 or dav-3510"
   echo "    --cann_3rd_lib_path=<PATH>"
   echo "                          Set third_party package install path, default ./output/third_party"
   echo "                          (Third_party package will cost a little time during the first compilation,"
@@ -313,16 +310,14 @@ checkopts() {
   ENABLE_UT="off"
   ENABLE_ST="off"
   ENABLE_COVERAGE="off"
-  ENABLE_RUN_EXAMPLE="off"
   TEST_IMPL_MODE="all"
   TARGET_MODULE="all"
   CANN_3RD_LIB_PATH="$BASEPATH/output/third_party"
   ENABLE_AUTOFUSE="on"
   CHANGED_FILES=""
   PACKAGE_TYPE="run"
-  NPU_ARCH=""
 
-  parsed_args=$(getopt -a -o j:huscf: -l help,pkg,autofuse,no-autofuse,impl:,module:,test_case:,run_example,ut,st,coverage,output_path:,cann_3rd_lib_path:,build-type:,pkg-type:,npu-arch: -- "$@") || {
+  parsed_args=$(getopt -a -o j:huscf: -l help,pkg,autofuse,no-autofuse,impl:,module:,test_case:,ut,st,coverage,output_path:,cann_3rd_lib_path:,build-type:,pkg-type: -- "$@") || {
     usage
     exit 1
   }
@@ -390,10 +385,6 @@ checkopts() {
         CPP_UTEST_FILTER="$2"
         shift 2
         ;;
-      --run_example)
-        ENABLE_RUN_EXAMPLE="on"
-        shift
-        ;;
       --output_path)
         OUTPUT_PATH="$(realpath $2)"
         shift 2
@@ -421,15 +412,6 @@ checkopts() {
         PACKAGE_TYPE="$2"
         shift 2
         ;;
-      --npu-arch)
-        if [[ ! "$2" =~ ^(dav-2201|dav-3510)$ ]]; then
-          echo "ERROR: Invalid NPU architecture: $2"
-          echo "       Valid values: dav-2201, dav-3510"
-          exit 1
-        fi
-        NPU_ARCH="$2"
-        shift 2
-        ;;
       -f)
         CHANGED_FILES_FILE="$2"
         if [ ! -f "$CHANGED_FILES_FILE" ]; then
@@ -453,32 +435,9 @@ checkopts() {
 
   normalize_test_selection
 
-  if [[ "${ENABLE_RUN_EXAMPLE}" == "on" ]]; then
-    if [[ "${TARGET_MODULE}" == "all" || "${TARGET_MODULE}" == "superkernel" ]] && [[ -z "${NPU_ARCH}" ]]; then
-      echo "ERROR: --npu-arch is required when running SuperKernel examples."
-      echo "       Valid values: dav-2201, dav-3510"
-      exit 1
-    fi
-
-    local selected_modules=()
-    if [[ "${TARGET_MODULE}" == "all" ]]; then
-      selected_modules=("${SUPPORTED_MODULES[@]}")
-    else
-      selected_modules=("${TARGET_MODULE}")
-    fi
-
-    local module
-    for module in "${selected_modules[@]}"; do
-      if [[ -z "${MODULE_ACTION_HANDLERS["${module}:py_run_example"]}" ]]; then
-        continue
-      fi
-      EXEC_ACTIONS+=("${module}:py_run_example")
-    done
-  fi
-
   if [ "X$ENABLE_BUILD_PACKAGE" != "Xon" ] && [ ${#EXEC_ACTIONS[@]} -eq 0 ]; then
     echo "ERROR: No supported actions for the requested selection."
-    echo "       module=${TARGET_MODULE}, impl=${TEST_IMPL_MODE}, ut=${ENABLE_UT}, st=${ENABLE_ST}, coverage=${ENABLE_COVERAGE}, run_example=${ENABLE_RUN_EXAMPLE}"
+    echo "       module=${TARGET_MODULE}, impl=${TEST_IMPL_MODE}, ut=${ENABLE_UT}, st=${ENABLE_ST}, coverage=${ENABLE_COVERAGE}"
     exit 1
   fi
 }
@@ -549,25 +508,6 @@ build_package() {
   output_run_path=`ls -1 ${OUTPUT_PATH}/cann-graph-autofusion*.run 2>/dev/null` &&
   echo "Build run package success!" &&
   echo "package: ${output_run_path}"
-}
-
-superkernel_py_run_example() {
-  echo "---------------- Start running examples ----------------"
-  if [[ "${NPU_ARCH}" == "dav-2201" ]]; then
-    "${PYTHON_CMD}" "${BASEPATH}/super_kernel/examples/jit/example01_super_kernel_base/superkernel_scope.py" || return $?
-    "${PYTHON_CMD}" "${BASEPATH}/super_kernel/examples/jit/example02_super_kernel_profiling/superkernel_compare.py" || return $?
-    "${PYTHON_CMD}" \
-      "${BASEPATH}/super_kernel/examples/jit/example03_super_kernel_runtime_ascendc_only/superkernel_runtime_ascendc_basic.py" || return $?
-  else
-    echo "[INFO] Skipping SuperKernel JIT examples on ${NPU_ARCH}."
-  fi
-  SK_NPU_ARCH="${NPU_ARCH}" PYTHON_CMD="${PYTHON_CMD}" \
-    bash "${BASEPATH}/super_kernel/examples/aot/example01_dual_stream/run.sh" &&
-  SK_NPU_ARCH="${NPU_ARCH}" PYTHON_CMD="${PYTHON_CMD}" \
-    bash "${BASEPATH}/super_kernel/examples/aot/example02_sk_options/run.sh" &&
-  SK_NPU_ARCH="${NPU_ARCH}" PYTHON_CMD="${PYTHON_CMD}" \
-    bash "${BASEPATH}/super_kernel/examples/aot/example03_kernel_pybind/run.sh" &&
-  echo "Run all examples success"
 }
 
 superkernel_py_ut() {

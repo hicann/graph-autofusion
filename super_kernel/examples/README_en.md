@@ -11,6 +11,7 @@ This directory contains two groups of Python samples:
 
 ```text
 examples/
+├── run_example.sh                                      # Unified sample runner
 ├── jit/
 │   ├── example01_super_kernel_base/                 # Basic SuperKernel usage
 │   ├── example02_super_kernel_profiling/            # Profiling comparison
@@ -32,8 +33,8 @@ Follow the [source build guide](../../docs/en/build.md), then install the Python
 `--npu-arch` specifies the AOT compilation target. Supported values are `dav-2201` and `dav-3510`. It does not select a device; use `NPU_DEVICE_ID` or `ASCEND_DEVICE_ID` for that purpose.
 
 ```bash
-bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-2201 -j 8
-bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-3510 -j 8
+bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
+bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
 ```
 
 With `dav-2201`, the command runs every JIT and AOT Python sample in sequence. The JIT samples do not support `dav-3510`, so that target skips JIT and runs only the AOT samples. An explicit `--npu-arch` is required to avoid guessing the AOT compilation target.

@@ -20,7 +20,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES_DIR = REPO_ROOT / "super_kernel" / "examples"
-BUILD_SCRIPT = REPO_ROOT / "build.sh"
+RUN_EXAMPLE_SCRIPT = EXAMPLES_DIR / "run_example.sh"
 
 
 @pytest.mark.ut
@@ -60,9 +60,9 @@ def test_aot_generated_files_are_ignored(relative_path):
 
 
 @pytest.mark.ut
-def test_superkernel_examples_require_npu_arch():
+def test_run_example_script_requires_npu_arch():
     result = subprocess.run(
-        ["bash", str(BUILD_SCRIPT), "--run_example", "--module=superkernel"],
+        ["bash", str(RUN_EXAMPLE_SCRIPT)],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,

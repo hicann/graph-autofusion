@@ -5,9 +5,9 @@ This sample creates control dependencies with two NPU streams and events, and en
 Run from the repository root:
 
 ```bash
-bash build.sh --run_example --module=superkernel --no-autofuse --npu-arch=dav-2201 -j 8
+bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
 ```
 
-Use `dav-3510` for that compilation target. Select the device with `NPU_DEVICE_ID` or `ASCEND_DEVICE_ID`.
+This sample supports `dav-2201` and `dav-3510`. Select the device with `NPU_DEVICE_ID` or `ASCEND_DEVICE_ID`.
 
 For options, see the [TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md).

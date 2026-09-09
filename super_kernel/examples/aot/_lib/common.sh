@@ -23,7 +23,7 @@ sk_validate_npu_arch() {
 
 sk_require_npu_arch() {
     if [ -z "${SK_NPU_ARCH:-}" ]; then
-        echo "ERROR: SK_NPU_ARCH is required; run the sample through build.sh --npu-arch=<ARCH>." >&2
+        echo "ERROR: SK_NPU_ARCH is required; run the sample through super_kernel/examples/run_example.sh --npu-arch=<ARCH>." >&2
         return 2
     fi
     sk_validate_npu_arch "${SK_NPU_ARCH}"
