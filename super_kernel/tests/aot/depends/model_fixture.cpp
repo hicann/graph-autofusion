@@ -16,12 +16,14 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <tuple>
 #include <unordered_map>
 
 namespace sk::test {
 namespace {
 struct Function {
     std::string name;
+    KernelSpec spec;
     // The fake code is never executed; offsets describe the SK binary metadata.
     std::array<unsigned char, 256> code{};
 };
@@ -51,7 +53,8 @@ std::unordered_map<aclrtStream, Stream *> streams;
 std::unordered_map<aclmdlRITask, OwnedTask *> tasks;
 // Function identities remain stable for the process, matching production's
 // binary metadata cache. Reuse names instead of recycling binary addresses.
-std::map<std::string, Function> functions;
+using FunctionKey = std::tuple<std::string, aclrtKernelType, uint16_t, uint16_t, uint32_t>;
+std::map<FunctionKey, Function> functions;
 std::unordered_map<void *, Function *> functionHandles;
 std::map<uintptr_t, size_t> memory;
 std::map<void *, size_t> allocations;
@@ -67,9 +70,10 @@ bool ContainsMemory(const void *address, size_t size) {
     return offset <= pos->second && size <= pos->second - offset;
 }
 
-Function *GetFunction(const std::string &name) {
-    auto &function = functions[name];
+Function *GetFunction(const std::string &name, const KernelSpec &spec = {}) {
+    auto &function = functions[{name, spec.type, spec.cubeRatio, spec.vectorRatio, spec.scheMode}];
     function.name = name;
+    function.spec = spec;
     functionHandles[&function] = &function;
     return &function;
 }
@@ -88,7 +92,8 @@ OwnedTask &AppendTask(Stream &stream, aclmdlRITaskType type) {
     return result;
 }
 
-aclmdlRITask AppendKernel(Stream &stream, const std::string &name, const void *args, size_t size) {
+aclmdlRITask AppendKernel(Stream &stream, const std::string &name, const void *args, size_t size,
+                          const KernelSpec &spec = {}) {
     auto &owned = AppendTask(stream, ACL_MODEL_RI_TASK_KERNEL);
     owned.args.resize(size, 0);
     if (args != nullptr) {
@@ -99,10 +104,10 @@ aclmdlRITask AppendKernel(Stream &stream, const std::string &name, const void *a
         memory[reinterpret_cast<uintptr_t>(owned.args.data())] = size;
     }
     auto &params = owned.task.params.kernelTaskParams;
-    params.funcHandle = GetFunction(name);
+    params.funcHandle = GetFunction(name, spec);
     params.args = owned.args.data();
     params.argsSize = size;
-    params.numBlocks = 1;
+    params.numBlocks = spec.numBlocks;
     return &owned.task;
 }
 
@@ -141,11 +146,11 @@ aclrtStream Model::AddStream() {
     impl_->streams.push_back(std::move(stream));
     return handle;
 }
-aclmdlRITask Model::AddKernel(aclrtStream stream, const std::string &name) {
+aclmdlRITask Model::AddKernel(aclrtStream stream, const std::string &name, const KernelSpec &spec) {
     if (!impl_) {
         throw std::logic_error("model destroyed");
     }
-    return AppendKernel(RequireStream(*impl_, stream), name, nullptr, sizeof(uint64_t));
+    return AppendKernel(RequireStream(*impl_, stream), name, nullptr, sizeof(uint64_t), spec);
 }
 aclmdlRITask Model::AddEvent(aclrtStream stream, aclmdlRITaskType type, aclrtEvent event) {
     if (!impl_) {
@@ -389,6 +394,22 @@ bool FunctionBinary(aclrtFuncHandle handle, aclrtBinHandle &binary) {
     binary = handle;
     return true;
 }
+bool FunctionAttribute(aclrtFuncHandle handle, aclrtFuncAttribute attr, int64_t &value) {
+    auto it = functionHandles.find(handle);
+    if (it == functionHandles.end()) {
+        return false;
+    }
+    const auto &spec = it->second->spec;
+    value = 0;
+    if (attr == ACL_FUNC_ATTR_KERNEL_TYPE) {
+        value = spec.type;
+    } else if (attr == ACL_FUNC_ATTR_KERNEL_RATIO) {
+        value = (static_cast<int64_t>(spec.cubeRatio) << 16) | spec.vectorRatio;
+    } else if (attr == ACL_FUNC_ATTR_KERNEL_SCHED_MODE) {
+        value = spec.scheMode;
+    }
+    return true;
+}
 aclrtFuncHandle ResolveFunction(const char *name) {
     return GetFunction(name);
 }
@@ -400,8 +421,13 @@ bool FunctionAddress(aclrtFuncHandle handle, void **cube, void **vector) {
     if (it == functionHandles.end()) {
         return false;
     }
-    *cube = nullptr;
-    *vector = it->second->code.data() + 16;
+    const auto &spec = it->second->spec;
+    const bool mixed = spec.type == ACL_KERNEL_TYPE_AICORE || spec.type == ACL_KERNEL_TYPE_MIX;
+    *cube =
+        (spec.type == ACL_KERNEL_TYPE_CUBE || (mixed && spec.cubeRatio != 0)) ? it->second->code.data() + 16 : nullptr;
+    *vector = (spec.type == ACL_KERNEL_TYPE_VECTOR || (mixed && spec.vectorRatio != 0))
+                  ? it->second->code.data() + (mixed && spec.cubeRatio != 0 ? 24 : 16)
+                  : nullptr;
     return true;
 }
 bool BinaryAddress(aclrtBinHandle handle, void **address, size_t *size) {
@@ -413,21 +439,38 @@ bool BinaryAddress(aclrtBinHandle handle, void **address, size_t *size) {
     *size = it->second->code.size();
     return true;
 }
+size_t BinaryMetadataCount(aclrtBinHandle handle) {
+    void *cube = nullptr;
+    void *vector = nullptr;
+    if (!FunctionAddress(handle, &cube, &vector)) {
+        return 0;
+    }
+    return static_cast<size_t>(cube != nullptr) + static_cast<size_t>(vector != nullptr);
+}
 bool BinaryMetadata(aclrtBinHandle handle, size_t count, void **data, size_t *sizes, int &result) {
     if (!HasBinary(handle)) {
         return false;
     }
     // RT_BINARY_TYPE_SK_INFO wire payload: reserved u32, cap u64, global
     // function offset, then four SK function offsets. All offsets stay in code.
-    const std::array<uint64_t, 6> values{0, 16, 32, 32, 32, 32};
+    std::array<uint64_t, 6> values{0, 16, 32, 32, 32, 32};
     const size_t payloadSize = sizeof(uint32_t) + sizeof(values);
     result = -1;
-    if (count != 1 || data == nullptr || sizes == nullptr || data[0] == nullptr || sizes[0] < payloadSize) {
+    if (count != BinaryMetadataCount(handle) || data == nullptr || sizes == nullptr) {
         return true;
     }
-    std::memset(data[0], 0, sizeof(uint32_t));
-    std::memcpy(static_cast<unsigned char *>(data[0]) + sizeof(uint32_t), values.data(), sizeof(values));
-    sizes[0] = payloadSize;
+    for (size_t i = 0; i < count; ++i) {
+        if (data[i] == nullptr || sizes[i] < payloadSize) {
+            return true;
+        }
+        values[1] = 16 + i * 8;
+        for (size_t j = 2; j < values.size(); ++j) {
+            values[j] = 32 + i * 8;
+        }
+        std::memset(data[i], 0, sizeof(uint32_t));
+        std::memcpy(static_cast<unsigned char *>(data[i]) + sizeof(uint32_t), values.data(), sizeof(values));
+        sizes[i] = payloadSize;
+    }
     result = 0;
     return true;
 }

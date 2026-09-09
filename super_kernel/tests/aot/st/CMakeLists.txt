@@ -13,6 +13,6 @@ target_link_libraries(ascendsk_st PRIVATE intf_llt_options super_kernel_aot_stub
 file(GLOB ST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test_*.cpp")
 add_executable(super_kernel_aot_stest ${ST_SOURCES})
 target_link_libraries(super_kernel_aot_stest PRIVATE
-    intf_llt_options GTest::gtest_main GTest::gtest ascendsk_st super_kernel_aot_stub
+    intf_llt_options GTest::gtest_main GTest::gtest ascendsk_st super_kernel_aot_stub json
 )
 run_llt_test(TARGET super_kernel_aot_stest TASK_NUM 1 COVERAGE_SUITE cpp_st)

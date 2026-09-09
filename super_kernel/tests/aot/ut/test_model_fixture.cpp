@@ -47,6 +47,33 @@ TEST(AotModelFixture, ModelsAreIsolatedAndSnapshotsOwnArguments) {
     EXPECT_THROW(first.Snapshot(b), std::invalid_argument);
 }
 
+TEST(AotModelFixture, SameNameKernelsKeepDistinctTypesAndLaunchDimensions) {
+    sk::test::Model model;
+    auto stream = model.AddStream();
+    const sk::test::KernelSpec specs[] = {
+        {ACL_KERNEL_TYPE_VECTOR, 2, 0, 0, 0},
+        {ACL_KERNEL_TYPE_CUBE, 4, 0, 0, 1},
+        {ACL_KERNEL_TYPE_MIX, 8, 1, 2, 0},
+    };
+    std::vector<aclmdlRITask> tasks;
+    for (const auto &spec : specs) {
+        tasks.push_back(model.AddKernel(stream, "same_name", spec));
+    }
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        aclmdlRITaskParams params{};
+        ASSERT_EQ(aclmdlRITaskGetParams(tasks[i], &params), ACL_SUCCESS);
+        EXPECT_EQ(params.kernelTaskParams.numBlocks, specs[i].numBlocks);
+        int64_t value = -1;
+        auto function = params.kernelTaskParams.funcHandle;
+        ASSERT_EQ(aclrtGetFunctionAttribute(function, ACL_FUNC_ATTR_KERNEL_TYPE, &value), ACL_SUCCESS);
+        EXPECT_EQ(value, specs[i].type);
+        ASSERT_EQ(aclrtGetFunctionAttribute(function, ACL_FUNC_ATTR_KERNEL_RATIO, &value), ACL_SUCCESS);
+        EXPECT_EQ(value, (static_cast<int64_t>(specs[i].cubeRatio) << 16) | specs[i].vectorRatio);
+        ASSERT_EQ(aclrtGetFunctionAttribute(function, ACL_FUNC_ATTR_KERNEL_SCHED_MODE, &value), ACL_SUCCESS);
+        EXPECT_EQ(value, specs[i].scheMode);
+    }
+}
+
 TEST(AotModelFixture, SetParamsCopiesHostArgumentsBeforeCallerReleasesThem) {
     sk::test::Model model;
     auto stream = model.AddStream();

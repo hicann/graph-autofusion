@@ -27,8 +27,11 @@ ST 可执行文件和 `ascendsk_st` 链接同一个 `super_kernel_aot_stub` 共�
 
 当前 ST 场景覆盖：无 marker 时默认全模型 scope、单 scope 融合、scope 外跨流 event 保持、
 融合 record 后外部 wait/reset 重写与同步内存清理、未配对 scope、模型 update 失败、
-begin/end marker 和 verify。夹具 UT 覆盖查询容量与状态保持、多模型隔离和参数快照所有权、
-参数深拷贝，以及旧 UT 使用的不透明设备地址兼容行为。
+begin/end marker 和 verify。扩展场景包括 cube/MIX 1:1/MIX 1:2 入口选择、逐算子调试、
+跨流同名 scope 合并、调试 JSON 的选项和任务顺序、Runtime 查询/入口解析/同步内存初始化失败，
+以及 Verify 的输出容量、动态核限制、跨流死锁和非法输入。夹具 UT 覆盖查询容量与状态保持、
+多模型隔离和参数快照所有权、同名不同核类型的元数据隔离、参数深拷贝，
+以及旧 UT 使用的不透明设备地址兼容行为。
 
 测试执行不需要 NPU。当前顶层 CMake 配置仍会查找 CANN 包并配置 ASC 编译器，因此仍需可用的
 CANN Toolkit 和环境配置。这些测试验证主机流程与 stub 契约，不能证明真实 Runtime ABI

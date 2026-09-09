@@ -18,6 +18,13 @@
 #include "acl/acl.h"
 
 namespace sk::test {
+struct KernelSpec {
+    aclrtKernelType type = ACL_KERNEL_TYPE_VECTOR;
+    uint32_t numBlocks = 1;
+    uint16_t cubeRatio = 0;
+    uint16_t vectorRatio = 0;
+    uint32_t scheMode = 0;
+};
 struct TaskSnapshot {
     uint32_t id = 0;
     aclmdlRITaskType type = ACL_MODEL_RI_TASK_DEFAULT;
@@ -47,7 +54,7 @@ class Model {
     Model &operator=(const Model &) = delete;
     aclmdlRI Handle() const;
     aclrtStream AddStream();
-    aclmdlRITask AddKernel(aclrtStream stream, const std::string &name);
+    aclmdlRITask AddKernel(aclrtStream stream, const std::string &name, const KernelSpec &spec = {});
     aclmdlRITask AddEvent(aclrtStream stream, aclmdlRITaskType type, aclrtEvent event);
     TaskSnapshot Snapshot(aclmdlRITask task) const;
     std::vector<TaskSnapshot> Tasks(aclrtStream stream) const;

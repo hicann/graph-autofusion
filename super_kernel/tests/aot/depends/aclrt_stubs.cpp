@@ -313,8 +313,7 @@ aclError aclrtGetFunctionAttribute(aclrtFuncHandle funcHandle, aclrtFuncAttribut
   if (attrValue == nullptr) {
     return ACL_ERROR_INVALID_PARAM;
   }
-  if (sk::test::HasBinary(funcHandle)) {
-    *attrValue = attrType == ACL_FUNC_ATTR_KERNEL_TYPE ? ACL_KERNEL_TYPE_VECTOR : 0;
+  if (sk::test::FunctionAttribute(funcHandle, attrType, *attrValue)) {
     return ACL_SUCCESS;
   }
   if (attrType == ACL_FUNC_ATTR_KERNEL_TYPE) {

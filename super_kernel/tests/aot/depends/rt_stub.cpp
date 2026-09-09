@@ -32,7 +32,7 @@ extern "C" {
 // Always returns success for UT stub mode
 int rtBinaryGetMetaNum(void *binHdl, int type_enum, size_t *metaNum) {
   if (metaNum != nullptr) {
-    *metaNum = type_enum == RT_BINARY_TYPE_SK_INFO && sk::test::HasBinary(binHdl) ? 1 : 0;
+    *metaNum = type_enum == RT_BINARY_TYPE_SK_INFO ? sk::test::BinaryMetadataCount(binHdl) : 0;
   }
   return RT_SUCCESS;
 }

@@ -28,6 +28,8 @@ void RecordTaskUpdate(aclmdlRITask task, const aclmdlRITaskParams &params);
 void RecordDisable(aclmdlRITask task);
 void RecordLaunch(aclrtStream stream, const char *function, const char *scope, size_t size);
 bool FunctionName(aclrtFuncHandle function, std::string &name);
+bool FunctionAttribute(aclrtFuncHandle function, aclrtFuncAttribute attr, int64_t &value);
+size_t BinaryMetadataCount(aclrtBinHandle binary);
 aclrtFuncHandle ResolveFunction(const char *name);
 bool FunctionBinary(aclrtFuncHandle function, aclrtBinHandle &binary);
 bool FunctionAddress(aclrtFuncHandle function, void **cube, void **vector);

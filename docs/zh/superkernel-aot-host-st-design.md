@@ -219,6 +219,12 @@ UT 源码迁移只改必要 include；保留原函数名及注错默认。测试
 | 功能 | Begin/End 参数与顺序 | 检查六次 marker 调用、stream、name；非法空名无 launch | ST |
 | 功能 | Verify 无拆分 | 使用公开 graph 结构，成功且拆分数量为零 | ST |
 | 功能 | Verify 有拆分 | 选取既有已验证规则的输入，核对数量、原输入节点指针、splitType/reason | ST |
+| 功能 | cube、MIX 1:1、MIX 1:2 | 外部 KernelSpec 提供核类型、比例、block 数和调度模式，检查真实构建的入口名称、block 数和参数 | ST |
+| 功能 | 逐算子调试、跨流同名 scope | 检查独立调试入口和跨流合并结果；STREAM_FUSION=0 按当前告警但仍合并的行为验证 | ST |
+| 功能 | 调试产物与选项 | 临时目录中解析生产输出 JSON，核对持久化选项、FUNC 任务顺序与调试标志；恢复环境并禁用文件日志 | ST |
+| 异常 | Runtime 枚举、入口解析、同步内存初始化失败 | 检查返回失败且不提交模型；内存初始化失败释放已分配资源 | ST |
+| 边界 | Verify 容量、动态核、死锁、非法节点 | 核对所需容量及缓冲区不被覆盖、动态核改变拆分结果、死锁排除 wait、失败清空结果数量 | ST |
+| 兼容性 | 同名不同核类型 | 后创建的 kernel 不改变已有 kernel 的核类型、比例、调度模式和 block 数 | UT |
 | 兼容性 | 共享桩与原有 mockcpp | 迁移前后原 UT 全量运行，特别检查函数 mock 与回调 | UT |
 | 功能 | 桩稳定状态/资源/快照 | 重复查询、修改后查询、多模型和深拷贝契约 | UT |
 | 特性交叉 | 共享 SO 状态与公开符号 | ST 设置外部故障后 SO 内调用确实观察到；nm/readelf 检查接口和依赖 | ST/构建检查 |
@@ -238,6 +244,17 @@ cmake --build build --target run_super_kernel_aot_stest -j 8
 ```
 
 预期：UT/ST 均通过，ST 覆盖率独立落在 `super_kernel/coverage/cpp_st`。使用实际配置的 build 目录；过滤器沿用已有入口参数。通过 `readelf -d` 和实际加载路径检查 ST 依赖仅落到测试 SO 与允许的主机库；在无 NPU 的执行环境运行全部首批 ST。不开启 ST 的正常打包和 `--no-autofuse` 打包检查测试库均未被安装。
+
+### 主机验证结果
+
+在首版提交 `3d2e2a63` 上增加 11 个 ST 和 1 个桩契约 UT 后，全量 21 个 ST、1086 个 UT 通过，ST 随机顺序重复 10 轮通过。清空 ST 的 gcda 后运行 `collect_coverage_data_cpp_st`，报告如下：
+
+| 指标 | 首版 | 扩展后 |
+|---|---|---|
+| 生产代码行覆盖率 | 3350/8219（40.8%） | 4318/8219（52.5%） |
+| 生产函数覆盖率 | 512/953（53.7%） | 598/953（62.7%） |
+
+两次均统计同一组 39 个 `super_kernel/src/aot` 文件，不计入测试和桩。主要增量来自核类型处理、选项持久化、调试日志/JSON、Verify 校验及死锁处理。DFX 异常回调和 profiling 仍是低覆盖区域；当前结果不代表设备执行或硬件故障流程已验证。
 
 ## 验收标准
 
@@ -268,6 +285,7 @@ cmake --build build --target run_super_kernel_aot_stest -j 8
 
 - [x] 编码红线：已检查资源、参数所有权、模型销毁回调和 ABI；生产算法未改动。
 - [x] 跨特性交叉影响：已检查 SuperKernel 主机测试、构建和交付边界；Autofuse/Python 行为不变。
-- [x] 贡献规范：已检查 CONTRIBUTING.md；本次仅本地实现，未提交 commit 或发布 PR。
+- [x] 贡献规范：已检查 CONTRIBUTING.md；首版按用户要求本地提交为 `3d2e2a63`，未推送。覆盖率扩展保留为工作区增量。
 - [x] 代码格式：新增 C++ 按用户要求采用 4 空格，使用 clang-format 18.1.8；迁移文件仅格式化本次修改处。
 - [x] Pre-commit：已核对配置并执行 OAT；仍有五处原有许可证头拼写问题，未顺带修改：`super_kernel/CMakeLists.txt`、`aot/CMakeLists.txt`、`depends/aprof_pub.h`、`depends/runtime/base.h`、`depends/dump/adump_pub.h`（后三者位于 `super_kernel/tests/aot` 下）。新增文件的许可证检查通过。
+- [x] 增量合规：覆盖率扩展的 9 个代码/构建文件 OAT 检查通过。
