@@ -7,6 +7,7 @@
 #define __AUTOFUSE_REDUCE_REUSE_UTILS_H__
 
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -74,33 +75,69 @@ inline bool IsBroadcastReduceAxis(const AscNode &broadcast, const AscNode &reduc
   return false;
 }
 
+inline bool HasUpstreamBroadcastOnReduceAxisImpl(const AscNode &current, const AscNode &reduce,
+                                                 std::unordered_map<const AscNode *, bool> &cache,
+                                                 std::unordered_set<const AscNode *> &visiting) {
+  const auto cached = cache.find(&current);
+  if (cached != cache.end()) {
+    return cached->second;
+  }
+
+  if (!visiting.insert(&current).second) {
+    return false;
+  }
+
+  if (current.GetType() == kNodeBroadcast && IsBroadcastReduceAxis(current, reduce)) {
+    visiting.erase(&current);
+    cache.emplace(&current, true);
+    return true;
+  }
+
+  bool has_upstream = false;
+  bool all_upstream_match = true;
+  for (const auto &in_node : current.GetInDataNodes()) {
+    auto asc_in_node = std::dynamic_pointer_cast<AscNode>(in_node);
+    if (asc_in_node == nullptr) {
+      continue;
+    }
+    has_upstream = true;
+    if (!HasUpstreamBroadcastOnReduceAxisImpl(*asc_in_node, reduce, cache, visiting)) {
+      all_upstream_match = false;
+      break;
+    }
+  }
+
+  visiting.erase(&current);
+  const bool result = has_upstream && all_upstream_match;
+  cache.emplace(&current, result);
+  return result;
+}
+
 // 用于检查 Reduce 上游是否存在在 Reduce 轴上的 Broadcast, 避免复用输入source被改写导致精度失败。
 inline bool HasUpstreamBroadcastOnReduceAxis(const AscNode &reduce) {
   std::vector<AscNodePtr> pending;
-  std::unordered_set<const AscNode *> visited;
+  std::unordered_map<const AscNode *, bool> cache;
+  std::unordered_set<const AscNode *> visiting;
   for (const auto &in_node : reduce.GetInDataNodes()) {
     auto asc_in_node = std::dynamic_pointer_cast<AscNode>(in_node);
     if (asc_in_node != nullptr) {
       pending.emplace_back(asc_in_node);
     }
   }
+  if (pending.empty()) {
+    return false;
+  }
   while (!pending.empty()) {
     auto current = pending.back();
     pending.pop_back();
-    if (current == nullptr || !visited.insert(current.get()).second) {
+    if (current == nullptr) {
       continue;
     }
-    if (current->GetType() == kNodeBroadcast && IsBroadcastReduceAxis(*current, reduce)) {
-      return true;
-    }
-    for (const auto &in_node : current->GetInDataNodes()) {
-      auto asc_in_node = std::dynamic_pointer_cast<AscNode>(in_node);
-      if (asc_in_node != nullptr) {
-        pending.emplace_back(asc_in_node);
-      }
+    if (!HasUpstreamBroadcastOnReduceAxisImpl(*current, reduce, cache, visiting)) {
+      return false;
     }
   }
-  return false;
+  return true;
 }
 
 }  // namespace ascir
