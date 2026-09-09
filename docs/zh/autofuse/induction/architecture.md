@@ -93,9 +93,9 @@ AutoFuse 作为上层 GE 或 Inductor 的后端，是自动融合编译的核心
 
 | 模块                  | 职责                                                                                          | 相关资料                                                |
 | --------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| **Schedule**    | 调度策略生成：计算重排、循环合并、并行优化、内存优化和多模板生成                              | [模块说明](./features/schedule.md)                       |
-| **Codegen**     | 代码生成：解析调度图，生成 Host 侧和 Device 侧代码                                            | [模块说明](./features/codegen.md)                        |
-| **Auto Tiling** | Tiling 求解：在 UB 约束下求解 Tile 大小和分核策略，评估切分方案性能，选择合适的模板和切分策略 | [模块说明](./features/auto_tiling.md)                    |
+| **Schedule**    | 调度策略生成：计算重排、循环合并、并行优化、内存优化和多模板生成                              | [模块说明](../design/features/schedule.md)               |
+| **Codegen**     | 代码生成：解析调度图，生成 Host 侧和 Device 侧代码                                            | [模块说明](../design/features/codegen.md)                |
+| **Auto Tiling** | Tiling 求解：在 UB 约束下求解 Tile 大小和分核策略，评估切分方案性能，选择合适的模板和切分策略 | [模块说明](../design/features/auto_tiling.md)            |
 | **AscendC API** | 提供 Vector 计算、Cube 计算、数据搬运和类型转换等 API                                         | [源码参考](../../../../autofuse/v35/ascendc/api_regbase) |
 
 ## 编译与运行
@@ -106,8 +106,8 @@ AutoFuse 生成的 Host 和 Device 源码由 **BiSheng 编译器**进一步编�
 
 按照两条融合实现路径启用：
 
-- **GE 路径**：[TensorFlow 框架下启用 AutoFuse](./features/tensorflow_enable.md)。该文档以 TensorFlow 为例，介绍依赖版本、`AUTOFUSE_FLAGS` 配置、环境变量和运行用例。
-- **Inductor 路径**：[PyTorch 框架下启用 AutoFuse](./features/pytorch_enable.md)。该文档以 PyTorch 为例，介绍依赖版本、`torch.compile` 配置、环境变量和运行用例。
+- **GE 路径**：[TensorFlow 框架下启用 AutoFuse](./tensorflow_enable.md)。该文档以 TensorFlow 为例，介绍依赖版本、`AUTOFUSE_FLAGS` 配置、环境变量和运行用例。
+- **Inductor 路径**：[PyTorch 框架下启用 AutoFuse](./pytorch_enable.md)。该文档以 PyTorch 为例，介绍依赖版本、`torch.compile` 配置、环境变量和运行用例。
 
 ## 项目结构
 
