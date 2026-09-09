@@ -148,12 +148,11 @@ def prepare_data(seed=1236):
     # Stream 1 参数
     m1, k1, n1 = 864, 7168, 4096
     x1_1 = torch.randint(-10, 10, (m1, k1), dtype=torch.int8)
-    x2_1 = torch_npu.npu_format_cast(
+    x2_1 = (
         torch.randint(-10, 10, (n1, k1), dtype=torch.int8)
         .npu()
         .transpose(1, 0)
-        .contiguous(),
-        29,
+        .contiguous()
     )
     scale_1 = torch.randn((n1,), dtype=torch.float32)
     pertoken_scale_1 = torch.randn((m1,), dtype=torch.float32)
@@ -165,12 +164,11 @@ def prepare_data(seed=1236):
     # Stream 2 参数
     m2, k2, n2 = 864, 7168, 4096
     x1_2 = torch.randint(-10, 10, (m2, k2), dtype=torch.int8)
-    x2_2 = torch_npu.npu_format_cast(
+    x2_2 = (
         torch.randint(-10, 10, (n2, k2), dtype=torch.int8)
         .npu()
         .transpose(1, 0)
-        .contiguous(),
-        29,
+        .contiguous()
     )
     scale_2 = torch.randn((n2,), dtype=torch.float32)
     pertoken_scale_2 = torch.randn((m2,), dtype=torch.float32)

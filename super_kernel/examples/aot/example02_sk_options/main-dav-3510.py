@@ -155,8 +155,8 @@ def build_model():
             "super_kernel_optimize_options": {
                 "auto_op_parallel": 0,
                 "dcci_before_kernel_start": [".*"],
-                "dcci_after_kernel_end": [],
-                "dcci_disable_on_kernel": [],
+                "dcci_after_kernel_end": [".*"],
+                "dcci_disable_on_kernel": [".*"],
                 "early_start": 1,
                 "aggressive_opt_strategies": {
                     "value_breaker_bypass": 0b10,
