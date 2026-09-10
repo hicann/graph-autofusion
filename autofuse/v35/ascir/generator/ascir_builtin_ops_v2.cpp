@@ -930,39 +930,39 @@ REG_ASC_IR(LeakyRelu).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::asc
 
 // todo:BitwiseAnd DT_INT64 后面根据需要放开
 REG_ASC_IR(BitwiseAnd)
-    .Impl(v2_soc_versions,
-          {af::ascir::AscIrImplCreator<af::ascir::BitwiseAndAscIrAttImplV2>(),
-           af::ascir::AscIrImplCreator<af::ascir::BitwiseAndAscIrCodegenImplV2>(),
-           {{"T", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT8, DT_INT8, DT_INT64, DT_UINT32, DT_UINT64}}}});
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::BitwiseAndAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::BitwiseAndAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT8, DT_INT8, DT_INT64, DT_UINT32,
+                                              DT_UINT64, DT_BOOL}}}});
 
 REG_ASC_IR(BitwiseNot)
     .Input("x", "T")
     .Output("y", "T")
     .ComputeType(ComputeType::kComputeElewise)
-    .Impl(v2_soc_versions,
-          {af::ascir::AscIrImplCreator<af::ascir::BitwiseNotAscIrAttImplV2>(),
-           af::ascir::AscIrImplCreator<af::ascir::BitwiseNotAscIrCodegenImplV2>(),
-           {{"T", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT8, DT_INT8, DT_INT64, DT_UINT32, DT_UINT64}}}});
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::BitwiseNotAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::BitwiseNotAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT8, DT_INT8, DT_INT64, DT_UINT32,
+                                              DT_UINT64, DT_BOOL}}}});
 
 REG_ASC_IR(BitwiseOr)
     .Input("x1", "T")
     .Input("x2", "T")
     .Output("y", "T")
     .ComputeType(ComputeType::kComputeElewise)
-    .Impl(v2_soc_versions,
-          {af::ascir::AscIrImplCreator<af::ascir::BitwiseOrAscIrAttImplV2>(),
-           af::ascir::AscIrImplCreator<af::ascir::BitwiseOrAscIrCodegenImplV2>(),
-           {{"T", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT8, DT_INT8, DT_INT64, DT_UINT32, DT_UINT64}}}});
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::BitwiseOrAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::BitwiseOrAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT8, DT_INT8, DT_INT64, DT_UINT32,
+                                              DT_UINT64, DT_BOOL}}}});
 
 REG_ASC_IR(BitwiseXor)
     .Input("x1", "T")
     .Input("x2", "T")
     .Output("y", "T")
     .ComputeType(ComputeType::kComputeElewise)
-    .Impl(v2_soc_versions,
-          {af::ascir::AscIrImplCreator<af::ascir::BitwiseXorAscIrAttImplV2>(),
-           af::ascir::AscIrImplCreator<af::ascir::BitwiseXorAscIrCodegenImplV2>(),
-           {{"T", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT8, DT_INT8, DT_INT64, DT_UINT32, DT_UINT64}}}});
+    .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::BitwiseXorAscIrAttImplV2>(),
+                            af::ascir::AscIrImplCreator<af::ascir::BitwiseXorAscIrCodegenImplV2>(),
+                            {{"T", TensorType{DT_INT16, DT_UINT16, DT_INT32, DT_UINT8, DT_INT8, DT_INT64, DT_UINT32,
+                                              DT_UINT64, DT_BOOL}}}});
 
 REG_ASC_IR(Ceil)
     .Input("x", "T")
