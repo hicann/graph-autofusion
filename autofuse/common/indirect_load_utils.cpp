@@ -11,13 +11,16 @@
 #include "indirect_load_utils.h"
 
 #include <algorithm>
+#include <limits>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
 #include "schedule_result.h"
+#include "utils/extern_math_util.h"
 
 namespace ascgen_utils::indirect_load {
 namespace {
@@ -356,6 +359,35 @@ af::Status GetIndirectLoadAccessInfo(const af::AscNodePtr &node, IndirectLoadAcc
   return af::SUCCESS;
 }
 
+af::Status SetLoweringMetadata(const af::AscNodePtr &node, const IndirectLoadLoweringMetadata &metadata) {
+  GE_ASSERT_NOTNULL(node);
+  GE_ASSERT_TRUE(metadata.version == 1U && metadata.axis >= 0L && metadata.outer_axis != af::kIdNone,
+                 "IndirectLoad lowering metadata is invalid, node = %s", node->GetNamePtr());
+  auto op_desc = node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kLoweringMetadataAttr, metadata),
+                 "Set IndirectLoad lowering metadata failed, node = %s", node->GetNamePtr());
+  return af::SUCCESS;
+}
+
+af::Status GetLoweringMetadata(const af::AscNodePtr &node, IndirectLoadLoweringMetadata &metadata) {
+  GE_ASSERT_NOTNULL(node);
+  auto op_desc = node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  metadata = op_desc->TryGetExtAttr(kLoweringMetadataAttr, IndirectLoadLoweringMetadata{});
+  GE_ASSERT_TRUE(metadata.version == 1U && metadata.axis >= 0L && metadata.outer_axis != af::kIdNone,
+                 "IndirectLoad lowering metadata is missing or invalid, node = %s", node->GetNamePtr());
+  return af::SUCCESS;
+}
+
+bool HasLoweringMetadata(const af::AscNodePtr &node) {
+  if (node == nullptr || node->GetOpDesc() == nullptr) {
+    return false;
+  }
+  const auto metadata = node->GetOpDesc()->TryGetExtAttr(kLoweringMetadataAttr, IndirectLoadLoweringMetadata{});
+  return metadata.version == 1U && metadata.axis >= 0L && metadata.outer_axis != af::kIdNone;
+}
+
 namespace {
 af::Expression ProductFrom(const LogicalTensorView &view, size_t begin) {
   af::Expression product = af::sym::kSymbolOne;
@@ -595,6 +627,612 @@ af::Status AnalyzeIndirectLoadAccess(const af::AscNodePtr &node, const TemplateL
   info.kind = embedding_like ? IndirectLoadAccessInfo::Kind::kEmbeddingLike : IndirectLoadAccessInfo::Kind::kGeneric;
   info.can_use_simt_structured = embedding_like;
   info.can_use_simd_embedding = IsSimdEmbeddingAccess(logical_view, info);
+  return af::SUCCESS;
+}
+
+namespace {
+using NodePath = std::vector<af::AscNodePtr>;
+using NodeSet = std::unordered_set<const af::AscNode *>;
+
+bool IsSimtDirectGmBoundary(const af::AscNodePtr &node) {
+  return af::ops::IsOps<af::ascir_op::Load>(node) ||
+         (af::ops::IsOps<af::ascir_op::Nddma>(node) && GetTemplateBehavior(node).uses_direct_gm_pipeline);
+}
+
+bool SimtLoadUsesZeroOffset(const af::AscNodePtr &node) {
+  if (node == nullptr || node->outputs().empty()) {
+    return false;
+  }
+  const auto &attr = node->outputs()[0]->attr;
+  const bool all_zero_strides =
+      !attr.strides.empty() && std::all_of(attr.strides.begin(), attr.strides.end(), [](const af::Expression &stride) {
+        return af::SymbolicUtils::StaticCheckEq(stride, af::ops::Zero) == af::TriBool::kTrue;
+      });
+  const bool single_element_shape =
+      !attr.repeats.empty() && std::all_of(attr.repeats.begin(), attr.repeats.end(), [](const af::Expression &size) {
+        return af::SymbolicUtils::StaticCheckEq(size, af::ops::One) == af::TriBool::kTrue;
+      });
+  return all_zero_strides || single_element_shape;
+}
+
+bool SimtLoadViewsMatch(const af::AscNodePtr &lhs, const af::AscNodePtr &rhs) {
+  if (lhs == nullptr || rhs == nullptr || lhs->outputs().empty() || rhs->outputs().empty()) {
+    return false;
+  }
+  const auto &lhs_attr = lhs->outputs()[0]->attr;
+  const auto &rhs_attr = rhs->outputs()[0]->attr;
+  if (lhs_attr.repeats.empty() || lhs_attr.strides.empty() || lhs_attr.repeats.size() != rhs_attr.repeats.size() ||
+      lhs_attr.strides.size() != rhs_attr.strides.size()) {
+    return false;
+  }
+  for (size_t dim = 0UL; dim < lhs_attr.repeats.size(); ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(lhs_attr.repeats[dim], rhs_attr.repeats[dim]) != af::TriBool::kTrue ||
+        af::SymbolicUtils::StaticCheckEq(lhs_attr.strides[dim], rhs_attr.strides[dim]) != af::TriBool::kTrue) {
+      return false;
+    }
+  }
+  return true;
+}
+
+af::Status GetStableGraphNodes(const af::AscNodePtr &node, NodePath &nodes) {
+  const auto owner_graph = node->GetOwnerComputeGraph();
+  GE_ASSERT_NOTNULL(owner_graph, "IndirectLoad node has no owner graph.");
+  for (const auto &graph_node : owner_graph->GetDirectNode()) {
+    const auto asc_node = std::dynamic_pointer_cast<af::AscNode>(graph_node);
+    GE_ASSERT_NOTNULL(asc_node, "IndirectLoad graph contains invalid node.");
+    nodes.emplace_back(asc_node);
+  }
+  return af::SUCCESS;
+}
+
+af::Status CollectSimtLoweringBackwardNodes(const af::AscNodePtr &root, const af::AscNodePtr &indirect_load,
+                                            NodeSet &nodes) {
+  NodePath pending = {root};
+  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
+    const af::AscNodePtr current = pending[cursor];
+    if (current == nullptr || current == indirect_load || !nodes.emplace(current.get()).second) {
+      continue;
+    }
+    if (IsSimtDirectGmBoundary(current) || af::ops::IsOps<af::ascir_op::Scalar>(current) ||
+        af::ops::IsOps<af::ascir_op::ScalarData>(current)) {
+      continue;
+    }
+    GE_ASSERT_TRUE(current->inputs.Size() > 0UL, "IndirectLoad SIMT node[%s] has no input.", current->GetNamePtr());
+    for (size_t i = 0UL; i < current->inputs.Size(); ++i) {
+      const auto producer = GetInputProducer(current, i);
+      GE_ASSERT_NOTNULL(producer, "IndirectLoad SIMT node[%s] input[%zu] has no producer.", current->GetNamePtr(), i);
+      pending.emplace_back(producer);
+    }
+  }
+  return af::SUCCESS;
+}
+
+size_t GetProducerOutputIndex(const af::AscNodePtr &consumer) {
+  const auto input_anchor = consumer == nullptr ? nullptr : consumer->GetInDataAnchor(0UL);
+  const auto peer_anchor = input_anchor == nullptr ? nullptr : input_anchor->GetPeerOutAnchor();
+  return peer_anchor == nullptr ? 0UL : static_cast<size_t>(peer_anchor->GetIdx());
+}
+
+struct SimtOutputChainBuild {
+  SimtOutputChainMetadata metadata;
+  NodeSet nodes;
+};
+
+af::Status CollectSimtOutputDescendants(const af::AscNodePtr &indirect_load, NodeSet &descendants) {
+  NodePath pending;
+  for (const auto &out_node : indirect_load->GetOutDataNodes()) {
+    const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out_node);
+    GE_ASSERT_NOTNULL(consumer, "IndirectLoad SIMT output successor is invalid.");
+    pending.emplace_back(consumer);
+  }
+  for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
+    const auto &node = pending[cursor];
+    if (!descendants.emplace(node.get()).second || af::ops::IsOps<af::ascir_op::Store>(node)) {
+      continue;
+    }
+    for (const auto &out_node : node->GetOutDataNodes()) {
+      const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out_node);
+      GE_ASSERT_NOTNULL(consumer, "IndirectLoad SIMT output successor is invalid.");
+      pending.emplace_back(consumer);
+    }
+  }
+  return af::SUCCESS;
+}
+
+af::Status CollectSimtOutputChainBuilds(const NodePath &graph_nodes, const af::AscNodePtr &indirect_load,
+                                        std::vector<SimtOutputChainBuild> &chains) {
+  NodeSet descendants;
+  GE_ASSERT_SUCCESS(CollectSimtOutputDescendants(indirect_load, descendants));
+  std::unordered_map<const af::AscNode *, size_t> cached_node_sets;
+  for (const af::AscNodePtr &node : graph_nodes) {
+    if (descendants.count(node.get()) == 0UL || !af::ops::IsOps<af::ascir_op::Store>(node)) {
+      continue;
+    }
+    const auto producer = GetInputProducer(node, 0UL);
+    GE_ASSERT_NOTNULL(producer, "IndirectLoad SIMT output terminal[%s] has no producer.", node->GetNamePtr());
+    const size_t producer_output_index = GetProducerOutputIndex(node);
+    GE_ASSERT_TRUE(producer_output_index < producer->outputs().size(),
+                   "IndirectLoad SIMT terminal[%s] producer output index[%zu] is invalid.", node->GetNamePtr(),
+                   producer_output_index);
+    SimtOutputChainBuild chain;
+    const auto cached = cached_node_sets.find(producer.get());
+    if (cached == cached_node_sets.end()) {
+      GE_ASSERT_SUCCESS(CollectSimtLoweringBackwardNodes(producer, indirect_load, chain.nodes));
+      cached_node_sets.emplace(producer.get(), chains.size());
+    } else {
+      chain.nodes = chains[cached->second].nodes;
+    }
+    chain.metadata.result_tensor_id = producer->outputs()[producer_output_index]->attr.mem.tensor_id;
+    chain.metadata.target_tensor_id = node->outputs()[0]->attr.mem.tensor_id;
+    chain.metadata.dtype = producer->outputs()[producer_output_index]->attr.dtype;
+    chains.emplace_back(std::move(chain));
+  }
+  return af::SUCCESS;
+}
+
+af::Status ValidateSimtLoweringNode(const af::AscNodePtr &node) {
+  if (IsSimtDirectGmBoundary(node) || af::ops::IsOps<af::ascir_op::Scalar>(node) ||
+      af::ops::IsOps<af::ascir_op::ScalarData>(node) || af::ops::IsOps<af::ascir_op::Store>(node) ||
+      af::ops::IsOps<af::ascir_op::Transpose>(node)) {
+    return af::SUCCESS;
+  }
+  const auto role = GetTemplateRole(node);
+  GE_ASSERT_TRUE(role == TemplateRole::kSimtInlineTransform || role == TemplateRole::kSimtFanoutBranch,
+                 "IndirectLoad SIMT node[%s] has no scalar evaluator role.", node->GetNamePtr());
+  GE_ASSERT_TRUE(!af::ops::IsOps<af::ascir_op::VectorFunc>(node),
+                 "IndirectLoad SIMT transform must use scalar emission, node:%s", node->GetNamePtr());
+  return af::SUCCESS;
+}
+
+bool TryBuildStaticSpan(const af::Expression &size_expr, uint64_t stride, uint64_t &span) {
+  int64_t size = 0L;
+  if (!size_expr.GetConstValue(size) || size < 0L) {
+    return false;
+  }
+  return !ge::MulOverflow(static_cast<uint64_t>(size), stride, span);
+}
+
+bool TryAccumulateStaticOffset(const af::Expression &size_expr, const af::Expression &stride_expr, uint64_t &offset) {
+  int64_t size = 0L;
+  int64_t stride = 0L;
+  if (!size_expr.GetConstValue(size) || size <= 0L || !stride_expr.GetConstValue(stride) || stride < 0L) {
+    return false;
+  }
+  uint64_t dim_offset = 0U;
+  return !ge::MulOverflow(static_cast<uint64_t>(size - 1L), static_cast<uint64_t>(stride), dim_offset) &&
+         !ge::AddOverflow(offset, dim_offset, offset);
+}
+
+bool TryGetStaticSpans(const LogicalTensorView &input, const LogicalTensorView &output, size_t axis,
+                       SimtPolicyMetadata &policy) {
+  uint64_t inner = 1U;
+  for (size_t i = axis + 1U; i < output.sizes.size(); ++i) {
+    if (!TryBuildStaticSpan(output.sizes[i], inner, inner)) {
+      return false;
+    }
+  }
+  int64_t input_stride = 0L;
+  if (!input.strides[axis].GetConstValue(input_stride) || input_stride < 0L ||
+      !TryBuildStaticSpan(output.sizes[axis], inner, policy.output_axis_span) ||
+      !TryBuildStaticSpan(input.sizes[axis], static_cast<uint64_t>(input_stride), policy.input_axis_span)) {
+    return false;
+  }
+  policy.inner_span = inner;
+  policy.input_axis_stride = static_cast<uint64_t>(input_stride);
+  return true;
+}
+
+bool TryGetMaxElementOffset(const LogicalTensorView &tensor, uint64_t &max_offset) {
+  max_offset = 0U;
+  for (size_t i = 0U; i < tensor.sizes.size(); ++i) {
+    if (!TryAccumulateStaticOffset(tensor.sizes[i], tensor.strides[i], max_offset)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsDense(const LogicalTensorView &tensor) {
+  af::Expression expected_stride = af::ops::One;
+  for (size_t i = tensor.sizes.size(); i > 0U; --i) {
+    const size_t dim = i - 1U;
+    if (af::SymbolicUtils::StaticCheckEq(tensor.strides[dim], expected_stride) != af::TriBool::kTrue) {
+      return false;
+    }
+    expected_stride = af::sym::Mul(expected_stride, tensor.sizes[dim]);
+  }
+  return true;
+}
+
+bool IsStructuredSimt(const LogicalTensorView &input, const LogicalTensorView &index, const LogicalTensorView &output,
+                      size_t axis) {
+  if (!IsDense(input) || !IsDense(index) || !IsDense(output) || index.sizes.size() != output.sizes.size() ||
+      input.sizes.size() != output.sizes.size()) {
+    return false;
+  }
+  for (size_t i = 0U; i < output.sizes.size(); ++i) {
+    if (af::SymbolicUtils::StaticCheckEq(index.sizes[i], output.sizes[i]) != af::TriBool::kTrue ||
+        (i != axis && af::SymbolicUtils::StaticCheckEq(input.sizes[i], output.sizes[i]) != af::TriBool::kTrue)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsPowerOfTwo(uint64_t value) {
+  return value != 0U && (value & (value - 1U)) == 0U;
+}
+
+bool CanUseUint32Offsets(const LogicalTensorView &input, const LogicalTensorView &index,
+                         const LogicalTensorView &output) {
+  uint64_t input_max = 0U;
+  uint64_t index_max = 0U;
+  uint64_t output_max = 0U;
+  const uint64_t limit = std::numeric_limits<uint32_t>::max();
+  return TryGetMaxElementOffset(input, input_max) && input_max <= limit && TryGetMaxElementOffset(index, index_max) &&
+         index_max <= limit && TryGetMaxElementOffset(output, output_max) && output_max <= limit;
+}
+
+bool CanUseUint32Divisors(const LogicalTensorView &index) {
+  for (const af::Expression &size_expr : index.sizes) {
+    int64_t size = 0L;
+    if (!size_expr.GetConstValue(size) || size < 0L || size > static_cast<int64_t>(INT32_MAX)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+uint64_t BuildNonZeroStrideMask(const std::vector<af::Expression> &strides) {
+  uint64_t mask = 0U;
+  for (size_t dim = 0U; dim < strides.size() && dim < 64UL; ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(strides[dim], af::sym::kSymbolZero) != af::TriBool::kTrue) {
+      mask |= 1ULL << dim;
+    }
+  }
+  return mask;
+}
+
+bool SimtPhysicalStridesEqual(const std::vector<af::Expression> &lhs, const std::vector<af::Expression> &rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  return std::equal(lhs.begin(), lhs.end(), rhs.begin(), [](const af::Expression &left, const af::Expression &right) {
+    return af::SymbolicUtils::StaticCheckEq(left, right) == af::TriBool::kTrue;
+  });
+}
+
+bool SimtHasZeroStride(const std::vector<af::Expression> &strides) {
+  return std::any_of(strides.begin(), strides.end(), [](const af::Expression &stride) {
+    return af::SymbolicUtils::StaticCheckEq(stride, af::ops::Zero) == af::TriBool::kTrue;
+  });
+}
+
+bool ApplySimtIndexPhysicalStrides(const NodePath &index_nodes, LogicalTensorView &index, bool &mixed_views) {
+  mixed_views = false;
+  const std::vector<af::Expression> *canonical_strides = nullptr;
+  bool has_zero_stride = false;
+  for (const af::AscNodePtr &node : index_nodes) {
+    if (!IsSimtDirectGmBoundary(node) || node->outputs().empty() ||
+        node->outputs()[0]->attr.strides.size() != index.strides.size()) {
+      continue;
+    }
+    const auto &strides = node->outputs()[0]->attr.strides;
+    if (canonical_strides == nullptr) {
+      canonical_strides = &strides;
+    } else if (!SimtPhysicalStridesEqual(*canonical_strides, strides)) {
+      mixed_views = true;
+    }
+    has_zero_stride = has_zero_stride || SimtHasZeroStride(strides);
+  }
+  if (canonical_strides == nullptr) {
+    for (const af::AscNodePtr &node : index_nodes) {
+      const std::vector<af::Expression> *physical_strides = nullptr;
+      if (af::ops::IsOps<af::ascir_op::Broadcast>(node) && !node->inputs().empty() &&
+          node->inputs()[0]->attr.strides.size() == index.strides.size()) {
+        physical_strides = &node->inputs()[0]->attr.strides;
+      } else if (!node->outputs().empty() && node->outputs()[0]->attr.strides.size() == index.strides.size()) {
+        physical_strides = &node->outputs()[0]->attr.strides;
+      }
+      if (physical_strides != nullptr && SimtHasZeroStride(*physical_strides)) {
+        canonical_strides = physical_strides;
+        has_zero_stride = true;
+        break;
+      }
+    }
+  }
+  if (canonical_strides != nullptr && has_zero_stride && !mixed_views) {
+    index.strides = *canonical_strides;
+  }
+  return has_zero_stride || mixed_views;
+}
+
+void AppendRuntimeParams(std::vector<af::Expression> &target, const std::vector<af::Expression> &source) {
+  target.insert(target.end(), source.begin(), source.end());
+}
+
+af::Status BuildSimtPolicyMetadata(const TemplateLogicalView &logical_view, const NodePath &index_nodes, size_t axis,
+                                   bool embedding_structured, bool &mixed_index_views, SimtPolicyMetadata &metadata) {
+  const size_t rank = logical_view.input.sizes.size();
+  GE_ASSERT_TRUE(rank < 64UL, "IndirectLoad SIMT rank must be smaller than 64.");
+  LogicalTensorView input = logical_view.input;
+  LogicalTensorView index = logical_view.index;
+  const auto &output = logical_view.output;
+  const bool index_broadcast_strided = ApplySimtIndexPhysicalStrides(index_nodes, index, mixed_index_views);
+  const bool strided = logical_view.input.kind != IndirectLoadLayoutKind::kDense ||
+                       logical_view.index.kind != IndirectLoadLayoutKind::kDense || index_broadcast_strided;
+  af::Expression inner_span = af::sym::kSymbolOne;
+  for (size_t i = axis + 1U; i < output.sizes.size(); ++i) {
+    inner_span = af::sym::Mul(inner_span, output.sizes[i]);
+  }
+  const af::Expression output_axis_span = af::sym::Mul(output.sizes[axis], inner_span);
+  const af::Expression input_axis_stride = input.strides[axis];
+  const af::Expression input_axis_span = af::sym::Mul(input.sizes[axis], input_axis_stride);
+  const bool structured = IsStructuredSimt(input, index, output, axis);
+  const bool static_spans = TryGetStaticSpans(input, output, axis, metadata);
+  if (embedding_structured) {
+    metadata.policy = SimtAddressPolicy::kEmbedding;
+    metadata.input_stride_mask = BuildNonZeroStrideMask(input.strides);
+    metadata.index_stride_mask = BuildNonZeroStrideMask(index.strides);
+    if (rank == 2UL && axis == 0UL) {
+      metadata.input_stride_mask = 0U;
+      metadata.index_stride_mask = 0U;
+    }
+  } else if (strided) {
+    metadata.policy = SimtAddressPolicy::kStrided;
+    metadata.input_stride_mask = BuildNonZeroStrideMask(input.strides);
+    metadata.index_stride_mask = BuildNonZeroStrideMask(index.strides);
+  } else if (structured) {
+    const bool static_power_of_two =
+        static_spans && IsPowerOfTwo(metadata.inner_span) && IsPowerOfTwo(metadata.output_axis_span);
+    const bool static_inner = static_spans && IsPowerOfTwo(metadata.inner_span);
+    const bool magic_divisors_supported =
+        !static_spans || (metadata.inner_span <= static_cast<uint64_t>(INT64_MAX) &&
+                          metadata.output_axis_span <= static_cast<uint64_t>(INT64_MAX));
+    metadata.policy = static_power_of_two        ? SimtAddressPolicy::kStaticPowerOfTwo
+                      : static_inner             ? SimtAddressPolicy::kStaticInner
+                      : magic_divisors_supported ? SimtAddressPolicy::kStructuredMagic
+                                                 : SimtAddressPolicy::kRecursive;
+  }
+  const bool structured_magic_supported = metadata.policy != SimtAddressPolicy::kStructuredMagic ||
+                                          (static_spans && metadata.inner_span <= static_cast<uint64_t>(INT32_MAX) &&
+                                           metadata.output_axis_span <= static_cast<uint64_t>(INT32_MAX));
+  const bool static_inner_magic_supported = metadata.policy != SimtAddressPolicy::kStaticInner ||
+                                            metadata.output_axis_span <= static_cast<uint64_t>(INT32_MAX);
+  const bool general_magic_supported =
+      (metadata.policy != SimtAddressPolicy::kRecursive && metadata.policy != SimtAddressPolicy::kStrided &&
+       metadata.policy != SimtAddressPolicy::kEmbedding) ||
+      CanUseUint32Divisors(index);
+  if (CanUseUint32Offsets(input, index, output) && structured_magic_supported && static_inner_magic_supported &&
+      general_magic_supported) {
+    metadata.offset_width = SimtOffsetWidth::kUint32;
+  }
+  switch (metadata.policy) {
+    case SimtAddressPolicy::kStaticPowerOfTwo:
+      break;
+    case SimtAddressPolicy::kStaticInner:
+      metadata.runtime_params.emplace_back(output_axis_span);
+      break;
+    case SimtAddressPolicy::kStructuredMagic:
+      metadata.runtime_params = {inner_span, output_axis_span, input_axis_stride, input_axis_span};
+      break;
+    case SimtAddressPolicy::kEmbedding:
+      AppendRuntimeParams(metadata.runtime_params, index.sizes);
+      AppendRuntimeParams(metadata.runtime_params, input.strides);
+      AppendRuntimeParams(metadata.runtime_params, index.strides);
+      break;
+    case SimtAddressPolicy::kRecursive:
+      AppendRuntimeParams(metadata.runtime_params, index.sizes);
+      AppendRuntimeParams(metadata.runtime_params, input.strides);
+      break;
+    case SimtAddressPolicy::kStrided:
+      AppendRuntimeParams(metadata.runtime_params, index.sizes);
+      AppendRuntimeParams(metadata.runtime_params, input.strides);
+      AppendRuntimeParams(metadata.runtime_params, index.strides);
+      break;
+  }
+  return af::SUCCESS;
+}
+
+LogicalTensorView GetNodeOutputView(const af::AscNodePtr &node) {
+  const auto &attr = node->outputs()[0]->attr;
+  return {attr.axis, attr.repeats, attr.strides};
+}
+
+void AppendSimtGmTensorMetadata(const af::AscNodePtr &node, SimtLoweringMetadata &metadata,
+                                std::unordered_set<ascir::TensorId> &seen_tensor_ids) {
+  const auto output = node->outputs()[0];
+  if (!seen_tensor_ids.emplace(output->attr.mem.tensor_id).second) {
+    return;
+  }
+  if (IsSimtDirectGmBoundary(node)) {
+    metadata.gm_tensors.push_back(
+        {output->attr.mem.tensor_id, node->inputs()[0]->attr.mem.tensor_id, output->attr.dtype, false});
+  } else {
+    metadata.gm_tensors.push_back({output->attr.mem.tensor_id, output->attr.mem.tensor_id, output->attr.dtype, true});
+  }
+}
+
+af::Status ValidateSimtOutputPlan(const SimtLoweringMetadata &metadata) {
+  GE_ASSERT_TRUE(!metadata.output_chains.empty(), "IndirectLoad SIMT output chains are empty.");
+  const size_t local_target_count =
+      static_cast<size_t>(std::count_if(metadata.output_chains.begin(), metadata.output_chains.end(),
+                                        [](const SimtOutputChainMetadata &chain) { return chain.local_target; }));
+  GE_ASSERT_TRUE(local_target_count <= 1UL, "IndirectLoad SIMT supports at most one local output target.");
+  GE_ASSERT_TRUE(metadata.has_post_reduce == (local_target_count == 1UL),
+                 "IndirectLoad SIMT post Reduce and local output target must appear together.");
+  if (local_target_count == 1UL) {
+    const auto &local_chain = metadata.output_chains.back();
+    GE_ASSERT_TRUE(local_chain.local_target && local_chain.result_tensor_id == metadata.output_result_tensor_id &&
+                       local_chain.target_tensor_id == metadata.output_result_tensor_id &&
+                       local_chain.node_names == metadata.output_node_names,
+                   "IndirectLoad SIMT local output must be the synthetic post Reduce chain.");
+  }
+  return af::SUCCESS;
+}
+
+af::Status BuildSimtLoweringMetadata(const af::AscNodePtr &indirect_load, IndirectLoadLoweringMetadata &metadata) {
+  NodePath graph_nodes;
+  GE_ASSERT_SUCCESS(GetStableGraphNodes(indirect_load, graph_nodes));
+  auto &simt = metadata.simt;
+  const af::AscNodePtr post_reduce = GetPostReduceConsumer(indirect_load);
+  simt.has_post_reduce = post_reduce != nullptr;
+  const auto inputs = indirect_load->inputs();
+  GE_ASSERT_TRUE(inputs.size() == 2UL, "Invalid IndirectLoad SIMT input number:%zu.", inputs.size());
+  simt.index_result_tensor_id = inputs[kIndexTensorIndex]->attr.mem.tensor_id;
+  simt.index_dtype = inputs[kIndexTensorIndex]->attr.dtype;
+  simt.value_tensor_id = indirect_load->outputs()[0]->attr.mem.tensor_id;
+
+  const auto index_root = GetInputProducer(indirect_load, kIndexTensorIndex);
+  GE_ASSERT_NOTNULL(index_root, "IndirectLoad SIMT index input has no producer.");
+  NodeSet index_set;
+  GE_ASSERT_SUCCESS(CollectSimtLoweringBackwardNodes(index_root, indirect_load, index_set));
+  NodeSet output_set;
+  af::AscNodePtr output_root;
+  if (simt.has_post_reduce) {
+    output_root = GetPostReduceInputProducer(indirect_load);
+    GE_ASSERT_NOTNULL(output_root, "IndirectLoad post Reduce input has no producer.");
+    GE_ASSERT_SUCCESS(CollectSimtLoweringBackwardNodes(output_root, indirect_load, output_set));
+  }
+
+  std::vector<SimtOutputChainBuild> chain_builds;
+  GE_ASSERT_SUCCESS(CollectSimtOutputChainBuilds(graph_nodes, indirect_load, chain_builds));
+  std::vector<bool> keep_chain(chain_builds.size(), true);
+  for (size_t chain_index = 0UL; chain_index < chain_builds.size(); ++chain_index) {
+    const bool contains_reduce =
+        simt.has_post_reduce && std::any_of(chain_builds[chain_index].nodes.begin(),
+                                            chain_builds[chain_index].nodes.end(), [](const af::AscNode *node) {
+                                              return node != nullptr &&
+                                                     node->attr.api.compute_type == af::ComputeType::kComputeReduce;
+                                            });
+    keep_chain[chain_index] = !contains_reduce;
+  }
+
+  NodePath index_nodes;
+  NodePath output_load_nodes;
+  std::unordered_set<ascir::TensorId> seen_gm_tensors;
+  for (const af::AscNodePtr &node : graph_nodes) {
+    const bool in_index = index_set.count(node.get()) != 0UL;
+    const bool in_output_region = output_set.count(node.get()) != 0UL;
+    bool in_output_chain = false;
+    for (size_t chain_index = 0UL; chain_index < chain_builds.size(); ++chain_index) {
+      if (keep_chain[chain_index] && chain_builds[chain_index].nodes.count(node.get()) != 0UL) {
+        chain_builds[chain_index].metadata.node_names.emplace_back(node->GetName());
+        in_output_chain = true;
+      }
+    }
+    if (!in_index && !in_output_region && !in_output_chain) {
+      continue;
+    }
+    GE_ASSERT_SUCCESS(ValidateSimtLoweringNode(node));
+    if (in_index) {
+      index_nodes.emplace_back(node);
+      simt.index_node_names.emplace_back(node->GetName());
+    }
+    if (in_output_region || in_output_chain) {
+      simt.output_node_names.emplace_back(node->GetName());
+    }
+    if ((in_output_region || in_output_chain) && IsSimtDirectGmBoundary(node)) {
+      output_load_nodes.emplace_back(node);
+    }
+    if (IsSimtDirectGmBoundary(node) || af::ops::IsOps<af::ascir_op::ScalarData>(node)) {
+      AppendSimtGmTensorMetadata(node, simt, seen_gm_tensors);
+    }
+  }
+  for (size_t chain_index = 0UL; chain_index < chain_builds.size(); ++chain_index) {
+    if (keep_chain[chain_index]) {
+      simt.output_chains.emplace_back(std::move(chain_builds[chain_index].metadata));
+    }
+  }
+  if (simt.has_post_reduce) {
+    GE_ASSERT_TRUE(!output_root->outputs().empty(), "IndirectLoad post Reduce input producer has no output.");
+    simt.output_result_tensor_id = output_root->outputs()[0]->attr.mem.tensor_id;
+    simt.output_dtype = output_root->outputs()[0]->attr.dtype;
+    simt.output_chains.push_back(
+        {simt.output_node_names, simt.output_result_tensor_id, simt.output_result_tensor_id, simt.output_dtype, true});
+  } else {
+    GE_ASSERT_TRUE(!simt.output_chains.empty(), "IndirectLoad SIMT output chains are empty.");
+    if (simt.output_chains.size() == 1UL) {
+      simt.output_result_tensor_id = simt.output_chains[0].result_tensor_id;
+      simt.output_node_names = simt.output_chains[0].node_names;
+    }
+    simt.output_dtype = simt.output_chains.front().dtype;
+  }
+
+  NodePath index_load_nodes;
+  for (const auto &node : index_nodes) {
+    if (IsSimtDirectGmBoundary(node)) {
+      index_load_nodes.emplace_back(node);
+    }
+  }
+  std::unordered_map<std::string, SimtLoadAddressSource> output_sources;
+  for (const auto &node : output_load_nodes) {
+    auto source = SimtLoadAddressSource::kOutputOffset;
+    if (SimtLoadUsesZeroOffset(node)) {
+      source = SimtLoadAddressSource::kZeroOffset;
+    } else if (std::any_of(index_load_nodes.begin(), index_load_nodes.end(), [&node](const af::AscNodePtr &index_load) {
+                 return SimtLoadViewsMatch(node, index_load);
+               })) {
+      source = SimtLoadAddressSource::kIndexOffset;
+    }
+    output_sources.emplace(node->GetName(), source);
+  }
+
+  bool mixed_index_views = false;
+  GE_ASSERT_SUCCESS(BuildSimtPolicyMetadata(metadata.logical_view, index_nodes, static_cast<size_t>(metadata.axis),
+                                            metadata.access_info.can_use_simt_structured, mixed_index_views,
+                                            simt.policy));
+  for (const auto &node : index_load_nodes) {
+    simt.index_loads.push_back(
+        {node->GetName(),
+         SimtLoadUsesZeroOffset(node) ? SimtLoadAddressSource::kZeroOffset : SimtLoadAddressSource::kOutputOffset,
+         mixed_index_views, GetNodeOutputView(node)});
+  }
+  const bool use_output_logical_offset = !simt.has_post_reduce;
+  for (const auto &node : output_load_nodes) {
+    simt.output_loads.push_back(
+        {node->GetName(), output_sources.at(node->GetName()), use_output_logical_offset, GetNodeOutputView(node)});
+  }
+  return af::SUCCESS;
+}
+}  // namespace
+
+af::Status FinalizeLoweringMetadata(const af::AscNodePtr &node, bool &is_supported) {
+  is_supported = false;
+  GE_ASSERT_NOTNULL(node);
+  const auto template_id = ::ascir::GetTemplateIdOrDefault(*node);
+  GE_ASSERT_TRUE(
+      template_id == ::ascir::TemplateId::kIndirectLoadSimd || template_id == ::ascir::TemplateId::kIndirectLoadSimt,
+      "IndirectLoad lowering metadata only supports SIMD/SIMT, node = %s", node->GetNamePtr());
+  IndirectLoadLoweringMetadata metadata;
+  GE_ASSERT_SUCCESS(GetTemplateLogicalView(node, metadata.logical_view));
+  GE_ASSERT_SUCCESS(AnalyzeIndirectLoadAccess(node, metadata.logical_view, metadata.access_info));
+  TemplateAxes axes;
+  GE_ASSERT_SUCCESS(GetTemplateAxes(node, axes));
+  metadata.axis = metadata.access_info.axis;
+  metadata.outer_axis = axes.outer_axis;
+  Implementation implementation;
+  GE_ASSERT_SUCCESS(GetImplementation(node, implementation));
+  if (template_id == ::ascir::TemplateId::kIndirectLoadSimd) {
+    const bool strided = metadata.logical_view.input.kind != IndirectLoadLayoutKind::kDense ||
+                         metadata.logical_view.index.kind != IndirectLoadLayoutKind::kDense;
+    metadata.simd.fallback = strided                                        ? SimdFallback::kStrided
+                             : implementation == Implementation::kGatherApi ? SimdFallback::kGatherApi
+                                                                            : SimdFallback::kRegisterGather;
+    metadata.simd.try_embedding =
+        implementation == Implementation::kDefault && metadata.access_info.can_use_simd_embedding;
+  } else {
+    if (metadata.logical_view.input.sizes.size() >= 64UL) {
+      GELOGI("[IndirectLoad] Reject SIMT lowering metadata for node[%s]: rank[%zu] must be smaller than 64.",
+             node->GetNamePtr(), metadata.logical_view.input.sizes.size());
+      return af::SUCCESS;
+    }
+    GE_ASSERT_SUCCESS(BuildSimtLoweringMetadata(node, metadata));
+    GE_ASSERT_SUCCESS(ValidateSimtOutputPlan(metadata.simt));
+  }
+  GE_ASSERT_SUCCESS(SetIndirectLoadAccessInfo(node, metadata.access_info));
+  GE_ASSERT_SUCCESS(SetLoweringMetadata(node, metadata));
+  is_supported = true;
   return af::SUCCESS;
 }
 

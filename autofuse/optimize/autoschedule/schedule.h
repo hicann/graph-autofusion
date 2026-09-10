@@ -43,7 +43,6 @@ struct TilingCase {
 
 struct IndirectLoadInfo {
   bool active = false;
-  std::vector<af::AscNodePtr> aligned_strided_path;
   ascgen_utils::indirect_load::TemplateAxes axes;
 };
 
