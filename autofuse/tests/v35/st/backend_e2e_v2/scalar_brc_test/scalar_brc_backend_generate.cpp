@@ -63,6 +63,8 @@ TEST_F(TestBackendScalarBrcE2e, ScalarBrcE2eCodegen) {
     EXPECT_EQ(optimizer.Optimize(graph, fused_schedule_result), 0);
     codegen::CodegenResult result;
     EXPECT_EQ(codegen.Generate(shape_info, fused_schedule_result, result), 0);
+    EXPECT_EQ(result.tiling.find("local_3_actual_size"), std::string::npos);
+    EXPECT_NE(result.tiling.find("z0z1t_size"), std::string::npos);
     kernel_file << tilig_stub << RemoveSubDirInclude(result.kernel);
     tiling_file << result.tiling;
     tiling_data_file << result.tiling_data;

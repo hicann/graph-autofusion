@@ -41,6 +41,7 @@ struct NodeDetail {
   Expr gm_stride{CreateExpr(0)};
   Expr ub_stride{CreateExpr(0)};
   ascir_param::CastNodeParams cast_node_params;
+  ascir_param::BroadcastNodeParams broadcast_node_params;
   ascir_param::CompareNodeParams compare_node_params;
   ascir_param::WhereNodeParams where_node_params;
   ascir_param::UnaryBitWidthChangeNodeParams unary_bitwidth_change_node_params;

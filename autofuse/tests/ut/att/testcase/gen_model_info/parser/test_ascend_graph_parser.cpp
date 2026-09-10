@@ -17,6 +17,7 @@
 #define private public
 #include "expr_gen/generate_tiling_expr.h"
 #include "parser/ascend_graph_parser.h"
+#include "parser/specific_params_builder.h"
 #undef private
 #include "tests/ut/att/utils/graph_construct_utils.h"
 
@@ -93,6 +94,38 @@ Status BuildReduceAscendGraphND(AscGraph &graph) {
 }  // namespace af
 namespace att {
 namespace {
+
+TEST(SpecificParamsBuilderTest, FillBroadcastParamsCopiesPayloadToNodeInfo) {
+  af::AscGraph graph("test_graph");
+  af::ascir_op::Broadcast broadcast_op("broadcast");
+  graph.AddNode(broadcast_op);
+  auto node = graph.FindNode("broadcast");
+  ASSERT_NE(node, nullptr);
+
+  auto params = std::make_shared<ascir_param::AscirNodeParams>();
+  params->api_name = "Broadcast";
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+  ascir_param::BroadcastNodeParams broadcast;
+  broadcast.valid = true;
+  broadcast.is_scalar = true;
+  broadcast.duplicate_count = ge::Symbol(8);
+  broadcast.src_shape = {{ge::Symbol(1), ascir_param::ParamExprRole::kSemantic},
+                         {ge::Symbol(8), ascir_param::ParamExprRole::kActualSize}};
+  broadcast.dst_shape = {{ge::Symbol(4), ascir_param::ParamExprRole::kActualSize},
+                         {ge::Symbol(8), ascir_param::ParamExprRole::kActualSize}};
+  params->specific_params = broadcast;
+  ASSERT_TRUE(node->GetOpDesc()->SetExtAttr("AscirNodeParams", params));
+
+  NodeInfo node_info;
+  node_info.name = "broadcast";
+  node_info.node_type = "Broadcast";
+  ASSERT_EQ(FillSpecificParams(node, node_info), af::SUCCESS);
+  EXPECT_TRUE(node_info.broadcast_node_params.valid);
+  EXPECT_TRUE(node_info.broadcast_node_params.is_scalar);
+  EXPECT_EQ(node_info.broadcast_node_params.duplicate_count, ge::Symbol(8));
+  EXPECT_EQ(node_info.broadcast_node_params.src_shape[0].expr, ge::Symbol(1));
+  EXPECT_EQ(node_info.broadcast_node_params.dst_shape[1].role, ascir_param::ParamExprRole::kActualSize);
+}
 ascir::FusedScheduledResult BuildGatherReduceScheduleResult(const af::AscGraph &gather_graph,
                                                             const af::AscGraph &reduce_graph,
                                                             const bool enable_group_parallel) {

@@ -38,6 +38,13 @@ af::Status FillCastParams(const ascir_param::AscirNodeParams &params, NodeInfo &
   return af::SUCCESS;
 }
 
+af::Status FillBroadcastParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
+  const auto *broadcast_params = ascir_param::GetSpecificParams<ascir_param::BroadcastNodeParams>(params);
+  GE_ASSERT_NOTNULL(broadcast_params, "Broadcast specific params is null, node[%s].", node_info.name.c_str());
+  node_info.broadcast_node_params = *broadcast_params;
+  return af::SUCCESS;
+}
+
 af::Status FillCompareParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
   const auto *compare_params = ascir_param::GetSpecificParams<ascir_param::CompareNodeParams>(params);
   GE_ASSERT_NOTNULL(compare_params, "Compare specific params is null, node[%s].", node_info.name.c_str());
@@ -86,6 +93,9 @@ af::Status FillSpecificParams(const af::AscNodePtr &ge_node, NodeInfo &node_info
   }
   if (node_info.node_type == kCast) {
     return FillCastParams(*params, node_info);
+  }
+  if (node_info.node_type == kBroadcast) {
+    return FillBroadcastParams(*params, node_info);
   }
   if (node_info.node_type == kGe || node_info.node_type == kEq || node_info.node_type == kNe ||
       node_info.node_type == kGt || node_info.node_type == kLe || node_info.node_type == kLt) {
