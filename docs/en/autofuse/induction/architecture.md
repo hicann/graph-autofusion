@@ -148,5 +148,5 @@ The automatic fusion feature is currently only supported on the following produc
 
 ## Related Materials
 
-- [AutoFuse Overview](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/programug/graphdevg/autofuse_1_0000.html)
+- [AutoFuse Overview](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/programug/graphdevg/docs/zh/user_guides/graph_dev/autofuse/overview.md)
 - [Autofuse Introduction and Quick Start](../../../../autofuse/README.md)
