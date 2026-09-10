@@ -574,7 +574,12 @@ bool InitKernelResolvedFuncs(KernelInfos &kernelInfos) {
       bindMap.size(), aicItor != bindMap.end(), aivItor != bindMap.end(), capBits.earlyStartWaitFlag,
       capBits.earlyStartSetFlag, capBits.disableDcci, capBits.disableScheMode, capBits.blockDimScaleUp);
   if (capBits.disableScheMode) {
+    const bool originScheModeOn = kernelInfos.isScheModeOn;
     kernelInfos.isScheModeOn = false;
+    SK_LOGI(
+        "Disable ScheMode by kernel cap, funcName=%s, cap=0x%lx, originIsScheModeOn=%d, "
+        "currentIsScheModeOn=%d",
+        kernelInfos.funcName.c_str(), kernelInfos.cap, originScheModeOn, kernelInfos.isScheModeOn);
   }
   kernelInfos.resolvedNum = 0;
   for (size_t i = 0; i < K_MAX_SPLIT_BIN_COUNT; ++i) {
