@@ -138,6 +138,19 @@ Status GetNodeOutputDtype(const NodePtr &node, DataType &dtype) {
   return af::SUCCESS;
 }
 
+Status SetNodeOutputDtype(const NodePtr &node, DataType dtype) {
+  const auto asc_node = std::dynamic_pointer_cast<af::AscNode>(node);
+  GE_ASSERT_NOTNULL(asc_node);
+  GE_ASSERT_TRUE(!asc_node->outputs().empty());
+  asc_node->outputs[0].attr.dtype = dtype;
+  const auto op_desc = node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  const auto output_desc = op_desc->MutableOutputDesc(0);
+  GE_ASSERT_NOTNULL(output_desc);
+  output_desc->SetDataType(dtype);
+  return af::SUCCESS;
+}
+
 Status DelNode(AscGraph &asc_graph, const NodePtr &node) {
   const auto in_data_anchor = node->GetInDataAnchor(0);
   GE_ASSERT_NOTNULL(in_data_anchor);
@@ -578,6 +591,7 @@ Status IsNeedInsertCastAfterLoad(const NodePtr &node, bool &is_need_insert_cast)
   GE_ASSERT_SUCCESS(GetPeerInNodes(node, peer_in_nodes, 0));
   if (IsNodeTypeInPeerInNodes(af::ascir_op::Cast::Type, peer_in_nodes) ||
       IsNodeTypeInPeerInNodes(af::ascir_op::Store::Type, peer_in_nodes) ||
+      IsNodeTypeInPeerInNodes(af::ascir_op::Transpose::Type, peer_in_nodes) ||
       !(output_tensor_desc->GetDataType() == DT_FLOAT16 || output_tensor_desc->GetDataType() == DT_BF16)) {
     return af::SUCCESS;
   }
@@ -614,7 +628,8 @@ Status IsNeedInsertCastBeforeOther(const NodePtr &other_node, bool &need_insert,
     DataType peer_dtype;
     GE_ASSERT_SUCCESS(GetNodeOutputDtype(peer_out_node, peer_dtype));
     const auto &type = peer_out_node->GetType();
-    if (type == af::ascir_op::Cast::Type || type == af::ascir_op::Load::Type || type == af::ascir_op::Gather::Type) {
+    if (type == af::ascir_op::Cast::Type || type == af::ascir_op::Load::Type || type == af::ascir_op::Gather::Type ||
+        type == af::ascir_op::Transpose::Type) {
       if (IsLowPrecisionDataType(peer_dtype)) {
         need_insert = true;
         input_idxs.push_back(static_cast<int32_t>(idx));
@@ -654,6 +669,35 @@ Status IsNeedInsertCastBeforeStore(const NodePtr &store_node, bool &need_insert,
     return af::SUCCESS;
   }
   need_insert = true;
+  return af::SUCCESS;
+}
+
+Status TryInsertCastBeforeTransposeForStore(AscGraph &asc_graph, const NodePtr &store_node,
+                                            const NodePtr &transpose_node, DataType target_dtype, bool &inserted) {
+  inserted = false;
+  std::vector<NodePtr> consumers;
+  GE_ASSERT_SUCCESS(GetPeerInNodes(transpose_node, consumers, 0));
+  for (const auto &consumer : consumers) {
+    DataType consumer_dtype;
+    GE_ASSERT_SUCCESS(GetNodeOutputDtype(consumer, consumer_dtype));
+    if (consumer->GetType() != af::ascir_op::Store::Type || consumer_dtype != target_dtype) {
+      return af::SUCCESS;
+    }
+  }
+  NodePtr transpose_input;
+  GE_ASSERT_SUCCESS(GetPeerOutNode(transpose_node, transpose_input, 0));
+  DataType transpose_input_dtype;
+  GE_ASSERT_SUCCESS(GetNodeOutputDtype(transpose_input, transpose_input_dtype));
+  if (!IsHighPrecisionDataType(transpose_input_dtype)) {
+    return af::SUCCESS;
+  }
+  GE_ASSERT_SUCCESS(InsertCastBeforeNode(asc_graph, transpose_node, true, false, {0}));
+  NodePtr cast_node;
+  GE_ASSERT_SUCCESS(GetPeerOutNode(transpose_node, cast_node, 0));
+  GE_ASSERT_SUCCESS(SetNodeOutputDtype(cast_node, target_dtype));
+  GE_ASSERT_SUCCESS(SetNodeOutputDtype(transpose_node, target_dtype));
+  inserted = true;
+  GELOGD("Moved downcast before Transpose[%s] for Store[%s].", transpose_node->GetNamePtr(), store_node->GetNamePtr());
   return af::SUCCESS;
 }
 using TypeToNodesMap = std::unordered_map<std::string, std::vector<NodePtr>>;
@@ -717,6 +761,9 @@ Status ProcessLoadGatherNodes(AscGraph &asc_graph, const std::vector<NodePtr> &n
 
 Status ProcessOtherComputeNodes(AscGraph &asc_graph, const std::vector<NodePtr> &nodes) {
   for (const auto &node : nodes) {
+    if (node->GetType() == af::ascir_op::Transpose::Type) {
+      continue;
+    }
     bool is_need = false;
     std::vector<int32_t> input_idxs;
     GE_ASSERT_SUCCESS(IsNeedInsertCastBeforeOther(node, is_need, input_idxs));
@@ -732,6 +779,16 @@ Status ProcessStoreNodes(AscGraph &asc_graph, const std::vector<NodePtr> &nodes)
     bool is_need = false;
     bool is_increase = true;
     GE_ASSERT_SUCCESS(IsNeedInsertCastBeforeStore(node, is_need, is_increase));
+    NodePtr peer_out_node;
+    GE_ASSERT_SUCCESS(GetPeerOutNode(node, peer_out_node, 0));
+    const auto store_dtype = node->GetOpDesc()->GetOutputDesc(0).GetDataType();
+    if (IsLowPrecisionDataType(store_dtype) && peer_out_node->GetType() == af::ascir_op::Transpose::Type) {
+      bool inserted = false;
+      GE_ASSERT_SUCCESS(TryInsertCastBeforeTransposeForStore(asc_graph, node, peer_out_node, store_dtype, inserted));
+      if (inserted) {
+        continue;
+      }
+    }
     GE_ASSERT_SUCCESS(InsertCastBeforeNode(asc_graph, node, is_need, is_increase, {0}));
   }
   return af::SUCCESS;

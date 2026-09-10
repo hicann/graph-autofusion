@@ -249,8 +249,10 @@ Status GenLoadToGenNddmaNode(const af::AscNodePtr &node_load) {
 }
 
 Status UnAlignmentStrategy::GetCurrentNodeContinuousTailAxisNum(const af::AscNodePtr &node,
-                                                                uint32_t &continuous_tail_axis_num) {
+                                                                uint32_t &continuous_tail_axis_num,
+                                                                uint32_t &discontinuous_axis_num) {
   continuous_tail_axis_num = 0;
+  uint32_t current_discontinuous_axis_num = 0;
   auto &output_attr = node->outputs[0].attr;
   const auto &output_vec_axis = output_attr.vectorized_axis;
   af::Expression inner_repeat = af::sym::kSymbolOne;
@@ -272,17 +274,26 @@ Status UnAlignmentStrategy::GetCurrentNodeContinuousTailAxisNum(const af::AscNod
       // 向量化轴的stride为0继续合轴，不更新inner_repeat和inner_stride
       continuous_tail_axis_num++;
     } else {
-      break;
+      // 出现第二根非连续轴的时候退出，第一根不连续轴用Compact模式处理
+      if (current_discontinuous_axis_num < discontinuous_axis_num) {
+        inner_repeat = repeat;
+        inner_stride = stride;
+        continuous_tail_axis_num++;
+        current_discontinuous_axis_num++;
+      } else {
+        break;
+      }
     }
   }
   return af::SUCCESS;
 }
 
 Status UnAlignmentStrategy::GetNodeContinuousTailAxisNumByStore(const af::AscNodePtr &node,
-                                                                uint32_t &continuous_tail_axis_num) {
+                                                                uint32_t &continuous_tail_axis_num,
+                                                                uint32_t &discontinuous_axis_num) {
   continuous_tail_axis_num = UINT32_MAX;
   if (af::ops::IsOps<af::ascir_op::Store>(node)) {
-    GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, continuous_tail_axis_num));
+    GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, continuous_tail_axis_num, discontinuous_axis_num));
     return af::SUCCESS;
   }
   for (size_t out_idx = 0U; out_idx < node->GetAllOutDataAnchorsSize(); out_idx++) {
@@ -297,11 +308,13 @@ Status UnAlignmentStrategy::GetNodeContinuousTailAxisNumByStore(const af::AscNod
                        out_idx, in_idx);
       if (af::ops::IsOps<af::ascir_op::Store>(out_node)) {
         uint32_t store_continuous_axis_num = 0;
-        GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(out_node, store_continuous_axis_num));
+        GE_ASSERT_SUCCESS(
+            GetCurrentNodeContinuousTailAxisNum(out_node, store_continuous_axis_num, discontinuous_axis_num));
         continuous_tail_axis_num = std::min(continuous_tail_axis_num, store_continuous_axis_num);
       } else {
         uint32_t out_node_continuous_axis_num = 0;
-        GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByStore(out_node, out_node_continuous_axis_num));
+        GE_ASSERT_SUCCESS(
+            GetNodeContinuousTailAxisNumByStore(out_node, out_node_continuous_axis_num, discontinuous_axis_num));
         continuous_tail_axis_num = std::min(continuous_tail_axis_num, out_node_continuous_axis_num);
       }
     }
@@ -310,10 +323,11 @@ Status UnAlignmentStrategy::GetNodeContinuousTailAxisNumByStore(const af::AscNod
 }
 
 Status UnAlignmentStrategy::GetNodeContinuousTailAxisNumByLoad(const af::AscNodePtr &node,
-                                                               uint32_t &continuous_tail_axis_num) {
+                                                               uint32_t &continuous_tail_axis_num,
+                                                               uint32_t &discontinuous_axis_num) {
   continuous_tail_axis_num = UINT32_MAX;
   if (af::ops::IsOps<af::ascir_op::Load>(node)) {
-    GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, continuous_tail_axis_num));
+    GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, continuous_tail_axis_num, discontinuous_axis_num));
     return af::SUCCESS;
   }
   for (size_t in_idx = 0U; in_idx < node->GetAllInDataAnchorsSize(); in_idx++) {
@@ -326,16 +340,17 @@ Status UnAlignmentStrategy::GetNodeContinuousTailAxisNumByLoad(const af::AscNode
                      in_idx);
     if (af::ops::IsOps<af::ascir_op::Load>(in_node)) {
       uint32_t load_continuous_axis_num = 0;
-      GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(in_node, load_continuous_axis_num));
+      GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(in_node, load_continuous_axis_num, discontinuous_axis_num));
       continuous_tail_axis_num = std::min(continuous_tail_axis_num, load_continuous_axis_num);
     } else if (af::ops::IsOps<af::ascir_op::Broadcast>(node)) {
       // transpose模板中出现的brc节点的输入一定是scalar，向量化轴的对齐按照brc节点本身标注的stride信息进行。
       uint32_t load_continuous_axis_num = 0;
-      GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, load_continuous_axis_num));
+      GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, load_continuous_axis_num, discontinuous_axis_num));
       continuous_tail_axis_num = std::min(continuous_tail_axis_num, load_continuous_axis_num);
     } else {
       uint32_t in_node_continuous_axis_num = 0;
-      GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByLoad(in_node, in_node_continuous_axis_num));
+      GE_ASSERT_SUCCESS(
+          GetNodeContinuousTailAxisNumByLoad(in_node, in_node_continuous_axis_num, discontinuous_axis_num));
       continuous_tail_axis_num = std::min(continuous_tail_axis_num, in_node_continuous_axis_num);
     }
   }
@@ -431,6 +446,8 @@ Status UnAlignmentStrategy::ModifyTransposeFusionVectorizedStrides(af::AscGraph 
   // 收集 Transpose 前序节点
   std::set<af::AscNodePtr> transpose_pre_nodes;
   GE_ASSERT_SUCCESS(CollectTransposePreNodes(graph, transpose_pre_nodes));
+  // ub-transpose模板：Compact模式拷贝，遇到第二根不连续轴时完成连续轴收集
+  uint32_t discontinuous_axis_num = transpose_pre_nodes.empty() ? 0 : 1;
 
   for (const auto &node : graph.GetAllNodes()) {
     if (af::ops::IsOps<af::ascir_op::Data>(node) || af::ops::IsOps<af::ascir_op::Scalar>(node) ||
@@ -442,10 +459,10 @@ Status UnAlignmentStrategy::ModifyTransposeFusionVectorizedStrides(af::AscGraph 
     // 根据节点类型选择不同的连续轴计算策略
     if (!transpose_pre_nodes.empty() && transpose_pre_nodes.find(node) != transpose_pre_nodes.end()) {
       // Transpose前序节点：按 Load 轴判断
-      GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByLoad(node, continuous_tail_axis_num));
+      GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByLoad(node, continuous_tail_axis_num, discontinuous_axis_num));
     } else {
       // Transpose及后续节点或无Transpose：按 Store 轴判断
-      GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByStore(node, continuous_tail_axis_num));
+      GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByStore(node, continuous_tail_axis_num, discontinuous_axis_num));
     }
     // 如果是ub-Transpose模板，则可以走Compact模式搬运，连续轴数量调整为2。
     // 实际上nddma模板也可以走Compact模式，但是codegen目前只能判断显式Transpose节点，暂时不放开。
