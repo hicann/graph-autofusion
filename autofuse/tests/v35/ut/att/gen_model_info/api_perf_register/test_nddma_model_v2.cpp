@@ -172,6 +172,105 @@ TEST(NddmaModelV2, UsesInnerToOuterFormulaOrderForTwoDimensions) {
   EXPECT_TRUE(result.cycles.IsValid());
 }
 
+TEST(NddmaModelV2, UsesNg2ForAscendingInputStridesAndUbContiguousOutput) {
+  NddmaDescriptorInfo descriptor;
+  // Descriptor is effective outer -> inner; normalized order is [N, M]/[is1, is2]/[1, N].
+  descriptor.output_dims = {CreateExpr(63), CreateExpr(2)};
+  descriptor.input_strides = {CreateExpr(1), CreateExpr(2)};
+  descriptor.output_strides = {CreateExpr(2), CreateExpr(1)};
+  descriptor.vectorized_axis = {1, 0};
+  NddmaModelResult result;
+
+  ASSERT_EQ(EvaluateNddmaModel(descriptor, "int8", CreateExpr(2), result), af::SUCCESS);
+  ASSERT_TRUE(result.selected);
+  EXPECT_EQ(result.model_name, "NDDMA_ND_MULTICORE_NG2");
+  EXPECT_NEAR(GetConstCycles(result.cycles), 210.58945015938997, 1e-6);
+}
+
+TEST(NddmaModelV2, ReproducesExpectedTransposeEstimate) {
+  NddmaDescriptorInfo descriptor;
+  descriptor.output_dims = {CreateExpr(128), CreateExpr(128)};
+  descriptor.input_strides = {CreateExpr(1), CreateExpr(1024)};
+  descriptor.output_strides = {CreateExpr(128), CreateExpr(1)};
+  descriptor.vectorized_axis = {1, 0};
+  NddmaModelResult result;
+
+  ASSERT_EQ(EvaluateNddmaModel(descriptor, "float16", CreateExpr(64), result), af::SUCCESS);
+  ASSERT_TRUE(result.selected);
+  EXPECT_EQ(result.model_name, "NDDMA_ND_MULTICORE_NG2");
+  EXPECT_NEAR(GetConstCycles(result.cycles), 6331.917846866325, 1e-3);
+}
+
+TEST(NddmaModelV2, SelectsNg2ForSymbolicTilingDimensions) {
+  NddmaDescriptorInfo descriptor;
+  descriptor.output_dims = {CreateExpr("m"), CreateExpr("n")};
+  descriptor.input_strides = {CreateExpr(1), CreateExpr(1024)};
+  descriptor.output_strides = {CreateExpr("n"), CreateExpr(1)};
+  descriptor.vectorized_axis = {1, 0};
+  NddmaModelResult result;
+
+  ASSERT_EQ(EvaluateNddmaModel(descriptor, "float16", CreateExpr(64), result), af::SUCCESS);
+  ASSERT_TRUE(result.selected);
+  EXPECT_EQ(result.model_name, "NDDMA_ND_MULTICORE_NG2");
+  EXPECT_TRUE(result.cycles.IsValid());
+}
+
+TEST(NddmaModelV2, SelectsNg2ForAlignedSymbolicOutputStride) {
+  const Expr m = CreateExpr("m");
+  const Expr n = CreateExpr("n");
+  const Expr aligned_n = CreateExpr(16) * af::sym::Ceiling(n / CreateExpr(16));
+  NddmaDescriptorInfo descriptor;
+  descriptor.output_dims = {m, n};
+  descriptor.input_strides = {CreateExpr(1), CreateExpr(1024)};
+  descriptor.output_strides = {aligned_n, CreateExpr(1)};
+  descriptor.vectorized_axis = {1, 0};
+  NddmaModelResult result;
+
+  ASSERT_EQ(EvaluateNddmaModel(descriptor, "float16", CreateExpr(64), result), af::SUCCESS);
+  ASSERT_TRUE(result.selected);
+  EXPECT_EQ(result.model_name, "NDDMA_ND_MULTICORE_NG2");
+  EXPECT_TRUE(result.cycles.IsValid());
+}
+
+TEST(NddmaModelV2, FallsBackForNegativeStaticNg2Multiplier) {
+  NddmaDescriptorInfo descriptor;
+  descriptor.output_dims = {CreateExpr(2), CreateExpr(2)};
+  descriptor.input_strides = {CreateExpr(1), CreateExpr(4)};
+  descriptor.output_strides = {CreateExpr(2), CreateExpr(1)};
+  descriptor.vectorized_axis = {1, 0};
+  NddmaModelResult result;
+
+  ASSERT_EQ(EvaluateNddmaModel(descriptor, "int64", CreateExpr(64), result), af::SUCCESS);
+  EXPECT_FALSE(result.selected);
+  EXPECT_EQ(result.fallback_reason, NddmaFallbackReason::kSchemaMismatch);
+}
+
+TEST(NddmaModelV2, UsesNg2WhenSingletonAxesArePresent) {
+  NddmaDescriptorInfo descriptor;
+  descriptor.output_dims = {CreateExpr(63), CreateExpr(1), CreateExpr(2)};
+  descriptor.input_strides = {CreateExpr(1), CreateExpr(1), CreateExpr(2)};
+  descriptor.output_strides = {CreateExpr(2), CreateExpr(1), CreateExpr(1)};
+  descriptor.vectorized_axis = {1, 2, 0};
+  NddmaModelResult result;
+
+  ASSERT_EQ(EvaluateNddmaModel(descriptor, "int8", CreateExpr(2), result), af::SUCCESS);
+  ASSERT_TRUE(result.selected);
+  EXPECT_EQ(result.model_name, "NDDMA_ND_MULTICORE_NG2");
+}
+
+TEST(NddmaModelV2, KeepsUnifiedModelWhenInputStridesAreNotAscending) {
+  NddmaDescriptorInfo descriptor;
+  descriptor.output_dims = {CreateExpr(63), CreateExpr(2)};
+  descriptor.input_strides = {CreateExpr(2), CreateExpr(1)};
+  descriptor.output_strides = {CreateExpr(2), CreateExpr(1)};
+  descriptor.vectorized_axis = {1, 0};
+  NddmaModelResult result;
+
+  ASSERT_EQ(EvaluateNddmaModel(descriptor, "int8", CreateExpr(2), result), af::SUCCESS);
+  ASSERT_TRUE(result.selected);
+  EXPECT_EQ(result.model_name, "NDDMA_ND_MULTICORE_V1");
+}
+
 TEST(NddmaModelV2, RejectsNonPositiveStaticOutputStride) {
   const auto descriptor = MakeDescriptor(CreateExpr(16), CreateExpr(1), CreateExpr(0));
   NddmaModelResult result;

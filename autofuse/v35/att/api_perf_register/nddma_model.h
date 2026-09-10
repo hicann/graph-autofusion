@@ -57,10 +57,15 @@ namespace att {
  *
  * D=1 时上述求和只有一个层级，即为 1D 模型；D=2～5 时逐层累加同一组
  * 参数，不复制或展开另一套多维系数。参数表保存 T1/H1/T2/H2、a1...c4。
+ * 对二维 [M,N]/[is2,is1]/[N,1] 且 is2 < is1 的转置类场景，选择
+ * NDDMA_ND_MULTICORE_NG2 特化模型。
  *
  * 静态和动态 shape：
  * - 两者使用同一组参数和同一公式；静态表达式直接折叠，动态 block_dim 生成一个 TernaryOp；
  * - 动态 is/os 保留符号 Min，输出 stride 修正项按统一公式保留符号表达式；
+ * - 符号化 tiling 维度仅排除静态确认的 unit 维度；对齐后的符号化 UB stride 等价性为 unknown 时保留 NG2 候选，
+ *   由后续静态非法值检查和运行时 tiling 约束保证模型安全；
+ * - NG2 乘子静态非正时回退 legacy，避免发出非法性能表达式；
  * - 静态非正 dim、负 input_stride、非正 output_stride、非法 dtype/schema 均记录原因并回退 legacy。
  *
  * 处理阶段：
