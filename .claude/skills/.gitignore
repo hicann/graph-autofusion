@@ -66,5 +66,6 @@ af-inductor-cv-validator/**/*.pyc
 !superkernel-stage-o-option-tuning/**
 superkernel-*/**/__pycache__/
 superkernel-*/**/*.pyc
+superkernel-*/**/*.pyo
 superkernel-*/**/.pytest_cache/
 !.gitignore
