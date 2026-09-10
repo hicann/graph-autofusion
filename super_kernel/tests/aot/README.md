@@ -1,7 +1,8 @@
 # SuperKernel AOT 主机侧测试
 
-本目录采用方案二（scheme 2）：从公开 API 进入完整 AOT 主机流程，以共享 Runtime/ACL stub
-提供外部模型和任务状态。ST 链接测试专用 `libascendsk_st.so`，该库使用与生产 `ascendsk`
+本目录包含 SuperKernel AOT 的单元测试（UT）和主机侧系统测试（ST）。
+ST 从公开 API 进入完整 AOT 主机流程，以共享 Runtime/ACL stub 提供外部模型和任务状态。
+ST 链接测试专用 `libascendsk_st.so`，该库使用与生产 `ascendsk`
 相同的 AOT 源码列表（包含 `sk_dump_json.cpp`）及编译、可见性、ABI 和链接加固配置。
 测试库不安装，不链接真实设备内核或 Runtime 库。
 
