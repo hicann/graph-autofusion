@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Run and seal incumbent/candidate x SK-off/SK-on mechanism profiles."""
 
 import argparse
@@ -36,10 +43,14 @@ def _profile_logs(profile):
 
 
 def _profile_environment(plan, profile):
-    return multistream_runner.lease_environment({
-        **plan["environment"],
-        **profile["environment_overrides"],
-    }, plan["device_ids"], plan["lease_root"])
+    return multistream_runner.lease_environment(
+        {
+            **plan["environment"],
+            **profile["environment_overrides"],
+        },
+        plan["device_ids"],
+        plan["lease_root"],
+    )
 
 
 def _validate_programs(value, label):
@@ -66,9 +77,17 @@ def _validate_programs(value, label):
 
 def validate_plan(value, *, require_fingerprint=True):
     required = {
-        "schema_version", "plan_id", "trial_id", "request_fingerprint",
-        "workspace_root", "artifact_root", "lease_root", "device_ids",
-        "environment", "profiles", "summary",
+        "schema_version",
+        "plan_id",
+        "trial_id",
+        "request_fingerprint",
+        "workspace_root",
+        "artifact_root",
+        "lease_root",
+        "device_ids",
+        "environment",
+        "profiles",
+        "summary",
     }
     if require_fingerprint:
         required.add("plan_fingerprint")
@@ -89,28 +108,46 @@ def validate_plan(value, *, require_fingerprint=True):
         or not device_ids
         or device_ids != sorted(device_ids)
         or len(device_ids) != len(set(device_ids))
-        or any(isinstance(item, bool) or not isinstance(item, int) or item < 0 for item in device_ids)
+        or any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+            for item in device_ids
+        )
     ):
         raise ValueError("device_ids must be sorted unique non-negative integers")
     environment = multistream_runner._validate_environment(value["environment"])
     profiles = value["profiles"]
-    if not isinstance(profiles, list) or [item.get("role") for item in profiles if isinstance(item, dict)] != list(ROLES):
+    if not isinstance(profiles, list) or [
+        item.get("role") for item in profiles if isinstance(item, dict)
+    ] != list(ROLES):
         raise ValueError(f"profiles must exactly follow {list(ROLES)}")
     normalized = []
     outputs = set()
     for index, profile in enumerate(profiles):
         label = f"profiles[{index}]"
         fields = {
-            "role", "argv", "validator_argv", "cwd", "timeout_seconds",
-            "validator_timeout_seconds", "environment_overrides", "program_files",
-            "required_artifacts", "manifest",
+            "role",
+            "argv",
+            "validator_argv",
+            "cwd",
+            "timeout_seconds",
+            "validator_timeout_seconds",
+            "environment_overrides",
+            "program_files",
+            "required_artifacts",
+            "manifest",
         }
         if set(profile) != fields:
             raise ValueError(f"{label} must contain exactly {sorted(fields)}")
         for timeout in ("timeout_seconds", "validator_timeout_seconds"):
-            if isinstance(profile[timeout], bool) or not isinstance(profile[timeout], (int, float)) or profile[timeout] <= 0:
+            if (
+                isinstance(profile[timeout], bool)
+                or not isinstance(profile[timeout], (int, float))
+                or profile[timeout] <= 0
+            ):
                 raise ValueError(f"{label}.{timeout} must be positive")
-        programs = _validate_programs(profile["program_files"], f"{label}.program_files")
+        programs = _validate_programs(
+            profile["program_files"], f"{label}.program_files"
+        )
         program_paths = {item["path"] for item in programs}
         argv = multistream_runner._validate_argv(profile["argv"], f"{label}.argv")
         validator = multistream_runner._validate_argv(
@@ -127,23 +164,29 @@ def validate_plan(value, *, require_fingerprint=True):
             multistream_runner._safe_relative(item, f"{label}.required_artifacts[]")
             for item in artifacts
         ]
-        manifest = multistream_runner._safe_relative(profile["manifest"], f"{label}.manifest")
+        manifest = multistream_runner._safe_relative(
+            profile["manifest"], f"{label}.manifest"
+        )
         role_outputs = artifacts + [manifest] + list(_profile_logs(profile).values())
         if len(role_outputs) != len(set(role_outputs)) or outputs & set(role_outputs):
             raise ValueError(f"{label} reuses an output path")
         outputs.update(role_outputs)
-        normalized.append({
-            **profile,
-            "argv": argv,
-            "validator_argv": validator,
-            "cwd": multistream_runner._safe_relative(profile["cwd"], f"{label}.cwd"),
-            "environment_overrides": multistream_runner._validate_environment(
-                profile["environment_overrides"]
-            ),
-            "program_files": programs,
-            "required_artifacts": artifacts,
-            "manifest": manifest,
-        })
+        normalized.append(
+            {
+                **profile,
+                "argv": argv,
+                "validator_argv": validator,
+                "cwd": multistream_runner._safe_relative(
+                    profile["cwd"], f"{label}.cwd"
+                ),
+                "environment_overrides": multistream_runner._validate_environment(
+                    profile["environment_overrides"]
+                ),
+                "program_files": programs,
+                "required_artifacts": artifacts,
+                "manifest": manifest,
+            }
+        )
     summary = multistream_runner._safe_relative(value["summary"], "summary")
     if summary in outputs:
         raise ValueError("summary collides with a profile output")
@@ -189,8 +232,13 @@ def _sealed(path, relative):
     }
 
 
-def validate_profile_manifest(value, plan, profile, artifact_root, *, require_passed=True):
-    if not isinstance(value, dict) or value.get("schema_version") != PROFILE_MANIFEST_SCHEMA:
+def validate_profile_manifest(
+    value, plan, profile, artifact_root, *, require_passed=True
+):
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != PROFILE_MANIFEST_SCHEMA
+    ):
         raise ValueError(f"profile role manifest must use {PROFILE_MANIFEST_SCHEMA}")
     expected = {
         "plan_id": plan["plan_id"],
@@ -205,7 +253,10 @@ def validate_profile_manifest(value, plan, profile, artifact_root, *, require_pa
             raise ValueError(f"profile role manifest {field} mismatch")
     if require_passed and value.get("status") != "passed":
         raise ValueError("profile role manifest is not passed")
-    for name, argv in (("command", profile["argv"]), ("validator", profile["validator_argv"])):
+    for name, argv in (
+        ("command", profile["argv"]),
+        ("validator", profile["validator_argv"]),
+    ):
         record = value.get(name)
         if not isinstance(record, dict) or record.get("argv") != argv:
             raise ValueError(f"profile role manifest {name} mismatch")
@@ -223,14 +274,21 @@ def validate_profile_manifest(value, plan, profile, artifact_root, *, require_pa
     for relative in required:
         path = _safe_output(artifact_root, relative, "profile sealed file")
         item = indexed.get(relative)
-        if not path.is_file() or item is None or item.get("size_bytes") != path.stat().st_size or item.get("file_fingerprint") != multistream_runner.file_fingerprint(path):
+        if (
+            not path.is_file()
+            or item is None
+            or item.get("size_bytes") != path.stat().st_size
+            or item.get("file_fingerprint") != multistream_runner.file_fingerprint(path)
+        ):
             raise ValueError(f"profile sealed file changed: {relative}")
     return value
 
 
 def _write_manifest(plan, profile, artifact_root, status, reason, records):
     sealed = []
-    for relative in profile["required_artifacts"] + list(_profile_logs(profile).values()):
+    for relative in profile["required_artifacts"] + list(
+        _profile_logs(profile).values()
+    ):
         path = _safe_output(artifact_root, relative, "profile output")
         if path.is_file():
             sealed.append(_sealed(path, relative))
@@ -244,8 +302,18 @@ def _write_manifest(plan, profile, artifact_root, status, reason, records):
         "status": status,
         "reason": reason,
         "environment": _profile_environment(plan, profile),
-        "command": records.get("command", {"argv": profile["argv"], "return_code": None, "timed_out": False}),
-        "validator": records.get("validator", {"argv": profile["validator_argv"], "return_code": None, "timed_out": False}),
+        "command": records.get(
+            "command",
+            {"argv": profile["argv"], "return_code": None, "timed_out": False},
+        ),
+        "validator": records.get(
+            "validator",
+            {
+                "argv": profile["validator_argv"],
+                "return_code": None,
+                "timed_out": False,
+            },
+        ),
         "sealed_files": sealed,
     }
     multistream_runner._atomic_write_json(
@@ -265,7 +333,9 @@ def _run_profile(plan, profile, workspace_root, artifact_root):
         raise ValueError(f"profile cwd does not exist: {profile['cwd']}")
     logs = _profile_logs(profile)
     all_outputs = profile["required_artifacts"] + list(logs.values())
-    paths = [_safe_output(artifact_root, item, "profile output") for item in all_outputs]
+    paths = [
+        _safe_output(artifact_root, item, "profile output") for item in all_outputs
+    ]
     if any(path.exists() for path in paths):
         raise ValueError(f"profile {profile['role']} has outputs without a manifest")
     for path in paths + [manifest_path]:
@@ -274,33 +344,62 @@ def _run_profile(plan, profile, workspace_root, artifact_root):
     environment = _profile_environment(plan, profile)
     try:
         records["command"] = multistream_runner._run_argv(
-            profile["argv"], cwd, environment,
+            profile["argv"],
+            cwd,
+            environment,
             _safe_output(artifact_root, logs["command_stdout"], "command stdout"),
             _safe_output(artifact_root, logs["command_stderr"], "command stderr"),
             profile["timeout_seconds"],
         )
     except OSError as error:
         return _write_manifest(
-            plan, profile, artifact_root, "failed", f"process_start_failed: {error}", records
+            plan,
+            profile,
+            artifact_root,
+            "failed",
+            f"process_start_failed: {error}",
+            records,
         )
     if records["command"]["return_code"] != 0 or records["command"]["timed_out"]:
-        return _write_manifest(plan, profile, artifact_root, "failed", "command_failed", records)
+        return _write_manifest(
+            plan, profile, artifact_root, "failed", "command_failed", records
+        )
     try:
         records["validator"] = multistream_runner._run_argv(
-            profile["validator_argv"], cwd, environment,
+            profile["validator_argv"],
+            cwd,
+            environment,
             _safe_output(artifact_root, logs["validator_stdout"], "validator stdout"),
             _safe_output(artifact_root, logs["validator_stderr"], "validator stderr"),
             profile["validator_timeout_seconds"],
         )
     except OSError as error:
         return _write_manifest(
-            plan, profile, artifact_root, "failed", f"validator_start_failed: {error}", records
+            plan,
+            profile,
+            artifact_root,
+            "failed",
+            f"validator_start_failed: {error}",
+            records,
         )
     if records["validator"]["return_code"] != 0 or records["validator"]["timed_out"]:
-        return _write_manifest(plan, profile, artifact_root, "failed", "validator_failed", records)
-    missing = [item for item, path in zip(profile["required_artifacts"], paths) if not path.is_file()]
+        return _write_manifest(
+            plan, profile, artifact_root, "failed", "validator_failed", records
+        )
+    missing = [
+        item
+        for item, path in zip(profile["required_artifacts"], paths)
+        if not path.is_file()
+    ]
     if missing:
-        return _write_manifest(plan, profile, artifact_root, "failed", f"required artifacts missing: {missing}", records)
+        return _write_manifest(
+            plan,
+            profile,
+            artifact_root,
+            "failed",
+            f"required artifacts missing: {missing}",
+            records,
+        )
     manifest = _write_manifest(plan, profile, artifact_root, "passed", None, records)
     return validate_profile_manifest(manifest, plan, profile, artifact_root)
 
@@ -308,12 +407,17 @@ def _run_profile(plan, profile, workspace_root, artifact_root):
 def _build_summary(plan, manifests, artifact_root):
     roles = {}
     for profile, manifest in zip(plan["profiles"], manifests):
-        manifest_path = _safe_output(artifact_root, profile["manifest"], "profile manifest")
+        manifest_path = _safe_output(
+            artifact_root, profile["manifest"], "profile manifest"
+        )
         roles[profile["role"]] = {
             "manifest": profile["manifest"],
-            "manifest_file_fingerprint": multistream_runner.file_fingerprint(manifest_path),
+            "manifest_file_fingerprint": multistream_runner.file_fingerprint(
+                manifest_path
+            ),
             "artifacts": [
-                item for item in manifest["sealed_files"]
+                item
+                for item in manifest["sealed_files"]
                 if item["path"] in profile["required_artifacts"]
             ],
         }
@@ -341,7 +445,9 @@ def validate_summary(summary_path, plan, artifact_root):
     if not isinstance(value, dict) or value.get("schema_version") != SUMMARY_SCHEMA:
         raise ValueError(f"four-profile summary must use {SUMMARY_SCHEMA}")
     actual = value.get("summary_fingerprint")
-    unsigned = {key: item for key, item in value.items() if key != "summary_fingerprint"}
+    unsigned = {
+        key: item for key, item in value.items() if key != "summary_fingerprint"
+    }
     if actual != multistream_runner.content_fingerprint(unsigned):
         raise ValueError("four-profile summary fingerprint mismatch")
     manifests = []
@@ -370,7 +476,9 @@ def run_plan(plan):
         manifest = _run_profile(plan, profile, workspace_root, artifact_root)
         manifests.append(manifest)
         if manifest["status"] != "passed":
-            raise ValueError(f"four-profile role failed: {profile['role']}: {manifest['reason']}")
+            raise ValueError(
+                f"four-profile role failed: {profile['role']}: {manifest['reason']}"
+            )
     summary = _build_summary(plan, manifests, artifact_root)
     multistream_runner._atomic_write_json(summary_path, summary)
     validate_summary(summary_path, plan, artifact_root)
@@ -390,7 +498,11 @@ def main(argv=None):
     check.add_argument("--summary", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        plan = validate_plan(json.loads(args.plan.read_text())) if hasattr(args, "plan") else None
+        plan = (
+            validate_plan(json.loads(args.plan.read_text()))
+            if hasattr(args, "plan")
+            else None
+        )
         if args.command == "freeze-plan":
             result = freeze_plan(json.loads(args.draft.read_text()))
             if args.out.exists():

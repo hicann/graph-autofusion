@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import csv
 import copy
 import hashlib
@@ -16,13 +23,13 @@ from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
-ADAPTATION_SCRIPTS = Path(__file__).resolve().parents[2] / "superkernel-runtime-common" / "scripts"
+ADAPTATION_SCRIPTS = (
+    Path(__file__).resolve().parents[2] / "superkernel-runtime-common" / "scripts"
+)
 sys.path.insert(0, str(ADAPTATION_SCRIPTS))
 
-import analyze_fusion_performance
-import artifact_contract
-import recommend_sk_strategy
-import structural_association
+import analyze_fusion_performance  # noqa: E402 - load sibling scripts after sys.path setup
+import artifact_contract  # noqa: E402 - load sibling scripts after sys.path setup
 
 
 CSV_FIELDS = [
@@ -68,13 +75,9 @@ def _row(task, stream, name, op_type, core, start, duration, scalar_ratio=0.0):
         "wait_us": 0,
         "block_num": 1,
         "mix_block_num": 0,
-        "aic_scalar_time_us": (
-            duration * scalar_ratio if "AI_CORE" in core else 0
-        ),
+        "aic_scalar_time_us": (duration * scalar_ratio if "AI_CORE" in core else 0),
         "aic_scalar_ratio": scalar_ratio if "AI_CORE" in core else 0,
-        "aiv_scalar_time_us": (
-            duration * scalar_ratio if "VECTOR" in core else 0
-        ),
+        "aiv_scalar_time_us": (duration * scalar_ratio if "VECTOR" in core else 0),
         "aiv_scalar_ratio": scalar_ratio if "VECTOR" in core else 0,
         "aic_icache_miss_rate": None,
         "aiv_icache_miss_rate": None,
@@ -275,7 +278,15 @@ def _configure_cube_vector_regression(artifacts, environment_evidence):
             row
             for start in (0, 30, 60)
             for row in (
-                _row(10, 1, "static_kernel_Vector_hash", "Vector", "AI_VECTOR_CORE", start, 10),
+                _row(
+                    10,
+                    1,
+                    "static_kernel_Vector_hash",
+                    "Vector",
+                    "AI_VECTOR_CORE",
+                    start,
+                    10,
+                ),
                 _row(11, 2, "static_kernel_Cube_hash", "Cube", "AI_CORE", start + 2, 8),
             )
         ],
@@ -353,7 +364,16 @@ def _configure_scalar_regression(artifacts, environment_evidence):
     _write_csv(
         artifacts["baseline_profile"],
         [
-            _row(10, 1, "static_kernel_GroupedMatmul_hash", "GroupedMatmul", "AI_CORE", start, 10, 0.25)
+            _row(
+                10,
+                1,
+                "static_kernel_GroupedMatmul_hash",
+                "GroupedMatmul",
+                "AI_CORE",
+                start,
+                10,
+                0.25,
+            )
             for start in (0, 30, 60)
         ],
     )
@@ -627,12 +647,9 @@ def _signed_analysis_report(overrides=None):
     if valid_decisions and (not overrides or "mapping_coverage" not in overrides):
         inventory = decisions
         exact_projected = sum(
-            item["mapping_confidence"] == "exact_projected_trace"
-            for item in inventory
+            item["mapping_confidence"] == "exact_projected_trace" for item in inventory
         )
-        ambiguous = sum(
-            item["mapping_confidence"] == "ambiguous" for item in inventory
-        )
+        ambiguous = sum(item["mapping_confidence"] == "ambiguous" for item in inventory)
         distribution = {}
         blocker_counts = {}
         for item in inventory:
@@ -664,15 +681,18 @@ def _signed_analysis_report(overrides=None):
                 "source_revision",
             )
         }
-        report["analysis_id"] = "analysis-" + hashlib.sha256(
-            json.dumps(
-                identity,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-                allow_nan=False,
-            ).encode("utf-8")
-        ).hexdigest()
+        report["analysis_id"] = (
+            "analysis-"
+            + hashlib.sha256(
+                json.dumps(
+                    identity,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+        )
     report.pop("analysis_content_fingerprint", None)
     report["analysis_content_fingerprint"] = hashlib.sha256(
         json.dumps(
@@ -749,7 +769,6 @@ def _signed_structural_report(overrides=None):
     return _signed_analysis_report(report)
 
 
-
 def _signed_exact_projected_trace_report(overrides=None):
     decision, action = _renderer_contract_pair()
     decision.update(
@@ -823,8 +842,7 @@ def _signed_exact_projected_trace_report(overrides=None):
         },
         "stream_role_mapping": {
             identity_key: {
-                str(step): {"profile:stream": step + 10}
-                for step in (1, 2, 3)
+                str(step): {"profile:stream": step + 10} for step in (1, 2, 3)
             }
         },
         "graph_alignment_proof": {
@@ -915,135 +933,137 @@ def _renderer_contract_pair(
 class ProfilerAnalysisTest(unittest.TestCase):
     def test_markdown_renderer_is_deterministic_complete_and_escaped(self):
         renderer = importlib.import_module("render_fusion_performance_report")
-        report = _signed_analysis_report({
-            "experiment_id": "exp|1",
-            "round_id": "S1-P1",
-            "analysis_agent_id": "agent-1",
-            "source_revision": "abc123",
-            "baseline_config_fingerprint": "baseline-config-fp",
-            "candidate_config_fingerprint": "candidate-config-fp",
-            "control_fingerprint": "control-fp",
-            "workload_fingerprint": "workload-fp",
-            "declared_change_set": {
-                "allowed_json_pointers": ["/superkernel/scope"],
-                "only_change_zh": "只修改本轮 scope。",
-            },
-            "thresholds": {
-                "min_relative_change_pct": 3.0,
-                "min_absolute_change_us": 1.0,
-                "min_occurrences": 3,
-            },
-            "per_sk_decisions": [
-                {
-                    "range_id": "range-b",
-                    "sk_id": "sk-b",
-                    "child_count": 2,
-                    "original": None,
-                    "sk_duration_us": None,
-                    "improvement_pct": None,
-                    "noise_threshold_pct": None,
-                    "classification": "insufficient_evidence",
-                    "classification_zh": "证据不足",
-                    "action": "reprofile",
-                    "mapping_method": None,
-                    "mapping_confidence": "diagnostic_only",
-                    "boundary": {
-                        "scope": "decoder.layer.1",
-                        "start_op": "C",
-                        "end_op": "D",
-                    },
-                    "identity": {
-                        "source_scope": "decoder.layer.1",
-                        "ordered_child_op_sequence": ["C", "D"],
-                    },
-                    "evidence_errors": [
-                        "missing|artifact",
-                        "baseline_mapping_missing",
-                    ],
+        report = _signed_analysis_report(
+            {
+                "experiment_id": "exp|1",
+                "round_id": "S1-P1",
+                "analysis_agent_id": "agent-1",
+                "source_revision": "abc123",
+                "baseline_config_fingerprint": "baseline-config-fp",
+                "candidate_config_fingerprint": "candidate-config-fp",
+                "control_fingerprint": "control-fp",
+                "workload_fingerprint": "workload-fp",
+                "declared_change_set": {
+                    "allowed_json_pointers": ["/superkernel/scope"],
+                    "only_change_zh": "只修改本轮 scope。",
                 },
-                {
-                    "range_id": "range-a|escaped",
-                    "sk_id": "sk-a",
-                    "child_count": 2,
-                    "original": {
-                        "occurrence_count": 4,
-                        "interval_us": {"p50": 10, "p90": 11, "mad": 0.5},
-                        "duration_sum_us": {
-                            "p50": 18,
-                            "p90": 19,
-                            "mad": 0.75,
+                "thresholds": {
+                    "min_relative_change_pct": 3.0,
+                    "min_absolute_change_us": 1.0,
+                    "min_occurrences": 3,
+                },
+                "per_sk_decisions": [
+                    {
+                        "range_id": "range-b",
+                        "sk_id": "sk-b",
+                        "child_count": 2,
+                        "original": None,
+                        "sk_duration_us": None,
+                        "improvement_pct": None,
+                        "noise_threshold_pct": None,
+                        "classification": "insufficient_evidence",
+                        "classification_zh": "证据不足",
+                        "action": "reprofile",
+                        "mapping_method": None,
+                        "mapping_confidence": "diagnostic_only",
+                        "boundary": {
+                            "scope": "decoder.layer.1",
+                            "start_op": "C",
+                            "end_op": "D",
                         },
-                        "example_occurrence": {
-                            "stream_ids": [1, 2],
-                            "stream_count": 2,
-                            "multi_stream_analysis": {
-                                "multi_stream_detected": True,
-                                "cube_vector_parallel_detected": True,
-                                "cube_vector_overlap_us": 4,
-                                "cube_vector_overlap_ratio": 0.4,
+                        "identity": {
+                            "source_scope": "decoder.layer.1",
+                            "ordered_child_op_sequence": ["C", "D"],
+                        },
+                        "evidence_errors": [
+                            "missing|artifact",
+                            "baseline_mapping_missing",
+                        ],
+                    },
+                    {
+                        "range_id": "range-a|escaped",
+                        "sk_id": "sk-a",
+                        "child_count": 2,
+                        "original": {
+                            "occurrence_count": 4,
+                            "interval_us": {"p50": 10, "p90": 11, "mad": 0.5},
+                            "duration_sum_us": {
+                                "p50": 18,
+                                "p90": 19,
+                                "mad": 0.75,
+                            },
+                            "example_occurrence": {
+                                "stream_ids": [1, 2],
+                                "stream_count": 2,
+                                "multi_stream_analysis": {
+                                    "multi_stream_detected": True,
+                                    "cube_vector_parallel_detected": True,
+                                    "cube_vector_overlap_us": 4,
+                                    "cube_vector_overlap_ratio": 0.4,
+                                },
                             },
                         },
+                        "sk_duration": {"p50": 12, "p90": 13, "mad": 0.25},
+                        "sk_duration_us": 12,
+                        "candidate_occurrence_count": 4,
+                        "improvement_pct": -20,
+                        "noise_threshold_pct": 3,
+                        "classification": "regressed",
+                        "classification_zh": "明确性能劣化",
+                        "action": "block",
+                        "action_blocker": (
+                            "prune_requires_exact_source_scope_boundary_mapping"
+                        ),
+                        "mapping_method": "source_scope_map",
+                        "mapping_confidence": "exact",
+                        "boundary": {
+                            "scope": "decoder.layer.0",
+                            "start_op": "A",
+                            "end_op": "B",
+                        },
+                        "identity": {
+                            "source_scope": "decoder.layer.0",
+                            "ordered_child_op_sequence": ["A", "B"],
+                        },
+                        "evidence_errors": [],
                     },
-                    "sk_duration": {"p50": 12, "p90": 13, "mad": 0.25},
-                    "sk_duration_us": 12,
-                    "candidate_occurrence_count": 4,
-                    "improvement_pct": -20,
-                    "noise_threshold_pct": 3,
-                    "classification": "regressed",
-                    "classification_zh": "明确性能劣化",
-                    "action": "block",
-                    "action_blocker": (
-                        "prune_requires_exact_source_scope_boundary_mapping"
-                    ),
-                    "mapping_method": "source_scope_map",
-                    "mapping_confidence": "exact",
-                    "boundary": {
-                        "scope": "decoder.layer.0",
-                        "start_op": "A",
-                        "end_op": "B",
+                ],
+                "scope_actions": [
+                    {
+                        "range_id": "range-b",
+                        "sk_id": "sk-b",
+                        "classification": "insufficient_evidence",
+                        "action": "reprofile",
+                        "source_scope": "decoder.layer.1",
+                        "boundary": {
+                            "scope": "decoder.layer.1",
+                            "start_op": "C",
+                            "end_op": "D",
+                        },
+                        "ordered_child_op_sequence": ["C", "D"],
+                        "interval_unproven": True,
                     },
-                    "identity": {
+                    {
+                        "range_id": "range-a|escaped",
+                        "sk_id": "sk-a",
+                        "classification": "regressed",
+                        "action": "block",
                         "source_scope": "decoder.layer.0",
+                        "boundary": {
+                            "scope": "decoder.layer.0",
+                            "start_op": "A",
+                            "end_op": "B",
+                        },
                         "ordered_child_op_sequence": ["A", "B"],
+                        "interval_unproven": True,
                     },
-                    "evidence_errors": [],
-                },
-            ],
-            "scope_actions": [
-                {
-                    "range_id": "range-b",
-                    "sk_id": "sk-b",
-                    "classification": "insufficient_evidence",
-                    "action": "reprofile",
-                    "source_scope": "decoder.layer.1",
-                    "boundary": {
-                        "scope": "decoder.layer.1",
-                        "start_op": "C",
-                        "end_op": "D",
-                    },
-                    "ordered_child_op_sequence": ["C", "D"],
-                    "interval_unproven": True,
-                },
-                {
-                    "range_id": "range-a|escaped",
-                    "sk_id": "sk-a",
-                    "classification": "regressed",
-                    "action": "block",
-                    "source_scope": "decoder.layer.0",
-                    "boundary": {
-                        "scope": "decoder.layer.0",
-                        "start_op": "A",
-                        "end_op": "B",
-                    },
-                    "ordered_child_op_sequence": ["A", "B"],
-                    "interval_unproven": True,
-                },
-            ],
-            "diagnostic_hypotheses": [],
-            "recommended_experiments": [],
-            "blockers": ["缺少 evidence|artifact"],
-            "next_agent_guidance_zh": "只执行已接受的单变量实验。",
-        })
+                ],
+                "diagnostic_hypotheses": [],
+                "recommended_experiments": [],
+                "blockers": ["缺少 evidence|artifact"],
+                "next_agent_guidance_zh": "只执行已接受的单变量实验。",
+            }
+        )
 
         first = renderer.render_report(report)
         second = renderer.render_report(json.loads(json.dumps(report)))
@@ -1089,9 +1109,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             "blocker/evidence",
         ):
             self.assertIn(column, first)
-        self.assertLess(
-            first.index(r"range\-a\|escaped"), first.index(r"range\-b")
-        )
+        self.assertLess(first.index(r"range\-a\|escaped"), first.index(r"range\-b"))
         self.assertIn("N/A", first)
         self.assertIn("missing\\|artifact", first)
         self.assertIn("baseline\\_mapping\\_missing", first)
@@ -1228,11 +1246,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 "per_sk_decisions[0].original.interval_us",
             ),
             (
-                {
-                    "per_sk_decisions": [
-                        {"original": {"duration_sum_us": "bad"}}
-                    ]
-                },
+                {"per_sk_decisions": [{"original": {"duration_sum_us": "bad"}}]},
                 "per_sk_decisions[0].original.duration_sum_us",
             ),
             (
@@ -1260,9 +1274,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     "per_sk_decisions": [
                         {
                             "original": {
-                                "example_occurrence": {
-                                    "multi_stream_analysis": []
-                                }
+                                "example_occurrence": {"multi_stream_analysis": []}
                             }
                         }
                     ]
@@ -1272,11 +1284,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             (
                 {
                     "per_sk_decisions": [
-                        {
-                            "original": {
-                                "example_occurrence": {"stream_ids": {"bad": 1}}
-                            }
-                        }
+                        {"original": {"example_occurrence": {"stream_ids": {"bad": 1}}}}
                     ]
                 },
                 "per_sk_decisions[0].original.example_occurrence.stream_ids",
@@ -1314,14 +1322,16 @@ class ProfilerAnalysisTest(unittest.TestCase):
             "mapping_confidence",
         ):
             with self.subTest(field=field):
-                report = _signed_analysis_report({
-                    "per_sk_decisions": [
-                        {
-                            field: {"malicious": "object"},
-                            "evidence_errors": ["baseline_mapping_missing"],
-                        }
-                    ]
-                })
+                report = _signed_analysis_report(
+                    {
+                        "per_sk_decisions": [
+                            {
+                                field: {"malicious": "object"},
+                                "evidence_errors": ["baseline_mapping_missing"],
+                            }
+                        ]
+                    }
+                )
                 with self.assertRaisesRegex(
                     ValueError, rf"per_sk_decisions\[0\]\.{field}"
                 ):
@@ -1333,11 +1343,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             {},
             {"boundary": {}},
             {"identity": {"ordered_child_op_sequence": []}},
-            {
-                "original": {
-                    "example_occurrence": {"multi_stream_analysis": {}}
-                }
-            },
+            {"original": {"example_occurrence": {"multi_stream_analysis": {}}}},
         ):
             with self.subTest(empty_fields=empty_fields):
                 decision = {
@@ -1353,16 +1359,8 @@ class ProfilerAnalysisTest(unittest.TestCase):
     def test_markdown_renderer_cli_controls_all_nested_schema_errors(self):
         renderer = importlib.import_module("render_fusion_performance_report")
         malformed_reports = (
-            {
-                "per_sk_decisions": [
-                    {"original": {"interval_us": "malicious"}}
-                ]
-            },
-            {
-                "per_sk_decisions": [
-                    {"original": {"duration_sum_us": ["malicious"]}}
-                ]
-            },
+            {"per_sk_decisions": [{"original": {"interval_us": "malicious"}}]},
+            {"per_sk_decisions": [{"original": {"duration_sum_us": ["malicious"]}}]},
             {
                 "per_sk_decisions": [
                     {
@@ -1441,14 +1439,16 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 "evidence_errors": ["baseline_mapping_missing"],
             }
         )
-        report = _signed_analysis_report({
-            "per_sk_decisions": [decision],
-            "scope_actions": [action],
-            "diagnostic_hypotheses": [],
-            "recommended_experiments": [],
-            "blockers": [payload, {"detail": payload}],
-            "next_agent_guidance_zh": payload,
-        })
+        report = _signed_analysis_report(
+            {
+                "per_sk_decisions": [decision],
+                "scope_actions": [action],
+                "diagnostic_hypotheses": [],
+                "recommended_experiments": [],
+                "blockers": [payload, {"detail": payload}],
+                "next_agent_guidance_zh": payload,
+            }
+        )
 
         first = renderer.render_report(report)
         second = renderer.render_report(json.loads(json.dumps(report)))
@@ -1502,9 +1502,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             report.pop(field)
             cases.append((report, field))
         for old_version in ("0.9", "1.0", "1.1"):
-            wrong_version = _signed_analysis_report(
-                {"schema_version": old_version}
-            )
+            wrong_version = _signed_analysis_report({"schema_version": old_version})
             cases.append((wrong_version, "schema_version"))
         wrong_hash = _signed_analysis_report()
         wrong_hash["analysis_content_fingerprint"] = "0" * 64
@@ -1561,6 +1559,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             "源码 offset，不能直接驱动 prune",
             rendered,
         )
+
     def test_schema_1_2_requires_all_structural_fields_without_synthesis(self):
         renderer = importlib.import_module("render_fusion_performance_report")
         for field in (
@@ -1584,7 +1583,8 @@ class ProfilerAnalysisTest(unittest.TestCase):
         rendered = renderer.render_report(_signed_exact_projected_trace_report())
 
         self.assertIn(
-            "kernel_projection_structural / exact_projected_trace", rendered.replace(r"\_", "_")
+            "kernel_projection_structural / exact_projected_trace",
+            rendered.replace(r"\_", "_"),
         )
         self.assertIn("仅性能分类；不可直接 prune", rendered)
 
@@ -1604,17 +1604,15 @@ class ProfilerAnalysisTest(unittest.TestCase):
         renderer = importlib.import_module("render_fusion_performance_report")
         identity = "device:0/model:48/sk:7"
         mutations = {
-            "alternative solution": lambda report: report[
-                "graph_alignment_proof"
-            ][identity]["alternative_solution_count_by_step"].update({"2": 1}),
-            "non-injective stream role": lambda report: report[
-                "stream_role_mapping"
-            ][identity]["1"].update({"profile:other": 11}),
-            "mapping fingerprint": lambda report: report[
-                "candidate_binding_evidence"
-            ]["occurrences"][0]["evidence_fingerprints"].update(
-                {"projection_mapping": "f" * 64}
-            ),
+            "alternative solution": lambda report: report["graph_alignment_proof"][
+                identity
+            ]["alternative_solution_count_by_step"].update({"2": 1}),
+            "non-injective stream role": lambda report: report["stream_role_mapping"][
+                identity
+            ]["1"].update({"profile:other": 11}),
+            "mapping fingerprint": lambda report: report["candidate_binding_evidence"][
+                "occurrences"
+            ][0]["evidence_fingerprints"].update({"projection_mapping": "f" * 64}),
             "fewer than three steps": lambda report: (
                 report["candidate_binding_evidence"]["occurrences"].pop(),
                 report["candidate_binding_evidence"]["summary"].update(
@@ -1633,9 +1631,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
     def test_projected_trace_report_allows_diagnostic_children_for_blocked_peer(self):
         renderer = importlib.import_module("render_fusion_performance_report")
         report = _signed_exact_projected_trace_report()
-        blocked = copy.deepcopy(
-            report["candidate_binding_evidence"]["occurrences"][0]
-        )
+        blocked = copy.deepcopy(report["candidate_binding_evidence"]["occurrences"][0])
         blocked["status"] = "blocked"
         blocked["process_identity"]["sk_id"] = 8
         blocked["blockers"] = ["kernel_projection_stream_assignment_ambiguous"]
@@ -1650,9 +1646,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
 
     def test_schema_1_2_mapping_enums_and_coverage_totals_are_closed(self):
         renderer = importlib.import_module("render_fusion_performance_report")
-        self.assertEqual(
-            renderer.SUPPORTED_SCHEMA_VERSIONS, {"1.2"}
-        )
+        self.assertEqual(renderer.SUPPORTED_SCHEMA_VERSIONS, {"1.2"})
         self.assertEqual(
             renderer.MAPPING_METHODS,
             {
@@ -1699,9 +1693,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             action="block",
             action_blocker="prune_requires_exact_source_scope_boundary_mapping",
         )
-        structural["scope_actions"][0].update(
-            classification="neutral", action="block"
-        )
+        structural["scope_actions"][0].update(classification="neutral", action="block")
         structural = _signed_analysis_report(structural)
         self.assertIn("仅性能分类", renderer.render_report(structural))
 
@@ -1763,7 +1755,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 "scope_actions": [source_action],
             }
         )
-        self.assertIn("## Scope 保留与裁剪", renderer.render_report(source_with_interval))
+        self.assertIn(
+            "## Scope 保留与裁剪", renderer.render_report(source_with_interval)
+        )
 
         blocked_source = json.loads(json.dumps(source_with_interval))
         blocked_source["per_sk_decisions"][0]["mapping_blockers"] = [
@@ -1776,9 +1770,6 @@ class ProfilerAnalysisTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact|blocker|prune"):
             renderer.render_report(blocked_source)
 
-
-
-
     def test_schema_1_2_malformed_values_raise_value_error(self):
         renderer = importlib.import_module("render_fusion_performance_report")
         cases = []
@@ -1789,9 +1780,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
         invalid_version["schema_version"] = []
         cases.append(invalid_version)
         invalid_projection = _signed_exact_projected_trace_report()
-        invalid_projection["graph_alignment_proof"][
-            "device:0/model:48/sk:7"
-        ]["canonical_baseline_child_keys"] = [[], "baseline:B"]
+        invalid_projection["graph_alignment_proof"]["device:0/model:48/sk:7"][
+            "canonical_baseline_child_keys"
+        ] = [[], "baseline:B"]
         cases.append(invalid_projection)
 
         for index, report in enumerate(cases):
@@ -1802,9 +1793,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
 
     def test_markdown_renderer_rejects_recomputed_hash_with_empty_decisions(self):
         renderer = importlib.import_module("render_fusion_performance_report")
-        report = _signed_analysis_report(
-            {"per_sk_decisions": [], "scope_actions": []}
-        )
+        report = _signed_analysis_report({"per_sk_decisions": [], "scope_actions": []})
 
         with self.assertRaisesRegex(ValueError, "per_sk_decisions"):
             renderer.render_report(report)
@@ -1826,15 +1815,18 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 "source_revision",
             )
         }
-        forged_round["analysis_id"] = "analysis-" + hashlib.sha256(
-            json.dumps(
-                identity,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-                allow_nan=False,
-            ).encode("utf-8")
-        ).hexdigest()
+        forged_round["analysis_id"] = (
+            "analysis-"
+            + hashlib.sha256(
+                json.dumps(
+                    identity,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+        )
         forged_round = _signed_analysis_report(forged_round)
 
         for report, expected_error in (
@@ -1954,7 +1946,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
         cases.extend(
             (
                 ({**action, "boundary": []}, "boundary"),
-                ({**action, "ordered_child_op_sequence": "A"}, "ordered_child_op_sequence"),
+                (
+                    {**action, "ordered_child_op_sequence": "A"},
+                    "ordered_child_op_sequence",
+                ),
                 ({**action, "interval_unproven": "true"}, "interval_unproven"),
                 ({**action, "interval_unproven": False}, "interval_unproven"),
             )
@@ -1964,9 +1959,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             with self.subTest(expected_error=expected_error):
                 with self.assertRaisesRegex(ValueError, expected_error):
                     renderer.render_report(
-                        _signed_analysis_report(
-                            {"scope_actions": [malformed_action]}
-                        )
+                        _signed_analysis_report({"scope_actions": [malformed_action]})
                     )
 
     def test_source_interval_proof_requires_file_and_ordered_offsets(self):
@@ -2199,8 +2192,6 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(coverage["unmapped_sk_ids"], 3)
         self.assertEqual(coverage["child_count_distribution"], {"2": 3})
 
-
-
     def test_strict_structural_binding_uses_association_metadata_sequence(self):
         association = {
             "candidate_binding_status": "bound",
@@ -2255,9 +2246,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifacts = _write_analysis_cli_fixture(root)
-            artifacts["source_scope_map"].write_text(
-                json.dumps({"task_ranges": []})
-            )
+            artifacts["source_scope_map"].write_text(json.dumps({"task_ranges": []}))
             binding = {
                 "status": "bound",
                 "process_identity": {
@@ -2317,11 +2306,14 @@ class ProfilerAnalysisTest(unittest.TestCase):
             }
             json_out = root / "exact-structural-cli.json"
 
-            with mock.patch.object(
-                analyze_fusion_performance,
-                "_load_structural_context",
-                return_value=structural_context,
-            ), redirect_stdout(io.StringIO()):
+            with (
+                mock.patch.object(
+                    analyze_fusion_performance,
+                    "_load_structural_context",
+                    return_value=structural_context,
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
                 exit_code = analyze_fusion_performance.main(
                     _analysis_cli_args(artifacts, json_out)
                 )
@@ -2368,11 +2360,17 @@ class ProfilerAnalysisTest(unittest.TestCase):
         )
 
         self.assertFalse(
-            any(item["kind"] == "cube_vector_serialization" for item in blocked["diagnostic_hypotheses"])
+            any(
+                item["kind"] == "cube_vector_serialization"
+                for item in blocked["diagnostic_hypotheses"]
+            )
         )
         self.assertTrue(any("关联" in item for item in blocked["blockers"]))
         self.assertTrue(
-            any(item["kind"] == "cube_vector_serialization" for item in associated["diagnostic_hypotheses"])
+            any(
+                item["kind"] == "cube_vector_serialization"
+                for item in associated["diagnostic_hypotheses"]
+            )
         )
 
     def test_cube_vector_serialization_requires_both_child_core_families(self):
@@ -2405,10 +2403,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 diagnostics = analyze_fusion_performance._build_regression_diagnostics(
                     [decision], child, environment, {}
                 )
-                kinds = {
-                    item["kind"]
-                    for item in diagnostics["diagnostic_hypotheses"]
-                }
+                kinds = {item["kind"] for item in diagnostics["diagnostic_hypotheses"]}
                 auto_experiments = [
                     item
                     for item in diagnostics["recommended_experiments"]
@@ -2498,9 +2493,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(classify([100, 101, 99], [94, 95, 96]), "beneficial")
         self.assertEqual(classify([100, 101, 99], [104, 105, 106]), "regressed")
         self.assertEqual(classify([100, 101, 99], [99, 100, 101]), "neutral")
-        self.assertEqual(
-            classify([100, 101], [95, 96]), "insufficient_evidence"
-        )
+        self.assertEqual(classify([100, 101], [95, 96]), "insufficient_evidence")
 
     def test_robust_stats_apply_noise_and_absolute_floors(self):
         stats = analyze_fusion_performance._robust_stats([90, 100, 110])
@@ -2544,9 +2537,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     analyze_fusion_performance._robust_stats(candidate_values),
                 )
 
-                self.assertEqual(
-                    decision["classification"], "insufficient_evidence"
-                )
+                self.assertEqual(decision["classification"], "insufficient_evidence")
                 self.assertIn(
                     "minimum_sample_unrepresented_tail",
                     decision["evidence_errors"],
@@ -2623,9 +2614,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
         ]
 
         self.assertFalse(validation["control_fingerprint_match"])
-        self.assertIn(
-            "undeclared_config_differences", validation["evidence_errors"]
-        )
+        self.assertIn("undeclared_config_differences", validation["evidence_errors"])
         self.assertEqual(decision["classification"], "insufficient_evidence")
         self.assertEqual(action, "reprofile")
 
@@ -2671,12 +2660,8 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(normalized, {"items": list(range(1, 10))})
         for pointer in ("/items/01", "/items/\u0661", "/items/-"):
             with self.subTest(pointer=pointer):
-                with self.assertRaisesRegex(
-                    ValueError, "invalid RFC6901 array index"
-                ):
-                    analyze_fusion_performance._remove_json_pointers(
-                        source, [pointer]
-                    )
+                with self.assertRaisesRegex(ValueError, "invalid RFC6901 array index"):
+                    analyze_fusion_performance._remove_json_pointers(source, [pointer])
 
     def test_declared_pointers_are_prevalidated_against_original_document(self):
         source = {"items": ["zero", "one"]}
@@ -2686,12 +2671,8 @@ class ProfilerAnalysisTest(unittest.TestCase):
             ["/items/01", "/items"],
         ):
             with self.subTest(pointers=pointers):
-                with self.assertRaisesRegex(
-                    ValueError, "invalid RFC6901 array index"
-                ):
-                    analyze_fusion_performance._remove_json_pointers(
-                        source, pointers
-                    )
+                with self.assertRaisesRegex(ValueError, "invalid RFC6901 array index"):
+                    analyze_fusion_performance._remove_json_pointers(source, pointers)
 
         with self.assertRaisesRegex(ValueError, "root JSON pointer"):
             analyze_fusion_performance._remove_json_pointers(source, [""])
@@ -2800,7 +2781,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     {"allowed_json_pointers": [], "only_change_zh": "无变更"},
                 )
 
-                self.assertIn("workload_manifest_incomplete", validation["evidence_errors"])
+                self.assertIn(
+                    "workload_manifest_incomplete", validation["evidence_errors"]
+                )
                 self.assertIn(expected_error, validation["evidence_errors"])
 
     def test_incomplete_or_invalid_workload_blocks_all_sk_decisions(self):
@@ -2845,9 +2828,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                         for error in report["blockers"]
                     )
                 )
-                self.assertEqual(
-                    decision["classification"], "insufficient_evidence"
-                )
+                self.assertEqual(decision["classification"], "insufficient_evidence")
                 self.assertEqual(decision["action"], "reprofile")
 
     def test_undeclared_config_difference_blocks_scope_action(self):
@@ -2871,20 +2852,14 @@ class ProfilerAnalysisTest(unittest.TestCase):
             decision["classification"]
         ]
 
-        self.assertIn(
-            "undeclared_config_differences", validation["evidence_errors"]
-        )
+        self.assertIn("undeclared_config_differences", validation["evidence_errors"])
         self.assertEqual(decision["classification"], "insufficient_evidence")
         self.assertNotIn(action, {"keep", "prune"})
 
     def test_occurrence_count_mismatch_is_not_truncated(self):
         rows = [
-            _row(10, 1, "A", "A", "AI_VECTOR_CORE", start, 1)
-            for start in (0, 10, 20)
-        ] + [
-            _row(11, 1, "B", "B", "AI_VECTOR_CORE", start, 1)
-            for start in (1, 11)
-        ]
+            _row(10, 1, "A", "A", "AI_VECTOR_CORE", start, 1) for start in (0, 10, 20)
+        ] + [_row(11, 1, "B", "B", "AI_VECTOR_CORE", start, 1) for start in (1, 11)]
 
         summaries, errors = analyze_fusion_performance._occurrence_summaries(
             rows, node_ids=[10, 11]
@@ -2922,7 +2897,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
 
         self.assertEqual(summaries, [])
         self.assertTrue(
-            {"baseline_child_occurrence_count_mismatch", "baseline_child_occurrence_key_mismatch"}
+            {
+                "baseline_child_occurrence_count_mismatch",
+                "baseline_child_occurrence_key_mismatch",
+            }
             & set(errors)
         )
 
@@ -3003,7 +2981,11 @@ class ProfilerAnalysisTest(unittest.TestCase):
             profile = Path(directory) / "kernel_details.csv"
             rows = []
             for node_id in (10, 11):
-                for occurrence_id, start in (("run-1", 0), ("run-2", 100), ("run-3", 200)):
+                for occurrence_id, start in (
+                    ("run-1", 0),
+                    ("run-2", 100),
+                    ("run-3", 200),
+                ):
                     row = _row(
                         node_id,
                         1,
@@ -3024,9 +3006,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             )
 
         self.assertEqual(errors, [])
-        self.assertEqual(
-            [summary["interval_us"] for summary in summaries], [2, 2, 2]
-        )
+        self.assertEqual([summary["interval_us"] for summary in summaries], [2, 2, 2])
 
     def test_occurrences_reject_missing_step_without_explicit_discriminator(self):
         rows = [_row(10, 1, "A", "A", "AI_VECTOR_CORE", 0, 1)]
@@ -3052,7 +3032,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
 
     def test_cli_low_min_occurrences_remains_diagnostic_only(self):
         for requested_min in (1, 2):
-            with self.subTest(requested_min=requested_min), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(requested_min=requested_min),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 artifacts = _write_analysis_cli_fixture(root)
                 _, baseline_rows = analyze_fusion_performance.load_kernel_rows(
@@ -3062,7 +3045,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     artifacts["candidate_profile"]
                 )
                 _write_csv(artifacts["baseline_profile"], baseline_rows[:requested_min])
-                _write_csv(artifacts["candidate_profile"], candidate_rows[:requested_min])
+                _write_csv(
+                    artifacts["candidate_profile"], candidate_rows[:requested_min]
+                )
                 json_out = root / "result.json"
                 args = _analysis_cli_args(artifacts, json_out)
                 args[args.index("--min-occurrences") + 1] = str(requested_min)
@@ -3316,9 +3301,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
 
                 self.assertEqual(exit_code, 0)
                 self.assertEqual(decision["mapping_confidence"], "diagnostic_only")
-                self.assertEqual(
-                    decision["classification"], "insufficient_evidence"
-                )
+                self.assertEqual(decision["classification"], "insufficient_evidence")
                 self.assertIn(decision["action"], {"reprofile", "block"})
                 self.assertNotIn(decision["action"], {"keep", "prune"})
                 self.assertIn(
@@ -3372,9 +3355,11 @@ class ProfilerAnalysisTest(unittest.TestCase):
             root = Path(directory)
             artifacts = _write_analysis_cli_fixture(root)
             metadata_log = _metadata_log_path(artifacts["sk_meta"])
-            duplicate = metadata_log.read_text().replace(
-                "scope id: 1", "scope id: 2"
-            ).replace("nodeId:10", "nodeId:11")
+            duplicate = (
+                metadata_log.read_text()
+                .replace("scope id: 1", "scope id: 2")
+                .replace("nodeId:10", "nodeId:11")
+            )
             metadata_log.write_text(metadata_log.read_text() + duplicate)
             json_out = root / "ambiguous-duplicate.json"
 
@@ -3393,7 +3378,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
             )
         )
 
-    @unittest.skip("retired task-range exact protocol; covered by source_scope_map_v2 tests")
+    @unittest.skip(
+        "retired task-range exact protocol; covered by source_scope_map_v2 tests"
+    )
     def test_source_scope_map_uniquely_recovers_exact_child_mapping(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3414,7 +3401,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(decision["action"], "keep")
         self.assertEqual(decision["original"]["occurrence_count"], 3)
 
-    @unittest.skip("retired task-range exact protocol; covered by source_scope_map_v2 tests")
+    @unittest.skip(
+        "retired task-range exact protocol; covered by source_scope_map_v2 tests"
+    )
     def test_source_scope_map_allows_different_cross_arm_occurrence_counts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3460,9 +3449,33 @@ class ProfilerAnalysisTest(unittest.TestCase):
             for start in (0, 30, 60):
                 baseline_rows.extend(
                     [
-                        _row(10, 1, "static_kernel_A_first_hash", "A", "AI_VECTOR_CORE", start, 8),
-                        _row(11, 1, "static_kernel_A_second_hash", "A", "AI_VECTOR_CORE", start + 8, 8),
-                        _row(12, 1, "static_kernel_B_hash", "B", "AI_VECTOR_CORE", start + 16, 8),
+                        _row(
+                            10,
+                            1,
+                            "static_kernel_A_first_hash",
+                            "A",
+                            "AI_VECTOR_CORE",
+                            start,
+                            8,
+                        ),
+                        _row(
+                            11,
+                            1,
+                            "static_kernel_A_second_hash",
+                            "A",
+                            "AI_VECTOR_CORE",
+                            start + 8,
+                            8,
+                        ),
+                        _row(
+                            12,
+                            1,
+                            "static_kernel_B_hash",
+                            "B",
+                            "AI_VECTOR_CORE",
+                            start + 16,
+                            8,
+                        ),
                     ]
                 )
             _write_csv(artifacts["baseline_profile"], baseline_rows)
@@ -3508,7 +3521,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(decision["classification"], "beneficial")
         self.assertEqual(decision["action"], "keep")
 
-    @unittest.skip("retired task-range exact protocol; covered by source_scope_map_v2 tests")
+    @unittest.skip(
+        "retired task-range exact protocol; covered by source_scope_map_v2 tests"
+    )
     def test_source_scope_map_preserves_and_validates_explicit_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3534,9 +3549,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             loaded = analyze_fusion_performance._load_layer_map(source_map)
 
             self.assertEqual(loaded[0]["source_scope"], "decoder.layer.0")
-            self.assertEqual(
-                loaded[0]["boundary"], {"start_op": "A", "end_op": "A"}
-            )
+            self.assertEqual(loaded[0]["boundary"], {"start_op": "A", "end_op": "A"})
             self.assertEqual(loaded[0]["ordered_child_op_sequence"], ["A"])
 
             invalid_values = (
@@ -3564,7 +3577,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "invalid layer range"):
                         analyze_fusion_performance._load_layer_map(source_map)
 
-    @unittest.skip("retired task-range exact protocol; covered by source_scope_map_v2 tests")
+    @unittest.skip(
+        "retired task-range exact protocol; covered by source_scope_map_v2 tests"
+    )
     def test_source_scope_map_explicit_identity_mismatch_or_duplicate_blocks(self):
         for case in (
             "scope-mismatch",
@@ -3610,12 +3625,12 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     else "source_scope_map_identity_mismatch"
                 )
                 self.assertIn(expected_error, decision["evidence_errors"])
-                self.assertEqual(
-                    decision["classification"], "insufficient_evidence"
-                )
+                self.assertEqual(decision["classification"], "insufficient_evidence")
                 self.assertEqual(decision["action"], "reprofile")
 
-    @unittest.skip("retired task-range exact protocol; covered by source_scope_map_v2 tests")
+    @unittest.skip(
+        "retired task-range exact protocol; covered by source_scope_map_v2 tests"
+    )
     def test_source_scope_map_explicit_identity_match_is_exact(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3652,7 +3667,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(decision["classification"], "beneficial")
         self.assertEqual(decision["action"], "keep")
 
-    @unittest.skip("retired task-range exact protocol; generic opaque blocks use source_scope_map_v2")
+    @unittest.skip(
+        "retired task-range exact protocol; generic opaque blocks use source_scope_map_v2"
+    )
     def test_explicit_source_scope_map_does_not_require_parseable_layer_name(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3741,13 +3758,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     "baseline_child_operator_mismatch",
                     decision["evidence_errors"],
                 )
-                self.assertEqual(
-                    decision["classification"], "insufficient_evidence"
-                )
+                self.assertEqual(decision["classification"], "insufficient_evidence")
                 self.assertEqual(decision["action"], "reprofile")
-                self.assertEqual(
-                    decision["mapping_confidence"], "diagnostic_only"
-                )
+                self.assertEqual(decision["mapping_confidence"], "diagnostic_only")
 
     def test_sk_meta_node_mapping_rejects_conflicting_operator_sources(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -3781,7 +3794,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(decision["classification"], "insufficient_evidence")
         self.assertEqual(decision["action"], "reprofile")
 
-    @unittest.skip("retired task-range exact protocol; covered by source_scope_map_v2 tests")
+    @unittest.skip(
+        "retired task-range exact protocol; covered by source_scope_map_v2 tests"
+    )
     def test_exact_source_scope_map_precedes_conflicting_raw_node_id_hint(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3848,9 +3863,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifacts = _write_analysis_cli_fixture(root)
-            artifacts["source_scope_map"].write_text(
-                json.dumps({"task_ranges": []})
-            )
+            artifacts["source_scope_map"].write_text(json.dumps({"task_ranges": []}))
             _write_csv(
                 artifacts["baseline_profile"],
                 [
@@ -3887,7 +3900,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertIsNone(decision["original"])
         self.assertEqual(report["coverage"]["mapped_count"], 0)
 
-    @unittest.skip("retired task-range exact protocol; v2 fails closed before comparison")
+    @unittest.skip(
+        "retired task-range exact protocol; v2 fails closed before comparison"
+    )
     def test_source_scope_map_ambiguity_or_missing_child_blocks_action(self):
         for case in ("ambiguous", "missing"):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
@@ -3960,12 +3975,8 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 decision = json.loads(json_out.read_text())["per_sk_decisions"][0]
 
                 self.assertEqual(exit_code, 0)
-                self.assertEqual(
-                    decision["mapping_confidence"], "diagnostic_only"
-                )
-                self.assertEqual(
-                    decision["classification"], "insufficient_evidence"
-                )
+                self.assertEqual(decision["mapping_confidence"], "diagnostic_only")
+                self.assertEqual(decision["classification"], "insufficient_evidence")
                 self.assertIn(expected_error, decision["evidence_errors"])
                 self.assertNotIn(decision["action"], {"keep", "prune"})
 
@@ -4056,7 +4067,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("## 结构关联覆盖率", markdown)
 
-    def test_collection_manifest_inputs_are_relative_and_affect_analysis_fingerprint(self):
+    def test_collection_manifest_inputs_are_relative_and_affect_analysis_fingerprint(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifacts = _write_analysis_cli_fixture(root)
@@ -4129,7 +4142,6 @@ class ProfilerAnalysisTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "symlink|regular file"):
                 analyze_fusion_performance._manifest_value(link)
 
-
     def test_partial_collection_manifest_set_blocks_structural_mapping(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -4174,14 +4186,14 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 exit_code = analyze_fusion_performance.main(args)
 
         self.assertEqual(exit_code, 0)
-        self.assertTrue(
-            artifact_contract.round_belongs_to_candidate("S1", "S1-AUTO")
-        )
+        self.assertTrue(artifact_contract.round_belongs_to_candidate("S1", "S1-AUTO"))
         self.assertFalse(
             hasattr(analyze_fusion_performance, "WORKLOAD_CONCEPT_ALIASES")
         )
 
-    @unittest.skip("retired task-range source interval fixture; v2 bundle is tested separately")
+    @unittest.skip(
+        "retired task-range source interval fixture; v2 bundle is tested separately"
+    )
     def test_complete_analysis_cli_preserves_proven_source_interval(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -4244,13 +4256,22 @@ class ProfilerAnalysisTest(unittest.TestCase):
     def test_cube_vector_diagnostic_requires_exact_accepted_parallel_value(self):
         fixtures = (
             (
-                {"options": {"optimize_options": {"auto_op_parallel": {"accepted_values": [0, 1]}}}},
+                {
+                    "options": {
+                        "optimize_options": {
+                            "auto_op_parallel": {"accepted_values": [0, 1]}
+                        }
+                    }
+                },
                 True,
             ),
             ({"accepted_options": {"auto_op_parallel": [0]}}, False),
         )
         for environment_evidence, expected_experiment in fixtures:
-            with self.subTest(environment_evidence=environment_evidence), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(environment_evidence=environment_evidence),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 report = _run_diagnostic_analysis(
                     root, _configure_cube_vector_regression, environment_evidence
@@ -4263,8 +4284,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     decision["original"]["duration_sum_us"]["p50"],
                 )
                 hypotheses = {
-                    item["kind"]: item
-                    for item in report["diagnostic_hypotheses"]
+                    item["kind"]: item for item in report["diagnostic_hypotheses"]
                 }
                 self.assertEqual(
                     hypotheses["cube_vector_serialization"]["confidence"],
@@ -4298,15 +4318,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
             "runtime_evidence": {"dcci_state": "enabled"},
             "options": {
                 "optimize_options": {
-                    "dcci_before_kernel_start": {
-                        "accepted_values": [regex_value]
-                    },
-                    "dcci_after_kernel_end": {
-                        "accepted_values": [regex_value]
-                    },
-                    "dcci_disable_on_kernel": {
-                        "accepted_values": [regex_value]
-                    },
+                    "dcci_before_kernel_start": {"accepted_values": [regex_value]},
+                    "dcci_after_kernel_end": {"accepted_values": [regex_value]},
+                    "dcci_disable_on_kernel": {"accepted_values": [regex_value]},
                 }
             },
         }
@@ -4448,11 +4462,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 "environment_evidence.options.optimize_options",
             ),
             (
-                {
-                    "options": {
-                        "optimize_options": {"auto_op_parallel": []}
-                    }
-                },
+                {"options": {"optimize_options": {"auto_op_parallel": []}}},
                 "environment_evidence.options.optimize_options.auto_op_parallel",
             ),
             (
@@ -4479,9 +4489,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     )
 
         with self.assertRaisesRegex(ValueError, r"candidate_config\.runtime"):
-            analyze_fusion_performance._dcci_runtime_evidence(
-                {}, {"runtime": []}
-            )
+            analyze_fusion_performance._dcci_runtime_evidence({}, {"runtime": []})
 
     def test_analysis_cli_ignores_post_base_option_evidence_shapes(self):
         cases = (
@@ -4489,19 +4497,18 @@ class ProfilerAnalysisTest(unittest.TestCase):
             {"options": {"optimize_options": []}},
             {
                 "options": {
-                    "optimize_options": {
-                        "auto_op_parallel": {"accepted_values": {}}
-                    }
+                    "optimize_options": {"auto_op_parallel": {"accepted_values": {}}}
                 }
             },
         )
         for environment in cases:
-            with self.subTest(environment=environment), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(environment=environment),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 artifacts = _write_analysis_cli_fixture(root)
-                artifacts["environment_evidence"].write_text(
-                    json.dumps(environment)
-                )
+                artifacts["environment_evidence"].write_text(json.dumps(environment))
                 json_out = root / "result.json"
 
                 with redirect_stdout(io.StringIO()):
@@ -4523,7 +4530,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
             artifacts["candidate_config"].write_text(json.dumps(candidate_config))
             json_out = root / "result.json"
 
-            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as stderr:
+            with (
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()) as stderr,
+            ):
                 with self.assertRaises(SystemExit) as raised:
                     analyze_fusion_performance.main(
                         _analysis_cli_args(artifacts, json_out)
@@ -4627,11 +4637,11 @@ class ProfilerAnalysisTest(unittest.TestCase):
             )
         )
         blocker = next(
-            item
-            for item in diagnostics["blockers"]
-            if "dcci_state_conflict" in item
+            item for item in diagnostics["blockers"] if "dcci_state_conflict" in item
         )
-        self.assertIn("environment_evidence.runtime_evidence.dcci_state=enabled", blocker)
+        self.assertIn(
+            "environment_evidence.runtime_evidence.dcci_state=enabled", blocker
+        )
         self.assertIn("candidate_config.runtime_evidence.dcci_state=disabled", blocker)
 
     def test_global_dcci_control_requires_exact_global_regex_acceptance(self):
@@ -4647,7 +4657,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
             (
                 {
                     "runtime_evidence": {"dcci_state": "enabled"},
-                    "accepted_options": {"dcci_disable_on_kernel": [[".*GroupedMatmul.*"]]},
+                    "accepted_options": {
+                        "dcci_disable_on_kernel": [[".*GroupedMatmul.*"]]
+                    },
                 },
                 {},
                 False,
@@ -4660,8 +4672,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
         )
         for environment_evidence, candidate_config, _expected_global in fixtures:
             diagnostics = analyze_fusion_performance._build_regression_diagnostics(
-                [_scalar_regression_decision()], None,
-                environment_evidence, candidate_config,
+                [_scalar_regression_decision()],
+                None,
+                environment_evidence,
+                candidate_config,
             )
             self.assertEqual(diagnostics["recommended_experiments"], [])
 
@@ -4696,15 +4710,15 @@ class ProfilerAnalysisTest(unittest.TestCase):
             json_index = args.index("--json-out")
             del args[json_index : json_index + 2]
 
-            with redirect_stdout(io.StringIO()), redirect_stderr(
-                io.StringIO()
-            ) as stderr:
+            with (
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()) as stderr,
+            ):
                 with self.assertRaises(SystemExit) as raised:
                     analyze_fusion_performance.main(args)
 
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("--json-out", stderr.getvalue())
-
 
     def test_complete_analysis_cli_rejects_malformed_round_family(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -4714,9 +4728,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
             args = _analysis_cli_args(artifacts, json_out)
             args[args.index("--round-id") + 1] = "S1-WEIRD"
 
-            with redirect_stdout(io.StringIO()), redirect_stderr(
-                io.StringIO()
-            ) as stderr:
+            with (
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()) as stderr,
+            ):
                 with self.assertRaises(SystemExit) as raised:
                     analyze_fusion_performance.main(args)
 
@@ -4726,7 +4741,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
 
     def test_complete_analysis_cli_rejects_directory_output_transactionally(self):
         for preexisting_json in (False, True):
-            with self.subTest(preexisting_json=preexisting_json), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(preexisting_json=preexisting_json),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 artifacts = _write_analysis_cli_fixture(root)
                 json_out = root / "analysis" / "result.json"
@@ -4736,9 +4754,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 markdown_out = root / "markdown-target"
                 markdown_out.mkdir()
 
-                with redirect_stdout(io.StringIO()), redirect_stderr(
-                    io.StringIO()
-                ):
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                     with self.assertRaises(SystemExit) as raised:
                         analyze_fusion_performance.main(
                             _analysis_cli_args(artifacts, json_out, markdown_out)
@@ -4746,9 +4762,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
 
                 self.assertEqual(raised.exception.code, 2)
                 if preexisting_json:
-                    self.assertEqual(
-                        json_out.read_text(), "existing-user-result\n"
-                    )
+                    self.assertEqual(json_out.read_text(), "existing-user-result\n")
                 else:
                     self.assertFalse(json_out.exists())
 
@@ -4772,17 +4786,13 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 elif case == "input-directory":
                     json_out = artifacts["sk_meta"]
                 elif case == "inside-input-directory":
-                    json_out = next(
-                        artifacts["sk_meta"].rglob("sk_fused_nodes.log")
-                    )
+                    json_out = next(artifacts["sk_meta"].rglob("sk_fused_nodes.log"))
                 else:
                     json_out = root / "result-link.json"
                     json_out.symlink_to(artifacts["baseline_profile"])
                 baseline_before = artifacts["baseline_profile"].read_text()
 
-                with redirect_stdout(io.StringIO()), redirect_stderr(
-                    io.StringIO()
-                ):
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                     with self.assertRaises(SystemExit) as raised:
                         analyze_fusion_performance.main(
                             _analysis_cli_args(artifacts, json_out, markdown_out)
@@ -4806,9 +4816,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     cyclic_path = json_out
                 cyclic_path.symlink_to(cyclic_path.name)
 
-                with redirect_stdout(io.StringIO()), redirect_stderr(
-                    io.StringIO()
-                ) as stderr:
+                with (
+                    redirect_stdout(io.StringIO()),
+                    redirect_stderr(io.StringIO()) as stderr,
+                ):
                     with self.assertRaises(SystemExit) as raised:
                         analyze_fusion_performance.main(
                             _analysis_cli_args(artifacts, json_out)
@@ -4822,7 +4833,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
 
     def test_analysis_output_rolls_back_markdown_when_json_commit_fails(self):
         for markdown_preexists in (False, True):
-            with self.subTest(markdown_preexists=markdown_preexists), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(markdown_preexists=markdown_preexists),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 json_out = root / "result.json"
                 markdown_out = root / "result.md"
@@ -4881,8 +4895,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
                         json_out = root / f"{option[2:]}-{label}.json"
                         args = _analysis_cli_args(artifacts, json_out)
                         args[args.index(option) + 1] = value
-                        with redirect_stdout(io.StringIO()), redirect_stderr(
-                            io.StringIO()
+                        with (
+                            redirect_stdout(io.StringIO()),
+                            redirect_stderr(io.StringIO()),
                         ):
                             with self.assertRaises(SystemExit) as raised:
                                 analyze_fusion_performance.main(args)
@@ -4923,9 +4938,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     )
                     json_out = root / f"invalid-{label}.json"
 
-                    with redirect_stdout(io.StringIO()), redirect_stderr(
-                        io.StringIO()
-                    ):
+                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                         with self.assertRaises(SystemExit) as raised:
                             analyze_fusion_performance.main(
                                 _analysis_cli_args(artifacts, json_out)
@@ -4946,12 +4959,8 @@ class ProfilerAnalysisTest(unittest.TestCase):
             candidate_config["items"][10] = "allowed-ten"
             artifacts["baseline_config"].write_text(json.dumps(baseline_config))
             artifacts["candidate_config"].write_text(json.dumps(candidate_config))
-            declared_change = json.loads(
-                artifacts["declared_change_set"].read_text()
-            )
-            declared_change["allowed_json_pointers"].extend(
-                ["/items/0", "/items/10"]
-            )
+            declared_change = json.loads(artifacts["declared_change_set"].read_text())
+            declared_change["allowed_json_pointers"].extend(["/items/0", "/items/10"])
             artifacts["declared_change_set"].write_text(json.dumps(declared_change))
             json_out = root / "valid-array-indices.json"
 
@@ -4972,7 +4981,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
             ("sk_meta", "sk=meta"),
             ("sk_prof", "sk=prof.json"),
         ):
-            with self.subTest(artifact=artifact_name), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(artifact=artifact_name),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 artifacts = _write_analysis_cli_fixture(root)
                 renamed_path = root / renamed
@@ -4989,9 +5001,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 self.assertTrue(json_out.is_file())
 
     def test_child_schedule_requires_both_core_families(self):
-        baseline = {
-            "multi_stream_analysis": {"cube_vector_parallel_detected": True}
-        }
+        baseline = {"multi_stream_analysis": {"cube_vector_parallel_detected": True}}
         serialized_child = {
             "stream_identity_complete": True,
             "core_family_counts": [
@@ -5023,9 +5033,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             incomplete["sk_child_schedule"]["verdict"],
             "child_trace_missing_cube_vector_evidence",
         )
-        self.assertNotIn(
-            "auto_op_parallel", incomplete["sk_child_schedule"]["action"]
-        )
+        self.assertNotIn("auto_op_parallel", incomplete["sk_child_schedule"]["action"])
 
     def test_removed_cli_options_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -5053,9 +5061,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     analyze_fusion_performance._robust_stats(candidate_values),
                 )
 
-                self.assertEqual(
-                    decision["classification"], "insufficient_evidence"
-                )
+                self.assertEqual(decision["classification"], "insufficient_evidence")
                 self.assertIn(
                     "non_finite_derived_statistics", decision["evidence_errors"]
                 )
@@ -5117,13 +5123,9 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(decision["classification"], "insufficient_evidence")
         self.assertEqual(decision["action"], "reprofile")
-        self.assertIn(
-            "non_finite_derived_statistics", decision["evidence_errors"]
-        )
+        self.assertIn("non_finite_derived_statistics", decision["evidence_errors"])
         self.assertNotIn("sk_vs_original_interval_pct", decision)
-        self.assertIsNone(
-            decision["fusion_benefit"]["interval_improvement_pct"]
-        )
+        self.assertIsNone(decision["fusion_benefit"]["interval_improvement_pct"])
 
     def test_complete_analysis_cli_handles_profile_arithmetic_overflow(self):
         cases = (
@@ -5144,7 +5146,10 @@ class ProfilerAnalysisTest(unittest.TestCase):
         )
 
         for case in cases:
-            with self.subTest(case=case["name"]), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(case=case["name"]),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 artifacts = _write_analysis_cli_fixture(root)
                 _write_csv(
@@ -5196,9 +5201,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
 
                 decision = report["per_sk_decisions"][0]
                 self.assertEqual(exit_code, 0)
-                self.assertEqual(
-                    decision["classification"], "insufficient_evidence"
-                )
+                self.assertEqual(decision["classification"], "insufficient_evidence")
                 self.assertEqual(decision["action"], "reprofile")
                 self.assertIn(
                     "non_finite_derived_statistics",
@@ -5294,9 +5297,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
         stdout = io.StringIO()
 
         with redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
-            analyze_fusion_performance.main(
-                ["--baseline-profile", "unused", "--help"]
-            )
+            analyze_fusion_performance.main(["--baseline-profile", "unused", "--help"])
 
         self.assertEqual(raised.exception.code, 0)
         help_text = stdout.getvalue()
@@ -5406,10 +5407,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     for start in (0, 20, 40)
                 ],
             )
-            sk_name = (
-                "sk_1_scope_start_static_kernel_A_hash_"
-                "end_static_kernel_A_hash"
-            )
+            sk_name = "sk_1_scope_start_static_kernel_A_hash_end_static_kernel_A_hash"
             _write_csv(
                 candidate,
                 [
@@ -5442,8 +5440,6 @@ class ProfilerAnalysisTest(unittest.TestCase):
             "cross_compile_runtime_id_not_identity",
             decision["mapping_blockers"],
         )
-
-
 
     def test_incomplete_metadata_model_identity_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -5491,10 +5487,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                         )
                     )
             _write_csv(baseline, baseline_rows)
-            sk_name = (
-                "sk_1_scope_start_static_kernel_A_hash_"
-                "end_static_kernel_F_hash"
-            )
+            sk_name = "sk_1_scope_start_static_kernel_A_hash_end_static_kernel_F_hash"
             _write_csv(
                 candidate,
                 [
@@ -5502,9 +5495,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     for start in (0, 20, 40)
                 ],
             )
-            metadata_lines = [
-                f"SK Function: {sk_name}, scope id: 1, Node Count: 6"
-            ]
+            metadata_lines = [f"SK Function: {sk_name}, scope id: 1, Node Count: 6"]
             for child_index, op_type in enumerate("ABCDEF"):
                 metadata_lines.append(
                     f"[nodeId:{10 + child_index}, streamId:1] - "
@@ -5512,9 +5503,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     "kernelType:AIV_ONLY, numBlocks:1, cubeNum:0, vecNum:1, "
                     "isScheModeOn:0}"
                 )
-            _metadata_log_path(metadata).write_text(
-                "\n".join(metadata_lines) + "\n"
-            )
+            _metadata_log_path(metadata).write_text("\n".join(metadata_lines) + "\n")
             _, loaded_baseline_rows = analyze_fusion_performance.summarize_profile(
                 baseline
             )
@@ -5545,33 +5534,32 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(summary["duration_sum_us"], 18)
         self.assertEqual(summary["union_duration_us"], 10)
 
-
-
-
-
-
-
-
-
-
     def test_structural_manifest_config_and_control_are_association_domain(self):
-        paths = {field: Path(field) for field in analyze_fusion_performance.COLLECTION_MANIFEST_ARGUMENTS}
+        paths = {
+            field: Path(field)
+            for field in analyze_fusion_performance.COLLECTION_MANIFEST_ARGUMENTS
+        }
         summary = {
             "set_fingerprint": "1" * 64,
             "config_fingerprint": "association-config-fingerprint",
             "control_fingerprint": "association-control-fingerprint",
         }
 
-        with mock.patch.object(
-            analyze_fusion_performance,
-            "validate_manifest_set",
-            return_value=summary,
-        ), mock.patch.object(
-            analyze_fusion_performance,
-            "_manifest_content_fingerprint",
-            return_value="2" * 64,
+        with (
+            mock.patch.object(
+                analyze_fusion_performance,
+                "validate_manifest_set",
+                return_value=summary,
+            ),
+            mock.patch.object(
+                analyze_fusion_performance,
+                "_manifest_content_fingerprint",
+                return_value="2" * 64,
+            ),
         ):
-            protocol, loaded = analyze_fusion_performance._collection_manifest_protocol(paths)
+            protocol, loaded = analyze_fusion_performance._collection_manifest_protocol(
+                paths
+            )
 
         self.assertEqual(loaded, summary)
         self.assertEqual(protocol["status"], "validated")
@@ -5606,12 +5594,6 @@ class ProfilerAnalysisTest(unittest.TestCase):
                 collection_summary, args, analysis_fingerprints
             )
         )
-
-
-
-
-
-
 
     def test_layer_inventory_and_cube_vector_overlap(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -5767,9 +5749,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
                     {},
                 )
 
-            kinds = {
-                item["kind"] for item in diagnostics["diagnostic_hypotheses"]
-            }
+            kinds = {item["kind"] for item in diagnostics["diagnostic_hypotheses"]}
             auto_experiments = [
                 item
                 for item in diagnostics["recommended_experiments"]
@@ -5779,9 +5759,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
             self.assertEqual(summary.get("known_stream_event_count"), known_count)
             self.assertEqual(summary.get("stream_identity_complete"), complete)
             self.assertEqual("cube_vector_serialization" in kinds, direct)
-            self.assertEqual(
-                "cube_vector_child_trace_missing" in kinds, not direct
-            )
+            self.assertEqual("cube_vector_child_trace_missing" in kinds, not direct)
             self.assertEqual(auto_experiments, [])
             if not direct:
                 self.assertTrue(
@@ -5795,9 +5773,7 @@ class ProfilerAnalysisTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             trace_path = Path(directory) / "sk_prof_device_0.json"
             trace_path.write_text(json.dumps({"traceEvents": []}))
-            summary = analyze_fusion_performance.summarize_sk_child_profile(
-                trace_path
-            )
+            summary = analyze_fusion_performance.summarize_sk_child_profile(trace_path)
 
         diagnostics = analyze_fusion_performance._build_regression_diagnostics(
             [_cube_vector_regression_decision()], summary, {}, {}
@@ -5897,6 +5873,4 @@ class ProfilerAnalysisTest(unittest.TestCase):
         self.assertEqual(benefit["launch_count_with_sk"], 1)
         self.assertEqual(benefit["estimated_launch_reduction"], 1)
         self.assertIsNone(benefit["interval_improvement_us"])
-        self.assertEqual(
-            result["fusion_performance"]["dcci_diagnostic_candidates"], []
-        )
+        self.assertEqual(result["fusion_performance"]["dcci_diagnostic_candidates"], [])

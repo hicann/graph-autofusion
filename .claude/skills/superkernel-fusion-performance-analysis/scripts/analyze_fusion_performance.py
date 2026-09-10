@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Summarize Ascend profiler kernel_details.csv and compare SK intervals."""
 
 import argparse
@@ -20,7 +27,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from artifact_contract import (
+from artifact_contract import (  # noqa: E402 - load sibling scripts after sys.path setup
     _load_json as _load_contract_json,
     _read_stable_input_bytes,
     canonical_sha256,
@@ -28,21 +35,23 @@ from artifact_contract import (
     round_belongs_to_candidate,
     validate_manifest_set,
 )
-from render_fusion_performance_report import render_report
-from projected_trace_mapping import (
+from render_fusion_performance_report import render_report  # noqa: E402 - load sibling scripts after sys.path setup
+from projected_trace_mapping import (  # noqa: E402 - load sibling scripts after sys.path setup
     build_mapping as build_projected_trace_mapping,
     graph_occurrence_fingerprint,
 )
-from structural_association import (
+from structural_association import (  # noqa: E402 - load sibling scripts after sys.path setup
     load_candidate_kernel_rows,
     load_candidate_profile_manifest,
 )
-from source_calibration_common import file_sha256
-from source_scope_map_v2 import load_source_scope_map_v2
+from source_calibration_common import file_sha256  # noqa: E402 - load sibling scripts after sys.path setup
+from source_scope_map_v2 import load_source_scope_map_v2  # noqa: E402 - load sibling scripts after sys.path setup
 
 
 KERNEL_DETAILS = "kernel_details.csv"
-SK_START_END = re.compile(r"^sk_\d+_(?P<scope>.+?)_start_(?P<start>.+)_end_(?P<end>.+)$")
+SK_START_END = re.compile(
+    r"^sk_\d+_(?P<scope>.+?)_start_(?P<start>.+)_end_(?P<end>.+)$"
+)
 STATIC_KERNEL_OP = re.compile(r"(?:^|_)static_kernel_([A-Za-z0-9]+)_")
 MODEL_DIRECTORY = re.compile(r"^model_(?P<model_id>\d+)(?:_|$)")
 FUSED_LOG_HEADER = re.compile(
@@ -98,10 +107,10 @@ def performance_mapping_exact(method, confidence):
 
 
 def source_mapping_actionable(method, confidence, boundary):
-    return (
-        (method, confidence) == ("source_scope_map", "exact")
-        and _source_interval_proven(boundary)
-    )
+    return (method, confidence) == (
+        "source_scope_map",
+        "exact",
+    ) and _source_interval_proven(boundary)
 
 
 def scope_action(classification, mapping_method, mapping_confidence, boundary):
@@ -110,9 +119,7 @@ def scope_action(classification, mapping_method, mapping_confidence, boundary):
         return action
     return (
         "prune"
-        if source_mapping_actionable(
-            mapping_method, mapping_confidence, boundary
-        )
+        if source_mapping_actionable(mapping_method, mapping_confidence, boundary)
         else "block"
     )
 
@@ -360,9 +367,8 @@ def _valid_normalized_workload_value(concept, value):
     if isinstance(value, int) and not isinstance(value, bool):
         return _valid_positive_count(value)
     if isinstance(value, list):
-        return (
-            bool(value)
-            and all(_valid_positive_count(dimension) for dimension in value)
+        return bool(value) and all(
+            _valid_positive_count(dimension) for dimension in value
         )
     return isinstance(value, (str, list, dict)) and bool(value)
 
@@ -376,9 +382,7 @@ def _validate_workload_manifest(workload):
         if match:
             errors = [f"workload_manifest_missing_{match.group(1)}"]
         else:
-            match = re.fullmatch(
-                r"workload\.([a-z]+) aliases conflict", message
-            )
+            match = re.fullmatch(r"workload\.([a-z]+) aliases conflict", message)
             if match:
                 concept = match.group(1)
                 errors = [
@@ -429,12 +433,8 @@ def validate_fingerprints(
     candidate_control_canonical = _canonical_json(candidate_control)
     workload_match = baseline_workload_canonical == candidate_workload_canonical
     control_match = baseline_control_canonical == candidate_control_canonical
-    baseline_workload_fingerprint = canonical_sha256(
-        baseline_normalized_workload
-    )
-    candidate_workload_fingerprint = canonical_sha256(
-        candidate_normalized_workload
-    )
+    baseline_workload_fingerprint = canonical_sha256(baseline_normalized_workload)
+    candidate_workload_fingerprint = canonical_sha256(candidate_normalized_workload)
     baseline_control_fingerprint = _canonical_sha256(baseline_control)
     candidate_control_fingerprint = _canonical_sha256(candidate_control)
     evidence_errors = []
@@ -520,9 +520,7 @@ def _structural_original(baseline_occurrences):
         return None
     interval = _stats([item["interval_us"] for item in occurrences])
     duration_sum = _stats([item["duration_sum_us"] for item in occurrences])
-    union_duration = _stats(
-        [item["union_duration_us"] for item in occurrences]
-    )
+    union_duration = _stats([item["union_duration_us"] for item in occurrences])
     example_children = occurrences[0].get("children") or []
     stream_ids = sorted(
         {
@@ -600,8 +598,7 @@ def _manifest_content_fingerprint(path):
 def _collection_manifest_protocol(paths):
     supplied = {field: paths.get(field) for field in COLLECTION_MANIFEST_ARGUMENTS}
     content_fingerprints = {
-        field: _manifest_content_fingerprint(path)
-        for field, path in supplied.items()
+        field: _manifest_content_fingerprint(path) for field, path in supplied.items()
     }
     present = {field for field, path in supplied.items() if path is not None}
     protocol = {
@@ -618,13 +615,10 @@ def _collection_manifest_protocol(paths):
         return protocol, None
     if present != set(COLLECTION_MANIFEST_ARGUMENTS):
         protocol["status"] = "blocked"
-        protocol["blockers"] = [
-            "structural_collection_manifest_set_incomplete"
-        ]
+        protocol["blockers"] = ["structural_collection_manifest_set_incomplete"]
         return protocol, None
     manifests = {
-        role: supplied[field]
-        for field, role in COLLECTION_MANIFEST_ARGUMENTS.items()
+        role: supplied[field] for field, role in COLLECTION_MANIFEST_ARGUMENTS.items()
     }
     try:
         summary = validate_manifest_set(
@@ -723,9 +717,7 @@ def _projected_trace_structural_context(
     args, protocol, summary, manifest_set, profile_manifest, candidate_rows
 ):
     """Build the v2 structural context without crossing profiler clock domains."""
-    identities = sorted(
-        {(row.device_id, row.model_id) for row in candidate_rows.rows}
-    )
+    identities = sorted({(row.device_id, row.model_id) for row in candidate_rows.rows})
     associations = {}
     binding_occurrences = []
     graph_fingerprints = {}
@@ -812,9 +804,7 @@ def _projected_trace_structural_context(
                     "blockers": copy.deepcopy(item["mapping_blockers"]),
                 },
                 "canonical_graph_fingerprints": copy.deepcopy(result["evidence"]),
-                "stream_role_mapping": copy.deepcopy(
-                    result["stream_role_mapping"]
-                ),
+                "stream_role_mapping": copy.deepcopy(result["stream_role_mapping"]),
                 "graph_alignment_proof": {
                     "protocol": result["protocol"],
                     "mapping_method": item["mapping_method"],
@@ -828,9 +818,7 @@ def _projected_trace_structural_context(
             }
             associations[identity] = association
             key = _structural_identity_key(*identity)
-            graph_fingerprints[key] = association[
-                "canonical_graph_fingerprints"
-            ]
+            graph_fingerprints[key] = association["canonical_graph_fingerprints"]
             stream_roles[key] = association["stream_role_mapping"]
             proofs[key] = association["graph_alignment_proof"]
 
@@ -845,13 +833,15 @@ def _projected_trace_structural_context(
     protocol["status"] = "associated"
     protocol["blockers"] = []
     protocol["model_mapping_fingerprints"] = {
-        f"device:{result['identity']['device_id']}/model:{result['identity']['model_id']}":
-        result["mapping_fingerprint"]
+        f"device:{result['identity']['device_id']}/model:{result['identity']['model_id']}": result[
+            "mapping_fingerprint"
+        ]
         for result in model_results
     }
     protocol["model_projection_exclusions"] = {
-        f"device:{result['identity']['device_id']}/model:{result['identity']['model_id']}":
-        copy.deepcopy(result["projection_exclusions"])
+        f"device:{result['identity']['device_id']}/model:{result['identity']['model_id']}": copy.deepcopy(
+            result["projection_exclusions"]
+        )
         for result in model_results
     }
     return {
@@ -1008,7 +998,7 @@ def _op_from_function(name):
         return match.group(1)
     for marker in ("aclnn", "aclnnInplace"):
         if name.startswith(marker):
-            tail = name[len(marker):]
+            tail = name[len(marker) :]
             return tail.split("_", 1)[0] or None
     return name.split("_", 1)[0]
 
@@ -1071,7 +1061,7 @@ def _scope_segments(source_scope):
         match = pattern.search(source_scope)
         if not match:
             continue
-        suffix = source_scope[match.end():].strip().strip("._-/").strip()
+        suffix = source_scope[match.end() :].strip().strip("._-/").strip()
         if suffix:
             segment = re.split(r"[._/\-]", suffix, maxsplit=1)[0].strip()
             if segment:
@@ -1135,9 +1125,13 @@ def _load_layer_map(path):
             start = int(item["start_task_id"])
             end = int(item["end_task_id"])
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"{path}: invalid layer range at index {index}: {exc}") from exc
+            raise ValueError(
+                f"{path}: invalid layer range at index {index}: {exc}"
+            ) from exc
         if start > end:
-            raise ValueError(f"{path}: start_task_id exceeds end_task_id at index {index}")
+            raise ValueError(
+                f"{path}: start_task_id exceeds end_task_id at index {index}"
+            )
         source_scope = item.get("source_scope", item.get("scope"))
         if (
             "source_scope" in item
@@ -1186,9 +1180,7 @@ def _load_layer_map(path):
                 for field in ("start_offset", "end_offset")
             )
         ):
-            raise ValueError(
-                f"{path}: invalid layer range at index {index}: boundary"
-            )
+            raise ValueError(f"{path}: invalid layer range at index {index}: boundary")
         sequence = item.get("ordered_child_op_sequence")
         if sequence is not None and (
             not isinstance(sequence, list)
@@ -1250,47 +1242,47 @@ def load_kernel_rows(path, layer_map=None, include_rejected=False):
                 continue
             end = _finite_sum((start, duration))
             item = {
-                    "index": index,
-                    "step_id": str(row.get("Step Id") or "").strip(),
-                    "occurrence_id": str(
-                        row.get("Occurrence Id") or row.get("Occurrence ID") or ""
-                    ).strip(),
-                    "iteration_id": str(
-                        row.get("Iteration Id") or row.get("Iteration ID") or ""
-                    ).strip(),
-                    "request_id": str(
-                        row.get("Request Id") or row.get("Request ID") or ""
-                    ).strip(),
-                    "batch_id": str(
-                        row.get("Batch Id") or row.get("Batch ID") or ""
-                    ).strip(),
-                    "device_id": _to_int(row.get("Device_id")),
-                    "model_id": model_id,
-                    "task_id": task_id,
-                    "stream_id": _to_int(row.get("Stream ID")),
-                    "name": name,
-                    "type": kind,
-                    "op_state": (row.get("OP State") or "").strip(),
-                    "accelerator_core": (row.get("Accelerator Core") or "").strip(),
-                    "start_us": start,
-                    "duration_us": duration,
-                    "end_us": end,
-                    "evidence_errors": (
-                        [] if end is not None else ["non_finite_derived_statistics"]
-                    ),
-                    "block_num": _to_int(row.get("Block Num")),
-                    "mix_block_num": _to_int(row.get("Mix Block Num")),
-                    "wait_us": _to_float(row.get("Wait Time(us)")),
-                    "aic_scalar_time_us": _to_float(row.get("aic_scalar_time(us)")),
-                    "aiv_scalar_time_us": _to_float(row.get("aiv_scalar_time(us)")),
-                    "aic_scalar_ratio": _to_float(row.get("aic_scalar_ratio")),
-                    "aiv_scalar_ratio": _to_float(row.get("aiv_scalar_ratio")),
-                    "aic_icache_miss_rate": _to_float(row.get("aic_icache_miss_rate")),
-                    "aiv_icache_miss_rate": _to_float(row.get("aiv_icache_miss_rate")),
-                    "layer": _layer_from_name(name),
-                    "layer_source": "name" if _layer_from_name(name) is not None else None,
-                    "sk_boundary": boundary,
-                }
+                "index": index,
+                "step_id": str(row.get("Step Id") or "").strip(),
+                "occurrence_id": str(
+                    row.get("Occurrence Id") or row.get("Occurrence ID") or ""
+                ).strip(),
+                "iteration_id": str(
+                    row.get("Iteration Id") or row.get("Iteration ID") or ""
+                ).strip(),
+                "request_id": str(
+                    row.get("Request Id") or row.get("Request ID") or ""
+                ).strip(),
+                "batch_id": str(
+                    row.get("Batch Id") or row.get("Batch ID") or ""
+                ).strip(),
+                "device_id": _to_int(row.get("Device_id")),
+                "model_id": model_id,
+                "task_id": task_id,
+                "stream_id": _to_int(row.get("Stream ID")),
+                "name": name,
+                "type": kind,
+                "op_state": (row.get("OP State") or "").strip(),
+                "accelerator_core": (row.get("Accelerator Core") or "").strip(),
+                "start_us": start,
+                "duration_us": duration,
+                "end_us": end,
+                "evidence_errors": (
+                    [] if end is not None else ["non_finite_derived_statistics"]
+                ),
+                "block_num": _to_int(row.get("Block Num")),
+                "mix_block_num": _to_int(row.get("Mix Block Num")),
+                "wait_us": _to_float(row.get("Wait Time(us)")),
+                "aic_scalar_time_us": _to_float(row.get("aic_scalar_time(us)")),
+                "aiv_scalar_time_us": _to_float(row.get("aiv_scalar_time(us)")),
+                "aic_scalar_ratio": _to_float(row.get("aic_scalar_ratio")),
+                "aiv_scalar_ratio": _to_float(row.get("aiv_scalar_ratio")),
+                "aic_icache_miss_rate": _to_float(row.get("aic_icache_miss_rate")),
+                "aiv_icache_miss_rate": _to_float(row.get("aiv_icache_miss_rate")),
+                "layer": _layer_from_name(name),
+                "layer_source": "name" if _layer_from_name(name) is not None else None,
+                "sk_boundary": boundary,
+            }
             item["core_family"] = _core_family(
                 item["accelerator_core"], item["type"], item["name"]
             )
@@ -1328,11 +1320,13 @@ def _infer_layers_from_scope_anchors(rows):
         )
         if len(ordered) < 2:
             continue
-        if any(right[0] <= left[0] or right[1] <= left[1] for left, right in zip(ordered, ordered[1:])):
+        if any(
+            right[0] <= left[0] or right[1] <= left[1]
+            for left, right in zip(ordered, ordered[1:])
+        ):
             continue
         boundaries = [
-            (left[1] + right[1]) / 2
-            for left, right in zip(ordered, ordered[1:])
+            (left[1] + right[1]) / 2 for left, right in zip(ordered, ordered[1:])
         ]
         first_width = ordered[1][1] - ordered[0][1]
         last_width = ordered[-1][1] - ordered[-2][1]
@@ -1362,8 +1356,7 @@ def _interval_union(intervals):
     ):
         return None
     return _finite_sum(
-        _finite_difference(end, start)
-        for start, end in _merge_intervals(intervals)
+        _finite_difference(end, start) for start, end in _merge_intervals(intervals)
     )
 
 
@@ -1382,8 +1375,7 @@ def _intersection_duration(left_intervals, right_intervals):
     left_intervals = list(left_intervals)
     right_intervals = list(right_intervals)
     if any(
-        start is None or end is None
-        for start, end in left_intervals + right_intervals
+        start is None or end is None for start, end in left_intervals + right_intervals
     ):
         return None
     left = _merge_intervals(left_intervals)
@@ -1431,7 +1423,7 @@ def _overlap_pairs(rows, limit=10):
     overlaps = []
     streams = sorted(by_stream)
     for i, left_stream in enumerate(streams):
-        for right_stream in streams[i + 1:]:
+        for right_stream in streams[i + 1 :]:
             overlap_us = 0.0
             pair_count = 0
             for left in by_stream[left_stream]:
@@ -1468,22 +1460,22 @@ def _core_overlap_analysis(rows, limit=20):
     records = []
     family_totals = Counter()
     for index, left_stream in enumerate(stream_ids):
-        for right_stream in stream_ids[index + 1:]:
+        for right_stream in stream_ids[index + 1 :]:
             for left_family in CORE_FAMILIES:
                 left_intervals = by_stream_family.get((left_stream, left_family), [])
                 if not left_intervals:
                     continue
                 for right_family in CORE_FAMILIES:
-                    right_intervals = by_stream_family.get((right_stream, right_family), [])
+                    right_intervals = by_stream_family.get(
+                        (right_stream, right_family), []
+                    )
                     if not right_intervals:
                         continue
                     overlap_us = _intersection_duration(left_intervals, right_intervals)
                     if overlap_us is None or overlap_us <= 0:
                         continue
                     family_pair = "+".join(sorted((left_family, right_family)))
-                    family_total = _finite_sum(
-                        (family_totals[family_pair], overlap_us)
-                    )
+                    family_total = _finite_sum((family_totals[family_pair], overlap_us))
                     if family_total is None:
                         continue
                     family_totals[family_pair] = family_total
@@ -1504,9 +1496,7 @@ def _core_overlap_analysis(rows, limit=20):
         family_totals.get(f"{family}+{family}", 0.0)
         for family in ("CUBE", "VECTOR", "MIX")
     )
-    device_union = _interval_union(
-        (row["start_us"], row["end_us"]) for row in rows
-    )
+    device_union = _interval_union((row["start_us"], row["end_us"]) for row in rows)
     if cube_vector_us > 0:
         strategy = "preserve_cube_vector_parallelism"
     elif (mix_competition_us or 0) > 0 or (same_resource_us or 0) > 0:
@@ -1533,8 +1523,7 @@ def _core_overlap_analysis(rows, limit=20):
 
 def _top_counter(counter, limit):
     return [
-        {"name": name, "count": count}
-        for name, count in counter.most_common(limit)
+        {"name": name, "count": count} for name, count in counter.most_common(limit)
     ]
 
 
@@ -1571,7 +1560,11 @@ def _node_sequence(rows):
                 "occurrence_count": len(node_rows),
                 "duration_us": _stats(durations),
                 "stream_ids": sorted(
-                    {row["stream_id"] for row in node_rows if row["stream_id"] is not None}
+                    {
+                        row["stream_id"]
+                        for row in node_rows
+                        if row["stream_id"] is not None
+                    }
                 ),
                 "max_scalar_ratio": max(scalar_ratios) if scalar_ratios else None,
             }
@@ -1603,7 +1596,9 @@ def _summarize_layers(rows, top=20):
             "interval": interval,
             "stream_count": len({row["stream_id"] for row in layer_rows}),
             "max_active_streams": _max_active_streams(layer_rows),
-            "op_type_counts": _top_counter(Counter(row["type"] for row in layer_rows), top),
+            "op_type_counts": _top_counter(
+                Counter(row["type"] for row in layer_rows), top
+            ),
             "core_family_counts": _top_counter(
                 Counter(row["core_family"] for row in layer_rows), top
             ),
@@ -1642,7 +1637,9 @@ def _summarize_layers(rows, top=20):
         "task_ranges": task_ranges,
         "layers": layers,
         "unassigned_op_types": _top_counter(
-            Counter(row["type"] for row in (model_rows or rows) if row["layer"] is None),
+            Counter(
+                row["type"] for row in (model_rows or rows) if row["layer"] is None
+            ),
             top,
         ),
         "limitations": limitations,
@@ -1721,12 +1718,14 @@ def summarize_profile(path, top=20, layer_map=None):
         "layers_with_ops": {
             str(layer): {
                 "row_count": len(layer_rows),
-                "op_types": _top_counter(Counter(row["type"] for row in layer_rows), 10),
-                    "stream_count": len({row["stream_id"] for row in layer_rows}),
-                    "core_families": _top_counter(
-                        Counter(row["core_family"] for row in layer_rows), 10
-                    ),
-                }
+                "op_types": _top_counter(
+                    Counter(row["type"] for row in layer_rows), 10
+                ),
+                "stream_count": len({row["stream_id"] for row in layer_rows}),
+                "core_families": _top_counter(
+                    Counter(row["core_family"] for row in layer_rows), 10
+                ),
+            }
             for layer, layer_rows in sorted(by_layer.items())
         },
         "op_type_counts": _top_counter(Counter(row["type"] for row in rows), top),
@@ -1735,9 +1734,7 @@ def summarize_profile(path, top=20, layer_map=None):
         ),
         "superkernel": {
             "count": len(sk_rows),
-            "duration_sum_us": _finite_sum(
-                row["duration_us"] for row in sk_rows
-            ),
+            "duration_sum_us": _finite_sum(row["duration_us"] for row in sk_rows),
             "top_by_duration": [
                 {
                     "task_id": row["task_id"],
@@ -1746,7 +1743,9 @@ def summarize_profile(path, top=20, layer_map=None):
                     "duration_us": row["duration_us"],
                     "boundary": row["sk_boundary"],
                 }
-                for row in sorted(sk_rows, key=lambda row: row["duration_us"], reverse=True)[:top]
+                for row in sorted(
+                    sk_rows, key=lambda row: row["duration_us"], reverse=True
+                )[:top]
             ],
         },
         "top_rows_by_duration": [
@@ -1755,14 +1754,14 @@ def summarize_profile(path, top=20, layer_map=None):
                 "stream_id": row["stream_id"],
                 "name": row["name"],
                 "type": row["type"],
-                    "accelerator_core": row["accelerator_core"],
-                    "core_family": row["core_family"],
+                "accelerator_core": row["accelerator_core"],
+                "core_family": row["core_family"],
                 "duration_us": row["duration_us"],
                 "start_us": row["start_us"],
-                    "end_us": row["end_us"],
-                    "op_state": row["op_state"],
-                    "layer": row["layer"],
-                }
+                "end_us": row["end_us"],
+                "op_state": row["op_state"],
+                "layer": row["layer"],
+            }
             for row in top_duration
         ],
     }, rows
@@ -1836,9 +1835,7 @@ def _interval_summary(rows):
     end = max(ends) if all(value is not None for value in ends) else None
     interval = _finite_difference(end, start)
     duration_sum = _finite_sum(row["duration_us"] for row in rows)
-    union_duration = _interval_union(
-        (row["start_us"], row["end_us"]) for row in rows
-    )
+    union_duration = _interval_union((row["start_us"], row["end_us"]) for row in rows)
     scalar_time = _finite_sum(
         _finite_sum((row["aic_scalar_time_us"] or 0, row["aiv_scalar_time_us"] or 0))
         for row in rows
@@ -1855,9 +1852,7 @@ def _interval_summary(rows):
         "row_count": len(rows),
         "task_ids": [row["task_id"] for row in rows],
         "op_types": _top_counter(Counter(row["type"] for row in rows), 12),
-        "core_families": _top_counter(
-            Counter(row["core_family"] for row in rows), 12
-        ),
+        "core_families": _top_counter(Counter(row["core_family"] for row in rows), 12),
         "stream_ids": _sorted_stream_ids(rows),
         "stream_count": len(_sorted_stream_ids(rows)),
         "start_us": start,
@@ -1903,14 +1898,10 @@ def _robust_stats(values):
         return None
     p50 = _finite_or_none(statistics.median(values))
     deviations = (
-        [_finite_difference(value, p50) for value in values]
-        if p50 is not None
-        else []
+        [_finite_difference(value, p50) for value in values] if p50 is not None else []
     )
     absolute_deviations = [
-        _finite_or_none(abs(value))
-        for value in deviations
-        if value is not None
+        _finite_or_none(abs(value)) for value in deviations if value is not None
     ]
     return {
         "count": len(values),
@@ -1975,8 +1966,7 @@ def classify_performance(
     )
     if (
         not all(
-            value is not None and math.isfinite(value)
-            for value in statistic_values
+            value is not None and math.isfinite(value) for value in statistic_values
         )
         or baseline_p50 == 0
         or candidate_p50 == 0
@@ -2017,12 +2007,8 @@ def classify_performance(
             "improvement_pct": None,
             "evidence_errors": list(dict.fromkeys(errors)),
         }
-    baseline_noise_pct = _finite_percentage(
-        baseline["mad"], baseline_p50
-    )
-    candidate_noise_pct = _finite_percentage(
-        candidate["mad"], candidate_p50
-    )
+    baseline_noise_pct = _finite_percentage(baseline["mad"], baseline_p50)
+    candidate_noise_pct = _finite_percentage(candidate["mad"], candidate_p50)
     baseline_noise_pct = _finite_or_none(
         baseline_noise_pct * 2 if baseline_noise_pct is not None else None
     )
@@ -2079,9 +2065,7 @@ def classify_performance(
 
 
 def _stats(values):
-    values = [
-        value for value in values if value is not None and math.isfinite(value)
-    ]
+    values = [value for value in values if value is not None and math.isfinite(value)]
     result = _robust_stats(values)
     if result is None:
         return None
@@ -2104,13 +2088,8 @@ def _occurrence_summaries(mapped_rows, node_ids=None):
         rows = [row for row in mapped_rows if row["task_id"] == node_id]
         if rows:
             by_node[node_id] = rows
-    child_occurrence_counts = {
-        node_id: len(rows) for node_id, rows in by_node.items()
-    }
-    if (
-        len(by_node) != len(node_ids)
-        or len(set(child_occurrence_counts.values())) != 1
-    ):
+    child_occurrence_counts = {node_id: len(rows) for node_id, rows in by_node.items()}
+    if len(by_node) != len(node_ids) or len(set(child_occurrence_counts.values())) != 1:
         return [], ["baseline_child_occurrence_count_mismatch"]
 
     domains = {
@@ -2118,14 +2097,9 @@ def _occurrence_summaries(mapped_rows, node_ids=None):
         for rows in by_node.values()
         for row in rows
     }
-    if (
-        len(domains) != 1
-        or any(
-            not model_id
-            or isinstance(device_id, bool)
-            or not isinstance(device_id, int)
-            for model_id, device_id in domains
-        )
+    if len(domains) != 1 or any(
+        not model_id or isinstance(device_id, bool) or not isinstance(device_id, int)
+        for model_id, device_id in domains
     ):
         return [], ["baseline_child_occurrence_domain_mismatch"]
 
@@ -2166,9 +2140,7 @@ def _occurrence_summaries(mapped_rows, node_ids=None):
 
     summaries = []
     for key in sorted(key_sets[0], key=_canonical_json):
-        occurrence_rows = [
-            rows_by_node_and_key[node_id][key] for node_id in node_ids
-        ]
+        occurrence_rows = [rows_by_node_and_key[node_id][key] for node_id in node_ids]
         summaries.append(_interval_summary(occurrence_rows))
     return summaries, []
 
@@ -2187,12 +2159,8 @@ def _aggregate_original(mapped_rows, node_ids=None):
         for error in summary.get("evidence_errors", [])
     }
     interval_stats = _stats(item["interval_us"] for item in occurrences)
-    duration_sum_stats = _stats(
-        item["duration_sum_us"] for item in occurrences
-    )
-    union_duration_stats = _stats(
-        item["union_duration_us"] for item in occurrences
-    )
+    duration_sum_stats = _stats(item["duration_sum_us"] for item in occurrences)
+    union_duration_stats = _stats(item["union_duration_us"] for item in occurrences)
     if any(
         value is None
         for value in (interval_stats, duration_sum_stats, union_duration_stats)
@@ -2239,9 +2207,7 @@ def _fusion_benefit(row, original, metadata_child_node_count):
         duration_sum_stats = original.get("duration_sum_us") or {}
         original_interval = interval_stats.get("p50")
         original_duration_sum = duration_sum_stats.get("p50")
-    interval_improvement = _finite_difference(
-        original_interval, row["duration_us"]
-    )
+    interval_improvement = _finite_difference(original_interval, row["duration_us"])
     duration_sum_improvement = _finite_difference(
         original_duration_sum, row["duration_us"]
     )
@@ -2326,12 +2292,14 @@ def _fusion_performance_summary(comparisons):
 
 def _profile_delta(baseline_summary, candidate_summary):
     return {
-        "row_count_delta": candidate_summary["row_count"] - baseline_summary["row_count"],
+        "row_count_delta": candidate_summary["row_count"]
+        - baseline_summary["row_count"],
         "row_count_change_pct": _pct_change(
             candidate_summary["row_count"], baseline_summary["row_count"]
         ),
         "device_interval_change_pct": _pct_change(
-            candidate_summary["device_interval_us"], baseline_summary["device_interval_us"]
+            candidate_summary["device_interval_us"],
+            baseline_summary["device_interval_us"],
         ),
         "duration_sum_change_pct": _pct_change(
             candidate_summary["duration_sum_us"], baseline_summary["duration_sum_us"]
@@ -2497,7 +2465,6 @@ def compare_candidate(
             for item in candidate_rejected_rows
         ):
             candidate_derived_errors.add("invalid_profile_occurrence")
-        mapped = []
         node_ids = []
         mapping_method = None
         mapping_confidence = "diagnostic_only"
@@ -2505,9 +2472,7 @@ def compare_candidate(
         decision_errors = [*evidence_errors, *sorted(candidate_derived_errors)]
         mapping_errors = _identity_evidence_errors(candidate_group["identity"])
         mapping_blockers = []
-        matching_metadata_group_count = candidate_group[
-            "matching_metadata_group_count"
-        ]
+        matching_metadata_group_count = candidate_group["matching_metadata_group_count"]
         if matching_metadata_group_count != 1:
             mapping_errors.extend(
                 [
@@ -2523,8 +2488,7 @@ def compare_candidate(
                 mapping_errors.append("candidate_binding_not_exact")
         elif metadata_groups:
             if any(
-                group["node_count"] != len(group["nodes"])
-                for group in metadata_groups
+                group["node_count"] != len(group["nodes"]) for group in metadata_groups
             ):
                 mapping_errors.append("metadata_child_node_count_mismatch")
             metadata_nodes = [
@@ -2540,12 +2504,8 @@ def compare_candidate(
                     )
                     if not child_rows:
                         continue
-                    if not _baseline_node_operators_match(
-                        child_rows, node["op_type"]
-                    ):
-                        raw_mapping_errors.append(
-                            "baseline_child_operator_mismatch"
-                        )
+                    if not _baseline_node_operators_match(child_rows, node["op_type"]):
+                        raw_mapping_errors.append("baseline_child_operator_mismatch")
                         break
                     raw_mapped.extend(child_rows)
         else:
@@ -2553,10 +2513,7 @@ def compare_candidate(
 
         if raw_node_ids:
             other_model_rows = sum(
-                (
-                    baseline_by_task.get((None, node_id), [])
-                    for node_id in raw_node_ids
-                ),
+                (baseline_by_task.get((None, node_id), []) for node_id in raw_node_ids),
                 [],
             )
             if other_model_rows:
@@ -2631,7 +2588,6 @@ def compare_candidate(
             mapping_confidence = "exact"
             mapping_blockers = []
             original = _structural_original(association.get("baseline_occurrences"))
-            mapped = []
             node_ids = []
         elif association is not None:
             mapping_method = association["mapping_method"]
@@ -2642,7 +2598,6 @@ def compare_candidate(
                 if performance_mapping_exact(mapping_method, mapping_confidence)
                 else None
             )
-            mapped = []
             node_ids = []
             if not performance_mapping_exact(mapping_method, mapping_confidence):
                 mapping_errors.extend(mapping_blockers)
@@ -2668,19 +2623,15 @@ def compare_candidate(
                     {
                         "method": "sk_meta_node_ids",
                         "confidence": "diagnostic_only",
-                        "baseline_occurrence_count": raw_original[
-                            "occurrence_count"
-                        ],
+                        "baseline_occurrence_count": raw_original["occurrence_count"],
                     }
                 )
-            mapped = []
             node_ids = []
             original = None
 
         decision_errors.extend(mapping_errors)
         if any(
-            item.get("model_id") == row["model_id"]
-            and item.get("task_id") in node_ids
+            item.get("model_id") == row["model_id"] and item.get("task_id") in node_ids
             for item in baseline_rejected_rows
         ):
             decision_errors.append("invalid_profile_occurrence")
@@ -2726,7 +2677,9 @@ def compare_candidate(
                 else sum(len(group["nodes"]) for group in metadata_groups)
             ),
             "metadata_child_functions": [
-                node["func_name"] for group in metadata_groups for node in group["nodes"]
+                node["func_name"]
+                for group in metadata_groups
+                for node in group["nodes"]
             ],
             "metadata_child_op_types": _top_counter(
                 Counter(
@@ -2841,9 +2794,7 @@ def summarize_sk_child_profile(path, top=20):
     files = _find_sk_prof_files(path)
     for file_index, json_path in enumerate(files):
         data = json.loads(json_path.read_text(errors="replace"))
-        file_range_id = (
-            data.get("range_id") if isinstance(data, dict) else None
-        )
+        file_range_id = data.get("range_id") if isinstance(data, dict) else None
         for event_index, event in enumerate(_walk_trace_events(data)):
             if event.get("ph") not in (None, "X"):
                 continue
@@ -2866,11 +2817,7 @@ def summarize_sk_child_profile(path, top=20):
             )
             if stream_id is None:
                 stream_id = _to_int(event.get("tid"))
-            range_id = (
-                args.get("range_id")
-                or event.get("range_id")
-                or file_range_id
-            )
+            range_id = args.get("range_id") or event.get("range_id") or file_range_id
             if isinstance(range_id, str) and range_id:
                 range_ids.add(range_id)
                 scoped_event_count += 1
@@ -2904,17 +2851,15 @@ def summarize_sk_child_profile(path, top=20):
                     "aic_icache_miss_rate": None,
                     "aiv_icache_miss_rate": None,
                     "layer": _layer_from_name(name),
-                    "layer_source": "name" if _layer_from_name(name) is not None else None,
+                    "layer_source": "name"
+                    if _layer_from_name(name) is not None
+                    else None,
                     "sk_boundary": _parse_sk_name(name),
                 }
             )
     interval = _interval_summary(rows)
-    known_stream_event_count = sum(
-        row["stream_id"] is not None for row in rows
-    )
-    cube_vector_rows = [
-        row for row in rows if row["core_family"] in {"CUBE", "VECTOR"}
-    ]
+    known_stream_event_count = sum(row["stream_id"] is not None for row in rows)
+    cube_vector_rows = [row for row in rows if row["core_family"] in {"CUBE", "VECTOR"}]
     return {
         "paths": [str(path) for path in files],
         "range_ids": sorted(range_ids),
@@ -2931,7 +2876,9 @@ def summarize_sk_child_profile(path, top=20):
             and all(row["stream_id"] is not None for row in cube_vector_rows)
         ),
         "interval": interval,
-        "core_family_counts": _top_counter(Counter(row["core_family"] for row in rows), top),
+        "core_family_counts": _top_counter(
+            Counter(row["core_family"] for row in rows), top
+        ),
         "stream_count": len(
             {row["stream_id"] for row in rows if row["stream_id"] is not None}
         ),
@@ -2943,7 +2890,9 @@ def summarize_sk_child_profile(path, top=20):
                 "core_family": row["core_family"],
                 "duration_us": row["duration_us"],
             }
-            for row in sorted(rows, key=lambda item: item["duration_us"], reverse=True)[:top]
+            for row in sorted(rows, key=lambda item: item["duration_us"], reverse=True)[
+                :top
+            ]
         ],
         "diagnostic_only": True,
     }
@@ -2952,10 +2901,9 @@ def summarize_sk_child_profile(path, top=20):
 def _attach_sk_child_schedule(comparison, baseline_summary, child_summary):
     baseline = baseline_summary["multi_stream_analysis"]
     child = child_summary["multi_stream_analysis"]
-    if (
-        not _child_trace_has_cube_and_vector(child_summary)
-        or not _child_trace_has_reliable_cube_vector_streams(child_summary)
-    ):
+    if not _child_trace_has_cube_and_vector(
+        child_summary
+    ) or not _child_trace_has_reliable_cube_vector_streams(child_summary):
         verdict = "child_trace_missing_cube_vector_evidence"
         action = (
             "collect a complete child trace containing both CUBE and VECTOR events "
@@ -2969,7 +2917,9 @@ def _attach_sk_child_schedule(comparison, baseline_summary, child_summary):
         action = "test accepted auto_op_parallel=1 or split the scope at the C/V dependency boundary"
     elif child.get("cube_vector_parallel_detected") is True:
         verdict = "cube_vector_parallel_inside_sk"
-        action = "keep the schedule only if clean worst-rank latency and correctness pass"
+        action = (
+            "keep the schedule only if clean worst-rank latency and correctness pass"
+        )
     else:
         verdict = "no_cube_vector_parallel_evidence"
         action = "prefer deeper single-stream fusion unless source inspection proves another schedule"
@@ -3000,16 +2950,16 @@ def _validated_environment_options(environment_evidence):
     )
     optimize_options = {}
     if options is not None:
-        optimize_options = _optional_mapping_field(
-            options,
-            "optimize_options",
-            "environment_evidence.options.optimize_options",
-        ) or {}
-    for option_name, option_evidence in optimize_options.items():
-        option_path = (
-            "environment_evidence.options.optimize_options."
-            f"{option_name}"
+        optimize_options = (
+            _optional_mapping_field(
+                options,
+                "optimize_options",
+                "environment_evidence.options.optimize_options",
+            )
+            or {}
         )
+    for option_name, option_evidence in optimize_options.items():
+        option_path = f"environment_evidence.options.optimize_options.{option_name}"
         if not isinstance(option_evidence, dict):
             raise ValueError(f"{option_path} must be an object")
         if "accepted_values" in option_evidence and not isinstance(
@@ -3017,11 +2967,14 @@ def _validated_environment_options(environment_evidence):
         ):
             raise ValueError(f"{option_path}.accepted_values must be a list")
 
-    accepted_options = _optional_mapping_field(
-        environment_evidence,
-        "accepted_options",
-        "environment_evidence.accepted_options",
-    ) or {}
+    accepted_options = (
+        _optional_mapping_field(
+            environment_evidence,
+            "accepted_options",
+            "environment_evidence.accepted_options",
+        )
+        or {}
+    )
     for option_name, values in accepted_options.items():
         if not isinstance(values, list):
             raise ValueError(
@@ -3167,11 +3120,7 @@ def _regex_has_child_literal_evidence(regex, symbols):
     evidence_tokens.update(
         token for token in (_op_from_function(symbol) for symbol in symbols) if token
     )
-    return any(
-        token in fragment
-        for token in evidence_tokens
-        for fragment in fragments
-    )
+    return any(token in fragment for token in evidence_tokens for fragment in fragments)
 
 
 def _accepted_narrow_regex(environment_evidence, option, child_functions):
@@ -3279,9 +3228,7 @@ def _append_missing_cube_vector_trace(
             "requires_ab_test": True,
         }
     )
-    blocker_detail = (
-        f"{detail_code}；{detail_zh}；" if detail_code else ""
-    )
+    blocker_detail = f"{detail_code}；{detail_zh}；" if detail_code else ""
     blockers.append(
         f"range_id={range_id}：child_trace_missing_cube_vector_evidence；"
         f"{blocker_detail}需补采可精确关联到该 range、同时包含 CUBE 与 VECTOR "
@@ -3377,10 +3324,13 @@ def _build_regression_diagnostics(
                     f"{source_summary}；冲突消除前不生成 DCCI 假设或实验。"
                 )
             elif dcci_runtime["state"] == "unknown":
-                source_summary = "，".join(
-                    f"{item['source']}={item['state']}"
-                    for item in dcci_runtime["sources"]
-                ) or "未提供显式 runtime_evidence.dcci_state 来源"
+                source_summary = (
+                    "，".join(
+                        f"{item['source']}={item['state']}"
+                        for item in dcci_runtime["sources"]
+                    )
+                    or "未提供显式 runtime_evidence.dcci_state 来源"
+                )
                 blockers.append(
                     "DCCI 运行状态未知（dcci_state_unknown）："
                     f"{source_summary}；scalar/cache 指标不能代替明确的状态证据。"
@@ -3613,8 +3563,7 @@ def _analysis_main(argv):
             parser.error(f"{option} must be a non-empty trimmed string")
     if not round_belongs_to_candidate(args.candidate_name, args.round_id):
         parser.error(
-            "--round-id must belong to --candidate-name and use "
-            "AUTO/BASE/Pn/Rn/FINAL"
+            "--round-id must belong to --candidate-name and use AUTO/BASE/Pn/Rn/FINAL"
         )
 
     if args.min_occurrences < 1:
@@ -3637,7 +3586,9 @@ def _analysis_main(argv):
         if not args.sk_meta.is_dir():
             raise ValueError(f"{args.sk_meta}: sk_meta must be an existing directory")
         baseline_config = _load_json_artifact(args.baseline_config, "baseline config")
-        candidate_config = _load_json_artifact(args.candidate_config, "candidate config")
+        candidate_config = _load_json_artifact(
+            args.candidate_config, "candidate config"
+        )
         baseline_workload = _load_json_artifact(
             args.baseline_workload, "baseline workload"
         )
@@ -3665,9 +3616,7 @@ def _analysis_main(argv):
         )
         baseline_profile_fingerprint = _profile_fingerprint(args.baseline_profile)
         candidate_profile_fingerprint = _profile_fingerprint(args.candidate_profile)
-        structural_context = _load_structural_context(
-            args, baseline_rows, fingerprints
-        )
+        structural_context = _load_structural_context(args, baseline_rows, fingerprints)
         source_scope_context = (
             load_source_scope_map_v2(
                 args.source_scope_map,
@@ -3783,25 +3732,15 @@ def _analysis_main(argv):
         **identity,
         "baseline_profile_fingerprint": baseline_profile_fingerprint,
         "candidate_profile_fingerprint": candidate_profile_fingerprint,
-        "baseline_config_fingerprint": fingerprints[
-            "baseline_config_fingerprint"
-        ],
-        "candidate_config_fingerprint": fingerprints[
-            "candidate_config_fingerprint"
-        ],
-        "baseline_workload_fingerprint": fingerprints[
-            "baseline_workload_fingerprint"
-        ],
+        "baseline_config_fingerprint": fingerprints["baseline_config_fingerprint"],
+        "candidate_config_fingerprint": fingerprints["candidate_config_fingerprint"],
+        "baseline_workload_fingerprint": fingerprints["baseline_workload_fingerprint"],
         "candidate_workload_fingerprint": fingerprints[
             "candidate_workload_fingerprint"
         ],
         "workload_fingerprint": fingerprints["workload_fingerprint"],
-        "baseline_control_fingerprint": fingerprints[
-            "baseline_control_fingerprint"
-        ],
-        "candidate_control_fingerprint": fingerprints[
-            "candidate_control_fingerprint"
-        ],
+        "baseline_control_fingerprint": fingerprints["baseline_control_fingerprint"],
+        "candidate_control_fingerprint": fingerprints["candidate_control_fingerprint"],
         "control_fingerprint": fingerprints["control_fingerprint"],
         "declared_change_set": fingerprints["declared_change_set"],
         "source_scope_mapping": {
@@ -3827,9 +3766,7 @@ def _analysis_main(argv):
         },
         "coverage": comparison["comparison_coverage"],
         "association_protocol": structural_context["protocol"],
-        "candidate_binding_evidence": structural_context[
-            "candidate_binding_evidence"
-        ],
+        "candidate_binding_evidence": structural_context["candidate_binding_evidence"],
         "canonical_graph_fingerprints": structural_context[
             "canonical_graph_fingerprints"
         ],
@@ -3873,11 +3810,7 @@ def _analysis_main(argv):
             args.json_out,
             output + "\n",
             markdown_path=args.markdown_out,
-            markdown_content=(
-                render_report(report)
-                if args.markdown_out
-                else None
-            ),
+            markdown_content=(render_report(report) if args.markdown_out else None),
         )
     except (OSError, ValueError) as error:
         parser.error(str(error))

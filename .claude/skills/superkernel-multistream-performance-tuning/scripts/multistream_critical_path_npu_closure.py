@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Seal and replay a real-NPU event/stage critical-path tuning closure."""
 
 import argparse
@@ -31,7 +38,13 @@ ARTIFACT_SCHEMAS = {
 
 
 def _canonical(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def fingerprint(value):
@@ -73,17 +86,33 @@ def _rooted(root, value, label):
 
 def _runtime(value):
     fields = {
-        "device_name", "device_count", "backend", "npugraph_ex",
-        "static_kernel_compile", "super_kernel_scope", "stream_count",
+        "device_name",
+        "device_count",
+        "backend",
+        "npugraph_ex",
+        "static_kernel_compile",
+        "super_kernel_scope",
+        "stream_count",
     }
     if not isinstance(value, dict) or set(value) != fields:
         raise ValueError("critical path closure runtime fields are invalid")
     _text(value["device_name"], "runtime.device_name")
-    if isinstance(value["device_count"], bool) or not isinstance(value["device_count"], int) or value["device_count"] < 1:
+    if (
+        isinstance(value["device_count"], bool)
+        or not isinstance(value["device_count"], int)
+        or value["device_count"] < 1
+    ):
         raise ValueError("runtime.device_count must be positive")
-    if value["backend"] != "npugraph_ex" or any(value[field] is not True for field in ("npugraph_ex", "static_kernel_compile", "super_kernel_scope")):
+    if value["backend"] != "npugraph_ex" or any(
+        value[field] is not True
+        for field in ("npugraph_ex", "static_kernel_compile", "super_kernel_scope")
+    ):
         raise ValueError("runtime does not prove npugraph_ex SuperKernel execution")
-    if isinstance(value["stream_count"], bool) or not isinstance(value["stream_count"], int) or value["stream_count"] < 2:
+    if (
+        isinstance(value["stream_count"], bool)
+        or not isinstance(value["stream_count"], int)
+        or value["stream_count"] < 2
+    ):
         raise ValueError("runtime.stream_count must be at least two")
     return dict(value)
 
@@ -99,7 +128,11 @@ def _artifacts(value, root):
         payload = _load(path)
         if payload.get("schema_version") != schema:
             raise ValueError(f"artifacts.{name} must use {schema}")
-        record = {"path": relative, "schema_version": schema, "file_fingerprint": file_fingerprint(path)}
+        record = {
+            "path": relative,
+            "schema_version": schema,
+            "file_fingerprint": file_fingerprint(path),
+        }
         if isinstance(item, dict) and item != record:
             raise ValueError(f"artifacts.{name} sealed identity mismatch")
         records[name], payloads[name] = record, payload
@@ -113,42 +146,67 @@ def _replay(manifest, root, payloads):
     if request_fp != manifest["request_fingerprint"]:
         raise ValueError("closure request fingerprint mismatch")
     action = payloads["action_manifest"]
-    if action.get("trial_id") != manifest["trial_id"] or action.get("change_kind") not in {"event_edge_refinement", "stage_split"}:
+    if action.get("trial_id") != manifest["trial_id"] or action.get(
+        "change_kind"
+    ) not in {"event_edge_refinement", "stage_split"}:
         raise ValueError("closure action is not a matching event/stage action")
-    if action.get("multistream_only_verified") is not True or action.get("single_change_verified") is not True:
+    if (
+        action.get("multistream_only_verified") is not True
+        or action.get("single_change_verified") is not True
+    ):
         raise ValueError("closure action lacks source isolation gates")
     dispatch = multistream_event_stage_dispatch.validate(
-        payloads["event_stage_dispatch"], action,
-        trial_id=manifest["trial_id"], request_fingerprint=request_fp,
+        payloads["event_stage_dispatch"],
+        action,
+        trial_id=manifest["trial_id"],
+        request_fingerprint=request_fp,
     )
     if dispatch["decision"] != "effective":
         raise ValueError("closure action dispatch did not change as authorized")
     plan = multistream_four_profile.validate_plan(payloads["four_profile_plan"])
-    if plan["trial_id"] != manifest["trial_id"] or plan["request_fingerprint"] != request_fp:
+    if (
+        plan["trial_id"] != manifest["trial_id"]
+        or plan["request_fingerprint"] != request_fp
+    ):
         raise ValueError("closure four-profile identity mismatch")
     summary = multistream_four_profile.validate_summary(
         root / manifest["artifacts"]["four_profile_summary"]["path"], plan, root
     )
     join = multistream_join_validation.validate(payloads["join_validation"])
-    if join["trial_id"] != manifest["trial_id"] or join["request_fingerprint"] != request_fp:
+    if (
+        join["trial_id"] != manifest["trial_id"]
+        or join["request_fingerprint"] != request_fp
+    ):
         raise ValueError("closure join validation identity mismatch")
-    if join["action_manifest_fingerprint"] != multistream_source_transform.fingerprint(action):
+    if join["action_manifest_fingerprint"] != multistream_source_transform.fingerprint(
+        action
+    ):
         raise ValueError("closure join validation does not bind action")
     if join["decision"] != "effective":
         raise ValueError("closure join mechanism is not effective")
-    result_summary = multistream_critical_path_contract.validate_result(request, payloads["result"], root)
-    trials = [item for item in payloads["result"].get("trials", []) if item.get("trial_id") == manifest["trial_id"]]
+    result_summary = multistream_critical_path_contract.validate_result(
+        request, payloads["result"], root
+    )
+    trials = [
+        item
+        for item in payloads["result"].get("trials", [])
+        if item.get("trial_id") == manifest["trial_id"]
+    ]
     if len(trials) != 1 or trials[0].get("decision") not in {"accepted", "rejected"}:
         raise ValueError("closure requires one matching executed trial")
     clean = multistream_evidence.validate_evidence(
-        root / manifest["artifacts"]["clean_evidence"]["path"], root,
-        trial_id=manifest["trial_id"], request_fingerprint=request_fp,
+        root / manifest["artifacts"]["clean_evidence"]["path"],
+        root,
+        trial_id=manifest["trial_id"],
+        request_fingerprint=request_fp,
         state_after=trials[0]["clean_state"],
     )
     expected_clean = "pass" if trials[0]["decision"] == "accepted" else "reject"
     if clean["decision"] != expected_clean:
         raise ValueError("closure clean decision differs from trial")
-    multistream_cleanup.validate_receipt(payloads["cleanup_receipt"], payloads["cleanup_plan"])
+    multistream_cleanup.validate_receipt(
+        payloads["cleanup_receipt"], payloads["cleanup_plan"]
+    )
     expected_status = "accepted" if trials[0]["decision"] == "accepted" else "no_gain"
     if result_summary["status"] != expected_status:
         raise ValueError("closure result status differs from trial")
@@ -162,22 +220,37 @@ def _replay(manifest, root, payloads):
 
 def validate(value, artifact_root, *, require_fingerprint=True):
     fields = {
-        "schema_version", "closure_id", "request_fingerprint", "trial_id", "runtime",
-        "artifacts", "action_closed", "four_profile_closed", "outcome",
+        "schema_version",
+        "closure_id",
+        "request_fingerprint",
+        "trial_id",
+        "runtime",
+        "artifacts",
+        "action_closed",
+        "four_profile_closed",
+        "outcome",
     }
     if require_fingerprint:
         fields.add("closure_fingerprint")
-    if not isinstance(value, dict) or set(value) != fields or value.get("schema_version") != SCHEMA:
+    if (
+        not isinstance(value, dict)
+        or set(value) != fields
+        or value.get("schema_version") != SCHEMA
+    ):
         raise ValueError(f"critical path closure must use {SCHEMA} with exact fields")
     root = Path(artifact_root).resolve()
     records, payloads = _artifacts(value["artifacts"], root)
     normalized = {
         "schema_version": SCHEMA,
         "closure_id": _text(value["closure_id"], "closure_id"),
-        "request_fingerprint": _text(value["request_fingerprint"], "request_fingerprint"),
+        "request_fingerprint": _text(
+            value["request_fingerprint"], "request_fingerprint"
+        ),
         "trial_id": _text(value["trial_id"], "trial_id"),
-        "runtime": _runtime(value["runtime"]), "artifacts": records,
-        "action_closed": True, "four_profile_closed": True,
+        "runtime": _runtime(value["runtime"]),
+        "artifacts": records,
+        "action_closed": True,
+        "four_profile_closed": True,
     }
     replay = _replay(normalized, root, payloads)
     normalized["outcome"] = replay
@@ -186,14 +259,19 @@ def validate(value, artifact_root, *, require_fingerprint=True):
         raise ValueError("critical path closure summary differs from semantic replay")
     if require_fingerprint and value["outcome"] != replay:
         raise ValueError("critical path closure outcome differs from semantic replay")
-    if require_fingerprint and value["closure_fingerprint"] != normalized["closure_fingerprint"]:
+    if (
+        require_fingerprint
+        and value["closure_fingerprint"] != normalized["closure_fingerprint"]
+    ):
         raise ValueError("critical path closure fingerprint mismatch")
     return {"valid": True, "closure": normalized, **replay}
 
 
 def seal(draft, artifact_root):
     if not isinstance(draft, dict) or "closure_fingerprint" in draft:
-        raise ValueError("critical path closure draft must not contain closure_fingerprint")
+        raise ValueError(
+            "critical path closure draft must not contain closure_fingerprint"
+        )
     prepared = dict(draft)
     prepared["action_closed"] = True
     prepared["four_profile_closed"] = True
@@ -210,7 +288,14 @@ def main(argv=None):
         result = validate(_load(args.manifest), args.artifact_root)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         parser.error(str(error))
-    print(json.dumps({key: item for key, item in result.items() if key != "closure"}, ensure_ascii=False, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {key: item for key, item in result.items() if key != "closure"},
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import sys
 import unittest
 from decimal import Decimal
@@ -9,8 +16,8 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-import projected_trace_mapping as mapping
-import structural_association as association
+import projected_trace_mapping as mapping  # noqa: E402 - load sibling scripts after sys.path setup
+import structural_association as association  # noqa: E402 - load sibling scripts after sys.path setup
 
 
 class ProjectedTraceMappingTest(unittest.TestCase):
@@ -88,8 +95,12 @@ class ProjectedTraceMappingTest(unittest.TestCase):
             cls._projection_node("p1", 11, "sk_placeholder_kernel_dav_2201"),
             cls._projection_node("p2", 12, "sk_placeholder_kernel_dav_2201"),
             cls._projection_node("add", 13, "Add"),
-            cls._projection_node("p3", end_ordinal - 2, "sk_placeholder_kernel_dav_2201"),
-            cls._projection_node("p4", end_ordinal - 1, "sk_placeholder_kernel_dav_2201"),
+            cls._projection_node(
+                "p3", end_ordinal - 2, "sk_placeholder_kernel_dav_2201"
+            ),
+            cls._projection_node(
+                "p4", end_ordinal - 1, "sk_placeholder_kernel_dav_2201"
+            ),
             cls._projection_node("end", end_ordinal, "sk_scope_kernel_end_dav_2201"),
         ]
         if extra_stream:
@@ -146,10 +157,13 @@ class ProjectedTraceMappingTest(unittest.TestCase):
             {"step_id": step, "name": "Add", "projected_op": "Add"}
             for step in (3, 4, 5)
         ]
-        with mock.patch.object(
-            mapping, "_candidate_profiler_marker_evidence", return_value=(3, [])
-        ), mock.patch.object(
-            mapping, "_updated_graph_marker_evidence", return_value=(1, [])
+        with (
+            mock.patch.object(
+                mapping, "_candidate_profiler_marker_evidence", return_value=(3, [])
+            ),
+            mock.patch.object(
+                mapping, "_updated_graph_marker_evidence", return_value=(1, [])
+            ),
         ):
             return mapping.guarded_sentinel_exclusion(
                 graph,
@@ -182,7 +196,9 @@ class ProjectedTraceMappingTest(unittest.TestCase):
             mapping._sentinel_chain_proposal(incomplete)["blockers"],
         )
         noncontiguous = self._sentinel_graph()
-        next(node for node in noncontiguous.nodes if node.key == "p4").stream_ordinal = 103
+        next(
+            node for node in noncontiguous.nodes if node.key == "p4"
+        ).stream_ordinal = 103
         self.assertIn(
             "scope_sentinel_chain_noncontiguous",
             mapping._sentinel_chain_proposal(noncontiguous)["blockers"],
@@ -252,12 +268,15 @@ class ProjectedTraceMappingTest(unittest.TestCase):
         graph_set = SimpleNamespace(
             graphs=(SimpleNamespace(device_id=0, model_id="48", graph=graph),)
         )
-        with mock.patch.object(
-            mapping,
-            "_candidate_profiler_marker_evidence",
-            return_value=(3, ["sk_scope_kernel_begin_dav_2201"]),
-        ), mock.patch.object(
-            mapping, "_updated_graph_marker_evidence", return_value=(1, [])
+        with (
+            mock.patch.object(
+                mapping,
+                "_candidate_profiler_marker_evidence",
+                return_value=(3, ["sk_scope_kernel_begin_dav_2201"]),
+            ),
+            mock.patch.object(
+                mapping, "_updated_graph_marker_evidence", return_value=(1, [])
+            ),
         ):
             excluded, evidence = mapping.guarded_sentinel_exclusion(
                 graph,
@@ -271,7 +290,9 @@ class ProjectedTraceMappingTest(unittest.TestCase):
                 model_id=48,
             )
         self.assertFalse(excluded)
-        self.assertIn("scope_sentinel_visible_in_candidate_profiler", evidence["blockers"])
+        self.assertIn(
+            "scope_sentinel_visible_in_candidate_profiler", evidence["blockers"]
+        )
 
     def test_guarded_scope_sentinel_exclusion_allows_calibration_visibility(self):
         graph = self._sentinel_graph()
@@ -283,12 +304,15 @@ class ProjectedTraceMappingTest(unittest.TestCase):
         manifest = SimpleNamespace(
             manifest_value={"config": {"marker_namespace": "skcal"}}
         )
-        with mock.patch.object(
-            mapping,
-            "_candidate_profiler_marker_evidence",
-            return_value=(3, ["sk_scope_kernel_begin_dav_2201"]),
-        ), mock.patch.object(
-            mapping, "_updated_graph_marker_evidence", return_value=(1, [])
+        with (
+            mock.patch.object(
+                mapping,
+                "_candidate_profiler_marker_evidence",
+                return_value=(3, ["sk_scope_kernel_begin_dav_2201"]),
+            ),
+            mock.patch.object(
+                mapping, "_updated_graph_marker_evidence", return_value=(1, [])
+            ),
         ):
             excluded, evidence = mapping.guarded_sentinel_exclusion(
                 graph,
@@ -360,15 +384,11 @@ class ProjectedTraceMappingTest(unittest.TestCase):
             source, baseline
         )
         self.assertIsNone(assignment)
-        self.assertEqual(
-            blocker, "kernel_projection_stream_assignment_ambiguous"
-        )
+        self.assertEqual(blocker, "kernel_projection_stream_assignment_ambiguous")
         self.assertEqual(count, 2)
 
     def test_materialize_group_maps_origin_ordinal_in_every_step(self):
-        child = SimpleNamespace(
-            node_key="origin:add", canonical_op="Add"
-        )
+        child = SimpleNamespace(node_key="origin:add", canonical_op="Add")
         group = SimpleNamespace(
             blockers=(),
             kernel_nodes=(child,),
@@ -389,16 +409,19 @@ class ProjectedTraceMappingTest(unittest.TestCase):
             )
             for step in (3, 4, 5)
         ]
-        row = lambda step: {
-            "source_row": step,
-            "stream_id": 20,
-            "task_id": step,
-            "name": "aclnnAdd_AddAiCore_Add",
-            "projected_op": "Add",
-            "core_family": "VECTOR",
-            "start_us": Decimal(step * 10),
-            "duration_us": Decimal("2"),
-        }
+
+        def row(step):
+            return {
+                "source_row": step,
+                "stream_id": 20,
+                "task_id": step,
+                "name": "aclnnAdd_AddAiCore_Add",
+                "projected_op": "Add",
+                "core_family": "VECTOR",
+                "start_us": Decimal(step * 10),
+                "duration_us": Decimal("2"),
+            }
+
         baseline_steps = {
             step: {
                 20: {
@@ -420,9 +443,7 @@ class ProjectedTraceMappingTest(unittest.TestCase):
         self.assertEqual(result["mapping_confidence"], "exact_projected_trace")
         self.assertEqual(len(result["baseline_occurrences"]), 3)
         self.assertEqual(
-            result["baseline_occurrences"][0]["children"][0][
-                "baseline_source_row"
-            ],
+            result["baseline_occurrences"][0]["children"][0]["baseline_source_row"],
             3,
         )
 

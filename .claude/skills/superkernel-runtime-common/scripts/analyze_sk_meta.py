@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Summarize TorchAir SuperKernel metadata and prove whether fusion occurred."""
 
 import argparse
@@ -18,7 +25,9 @@ REASONS = re.compile(
     r"KERNEL_ATTR_GET_FAILED|NO_TARGET_NODE|UNRECOVERABLE_FAIL|SUCCESS)\b"
 )
 STATIC_KERNEL_OP = re.compile(r"(?:^|_)static_kernel_([A-Za-z0-9]+)_")
-SK_START_END = re.compile(r"^sk_\d+_(?P<scope>.+?)_start_(?P<start>.+)_end_(?P<end>.+)$")
+SK_START_END = re.compile(
+    r"^sk_\d+_(?P<scope>.+?)_start_(?P<start>.+)_end_(?P<end>.+)$"
+)
 MODEL_DIRECTORY = re.compile(r"^model_(?P<model_id>\d+)(?:_|$)")
 LOG_NAMES = {
     "sk_fused_nodes.log",
@@ -193,7 +202,7 @@ def _op_from_function(name):
         return match.group(1)
     for marker in ("aclnn", "aclnnInplace"):
         if name.startswith(marker):
-            tail = name[len(marker):]
+            tail = name[len(marker) :]
             return tail.split("_", 1)[0] or None
     return name.split("_", 1)[0]
 
@@ -237,7 +246,7 @@ def _scope_dimensions(scope_names):
             match = pattern.search(name)
             if not match:
                 continue
-            suffix = name[match.end():].strip().strip("._-/").strip()
+            suffix = name[match.end() :].strip().strip("._-/").strip()
             if suffix:
                 segment = re.split(r"[._/\-]", suffix, maxsplit=1)[0].strip()
                 if segment:
@@ -428,11 +437,7 @@ def _deduplicate_scope_breaks(scope_breaks):
 
 def _summarize_fused_groups(fused_groups, sample_limit):
     child_counts = [_trusted_child_count(group) for group in fused_groups]
-    node_records = [
-        node
-        for group in fused_groups
-        for node in group["nodes"]
-    ]
+    node_records = [node for group in fused_groups for node in group["nodes"]]
     by_scope = collections.defaultdict(list)
     for group in fused_groups:
         by_scope[_scope_key(group)].append(group)
@@ -440,18 +445,16 @@ def _summarize_fused_groups(fused_groups, sample_limit):
     top_scopes = []
     for scope_name, groups in by_scope.items():
         scope_child_counts = [_trusted_child_count(group) for group in groups]
-        scope_nodes = [
-            node
-            for group in groups
-            for node in group["nodes"]
-        ]
+        scope_nodes = [node for group in groups for node in group["nodes"]]
         top_scopes.append(
             {
                 "scope": scope_name,
                 "group_count": len(groups),
                 "total_child_nodes": sum(scope_child_counts),
                 "child_count_stats": _stats(scope_child_counts),
-                "single_child_group_count": sum(count <= 1 for count in scope_child_counts),
+                "single_child_group_count": sum(
+                    count <= 1 for count in scope_child_counts
+                ),
                 "stream_count_stats": _stats(
                     len({node["stream_id"] for node in group["nodes"]})
                     for group in groups
@@ -531,8 +534,7 @@ def _summarize_fused_groups(fused_groups, sample_limit):
         "top_scopes": _sample(top_scopes, sample_limit),
         "top_child_op_types": _top_counter(
             collections.Counter(
-                node.get("op_type") or node.get("func_name")
-                for node in node_records
+                node.get("op_type") or node.get("func_name") for node in node_records
             ),
             sample_limit,
         ),
@@ -546,10 +548,7 @@ def _summarize_fused_groups(fused_groups, sample_limit):
 def _candidate_from_fused_group(group):
     nodes = group.get("nodes") or []
     boundary = group.get("boundary") or {}
-    op_sequence = [
-        node.get("op_type") or node.get("func_name")
-        for node in nodes
-    ]
+    op_sequence = [node.get("op_type") or node.get("func_name") for node in nodes]
     return {
         "model_id": group.get("model_id"),
         "scope_id": group.get("scope_id"),
@@ -603,7 +602,9 @@ def build_deep_auto_scope_plan(summary, min_child_nodes=5, sample_limit=20):
     )
     by_boundary = collections.Counter(
         (
-            candidate["boundary"].get("start_op") if candidate.get("boundary") else None,
+            candidate["boundary"].get("start_op")
+            if candidate.get("boundary")
+            else None,
             candidate["boundary"].get("end_op") if candidate.get("boundary") else None,
             candidate["child_count"],
         )
@@ -658,9 +659,7 @@ def _summarize_failures(fusion_failures, sample_limit):
     top_kernel_types_by_reason = {}
     examples_by_reason = {}
     for reason in sorted(reason_counter):
-        reason_items = [
-            item for item in fusion_failures if item["reason"] == reason
-        ]
+        reason_items = [item for item in fusion_failures if item["reason"] == reason]
         top_op_types_by_reason[reason] = _top_counter(
             collections.Counter(
                 item.get("op_type") or item.get("func_name") for item in reason_items
@@ -684,15 +683,23 @@ def _summarize_failures(fusion_failures, sample_limit):
 
 def _summarize_scope_breaks(scope_breaks, sample_limit, raw_record_count=None):
     break_counter = collections.Counter(item["break_reason"] for item in scope_breaks)
-    fail_counter = collections.Counter(item["fusion_fail_reason"] for item in scope_breaks)
+    fail_counter = collections.Counter(
+        item["fusion_fail_reason"] for item in scope_breaks
+    )
     scope_names_by_reason = collections.defaultdict(collections.Counter)
     details_by_reason = collections.defaultdict(collections.Counter)
     examples_by_reason = collections.defaultdict(list)
     for item in scope_breaks:
         reason = item["fusion_fail_reason"]
-        scope_name = ",".join(item.get("scope_names") or []) or f"scope_id:{item['scope_id']}"
+        scope_name = (
+            ",".join(item.get("scope_names") or []) or f"scope_id:{item['scope_id']}"
+        )
         scope_names_by_reason[reason][scope_name] += 1
-        detail = item.get("fusion_fail_detail") or item.get("detail") or item.get("break_detail")
+        detail = (
+            item.get("fusion_fail_detail")
+            or item.get("detail")
+            or item.get("break_detail")
+        )
         details_by_reason[reason][detail] += 1
         if len(examples_by_reason[reason]) < min(sample_limit, 10):
             examples_by_reason[reason].append(item)
@@ -702,9 +709,7 @@ def _summarize_scope_breaks(scope_breaks, sample_limit, raw_record_count=None):
             raw_record_count if raw_record_count is not None else len(scope_breaks)
         ),
         "duplicate_record_count": (
-            raw_record_count - len(scope_breaks)
-            if raw_record_count is not None
-            else 0
+            raw_record_count - len(scope_breaks) if raw_record_count is not None else 0
         ),
         "break_reason_counts": dict(sorted(break_counter.items())),
         "fusion_fail_reason_counts": dict(sorted(fail_counter.items())),
@@ -729,9 +734,7 @@ def _disconnect_metrics(groups, breaks):
         else None
     )
     actionable_breaks = [
-        item
-        for item in breaks
-        if item["fusion_fail_reason"] not in EXPECTED_REASONS
+        item for item in breaks if item["fusion_fail_reason"] not in EXPECTED_REASONS
     ]
     breaks_per_group = len(actionable_breaks) / len(groups) if groups else None
     groups_per_100_children = (
@@ -825,7 +828,11 @@ def _summarize_layers(fused_groups, scope_breaks, sample_limit):
             "scope_fragment_count": len(breaks),
             "declared_scope_node_count": sum(item["node_count"] for item in breaks),
             "break_reason_counts": dict(
-                sorted(collections.Counter(item["fusion_fail_reason"] for item in breaks).items())
+                sorted(
+                    collections.Counter(
+                        item["fusion_fail_reason"] for item in breaks
+                    ).items()
+                )
             ),
             "segments": sorted(
                 {
@@ -838,7 +845,9 @@ def _summarize_layers(fused_groups, scope_breaks, sample_limit):
                 len({node["stream_id"] for node in group["nodes"]}) for group in groups
             ),
             "top_child_op_types": _top_counter(
-                collections.Counter(node.get("op_type") or node["func_name"] for node in nodes),
+                collections.Counter(
+                    node.get("op_type") or node["func_name"] for node in nodes
+                ),
                 sample_limit,
             ),
             "kernel_type_counts": _top_counter(
@@ -881,9 +890,15 @@ def _break_action(reason, items):
             "can_reduce_before_operator_adaptation": True,
             "action": "split at dependency/resource boundaries before testing a wider scope",
         }
-    if reason in {"EXIST_DEADLOCK", "DEADLOCK_DETECTED", "EXTERNAL_DEPEND", "ISOLATED_EVENT"}:
+    if reason in {
+        "EXIST_DEADLOCK",
+        "DEADLOCK_DETECTED",
+        "EXTERNAL_DEPEND",
+        "ISOLATED_EVENT",
+    }:
         details = " ".join(
-            str(item.get("detail") or item.get("fusion_fail_detail") or "") for item in items
+            str(item.get("detail") or item.get("fusion_fail_detail") or "")
+            for item in items
         ).lower()
         options = []
         if "valuewait" in details or "value wait" in details:
@@ -937,7 +952,11 @@ def _build_break_action_plan(fusion_failures, scope_breaks):
     source = list(fusion_failures)
     if not source:
         source = [
-            {**item, "reason": item["fusion_fail_reason"], "static_kernel_symbol": False}
+            {
+                **item,
+                "reason": item["fusion_fail_reason"],
+                "static_kernel_symbol": False,
+            }
             for item in scope_breaks
         ]
     by_reason = collections.defaultdict(list)
@@ -1123,9 +1142,7 @@ def _build_round_report(
         if item["child_count"] == 1 and item.get("count_reliable")
     ]
     shallow_non_single_child = [
-        item
-        for item in per_sk
-        if 1 < item["child_count"] < min_child_nodes
+        item for item in per_sk if 1 < item["child_count"] < min_child_nodes
     ]
     single_child_exclusion = {
         "policy": (
@@ -1169,7 +1186,9 @@ def _build_round_report(
             "total_group_count": len(per_sk),
             "effective_group_count": len(effective),
             "shallow_group_count": len(shallow),
-            "effective_child_node_total": sum(item["child_count"] for item in effective),
+            "effective_child_node_total": sum(
+                item["child_count"] for item in effective
+            ),
             "shallow_child_node_total": sum(item["child_count"] for item in shallow),
             "effective_child_count_histogram": _histogram(
                 item["child_count"] for item in effective
@@ -1238,9 +1257,7 @@ def analyze_metadata(
 ):
     root = Path(root).resolve()
     scope_kind = _infer_scope_kind(round_name, scope_kind)
-    log_paths = sorted(
-        path for path in root.rglob("*.log") if path.name in LOG_NAMES
-    )
+    log_paths = sorted(path for path in root.rglob("*.log") if path.name in LOG_NAMES)
     model_dirs = {
         model_dir
         for path in log_paths
@@ -1293,7 +1310,8 @@ def analyze_metadata(
         "root": ".",
         "model_count": len(model_dirs),
         "files": {
-            name: sum(path.name == name for path in log_paths) for name in sorted(LOG_NAMES)
+            name: sum(path.name == name for path in log_paths)
+            for name in sorted(LOG_NAMES)
         },
         "fused_node_records": fused_node_records,
         "fused_group_count": len(fused_groups),
@@ -1308,12 +1326,18 @@ def analyze_metadata(
                 group.get("node_count") or 0 for group in fused_groups
             ),
             "trusted_child_node_count": fused_node_records,
-            "parsed_child_node_count": sum(len(group["nodes"]) for group in fused_groups),
+            "parsed_child_node_count": sum(
+                len(group["nodes"]) for group in fused_groups
+            ),
             "node_count_mismatch_group_count": sum(
                 group["node_count_mismatch"] for group in fused_groups
             ),
-            "layer_named_sk_count": sum(group.get("layer") is not None for group in fused_groups),
-            "layer_named_break_count": sum(item.get("layer") is not None for item in scope_breaks),
+            "layer_named_sk_count": sum(
+                group.get("layer") is not None for group in fused_groups
+            ),
+            "layer_named_break_count": sum(
+                item.get("layer") is not None for item in scope_breaks
+            ),
             "raw_scope_break_record_count": len(raw_scope_breaks),
             "unique_scope_break_record_count": len(scope_breaks),
         },
@@ -1358,12 +1382,8 @@ def analyze_metadata(
         "reason_counts": reason_counts,
         "reason_count_source": reason_count_source,
         "raw_reason_token_counts": raw_reason_counts,
-        "fused_group_summary": _summarize_fused_groups(
-            fused_groups, sample_limit
-        ),
-        "fusion_failure_summary": _summarize_failures(
-            fusion_failures, sample_limit
-        ),
+        "fused_group_summary": _summarize_fused_groups(fused_groups, sample_limit),
+        "fusion_failure_summary": _summarize_failures(fusion_failures, sample_limit),
         "scope_break_summary": _summarize_scope_breaks(
             scope_breaks, sample_limit, raw_record_count=len(raw_scope_breaks)
         ),
@@ -1453,7 +1473,9 @@ def _replay_identity_complete(
         return False
     if (
         not isinstance(segments, list)
-        or any(not isinstance(segment, str) or not segment.strip() for segment in segments)
+        or any(
+            not isinstance(segment, str) or not segment.strip() for segment in segments
+        )
         or segments != sorted(set(segments))
     ):
         return False
@@ -1468,7 +1490,9 @@ def _replay_identity_complete(
     if (
         not isinstance(sequence, list)
         or not sequence
-        or any(not isinstance(op_type, str) or not op_type.strip() for op_type in sequence)
+        or any(
+            not isinstance(op_type, str) or not op_type.strip() for op_type in sequence
+        )
     ):
         return False
     if (
@@ -1477,11 +1501,7 @@ def _replay_identity_complete(
         or child_count != len(sequence)
     ):
         return False
-    return (
-        count_reliable is True
-        and start_op == sequence[0]
-        and end_op == sequence[-1]
-    )
+    return count_reliable is True and start_op == sequence[0] and end_op == sequence[-1]
 
 
 def _replay_row_identity_complete(item):
@@ -1532,19 +1552,17 @@ def _match_replay_groups(compat_groups, verify_groups):
             compat_group = compat_matches[0]
             verify_group = verify_matches[0]
             matched_group = {
-                    "signature": compat_group["signature"],
-                    "model_id": compat_group["model_id"],
-                    "source_scope": compat_group["source_scope"],
-                    "segments": compat_group["segments"],
-                    "boundary": compat_group["boundary"],
-                    "ordered_child_op_sequence": compat_group[
-                        "ordered_child_op_sequence"
-                    ],
-                    "child_count": compat_group["child_count"],
-                    "verify_child_count": verify_group["child_count"],
-                    "count_reliable": compat_group["count_reliable"],
-                    "verify_count_reliable": verify_group["count_reliable"],
-                }
+                "signature": compat_group["signature"],
+                "model_id": compat_group["model_id"],
+                "source_scope": compat_group["source_scope"],
+                "segments": compat_group["segments"],
+                "boundary": compat_group["boundary"],
+                "ordered_child_op_sequence": compat_group["ordered_child_op_sequence"],
+                "child_count": compat_group["child_count"],
+                "verify_child_count": verify_group["child_count"],
+                "count_reliable": compat_group["count_reliable"],
+                "verify_count_reliable": verify_group["count_reliable"],
+            }
             if "graph_occurrence_fingerprint" in compat_group:
                 matched_group["graph_occurrence_fingerprint"] = compat_group[
                     "graph_occurrence_fingerprint"
@@ -1560,9 +1578,9 @@ def _match_replay_groups(compat_groups, verify_groups):
 
 
 def _portable_path(path, base_dir):
-    return os.path.relpath(
-        Path(path).resolve(), Path(base_dir).resolve()
-    ).replace(os.sep, "/")
+    return os.path.relpath(Path(path).resolve(), Path(base_dir).resolve()).replace(
+        os.sep, "/"
+    )
 
 
 def _common_artifact_root(paths):
@@ -1610,7 +1628,11 @@ def _report_artifact_path(report, field, base_dir=None):
         return None
     try:
         path = Path(value)
-        return (Path(base_dir) / path) if base_dir is not None and not path.is_absolute() else path
+        return (
+            (Path(base_dir) / path)
+            if base_dir is not None and not path.is_absolute()
+            else path
+        )
     except (TypeError, ValueError, OSError):
         return None
 
@@ -1708,8 +1730,7 @@ def validate_replay_report(
     result["source_revision"] = source_revision
     result["checks"]["source_revision"] = True
     result["checks"]["source_revision_matches"] = (
-        expected_source_revision is None
-        or source_revision == expected_source_revision
+        expected_source_revision is None or source_revision == expected_source_revision
     )
     if not result["checks"]["source_revision_matches"]:
         result["failure_reason"] = "replay_source_revision_mismatch"
@@ -1788,9 +1809,7 @@ def validate_replay_report(
     }
     result["valid"] = all(result["checks"].values())
     result["fusion_reproducible"] = recomputed["fusion_reproducible"]
-    result["deep_fusion_reproducible"] = recomputed[
-        "deep_fusion_reproducible"
-    ]
+    result["deep_fusion_reproducible"] = recomputed["deep_fusion_reproducible"]
     if not result["valid"]:
         if not report_matches_recomputed:
             result["failure_reason"] = "replay_report_stale_or_tampered"
@@ -1867,12 +1886,8 @@ def compare_fusion_replay(
         compat_groups, verify_groups
     )
 
-    compat_deep_groups = eligible_groups(
-        compat_rows, REPLAY_MIN_EFFECTIVE_CHILD_NODES
-    )
-    verify_deep_groups = eligible_groups(
-        verify_rows, REPLAY_MIN_EFFECTIVE_CHILD_NODES
-    )
+    compat_deep_groups = eligible_groups(compat_rows, REPLAY_MIN_EFFECTIVE_CHILD_NODES)
+    verify_deep_groups = eligible_groups(verify_rows, REPLAY_MIN_EFFECTIVE_CHILD_NODES)
     compat_deep_groups.sort(
         key=lambda item: (item["_signature_key"], item["child_count"])
     )
@@ -1968,7 +1983,9 @@ def compare_deep_fusion_replay(
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("root", type=Path, help="metadata directory to scan recursively")
+    parser.add_argument(
+        "root", type=Path, help="metadata directory to scan recursively"
+    )
     parser.add_argument("--json-out", type=Path)
     parser.add_argument("--verify-root", type=Path)
     parser.add_argument("--replay-report-out", type=Path)
@@ -1979,7 +1996,9 @@ def main(argv=None):
     parser.add_argument("--round-id")
     parser.add_argument("--source-revision")
     parser.add_argument("--sample-limit", type=int, default=20)
-    parser.add_argument("--round-name", help="candidate or test-round name such as S1/S2/S4c")
+    parser.add_argument(
+        "--round-name", help="candidate or test-round name such as S1/S2/S4c"
+    )
     parser.add_argument(
         "--scope-kind",
         choices=("manual", "automatic_aot"),
@@ -2026,7 +2045,9 @@ def main(argv=None):
         parser.error(
             "--verify-root requires --compat-config-manifest and --verify-config-manifest"
         )
-    if args.verify_root and (not args.candidate_name or not args.candidate_name.strip()):
+    if args.verify_root and (
+        not args.candidate_name or not args.candidate_name.strip()
+    ):
         parser.error("--verify-root requires --candidate-name NAME")
     if args.verify_root and (not args.round_id or not args.round_id.strip()):
         parser.error("--verify-root requires --round-id ROUND")
@@ -2041,12 +2062,15 @@ def main(argv=None):
     if args.verify_root and args.replay_min_child_nodes < 1:
         parser.error("--replay-min-child-nodes must be >= 1")
     if not args.verify_root and (
-        args.compat_config_manifest is not None or args.verify_config_manifest is not None
+        args.compat_config_manifest is not None
+        or args.verify_config_manifest is not None
     ):
         parser.error("config manifests require --verify-root")
     if not args.verify_root and args.candidate_name is not None:
         parser.error("--candidate-name requires --verify-root")
-    if not args.verify_root and (args.round_id is not None or args.source_revision is not None):
+    if not args.verify_root and (
+        args.round_id is not None or args.source_revision is not None
+    ):
         parser.error("--round-id and --source-revision require --verify-root")
 
     report = analyze_metadata(
@@ -2086,9 +2110,7 @@ def main(argv=None):
             round_id=args.round_id.strip(),
             source_revision=args.source_revision.strip(),
             artifact_base=(
-                args.replay_report_out.parent
-                if args.replay_report_out
-                else None
+                args.replay_report_out.parent if args.replay_report_out else None
             ),
         )
         replay_output = json.dumps(replay, indent=2, sort_keys=True)

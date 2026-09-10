@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Build a replayable capability and action support matrix for network adapters."""
 
 import argparse
@@ -64,33 +71,52 @@ ARTIFACT_SCHEMAS = {
 ACTION_REQUIREMENTS = {
     "option": {
         "capabilities": (
-            "clean_performance_validation", "isolated_cleanup", "model_execution",
+            "clean_performance_validation",
+            "isolated_cleanup",
+            "model_execution",
             "shared_npu_lease",
         ),
         "artifacts": ("network_conformance_report", "shared_npu_lease_inventory"),
     },
     "scope_split": {
         "capabilities": (
-            "clean_performance_validation", "identity_binding", "isolated_cleanup",
-            "model_execution", "raw_capture_ingestion", "scope_api_materialization",
-            "shared_npu_lease", "source_exact_mapping",
+            "clean_performance_validation",
+            "identity_binding",
+            "isolated_cleanup",
+            "model_execution",
+            "raw_capture_ingestion",
+            "scope_api_materialization",
+            "shared_npu_lease",
+            "source_exact_mapping",
         ),
         "artifacts": ("network_conformance_report", "shared_npu_lease_inventory"),
     },
     "range_exclusion": {
         "capabilities": (
-            "clean_performance_validation", "identity_binding", "isolated_cleanup",
-            "model_execution", "raw_capture_ingestion", "scope_api_materialization",
-            "shared_npu_lease", "source_exact_mapping",
+            "clean_performance_validation",
+            "identity_binding",
+            "isolated_cleanup",
+            "model_execution",
+            "raw_capture_ingestion",
+            "scope_api_materialization",
+            "shared_npu_lease",
+            "source_exact_mapping",
         ),
         "artifacts": ("network_conformance_report", "shared_npu_lease_inventory"),
     },
     "dependency_safe_operator_reorder": {
         "capabilities": (
-            "clean_performance_validation", "core_family_classification",
-            "dependency_evidence", "four_profile_orchestration", "identity_binding",
-            "isolated_cleanup", "model_execution", "operator_reorder_materialization",
-            "raw_capture_ingestion", "shared_npu_lease", "source_exact_mapping",
+            "clean_performance_validation",
+            "core_family_classification",
+            "dependency_evidence",
+            "four_profile_orchestration",
+            "identity_binding",
+            "isolated_cleanup",
+            "model_execution",
+            "operator_reorder_materialization",
+            "raw_capture_ingestion",
+            "shared_npu_lease",
+            "source_exact_mapping",
         ),
         "artifacts": ("network_conformance_report", "shared_npu_lease_inventory"),
     },
@@ -99,42 +125,84 @@ ACTION_REQUIREMENTS_V2 = {
     **ACTION_REQUIREMENTS,
     "event_edge_refinement": {
         "capabilities": (
-            "clean_performance_validation", "critical_path_analysis", "dependency_evidence",
-            "event_stage_dispatch_validation", "event_transform_materialization",
-            "four_profile_orchestration", "identity_binding", "isolated_cleanup",
-            "join_mechanism_validation", "logical_graph_capture", "model_execution",
-            "raw_capture_ingestion", "shared_npu_lease", "source_exact_mapping",
+            "clean_performance_validation",
+            "critical_path_analysis",
+            "dependency_evidence",
+            "event_stage_dispatch_validation",
+            "event_transform_materialization",
+            "four_profile_orchestration",
+            "identity_binding",
+            "isolated_cleanup",
+            "join_mechanism_validation",
+            "logical_graph_capture",
+            "model_execution",
+            "raw_capture_ingestion",
+            "shared_npu_lease",
+            "source_exact_mapping",
         ),
-        "artifacts": ("critical_path_npu_closure_receipt", "network_conformance_report", "shared_npu_lease_inventory"),
+        "artifacts": (
+            "critical_path_npu_closure_receipt",
+            "network_conformance_report",
+            "shared_npu_lease_inventory",
+        ),
     },
     "stage_split": {
         "capabilities": (
-            "clean_performance_validation", "critical_path_analysis", "dependency_evidence",
-            "event_stage_dispatch_validation", "four_profile_orchestration", "identity_binding",
-            "isolated_cleanup", "join_mechanism_validation", "logical_graph_capture",
-            "model_execution", "raw_capture_ingestion", "shared_npu_lease",
-            "source_exact_mapping", "stage_transform_materialization",
+            "clean_performance_validation",
+            "critical_path_analysis",
+            "dependency_evidence",
+            "event_stage_dispatch_validation",
+            "four_profile_orchestration",
+            "identity_binding",
+            "isolated_cleanup",
+            "join_mechanism_validation",
+            "logical_graph_capture",
+            "model_execution",
+            "raw_capture_ingestion",
+            "shared_npu_lease",
+            "source_exact_mapping",
+            "stage_transform_materialization",
         ),
-        "artifacts": ("critical_path_npu_closure_receipt", "network_conformance_report", "shared_npu_lease_inventory"),
+        "artifacts": (
+            "critical_path_npu_closure_receipt",
+            "network_conformance_report",
+            "shared_npu_lease_inventory",
+        ),
     },
     "scope_event_derivative": {
         "capabilities": (
-            "clean_performance_validation", "critical_path_analysis", "four_profile_orchestration",
-            "identity_binding", "isolated_cleanup", "join_mechanism_validation",
-            "model_execution", "scope_api_materialization", "shared_npu_lease",
+            "clean_performance_validation",
+            "critical_path_analysis",
+            "four_profile_orchestration",
+            "identity_binding",
+            "isolated_cleanup",
+            "join_mechanism_validation",
+            "model_execution",
+            "scope_api_materialization",
+            "shared_npu_lease",
             "source_exact_mapping",
         ),
-        "artifacts": ("critical_path_npu_closure_receipt", "network_conformance_report", "shared_npu_lease_inventory"),
+        "artifacts": (
+            "critical_path_npu_closure_receipt",
+            "network_conformance_report",
+            "shared_npu_lease_inventory",
+        ),
     },
 }
 ACTION_REQUIREMENTS_V3 = {
     **ACTION_REQUIREMENTS_V2,
     "component_overlap_reorder": {
         "capabilities": (
-            "clean_performance_validation", "component_reorder_materialization",
-            "core_family_classification", "dependency_evidence",
-            "four_profile_orchestration", "identity_binding", "isolated_cleanup",
-            "model_execution", "multi_source_exact_mapping", "raw_capture_ingestion",
+            "clean_performance_validation",
+            "component_reorder_materialization",
+            "core_family_classification",
+            "dependency_evidence",
+            "four_profile_orchestration",
+            "identity_binding",
+            "isolated_cleanup",
+            "model_execution",
+            "multi_source_exact_mapping",
+            "raw_capture_ingestion",
             "shared_npu_lease",
         ),
         "artifacts": ("network_conformance_report", "shared_npu_lease_inventory"),
@@ -163,9 +231,13 @@ REORDER_COLLECTION_BINDINGS = SOURCE_COLLECTION_BINDINGS + (
     "reorder_materializer",
 )
 COMPONENT_REORDER_COLLECTION_BINDINGS = COMMON_COLLECTION_BINDINGS + (
-    "component_capture_provider", "component_reorder_materializer",
-    "component_source_mapping_provider", "dependency_provider", "four_profile_launcher",
-    "identity_provider", "raw_capture_plugin",
+    "component_capture_provider",
+    "component_reorder_materializer",
+    "component_source_mapping_provider",
+    "dependency_provider",
+    "four_profile_launcher",
+    "identity_provider",
+    "raw_capture_plugin",
 )
 EVENT_COLLECTION_BINDINGS = SOURCE_COLLECTION_BINDINGS + (
     "critical_path_provider",
@@ -182,10 +254,14 @@ COLLECTION_BINDING_REQUIREMENTS = {
     "component_overlap_reorder": COMPONENT_REORDER_COLLECTION_BINDINGS,
     "event_edge_refinement": EVENT_COLLECTION_BINDINGS + ("event_materializer",),
     "stage_split": EVENT_COLLECTION_BINDINGS + ("stage_materializer",),
-    "scope_event_derivative": SOURCE_COLLECTION_BINDINGS + (
-        "critical_path_provider", "derivative_materializer",
-        "event_stage_dispatch_provider", "four_profile_launcher",
-        "join_validation_provider", "logical_graph_provider",
+    "scope_event_derivative": SOURCE_COLLECTION_BINDINGS
+    + (
+        "critical_path_provider",
+        "derivative_materializer",
+        "event_stage_dispatch_provider",
+        "four_profile_launcher",
+        "join_validation_provider",
+        "logical_graph_provider",
         "parent_trial_evidence",
     ),
 }
@@ -209,8 +285,11 @@ REORDER_EXPECTED_OUTPUTS = SOURCE_EXPECTED_OUTPUTS + (
     "post_reorder_dispatch_evidence",
 )
 COMPONENT_REORDER_EXPECTED_OUTPUTS = SOURCE_EXPECTED_OUTPUTS + (
-    "bound_component_capture", "component_source_map", "dependency_evidence",
-    "four_profile_summary", "post_component_dispatch_evidence",
+    "bound_component_capture",
+    "component_source_map",
+    "dependency_evidence",
+    "four_profile_summary",
+    "post_component_dispatch_evidence",
 )
 EVENT_EXPECTED_OUTPUTS = SOURCE_EXPECTED_OUTPUTS + (
     "bound_short_trace_analysis",
@@ -229,10 +308,14 @@ COLLECTION_OUTPUT_REQUIREMENTS = {
     "component_overlap_reorder": COMPONENT_REORDER_EXPECTED_OUTPUTS,
     "event_edge_refinement": EVENT_EXPECTED_OUTPUTS,
     "stage_split": EVENT_EXPECTED_OUTPUTS,
-    "scope_event_derivative": SOURCE_EXPECTED_OUTPUTS + (
-        "critical_path_analysis", "event_stage_dispatch_evidence",
-        "four_profile_summary", "join_mechanism_validation",
-        "logical_graph_capture", "parent_trial_clean_evidence",
+    "scope_event_derivative": SOURCE_EXPECTED_OUTPUTS
+    + (
+        "critical_path_analysis",
+        "event_stage_dispatch_evidence",
+        "four_profile_summary",
+        "join_mechanism_validation",
+        "logical_graph_capture",
+        "parent_trial_clean_evidence",
     ),
 }
 ROUND_EXPECTED_OUTPUTS = (
@@ -241,21 +324,31 @@ ROUND_EXPECTED_OUTPUTS = (
     "profile_owned_sk_meta",
     "profiling_analysis_result",
 )
-COLLECTION_BINDING_ROLES = tuple(sorted({
-    role
-    for roles in COLLECTION_BINDING_REQUIREMENTS.values()
-    for role in roles
-} | set(ROUND_COLLECTION_BINDINGS)))
-COLLECTION_OUTPUTS = tuple(sorted({
-    output
-    for outputs in COLLECTION_OUTPUT_REQUIREMENTS.values()
-    for output in outputs
-} | set(ROUND_EXPECTED_OUTPUTS)))
+COLLECTION_BINDING_ROLES = tuple(
+    sorted(
+        {role for roles in COLLECTION_BINDING_REQUIREMENTS.values() for role in roles}
+        | set(ROUND_COLLECTION_BINDINGS)
+    )
+)
+COLLECTION_OUTPUTS = tuple(
+    sorted(
+        {
+            output
+            for outputs in COLLECTION_OUTPUT_REQUIREMENTS.values()
+            for output in outputs
+        }
+        | set(ROUND_EXPECTED_OUTPUTS)
+    )
+)
 
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -325,18 +418,30 @@ def _atomic(path, value):
 
 def _validate_artifact_semantics(kind, value):
     if kind == "network_conformance_report" and (
-        value.get("decision") != "pass" or value.get("core_adapter_identity_leaks") != []
+        value.get("decision") != "pass"
+        or value.get("core_adapter_identity_leaks") != []
     ):
         raise ValueError("network conformance artifact is not passed")
     if kind == "critical_path_npu_closure_receipt":
         outcome = value.get("outcome")
-        if not isinstance(outcome, dict) or outcome.get("result_status") not in {"accepted", "no_gain"}:
+        if not isinstance(outcome, dict) or outcome.get("result_status") not in {
+            "accepted",
+            "no_gain",
+        }:
             raise ValueError("critical path NPU closure has no valid executed outcome")
-        if value.get("action_closed") is not True or value.get("four_profile_closed") is not True:
-            raise ValueError("critical path NPU closure lacks action/four-profile closure")
+        if (
+            value.get("action_closed") is not True
+            or value.get("four_profile_closed") is not True
+        ):
+            raise ValueError(
+                "critical path NPU closure lacks action/four-profile closure"
+            )
     if kind == "real_npu_closure_receipt":
         outcome = value.get("outcome")
-        if not isinstance(outcome, dict) or outcome.get("result_status") not in {"accepted", "no_gain"}:
+        if not isinstance(outcome, dict) or outcome.get("result_status") not in {
+            "accepted",
+            "no_gain",
+        }:
             raise ValueError("real NPU closure receipt has no valid executed outcome")
     if kind == "resource_screening_receipt" and (
         value.get("decision") != "no_reorder_candidate"
@@ -347,7 +452,11 @@ def _validate_artifact_semantics(kind, value):
         acceptance = value.get("acceptance")
         if not isinstance(acceptance, dict) or any(
             acceptance.get(field) != "passed"
-            for field in ("failure_injection_recovery", "idempotent_replay", "incumbent_unchanged")
+            for field in (
+                "failure_injection_recovery",
+                "idempotent_replay",
+                "incumbent_unchanged",
+            )
         ):
             raise ValueError("cleanup evaluation is not passed")
     if kind == "shared_npu_lease_inventory" and (
@@ -358,7 +467,11 @@ def _validate_artifact_semantics(kind, value):
 
 def validate_adapter(value, root, *, require_fingerprint=True):
     required = {
-        "schema_version", "adapter_id", "network_class", "artifacts", "capabilities",
+        "schema_version",
+        "adapter_id",
+        "network_class",
+        "artifacts",
+        "capabilities",
     }
     if require_fingerprint:
         required.add("adapter_fingerprint")
@@ -370,8 +483,11 @@ def validate_adapter(value, root, *, require_fingerprint=True):
             f"capability adapter must use {ADAPTER_SCHEMA}, {ADAPTER_SCHEMA_V2}, or {ADAPTER_SCHEMA_V3}"
         )
     capability_catalog = (
-        CAPABILITIES_V3 if schema == ADAPTER_SCHEMA_V3
-        else CAPABILITIES_V2 if schema == ADAPTER_SCHEMA_V2 else CAPABILITIES
+        CAPABILITIES_V3
+        if schema == ADAPTER_SCHEMA_V3
+        else CAPABILITIES_V2
+        if schema == ADAPTER_SCHEMA_V2
+        else CAPABILITIES
     )
     adapter_id = _text(value["adapter_id"], "adapter_id")
     network_class = _text(value["network_class"], "network_class")
@@ -391,22 +507,33 @@ def validate_adapter(value, root, *, require_fingerprint=True):
         actual = file_fingerprint(path)
         if artifact.get("schema_version") != expected_schema:
             raise ValueError(f"{label} content must use {expected_schema}")
-        if item["schema_version"] != expected_schema or item["file_fingerprint"] != actual:
+        if (
+            item["schema_version"] != expected_schema
+            or item["file_fingerprint"] != actual
+        ):
             raise ValueError(f"{label} sealed identity mismatch")
         _validate_artifact_semantics(kind, artifact)
         artifact_kinds.add(kind)
-        artifacts.append({
-            "kind": kind, "path": item["path"], "schema_version": expected_schema,
-            "file_fingerprint": actual,
-        })
+        artifacts.append(
+            {
+                "kind": kind,
+                "path": item["path"],
+                "schema_version": expected_schema,
+                "file_fingerprint": actual,
+            }
+        )
     if not artifacts:
         raise ValueError("capability adapter requires artifact evidence")
     if [item["kind"] for item in artifacts] != sorted(artifact_kinds):
         raise ValueError("artifacts must be sorted by kind")
 
     capabilities = value["capabilities"]
-    if not isinstance(capabilities, list) or [item.get("name") for item in capabilities if isinstance(item, dict)] != list(capability_catalog):
-        raise ValueError("capabilities must declare the complete ordered capability catalog")
+    if not isinstance(capabilities, list) or [
+        item.get("name") for item in capabilities if isinstance(item, dict)
+    ] != list(capability_catalog):
+        raise ValueError(
+            "capabilities must declare the complete ordered capability catalog"
+        )
     normalized_capabilities = []
     for index, item in enumerate(capabilities):
         label = f"capabilities[{index}]"
@@ -414,25 +541,38 @@ def validate_adapter(value, root, *, require_fingerprint=True):
         if set(item) != fields or item["status"] not in {"supported", "unsupported"}:
             raise ValueError(f"{label} fields or status are invalid")
         evidence = item["evidence_artifacts"]
-        if not isinstance(evidence, list) or evidence != sorted(set(evidence)) or set(evidence) - artifact_kinds:
+        if (
+            not isinstance(evidence, list)
+            or evidence != sorted(set(evidence))
+            or set(evidence) - artifact_kinds
+        ):
             raise ValueError(f"{label}.evidence_artifacts are invalid")
         if item["status"] == "supported":
             if not evidence or item["blocker"] is not None:
-                raise ValueError(f"{label} supported capability requires evidence and no blocker")
+                raise ValueError(
+                    f"{label} supported capability requires evidence and no blocker"
+                )
         else:
             blocker = item["blocker"]
             if not isinstance(blocker, dict) or set(blocker) != {"code", "detail"}:
-                raise ValueError(f"{label} unsupported capability requires a structured blocker")
+                raise ValueError(
+                    f"{label} unsupported capability requires a structured blocker"
+                )
             _text(blocker["code"], f"{label}.blocker.code")
             _text(blocker["detail"], f"{label}.blocker.detail")
         normalized_capabilities.append(dict(item))
     normalized = {
-        "schema_version": schema, "adapter_id": adapter_id,
-        "network_class": network_class, "artifacts": artifacts,
+        "schema_version": schema,
+        "adapter_id": adapter_id,
+        "network_class": network_class,
+        "artifacts": artifacts,
         "capabilities": normalized_capabilities,
     }
     normalized["adapter_fingerprint"] = fingerprint(normalized)
-    if require_fingerprint and value["adapter_fingerprint"] != normalized["adapter_fingerprint"]:
+    if (
+        require_fingerprint
+        and value["adapter_fingerprint"] != normalized["adapter_fingerprint"]
+    ):
         raise ValueError("adapter_fingerprint mismatch")
     return normalized
 
@@ -444,15 +584,20 @@ def freeze_adapter(draft, root):
     artifacts = []
     for index, item in enumerate(draft.get("artifacts", [])):
         if not isinstance(item, dict) or set(item) != {"kind", "path"}:
-            raise ValueError(f"adapter draft artifacts[{index}] must contain kind and path")
+            raise ValueError(
+                f"adapter draft artifacts[{index}] must contain kind and path"
+            )
         kind = item["kind"]
         if kind not in ARTIFACT_SCHEMAS:
             raise ValueError(f"adapter draft artifacts[{index}].kind is unknown")
         path = _rooted(root, item["path"], f"artifacts[{index}].path")
-        artifacts.append({
-            **item, "schema_version": ARTIFACT_SCHEMAS[kind],
-            "file_fingerprint": file_fingerprint(path),
-        })
+        artifacts.append(
+            {
+                **item,
+                "schema_version": ARTIFACT_SCHEMAS[kind],
+                "file_fingerprint": file_fingerprint(path),
+            }
+        )
     prepared["artifacts"] = artifacts
     return validate_adapter(prepared, root, require_fingerprint=False)
 
@@ -463,8 +608,10 @@ def _action_support(adapter):
     resource_screened = "resource_screening_receipt" in artifacts
     actions = []
     requirements_catalog = (
-        ACTION_REQUIREMENTS_V3 if adapter["schema_version"] == ADAPTER_SCHEMA_V3
-        else ACTION_REQUIREMENTS_V2 if adapter["schema_version"] == ADAPTER_SCHEMA_V2
+        ACTION_REQUIREMENTS_V3
+        if adapter["schema_version"] == ADAPTER_SCHEMA_V3
+        else ACTION_REQUIREMENTS_V2
+        if adapter["schema_version"] == ADAPTER_SCHEMA_V2
         else ACTION_REQUIREMENTS
     )
     for action, requirements in requirements_catalog.items():
@@ -472,29 +619,42 @@ def _action_support(adapter):
         for name in requirements["capabilities"]:
             capability = capabilities[name]
             if capability["status"] != "supported":
-                blockers.append({
-                    "type": "capability", "name": name,
-                    "code": capability["blocker"]["code"],
-                    "detail": capability["blocker"]["detail"],
-                })
+                blockers.append(
+                    {
+                        "type": "capability",
+                        "name": name,
+                        "code": capability["blocker"]["code"],
+                        "detail": capability["blocker"]["detail"],
+                    }
+                )
         for kind in requirements["artifacts"]:
             if kind not in artifacts:
-                blockers.append({
-                    "type": "artifact", "name": kind, "code": "MISSING_REQUIRED_ARTIFACT",
-                    "detail": f"adapter has no sealed {kind}",
-                })
+                blockers.append(
+                    {
+                        "type": "artifact",
+                        "name": kind,
+                        "code": "MISSING_REQUIRED_ARTIFACT",
+                        "detail": f"adapter has no sealed {kind}",
+                    }
+                )
         if action == "dependency_safe_operator_reorder" and resource_screened:
-            blockers.append({
-                "type": "current_evidence", "name": "stable_same_parent_pair",
-                "code": "NO_STABLE_SAME_PARENT_PAIR",
-                "detail": "resource screening proves zero stable same-parent Cube/Vector matches",
-            })
-        actions.append({
-            "action": action, "status": "available" if not blockers else "blocked",
-            "required_capabilities": list(requirements["capabilities"]),
-            "required_artifacts": list(requirements["artifacts"]),
-            "blockers": blockers,
-        })
+            blockers.append(
+                {
+                    "type": "current_evidence",
+                    "name": "stable_same_parent_pair",
+                    "code": "NO_STABLE_SAME_PARENT_PAIR",
+                    "detail": "resource screening proves zero stable same-parent Cube/Vector matches",
+                }
+            )
+        actions.append(
+            {
+                "action": action,
+                "status": "available" if not blockers else "blocked",
+                "required_capabilities": list(requirements["capabilities"]),
+                "required_artifacts": list(requirements["artifacts"]),
+                "blockers": blockers,
+            }
+        )
     return actions
 
 
@@ -512,22 +672,34 @@ def build_matrix(matrix_id, adapter_paths, root):
             raise ValueError("support matrix contains duplicate adapter_id")
         identities.add(adapter["adapter_id"])
         schemas.add(adapter["schema_version"])
-        records.append({
-            "path": relative, "file_fingerprint": file_fingerprint(path),
-            "adapter_id": adapter["adapter_id"], "network_class": adapter["network_class"],
-            "adapter_fingerprint": adapter["adapter_fingerprint"],
-            "capabilities": adapter["capabilities"], "actions": _action_support(adapter),
-        })
+        records.append(
+            {
+                "path": relative,
+                "file_fingerprint": file_fingerprint(path),
+                "adapter_id": adapter["adapter_id"],
+                "network_class": adapter["network_class"],
+                "adapter_fingerprint": adapter["adapter_fingerprint"],
+                "capabilities": adapter["capabilities"],
+                "actions": _action_support(adapter),
+            }
+        )
     matrix_schema = (
-        MATRIX_SCHEMA_V3 if ADAPTER_SCHEMA_V3 in schemas
-        else MATRIX_SCHEMA_V2 if ADAPTER_SCHEMA_V2 in schemas else MATRIX_SCHEMA
+        MATRIX_SCHEMA_V3
+        if ADAPTER_SCHEMA_V3 in schemas
+        else MATRIX_SCHEMA_V2
+        if ADAPTER_SCHEMA_V2 in schemas
+        else MATRIX_SCHEMA
     )
     requirements = (
-        ACTION_REQUIREMENTS_V3 if matrix_schema == MATRIX_SCHEMA_V3
-        else ACTION_REQUIREMENTS_V2 if matrix_schema == MATRIX_SCHEMA_V2 else ACTION_REQUIREMENTS
+        ACTION_REQUIREMENTS_V3
+        if matrix_schema == MATRIX_SCHEMA_V3
+        else ACTION_REQUIREMENTS_V2
+        if matrix_schema == MATRIX_SCHEMA_V2
+        else ACTION_REQUIREMENTS
     )
     matrix = {
-        "schema_version": matrix_schema, "matrix_id": matrix_id,
+        "schema_version": matrix_schema,
+        "matrix_id": matrix_id,
         "availability_scope": "adapter_capability_not_candidate_recommendation",
         "action_requirements_fingerprint": fingerprint(requirements),
         "adapters": records,
@@ -538,19 +710,33 @@ def build_matrix(matrix_id, adapter_paths, root):
 
 def validate_matrix(matrix, root):
     required = {
-        "schema_version", "matrix_id", "availability_scope",
-        "action_requirements_fingerprint", "adapters", "matrix_fingerprint",
+        "schema_version",
+        "matrix_id",
+        "availability_scope",
+        "action_requirements_fingerprint",
+        "adapters",
+        "matrix_fingerprint",
     }
-    if not isinstance(matrix, dict) or set(matrix) != required or matrix.get("schema_version") not in {MATRIX_SCHEMA, MATRIX_SCHEMA_V2, MATRIX_SCHEMA_V3}:
+    if (
+        not isinstance(matrix, dict)
+        or set(matrix) != required
+        or matrix.get("schema_version")
+        not in {MATRIX_SCHEMA, MATRIX_SCHEMA_V2, MATRIX_SCHEMA_V3}
+    ):
         raise ValueError(
             f"support matrix must use {MATRIX_SCHEMA}, {MATRIX_SCHEMA_V2}, or {MATRIX_SCHEMA_V3} with exact fields"
         )
-    paths = [item.get("path") for item in matrix.get("adapters", []) if isinstance(item, dict)]
+    paths = [
+        item.get("path")
+        for item in matrix.get("adapters", [])
+        if isinstance(item, dict)
+    ]
     actual = build_matrix(matrix["matrix_id"], paths, root)
     if matrix != actual:
         raise ValueError("support matrix differs from deterministic adapter replay")
     return {
-        "valid": True, "adapter_count": len(matrix["adapters"]),
+        "valid": True,
+        "adapter_count": len(matrix["adapters"]),
         "matrix_fingerprint": matrix["matrix_fingerprint"],
     }
 
@@ -561,9 +747,7 @@ def _validate_round_actions(round_kind, requested_actions):
         raise ValueError(f"collection plan round_kind must be one of {ROUND_KINDS}")
     actions = set(requested_actions)
     source_actions = {"range_exclusion", "scope_split"}
-    if round_kind in {"P", "FINAL"} and (
-        not actions or not actions <= source_actions
-    ):
+    if round_kind in {"P", "FINAL"} and (not actions or not actions <= source_actions):
         raise ValueError(
             f"{round_kind} round requires one or more source actions and forbids option action"
         )
@@ -583,7 +767,9 @@ def _validate_identity_artifact(role, value, normalized):
             "source_revision": normalized["source_revision"],
             "source_fingerprint": normalized["source_fingerprint"],
         },
-        "workload_identity": {"workload_fingerprint": normalized["workload_fingerprint"]},
+        "workload_identity": {
+            "workload_fingerprint": normalized["workload_fingerprint"]
+        },
     }
     for name, expected in expectations[role].items():
         if value.get(name) != expected:
@@ -592,10 +778,19 @@ def _validate_identity_artifact(role, value, normalized):
 
 def validate_collection_plan(plan, root, *, require_fingerprint=True):
     required = {
-        "schema_version", "plan_id", "adapter_id", "round_kind",
-        "requested_actions", "source_revision", "source_fingerprint",
-        "config_fingerprint", "control_fingerprint", "workload_fingerprint",
-        "experiment_artifacts", "bindings", "expected_outputs",
+        "schema_version",
+        "plan_id",
+        "adapter_id",
+        "round_kind",
+        "requested_actions",
+        "source_revision",
+        "source_fingerprint",
+        "config_fingerprint",
+        "control_fingerprint",
+        "workload_fingerprint",
+        "experiment_artifacts",
+        "bindings",
+        "expected_outputs",
     }
     if require_fingerprint:
         required.add("collection_plan_fingerprint")
@@ -612,7 +807,9 @@ def validate_collection_plan(plan, root, *, require_fingerprint=True):
         or requested_actions != sorted(set(requested_actions))
         or set(requested_actions) - known_actions
     ):
-        raise ValueError("collection plan requested_actions must be sorted unique known actions")
+        raise ValueError(
+            "collection plan requested_actions must be sorted unique known actions"
+        )
     round_kind = _validate_round_actions(plan.get("round_kind"), requested_actions)
 
     normalized = {
@@ -620,11 +817,21 @@ def validate_collection_plan(plan, root, *, require_fingerprint=True):
         "plan_id": _text(plan.get("plan_id"), "collection plan plan_id"),
         "adapter_id": _text(plan.get("adapter_id"), "collection plan adapter_id"),
         "round_kind": round_kind,
-        "source_revision": _text(plan.get("source_revision"), "collection plan source_revision"),
-        "source_fingerprint": _sha256_text(plan.get("source_fingerprint"), "collection plan source_fingerprint"),
-        "config_fingerprint": _sha256_text(plan.get("config_fingerprint"), "collection plan config_fingerprint"),
-        "control_fingerprint": _sha256_text(plan.get("control_fingerprint"), "collection plan control_fingerprint"),
-        "workload_fingerprint": _sha256_text(plan.get("workload_fingerprint"), "collection plan workload_fingerprint"),
+        "source_revision": _text(
+            plan.get("source_revision"), "collection plan source_revision"
+        ),
+        "source_fingerprint": _sha256_text(
+            plan.get("source_fingerprint"), "collection plan source_fingerprint"
+        ),
+        "config_fingerprint": _sha256_text(
+            plan.get("config_fingerprint"), "collection plan config_fingerprint"
+        ),
+        "control_fingerprint": _sha256_text(
+            plan.get("control_fingerprint"), "collection plan control_fingerprint"
+        ),
+        "workload_fingerprint": _sha256_text(
+            plan.get("workload_fingerprint"), "collection plan workload_fingerprint"
+        ),
         "requested_actions": requested_actions,
     }
 
@@ -635,7 +842,11 @@ def validate_collection_plan(plan, root, *, require_fingerprint=True):
     seen_artifact_roles = set()
     for index, item in enumerate(experiment_artifacts):
         label = f"collection plan experiment_artifacts[{index}]"
-        if not isinstance(item, dict) or set(item) != {"role", "path", "file_fingerprint"}:
+        if not isinstance(item, dict) or set(item) != {
+            "role",
+            "path",
+            "file_fingerprint",
+        }:
             raise ValueError(f"{label} fields are invalid")
         role = _text(item["role"], f"{label}.role")
         if role not in EXPERIMENT_IDENTITY_ROLES or role in seen_artifact_roles:
@@ -646,9 +857,13 @@ def validate_collection_plan(plan, root, *, require_fingerprint=True):
             raise ValueError(f"{label}.file_fingerprint mismatch")
         _validate_identity_artifact(role, _load(path), normalized)
         seen_artifact_roles.add(role)
-        normalized_artifacts.append({
-            "role": role, "path": item["path"], "file_fingerprint": actual,
-        })
+        normalized_artifacts.append(
+            {
+                "role": role,
+                "path": item["path"],
+                "file_fingerprint": actual,
+            }
+        )
     if seen_artifact_roles != set(EXPERIMENT_IDENTITY_ROLES):
         raise ValueError("collection plan must bind all experiment identity artifacts")
     if [item["role"] for item in normalized_artifacts] != sorted(seen_artifact_roles):
@@ -661,7 +876,11 @@ def validate_collection_plan(plan, root, *, require_fingerprint=True):
     seen_roles = set()
     for index, item in enumerate(bindings):
         label = f"collection plan bindings[{index}]"
-        if not isinstance(item, dict) or set(item) != {"role", "path", "file_fingerprint"}:
+        if not isinstance(item, dict) or set(item) != {
+            "role",
+            "path",
+            "file_fingerprint",
+        }:
             raise ValueError(f"{label} fields are invalid")
         role = _text(item["role"], f"{label}.role")
         if role not in COLLECTION_BINDING_ROLES or role in seen_roles:
@@ -671,9 +890,13 @@ def validate_collection_plan(plan, root, *, require_fingerprint=True):
         if item["file_fingerprint"] != actual:
             raise ValueError(f"{label}.file_fingerprint mismatch")
         seen_roles.add(role)
-        normalized_bindings.append({
-            "role": role, "path": item["path"], "file_fingerprint": actual,
-        })
+        normalized_bindings.append(
+            {
+                "role": role,
+                "path": item["path"],
+                "file_fingerprint": actual,
+            }
+        )
     if [item["role"] for item in normalized_bindings] != sorted(seen_roles):
         raise ValueError("collection plan bindings must be sorted by role")
 
@@ -683,28 +906,40 @@ def validate_collection_plan(plan, root, *, require_fingerprint=True):
         or expected_outputs != sorted(set(expected_outputs))
         or set(expected_outputs) - set(COLLECTION_OUTPUTS)
     ):
-        raise ValueError("collection plan expected_outputs must be sorted unique known outputs")
+        raise ValueError(
+            "collection plan expected_outputs must be sorted unique known outputs"
+        )
 
-    normalized.update({
-        "experiment_artifacts": normalized_artifacts,
-        "bindings": normalized_bindings,
-        "expected_outputs": expected_outputs,
-    })
+    normalized.update(
+        {
+            "experiment_artifacts": normalized_artifacts,
+            "bindings": normalized_bindings,
+            "expected_outputs": expected_outputs,
+        }
+    )
     normalized["collection_plan_fingerprint"] = fingerprint(normalized)
-    if require_fingerprint and plan["collection_plan_fingerprint"] != normalized["collection_plan_fingerprint"]:
+    if (
+        require_fingerprint
+        and plan["collection_plan_fingerprint"]
+        != normalized["collection_plan_fingerprint"]
+    ):
         raise ValueError("collection_plan_fingerprint mismatch")
     return normalized
 
 
 def freeze_collection_plan(draft, root):
     if "collection_plan_fingerprint" in draft:
-        raise ValueError("collection plan draft must not contain collection_plan_fingerprint")
+        raise ValueError(
+            "collection plan draft must not contain collection_plan_fingerprint"
+        )
     prepared = dict(draft)
     for field in ("experiment_artifacts", "bindings"):
         prepared_items = []
         for index, item in enumerate(draft.get(field, [])):
             if not isinstance(item, dict) or set(item) != {"role", "path"}:
-                raise ValueError(f"collection plan draft {field}[{index}] must contain role and path")
+                raise ValueError(
+                    f"collection plan draft {field}[{index}] must contain role and path"
+                )
             path = _rooted(root, item["path"], f"{field}[{index}].path")
             prepared_items.append({**item, "file_fingerprint": file_fingerprint(path)})
         prepared[field] = prepared_items
@@ -715,15 +950,30 @@ def _binding_semantic_blockers(plan, root):
     blockers = []
     bindings = {item["role"]: item for item in plan["bindings"]}
     if "model_run_spec" in bindings:
-        value = _load(_rooted(root, bindings["model_run_spec"]["path"], "model_run_spec.path"))
-        if not isinstance(value, dict) or value.get("schema_version") != MODEL_RUN_SPEC_SCHEMA:
-            blockers.append({
-                "action": None, "type": "collection_binding", "name": "model_run_spec",
-                "code": "INVALID_COLLECTION_BINDING",
-                "detail": f"model_run_spec must use {MODEL_RUN_SPEC_SCHEMA}",
-            })
+        value = _load(
+            _rooted(root, bindings["model_run_spec"]["path"], "model_run_spec.path")
+        )
+        if (
+            not isinstance(value, dict)
+            or value.get("schema_version") != MODEL_RUN_SPEC_SCHEMA
+        ):
+            blockers.append(
+                {
+                    "action": None,
+                    "type": "collection_binding",
+                    "name": "model_run_spec",
+                    "code": "INVALID_COLLECTION_BINDING",
+                    "detail": f"model_run_spec must use {MODEL_RUN_SPEC_SCHEMA}",
+                }
+            )
     if plan["round_kind"] in {"P", "FINAL"} and "round_action_manifest" in bindings:
-        value = _load(_rooted(root, bindings["round_action_manifest"]["path"], "round_action_manifest.path"))
+        value = _load(
+            _rooted(
+                root,
+                bindings["round_action_manifest"]["path"],
+                "round_action_manifest.path",
+            )
+        )
         expected = {
             "schema_version": ROUND_ACTION_MANIFEST_SCHEMA,
             "round_kind": plan["round_kind"],
@@ -731,11 +981,15 @@ def _binding_semantic_blockers(plan, root):
             "requested_actions": plan["requested_actions"],
         }
         if value != expected:
-            blockers.append({
-                "action": None, "type": "collection_binding", "name": "round_action_manifest",
-                "code": "INVALID_COLLECTION_BINDING",
-                "detail": "round_action_manifest does not bind the current round/actions/source",
-            })
+            blockers.append(
+                {
+                    "action": None,
+                    "type": "collection_binding",
+                    "name": "round_action_manifest",
+                    "code": "INVALID_COLLECTION_BINDING",
+                    "detail": "round_action_manifest does not bind the current round/actions/source",
+                }
+            )
     return blockers
 
 
@@ -743,10 +997,15 @@ def _safe_receipt_text(value):
     return value if isinstance(value, str) and value.strip() else "unavailable"
 
 
-def _blocked_preflight(preflight_id, matrix, collection_plan, adapter_id, requested_actions, error):
-    actions = sorted(set(requested_actions)) if isinstance(requested_actions, list) and all(
-        isinstance(item, str) for item in requested_actions
-    ) else []
+def _blocked_preflight(
+    preflight_id, matrix, collection_plan, adapter_id, requested_actions, error
+):
+    actions = (
+        sorted(set(requested_actions))
+        if isinstance(requested_actions, list)
+        and all(isinstance(item, str) for item in requested_actions)
+        else []
+    )
     message = str(error)
     if "match exactly one matrix adapter" in message:
         code = "ADAPTER_NOT_IN_MATRIX"
@@ -763,25 +1022,48 @@ def _blocked_preflight(preflight_id, matrix, collection_plan, adapter_id, reques
         "preflight_id": _safe_receipt_text(preflight_id),
         "status": "blocked",
         "availability_scope": "adapter_and_run_specific_collection_readiness",
-        "matrix_id": _safe_receipt_text(matrix.get("matrix_id") if isinstance(matrix, dict) else None),
-        "matrix_fingerprint": _safe_receipt_text(matrix.get("matrix_fingerprint") if isinstance(matrix, dict) else None),
+        "matrix_id": _safe_receipt_text(
+            matrix.get("matrix_id") if isinstance(matrix, dict) else None
+        ),
+        "matrix_fingerprint": _safe_receipt_text(
+            matrix.get("matrix_fingerprint") if isinstance(matrix, dict) else None
+        ),
         "adapter_id": _safe_receipt_text(adapter_id),
         "adapter_fingerprint": "unavailable",
-        "collection_plan_id": _safe_receipt_text(collection_plan.get("plan_id") if isinstance(collection_plan, dict) else None),
-        "collection_plan_fingerprint": _safe_receipt_text(collection_plan.get("collection_plan_fingerprint") if isinstance(collection_plan, dict) else None),
-        "round_kind": _safe_receipt_text(collection_plan.get("round_kind") if isinstance(collection_plan, dict) else None),
+        "collection_plan_id": _safe_receipt_text(
+            collection_plan.get("plan_id")
+            if isinstance(collection_plan, dict)
+            else None
+        ),
+        "collection_plan_fingerprint": _safe_receipt_text(
+            collection_plan.get("collection_plan_fingerprint")
+            if isinstance(collection_plan, dict)
+            else None
+        ),
+        "round_kind": _safe_receipt_text(
+            collection_plan.get("round_kind")
+            if isinstance(collection_plan, dict)
+            else None
+        ),
         "requested_actions": actions,
         "action_checks": [],
-        "blockers": [{
-            "action": None, "type": "preflight_input", "name": "preflight_input",
-            "code": code, "detail": message,
-        }],
+        "blockers": [
+            {
+                "action": None,
+                "type": "preflight_input",
+                "name": "preflight_input",
+                "code": code,
+                "detail": message,
+            }
+        ],
     }
     result["preflight_fingerprint"] = fingerprint(result)
     return result
 
 
-def _build_preflight(preflight_id, matrix, collection_plan, root, adapter_id, requested_actions):
+def _build_preflight(
+    preflight_id, matrix, collection_plan, root, adapter_id, requested_actions
+):
     validate_matrix(matrix, root)
     plan = validate_collection_plan(collection_plan, root)
     adapter_id = _text(adapter_id, "adapter_id")
@@ -798,19 +1080,27 @@ def _build_preflight(preflight_id, matrix, collection_plan, root, adapter_id, re
     action_index = {item["action"]: item for item in adapter["actions"]}
     unknown = set(requested_actions) - set(action_index)
     if unknown:
-        raise ValueError(f"requested actions are unavailable in this matrix schema: {sorted(unknown)}")
-    if plan["adapter_id"] != adapter_id or plan["requested_actions"] != requested_actions:
+        raise ValueError(
+            f"requested actions are unavailable in this matrix schema: {sorted(unknown)}"
+        )
+    if (
+        plan["adapter_id"] != adapter_id
+        or plan["requested_actions"] != requested_actions
+    ):
         raise ValueError("collection plan adapter/actions do not match preflight")
 
     blockers = []
     action_checks = []
     for action in requested_actions:
         check = action_index[action]
-        action_checks.append({
-            "action": action, "status": check["status"],
-            "required_capabilities": check["required_capabilities"],
-            "required_artifacts": check["required_artifacts"],
-        })
+        action_checks.append(
+            {
+                "action": action,
+                "status": check["status"],
+                "required_capabilities": check["required_capabilities"],
+                "required_artifacts": check["required_artifacts"],
+            }
+        )
         blockers.extend({"action": action, **blocker} for blocker in check["blockers"])
 
     bound_roles = {item["role"] for item in plan["bindings"]}
@@ -824,17 +1114,25 @@ def _build_preflight(preflight_id, matrix, collection_plan, root, adapter_id, re
         required_roles.update(ROUND_COLLECTION_BINDINGS)
         required_outputs.update(ROUND_EXPECTED_OUTPUTS)
     for role in sorted(required_roles - bound_roles):
-        blockers.append({
-            "action": None, "type": "collection_binding", "name": role,
-            "code": "MISSING_COLLECTION_BINDING",
-            "detail": f"run-specific collection plan does not bind {role}",
-        })
+        blockers.append(
+            {
+                "action": None,
+                "type": "collection_binding",
+                "name": role,
+                "code": "MISSING_COLLECTION_BINDING",
+                "detail": f"run-specific collection plan does not bind {role}",
+            }
+        )
     for output in sorted(required_outputs - declared_outputs):
-        blockers.append({
-            "action": None, "type": "expected_output", "name": output,
-            "code": "MISSING_EXPECTED_OUTPUT",
-            "detail": f"run-specific collection plan does not require {output}",
-        })
+        blockers.append(
+            {
+                "action": None,
+                "type": "expected_output",
+                "name": output,
+                "code": "MISSING_EXPECTED_OUTPUT",
+                "detail": f"run-specific collection plan does not require {output}",
+            }
+        )
     blockers.extend(_binding_semantic_blockers(plan, root))
 
     result = {
@@ -857,7 +1155,9 @@ def _build_preflight(preflight_id, matrix, collection_plan, root, adapter_id, re
     return result
 
 
-def build_preflight(preflight_id, matrix, collection_plan, root, adapter_id, requested_actions):
+def build_preflight(
+    preflight_id, matrix, collection_plan, root, adapter_id, requested_actions
+):
     try:
         return _build_preflight(
             preflight_id, matrix, collection_plan, root, adapter_id, requested_actions
@@ -872,13 +1172,18 @@ def validate_preflight(preflight, matrix, collection_plan, root):
     if not isinstance(preflight, dict):
         raise ValueError("preflight must be an object")
     actual = build_preflight(
-        preflight.get("preflight_id"), matrix, collection_plan, root,
-        preflight.get("adapter_id"), preflight.get("requested_actions"),
+        preflight.get("preflight_id"),
+        matrix,
+        collection_plan,
+        root,
+        preflight.get("adapter_id"),
+        preflight.get("requested_actions"),
     )
     if preflight != actual:
         raise ValueError("preflight differs from deterministic replay")
     return {
-        "valid": True, "status": preflight["status"],
+        "valid": True,
+        "status": preflight["status"],
         "preflight_fingerprint": preflight["preflight_fingerprint"],
     }
 
@@ -913,7 +1218,9 @@ def main():
     validate_preflight_parser = commands.add_parser("validate-preflight")
     validate_preflight_parser.add_argument("--preflight", type=Path, required=True)
     validate_preflight_parser.add_argument("--matrix", type=Path, required=True)
-    validate_preflight_parser.add_argument("--collection-plan", type=Path, required=True)
+    validate_preflight_parser.add_argument(
+        "--collection-plan", type=Path, required=True
+    )
     validate_preflight_parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
     exit_code = 0
@@ -932,16 +1239,22 @@ def main():
             output = args.out
         elif args.command == "preflight":
             result = build_preflight(
-                args.preflight_id, _load(args.matrix), _load(args.collection_plan),
-                args.root, args.adapter_id, sorted(set(args.action)),
+                args.preflight_id,
+                _load(args.matrix),
+                _load(args.collection_plan),
+                args.root,
+                args.adapter_id,
+                sorted(set(args.action)),
             )
             output = args.out
             if result["status"] != "ready":
                 exit_code = 2
         else:
             result = validate_preflight(
-                _load(args.preflight), _load(args.matrix),
-                _load(args.collection_plan), args.root,
+                _load(args.preflight),
+                _load(args.matrix),
+                _load(args.collection_plan),
+                args.root,
             )
             output = None
         if output:

@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import json
 import sys
 import tempfile
@@ -75,10 +82,12 @@ class NpuClosureTest(unittest.TestCase):
             multistream_npu_closure.multistream_operator_order,
             "analyze",
             return_value={
-                "targets": [{
-                    "range_id": "range-1",
-                    "multistream_reorder_authorized": authorized,
-                }]
+                "targets": [
+                    {
+                        "range_id": "range-1",
+                        "multistream_reorder_authorized": authorized,
+                    }
+                ]
             },
         ).start()
         mock.patch.object(
@@ -123,7 +132,9 @@ class NpuClosureTest(unittest.TestCase):
 
     def test_no_candidate_cannot_substitute_for_executed_reorder(self):
         self._patch_replay(authorized=False)
-        with self.assertRaisesRegex(ValueError, "analyzer-authorized reorder candidate"):
+        with self.assertRaisesRegex(
+            ValueError, "analyzer-authorized reorder candidate"
+        ):
             multistream_npu_closure.seal(self._draft(), self.root)
 
     def test_requires_real_npu_execution_capabilities(self):

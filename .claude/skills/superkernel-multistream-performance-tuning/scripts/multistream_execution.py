@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Materialize isolated option trials and maintain an auditable trial state."""
 
 import argparse
@@ -59,7 +66,10 @@ def file_fingerprint(path):
 
 
 def validate_source_snapshot(manifest, artifact_root):
-    if not isinstance(manifest, dict) or manifest.get("schema_version") != SOURCE_SNAPSHOT_SCHEMA:
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != SOURCE_SNAPSHOT_SCHEMA
+    ):
         raise ValueError(f"source manifest must use {SOURCE_SNAPSHOT_SCHEMA}")
     revision = manifest.get("source_revision")
     if not isinstance(revision, str) or not revision.strip():
@@ -131,7 +141,9 @@ def generate_source_snapshot(source_root, artifact_root, source_revision, files)
             raise ValueError(f"source snapshot file does not exist: {value}")
         artifact_relative = path.relative_to(artifact_root).as_posix()
         if artifact_relative in seen:
-            raise ValueError(f"source snapshot contains duplicate file: {artifact_relative}")
+            raise ValueError(
+                f"source snapshot contains duplicate file: {artifact_relative}"
+            )
         seen.add(artifact_relative)
         normalized.append(
             {"path": artifact_relative, "file_fingerprint": file_fingerprint(path)}
@@ -188,7 +200,9 @@ def _write_json(path, value):
 def _write_structured(path, value):
     path = Path(path)
     if path.suffix.lower() == ".json":
-        rendered = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        rendered = (
+            json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        )
     else:
         rendered = yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
     _atomic_write_text(path, rendered)
@@ -225,7 +239,9 @@ def _resolve_parent(value, tokens):
             try:
                 index = int(token)
             except ValueError as error:
-                raise ValueError(f"json_pointer list index is invalid: {token}") from error
+                raise ValueError(
+                    f"json_pointer list index is invalid: {token}"
+                ) from error
             if index < 0 or index >= len(current):
                 raise ValueError(f"json_pointer list index is out of range: {token}")
             current = current[index]
@@ -382,7 +398,9 @@ def _validate_source_action(kind, start, end, insertions):
         if len(populated) != 1 or len(populated[0]) != 2:
             raise ValueError("scope_split requires one boundary with end then begin")
         if [call[0] for call in populated[0]] != ["end", "begin"]:
-            raise ValueError("scope_split requires one scope_end followed by scope_begin")
+            raise ValueError(
+                "scope_split requires one scope_end followed by scope_begin"
+            )
         if any(call[1] is None for call in populated[0]):
             raise ValueError("scope_split requires named scopes")
         return "dependency_aligned_split"
@@ -465,9 +483,13 @@ def materialize_source_action(
         ast.parse(original_text, filename=str(input_path))
         ast.parse(materialized.decode("utf-8"), filename=str(output_path))
     except (SyntaxError, UnicodeDecodeError) as error:
-        raise ValueError(f"source action does not preserve valid Python syntax: {error}") from error
+        raise ValueError(
+            f"source action does not preserve valid Python syntax: {error}"
+        ) from error
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{output_path.name}.", dir=output_path.parent)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", dir=output_path.parent
+    )
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(materialized)
@@ -517,7 +539,11 @@ def materialize_operator_reorder(
     input_path = Path(input_path).resolve()
     output_path = Path(output_path).resolve()
     analysis_path = Path(order_analysis_path).resolve()
-    root = Path(artifact_root).resolve() if artifact_root is not None else analysis_path.parent
+    root = (
+        Path(artifact_root).resolve()
+        if artifact_root is not None
+        else analysis_path.parent
+    )
     if input_path == output_path:
         raise ValueError("output source must differ from immutable input source")
     if output_path.exists():
@@ -526,13 +552,19 @@ def materialize_operator_reorder(
     analysis = json.loads(analysis_path.read_text())
     matches = [item for item in analysis["targets"] if item["range_id"] == range_id]
     if len(matches) != 1:
-        raise ValueError("operator reorder range_id must match exactly one analysis target")
+        raise ValueError(
+            "operator reorder range_id must match exactly one analysis target"
+        )
     target = matches[0]
     if target.get("multistream_reorder_authorized") is not True:
-        raise ValueError("business operator reorder requires direct multistream authorization")
+        raise ValueError(
+            "business operator reorder requires direct multistream authorization"
+        )
     legal_orders = [target["route2_order"], *target["route3_orders"]]
     if after_order not in legal_orders:
-        raise ValueError("after_order is not an analyzer-generated legal route2/route3 order")
+        raise ValueError(
+            "after_order is not an analyzer-generated legal route2/route3 order"
+        )
     route = "route2" if after_order == target["route2_order"] else "route3"
     route3_prerequisite = None
     if route == "route3":
@@ -584,14 +616,18 @@ def materialize_operator_reorder(
     if input_relative != target["source_file"]:
         raise ValueError("input source does not match the analyzed source file")
     if file_fingerprint(input_path) != target["source_file_fingerprint"]:
-        raise ValueError("input source fingerprint differs from operator order analysis")
+        raise ValueError(
+            "input source fingerprint differs from operator order analysis"
+        )
 
     original = input_path.read_bytes()
     try:
         original_text = original.decode("utf-8")
         ast.parse(original_text, filename=str(input_path))
     except (UnicodeDecodeError, SyntaxError) as error:
-        raise ValueError(f"operator reorder requires valid UTF-8 Python source: {error}") from error
+        raise ValueError(
+            f"operator reorder requires valid UTF-8 Python source: {error}"
+        ) from error
     start = target["range_start_offset"]
     end = target["range_end_offset"]
     if not 0 <= start < end <= len(original):
@@ -600,17 +636,23 @@ def materialize_operator_reorder(
     before_order = target["current_source_order"]
     if [item["statement_id"] for item in statements] != before_order:
         raise ValueError("operator reorder statement order differs from analysis")
-    if set(after_order) != set(before_order) or len(after_order) != len(set(after_order)):
-        raise ValueError("operator reorder must be a permutation of the analyzed statements")
+    if set(after_order) != set(before_order) or len(after_order) != len(
+        set(after_order)
+    ):
+        raise ValueError(
+            "operator reorder must be a permutation of the analyzed statements"
+        )
     if after_order == before_order:
         raise ValueError("operator reorder must change statement order")
     blocks = {}
     block_records = []
     for statement in statements:
         statement_id = statement["statement_id"]
-        block = original[statement["start_offset"]:statement["end_offset"]]
+        block = original[statement["start_offset"] : statement["end_offset"]]
         if not block:
-            raise ValueError(f"operator reorder statement block is empty: {statement_id}")
+            raise ValueError(
+                f"operator reorder statement block is empty: {statement_id}"
+            )
         try:
             block.decode("utf-8")
         except UnicodeDecodeError as error:
@@ -626,7 +668,9 @@ def materialize_operator_reorder(
         (item["before"], item["after"]) for item in target["hard_dependencies"]
     ]
     after_rank = {statement_id: index for index, statement_id in enumerate(after_order)}
-    violated = [edge for edge in hard_edges if after_rank[edge[0]] >= after_rank[edge[1]]]
+    violated = [
+        edge for edge in hard_edges if after_rank[edge[0]] >= after_rank[edge[1]]
+    ]
     if violated:
         raise ValueError(f"operator reorder violates hard dependencies: {violated}")
 
@@ -637,18 +681,23 @@ def materialize_operator_reorder(
     try:
         ast.parse(materialized.decode("utf-8"), filename=str(output_path))
     except (UnicodeDecodeError, SyntaxError) as error:
-        raise ValueError(f"operator reorder does not preserve valid Python syntax: {error}") from error
+        raise ValueError(
+            f"operator reorder does not preserve valid Python syntax: {error}"
+        ) from error
     if sorted(blocks.values()) != sorted(
         replacement[
-            sum(len(blocks[item]) for item in after_order[:index]):
-            sum(len(blocks[item]) for item in after_order[:index + 1])
+            sum(len(blocks[item]) for item in after_order[:index]) : sum(
+                len(blocks[item]) for item in after_order[: index + 1]
+            )
         ]
         for index in range(len(after_order))
     ):
         raise ValueError("operator reorder changed statement block contents")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{output_path.name}.", dir=output_path.parent)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", dir=output_path.parent
+    )
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(materialized)
@@ -705,7 +754,9 @@ def _now():
 def initialize_state(trial_id, request_fingerprint, action_manifest):
     manifest = json.loads(Path(action_manifest).read_text())
     if manifest.get("schema_version") not in {ACTION_SCHEMA, ACTION_SCHEMA_V2}:
-        raise ValueError(f"action manifest must use {ACTION_SCHEMA} or {ACTION_SCHEMA_V2}")
+        raise ValueError(
+            f"action manifest must use {ACTION_SCHEMA} or {ACTION_SCHEMA_V2}"
+        )
     if manifest.get("trial_id") != trial_id:
         raise ValueError("action manifest trial_id mismatch")
     return {
@@ -741,7 +792,9 @@ def advance_state(state, target, evidence=None):
             raise ValueError(f"unknown trial state transition: {current} -> {target}")
         current_index = ORDERED_STATES.index(current)
         if ORDERED_STATES[current_index + 1] != target:
-            raise ValueError(f"trial state must advance one gate at a time: {current} -> {target}")
+            raise ValueError(
+                f"trial state must advance one gate at a time: {current} -> {target}"
+            )
     if target not in {"planned", "materialized"} and evidence is None:
         raise ValueError(f"transition to {target} requires an evidence path")
     evidence = _safe_relative_artifact(evidence)
@@ -766,10 +819,17 @@ def validate_state(
         raise ValueError(f"state must use {STATE_SCHEMA}")
     if trial_id is not None and state.get("trial_id") != trial_id:
         raise ValueError("trial state trial_id mismatch")
-    if request_fingerprint is not None and state.get("request_fingerprint") != request_fingerprint:
+    if (
+        request_fingerprint is not None
+        and state.get("request_fingerprint") != request_fingerprint
+    ):
         raise ValueError("trial state request_fingerprint mismatch")
     events = state.get("events")
-    if not isinstance(events, list) or not events or events[0].get("state") != "planned":
+    if (
+        not isinstance(events, list)
+        or not events
+        or events[0].get("state") != "planned"
+    ):
         raise ValueError("trial state must start with planned")
     replay = "planned"
     terminal = False
@@ -785,7 +845,9 @@ def validate_state(
             try:
                 candidate.relative_to(root)
             except ValueError as error:
-                raise ValueError("trial state evidence escapes artifact root") from error
+                raise ValueError(
+                    "trial state evidence escapes artifact root"
+                ) from error
             if not candidate.is_file():
                 raise ValueError(f"trial state evidence does not exist: {relative}")
         holder = {"schema_version": STATE_SCHEMA, "state": replay, "events": []}
@@ -820,7 +882,9 @@ def main(argv=None):
     source.add_argument("--start-offset", type=int, required=True)
     source.add_argument("--end-offset", type=int, required=True)
     source.add_argument("--boundary-change", required=True)
-    source.add_argument("--change-kind", choices=sorted(SOURCE_CHANGE_KINDS), required=True)
+    source.add_argument(
+        "--change-kind", choices=sorted(SOURCE_CHANGE_KINDS), required=True
+    )
     source.add_argument("--insertions", type=Path, required=True)
     source.add_argument("--trial-id", required=True)
     source.add_argument("--artifact-root", type=Path, required=True)
@@ -923,7 +987,9 @@ def main(argv=None):
             )
         else:
             if args.manifest_out.exists():
-                raise ValueError(f"source snapshot manifest already exists: {args.manifest_out}")
+                raise ValueError(
+                    f"source snapshot manifest already exists: {args.manifest_out}"
+                )
             result = generate_source_snapshot(
                 args.source_root,
                 args.artifact_root,

@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import json
 import sys
 import tempfile
@@ -40,13 +47,19 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
     def _resource_fields(family):
         return {
             "CUBE": {
-                "accelerator_core": "AI_CORE", "block_num": 16, "mix_block_num": 0,
+                "accelerator_core": "AI_CORE",
+                "block_num": 16,
+                "mix_block_num": 0,
             },
             "VECTOR": {
-                "accelerator_core": "AI_VECTOR_CORE", "block_num": 32, "mix_block_num": 0,
+                "accelerator_core": "AI_VECTOR_CORE",
+                "block_num": 32,
+                "mix_block_num": 0,
             },
             "MIX": {
-                "accelerator_core": "MIX_AIV", "block_num": 32, "mix_block_num": 16,
+                "accelerator_core": "MIX_AIV",
+                "block_num": 32,
+                "mix_block_num": 16,
             },
         }[family]
 
@@ -61,25 +74,29 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
             "required_dependency_kinds": sorted(
                 multistream_dependency_evidence.HARD_DEPENDENCY_KINDS
             ),
-            "providers": [{
-                "provider_id": "source-review-1",
-                "provider_api_version": multistream_dependency_evidence.PROVIDER_API_VERSION,
-                "provider_kind": "source_review",
-                "implementation": multistream_dependency_evidence.source_file_record(
-                    self.dependency_provider, self.root
-                ),
-                "input_files": [multistream_dependency_evidence.source_file_record(
-                    self.dependency_input, self.root
-                )],
-                "covered_dependency_kinds": sorted(
-                    multistream_dependency_evidence.HARD_DEPENDENCY_KINDS
-                ),
-                "edges": [
-                    {**edge, "evidence_locator": f"review.edges[{index}]"}
-                    for index, edge in enumerate(dependencies)
-                ],
-                "blockers": [],
-            }],
+            "providers": [
+                {
+                    "provider_id": "source-review-1",
+                    "provider_api_version": multistream_dependency_evidence.PROVIDER_API_VERSION,
+                    "provider_kind": "source_review",
+                    "implementation": multistream_dependency_evidence.source_file_record(
+                        self.dependency_provider, self.root
+                    ),
+                    "input_files": [
+                        multistream_dependency_evidence.source_file_record(
+                            self.dependency_input, self.root
+                        )
+                    ],
+                    "covered_dependency_kinds": sorted(
+                        multistream_dependency_evidence.HARD_DEPENDENCY_KINDS
+                    ),
+                    "edges": [
+                        {**edge, "evidence_locator": f"review.edges[{index}]"}
+                        for index, edge in enumerate(dependencies)
+                    ],
+                    "blockers": [],
+                }
+            ],
         }
         fragments["fragment_set_fingerprint"] = (
             multistream_dependency_evidence.fingerprint(fragments)
@@ -173,9 +190,7 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
         }
 
     def _analyze(self, capture):
-        capture["capture_fingerprint"] = multistream_operator_order.fingerprint(
-            capture
-        )
+        capture["capture_fingerprint"] = multistream_operator_order.fingerprint(capture)
         path = self.root / "capture.json"
         path.write_text(json.dumps(capture) + "\n")
         return multistream_operator_order.analyze(
@@ -201,55 +216,77 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
         statements = []
         names = ["vector", "cube", "aux"]
         for index, name in enumerate(names):
-            statements.append({
-                "statement_id": name,
-                "start_offset": starts[name],
-                "end_offset": starts[names[index + 1]] if index + 1 < len(names) else end,
-                "movable": True,
-                "side_effect_free": True,
-            })
+            statements.append(
+                {
+                    "statement_id": name,
+                    "start_offset": starts[name],
+                    "end_offset": starts[names[index + 1]]
+                    if index + 1 < len(names)
+                    else end,
+                    "movable": True,
+                    "side_effect_free": True,
+                }
+            )
         capture = {
             "schema_version": multistream_operator_order.CAPTURE_SCHEMA,
             "capture_id": "order-capture-route3",
             "request_fingerprint": "request-fp-1",
-            "source_files": [{
-                "path": "model.py",
-                "size_bytes": self.source.stat().st_size,
-                "file_fingerprint": multistream_operator_order.file_fingerprint(self.source),
-            }],
-            "targets": [{
-                "range_id": "range-1",
-                "graph_occurrence_fingerprint": "occurrence-1",
-                "source_file": "model.py",
-                "range_start_offset": starts["vector"],
-                "range_end_offset": end,
-                "statements": statements,
-                "hard_dependencies": [],
-                "dependency_evidence": self._dependency_evidence(
-                    names, [], "request-fp-1"
-                ),
-                "occurrences": [{
-                    "alignment_id": f"decode-{step}",
-                    "sk_off_operators": [
+            "source_files": [
+                {
+                    "path": "model.py",
+                    "size_bytes": self.source.stat().st_size,
+                    "file_fingerprint": multistream_operator_order.file_fingerprint(
+                        self.source
+                    ),
+                }
+            ],
+            "targets": [
+                {
+                    "range_id": "range-1",
+                    "graph_occurrence_fingerprint": "occurrence-1",
+                    "source_file": "model.py",
+                    "range_start_offset": starts["vector"],
+                    "range_end_offset": end,
+                    "statements": statements,
+                    "hard_dependencies": [],
+                    "dependency_evidence": self._dependency_evidence(
+                        names, [], "request-fp-1"
+                    ),
+                    "occurrences": [
                         {
-                            "operator_id": "cube-op", "statement_id": "cube",
-                            "stream_id": 1, **self._resource_fields("CUBE"),
-                            "start_us": 0.0, "duration_us": 10.0,
-                        },
-                        {
-                            "operator_id": "aux-op", "statement_id": "aux",
-                            "stream_id": 3, **self._resource_fields("VECTOR"),
-                            "start_us": 0.0, "duration_us": 10.0,
-                        },
-                        {
-                            "operator_id": "vector-op", "statement_id": "vector",
-                            "stream_id": 2, **self._resource_fields("VECTOR"),
-                            "start_us": 5.0, "duration_us": 8.0,
-                        },
+                            "alignment_id": f"decode-{step}",
+                            "sk_off_operators": [
+                                {
+                                    "operator_id": "cube-op",
+                                    "statement_id": "cube",
+                                    "stream_id": 1,
+                                    **self._resource_fields("CUBE"),
+                                    "start_us": 0.0,
+                                    "duration_us": 10.0,
+                                },
+                                {
+                                    "operator_id": "aux-op",
+                                    "statement_id": "aux",
+                                    "stream_id": 3,
+                                    **self._resource_fields("VECTOR"),
+                                    "start_us": 0.0,
+                                    "duration_us": 10.0,
+                                },
+                                {
+                                    "operator_id": "vector-op",
+                                    "statement_id": "vector",
+                                    "stream_id": 2,
+                                    **self._resource_fields("VECTOR"),
+                                    "start_us": 5.0,
+                                    "duration_us": 8.0,
+                                },
+                            ],
+                            "sk_on_dispatch_order": ["vector-op", "cube-op", "aux-op"],
+                        }
+                        for step in range(3)
                     ],
-                    "sk_on_dispatch_order": ["vector-op", "cube-op", "aux-op"],
-                } for step in range(3)],
-            }],
+                }
+            ],
         }
         return capture
 
@@ -301,19 +338,31 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
 
     def test_hard_dependency_cannot_be_reversed(self):
         analysis = self._analyze(
-            self._capture(hard_dependencies=[{"before": "vector", "after": "cube", "kind": "DATA"}])
+            self._capture(
+                hard_dependencies=[
+                    {"before": "vector", "after": "cube", "kind": "DATA"}
+                ]
+            )
         )
         target = analysis["targets"][0]
         self.assertFalse(target["multistream_reorder_authorized"])
-        self.assertIn("stable_preference_conflicts_with_hard_dependency", target["blockers"])
+        self.assertIn(
+            "stable_preference_conflicts_with_hard_dependency", target["blockers"]
+        )
 
     def test_incomplete_dependency_provider_coverage_blocks_analysis(self):
         capture = self._capture()
         fragments_path = self.root / "dependency-fragments.json"
         fragments = json.loads(fragments_path.read_text())
         fragments["providers"][0]["covered_dependency_kinds"] = ["DATA"]
-        fragments["fragment_set_fingerprint"] = multistream_dependency_evidence.fingerprint(
-            {key: item for key, item in fragments.items() if key != "fragment_set_fingerprint"}
+        fragments["fragment_set_fingerprint"] = (
+            multistream_dependency_evidence.fingerprint(
+                {
+                    key: item
+                    for key, item in fragments.items()
+                    if key != "fragment_set_fingerprint"
+                }
+            )
         )
         fragments_path.write_text(json.dumps(fragments) + "\n")
         evidence = multistream_dependency_evidence.build(fragments_path, self.root)
@@ -353,7 +402,9 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
 
         analysis_path = self.root / "analysis.json"
         analysis_path.write_text(json.dumps(analysis) + "\n")
-        with self.assertRaisesRegex(ValueError, "route3 requires route2 dispatch evidence"):
+        with self.assertRaisesRegex(
+            ValueError, "route3 requires route2 dispatch evidence"
+        ):
             multistream_execution.materialize_operator_reorder(
                 self.source,
                 self.root / "route3.py",
@@ -376,11 +427,15 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
                 "trial_id": "MS-R2",
                 "request_fingerprint": "request-fp-1",
                 "inputs": {},
-                "source_files": [{
-                    "path": raw.name,
-                    "size_bytes": raw.stat().st_size,
-                    "file_fingerprint": multistream_operator_order.file_fingerprint(raw),
-                }],
+                "source_files": [
+                    {
+                        "path": raw.name,
+                        "size_bytes": raw.stat().st_size,
+                        "file_fingerprint": multistream_operator_order.file_fingerprint(
+                            raw
+                        ),
+                    }
+                ],
                 "semantic_result": {
                     "candidate": {
                         "option_trial_evaluation": {
@@ -438,7 +493,9 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
             "MS-R1",
             self.root,
         )
-        self.assertLess(output.read_text().index("cube ="), output.read_text().index("vector ="))
+        self.assertLess(
+            output.read_text().index("cube ="), output.read_text().index("vector =")
+        )
         self.assertEqual(manifest["change_kind"], "dependency_safe_operator_reorder")
         self.assertTrue(manifest["multistream_only_verified"])
         self.assertEqual(manifest["resource_pair_policy"], "cube_vector_only")
@@ -456,7 +513,9 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
             "schema_version": multistream_operator_order.DISPATCH_CAPTURE_SCHEMA,
             "trial_id": "MS-R1",
             "request_fingerprint": "request-fp-1",
-            "action_manifest_fingerprint": multistream_operator_order.fingerprint(manifest),
+            "action_manifest_fingerprint": multistream_operator_order.fingerprint(
+                manifest
+            ),
             "range_id": "range-1",
             "child_set_preserved": True,
             "stream_identity_complete": True,
@@ -472,7 +531,9 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
                 {
                     "path": dispatch_raw.name,
                     "size_bytes": dispatch_raw.stat().st_size,
-                    "file_fingerprint": multistream_operator_order.file_fingerprint(dispatch_raw),
+                    "file_fingerprint": multistream_operator_order.file_fingerprint(
+                        dispatch_raw
+                    ),
                 }
             ],
         }
@@ -490,8 +551,13 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
         analysis_path = self.root / "analysis.json"
         analysis_path.write_text(json.dumps(analysis) + "\n")
         manifest = multistream_execution.materialize_operator_reorder(
-            self.source, self.root / "reordered.py", analysis_path,
-            "range-1", ["cube", "vector"], "MS-R1", self.root,
+            self.source,
+            self.root / "reordered.py",
+            analysis_path,
+            "range-1",
+            ["cube", "vector"],
+            "MS-R1",
+            self.root,
         )
         manifest_path = self.root / "action.json"
         manifest_path.write_text(json.dumps(manifest) + "\n")
@@ -501,7 +567,9 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
             "schema_version": multistream_operator_order.DISPATCH_CAPTURE_SCHEMA,
             "trial_id": "MS-R1",
             "request_fingerprint": "request-fp-1",
-            "action_manifest_fingerprint": multistream_operator_order.fingerprint(manifest),
+            "action_manifest_fingerprint": multistream_operator_order.fingerprint(
+                manifest
+            ),
             "range_id": "range-1",
             "child_set_preserved": True,
             "stream_identity_complete": True,
@@ -513,11 +581,15 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
                 }
                 for step in range(3)
             ],
-            "source_files": [{
-                "path": raw.name,
-                "size_bytes": raw.stat().st_size,
-                "file_fingerprint": multistream_operator_order.file_fingerprint(raw),
-            }],
+            "source_files": [
+                {
+                    "path": raw.name,
+                    "size_bytes": raw.stat().st_size,
+                    "file_fingerprint": multistream_operator_order.file_fingerprint(
+                        raw
+                    ),
+                }
+            ],
         }
         capture["capture_fingerprint"] = multistream_operator_order.fingerprint(capture)
         capture_path = self.root / "post-dispatch.json"
@@ -542,16 +614,25 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
         }
         request_path = self.root / "request.json"
         request_path.write_text(json.dumps(request) + "\n")
-        (self.root / "history.json").write_text(json.dumps({
-            "schema_version": multistream_candidate_planner.HISTORY_SCHEMA,
-            "settled_trials": [],
-        }) + "\n")
+        (self.root / "history.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": multistream_candidate_planner.HISTORY_SCHEMA,
+                    "settled_trials": [],
+                }
+            )
+            + "\n"
+        )
         (self.root / "source-map.json").write_text("{}\n")
-        trace = {"targets": [{
-            "range_id": "range-1",
-            "net_effect": "beneficial",
-            "parallelism_effect": "degraded",
-        }]}
+        trace = {
+            "targets": [
+                {
+                    "range_id": "range-1",
+                    "net_effect": "beneficial",
+                    "parallelism_effect": "degraded",
+                }
+            ]
+        }
         trace_path = self.root / "trace.json"
         trace_path.write_text(json.dumps(trace) + "\n")
         catalog = {
@@ -559,38 +640,47 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
             "options": [],
             "source_actions": [],
         }
-        catalog["catalog_fingerprint"] = multistream_candidate_planner.fingerprint(catalog)
+        catalog["catalog_fingerprint"] = multistream_candidate_planner.fingerprint(
+            catalog
+        )
         catalog_path = self.root / "catalog.json"
         catalog_path.write_text(json.dumps(catalog) + "\n")
         summary = {
             "request_fingerprint": "request-fp-1",
             "target_range_ids": ["range-1"],
             "requested_change_kinds": ["dependency_safe_operator_reorder"],
-            "analysis_targets": {"range-1": {
-                "graph_occurrence_fingerprint": "occurrence-1",
-                "mapping_method": "source_scope_map",
-                "mapping_confidence": "exact",
-                "boundary": {
-                    "source_file": "model.py",
-                    "start_offset": analysis["targets"][0]["range_start_offset"],
-                    "end_offset": analysis["targets"][0]["range_end_offset"],
-                },
-            }},
+            "analysis_targets": {
+                "range-1": {
+                    "graph_occurrence_fingerprint": "occurrence-1",
+                    "mapping_method": "source_scope_map",
+                    "mapping_confidence": "exact",
+                    "boundary": {
+                        "source_file": "model.py",
+                        "start_offset": analysis["targets"][0]["range_start_offset"],
+                        "end_offset": analysis["targets"][0]["range_end_offset"],
+                    },
+                }
+            },
         }
-        with mock.patch.object(
-            multistream_candidate_planner.multistream_contract,
-            "validate_request",
-            return_value=summary,
-        ), mock.patch.object(
-            multistream_candidate_planner.multistream_trace_analysis,
-            "validate_analysis",
-            return_value={"analysis_fingerprint": "trace-fp"},
+        with (
+            mock.patch.object(
+                multistream_candidate_planner.multistream_contract,
+                "validate_request",
+                return_value=summary,
+            ),
+            mock.patch.object(
+                multistream_candidate_planner.multistream_trace_analysis,
+                "validate_analysis",
+                return_value={"analysis_fingerprint": "trace-fp"},
+            ),
         ):
             matrix = multistream_candidate_planner.plan(
                 request_path, trace_path, catalog_path, self.root, analysis_path
             )
             candidate = matrix["candidates"][0]
-            self.assertEqual(candidate["change_kind"], "dependency_safe_operator_reorder")
+            self.assertEqual(
+                candidate["change_kind"], "dependency_safe_operator_reorder"
+            )
             self.assertEqual(candidate["route"], "route2")
             self.assertTrue(candidate["selected_for_execution"])
 
@@ -603,13 +693,17 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
 
     def test_request_contract_allows_reorder_only_with_direct_multistream_capture(self):
         for name in (
-            "clean.json", "baseline-manifest.json", "candidate-manifest.json",
-            "projection.json", "environment.json", "history.json", "source-map.json",
+            "clean.json",
+            "baseline-manifest.json",
+            "candidate-manifest.json",
+            "projection.json",
+            "environment.json",
+            "history.json",
+            "source-map.json",
         ):
             (self.root / name).write_text("{}\n")
         source_bytes = self.source.read_bytes()
         start = source_bytes.index(b"    vector")
-        middle = source_bytes.index(b"    cube")
         end = source_bytes.index(b"    return")
         request = {
             "schema_version": multistream_contract.REQUEST_SCHEMA,
@@ -636,13 +730,15 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
                 "source_scope_map": "source-map.json",
                 "operator_order_capture": "operator-order-capture.json",
             },
-            "targets": [{
-                "range_id": "range-1",
-                "graph_occurrence_fingerprint": "occurrence-1",
-                "net_effect": "beneficial",
-                "parallelism_effect": "degraded",
-                "optimization_status": "opportunity",
-            }],
+            "targets": [
+                {
+                    "range_id": "range-1",
+                    "graph_occurrence_fingerprint": "occurrence-1",
+                    "net_effect": "beneficial",
+                    "parallelism_effect": "degraded",
+                    "optimization_status": "opportunity",
+                }
+            ],
             "requested_change_kinds": ["dependency_safe_operator_reorder"],
             "isolation": {
                 "source_worktree": "isolated/source",
@@ -675,34 +771,45 @@ class OperatorOrderAnalysisTest(unittest.TestCase):
             "candidate_config_fingerprint": "config-fp-1",
             "control_fingerprint": "control-fp-1",
             "workload_fingerprint": "workload-fp-1",
-            "source_scope_mapping": {"protocol": "source_scope_map_v2", "status": "exact"},
-            "per_sk_decisions": [{
-                "range_id": "range-1",
-                "graph_occurrence_fingerprint": "occurrence-1",
-                "classification": "beneficial",
-                "mapping_method": "source_scope_map",
-                "mapping_confidence": "exact",
-                "candidate_occurrence_count": 3,
-                "original": {"interval_us": {"count": 3}},
-                "boundary": {
-                    "source_file": "model.py",
-                    "start_offset": start,
-                    "end_offset": end,
-                },
-            }],
+            "source_scope_mapping": {
+                "protocol": "source_scope_map_v2",
+                "status": "exact",
+            },
+            "per_sk_decisions": [
+                {
+                    "range_id": "range-1",
+                    "graph_occurrence_fingerprint": "occurrence-1",
+                    "classification": "beneficial",
+                    "mapping_method": "source_scope_map",
+                    "mapping_confidence": "exact",
+                    "candidate_occurrence_count": 3,
+                    "original": {"interval_us": {"count": 3}},
+                    "boundary": {
+                        "source_file": "model.py",
+                        "start_offset": start,
+                        "end_offset": end,
+                    },
+                }
+            ],
         }
-        profiling["analysis_content_fingerprint"] = multistream_contract._analysis_fingerprint(profiling)
+        profiling["analysis_content_fingerprint"] = (
+            multistream_contract._analysis_fingerprint(profiling)
+        )
         (self.root / "profiling-analysis.json").write_text(json.dumps(profiling) + "\n")
         capture = self._capture(
             request_fingerprint=multistream_contract.content_fingerprint(request)
         )
         capture["capture_fingerprint"] = multistream_operator_order.fingerprint(capture)
-        (self.root / "operator-order-capture.json").write_text(json.dumps(capture) + "\n")
+        (self.root / "operator-order-capture.json").write_text(
+            json.dumps(capture) + "\n"
+        )
         summary = multistream_contract.validate_request(request, self.root)
         self.assertTrue(summary["operator_order_capture_available"])
 
         request["targets"][0]["parallelism_effect"] = "preserved"
-        with self.assertRaisesRegex(ValueError, "allowed only for degraded multistream"):
+        with self.assertRaisesRegex(
+            ValueError, "allowed only for degraded multistream"
+        ):
             multistream_contract.validate_request(request, self.root)
 
 

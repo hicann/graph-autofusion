@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Render a deterministic Chinese SuperKernel fusion performance report."""
 
 import argparse
@@ -267,9 +274,7 @@ def _source_interval_proven(boundary, path):
         or Path(source_file).is_absolute()
         or ".." in Path(source_file).parts
     ):
-        raise ValueError(
-            f"{path}.source_file must be a non-empty relative source path"
-        )
+        raise ValueError(f"{path}.source_file must be a non-empty relative source path")
     start_offset = boundary["start_offset"]
     end_offset = boundary["end_offset"]
     if (
@@ -370,9 +375,7 @@ def _decision_scope_contract(decision, path):
         raise ValueError(f"{path}.boundary must be an object")
     for field in ("start_op", "end_op"):
         _required_text(boundary, field, f"{path}.boundary")
-    interval_unproven = not _source_interval_proven(
-        boundary, f"{path}.boundary"
-    )
+    interval_unproven = not _source_interval_proven(boundary, f"{path}.boundary")
     if classification in {"neutral", "regressed"}:
         source_actionable = (
             decision.get("mapping_method") == "source_scope_map"
@@ -405,8 +408,7 @@ def _decision_scope_contract(decision, path):
         or any(not isinstance(item, str) or not item.strip() for item in sequence)
     ):
         raise ValueError(
-            f"{path}.identity.ordered_child_op_sequence must be a non-empty "
-            "string list"
+            f"{path}.identity.ordered_child_op_sequence must be a non-empty string list"
         )
     return {
         "sk_id": sk_id,
@@ -633,15 +635,11 @@ def _stream_overlap(decision):
     return {
         "stream_ids": _value_or_na(occurrence.get("stream_ids")),
         "stream_count": _value_or_na(occurrence.get("stream_count")),
-        "multi_stream_detected": _value_or_na(
-            overlap.get("multi_stream_detected")
-        ),
+        "multi_stream_detected": _value_or_na(overlap.get("multi_stream_detected")),
         "cube_vector_parallel_detected": _value_or_na(
             overlap.get("cube_vector_parallel_detected")
         ),
-        "cube_vector_overlap_us": _value_or_na(
-            overlap.get("cube_vector_overlap_us")
-        ),
+        "cube_vector_overlap_us": _value_or_na(overlap.get("cube_vector_overlap_us")),
         "cube_vector_overlap_ratio": _value_or_na(
             overlap.get("cube_vector_overlap_ratio")
         ),
@@ -664,9 +662,7 @@ def _markdown(value):
     text = html.escape(_display(value), quote=False)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     escaped = "".join(
-        f"\\{character}"
-        if character in MARKDOWN_SPECIAL_CHARACTERS
-        else character
+        f"\\{character}" if character in MARKDOWN_SPECIAL_CHARACTERS else character
         for character in text
     )
     return escaped.replace("\n", "<br>")
@@ -678,8 +674,7 @@ def _table(headers, rows):
         "| " + " | ".join("---" for _ in headers) + " |",
     ]
     lines.extend(
-        "| " + " | ".join(_markdown(value) for value in row) + " |"
-        for row in rows
+        "| " + " | ".join(_markdown(value) for value in row) + " |" for row in rows
     )
     return lines
 
@@ -808,8 +803,7 @@ def _validate_candidate_binding_occurrence(item, path):
         or not isinstance(child_keys, list)
         or not isinstance(child_ops, list)
         or any(
-            not isinstance(value, str) or not value
-            for value in child_keys + child_ops
+            not isinstance(value, str) or not value for value in child_keys + child_ops
         )
         or len(child_keys) != child_count
         or len(child_ops) != child_count
@@ -832,7 +826,9 @@ def _validate_candidate_binding_occurrence(item, path):
         or step_id < 0
         or not isinstance(interval, list)
         or len(interval) != 2
-        or any(isinstance(value, bool) or not isinstance(value, int) for value in interval)
+        or any(
+            isinstance(value, bool) or not isinstance(value, int) for value in interval
+        )
         or interval[0] < 0
         or interval[0] >= interval[1]
     ):
@@ -887,10 +883,7 @@ def _validate_mapping_coverage(report):
 
     distribution = coverage["child_count_distribution"]
     if not isinstance(distribution, dict) or any(
-        not isinstance(bucket, str)
-        or not bucket
-        or type(count) is not int
-        or count < 0
+        not isinstance(bucket, str) or not bucket or type(count) is not int or count < 0
         for bucket, count in distribution.items()
     ):
         raise ValueError(
@@ -929,8 +922,7 @@ def _validate_mapping_coverage(report):
         inventoried.setdefault(inventory_key, decision)
     inventory = list(inventoried.values())
     exact_count = sum(
-        item.get("mapping_confidence") == "exact_projected_trace"
-        for item in inventory
+        item.get("mapping_confidence") == "exact_projected_trace" for item in inventory
     )
     ambiguous_count = sum(
         item.get("mapping_confidence") == "ambiguous" for item in inventory
@@ -952,13 +944,11 @@ def _validate_mapping_coverage(report):
         or coverage["bound_sk_ids"] != bound_count
         or coverage["exact_projected_trace_sk_ids"] != exact_count
         or coverage["ambiguous_sk_ids"] != ambiguous_count
-        or coverage["unmapped_sk_ids"]
-        != len(inventory) - exact_count - ambiguous_count
+        or coverage["unmapped_sk_ids"] != len(inventory) - exact_count - ambiguous_count
         or coverage["child_count_distribution"] != expected_distribution
         or coverage["blocker_counts"] != expected_blockers
     ):
         raise ValueError("report.mapping_coverage does not match per_sk_decisions")
-
 
 
 def _validate_exact_projected_trace_decision(report, decision, path):
@@ -1093,8 +1083,7 @@ def _validate_exact_projected_trace_decision(report, decision, path):
     for occurrence in matching:
         evidence = occurrence["evidence_fingerprints"]
         if (
-            evidence["kernel_details"]
-            != fingerprints["baseline_kernel_details_sha256"]
+            evidence["kernel_details"] != fingerprints["baseline_kernel_details_sha256"]
             or evidence["projection_mapping"] != proof["mapping_fingerprint"]
             or evidence["profile_sk_graph_origin"]
             != fingerprints["profile_origin_graph_fingerprint"]
@@ -1147,11 +1136,8 @@ def _validate_structural_schema(report):
             or not _is_sha256(protocol.get("manifest_set_fingerprint"))
             or not isinstance(content_fingerprints, dict)
             or set(content_fingerprints) != set(structural_input_fields)
-            or any(
-                not _is_sha256(value) for value in content_fingerprints.values()
-            )
-            or len(set(content_fingerprints.values()))
-            != len(content_fingerprints)
+            or any(not _is_sha256(value) for value in content_fingerprints.values())
+            or len(set(content_fingerprints.values())) != len(content_fingerprints)
         ):
             raise ValueError(
                 "report.association_protocol must bind the complete manifest set"
@@ -1165,28 +1151,19 @@ def _validate_structural_schema(report):
         if not isinstance(mapping_blockers, list) or any(
             not isinstance(item, str) or not item for item in mapping_blockers
         ):
-            raise ValueError(
-                f"{path}.mapping_blockers is required for schema 1.2"
-            )
+            raise ValueError(f"{path}.mapping_blockers is required for schema 1.2")
         if method is not None and (
             not isinstance(method, str) or method not in MAPPING_METHODS
         ):
-            raise ValueError(
-                f"{path}.mapping_method is not a schema 1.2 enum"
-            )
+            raise ValueError(f"{path}.mapping_method is not a schema 1.2 enum")
         if confidence is not None and (
-            not isinstance(confidence, str)
-            or confidence not in MAPPING_CONFIDENCES
+            not isinstance(confidence, str) or confidence not in MAPPING_CONFIDENCES
         ):
-            raise ValueError(
-                f"{path}.mapping_confidence is not a schema 1.2 enum"
-            )
+            raise ValueError(f"{path}.mapping_confidence is not a schema 1.2 enum")
         if confidence in {"exact", "exact_projected_trace"} and mapping_blockers:
             raise ValueError(f"{path} exact mapping requires empty mapping blockers")
         if confidence == "exact" and method != "source_scope_map":
-            raise ValueError(
-                f"{path} schema 1.2 exact requires source_scope_map"
-            )
+            raise ValueError(f"{path} schema 1.2 exact requires source_scope_map")
         if confidence == "exact_projected_trace":
             if method != "kernel_projection_structural":
                 raise ValueError(
@@ -1239,22 +1216,21 @@ def _validate_report_schema(report):
         ensure_ascii=True,
         allow_nan=False,
     ).encode("utf-8")
-    expected_analysis_id = "analysis-" + hashlib.sha256(
-        canonical_identity
-    ).hexdigest()
+    expected_analysis_id = "analysis-" + hashlib.sha256(canonical_identity).hexdigest()
     if report["analysis_id"] != expected_analysis_id:
         raise ValueError("report.analysis_id does not match analyzer identity fields")
     candidate_name = report["candidate_name"]
-    if re.fullmatch(
-        rf"{re.escape(candidate_name)}-(?:AUTO|BASE|P[1-9][0-9]*|FINAL)",
-        report["round_id"],
-    ) is None:
+    if (
+        re.fullmatch(
+            rf"{re.escape(candidate_name)}-(?:AUTO|BASE|P[1-9][0-9]*|FINAL)",
+            report["round_id"],
+        )
+        is None
+    ):
         raise ValueError("report.round_id must belong to candidate_name")
     for field in REQUIRED_FINGERPRINT_FIELDS:
         value = report[field]
-        if value is not None and (
-            not isinstance(value, str) or not value.strip()
-        ):
+        if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"report.{field} must be a non-empty string or null")
     for field in (
         *REQUIRED_FINGERPRINT_FIELDS[:6],
@@ -1301,9 +1277,7 @@ def _validate_report_schema(report):
         value = inputs[field]
         if value is not None and not isinstance(value, str):
             raise ValueError(f"inputs.{field} must be a string or null")
-    declared_change_set = _optional_object(
-        report, "declared_change_set", "report"
-    )
+    declared_change_set = _optional_object(report, "declared_change_set", "report")
     pointers = (declared_change_set or {}).get("allowed_json_pointers")
     if not isinstance(pointers, list) or not all(
         isinstance(pointer, str) for pointer in pointers
@@ -1357,9 +1331,7 @@ def _validate_report_schema(report):
         bool_fields=("requires_ab_test",),
     )
     for index, item in enumerate(report.get("diagnostic_hypotheses") or []):
-        evidence = _optional_list(
-            item, "evidence", f"diagnostic_hypotheses[{index}]"
-        )
+        evidence = _optional_list(item, "evidence", f"diagnostic_hypotheses[{index}]")
         _validate_text_list(evidence, f"diagnostic_hypotheses[{index}].evidence")
 
     _validate_list_item_fields(
@@ -1385,9 +1357,7 @@ def _validate_report_schema(report):
             raise ValueError("blockers must be a list")
         for index, blocker in enumerate(blockers):
             if not isinstance(blocker, (str, dict)):
-                raise ValueError(
-                    f"blockers[{index}] must be a string or object"
-                )
+                raise ValueError(f"blockers[{index}] must be a string or object")
 
     guidance = report["next_agent_guidance_zh"]
     if not isinstance(guidance, str) or not guidance.strip():
@@ -1541,9 +1511,7 @@ def render_report(report):
             [f"- protocol: {_markdown(item)}" for item in protocol_blockers]
             or [f"- protocol: {EMPTY}"]
         )
-        exclusions = report["association_protocol"].get(
-            "model_projection_exclusions"
-        )
+        exclusions = report["association_protocol"].get("model_projection_exclusions")
         if isinstance(exclusions, dict) and exclusions:
             lines.extend(["", "## Projection 排除门禁", ""])
             exclusion_rows = []
@@ -1666,9 +1634,7 @@ def render_report(report):
     ]
     _section_or_empty(
         lines,
-        _table(
-            ["range_id", "sk_id", "classification", "action"], action_rows
-        )
+        _table(["range_id", "sk_id", "classification", "action"], action_rows)
         if action_rows
         else [],
     )

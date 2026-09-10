@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Generate original_fused_inventory_v1 from exact projection evidence."""
 
 from __future__ import annotations
@@ -120,7 +127,9 @@ def build_inventory(trace, projection, block_inventory, unit_assignments):
 
     records = []
     groups = []
-    for block_id in sorted(candidates, key=lambda value: (not value.isdecimal(), value)):
+    for block_id in sorted(
+        candidates, key=lambda value: (not value.isdecimal(), value)
+    ):
         ordered = sorted(
             candidates[block_id], key=lambda item: (item[0], int(item[1]["sk_id"]))
         )

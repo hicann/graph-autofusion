@@ -163,4 +163,3 @@ For `OP_UNSUPPORT`, wrong output, timeout, or a fault inside the custom child, v
 - every `TPipe` lifetime has the required destruction and barriers;
 - early-start calls and mask bits agree;
 - one-op, maximum-core, multi-op, and real-model tests all pass.
-

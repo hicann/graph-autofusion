@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Validate isolated SuperKernel multi-stream tuning requests and results."""
 
 import argparse
@@ -21,7 +28,9 @@ RESULT_SCHEMA = "superkernel-multistream-result-v2"
 RESULT_STATUSES = {"accepted", "no_gain", "blocked", "failed"}
 TRIAL_DECISIONS = {"accepted", "rejected", "blocked", "failed"}
 CHANGE_KINDS = {
-    "option", "scope_split", "range_exclusion",
+    "option",
+    "scope_split",
+    "range_exclusion",
     multistream_execution.REORDER_CHANGE_KIND,
     multistream_component_reorder.CHANGE_KIND,
 }
@@ -293,9 +302,7 @@ def _validate_analysis_binding(request, artifact_root, targets):
             minimum=3,
         )
         validated[target["range_id"]] = {
-            "graph_occurrence_fingerprint": target[
-                "graph_occurrence_fingerprint"
-            ],
+            "graph_occurrence_fingerprint": target["graph_occurrence_fingerprint"],
             "mapping_method": method,
             "mapping_confidence": confidence,
             "candidate_occurrence_count": candidate_count,
@@ -331,12 +338,15 @@ def validate_request(request, artifact_root):
         incumbent.get("profiling_analysis_result"),
         "request.incumbent.profiling_analysis_result",
     )
-    if _integer(
-        incumbent.get("clean_run_count"),
-        "request.incumbent.clean_run_count",
-        minimum=5,
-        maximum=5,
-    ) != 5:
+    if (
+        _integer(
+            incumbent.get("clean_run_count"),
+            "request.incumbent.clean_run_count",
+            minimum=5,
+            maximum=5,
+        )
+        != 5
+    ):
         raise ValueError("request.incumbent.clean_run_count must be exactly 5")
     if incumbent.get("stable") is not True:
         raise ValueError("request.incumbent.stable must be true")
@@ -347,8 +357,11 @@ def validate_request(request, artifact_root):
             artifact_root, artifacts.get(field), f"request.artifacts.{field}"
         )
     for field in (
-        "sk_prof", "source_scope_map", "operator_order_capture",
-        "component_source_map", "component_order_capture",
+        "sk_prof",
+        "source_scope_map",
+        "operator_order_capture",
+        "component_source_map",
+        "component_order_capture",
     ):
         if artifacts.get(field) is not None:
             _existing_artifact(
@@ -398,12 +411,11 @@ def validate_request(request, artifact_root):
     if len(normalized_kinds) != len(set(normalized_kinds)):
         raise ValueError("request.requested_change_kinds must be unique")
     ordinary_source_kinds = set(normalized_kinds) - {
-        "option", multistream_component_reorder.CHANGE_KIND
+        "option",
+        multistream_component_reorder.CHANGE_KIND,
     }
     if ordinary_source_kinds and artifacts.get("source_scope_map") is None:
-        raise ValueError(
-            "source-changing request requires artifacts.source_scope_map"
-        )
+        raise ValueError("source-changing request requires artifacts.source_scope_map")
     if multistream_execution.REORDER_CHANGE_KIND in normalized_kinds:
         capture = artifacts.get("operator_order_capture")
         if capture is None:
@@ -431,7 +443,10 @@ def validate_request(request, artifact_root):
             )
         for range_id in target_ids:
             order_target = order_targets.get(range_id)
-            if order_target is None or order_target.get("multistream_reorder_authorized") is not True:
+            if (
+                order_target is None
+                or order_target.get("multistream_reorder_authorized") is not True
+            ):
                 raise ValueError(
                     "business operator reorder requires direct multistream evidence and a "
                     f"stable dispatch inversion for every target: {range_id}"
@@ -490,7 +505,7 @@ def validate_request(request, artifact_root):
             _load_json(Path(artifact_root) / map_relative), source_root
         )
         capture = _load_json(Path(artifact_root) / capture_relative)
-        component_validation = multistream_component_reorder.validate_capture(
+        multistream_component_reorder.validate_capture(
             capture, artifact_root, source_map
         )
         if capture["request_fingerprint"] != content_fingerprint(request):
@@ -499,10 +514,15 @@ def validate_request(request, artifact_root):
             item["range_id"]: item for item in source_map["target_bindings"]
         }
         if set(map_bindings) != target_ids:
-            raise ValueError("component source map targets must exactly match request targets")
+            raise ValueError(
+                "component source map targets must exactly match request targets"
+            )
         for range_id, binding in map_bindings.items():
             analysis = analysis_targets[range_id]
-            if binding["graph_occurrence_fingerprint"] != analysis["graph_occurrence_fingerprint"]:
+            if (
+                binding["graph_occurrence_fingerprint"]
+                != analysis["graph_occurrence_fingerprint"]
+            ):
                 raise ValueError(
                     f"component source map occurrence identity differs for {range_id}"
                 )
@@ -511,9 +531,7 @@ def validate_request(request, artifact_root):
     if authorization.get("run_inference") is not True:
         raise ValueError("request.authorization.run_inference must be true")
     if authorization.get("edit_isolated_worktree") is not True:
-        raise ValueError(
-            "request.authorization.edit_isolated_worktree must be true"
-        )
+        raise ValueError("request.authorization.edit_isolated_worktree must be true")
 
     execution = _mapping(request.get("execution"), "request.execution")
     command = _list(
@@ -530,9 +548,7 @@ def validate_request(request, artifact_root):
         "request.execution.expected_ranks",
         minimum=1,
     )
-    _integer(
-        execution.get("warmup"), "request.execution.warmup", minimum=0
-    )
+    _integer(execution.get("warmup"), "request.execution.warmup", minimum=0)
 
     budget = _mapping(request.get("budget"), "request.budget")
     _integer(budget.get("max_trials"), "request.budget.max_trials", minimum=1)
@@ -559,9 +575,12 @@ def validate_request(request, artifact_root):
         "requested_change_kinds": sorted(normalized_kinds),
         "source_scope_map_available": artifacts.get("source_scope_map") is not None,
         "sk_prof_available": artifacts.get("sk_prof") is not None,
-        "operator_order_capture_available": artifacts.get("operator_order_capture") is not None,
-        "component_source_map_available": artifacts.get("component_source_map") is not None,
-        "component_order_capture_available": artifacts.get("component_order_capture") is not None,
+        "operator_order_capture_available": artifacts.get("operator_order_capture")
+        is not None,
+        "component_source_map_available": artifacts.get("component_source_map")
+        is not None,
+        "component_order_capture_available": artifacts.get("component_order_capture")
+        is not None,
         "analysis_targets": analysis_targets,
     }
 
@@ -569,18 +588,20 @@ def validate_request(request, artifact_root):
 def _validate_option_change(change, root, label):
     expected = {"json_pointer", "before", "after", "accepted_evidence"}
     if set(change) != expected:
-        raise ValueError(f"{label} option fields must be: {', '.join(sorted(expected))}")
+        raise ValueError(
+            f"{label} option fields must be: {', '.join(sorted(expected))}"
+        )
     pointer = _text(change.get("json_pointer"), f"{label}.json_pointer")
     if not pointer.startswith("/") or pointer == "/":
         raise ValueError(f"{label}.json_pointer must be a non-root RFC6901 pointer")
     if _canonical_json(change.get("before")) == _canonical_json(change.get("after")):
         raise ValueError(f"{label} before and after must differ")
-    _existing_artifact(root, change.get("accepted_evidence"), f"{label}.accepted_evidence")
+    _existing_artifact(
+        root, change.get("accepted_evidence"), f"{label}.accepted_evidence"
+    )
 
 
-def _validate_source_change(
-    change, request, analysis_target, result_root, label
-):
+def _validate_source_change(change, request, analysis_target, result_root, label):
     expected = {
         "source_scope_map",
         "source_file",
@@ -589,7 +610,9 @@ def _validate_source_change(
         "boundary_change",
     }
     if set(change) != expected:
-        raise ValueError(f"{label} source fields must be: {', '.join(sorted(expected))}")
+        raise ValueError(
+            f"{label} source fields must be: {', '.join(sorted(expected))}"
+        )
     source_map = request["artifacts"].get("source_scope_map")
     if source_map is None:
         raise ValueError(f"{label} requires request.artifacts.source_scope_map")
@@ -598,9 +621,12 @@ def _validate_source_change(
     source_map_value = _mapping(
         _load_json(Path(result_root) / source_map), f"{label}.source_scope_map"
     )
-    if source_map_value.get("protocol") != "source_scope_map_v2" or source_map_value.get(
-        "schema_version"
-    ) not in {"2.0", "2.1"}:
+    if source_map_value.get(
+        "protocol"
+    ) != "source_scope_map_v2" or source_map_value.get("schema_version") not in {
+        "2.0",
+        "2.1",
+    }:
         raise ValueError(f"{label} requires a source_scope_map_v2 schema 2.0 or 2.1")
     provenance = _mapping(
         source_map_value.get("provenance"), f"{label}.source_scope_map.provenance"
@@ -623,10 +649,13 @@ def _validate_source_change(
         raise ValueError(f"{label}.end_offset must be greater than start_offset")
     _text(change.get("boundary_change"), f"{label}.boundary_change")
     source_context = analysis_target["source_scope_mapping"]
-    if source_context.get("protocol") != "source_scope_map_v2" or source_context.get(
-        "status"
-    ) != "exact":
-        raise ValueError(f"{label} requires analyzer-validated source_scope_map_v2 exact")
+    if (
+        source_context.get("protocol") != "source_scope_map_v2"
+        or source_context.get("status") != "exact"
+    ):
+        raise ValueError(
+            f"{label} requires analyzer-validated source_scope_map_v2 exact"
+        )
     if (
         analysis_target["mapping_method"],
         analysis_target["mapping_confidence"],
@@ -640,7 +669,9 @@ def _validate_source_change(
     }
     for field, value in expected.items():
         if boundary.get(field) != value:
-            raise ValueError(f"{label}.{field} differs from analyzer-validated boundary")
+            raise ValueError(
+                f"{label}.{field} differs from analyzer-validated boundary"
+            )
     source_ranges = _list(
         source_map_value.get("source_ranges"),
         f"{label}.source_scope_map.source_ranges",
@@ -660,18 +691,29 @@ def _validate_source_change(
     )
     for field, value in expected.items():
         if map_boundary.get(field) != value:
-            raise ValueError(f"{label}.{field} differs from source_scope_map_v2 boundary")
+            raise ValueError(
+                f"{label}.{field} differs from source_scope_map_v2 boundary"
+            )
 
 
 def _validate_reorder_change(change, request, analysis_target, result_root, label):
     required = {
-        "source_scope_map", "operator_order_analysis",
-        "operator_order_analysis_fingerprint", "source_file", "range_id",
-        "start_offset", "end_offset", "before_order", "after_order", "route",
+        "source_scope_map",
+        "operator_order_analysis",
+        "operator_order_analysis_fingerprint",
+        "source_file",
+        "range_id",
+        "start_offset",
+        "end_offset",
+        "before_order",
+        "after_order",
+        "route",
         "hard_dependencies",
     }
     if set(change) != required:
-        raise ValueError(f"{label} reorder fields must be: {', '.join(sorted(required))}")
+        raise ValueError(
+            f"{label} reorder fields must be: {', '.join(sorted(required))}"
+        )
     _validate_source_change(
         {
             "source_scope_map": change["source_scope_map"],
@@ -702,31 +744,48 @@ def _validate_reorder_change(change, request, analysis_target, result_root, labe
         if not isinstance(edge, dict) or set(edge) != {"before", "after", "kind"}:
             raise ValueError(f"{edge_label} fields are invalid")
     analysis_path = _existing_artifact(
-        result_root, change["operator_order_analysis"], f"{label}.operator_order_analysis"
+        result_root,
+        change["operator_order_analysis"],
+        f"{label}.operator_order_analysis",
     )
     validation = multistream_operator_order.validate_analysis(
         Path(result_root) / analysis_path,
         result_root,
         expected_request_fingerprint=content_fingerprint(request),
     )
-    if change["operator_order_analysis_fingerprint"] != validation["analysis_fingerprint"]:
+    if (
+        change["operator_order_analysis_fingerprint"]
+        != validation["analysis_fingerprint"]
+    ):
         raise ValueError(f"{label}.operator_order_analysis_fingerprint mismatch")
     analysis = _load_json(Path(result_root) / analysis_path)
-    matches = [item for item in analysis["targets"] if item["range_id"] == change["range_id"]]
-    if len(matches) != 1 or matches[0].get("multistream_reorder_authorized") is not True:
+    matches = [
+        item for item in analysis["targets"] if item["range_id"] == change["range_id"]
+    ]
+    if (
+        len(matches) != 1
+        or matches[0].get("multistream_reorder_authorized") is not True
+    ):
         raise ValueError(f"{label} lacks direct multistream reorder authorization")
     target = matches[0]
     legal = [target["route2_order"], *target["route3_orders"]]
     if before != target["current_source_order"] or after not in legal:
-        raise ValueError(f"{label} order differs from analyzer-generated legal candidates")
+        raise ValueError(
+            f"{label} order differs from analyzer-generated legal candidates"
+        )
     if dependencies != target["hard_dependencies"]:
         raise ValueError(f"{label}.hard_dependencies differs from order analysis")
 
 
 def _validate_component_change(change, request, result_root, label):
     required = {
-        "source_file", "target_set_id", "target_range_ids", "span_ids",
-        "before_order", "after_order", "hard_dependencies",
+        "source_file",
+        "target_set_id",
+        "target_range_ids",
+        "span_ids",
+        "before_order",
+        "after_order",
+        "hard_dependencies",
     }
     if not isinstance(change, dict) or set(change) != required:
         raise ValueError(
@@ -771,9 +830,7 @@ def _validate_component_change(change, request, result_root, label):
         raise ValueError(f"{label} differs from the sealed component map/capture")
 
 
-def _validate_trial(
-    trial, request, result_root, target_ids, analysis_targets, index
-):
+def _validate_trial(trial, request, result_root, target_ids, analysis_targets, index):
     label = f"result.trials[{index}]"
     trial = _mapping(trial, label)
     trial_id = _text(trial.get("trial_id"), f"{label}.trial_id")
@@ -796,9 +853,7 @@ def _validate_trial(
             f"{label}.only_change",
         )
     elif kind == multistream_component_reorder.CHANGE_KIND:
-        _validate_component_change(
-            change, request, result_root, f"{label}.only_change"
-        )
+        _validate_component_change(change, request, result_root, f"{label}.only_change")
     else:
         _validate_source_change(
             change,
@@ -820,9 +875,7 @@ def _validate_trial(
         else multistream_execution.ACTION_SCHEMA
     )
     if action.get("schema_version") != expected_action_schema:
-        raise ValueError(
-            f"{label}.action_manifest must use {expected_action_schema}"
-        )
+        raise ValueError(f"{label}.action_manifest must use {expected_action_schema}")
     if action.get("trial_id") != trial_id or action.get("change_kind") != kind:
         raise ValueError(f"{label}.action_manifest identity mismatch")
     if action.get("single_change_verified") is not True:
@@ -842,21 +895,35 @@ def _validate_trial(
         expected_action = {
             field: change[field]
             for field in (
-                "source_file", "range_id", "start_offset", "end_offset",
-                "before_order", "after_order", "route", "hard_dependencies",
+                "source_file",
+                "range_id",
+                "start_offset",
+                "end_offset",
+                "before_order",
+                "after_order",
+                "route",
+                "hard_dependencies",
             )
         }
         if _canonical_json(action_change) != _canonical_json(expected_action):
-            raise ValueError(f"{label}.action_manifest differs from reorder only_change")
+            raise ValueError(
+                f"{label}.action_manifest differs from reorder only_change"
+            )
         if action.get("multistream_only_verified") is not True:
-            raise ValueError(f"{label}.action_manifest lacks multistream-only verification")
-        if action.get("resource_pair_policy") != multistream_operator_order.RESOURCE_PAIR_POLICY:
+            raise ValueError(
+                f"{label}.action_manifest lacks multistream-only verification"
+            )
+        if (
+            action.get("resource_pair_policy")
+            != multistream_operator_order.RESOURCE_PAIR_POLICY
+        ):
             raise ValueError(f"{label}.action_manifest resource pair policy mismatch")
         order_analysis = _load_json(
             Path(result_root) / change["operator_order_analysis"]
         )
         order_target = next(
-            item for item in order_analysis["targets"]
+            item
+            for item in order_analysis["targets"]
             if item["range_id"] == change["range_id"]
         )
         if (
@@ -869,25 +936,35 @@ def _validate_trial(
             )
         if action.get("operator_order_analysis") != change["operator_order_analysis"]:
             raise ValueError(f"{label}.action_manifest order analysis path mismatch")
-        if action.get("operator_order_analysis_fingerprint") != change[
-            "operator_order_analysis_fingerprint"
-        ]:
-            raise ValueError(f"{label}.action_manifest order analysis fingerprint mismatch")
+        if (
+            action.get("operator_order_analysis_fingerprint")
+            != change["operator_order_analysis_fingerprint"]
+        ):
+            raise ValueError(
+                f"{label}.action_manifest order analysis fingerprint mismatch"
+            )
         if action.get("source_adapter_validation") != "passed":
             raise ValueError(f"{label}.action_manifest source validation must pass")
         prerequisite = action.get("route3_prerequisite")
         if change["route"] == "route2":
             if prerequisite is not None:
-                raise ValueError(f"{label}.action_manifest route2 cannot cite route3 prerequisite")
+                raise ValueError(
+                    f"{label}.action_manifest route2 cannot cite route3 prerequisite"
+                )
         else:
             required = {
-                "route2_trial_id", "route2_dispatch_evidence",
+                "route2_trial_id",
+                "route2_dispatch_evidence",
                 "route2_dispatch_evidence_fingerprint",
-                "route2_dispatch_occurrence_count", "route2_clean3_evidence",
-                "route2_clean3_evidence_fingerprint", "route2_clean3_decision",
+                "route2_dispatch_occurrence_count",
+                "route2_clean3_evidence",
+                "route2_clean3_evidence_fingerprint",
+                "route2_clean3_decision",
             }
             if not isinstance(prerequisite, dict) or set(prerequisite) != required:
-                raise ValueError(f"{label}.action_manifest route3 prerequisite is invalid")
+                raise ValueError(
+                    f"{label}.action_manifest route3 prerequisite is invalid"
+                )
             dispatch_path = _existing_artifact(
                 result_root,
                 prerequisite["route2_dispatch_evidence"],
@@ -915,7 +992,9 @@ def _validate_trial(
                 or route2_change.get("route") != "route2"
                 or route2_change.get("after_order") != order_target["route2_order"]
             ):
-                raise ValueError(f"{label}.action_manifest route2 dispatch binding mismatch")
+                raise ValueError(
+                    f"{label}.action_manifest route2 dispatch binding mismatch"
+                )
             clean_path = _existing_artifact(
                 result_root,
                 prerequisite["route2_clean3_evidence"],
@@ -933,28 +1012,42 @@ def _validate_trial(
                 or prerequisite["route2_clean3_evidence_fingerprint"]
                 != clean["evidence_fingerprint"]
             ):
-                raise ValueError(f"{label}.action_manifest route3 lacks rejected route2 clean3")
+                raise ValueError(
+                    f"{label}.action_manifest route3 lacks rejected route2 clean3"
+                )
     elif kind == multistream_component_reorder.CHANGE_KIND:
         if _canonical_json(action_change) != _canonical_json(change):
-            raise ValueError(f"{label}.action_manifest differs from component only_change")
+            raise ValueError(
+                f"{label}.action_manifest differs from component only_change"
+            )
         if (
             action.get("component_aware_verified") is not True
             or action.get("multistream_only_verified") is not True
             or action.get("source_adapter_validation") != "passed"
         ):
-            raise ValueError(f"{label}.action_manifest lacks component-aware verification")
+            raise ValueError(
+                f"{label}.action_manifest lacks component-aware verification"
+            )
         artifacts = request["artifacts"]
         source_map = _load_json(Path(result_root) / artifacts["component_source_map"])
         capture = _load_json(Path(result_root) / artifacts["component_order_capture"])
-        if (
-            action.get("component_source_map_fingerprint") != source_map.get("mapping_fingerprint")
-            or action.get("component_capture_fingerprint") != capture.get("capture_fingerprint")
+        if action.get("component_source_map_fingerprint") != source_map.get(
+            "mapping_fingerprint"
+        ) or action.get("component_capture_fingerprint") != capture.get(
+            "capture_fingerprint"
         ):
-            raise ValueError(f"{label}.action_manifest component evidence binding mismatch")
+            raise ValueError(
+                f"{label}.action_manifest component evidence binding mismatch"
+            )
     else:
         expected_action = {
             field: change[field]
-            for field in ("source_file", "start_offset", "end_offset", "boundary_change")
+            for field in (
+                "source_file",
+                "start_offset",
+                "end_offset",
+                "boundary_change",
+            )
         }
         if _canonical_json(action_change) != _canonical_json(expected_action):
             raise ValueError(f"{label}.action_manifest differs from only_change")
@@ -986,9 +1079,7 @@ def _validate_trial(
         result_root, trial.get("execution_plan"), f"{label}.execution_plan"
     )
     plan = multistream_runner.validate_plan(
-        _mapping(
-            _load_json(Path(result_root) / plan_path), f"{label}.execution_plan"
-        )
+        _mapping(_load_json(Path(result_root) / plan_path), f"{label}.execution_plan")
     )
     if plan["trial_id"] != trial_id:
         raise ValueError(f"{label}.execution_plan trial_id mismatch")
@@ -1014,7 +1105,9 @@ def _validate_trial(
 
     events = {event["state"]: event.get("evidence") for event in state["events"]}
     if events.get("diff_verified") != action_path:
-        raise ValueError(f"{label}.execution_state diff_verified must cite action_manifest")
+        raise ValueError(
+            f"{label}.execution_state diff_verified must cite action_manifest"
+        )
     if decision == "accepted":
         for phase in plan["phases"]:
             evidence = events.get(phase["state_after"])
@@ -1059,9 +1152,7 @@ def _validate_trial(
     if kind in {
         multistream_execution.REORDER_CHANGE_KIND,
         multistream_component_reorder.CHANGE_KIND,
-    } and (
-        gates["profiling"] != "not_run" or decision == "accepted"
-    ):
+    } and (gates["profiling"] != "not_run" or decision == "accepted"):
         dispatch_path = _existing_artifact(
             result_root,
             trial.get("dispatch_order_evidence"),
@@ -1073,11 +1164,15 @@ def _validate_trial(
             else multistream_operator_order.validate_dispatch_evidence
         )
         dispatch = validator(
-            Path(result_root) / dispatch_path, result_root, trial_id=trial_id,
+            Path(result_root) / dispatch_path,
+            result_root,
+            trial_id=trial_id,
             request_fingerprint=content_fingerprint(request),
         )
         if dispatch["decision"] != "pass":
-            raise ValueError(f"{label}.dispatch_order_evidence must pass before profiling")
+            raise ValueError(
+                f"{label}.dispatch_order_evidence must pass before profiling"
+            )
     metrics = _mapping(trial.get("clean_metrics"), f"{label}.clean_metrics")
     run_count = _integer(
         metrics.get("run_count"), f"{label}.clean_metrics.run_count", minimum=0
@@ -1137,20 +1232,31 @@ def _validate_trial(
         )
         capture = trace_analysis["capture"]
         if capture.get("path") != trace_path:
-            raise ValueError(f"{label} trace_artifact differs from trace analysis capture")
-        if capture.get("overflow_detected") is not False or trace_analysis.get("blockers"):
-            raise ValueError(f"{label} validated mechanism requires complete unblocked trace")
+            raise ValueError(
+                f"{label} trace_artifact differs from trace analysis capture"
+            )
+        if capture.get("overflow_detected") is not False or trace_analysis.get(
+            "blockers"
+        ):
+            raise ValueError(
+                f"{label} validated mechanism requires complete unblocked trace"
+            )
         matches = [
-            item for item in trace_analysis["targets"]
-            if item.get("range_id") == target
+            item for item in trace_analysis["targets"] if item.get("range_id") == target
         ]
         if len(matches) != 1:
-            raise ValueError(f"{label} trace analysis must contain exactly one target binding")
+            raise ValueError(
+                f"{label} trace analysis must contain exactly one target binding"
+            )
         trace_finding = matches[0]
         if trace_finding.get("parallelism_effect") != "improved":
-            raise ValueError(f"{label} validated mechanism requires improved parallelism evidence")
+            raise ValueError(
+                f"{label} validated mechanism requires improved parallelism evidence"
+            )
         if trace_finding.get("aligned_occurrence_count") != declared_count:
-            raise ValueError(f"{label} aligned occurrence count differs from trace analysis")
+            raise ValueError(
+                f"{label} aligned occurrence count differs from trace analysis"
+            )
     elif scheduling is not None:
         raise ValueError(
             f"{label}.scheduling_evidence is allowed only for a validated mechanism"
@@ -1185,7 +1291,9 @@ def validate_result(request, result, artifact_root):
     if result.get("request_fingerprint") != request_summary["request_fingerprint"]:
         raise ValueError("result.request_fingerprint does not match request content")
     status = _enum(result.get("status"), RESULT_STATUSES, "result.status")
-    unchanged = _boolean(result.get("incumbent_unchanged"), "result.incumbent_unchanged")
+    unchanged = _boolean(
+        result.get("incumbent_unchanged"), "result.incumbent_unchanged"
+    )
 
     blockers = _list(result.get("blockers"), "result.blockers")
     for index, blocker in enumerate(blockers):
@@ -1253,13 +1361,19 @@ def validate_result(request, result, artifact_root):
             raise ValueError("accepted result requires exactly one accepted trial")
         selected = _mapping(selected, "result.selected_candidate")
         if selected.get("trial_id") != accepted_trial_ids[0]:
-            raise ValueError("selected_candidate.trial_id must identify the accepted trial")
-        _text(selected.get("candidate_name"), "result.selected_candidate.candidate_name")
+            raise ValueError(
+                "selected_candidate.trial_id must identify the accepted trial"
+            )
+        _text(
+            selected.get("candidate_name"), "result.selected_candidate.candidate_name"
+        )
         _text(
             selected.get("derived_experiment_id"),
             "result.selected_candidate.derived_experiment_id",
         )
-        _text(selected.get("source_revision"), "result.selected_candidate.source_revision")
+        _text(
+            selected.get("source_revision"), "result.selected_candidate.source_revision"
+        )
         for field in FINGERPRINT_FIELDS:
             _text(selected.get(field), f"result.selected_candidate.{field}")
         for field in (
@@ -1281,21 +1395,34 @@ def validate_result(request, result, artifact_root):
             raise ValueError(
                 "accepted selected candidate must change source or config fingerprint"
             )
-        if selected["control_fingerprint"] != request["incumbent"]["control_fingerprint"]:
-            raise ValueError("accepted selected candidate must preserve control_fingerprint")
-        if selected["workload_fingerprint"] != request["incumbent"]["workload_fingerprint"]:
-            raise ValueError("accepted selected candidate must preserve workload_fingerprint")
+        if (
+            selected["control_fingerprint"]
+            != request["incumbent"]["control_fingerprint"]
+        ):
+            raise ValueError(
+                "accepted selected candidate must preserve control_fingerprint"
+            )
+        if (
+            selected["workload_fingerprint"]
+            != request["incumbent"]["workload_fingerprint"]
+        ):
+            raise ValueError(
+                "accepted selected candidate must preserve workload_fingerprint"
+            )
         accepted_trial = next(
             trial for trial in trials if trial["trial_id"] == accepted_trial_ids[0]
         )
         accepted_trace_finding = trace_findings_by_trial[accepted_trial_ids[0]]
         if accepted_trace_finding is not None:
             matching_findings = [
-                item for item in findings
+                item
+                for item in findings
                 if item.get("range_id") == accepted_trial["target_range_id"]
             ]
             if len(matching_findings) != 1:
-                raise ValueError("validated mechanism requires one matching multistream finding")
+                raise ValueError(
+                    "validated mechanism requires one matching multistream finding"
+                )
             finding = matching_findings[0]
             if (
                 finding.get("parallelism_effect")
@@ -1331,9 +1458,10 @@ def validate_result(request, result, artifact_root):
                 raise ValueError(
                     "accepted option selected config_manifest must be its action_manifest"
                 )
-            if accepted_action.get("output_content_fingerprint") != selected[
-                "config_fingerprint"
-            ]:
+            if (
+                accepted_action.get("output_content_fingerprint")
+                != selected["config_fingerprint"]
+            ):
                 raise ValueError(
                     "accepted option action manifest config fingerprint mismatch"
                 )
@@ -1343,7 +1471,10 @@ def validate_result(request, result, artifact_root):
                 != request["incumbent"]["source_fingerprint"]
             ):
                 raise ValueError("accepted option trial must preserve source identity")
-            if selected["config_fingerprint"] == request["incumbent"]["config_fingerprint"]:
+            if (
+                selected["config_fingerprint"]
+                == request["incumbent"]["config_fingerprint"]
+            ):
                 raise ValueError("accepted option trial must change config_fingerprint")
         else:
             if (

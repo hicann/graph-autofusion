@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import sys
 import unittest
 from pathlib import Path
@@ -68,8 +75,16 @@ class CriticalPathTest(unittest.TestCase):
                 }
             ],
             "hard_dependencies": [
-                {"before_stage_id": "aux.vector", "after_stage_id": "join.consumer", "kind": "EVENT"},
-                {"before_stage_id": "main.cube", "after_stage_id": "join.consumer", "kind": "DATA"},
+                {
+                    "before_stage_id": "aux.vector",
+                    "after_stage_id": "join.consumer",
+                    "kind": "EVENT",
+                },
+                {
+                    "before_stage_id": "main.cube",
+                    "after_stage_id": "join.consumer",
+                    "kind": "DATA",
+                },
             ],
             "dependency_evidence_fingerprint": "dependency-fp-1",
         }
@@ -90,31 +105,57 @@ class CriticalPathTest(unittest.TestCase):
         }
 
     def _capture(
-        self, count=3, *, aux_start=8.0, aux_ready=0.0, event_delay=0.0,
-        downstream_start=20.0, step_latency=100.0,
-        aux_core="AI_VECTOR_CORE", aux_mix=0,
+        self,
+        count=3,
+        *,
+        aux_start=8.0,
+        aux_ready=0.0,
+        event_delay=0.0,
+        downstream_start=20.0,
+        step_latency=100.0,
+        aux_core="AI_VECTOR_CORE",
+        aux_mix=0,
     ):
         occurrences = []
         for index in range(count):
             shift = index * 100.0
-            occurrences.append({
-                "alignment_id": f"decode-{index}",
-                "join_id": "decode.join",
-                "fork_time_us": shift,
-                "step_latency_us": step_latency,
-                "timeline_complete": True,
-                "stages": [
-                    self._stage("main.cube", 1, "AI_CORE", shift, 10.0, shift),
-                    self._stage("aux.vector", 2, aux_core, shift + aux_start, 4.0, shift + aux_ready, aux_mix),
-                    self._stage("join.consumer", 1, "AI_VECTOR_CORE", shift + downstream_start, 2.0, shift + downstream_start),
-                ],
-                "events": [
-                    {
-                        "event_edge_id": "aux.ready", "event_kind": "notify", "stream_id": 2,
-                        "time_us": shift + aux_start + 4.0 + event_delay,
-                    },
-                ],
-            })
+            occurrences.append(
+                {
+                    "alignment_id": f"decode-{index}",
+                    "join_id": "decode.join",
+                    "fork_time_us": shift,
+                    "step_latency_us": step_latency,
+                    "timeline_complete": True,
+                    "stages": [
+                        self._stage("main.cube", 1, "AI_CORE", shift, 10.0, shift),
+                        self._stage(
+                            "aux.vector",
+                            2,
+                            aux_core,
+                            shift + aux_start,
+                            4.0,
+                            shift + aux_ready,
+                            aux_mix,
+                        ),
+                        self._stage(
+                            "join.consumer",
+                            1,
+                            "AI_VECTOR_CORE",
+                            shift + downstream_start,
+                            2.0,
+                            shift + downstream_start,
+                        ),
+                    ],
+                    "events": [
+                        {
+                            "event_edge_id": "aux.ready",
+                            "event_kind": "notify",
+                            "stream_id": 2,
+                            "time_us": shift + aux_start + 4.0 + event_delay,
+                        },
+                    ],
+                }
+            )
         capture = {
             "schema_version": multistream_critical_path.CAPTURE_SCHEMA,
             "capture_id": "capture-1",
@@ -158,7 +199,9 @@ class CriticalPathTest(unittest.TestCase):
         self.assertEqual(target["event_recoverable_us"]["aux.ready"]["p50"], 8.0)
 
     def test_already_hidden_noncritical_branch_does_not_authorize_action(self):
-        result = multistream_critical_path.analyze(self._capture(aux_start=0.0, aux_ready=0.0))
+        result = multistream_critical_path.analyze(
+            self._capture(aux_start=0.0, aux_ready=0.0)
+        )
         self.assertEqual(result["decision"], "no_event_or_stage_candidate")
         self.assertEqual(result["targets"][0]["reason"], "no_deferred_critical_stage")
 
@@ -167,7 +210,9 @@ class CriticalPathTest(unittest.TestCase):
             self._capture(aux_core="MIX_AIV", aux_mix=4)
         )
         self.assertEqual(result["decision"], "no_event_or_stage_candidate")
-        self.assertEqual(result["targets"][0]["reason"], "critical_stage_not_cube_vector")
+        self.assertEqual(
+            result["targets"][0]["reason"], "critical_stage_not_cube_vector"
+        )
 
     def test_fewer_than_three_occurrences_blocks_analysis(self):
         with self.assertRaisesRegex(ValueError, "at least three"):
@@ -177,7 +222,11 @@ class CriticalPathTest(unittest.TestCase):
         capture = self._capture()
         capture["trace_overflow_detected"] = True
         capture["capture_fingerprint"] = multistream_critical_path.fingerprint(
-            {key: value for key, value in capture.items() if key != "capture_fingerprint"}
+            {
+                key: value
+                for key, value in capture.items()
+                if key != "capture_fingerprint"
+            }
         )
         with self.assertRaisesRegex(ValueError, "overflow"):
             multistream_critical_path.analyze(capture)
@@ -185,11 +234,21 @@ class CriticalPathTest(unittest.TestCase):
     def test_unreliable_critical_stream_does_not_authorize_action(self):
         capture = self._capture()
         capture["logical_graph"]["stages"][1]["stream_reliable"] = False
-        capture["logical_graph"]["graph_fingerprint"] = multistream_logical_graph.fingerprint(
-            {key: value for key, value in capture["logical_graph"].items() if key != "graph_fingerprint"}
+        capture["logical_graph"]["graph_fingerprint"] = (
+            multistream_logical_graph.fingerprint(
+                {
+                    key: value
+                    for key, value in capture["logical_graph"].items()
+                    if key != "graph_fingerprint"
+                }
+            )
         )
         capture["capture_fingerprint"] = multistream_critical_path.fingerprint(
-            {key: value for key, value in capture.items() if key != "capture_fingerprint"}
+            {
+                key: value
+                for key, value in capture.items()
+                if key != "capture_fingerprint"
+            }
         )
         result = multistream_critical_path.analyze(capture)
         self.assertEqual(result["decision"], "no_event_or_stage_candidate")
@@ -207,7 +266,9 @@ class CriticalPathTest(unittest.TestCase):
     def test_predicted_e2e_bound_below_three_percent_blocks_trial(self):
         result = multistream_critical_path.analyze(self._capture(step_latency=300.0))
         self.assertEqual(result["decision"], "no_event_or_stage_candidate")
-        self.assertEqual(result["targets"][0]["reason"], "predicted_e2e_bound_below_gate")
+        self.assertEqual(
+            result["targets"][0]["reason"], "predicted_e2e_bound_below_gate"
+        )
 
 
 if __name__ == "__main__":

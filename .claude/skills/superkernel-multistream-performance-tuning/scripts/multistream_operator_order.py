@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Analyze multistream execution/dispatch order and plan dependency-safe reorders."""
 
 import argparse
@@ -25,7 +32,11 @@ HARD_DEPENDENCY_KINDS = multistream_dependency_evidence.HARD_DEPENDENCY_KINDS
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -77,7 +88,9 @@ def _number(value, label, *, positive=False):
         raise ValueError(f"{label} must be a number")
     value = float(value)
     if value < 0 or (positive and value <= 0):
-        raise ValueError(f"{label} must be {'positive' if positive else 'non-negative'}")
+        raise ValueError(
+            f"{label} must be {'positive' if positive else 'non-negative'}"
+        )
     return value
 
 
@@ -110,7 +123,9 @@ def _validate_source_files(root, records):
     for index, record in enumerate(records):
         label = f"source_files[{index}]"
         if not isinstance(record, dict) or set(record) != {
-            "path", "size_bytes", "file_fingerprint"
+            "path",
+            "size_bytes",
+            "file_fingerprint",
         }:
             raise ValueError(f"{label} fields are invalid")
         path = _rooted(root, record["path"], f"{label}.path")
@@ -119,10 +134,17 @@ def _validate_source_files(root, records):
             raise ValueError(f"duplicate source file: {relative}")
         seen.add(relative)
         actual = file_fingerprint(path)
-        if record["size_bytes"] != path.stat().st_size or record["file_fingerprint"] != actual:
+        if (
+            record["size_bytes"] != path.stat().st_size
+            or record["file_fingerprint"] != actual
+        ):
             raise ValueError(f"source file changed: {relative}")
         normalized.append(
-            {"path": relative, "size_bytes": path.stat().st_size, "file_fingerprint": actual}
+            {
+                "path": relative,
+                "size_bytes": path.stat().st_size,
+                "file_fingerprint": actual,
+            }
         )
     return sorted(normalized, key=lambda item: item["path"])
 
@@ -217,7 +239,11 @@ def _validate_statements(target, source_size, label):
     for index, item in enumerate(statements):
         item_label = f"{label}.statements[{index}]"
         required = {
-            "statement_id", "start_offset", "end_offset", "movable", "side_effect_free"
+            "statement_id",
+            "start_offset",
+            "end_offset",
+            "movable",
+            "side_effect_free",
         }
         if not isinstance(item, dict) or set(item) != required:
             raise ValueError(f"{item_label} fields are invalid")
@@ -230,7 +256,9 @@ def _validate_statements(target, source_size, label):
         if not 0 <= start < end <= source_size:
             raise ValueError(f"{item_label} byte span is invalid")
         if item["movable"] is not True or item["side_effect_free"] is not True:
-            raise ValueError(f"{item_label} must be explicitly movable and side-effect-free")
+            raise ValueError(
+                f"{item_label} must be explicitly movable and side-effect-free"
+            )
         normalized.append({**item, "statement_id": statement_id})
     normalized.sort(key=lambda item: item["start_offset"])
     for left, right in zip(normalized, normalized[1:]):
@@ -275,23 +303,35 @@ def _validate_occurrences(value, statement_ids, label):
     for index, occurrence in enumerate(value):
         occurrence_label = f"{label}[{index}]"
         if not isinstance(occurrence, dict) or set(occurrence) != {
-            "alignment_id", "sk_off_operators", "sk_on_dispatch_order"
+            "alignment_id",
+            "sk_off_operators",
+            "sk_on_dispatch_order",
         }:
             raise ValueError(f"{occurrence_label} fields are invalid")
-        alignment_id = _text(occurrence["alignment_id"], f"{occurrence_label}.alignment_id")
+        alignment_id = _text(
+            occurrence["alignment_id"], f"{occurrence_label}.alignment_id"
+        )
         if alignment_id in alignment_ids:
             raise ValueError(f"{label} has duplicate alignment_id")
         alignment_ids.add(alignment_id)
         raw_operators = occurrence["sk_off_operators"]
         if not isinstance(raw_operators, list) or len(raw_operators) < 2:
-            raise ValueError(f"{occurrence_label}.sk_off_operators requires at least two entries")
+            raise ValueError(
+                f"{occurrence_label}.sk_off_operators requires at least two entries"
+            )
         operators = []
         mapping = {}
         for op_index, operator in enumerate(raw_operators):
             op_label = f"{occurrence_label}.sk_off_operators[{op_index}]"
             required = {
-                "operator_id", "statement_id", "stream_id", "accelerator_core",
-                "block_num", "mix_block_num", "start_us", "duration_us",
+                "operator_id",
+                "statement_id",
+                "stream_id",
+                "accelerator_core",
+                "block_num",
+                "mix_block_num",
+                "start_us",
+                "duration_us",
             }
             if not isinstance(operator, dict) or set(operator) != required:
                 raise ValueError(f"{op_label} fields are invalid")
@@ -306,7 +346,9 @@ def _validate_occurrences(value, statement_ids, label):
                 operator["mix_block_num"],
             )
             start = _number(operator["start_us"], f"{op_label}.start_us")
-            duration = _number(operator["duration_us"], f"{op_label}.duration_us", positive=True)
+            duration = _number(
+                operator["duration_us"], f"{op_label}.duration_us", positive=True
+            )
             mapping[operator_id] = statement_id
             operators.append(
                 {
@@ -326,9 +368,15 @@ def _validate_occurrences(value, statement_ids, label):
         if not isinstance(dispatch, list) or len(dispatch) != len(mapping):
             raise ValueError(f"{occurrence_label}.sk_on_dispatch_order is invalid")
         if set(dispatch) != set(mapping) or len(dispatch) != len(set(dispatch)):
-            raise ValueError(f"{occurrence_label}.sk_on_dispatch_order identity differs")
+            raise ValueError(
+                f"{occurrence_label}.sk_on_dispatch_order identity differs"
+            )
         normalized.append(
-            {"alignment_id": alignment_id, "operators": operators, "dispatch_order": dispatch}
+            {
+                "alignment_id": alignment_id,
+                "operators": operators,
+                "dispatch_order": dispatch,
+            }
         )
     return normalized, operator_to_statement
 
@@ -349,9 +397,15 @@ def _analyze_target(
     target, source_records, root, label, *, request_fingerprint, max_route3_candidates
 ):
     required = {
-        "range_id", "graph_occurrence_fingerprint", "source_file",
-        "range_start_offset", "range_end_offset", "statements",
-        "hard_dependencies", "dependency_evidence", "occurrences",
+        "range_id",
+        "graph_occurrence_fingerprint",
+        "source_file",
+        "range_start_offset",
+        "range_end_offset",
+        "statements",
+        "hard_dependencies",
+        "dependency_evidence",
+        "occurrences",
     }
     if not isinstance(target, dict) or set(target) != required:
         raise ValueError(f"{label} fields are invalid")
@@ -360,7 +414,9 @@ def _analyze_target(
         target["graph_occurrence_fingerprint"], f"{label}.graph_occurrence_fingerprint"
     )
     source_file = _relative(target["source_file"], f"{label}.source_file")
-    source_record = next((item for item in source_records if item["path"] == source_file), None)
+    source_record = next(
+        (item for item in source_records if item["path"] == source_file), None
+    )
     if source_record is None:
         raise ValueError(f"{label}.source_file is not sealed in source_files")
     source_path = _rooted(root, source_file, f"{label}.source_file")
@@ -368,9 +424,16 @@ def _analyze_target(
     current_order = [item["statement_id"] for item in statements]
     statement_ids = set(current_order)
     range_start = _integer(target["range_start_offset"], f"{label}.range_start_offset")
-    range_end = _integer(target["range_end_offset"], f"{label}.range_end_offset", minimum=1)
-    if range_start != statements[0]["start_offset"] or range_end != statements[-1]["end_offset"]:
-        raise ValueError(f"{label} range must exactly cover the contiguous statement region")
+    range_end = _integer(
+        target["range_end_offset"], f"{label}.range_end_offset", minimum=1
+    )
+    if (
+        range_start != statements[0]["start_offset"]
+        or range_end != statements[-1]["end_offset"]
+    ):
+        raise ValueError(
+            f"{label} range must exactly cover the contiguous statement region"
+        )
     dependencies = _validate_dependencies(
         target["hard_dependencies"], statement_ids, f"{label}.hard_dependencies"
     )
@@ -400,9 +463,11 @@ def _analyze_target(
         # retained for overlap only; sub-microsecond Cube/Vector starts may tie or
         # appear reversed without changing the profiler's execution ordering.
         operator_ids = [item["operator_id"] for item in occurrence["operators"]]
-        dispatch_rank = {item: index for index, item in enumerate(occurrence["dispatch_order"])}
+        dispatch_rank = {
+            item: index for index, item in enumerate(occurrence["dispatch_order"])
+        }
         for left_index, left_id in enumerate(operator_ids):
-            for right_id in operator_ids[left_index + 1:]:
+            for right_id in operator_ids[left_index + 1 :]:
                 left, right = operators[left_id], operators[right_id]
                 first, second = left, right
                 overlap = min(left["end_us"], right["end_us"]) > max(
@@ -477,7 +542,9 @@ def _analyze_target(
     usable_preferences = [pair for pair in stable_preferences if pair not in conflicts]
     route2 = None
     if not blockers:
-        route2 = _topological_order(statement_ids, hard_pairs, usable_preferences, current_order)
+        route2 = _topological_order(
+            statement_ids, hard_pairs, usable_preferences, current_order
+        )
         if route2 is None:
             blockers.append("preferred_order_cycle")
         elif route2 == current_order:
@@ -488,7 +555,10 @@ def _analyze_target(
         route3 = [
             order
             for order in _bounded_orders(
-                list(statement_ids), hard_pairs | set(usable_preferences), route2, current_order,
+                list(statement_ids),
+                hard_pairs | set(usable_preferences),
+                route2,
+                current_order,
                 maximum=max_route3_candidates + 1,
             )
             if order != route2 and order != current_order
@@ -523,23 +593,40 @@ def _analyze_target(
     }
 
 
-def analyze(capture_path, artifact_root=None, *, expected_request_fingerprint=None, max_route3_candidates=5):
+def analyze(
+    capture_path,
+    artifact_root=None,
+    *,
+    expected_request_fingerprint=None,
+    max_route3_candidates=5,
+):
     capture_path = Path(capture_path).resolve()
     root = Path(artifact_root).resolve() if artifact_root else capture_path.parent
     capture = json.loads(capture_path.read_text())
     required = {
-        "schema_version", "capture_id", "request_fingerprint", "source_files",
-        "targets", "capture_fingerprint",
+        "schema_version",
+        "capture_id",
+        "request_fingerprint",
+        "source_files",
+        "targets",
+        "capture_fingerprint",
     }
     if not isinstance(capture, dict) or set(capture) != required:
-        raise ValueError(f"operator order capture must contain exactly {sorted(required)}")
+        raise ValueError(
+            f"operator order capture must contain exactly {sorted(required)}"
+        )
     if capture["schema_version"] != CAPTURE_SCHEMA:
         raise ValueError(f"operator order capture must use {CAPTURE_SCHEMA}")
-    unsigned = {key: value for key, value in capture.items() if key != "capture_fingerprint"}
+    unsigned = {
+        key: value for key, value in capture.items() if key != "capture_fingerprint"
+    }
     if capture["capture_fingerprint"] != fingerprint(unsigned):
         raise ValueError("operator order capture fingerprint mismatch")
     request_fingerprint = _text(capture["request_fingerprint"], "request_fingerprint")
-    if expected_request_fingerprint is not None and request_fingerprint != expected_request_fingerprint:
+    if (
+        expected_request_fingerprint is not None
+        and request_fingerprint != expected_request_fingerprint
+    ):
         raise ValueError("operator order capture request fingerprint mismatch")
     _text(capture["capture_id"], "capture_id")
     source_files = _validate_source_files(root, capture["source_files"])
@@ -548,7 +635,10 @@ def analyze(capture_path, artifact_root=None, *, expected_request_fingerprint=No
         raise ValueError("operator order capture targets must be non-empty")
     results = [
         _analyze_target(
-            target, source_files, root, f"targets[{index}]",
+            target,
+            source_files,
+            root,
+            f"targets[{index}]",
             request_fingerprint=request_fingerprint,
             max_route3_candidates=max_route3_candidates,
         )
@@ -584,13 +674,20 @@ def validate_analysis(path, artifact_root=None, *, expected_request_fingerprint=
     if not isinstance(value, dict) or value.get("schema_version") != ANALYSIS_SCHEMA:
         raise ValueError(f"operator order analysis must use {ANALYSIS_SCHEMA}")
     actual = value.get("analysis_fingerprint")
-    if actual != fingerprint({key: item for key, item in value.items() if key != "analysis_fingerprint"}):
+    if actual != fingerprint(
+        {key: item for key, item in value.items() if key != "analysis_fingerprint"}
+    ):
         raise ValueError("operator order analysis fingerprint mismatch")
-    if expected_request_fingerprint is not None and value.get("request_fingerprint") != expected_request_fingerprint:
+    if (
+        expected_request_fingerprint is not None
+        and value.get("request_fingerprint") != expected_request_fingerprint
+    ):
         raise ValueError("operator order analysis request fingerprint mismatch")
     capture = value.get("capture")
     if not isinstance(capture, dict) or set(capture) != {
-        "path", "file_fingerprint", "capture_fingerprint"
+        "path",
+        "file_fingerprint",
+        "capture_fingerprint",
     }:
         raise ValueError("operator order analysis capture binding is invalid")
     capture_path = _rooted(root, capture["path"], "analysis.capture.path")
@@ -604,11 +701,21 @@ def validate_analysis(path, artifact_root=None, *, expected_request_fingerprint=
     )
     if _canonical(rebuilt) != _canonical(value):
         raise ValueError("operator order analysis differs from deterministic replay")
-    return {"valid": True, "analysis_fingerprint": actual, "targets": len(value["targets"])}
+    return {
+        "valid": True,
+        "analysis_fingerprint": actual,
+        "targets": len(value["targets"]),
+    }
 
 
-def build_dispatch_evidence(action_manifest_path, dispatch_capture_path, artifact_root=None):
-    root = Path(artifact_root).resolve() if artifact_root else Path(action_manifest_path).resolve().parent
+def build_dispatch_evidence(
+    action_manifest_path, dispatch_capture_path, artifact_root=None
+):
+    root = (
+        Path(artifact_root).resolve()
+        if artifact_root
+        else Path(action_manifest_path).resolve().parent
+    )
     action_path = Path(action_manifest_path).resolve()
     capture_path = Path(dispatch_capture_path).resolve()
     action = json.loads(action_path.read_text())
@@ -618,15 +725,25 @@ def build_dispatch_evidence(action_manifest_path, dispatch_capture_path, artifac
         raise ValueError("operator reorder action lacks multistream-only verification")
     capture = json.loads(capture_path.read_text())
     required = {
-        "schema_version", "trial_id", "request_fingerprint",
-        "action_manifest_fingerprint", "range_id", "child_set_preserved",
-        "stream_identity_complete", "occurrences", "source_files",
+        "schema_version",
+        "trial_id",
+        "request_fingerprint",
+        "action_manifest_fingerprint",
+        "range_id",
+        "child_set_preserved",
+        "stream_identity_complete",
+        "occurrences",
+        "source_files",
         "capture_fingerprint",
     }
     if not isinstance(capture, dict) or set(capture) != required:
-        raise ValueError(f"post-reorder dispatch capture must contain exactly {sorted(required)}")
+        raise ValueError(
+            f"post-reorder dispatch capture must contain exactly {sorted(required)}"
+        )
     if capture["schema_version"] != DISPATCH_CAPTURE_SCHEMA:
-        raise ValueError(f"post-reorder dispatch capture must use {DISPATCH_CAPTURE_SCHEMA}")
+        raise ValueError(
+            f"post-reorder dispatch capture must use {DISPATCH_CAPTURE_SCHEMA}"
+        )
     if capture["capture_fingerprint"] != fingerprint(
         {key: item for key, item in capture.items() if key != "capture_fingerprint"}
     ):
@@ -652,7 +769,9 @@ def build_dispatch_evidence(action_manifest_path, dispatch_capture_path, artifac
     for index, occurrence in enumerate(occurrences):
         label = f"post-reorder dispatch occurrences[{index}]"
         if not isinstance(occurrence, dict) or set(occurrence) != {
-            "alignment_id", "observed_statement_order", "stream_ids"
+            "alignment_id",
+            "observed_statement_order",
+            "stream_ids",
         }:
             raise ValueError(f"{label} fields are invalid")
         alignment_id = _text(occurrence["alignment_id"], f"{label}.alignment_id")
@@ -662,21 +781,35 @@ def build_dispatch_evidence(action_manifest_path, dispatch_capture_path, artifac
         order = occurrence["observed_statement_order"]
         streams = occurrence["stream_ids"]
         if order != expected:
-            raise ValueError("post-reorder dispatch order does not match the planned order")
-        if not isinstance(streams, list) or len(streams) != len(expected) or len(set(streams)) < 2 or any(
-            isinstance(item, bool) or not isinstance(item, int) or item < 0 for item in streams
+            raise ValueError(
+                "post-reorder dispatch order does not match the planned order"
+            )
+        if (
+            not isinstance(streams, list)
+            or len(streams) != len(expected)
+            or len(set(streams)) < 2
+            or any(
+                isinstance(item, bool) or not isinstance(item, int) or item < 0
+                for item in streams
+            )
         ):
             raise ValueError(
                 "post-reorder dispatch occurrence lacks one stream identity per statement "
                 "or is not multistream"
             )
         normalized.append(
-            {"alignment_id": alignment_id, "observed_statement_order": order, "stream_ids": streams}
+            {
+                "alignment_id": alignment_id,
+                "observed_statement_order": order,
+                "stream_ids": streams,
+            }
         )
     evidence = {
         "schema_version": DISPATCH_EVIDENCE_SCHEMA,
         "trial_id": action["trial_id"],
-        "request_fingerprint": _text(capture["request_fingerprint"], "request_fingerprint"),
+        "request_fingerprint": _text(
+            capture["request_fingerprint"], "request_fingerprint"
+        ),
         "range_id": change["range_id"],
         "action_manifest": action_path.relative_to(root).as_posix(),
         "action_manifest_fingerprint": fingerprint(action),
@@ -693,11 +826,16 @@ def build_dispatch_evidence(action_manifest_path, dispatch_capture_path, artifac
     return evidence
 
 
-def validate_dispatch_evidence(path, artifact_root=None, *, trial_id=None, request_fingerprint=None):
+def validate_dispatch_evidence(
+    path, artifact_root=None, *, trial_id=None, request_fingerprint=None
+):
     path = Path(path).resolve()
     root = Path(artifact_root).resolve() if artifact_root else path.parent
     value = json.loads(path.read_text())
-    if not isinstance(value, dict) or value.get("schema_version") != DISPATCH_EVIDENCE_SCHEMA:
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != DISPATCH_EVIDENCE_SCHEMA
+    ):
         raise ValueError(f"dispatch evidence must use {DISPATCH_EVIDENCE_SCHEMA}")
     if value.get("evidence_fingerprint") != fingerprint(
         {key: item for key, item in value.items() if key != "evidence_fingerprint"}
@@ -705,17 +843,28 @@ def validate_dispatch_evidence(path, artifact_root=None, *, trial_id=None, reque
         raise ValueError("dispatch evidence fingerprint mismatch")
     if trial_id is not None and value.get("trial_id") != trial_id:
         raise ValueError("dispatch evidence trial_id mismatch")
-    if request_fingerprint is not None and value.get("request_fingerprint") != request_fingerprint:
+    if (
+        request_fingerprint is not None
+        and value.get("request_fingerprint") != request_fingerprint
+    ):
         raise ValueError("dispatch evidence request fingerprint mismatch")
-    action_path = _rooted(root, value["action_manifest"], "dispatch evidence action_manifest")
+    action_path = _rooted(
+        root, value["action_manifest"], "dispatch evidence action_manifest"
+    )
     capture_path = _rooted(root, value["dispatch_capture"], "dispatch evidence capture")
     rebuilt = build_dispatch_evidence(action_path, capture_path, root)
     if _canonical(rebuilt) != _canonical(value):
         raise ValueError("dispatch evidence differs from deterministic replay")
-    return {"valid": True, "decision": "pass", "aligned_occurrence_count": value["aligned_occurrence_count"]}
+    return {
+        "valid": True,
+        "decision": "pass",
+        "aligned_occurrence_count": value["aligned_occurrence_count"],
+    }
 
 
-def validate_route2_no_gain_evidence(path, artifact_root, *, trial_id, request_fingerprint):
+def validate_route2_no_gain_evidence(
+    path, artifact_root, *, trial_id, request_fingerprint
+):
     """Accept only a stable, non-regressing clean3 miss as route3 authorization."""
     import multistream_evidence
 
@@ -736,13 +885,20 @@ def validate_route2_no_gain_evidence(path, artifact_root, *, trial_id, request_f
     except (KeyError, TypeError) as error:
         raise ValueError("route2 clean3 evidence lacks promotion checks") from error
     required_passes = {
-        "baseline_stable", "baseline_min_runs", "candidate_min_runs",
-        "p90_no_material_regression", "stddev_no_material_regression",
+        "baseline_stable",
+        "baseline_min_runs",
+        "candidate_min_runs",
+        "p90_no_material_regression",
+        "stddev_no_material_regression",
     }
     if any(checks.get(name) is not True for name in required_passes):
-        raise ValueError("route3 cannot follow unstable or tail/variance-regressing route2")
+        raise ValueError(
+            "route3 cannot follow unstable or tail/variance-regressing route2"
+        )
     if checks.get("mean_improvement") is not False:
-        raise ValueError("route3 requires route2 to miss the clean improvement threshold")
+        raise ValueError(
+            "route3 requires route2 to miss the clean improvement threshold"
+        )
     if (
         isinstance(mean_improvement, bool)
         or not isinstance(mean_improvement, (int, float))
@@ -782,16 +938,20 @@ def main(argv=None):
     try:
         if args.command == "analyze":
             result = analyze(
-                args.capture, args.artifact_root,
+                args.capture,
+                args.artifact_root,
                 expected_request_fingerprint=args.request_fingerprint,
                 max_route3_candidates=args.max_route3_candidates,
             )
             if args.out.exists():
-                raise ValueError(f"operator order analysis output already exists: {args.out}")
+                raise ValueError(
+                    f"operator order analysis output already exists: {args.out}"
+                )
             _atomic_json(args.out, result)
         elif args.command == "validate":
             result = validate_analysis(
-                args.analysis, args.artifact_root,
+                args.analysis,
+                args.artifact_root,
                 expected_request_fingerprint=args.request_fingerprint,
             )
         elif args.command == "verify-dispatch":

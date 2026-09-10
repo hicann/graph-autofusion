@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import sys
 import tempfile
 import unittest
@@ -60,7 +67,9 @@ class AdapterAndLeaseTest(unittest.TestCase):
                         "trace_analysis": "trials/{trial_id}/trace-analysis.json",
                     }
                 ),
-                "analysis": phase({"analysis_result": "trials/{trial_id}/analysis.json"}),
+                "analysis": phase(
+                    {"analysis_result": "trials/{trial_id}/analysis.json"}
+                ),
                 "clean3": phase(
                     {
                         "baseline_root": "baseline/clean",
@@ -86,9 +95,16 @@ class AdapterAndLeaseTest(unittest.TestCase):
             [item["state_after"] for item in validated["phases"]],
             list(multistream_runner.PHASE_STATES),
         )
-        self.assertIn("multistream_evidence.py", validated["phases"][0]["validator_argv_template"][1])
-        self.assertIn("--trace-analysis", validated["phases"][1]["validator_argv_template"])
-        self.assertEqual(validated["phases"][3]["validator_exit_actions"]["10"], "reject")
+        self.assertIn(
+            "multistream_evidence.py",
+            validated["phases"][0]["validator_argv_template"][1],
+        )
+        self.assertIn(
+            "--trace-analysis", validated["phases"][1]["validator_argv_template"]
+        )
+        self.assertEqual(
+            validated["phases"][3]["validator_exit_actions"]["10"], "reject"
+        )
 
     def test_parent_wrapper_uses_same_device_lease_protocol(self):
         manifest = self.root / "parent-command.json"

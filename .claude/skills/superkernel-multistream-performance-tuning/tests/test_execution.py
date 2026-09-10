@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import json
 import sys
 import tempfile
@@ -30,8 +37,7 @@ class MultistreamExecutionTest(unittest.TestCase):
 
     def test_materialize_option_proves_one_structural_change(self):
         pointer = (
-            "/model_config/custom_params/super_kernel_optimize_options/"
-            "auto_op_parallel"
+            "/model_config/custom_params/super_kernel_optimize_options/auto_op_parallel"
         )
         manifest = multistream_execution.materialize_option(
             self.input_config,
@@ -45,13 +51,15 @@ class MultistreamExecutionTest(unittest.TestCase):
         self.assertEqual(manifest["changed_pointers"], [pointer])
         self.assertTrue(manifest["single_change_verified"])
         self.assertEqual(
-            multistream_execution._load_structured(self.output_config)["model_config"]
-            ["custom_params"]["super_kernel_optimize_options"]["auto_op_parallel"],
+            multistream_execution._load_structured(self.output_config)["model_config"][
+                "custom_params"
+            ]["super_kernel_optimize_options"]["auto_op_parallel"],
             1,
         )
         self.assertEqual(
-            multistream_execution._load_structured(self.input_config)["model_config"]
-            ["custom_params"]["super_kernel_optimize_options"]["auto_op_parallel"],
+            multistream_execution._load_structured(self.input_config)["model_config"][
+                "custom_params"
+            ]["super_kernel_optimize_options"]["auto_op_parallel"],
             0,
         )
 
@@ -194,4 +202,6 @@ class MultistreamExecutionTest(unittest.TestCase):
             ["source/layers.py", "source/model.py"],
         )
         validated = multistream_execution.validate_source_snapshot(manifest, self.root)
-        self.assertEqual(validated["source_fingerprint"], manifest["source_fingerprint"])
+        self.assertEqual(
+            validated["source_fingerprint"], manifest["source_fingerprint"]
+        )

@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import json
 import sys
 import tempfile
@@ -55,8 +62,16 @@ class CaptureProducerTest(unittest.TestCase):
         cube = content.index(b"    cube")
         end = content.index(b"    return")
         resource = {
-            "cube": {"accelerator_core": "AI_CORE", "block_num": 16, "mix_block_num": 0},
-            "vector": {"accelerator_core": "AI_VECTOR_CORE", "block_num": 32, "mix_block_num": 0},
+            "cube": {
+                "accelerator_core": "AI_CORE",
+                "block_num": 16,
+                "mix_block_num": 0,
+            },
+            "vector": {
+                "accelerator_core": "AI_VECTOR_CORE",
+                "block_num": 32,
+                "mix_block_num": 0,
+            },
         }
         fragments = {
             "schema_version": multistream_dependency_evidence.FRAGMENT_SET_SCHEMA,
@@ -68,22 +83,26 @@ class CaptureProducerTest(unittest.TestCase):
             "required_dependency_kinds": sorted(
                 multistream_dependency_evidence.HARD_DEPENDENCY_KINDS
             ),
-            "providers": [{
-                "provider_id": "source-review-1",
-                "provider_api_version": multistream_dependency_evidence.PROVIDER_API_VERSION,
-                "provider_kind": "source_review",
-                "implementation": multistream_dependency_evidence.source_file_record(
-                    self.dependency_provider, self.root
-                ),
-                "input_files": [multistream_dependency_evidence.source_file_record(
-                    self.dependency_input, self.root
-                )],
-                "covered_dependency_kinds": sorted(
-                    multistream_dependency_evidence.HARD_DEPENDENCY_KINDS
-                ),
-                "edges": [],
-                "blockers": [],
-            }],
+            "providers": [
+                {
+                    "provider_id": "source-review-1",
+                    "provider_api_version": multistream_dependency_evidence.PROVIDER_API_VERSION,
+                    "provider_kind": "source_review",
+                    "implementation": multistream_dependency_evidence.source_file_record(
+                        self.dependency_provider, self.root
+                    ),
+                    "input_files": [
+                        multistream_dependency_evidence.source_file_record(
+                            self.dependency_input, self.root
+                        )
+                    ],
+                    "covered_dependency_kinds": sorted(
+                        multistream_dependency_evidence.HARD_DEPENDENCY_KINDS
+                    ),
+                    "edges": [],
+                    "blockers": [],
+                }
+            ],
         }
         fragments["fragment_set_fingerprint"] = (
             multistream_dependency_evidence.fingerprint(fragments)
@@ -103,27 +122,58 @@ class CaptureProducerTest(unittest.TestCase):
             "source_files": [
                 multistream_capture_producer.source_file_record(self.source, self.root)
             ],
-            "targets": [{
-                "range_id": "range-1",
-                "graph_occurrence_fingerprint": "occurrence-1",
-                "source_file": "model.py",
-                "range_start_offset": vector,
-                "range_end_offset": end,
-                "statements": [
-                    {"statement_id": "vector", "start_offset": vector, "end_offset": cube, "movable": True, "side_effect_free": True},
-                    {"statement_id": "cube", "start_offset": cube, "end_offset": end, "movable": True, "side_effect_free": True},
-                ],
+            "targets": [
+                {
+                    "range_id": "range-1",
+                    "graph_occurrence_fingerprint": "occurrence-1",
+                    "source_file": "model.py",
+                    "range_start_offset": vector,
+                    "range_end_offset": end,
+                    "statements": [
+                        {
+                            "statement_id": "vector",
+                            "start_offset": vector,
+                            "end_offset": cube,
+                            "movable": True,
+                            "side_effect_free": True,
+                        },
+                        {
+                            "statement_id": "cube",
+                            "start_offset": cube,
+                            "end_offset": end,
+                            "movable": True,
+                            "side_effect_free": True,
+                        },
+                    ],
                     "hard_dependencies": [],
                     "dependency_evidence": "dependency-evidence.json",
-                "occurrences": [{
-                    "alignment_id": f"decode-{index}",
-                    "sk_off_operators": [
-                        {"operator_id": "cube-op", "statement_id": "cube", "stream_id": 1, **resource["cube"], "start_us": 0.0, "duration_us": 10.0},
-                        {"operator_id": "vector-op", "statement_id": "vector", "stream_id": 2, **resource["vector"], "start_us": 5.0, "duration_us": 8.0},
+                    "occurrences": [
+                        {
+                            "alignment_id": f"decode-{index}",
+                            "sk_off_operators": [
+                                {
+                                    "operator_id": "cube-op",
+                                    "statement_id": "cube",
+                                    "stream_id": 1,
+                                    **resource["cube"],
+                                    "start_us": 0.0,
+                                    "duration_us": 10.0,
+                                },
+                                {
+                                    "operator_id": "vector-op",
+                                    "statement_id": "vector",
+                                    "stream_id": 2,
+                                    **resource["vector"],
+                                    "start_us": 5.0,
+                                    "duration_us": 8.0,
+                                },
+                            ],
+                            "sk_on_dispatch_order": ["vector-op", "cube-op"],
+                        }
+                        for index in range(3)
                     ],
-                    "sk_on_dispatch_order": ["vector-op", "cube-op"],
-                } for index in range(3)],
-            }],
+                }
+            ],
         }
 
     def _job(self, kind, validation):
@@ -135,12 +185,16 @@ class CaptureProducerTest(unittest.TestCase):
             "artifact_root": str(self.root),
             "plugin": {
                 "path": self.plugin.name,
-                "file_fingerprint": multistream_capture_producer.file_fingerprint(self.plugin),
+                "file_fingerprint": multistream_capture_producer.file_fingerprint(
+                    self.plugin
+                ),
             },
             "inputs": {
                 "payload": {
                     "path": self.payload.name,
-                    "file_fingerprint": multistream_capture_producer.file_fingerprint(self.payload),
+                    "file_fingerprint": multistream_capture_producer.file_fingerprint(
+                        self.payload
+                    ),
                 }
             },
             "parameters": {},
@@ -159,7 +213,11 @@ class CaptureProducerTest(unittest.TestCase):
         self.assertEqual(
             capture["capture_fingerprint"],
             multistream_capture_producer.fingerprint(
-                {key: value for key, value in capture.items() if key != "capture_fingerprint"}
+                {
+                    key: value
+                    for key, value in capture.items()
+                    if key != "capture_fingerprint"
+                }
             ),
         )
         self.assertEqual(receipt["plugin"]["plugin_id"], "fixture-plugin-v1")
@@ -209,20 +267,68 @@ class CaptureProducerTest(unittest.TestCase):
             "graph_id": "graph-1",
             "request_fingerprint": "request-fp-1",
             "stages": [
-                {"stage_id": "a", "stream_role": "main", "stream_reliable": True, "source_statement_ids": ["a"], "movable": False, "blocked_effects": []},
-                {"stage_id": "b", "stream_role": "aux", "stream_reliable": True, "source_statement_ids": ["b"], "movable": True, "blocked_effects": []},
-                {"stage_id": "c", "stream_role": "main", "stream_reliable": True, "source_statement_ids": ["c"], "movable": False, "blocked_effects": []},
+                {
+                    "stage_id": "a",
+                    "stream_role": "main",
+                    "stream_reliable": True,
+                    "source_statement_ids": ["a"],
+                    "movable": False,
+                    "blocked_effects": [],
+                },
+                {
+                    "stage_id": "b",
+                    "stream_role": "aux",
+                    "stream_reliable": True,
+                    "source_statement_ids": ["b"],
+                    "movable": True,
+                    "blocked_effects": [],
+                },
+                {
+                    "stage_id": "c",
+                    "stream_role": "main",
+                    "stream_reliable": True,
+                    "source_statement_ids": ["c"],
+                    "movable": False,
+                    "blocked_effects": [],
+                },
             ],
-            "event_edges": [{"event_edge_id": "b.ready", "producer_stage_id": "b", "consumer_stage_id": "c", "reuse_scope": "per_iteration", "reuse_proven_safe": True}],
-            "forks": [{"fork_id": "fork", "source_stage_id": "a", "branch_stage_ids": ["a", "b"]}],
-            "joins": [{"join_id": "join", "fork_id": "fork", "branch_stage_ids": ["a", "b"], "downstream_stage_id": "c", "required_event_edge_ids": ["b.ready"]}],
-            "hard_dependencies": [{"before_stage_id": "a", "after_stage_id": "c", "kind": "DATA"}, {"before_stage_id": "b", "after_stage_id": "c", "kind": "EVENT"}],
+            "event_edges": [
+                {
+                    "event_edge_id": "b.ready",
+                    "producer_stage_id": "b",
+                    "consumer_stage_id": "c",
+                    "reuse_scope": "per_iteration",
+                    "reuse_proven_safe": True,
+                }
+            ],
+            "forks": [
+                {
+                    "fork_id": "fork",
+                    "source_stage_id": "a",
+                    "branch_stage_ids": ["a", "b"],
+                }
+            ],
+            "joins": [
+                {
+                    "join_id": "join",
+                    "fork_id": "fork",
+                    "branch_stage_ids": ["a", "b"],
+                    "downstream_stage_id": "c",
+                    "required_event_edge_ids": ["b.ready"],
+                }
+            ],
+            "hard_dependencies": [
+                {"before_stage_id": "a", "after_stage_id": "c", "kind": "DATA"},
+                {"before_stage_id": "b", "after_stage_id": "c", "kind": "EVENT"},
+            ],
             "dependency_evidence_fingerprint": "dependency-fp-1",
         }
         graph["graph_fingerprint"] = multistream_logical_graph.fingerprint(graph)
         job = self._job("logical_graph", {"request_fingerprint": "request-fp-1"})
         self.payload.write_text(json.dumps({"logical_graph": graph}) + "\n")
-        job["inputs"]["payload"]["file_fingerprint"] = multistream_capture_producer.file_fingerprint(self.payload)
+        job["inputs"]["payload"]["file_fingerprint"] = (
+            multistream_capture_producer.file_fingerprint(self.payload)
+        )
         path = self.root / "job.json"
         path.write_text(json.dumps(job) + "\n")
         receipt = multistream_capture_producer.produce(path, self.plugins)
@@ -241,12 +347,18 @@ class CaptureProducerTest(unittest.TestCase):
         }
         job = self._job("critical_path", {"request_fingerprint": "request-fp-1"})
         self.payload.write_text(json.dumps({"critical_path": capture}) + "\n")
-        job["inputs"]["payload"]["file_fingerprint"] = multistream_capture_producer.file_fingerprint(self.payload)
+        job["inputs"]["payload"]["file_fingerprint"] = (
+            multistream_capture_producer.file_fingerprint(self.payload)
+        )
         path = self.root / "job.json"
         path.write_text(json.dumps(job) + "\n")
         with mock.patch(
             "multistream_capture_producer.multistream_critical_path.analyze",
-            return_value={"request_fingerprint": "request-fp-1", "decision": "opportunity", "targets": [{}]},
+            return_value={
+                "request_fingerprint": "request-fp-1",
+                "decision": "opportunity",
+                "targets": [{}],
+            },
         ) as analyze:
             receipt = multistream_capture_producer.produce(path, self.plugins)
         analyze.assert_called_once()
@@ -268,7 +380,9 @@ class CaptureProducerTest(unittest.TestCase):
             "schema_version": multistream_operator_order.DISPATCH_CAPTURE_SCHEMA,
             "trial_id": "trial-1",
             "request_fingerprint": "request-fp-1",
-            "action_manifest_fingerprint": multistream_operator_order.fingerprint(action),
+            "action_manifest_fingerprint": multistream_operator_order.fingerprint(
+                action
+            ),
             "range_id": "range-1",
             "child_set_preserved": True,
             "stream_identity_complete": True,
@@ -299,14 +413,15 @@ class CaptureProducerTest(unittest.TestCase):
 
     def test_csv_helpers_require_raw_columns_and_strict_numbers(self):
         csv_path = self.root / "kernel_details.csv"
-        csv_path.write_text(
-            "Accelerator Core,Block Num,Mix Block Num\nAI_CORE,16,0\n"
-        )
+        csv_path.write_text("Accelerator Core,Block Num,Mix Block Num\nAI_CORE,16,0\n")
         rows = multistream_capture_producer.read_csv_rows(
             csv_path, ("Accelerator Core", "Block Num", "Mix Block Num")
         )
         self.assertEqual(rows[0]["Accelerator Core"], "AI_CORE")
-        self.assertEqual(multistream_capture_producer.parse_integer(rows[0]["Block Num"], "block"), 16)
+        self.assertEqual(
+            multistream_capture_producer.parse_integer(rows[0]["Block Num"], "block"),
+            16,
+        )
         with self.assertRaisesRegex(ValueError, "missing required columns"):
             multistream_capture_producer.read_csv_rows(csv_path, ("Stream Id",))
 

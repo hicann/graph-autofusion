@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Run fresh BASE and gate a derived family through ordinary ledger merge."""
 
 import argparse
@@ -19,14 +26,21 @@ PLAN_SCHEMA = "superkernel-derived-fresh-base-plan-v1"
 RECEIPT_SCHEMA = "superkernel-derived-fresh-base-receipt-v1"
 REQUIRED_GATES = {"correctness", "profiling", "analysis", "clean_performance"}
 REQUIRED_ARTIFACTS = {
-    "config_snapshot", "baseline_profile_manifest", "candidate_profile_manifest",
-    "profiling_analysis_result", "clean_performance_summary",
+    "config_snapshot",
+    "baseline_profile_manifest",
+    "candidate_profile_manifest",
+    "profiling_analysis_result",
+    "clean_performance_summary",
 }
 
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -92,9 +106,20 @@ def _identity(value, label):
 
 def freeze_plan(draft):
     required = {
-        "schema_version", "family_id", "round_id", "family_root", "lease_root",
-        "device_ids", "lease_timeout_seconds", "environment", "cwd", "command_argv",
-        "timeout_seconds", "program_files", "receipt", "command_manifest",
+        "schema_version",
+        "family_id",
+        "round_id",
+        "family_root",
+        "lease_root",
+        "device_ids",
+        "lease_timeout_seconds",
+        "environment",
+        "cwd",
+        "command_argv",
+        "timeout_seconds",
+        "program_files",
+        "receipt",
+        "command_manifest",
     }
     if not isinstance(draft, dict) or draft.get("schema_version") != PLAN_SCHEMA:
         raise ValueError(f"fresh BASE plan must use {PLAN_SCHEMA}")
@@ -117,8 +142,15 @@ def freeze_plan(draft):
     except ValueError as error:
         raise ValueError("fresh BASE cwd must be inside family_root") from error
     devices = draft["device_ids"]
-    if not isinstance(devices, list) or devices != sorted(devices) or len(devices) != len(set(devices)) or not devices or any(
-        isinstance(item, bool) or not isinstance(item, int) or item < 0 for item in devices
+    if (
+        not isinstance(devices, list)
+        or devices != sorted(devices)
+        or len(devices) != len(set(devices))
+        or not devices
+        or any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+            for item in devices
+        )
     ):
         raise ValueError("fresh BASE plan device_ids are invalid")
     for field in ("lease_timeout_seconds", "timeout_seconds"):
@@ -126,17 +158,27 @@ def freeze_plan(draft):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
             raise ValueError(f"fresh BASE plan {field} must be positive")
     environment = draft["environment"]
-    multistream_scripts = Path(__file__).resolve().parents[2] / "superkernel-multistream-performance-tuning" / "scripts"
+    multistream_scripts = (
+        Path(__file__).resolve().parents[2]
+        / "superkernel-multistream-performance-tuning"
+        / "scripts"
+    )
     sys.path.insert(0, str(multistream_scripts))
     import multistream_runner
 
     environment = multistream_runner._validate_environment(environment)
     argv = draft["command_argv"]
-    if not isinstance(argv, list) or not argv or any(not isinstance(item, str) or not item for item in argv):
+    if (
+        not isinstance(argv, list)
+        or not argv
+        or any(not isinstance(item, str) or not item for item in argv)
+    ):
         raise ValueError("fresh BASE command_argv must be a non-empty array")
     executable = Path(argv[0])
     if not executable.is_absolute() or not executable.is_file():
-        raise ValueError("fresh BASE command executable must be an existing absolute file")
+        raise ValueError(
+            "fresh BASE command executable must be an existing absolute file"
+        )
     programs = draft["program_files"]
     if not isinstance(programs, list) or not programs:
         raise ValueError("fresh BASE program_files must be non-empty")
@@ -147,7 +189,9 @@ def freeze_plan(draft):
             raise ValueError("fresh BASE program file record is invalid")
         path = Path(record["path"])
         if not path.is_absolute() or not path.is_file():
-            raise ValueError("fresh BASE program file must be an existing absolute file")
+            raise ValueError(
+                "fresh BASE program file must be an existing absolute file"
+            )
         resolved = str(path.resolve())
         if resolved in seen:
             raise ValueError("fresh BASE program_files contains duplicates")
@@ -202,8 +246,15 @@ def validate_receipt(path, family_root, lineage):
         raise ValueError("fresh BASE receipt escapes family root") from error
     receipt = _load(path)
     required = {
-        "schema_version", "derived_experiment_id", "round_id", "seed_identity",
-        "gates", "clean_run_count", "stable", "artifacts", "source_files",
+        "schema_version",
+        "derived_experiment_id",
+        "round_id",
+        "seed_identity",
+        "gates",
+        "clean_run_count",
+        "stable",
+        "artifacts",
+        "source_files",
         "receipt_fingerprint",
     }
     if not isinstance(receipt, dict) or set(receipt) != required:
@@ -214,20 +265,33 @@ def validate_receipt(path, family_root, lineage):
         {key: value for key, value in receipt.items() if key != "receipt_fingerprint"}
     ):
         raise ValueError("fresh BASE receipt fingerprint mismatch")
-    if receipt["derived_experiment_id"] != lineage["derived_experiment_id"] or receipt["round_id"] != lineage["fresh_base_round_id"]:
+    if (
+        receipt["derived_experiment_id"] != lineage["derived_experiment_id"]
+        or receipt["round_id"] != lineage["fresh_base_round_id"]
+    ):
         raise ValueError("fresh BASE receipt family/round identity mismatch")
-    if _identity(receipt["seed_identity"], "fresh BASE seed identity") != _identity(lineage["seed_identity"], "lineage seed identity"):
+    if _identity(receipt["seed_identity"], "fresh BASE seed identity") != _identity(
+        lineage["seed_identity"], "lineage seed identity"
+    ):
         raise ValueError("fresh BASE receipt seed identity mismatch")
     gates = receipt["gates"]
-    if not isinstance(gates, dict) or set(gates) != REQUIRED_GATES or any(value != "passed" for value in gates.values()):
+    if (
+        not isinstance(gates, dict)
+        or set(gates) != REQUIRED_GATES
+        or any(value != "passed" for value in gates.values())
+    ):
         raise ValueError("fresh BASE receipt requires all gates passed")
     if receipt["clean_run_count"] != 5 or receipt["stable"] is not True:
         raise ValueError("fresh BASE receipt requires exactly five stable clean runs")
     artifacts = receipt["artifacts"]
     if not isinstance(artifacts, dict) or set(artifacts) != REQUIRED_ARTIFACTS:
-        raise ValueError(f"fresh BASE artifacts must contain exactly {sorted(REQUIRED_ARTIFACTS)}")
+        raise ValueError(
+            f"fresh BASE artifacts must contain exactly {sorted(REQUIRED_ARTIFACTS)}"
+        )
     artifact_paths = {
-        name: _under(family_root, relative, f"fresh BASE artifact {name}", must_exist=True)
+        name: _under(
+            family_root, relative, f"fresh BASE artifact {name}", must_exist=True
+        )
         for name, relative in artifacts.items()
     }
     records = receipt["source_files"]
@@ -235,18 +299,33 @@ def validate_receipt(path, family_root, lineage):
         raise ValueError("fresh BASE source_files must be non-empty")
     indexed = {}
     for record in records:
-        if not isinstance(record, dict) or set(record) != {"path", "size_bytes", "file_fingerprint"}:
+        if not isinstance(record, dict) or set(record) != {
+            "path",
+            "size_bytes",
+            "file_fingerprint",
+        }:
             raise ValueError("fresh BASE source file record is invalid")
-        source = _under(family_root, record["path"], "fresh BASE source file", must_exist=True)
+        source = _under(
+            family_root, record["path"], "fresh BASE source file", must_exist=True
+        )
         relative = str(source.relative_to(family_root))
         if relative in indexed:
             raise ValueError("fresh BASE source_files contains duplicates")
-        if source.stat().st_size != record["size_bytes"] or file_fingerprint(source) != record["file_fingerprint"]:
+        if (
+            source.stat().st_size != record["size_bytes"]
+            or file_fingerprint(source) != record["file_fingerprint"]
+        ):
             raise ValueError(f"fresh BASE source file changed: {relative}")
         indexed[relative] = record
-    missing = sorted(str(path.relative_to(family_root)) for path in artifact_paths.values() if str(path.relative_to(family_root)) not in indexed)
+    missing = sorted(
+        str(path.relative_to(family_root))
+        for path in artifact_paths.values()
+        if str(path.relative_to(family_root)) not in indexed
+    )
     if missing:
-        raise ValueError("fresh BASE artifacts are not bound by source_files: " + ", ".join(missing))
+        raise ValueError(
+            "fresh BASE artifacts are not bound by source_files: " + ", ".join(missing)
+        )
     return receipt
 
 
@@ -275,7 +354,10 @@ def run_fresh_base(plan_path, registry_path):
     try:
         registry = bootstrap_derived_family._read_registry(registry_path)
         entry, family, lineage = _entry_and_lineage(registry, plan["family_id"])
-        if plan["family_root"] != str(family) or plan["round_id"] != lineage["fresh_base_round_id"]:
+        if (
+            plan["family_root"] != str(family)
+            or plan["round_id"] != lineage["fresh_base_round_id"]
+        ):
             raise ValueError("fresh BASE plan differs from registered family lineage")
         if entry["status"] == "fresh_base_completed":
             validate_receipt(family / entry["fresh_base_receipt"], family, lineage)
@@ -285,7 +367,9 @@ def run_fresh_base(plan_path, registry_path):
     finally:
         lock.close()
     receipt_path = _under(family, plan["receipt"], "fresh BASE receipt")
-    command_manifest = _under(family, plan["command_manifest"], "fresh BASE command manifest")
+    command_manifest = _under(
+        family, plan["command_manifest"], "fresh BASE command manifest"
+    )
     if receipt_path.exists():
         raise ValueError("fresh BASE receipt existed before command execution")
     command = device_lease_runner.run_command(
@@ -348,18 +432,28 @@ def complete_lifecycle(registry_path, family_id, result_path):
         result, artifact_root=result_path.parent
     )
     if not validation["valid"]:
-        raise ValueError("ordinary experiment result invalid: " + "; ".join(validation["errors"]))
+        raise ValueError(
+            "ordinary experiment result invalid: " + "; ".join(validation["errors"])
+        )
     registry_path, lock = _locked_registry(registry_path)
     try:
         registry = bootstrap_derived_family._read_registry(registry_path)
         entry, family, lineage = _entry_and_lineage(registry, family_id)
-        if entry["status"] not in {"fresh_base_completed", "ordinary_lifecycle_completed"}:
+        if entry["status"] not in {
+            "fresh_base_completed",
+            "ordinary_lifecycle_completed",
+        }:
             raise ValueError("ordinary lifecycle requires fresh_base_completed")
         try:
             relative_result = str(result_path.relative_to(family))
         except ValueError as error:
-            raise ValueError("ordinary experiment result must be inside derived family") from error
-        if result.get("experiment_id") != family_id or result.get("parent_experiment_id") != family_id:
+            raise ValueError(
+                "ordinary experiment result must be inside derived family"
+            ) from error
+        if (
+            result.get("experiment_id") != family_id
+            or result.get("parent_experiment_id") != family_id
+        ):
             raise ValueError("ordinary experiment result lineage identity mismatch")
         rounds = result.get("rounds")
         if not isinstance(rounds, list) or not any(
@@ -368,11 +462,15 @@ def complete_lifecycle(registry_path, family_id, result_path):
             and item.get("round_kind") in {"base", "automatic_aot"}
             for item in rounds
         ):
-            raise ValueError("ordinary experiment result does not contain the registered fresh BASE")
+            raise ValueError(
+                "ordinary experiment result does not contain the registered fresh BASE"
+            )
         result_fp = file_fingerprint(result_path)
         if entry["status"] == "ordinary_lifecycle_completed":
             if entry.get("ordinary_result_fingerprint") != result_fp:
-                raise ValueError("ordinary lifecycle already completed with another result")
+                raise ValueError(
+                    "ordinary lifecycle already completed with another result"
+                )
             return entry
         entry.update(
             {
@@ -397,7 +495,10 @@ def merge_ledger(registry_path, family_id, ledger_path, output_path):
     try:
         registry = bootstrap_derived_family._read_registry(registry_path)
         entry, family, _ = _entry_and_lineage(registry, family_id)
-        if entry["status"] != "ordinary_lifecycle_completed" or entry.get("ledger_merge_allowed") is not True:
+        if (
+            entry["status"] != "ordinary_lifecycle_completed"
+            or entry.get("ledger_merge_allowed") is not True
+        ):
             raise ValueError("ledger merge requires ordinary_lifecycle_completed")
         result_path = family / entry["ordinary_result"]
         if file_fingerprint(result_path) != entry["ordinary_result_fingerprint"]:

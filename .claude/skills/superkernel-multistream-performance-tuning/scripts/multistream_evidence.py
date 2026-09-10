@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Build compact, trial-bound semantic evidence for multistream phases."""
 
 import argparse
@@ -30,7 +37,11 @@ RUNTIME_ERROR = re.compile(
 
 def _canonical_json(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -117,7 +128,10 @@ def _profile_source_records(root, manifests):
                     f"profile owned file {role}",
                 )
                 expected = "sha256:" + record["sha256"]
-                if path.stat().st_size != record["size"] or file_fingerprint(path) != expected:
+                if (
+                    path.stat().st_size != record["size"]
+                    or file_fingerprint(path) != expected
+                ):
                     raise ValueError(f"profile owned file changed: {record['path']}")
                 records.append(
                     {
@@ -147,9 +161,13 @@ def _load_local_modules():
     return analyze_performance, artifact_contract, recommend_sk_strategy
 
 
-def _finish(kind, state_after, trial_id, request_fingerprint, inputs, sources, result, decision):
+def _finish(
+    kind, state_after, trial_id, request_fingerprint, inputs, sources, result, decision
+):
     if STATE_KINDS.get(state_after) != kind:
-        raise ValueError(f"state_after {state_after} does not accept evidence kind {kind}")
+        raise ValueError(
+            f"state_after {state_after} does not accept evidence kind {kind}"
+        )
     if decision not in {"pass", "reject"}:
         raise ValueError("semantic evidence decision must be pass or reject")
     evidence = {
@@ -167,10 +185,16 @@ def _finish(kind, state_after, trial_id, request_fingerprint, inputs, sources, r
     return evidence
 
 
-def build_correctness(root, state_after, trial_id, request_fingerprint, run_root, expected_ranks):
+def build_correctness(
+    root, state_after, trial_id, request_fingerprint, run_root, expected_ranks
+):
     run_root = _rooted_path(root, run_root, "run_root", directory=True)
-    exit_path = _rooted_path(root, run_root / "launcher.exit-code", "launcher.exit-code")
-    status_path = _rooted_path(root, run_root / "correctness.status", "correctness.status")
+    exit_path = _rooted_path(
+        root, run_root / "launcher.exit-code", "launcher.exit-code"
+    )
+    status_path = _rooted_path(
+        root, run_root / "correctness.status", "correctness.status"
+    )
     try:
         launcher_exit = int(exit_path.read_text().strip())
     except ValueError as error:
@@ -189,7 +213,10 @@ def build_correctness(root, state_after, trial_id, request_fingerprint, run_root
             failed.append(rank)
     pass_gate = launcher_exit == 0 and status == "passed" and not failed
     return _finish(
-        "correctness", state_after, trial_id, request_fingerprint,
+        "correctness",
+        state_after,
+        trial_id,
+        request_fingerprint,
         {"run_root": _relative(root, run_root), "expected_ranks": expected_ranks},
         _source_records(root, [exit_path, status_path, *logs]),
         {
@@ -204,8 +231,14 @@ def build_correctness(root, state_after, trial_id, request_fingerprint, run_root
 
 
 def build_profile(
-    root, state_after, trial_id, request_fingerprint, baseline_manifest,
-    candidate_manifest, trace_analysis=None, four_profile_plan=None,
+    root,
+    state_after,
+    trial_id,
+    request_fingerprint,
+    baseline_manifest,
+    candidate_manifest,
+    trace_analysis=None,
+    four_profile_plan=None,
     four_profile_summary=None,
 ):
     _, artifact_contract, _ = _load_local_modules()
@@ -216,7 +249,9 @@ def build_profile(
         "candidate_manifest": _relative(root, candidate),
     }
     if (four_profile_plan is None) != (four_profile_summary is None):
-        raise ValueError("four_profile_plan and four_profile_summary must be provided together")
+        raise ValueError(
+            "four_profile_plan and four_profile_summary must be provided together"
+        )
     if four_profile_plan is not None:
         import multistream_four_profile
 
@@ -227,7 +262,9 @@ def build_profile(
         try:
             four_profile_root.relative_to(Path(root).resolve())
         except ValueError as error:
-            raise ValueError("four-profile artifact root escapes evidence root") from error
+            raise ValueError(
+                "four-profile artifact root escapes evidence root"
+            ) from error
         validation = multistream_four_profile.validate_summary(
             summary_path, plan, four_profile_root
         )
@@ -237,15 +274,29 @@ def build_profile(
             or summary_value["request_fingerprint"] != request_fingerprint
         ):
             raise ValueError("four-profile summary identity mismatch")
-        inputs.update({
-            "four_profile_plan": _relative(root, plan_path),
-            "four_profile_summary": _relative(root, summary_path),
-        })
+        inputs.update(
+            {
+                "four_profile_plan": _relative(root, plan_path),
+                "four_profile_summary": _relative(root, summary_path),
+            }
+        )
         owned = [plan_path, summary_path]
         for role in summary_value["roles"].values():
-            owned.append(_rooted_path(root, four_profile_root / role["manifest"], "four-profile role manifest"))
+            owned.append(
+                _rooted_path(
+                    root,
+                    four_profile_root / role["manifest"],
+                    "four-profile role manifest",
+                )
+            )
             for artifact in role["artifacts"]:
-                owned.append(_rooted_path(root, four_profile_root / artifact["path"], "four-profile sealed artifact"))
+                owned.append(
+                    _rooted_path(
+                        root,
+                        four_profile_root / artifact["path"],
+                        "four-profile sealed artifact",
+                    )
+                )
         sources = _source_records(root, owned)
         summary = {"four_profile_validation": validation}
     else:
@@ -280,7 +331,10 @@ def build_profile(
     if trace_summary is not None:
         result["trace_analysis_validation"] = trace_summary
     return _finish(
-        "profile", state_after, trial_id, request_fingerprint,
+        "profile",
+        state_after,
+        trial_id,
+        request_fingerprint,
         inputs,
         sources,
         result,
@@ -292,14 +346,19 @@ def build_analysis(root, state_after, trial_id, request_fingerprint, analysis_re
     _, _, recommend = _load_local_modules()
     path = _rooted_path(root, analysis_result, "analysis_result")
     analysis = json.loads(path.read_text())
-    if set(analysis) == {"layers", "summary"} and analysis["summary"].get(
-        "schema_version"
-    ) == "superkernel-multistream-component-performance-analysis-v1":
+    if (
+        set(analysis) == {"layers", "summary"}
+        and analysis["summary"].get("schema_version")
+        == "superkernel-multistream-component-performance-analysis-v1"
+    ):
         layers = analysis["layers"]
         summary = analysis["summary"]
         if not isinstance(layers, list) or len(layers) != summary.get("target_count"):
             raise ValueError("component analysis layer count mismatch")
-        if summary.get("status") != "complete" or summary.get("occurrences_per_target", 0) < 3:
+        if (
+            summary.get("status") != "complete"
+            or summary.get("occurrences_per_target", 0) < 3
+        ):
             raise ValueError("component analysis is incomplete")
         if summary.get("target_count", 0) < 1:
             raise ValueError("component analysis target_count must be positive")
@@ -311,17 +370,24 @@ def build_analysis(root, state_after, trial_id, request_fingerprint, analysis_re
         ):
             raise ValueError("component analysis outcome counts mismatch")
         required_numbers = {
-            "incumbent_parent_total_mean_us", "candidate_parent_total_mean_us",
-            "weighted_parent_improvement_us", "weighted_parent_improvement_pct",
-            "incumbent_overlap_mean_us", "candidate_overlap_mean_us",
+            "incumbent_parent_total_mean_us",
+            "candidate_parent_total_mean_us",
+            "weighted_parent_improvement_us",
+            "weighted_parent_improvement_pct",
+            "incumbent_overlap_mean_us",
+            "candidate_overlap_mean_us",
             "candidate_same_engine_contention_mean_us",
         }
         for field in required_numbers:
-            if isinstance(summary.get(field), bool) or not isinstance(summary.get(field), (int, float)):
+            if isinstance(summary.get(field), bool) or not isinstance(
+                summary.get(field), (int, float)
+            ):
                 raise ValueError(f"component analysis {field} must be numeric")
         range_ids = []
         for index, layer in enumerate(layers):
-            if not isinstance(layer, dict) or not isinstance(layer.get("range_id"), str):
+            if not isinstance(layer, dict) or not isinstance(
+                layer.get("range_id"), str
+            ):
                 raise ValueError(f"component analysis layers[{index}] is invalid")
             range_ids.append(layer["range_id"])
         if len(range_ids) != len(set(range_ids)):
@@ -342,16 +408,23 @@ def build_analysis(root, state_after, trial_id, request_fingerprint, analysis_re
             "round_id": analysis["round_id"],
             "analysis_agent_id": analysis["analysis_agent_id"],
             "source_revision": analysis["source_revision"],
-            "analysis_content_fingerprint": analysis.get("analysis_content_fingerprint"),
+            "analysis_content_fingerprint": analysis.get(
+                "analysis_content_fingerprint"
+            ),
             "per_sk_decision_count": len(analysis["per_sk_decisions"]),
             "scope_action_count": len(analysis["scope_actions"]),
             "recommended_experiment_count": len(analysis["recommended_experiments"]),
             "blocker_count": len(analysis["blockers"]),
         }
     return _finish(
-        "analysis", state_after, trial_id, request_fingerprint,
+        "analysis",
+        state_after,
+        trial_id,
+        request_fingerprint,
         {"analysis_result": _relative(root, path)},
-        _source_records(root, [path]), result, "pass",
+        _source_records(root, [path]),
+        result,
+        "pass",
     )
 
 
@@ -359,14 +432,23 @@ def _compact_candidate(summary):
     return {
         "path": summary["path"],
         "run_count": summary["run_count"],
-        "decode": {key: value for key, value in summary["decode"].items() if key != "samples_ms"},
+        "decode": {
+            key: value
+            for key, value in summary["decode"].items()
+            if key != "samples_ms"
+        },
         "run_worst_rank_means_ms": summary["run_worst_rank_means_ms"],
         "median_run_worst_rank_mean_ms": summary["median_run_worst_rank_mean_ms"],
         "worst_rank_mean_ms": summary["worst_rank_mean_ms"],
-        **({"improvement_pct": summary["improvement_pct"]} if "improvement_pct" in summary else {}),
+        **(
+            {"improvement_pct": summary["improvement_pct"]}
+            if "improvement_pct" in summary
+            else {}
+        ),
         **(
             {"option_trial_evaluation": summary["option_trial_evaluation"]}
-            if "option_trial_evaluation" in summary else {}
+            if "option_trial_evaluation" in summary
+            else {}
         ),
     }
 
@@ -383,9 +465,19 @@ def _clean_sources(root, candidate_root):
 
 
 def build_clean(
-    root, state_after, trial_id, request_fingerprint, baseline_root, candidate_root,
-    candidate_name, expected_ranks, warmup, expected_runs, min_improvement_pct,
-    allow_p90_regression_pct, allow_stddev_regression_pct,
+    root,
+    state_after,
+    trial_id,
+    request_fingerprint,
+    baseline_root,
+    candidate_root,
+    candidate_name,
+    expected_ranks,
+    warmup,
+    expected_runs,
+    min_improvement_pct,
+    allow_p90_regression_pct,
+    allow_stddev_regression_pct,
 ):
     analyze, _, _ = _load_local_modules()
     baseline = _rooted_path(root, baseline_root, "baseline_root", directory=True)
@@ -424,7 +516,10 @@ def build_clean(
     sources = _clean_sources(root, baseline) + _clean_sources(root, candidate)
     sources.sort(key=lambda item: item["path"])
     return _finish(
-        "clean", state_after, trial_id, request_fingerprint,
+        "clean",
+        state_after,
+        trial_id,
+        request_fingerprint,
         {
             "baseline_root": _relative(root, baseline),
             "candidate_root": _relative(root, candidate),
@@ -433,29 +528,43 @@ def build_clean(
             "warmup": warmup,
             "expected_runs": expected_runs,
         },
-        sources, compact, "pass" if accepted else "reject",
+        sources,
+        compact,
+        "pass" if accepted else "reject",
     )
 
 
-def validate_evidence(path, root, *, trial_id=None, request_fingerprint=None, state_after=None):
+def validate_evidence(
+    path, root, *, trial_id=None, request_fingerprint=None, state_after=None
+):
     path = _rooted_path(root, path, "evidence")
     evidence = json.loads(path.read_text())
     required = {
-        "schema_version", "evidence_kind", "state_after", "trial_id",
-        "request_fingerprint", "inputs", "source_files", "semantic_result",
-        "decision", "evidence_fingerprint",
+        "schema_version",
+        "evidence_kind",
+        "state_after",
+        "trial_id",
+        "request_fingerprint",
+        "inputs",
+        "source_files",
+        "semantic_result",
+        "decision",
+        "evidence_fingerprint",
     }
     if not isinstance(evidence, dict) or set(evidence) != required:
         raise ValueError(f"semantic evidence must contain exactly {sorted(required)}")
     if evidence["schema_version"] != EVIDENCE_SCHEMA:
         raise ValueError(f"semantic evidence must use {EVIDENCE_SCHEMA}")
-    unsigned = {key: value for key, value in evidence.items() if key != "evidence_fingerprint"}
+    unsigned = {
+        key: value for key, value in evidence.items() if key != "evidence_fingerprint"
+    }
     if evidence["evidence_fingerprint"] != content_fingerprint(unsigned):
         raise ValueError("semantic evidence evidence_fingerprint mismatch")
     if STATE_KINDS.get(evidence["state_after"]) != evidence["evidence_kind"]:
         raise ValueError("semantic evidence kind/state mismatch")
     for field, expected in (
-        ("trial_id", trial_id), ("request_fingerprint", request_fingerprint),
+        ("trial_id", trial_id),
+        ("request_fingerprint", request_fingerprint),
         ("state_after", state_after),
     ):
         if expected is not None and evidence[field] != expected:
@@ -465,10 +574,17 @@ def validate_evidence(path, root, *, trial_id=None, request_fingerprint=None, st
     if not isinstance(evidence["source_files"], list) or not evidence["source_files"]:
         raise ValueError("semantic evidence source_files must be non-empty")
     for record in evidence["source_files"]:
-        if not isinstance(record, dict) or set(record) != {"path", "size_bytes", "file_fingerprint"}:
+        if not isinstance(record, dict) or set(record) != {
+            "path",
+            "size_bytes",
+            "file_fingerprint",
+        }:
             raise ValueError("semantic evidence source file record is invalid")
         source = _rooted_path(root, record["path"], "semantic evidence source")
-        if source.stat().st_size != record["size_bytes"] or file_fingerprint(source) != record["file_fingerprint"]:
+        if (
+            source.stat().st_size != record["size_bytes"]
+            or file_fingerprint(source) != record["file_fingerprint"]
+        ):
             raise ValueError(f"semantic evidence source changed: {record['path']}")
     return evidence
 
@@ -523,31 +639,54 @@ def main(argv=None):
     try:
         if args.command == "correctness":
             evidence = build_correctness(
-                args.artifact_root, args.state_after, args.trial_id,
-                args.request_fingerprint, args.run_root, args.expected_ranks,
+                args.artifact_root,
+                args.state_after,
+                args.trial_id,
+                args.request_fingerprint,
+                args.run_root,
+                args.expected_ranks,
             )
         elif args.command == "profile":
             evidence = build_profile(
-                args.artifact_root, args.state_after, args.trial_id,
-                args.request_fingerprint, args.baseline_manifest, args.candidate_manifest,
-                args.trace_analysis, args.four_profile_plan, args.four_profile_summary,
+                args.artifact_root,
+                args.state_after,
+                args.trial_id,
+                args.request_fingerprint,
+                args.baseline_manifest,
+                args.candidate_manifest,
+                args.trace_analysis,
+                args.four_profile_plan,
+                args.four_profile_summary,
             )
         elif args.command == "analysis":
             evidence = build_analysis(
-                args.artifact_root, args.state_after, args.trial_id,
-                args.request_fingerprint, args.analysis_result,
+                args.artifact_root,
+                args.state_after,
+                args.trial_id,
+                args.request_fingerprint,
+                args.analysis_result,
             )
         elif args.command == "clean":
             evidence = build_clean(
-                args.artifact_root, args.state_after, args.trial_id,
-                args.request_fingerprint, args.baseline_root, args.candidate_root,
-                args.candidate_name, args.expected_ranks, args.warmup,
-                args.expected_runs, args.min_improvement_pct,
-                args.allow_p90_regression_pct, args.allow_stddev_regression_pct,
+                args.artifact_root,
+                args.state_after,
+                args.trial_id,
+                args.request_fingerprint,
+                args.baseline_root,
+                args.candidate_root,
+                args.candidate_name,
+                args.expected_ranks,
+                args.warmup,
+                args.expected_runs,
+                args.min_improvement_pct,
+                args.allow_p90_regression_pct,
+                args.allow_stddev_regression_pct,
             )
         else:
             evidence = validate_evidence(
-                args.evidence, args.artifact_root, trial_id=args.trial_id,
+                args.evidence,
+                args.artifact_root,
+                trial_id=args.trial_id,
                 request_fingerprint=args.request_fingerprint,
                 state_after=args.state_after,
             )

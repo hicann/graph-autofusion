@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Persist and validate provider-neutral SuperKernel Auto Tune sessions."""
 
 from __future__ import annotations
@@ -76,8 +83,21 @@ PHASE_STATUSES = {
     "s0_baseline": {"succeeded", "blocked", "failed", "invalid"},
     "stage_a_scope_selection": {"accepted", "no_gain", "blocked", "failed", "invalid"},
     "stage_o_option_tuning": {"accepted", "no_gain", "blocked", "failed", "invalid"},
-    "base_profile_source_mapping": {"succeeded", "no_gain", "blocked", "failed", "invalid"},
-    "final_e2e_report": {"accepted", "no_gain", "blocked", "failed", "invalid", "not_run"},
+    "base_profile_source_mapping": {
+        "succeeded",
+        "no_gain",
+        "blocked",
+        "failed",
+        "invalid",
+    },
+    "final_e2e_report": {
+        "accepted",
+        "no_gain",
+        "blocked",
+        "failed",
+        "invalid",
+        "not_run",
+    },
 }
 
 
@@ -145,12 +165,18 @@ def _load_ledger(artifact_root, relative_path):
             raise ValueError("ledger experiment blockers must be a list")
     _validate_final_e2e(ledger.get("final_e2e"))
     if "report_summary" in ledger:
-        _validate_report_summary(ledger["report_summary"], ledger["final_e2e"], artifact_root)
+        _validate_report_summary(
+            ledger["report_summary"], ledger["final_e2e"], artifact_root
+        )
     return relative_path, ledger
 
 
 def _finite_number(value, name, *, positive=False):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
         raise ValueError(f"final_e2e {name} must be a finite number")
     if positive and value <= 0:
         raise ValueError(f"final_e2e {name} must be positive")
@@ -163,7 +189,9 @@ def _validate_metric_set(value, name):
     _finite_number(value.get("median_ms"), f"{name}.median_ms", positive=True)
     for optional in ("p90_ms", "stddev_ms"):
         if optional in value:
-            _finite_number(value[optional], f"{name}.{optional}", positive=optional == "p90_ms")
+            _finite_number(
+                value[optional], f"{name}.{optional}", positive=optional == "p90_ms"
+            )
     for count_key in ("sample_count", "run_count"):
         if count_key in value and (
             isinstance(value[count_key], bool)
@@ -196,9 +224,13 @@ def _validate_final_e2e(value):
         candidate = float(value["candidate"]["median_ms"])
         calculated = (baseline - candidate) / baseline * 100.0
         if not math.isclose(declared, calculated, rel_tol=1e-6, abs_tol=1e-6):
-            raise ValueError("final_e2e improvement_pct does not match clean E2E medians")
+            raise ValueError(
+                "final_e2e improvement_pct does not match clean E2E medians"
+            )
         if classification == "beneficial" and declared <= 0:
-            raise ValueError("final_e2e beneficial classification requires positive improvement")
+            raise ValueError(
+                "final_e2e beneficial classification requires positive improvement"
+            )
     return value
 
 
@@ -210,7 +242,9 @@ def _atomic_json(path, value):
     )
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+            handle.write(
+                json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+            )
             handle.write("\n")
         os.replace(temporary, path)
     except BaseException:
@@ -263,7 +297,9 @@ def _canonical_steps(optional_mode, *, entrypoint="full", multistream_accepted=F
         ]
     elif entrypoint == "source-range-from-smap":
         if optional_mode != "source-range":
-            raise ValueError("source-range-from-smap requires optional_mode source-range")
+            raise ValueError(
+                "source-range-from-smap requires optional_mode source-range"
+            )
         return [
             _step(
                 "optional-source-range",
@@ -330,7 +366,11 @@ def _initial_steps(optional_mode):
 
 def _validate_canonical_schedule(session):
     multistream = next(
-        (step for step in session["steps"] if step.get("step_id") == "optional-multistream"),
+        (
+            step
+            for step in session["steps"]
+            if step.get("step_id") == "optional-multistream"
+        ),
         None,
     )
     multistream_accepted = bool(
@@ -452,13 +492,17 @@ def _validate_import_analysis(path):
 
 def _validate_import_ledger(path, analysis):
     ledger = _read_object(path, "experiment ledger")
-    if ledger.get("schema_version") != 2 or not isinstance(ledger.get("experiments"), dict):
+    if ledger.get("schema_version") != 2 or not isinstance(
+        ledger.get("experiments"), dict
+    ):
         raise ValueError("experiment ledger must be a schema 2 ledger")
     experiment = ledger["experiments"].get(analysis["experiment_id"])
     if not isinstance(experiment, dict):
         raise ValueError("experiment ledger does not contain the analyzed experiment")
     if experiment.get("source_revision") != analysis["source_revision"]:
-        raise ValueError("experiment ledger source revision differs from profiling analysis")
+        raise ValueError(
+            "experiment ledger source revision differs from profiling analysis"
+        )
     rounds = experiment.get("rounds")
     if not isinstance(rounds, list) or not any(
         isinstance(item, dict) and item.get("round_id") == analysis["round_id"]
@@ -481,7 +525,9 @@ def _validate_import_source_map(path, analysis):
     if source_map.get("protocol") != "source_scope_map_v2" or source_map.get(
         "schema_version"
     ) not in {"2.0", "2.1"}:
-        raise ValueError("source scope map must use source_scope_map_v2 schema 2.0 or 2.1")
+        raise ValueError(
+            "source scope map must use source_scope_map_v2 schema 2.0 or 2.1"
+        )
     provenance = source_map.get("provenance")
     if not isinstance(provenance, dict):
         raise ValueError("source scope map provenance must be an object")
@@ -495,7 +541,9 @@ def _validate_import_source_map(path, analysis):
         "source_revision", provenance.get("stable_marker_revision")
     )
     if source_revision != analysis["source_revision"]:
-        raise ValueError("source scope map source revision differs from profiling analysis")
+        raise ValueError(
+            "source scope map source revision differs from profiling analysis"
+        )
     ranges = source_map.get("source_ranges")
     if not isinstance(ranges, list) or not any(
         isinstance(item, dict) and item.get("relation") == "exact_cover"
@@ -522,7 +570,9 @@ def _latest_base_handoff(parent, parent_root):
         and later.get("outcome_status") == "accepted"
         for later in parent["steps"][index + 1 :]
     ):
-        raise ValueError("accepted multistream requires a later derived BASE/SMAP handoff")
+        raise ValueError(
+            "accepted multistream requires a later derived BASE/SMAP handoff"
+        )
     result_path = parent_root / step["result_path"]
     result = _read_object(result_path, "BASE/SMAP phase result")
     if _digest(result) != step["result_sha256"]:
@@ -548,14 +598,20 @@ def derive_session(
 ):
     """Create a new optional-experiment session from immutable accepted evidence."""
     if not approve_imported_evidence:
-        raise ValueError("deriving a session requires explicit approval of imported evidence")
+        raise ValueError(
+            "deriving a session requires explicit approval of imported evidence"
+        )
     if optional_mode not in {"multistream", "source-range", "both"}:
-        raise ValueError("derived optional_mode must be multistream, source-range, or both")
+        raise ValueError(
+            "derived optional_mode must be multistream, source-range, or both"
+        )
     _require_string(session_id, "session_id")
     parent_session_path = Path(parent_session_path).resolve()
     validation = verify_session(parent_session_path)
     if not validation["valid"]:
-        raise ValueError("parent session is invalid: " + "; ".join(validation["errors"]))
+        raise ValueError(
+            "parent session is invalid: " + "; ".join(validation["errors"])
+        )
     parent = load_session(parent_session_path)
     if parent["status"] != "completed":
         raise ValueError("parent session must be completed")
@@ -565,11 +621,15 @@ def derive_session(
     artifact_root = Path(artifact_root).resolve()
     session_path = Path(session_path).resolve()
     if _roots_overlap(parent_root, artifact_root):
-        raise ValueError("derived artifact root must be disjoint from the parent artifact root")
+        raise ValueError(
+            "derived artifact root must be disjoint from the parent artifact root"
+        )
     try:
         session_path.relative_to(artifact_root)
     except ValueError as error:
-        raise ValueError("derived session path must be inside its artifact root") from error
+        raise ValueError(
+            "derived session path must be inside its artifact root"
+        ) from error
     if session_path.exists():
         raise ValueError(f"session already exists: {session_path}")
 
@@ -606,7 +666,9 @@ def derive_session(
         _validate_import_source_map(resolved["source_scope_map"], analysis)
 
     entrypoint = (
-        "source-range-from-smap" if optional_mode == "source-range" else "optional-from-base"
+        "source-range-from-smap"
+        if optional_mode == "source-range"
+        else "optional-from-base"
     )
     manifest = {
         "schema_version": EVIDENCE_IMPORT_SCHEMA,
@@ -632,13 +694,20 @@ def derive_session(
         "artifacts": descriptors,
         "identity": {
             key: analysis[key]
-            for key in ("experiment_id", "round_id", "candidate_name", "source_revision")
+            for key in (
+                "experiment_id",
+                "round_id",
+                "candidate_name",
+                "source_revision",
+            )
         },
     }
     manifest_relative = "imports/evidence-import.json"
     manifest_path = artifact_root / manifest_relative
     if session_path == manifest_path:
-        raise ValueError("derived session path must differ from the evidence import path")
+        raise ValueError(
+            "derived session path must differ from the evidence import path"
+        )
     if manifest_path.exists():
         raise ValueError(f"evidence import already exists: {manifest_path}")
     session = {
@@ -682,7 +751,9 @@ def resume_session(session_path):
     session = load_session(session_path)
     validation = verify_session(session_path)
     if not validation["valid"]:
-        raise ValueError("session cannot be resumed: " + "; ".join(validation["errors"]))
+        raise ValueError(
+            "session cannot be resumed: " + "; ".join(validation["errors"])
+        )
     return {
         "session_id": session["session_id"],
         "status": session["status"],
@@ -693,7 +764,9 @@ def resume_session(session_path):
 def _validate_evidence_import(session):
     reference = session.get("evidence_import")
     if not isinstance(reference, dict) or set(reference) != {"path", "sha256"}:
-        raise ValueError("derived session requires one canonical evidence_import reference")
+        raise ValueError(
+            "derived session requires one canonical evidence_import reference"
+        )
     relative = _relative_artifact(reference.get("path"), "evidence_import path")
     declared_digest = _require_string(reference.get("sha256"), "evidence_import sha256")
     root = Path(session["artifact_root"])
@@ -713,11 +786,15 @@ def _validate_evidence_import(session):
     parent = manifest.get("parent")
     if not isinstance(parent, dict):
         raise ValueError("evidence import parent must be an object")
-    parent_root = Path(_require_string(parent.get("artifact_root"), "parent artifact_root"))
+    parent_root = Path(
+        _require_string(parent.get("artifact_root"), "parent artifact_root")
+    )
     if not parent_root.is_absolute():
         raise ValueError("parent artifact_root must be absolute")
     parent_session, _ = _path_within(
-        parent_root, parent_root / _relative_artifact(parent.get("session_path"), "parent session_path"),
+        parent_root,
+        parent_root
+        / _relative_artifact(parent.get("session_path"), "parent session_path"),
         "parent session",
     )
     if _file_sha256(parent_session) != parent.get("session_sha256"):
@@ -836,7 +913,10 @@ def _validate_session(session, *, validate_import=True):
         if step.get("phase") not in PHASES:
             raise ValueError("session step phase is invalid")
         expected_agent, expected_skill = PHASES[step["phase"]]
-        if step.get("agent_id") != expected_agent or step.get("skill") != expected_skill:
+        if (
+            step.get("agent_id") != expected_agent
+            or step.get("skill") != expected_skill
+        ):
             raise ValueError("session step agent or skill is invalid")
         if step.get("state") not in {"pending", "sealed"}:
             raise ValueError("session step state is invalid")
@@ -850,11 +930,19 @@ def _validate_session(session, *, validate_import=True):
             if step.get("outcome_status") not in RESULT_STATUSES:
                 raise ValueError("sealed step outcome_status is invalid")
             if "dispatch_receipt_path" in step:
-                _relative_artifact(step["dispatch_receipt_path"], "dispatch_receipt_path")
-                _require_string(step.get("dispatch_receipt_sha256"), "dispatch_receipt_sha256")
-    if session["status"] == "completed" and next(
-        (step for step in session["steps"] if step["state"] == "pending"), None
-    ) is not None:
+                _relative_artifact(
+                    step["dispatch_receipt_path"], "dispatch_receipt_path"
+                )
+                _require_string(
+                    step.get("dispatch_receipt_sha256"), "dispatch_receipt_sha256"
+                )
+    if (
+        session["status"] == "completed"
+        and next(
+            (step for step in session["steps"] if step["state"] == "pending"), None
+        )
+        is not None
+    ):
         raise ValueError("completed session has pending steps")
     _validate_canonical_schedule(session)
 
@@ -892,7 +980,9 @@ def _validate_result(result, expected, session, *, allow_system_generated=False)
         raise ValueError("phase result status is invalid")
     system_generated = result.get("system_generated_by") == "superkernel-auto-tune"
     if system_generated and not allow_system_generated:
-        raise ValueError("system_generated_by is reserved for controller-created handoffs")
+        raise ValueError(
+            "system_generated_by is reserved for controller-created handoffs"
+        )
     if not system_generated and result["status"] not in _allowed_statuses(expected):
         raise ValueError(f"phase result status is invalid for {expected['phase']}")
     _require_string(result["summary_zh"], "summary_zh")
@@ -917,9 +1007,15 @@ def _validate_result(result, expected, session, *, allow_system_generated=False)
         if branch == "none" and result["status"] != "not_requested":
             raise ValueError("optional mode none requires a not_requested handoff")
     if expected["phase"] == "final_e2e_report":
-        missing_details = [key for key in FINAL_DETAIL_KEYS if not _requireable(result["details_zh"].get(key))]
+        missing_details = [
+            key
+            for key in FINAL_DETAIL_KEYS
+            if not _requireable(result["details_zh"].get(key))
+        ]
         if missing_details:
-            raise ValueError(f"final details_zh is missing: {', '.join(missing_details)}")
+            raise ValueError(
+                f"final details_zh is missing: {', '.join(missing_details)}"
+            )
         if "ledger_path" not in result:
             raise ValueError("final phase result requires ledger_path")
         _, ledger = _load_ledger(session["artifact_root"], result["ledger_path"])
@@ -959,7 +1055,9 @@ def _phase_report(result, expected):
     ]
     if result["blockers"]:
         lines.extend(["", "## 阻塞项", ""])
-        lines.extend(f"- {json.dumps(item, ensure_ascii=False)}" for item in result["blockers"])
+        lines.extend(
+            f"- {json.dumps(item, ensure_ascii=False)}" for item in result["blockers"]
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -1014,7 +1112,9 @@ def _seal_not_run_steps(session, reason_zh):
         result_path = phase_root / "phase-result.json"
         report_path = phase_root / "PHASE_REPORT.md"
         if result_path.exists() or report_path.exists():
-            raise ValueError(f"cannot short-circuit an existing phase scene: {step['step_id']}")
+            raise ValueError(
+                f"cannot short-circuit an existing phase scene: {step['step_id']}"
+            )
         _atomic_json(result_path, result)
         _atomic_text(report_path, _phase_report(result, step))
         step["state"] = "sealed"
@@ -1086,7 +1186,9 @@ def validate_dispatch_task(task, session_path):
         if task.get(key) != current.get(key):
             raise ValueError("stale dispatch task does not match the current session")
     if task.get("consumed_handoffs") != current["consumed_handoffs"]:
-        raise ValueError("stale dispatch task handoffs do not match the current session")
+        raise ValueError(
+            "stale dispatch task handoffs do not match the current session"
+        )
     return current
 
 
@@ -1162,7 +1264,9 @@ def run_agent_step(session_path, runner_argv, *, timeout_seconds=3600):
         try:
             result = json.loads(result_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
-            raise ValueError(f"Agent host did not produce a readable phase result: {error}") from error
+            raise ValueError(
+                f"Agent host did not produce a readable phase result: {error}"
+            ) from error
         current = load_session(session_path)
         _validate_result(result, next_step(current), current)
         sealed = seal_handoff(session_path, result)
@@ -1175,7 +1279,9 @@ def run_agent_step(session_path, runner_argv, *, timeout_seconds=3600):
         )
         _atomic_json(receipt_path, receipt)
         sealed = load_session(session_path)
-        sealed_step = next(item for item in sealed["steps"] if item["step_id"] == step["step_id"])
+        sealed_step = next(
+            item for item in sealed["steps"] if item["step_id"] == step["step_id"]
+        )
         sealed_step["dispatch_receipt_path"] = str(
             receipt_path.relative_to(task["artifact_root"])
         )
@@ -1183,8 +1289,16 @@ def run_agent_step(session_path, runner_argv, *, timeout_seconds=3600):
         _atomic_json(session_path, sealed)
         return load_session(session_path)
     except subprocess.TimeoutExpired as error:
-        stdout = error.stdout.decode() if isinstance(error.stdout, bytes) else (error.stdout or "")
-        stderr = error.stderr.decode() if isinstance(error.stderr, bytes) else (error.stderr or "")
+        stdout = (
+            error.stdout.decode()
+            if isinstance(error.stdout, bytes)
+            else (error.stdout or "")
+        )
+        stderr = (
+            error.stderr.decode()
+            if isinstance(error.stderr, bytes)
+            else (error.stderr or "")
+        )
         _atomic_text(stdout_path, stdout)
         _atomic_text(stderr_path, stderr)
         receipt.update(
@@ -1268,19 +1382,32 @@ def verify_session(session_path):
             result_path = root / step["result_path"]
             result = json.loads(result_path.read_text(encoding="utf-8"))
             if _digest(result) != step["result_sha256"]:
-                raise ValueError(f"sealed phase result digest mismatch: {step['step_id']}")
+                raise ValueError(
+                    f"sealed phase result digest mismatch: {step['step_id']}"
+                )
             _validate_result(result, step, session, allow_system_generated=True)
             if result["status"] != step["outcome_status"]:
-                raise ValueError(f"sealed phase result outcome mismatch: {step['step_id']}")
+                raise ValueError(
+                    f"sealed phase result outcome mismatch: {step['step_id']}"
+                )
             if not (result_path.parent / "PHASE_REPORT.md").is_file():
                 raise ValueError(f"missing phase report: {step['step_id']}")
             if "dispatch_receipt_path" in step:
                 receipt_path = root / step["dispatch_receipt_path"]
                 if _file_sha256(receipt_path) != step["dispatch_receipt_sha256"]:
-                    raise ValueError(f"dispatch receipt digest mismatch: {step['step_id']}")
-        if session["status"] == "completed" and not (root / "FINAL_E2E_REPORT.md").is_file():
+                    raise ValueError(
+                        f"dispatch receipt digest mismatch: {step['step_id']}"
+                    )
+        if (
+            session["status"] == "completed"
+            and not (root / "FINAL_E2E_REPORT.md").is_file()
+        ):
             raise ValueError("completed session is missing FINAL_E2E_REPORT.md")
-        return {"valid": True, "session_id": session["session_id"], "status": session["status"]}
+        return {
+            "valid": True,
+            "session_id": session["session_id"],
+            "status": session["status"],
+        }
     except (OSError, ValueError, json.JSONDecodeError) as error:
         return {"valid": False, "errors": [str(error)]}
 
@@ -1314,16 +1441,26 @@ def _summary_evidence(value, root, name, *, required=False):
         relative = _relative_artifact(artifact, f"report_summary {name} evidence")
         path = (Path(root) / relative).resolve()
         if not path.is_relative_to(Path(root).resolve()) or not path.is_file():
-            raise ValueError(f"report_summary {name} evidence missing or outside artifact root: {artifact}")
+            raise ValueError(
+                f"report_summary {name} evidence missing or outside artifact root: {artifact}"
+            )
 
 
 def _summary_number(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
         raise ValueError(f"report_summary {name} must be positive and finite")
 
 
 def _validate_report_summary(summary, final_e2e, root):
-    if not isinstance(summary, dict) or summary.get("schema_version") != "superkernel-report-summary-v1":
+    if (
+        not isinstance(summary, dict)
+        or summary.get("schema_version") != "superkernel-report-summary-v1"
+    ):
         raise ValueError("report_summary schema_version is invalid")
     baseline = summary.get("baseline")
     stages = summary.get("stages")
@@ -1339,36 +1476,63 @@ def _validate_report_summary(summary, final_e2e, root):
                 _summary_number(row[key], key)
         for key in ("run_count", "selector_rank"):
             if row.get(key) is not None and (
-                isinstance(row[key], bool) or not isinstance(row[key], int) or row[key] <= 0
+                isinstance(row[key], bool)
+                or not isinstance(row[key], int)
+                or row[key] <= 0
             ):
                 raise ValueError(f"report_summary {key} must be a positive integer")
         measured = row.get("value_ms" if index == 0 else "candidate_ms") is not None
         if measured and row.get("run_count") is None:
             raise ValueError("report_summary measured result requires run_count")
-        _summary_evidence(row, root, "measurement", required=measured or row.get("baseline_ms") is not None)
+        _summary_evidence(
+            row,
+            root,
+            "measurement",
+            required=measured or row.get("baseline_ms") is not None,
+        )
         if index == 0:
             continue
         stage = row.get("stage")
         if stage not in SUMMARY_STAGES or row.get("kind") != SUMMARY_STAGES[stage][1]:
-            raise ValueError("report_summary stage/kind is invalid; final clean comes only from final_e2e")
+            raise ValueError(
+                "report_summary stage/kind is invalid; final clean comes only from final_e2e"
+            )
         _require_string(row.get("candidate_id"), "report_summary candidate_id")
         _require_string(row.get("gates_zh"), "report_summary gates_zh")
-        if row.get("status") not in RESULT_STATUSES or not isinstance(row.get("eligible"), bool):
+        if row.get("status") not in RESULT_STATUSES or not isinstance(
+            row.get("eligible"), bool
+        ):
             raise ValueError("report_summary status/eligible is invalid")
         if row["eligible"] and (not measured or row["status"] != "accepted"):
-            raise ValueError("report_summary eligible candidate must be measured and accepted")
+            raise ValueError(
+                "report_summary eligible candidate must be measured and accepted"
+            )
         if row.get("baseline_ms") is not None and row["kind"] != "profiling":
             if row["metric"] != baseline["metric"] or baseline.get("value_ms") is None:
-                raise ValueError("report_summary clean comparison metric must match frozen S0")
-            if not math.isclose(row["baseline_ms"], baseline["value_ms"], rel_tol=1e-9, abs_tol=1e-9):
+                raise ValueError(
+                    "report_summary clean comparison metric must match frozen S0"
+                )
+            if not math.isclose(
+                row["baseline_ms"], baseline["value_ms"], rel_tol=1e-9, abs_tol=1e-9
+            ):
                 raise ValueError("report_summary baseline_ms must match frozen S0")
         if "improvement_pct" in row:
             if not measured or row.get("baseline_ms") is None:
-                raise ValueError("report_summary improvement_pct requires paired measurements")
-            expected = (row["baseline_ms"] - row["candidate_ms"]) / row["baseline_ms"] * 100
+                raise ValueError(
+                    "report_summary improvement_pct requires paired measurements"
+                )
+            expected = (
+                (row["baseline_ms"] - row["candidate_ms"]) / row["baseline_ms"] * 100
+            )
             declared = row["improvement_pct"]
-            if isinstance(declared, bool) or not isinstance(declared, (int, float)) or not math.isclose(declared, expected, rel_tol=1e-6, abs_tol=1e-6):
-                raise ValueError("report_summary improvement_pct does not match measurements")
+            if (
+                isinstance(declared, bool)
+                or not isinstance(declared, (int, float))
+                or not math.isclose(declared, expected, rel_tol=1e-6, abs_tol=1e-6)
+            ):
+                raise ValueError(
+                    "report_summary improvement_pct does not match measurements"
+                )
     for key in ("final_gates_zh", "display_note_zh"):
         if key in summary:
             _require_string(summary[key], f"report_summary {key}")
@@ -1383,8 +1547,13 @@ def _validate_report_summary(summary, final_e2e, root):
         for key in ("config_path", "config_fingerprint"):
             if key in config:
                 _require_string(config[key], f"report_summary {role}.{key}")
-        if "promotion_path" in config and config["promotion_path"] not in {"whole-scope", "FINAL"}:
-            raise ValueError("report_summary promotion_path must be whole-scope or FINAL")
+        if "promotion_path" in config and config["promotion_path"] not in {
+            "whole-scope",
+            "FINAL",
+        }:
+            raise ValueError(
+                "report_summary promotion_path must be whole-scope or FINAL"
+            )
         _summary_evidence(config, root, role, required=True)
         for key in ("option_config", "debug_option_config"):
             if key in config and not isinstance(config[key], dict):
@@ -1397,15 +1566,21 @@ def _validate_report_summary(summary, final_e2e, root):
             if options["super_kernel_debug_options"] != config["debug_option_config"]:
                 raise ValueError("report_summary debug options disagree")
         if "config_path" in config:
-            _summary_evidence({"evidence_artifacts": [config["config_path"]]}, root, "config_path")
+            _summary_evidence(
+                {"evidence_artifacts": [config["config_path"]]}, root, "config_path"
+            )
         if role == "winner":
             if final_e2e["classification"] != "beneficial":
                 raise ValueError("report_summary winner requires beneficial final_e2e")
             for key in ("candidate_id", "scope_strategy", "option_config"):
                 if config.get(key) != final_e2e[key]:
-                    raise ValueError(f"report_summary winner {key} differs from final_e2e")
+                    raise ValueError(
+                        f"report_summary winner {key} differs from final_e2e"
+                    )
             if config.get("promotion_path") not in {"whole-scope", "FINAL"}:
-                raise ValueError("report_summary winner requires whole-scope or FINAL promotion_path")
+                raise ValueError(
+                    "report_summary winner requires whole-scope or FINAL promotion_path"
+                )
     return summary
 
 
@@ -1416,15 +1591,20 @@ def _summary_cell(value):
 
 
 def _summary_row(label, metric, baseline, candidate, count, status, evidence):
-    delta = candidate - baseline if baseline is not None and candidate is not None else None
+    delta = (
+        candidate - baseline if baseline is not None and candidate is not None else None
+    )
     improvement = -delta / baseline * 100 if delta is not None else None
     cells = [
-        label, metric,
+        label,
+        metric,
         f"{baseline:.6f}" if baseline is not None else None,
         f"{candidate:.6f}" if candidate is not None else None,
         f"{delta:+.6f}" if delta is not None else None,
         f"{improvement:+.6f}%" if improvement is not None else None,
-        count, status, ", ".join(f"`{path}`" for path in evidence) or "N/A：未提供证据",
+        count,
+        status,
+        ", ".join(f"`{path}`" for path in evidence) or "N/A：未提供证据",
     ]
     return "| " + " | ".join(_summary_cell(cell) for cell in cells) + " |"
 
@@ -1439,23 +1619,43 @@ def _render_report_summary(session, result, final_e2e, summary):
         "failed": "最终验证失败，未产生终局优胜者",
         "blocked": "调优阻塞，未产生终局优胜者",
     }[classification]
-    lines = ["## 结果速览", "", f"**{outcome}。**", "",
-             f"- 最终 E2E 结论: {_terminal_outcome_label(result['status'])} (`{classification}`)",
-             f"- 判定依据: {final_e2e['reason_zh']}", "", "## 关键数据对比", "",
-             "耗时单位 ms；耗时差 = 实验 − 基线；改善率为正表示更快。不同测量口径不互算。",
-             "screening / option / optional_clean 是阶段实验，profiling 是诊断，均不替代最终 clean E2E。", "",
-             "| 阶段/候选 | 测量口径 | 基线耗时 ms | 实验耗时 ms | 耗时差 ms | 改善率 | 运行数 | 门禁/状态 | 证据 |",
-             "|---|---|---:|---:|---:|---:|---|---|---|"]
+    lines = [
+        "## 结果速览",
+        "",
+        f"**{outcome}。**",
+        "",
+        f"- 最终 E2E 结论: {_terminal_outcome_label(result['status'])} (`{classification}`)",
+        f"- 判定依据: {final_e2e['reason_zh']}",
+        "",
+        "## 关键数据对比",
+        "",
+        "耗时单位 ms；耗时差 = 实验 − 基线；改善率为正表示更快。不同测量口径不互算。",
+        "screening / option / optional_clean 是阶段实验，profiling 是诊断，均不替代最终 clean E2E。",
+        "",
+        "| 阶段/候选 | 测量口径 | 基线耗时 ms | 实验耗时 ms | 耗时差 ms | 改善率 | 运行数 | 门禁/状态 | 证据 |",
+        "|---|---|---:|---:|---:|---:|---|---|---|",
+    ]
     summary = summary or {}
     baseline = summary.get("baseline", {})
     if not baseline and measured_final:
-        baseline = {"metric": "final clean median", "value_ms": final_e2e["baseline"]["median_ms"],
-                    "run_count": final_e2e["baseline"].get("run_count"),
-                    "reason_zh": "来自 final_e2e；独立进程数未提供，不将 sample_count 当作运行数",
-                    "evidence_artifacts": final_e2e["evidence_artifacts"]}
-    lines.append(_summary_row("S0（冻结基线）", baseline.get("metric"), baseline.get("value_ms"), None,
-                              baseline.get("run_count"), baseline.get("reason_zh", "N/A：旧账本未提供结构化基线"),
-                              baseline.get("evidence_artifacts", [])))
+        baseline = {
+            "metric": "final clean median",
+            "value_ms": final_e2e["baseline"]["median_ms"],
+            "run_count": final_e2e["baseline"].get("run_count"),
+            "reason_zh": "来自 final_e2e；独立进程数未提供，不将 sample_count 当作运行数",
+            "evidence_artifacts": final_e2e["evidence_artifacts"],
+        }
+    lines.append(
+        _summary_row(
+            "S0（冻结基线）",
+            baseline.get("metric"),
+            baseline.get("value_ms"),
+            None,
+            baseline.get("run_count"),
+            baseline.get("reason_zh", "N/A：旧账本未提供结构化基线"),
+            baseline.get("evidence_artifacts", []),
+        )
+    )
     gates = []
     stages = summary.get("stages", [])
     for stage, (phase, kind) in SUMMARY_STAGES.items():
@@ -1469,38 +1669,87 @@ def _render_report_summary(session, result, final_e2e, summary):
         if not candidates:
             if not steps:
                 continue
-            if stage == "optional_experiments" and any(row["stage"].startswith("optional_") for row in stages):
+            if stage == "optional_experiments" and any(
+                row["stage"].startswith("optional_") for row in stages
+            ):
                 continue
-            status = "; ".join(f"{step['step_id']}: {step.get('outcome_status', step['state'])}" for step in steps)
-            lines.append(_summary_row(stage, kind, None, None, None, status + "；N/A：未提供关键测量，原因见阶段正文",
-                                      [step["result_path"] for step in steps if step.get("result_path")]))
+            status = "; ".join(
+                f"{step['step_id']}: {step.get('outcome_status', step['state'])}"
+                for step in steps
+            )
+            lines.append(
+                _summary_row(
+                    stage,
+                    kind,
+                    None,
+                    None,
+                    None,
+                    status + "；N/A：未提供关键测量，原因见阶段正文",
+                    [step["result_path"] for step in steps if step.get("result_path")],
+                )
+            )
             continue
         for metric in dict.fromkeys(row["metric"] for row in candidates):
             comparable = [row for row in candidates if row["metric"] == metric]
-            chosen = min(comparable, key=lambda row: (
-                not row["eligible"], row.get("candidate_ms") is None,
-                row.get("selector_rank") or math.inf,
-                row.get("candidate_ms") if row.get("candidate_ms") is not None else math.inf,
-                row["candidate_id"],
-            ))
+            chosen = min(
+                comparable,
+                key=lambda row: (
+                    not row["eligible"],
+                    row.get("candidate_ms") is None,
+                    row.get("selector_rank") or math.inf,
+                    row.get("candidate_ms")
+                    if row.get("candidate_ms") is not None
+                    else math.inf,
+                    row["candidate_id"],
+                ),
+            )
             label = f"{stage} / {chosen['candidate_id']}"
             status = chosen["status"] + "；" + chosen["reason_zh"]
             if not chosen["eligible"] and chosen.get("candidate_ms") is not None:
-                status += "；最佳已测尝试，未通过门禁，非优胜者" if kind != "profiling" else "；仅诊断，非优胜者"
-            lines.append(_summary_row(label, f"{kind} / {metric}", chosen.get("baseline_ms"), chosen.get("candidate_ms"),
-                                      chosen.get("run_count"), status, chosen.get("evidence_artifacts", [])))
+                status += (
+                    "；最佳已测尝试，未通过门禁，非优胜者"
+                    if kind != "profiling"
+                    else "；仅诊断，非优胜者"
+                )
+            lines.append(
+                _summary_row(
+                    label,
+                    f"{kind} / {metric}",
+                    chosen.get("baseline_ms"),
+                    chosen.get("candidate_ms"),
+                    chosen.get("run_count"),
+                    status,
+                    chosen.get("evidence_artifacts", []),
+                )
+            )
             gates.append(f"- {label}：{chosen['gates_zh']}")
-    lines.append(_summary_row(
-        f"最终 E2E / {final_e2e['candidate_id']}", "final clean / median",
-        final_e2e["baseline"]["median_ms"] if measured_final else None,
-        final_e2e["candidate"]["median_ms"] if measured_final else None,
-        final_e2e["candidate"].get("run_count") if measured_final else None,
-        classification + "；" + final_e2e["reason_zh"], final_e2e["evidence_artifacts"],
-    ))
-    lines.extend(["", "### 门禁与统计说明", "", *gates,
-                  "- 最终阈值 / P90 / stddev：" + summary.get("final_gates_zh", "N/A：未提供结构化门禁说明，见最终 Clean E2E 正文。"),
-                  "- 运行数仅指独立进程次数；旧 final_e2e.sample_count 不自动解释为运行数。",
-                  "", "## 配置与建议", ""])
+    lines.append(
+        _summary_row(
+            f"最终 E2E / {final_e2e['candidate_id']}",
+            "final clean / median",
+            final_e2e["baseline"]["median_ms"] if measured_final else None,
+            final_e2e["candidate"]["median_ms"] if measured_final else None,
+            final_e2e["candidate"].get("run_count") if measured_final else None,
+            classification + "；" + final_e2e["reason_zh"],
+            final_e2e["evidence_artifacts"],
+        )
+    )
+    lines.extend(
+        [
+            "",
+            "### 门禁与统计说明",
+            "",
+            *gates,
+            "- 最终阈值 / P90 / stddev："
+            + summary.get(
+                "final_gates_zh", "N/A：未提供结构化门禁说明，见最终 Clean E2E 正文。"
+            ),
+            "- 运行数仅指独立进程次数；旧 final_e2e.sample_count 不自动解释为运行数。",
+            "",
+            "## 配置与建议",
+            "",
+        ]
+    )
     role = "winner" if classification == "beneficial" else "fallback"
     config = summary.get(role, {})
     if role == "winner":
@@ -1508,22 +1757,47 @@ def _render_report_summary(session, result, final_e2e, summary):
         config = {**final_e2e, **config}
     else:
         lines.append("- 优胜者：无。最佳尝试不是推荐配置。")
-        lines.append(f"- 回退配置：{config.get('candidate_id', 'N/A：未提供已验证回退配置，不推断默认 SK-off')}")
+        lines.append(
+            f"- 回退配置：{config.get('candidate_id', 'N/A：未提供已验证回退配置，不推断默认 SK-off')}"
+        )
     option_config = config.get("option_config")
     optimize = option_config
     debug = config.get("debug_option_config")
     if isinstance(option_config, dict) and any(
-        key in option_config for key in ("super_kernel_optimize_options", "super_kernel_debug_options")
+        key in option_config
+        for key in ("super_kernel_optimize_options", "super_kernel_debug_options")
     ):
         optimize = option_config.get("super_kernel_optimize_options")
         debug = option_config.get("super_kernel_debug_options", debug)
-    for label, value in (("SK 框定方式", config.get("scope_strategy")), ("晋级路径", config.get("promotion_path")),
-                         ("Option 配置", option_config), ("Optimize options", optimize), ("Debug options", debug),
-                         ("配置文件", config.get("config_path")), ("配置 fingerprint", config.get("config_fingerprint"))):
-        text = json.dumps(value, ensure_ascii=False, sort_keys=True) if isinstance(value, dict) else value
-        lines.append(f"- {label}: `{text}`" if text is not None else f"- {label}: N/A（未提供证据，不猜测默认值）")
-    lines.extend([f"- 配置依据: {config.get('reason_zh', 'N/A：缺少配置证据')}",
-                  "- 配置证据: " + (", ".join(f"`{path}`" for path in config.get("evidence_artifacts", [])) or "N/A")])
+    for label, value in (
+        ("SK 框定方式", config.get("scope_strategy")),
+        ("晋级路径", config.get("promotion_path")),
+        ("Option 配置", option_config),
+        ("Optimize options", optimize),
+        ("Debug options", debug),
+        ("配置文件", config.get("config_path")),
+        ("配置 fingerprint", config.get("config_fingerprint")),
+    ):
+        text = (
+            json.dumps(value, ensure_ascii=False, sort_keys=True)
+            if isinstance(value, dict)
+            else value
+        )
+        lines.append(
+            f"- {label}: `{text}`"
+            if text is not None
+            else f"- {label}: N/A（未提供证据，不猜测默认值）"
+        )
+    lines.extend(
+        [
+            f"- 配置依据: {config.get('reason_zh', 'N/A：缺少配置证据')}",
+            "- 配置证据: "
+            + (
+                ", ".join(f"`{path}`" for path in config.get("evidence_artifacts", []))
+                or "N/A"
+            ),
+        ]
+    )
     if summary.get("display_note_zh"):
         lines.extend(["", "> " + _summary_cell(summary["display_note_zh"])])
     return lines
@@ -1532,7 +1806,11 @@ def _render_report_summary(session, result, final_e2e, summary):
 def render_final_report(session_path, output_path=None, summary_path=None):
     session = load_session(session_path)
     final = next(
-        (step for step in session["steps"] if step["phase"] == "final_e2e_report" and step["state"] == "sealed"),
+        (
+            step
+            for step in session["steps"]
+            if step["phase"] == "final_e2e_report" and step["state"] == "sealed"
+        ),
         None,
     )
     if final is None:
@@ -1558,14 +1836,14 @@ def render_final_report(session_path, output_path=None, summary_path=None):
         f"- Optional mode: `{session['optional_mode']}`",
         f"- Final status: `{result['status']}`",
         "",
-            result["summary_zh"],
-            "",
-            f"- 最终 E2E 结论: {_terminal_outcome_label(result['status'])} (`{final_e2e['classification']}`)",
-            f"- Candidate: `{final_e2e['candidate_id']}`",
-            f"- SK 框定方式: `{final_e2e['scope_strategy']}`",
-            f"- Option 配置: `{json.dumps(final_e2e['option_config'], ensure_ascii=False, sort_keys=True)}`",
-            f"- 判定依据: {final_e2e['reason_zh']}",
-        ]
+        result["summary_zh"],
+        "",
+        f"- 最终 E2E 结论: {_terminal_outcome_label(result['status'])} (`{final_e2e['classification']}`)",
+        f"- Candidate: `{final_e2e['candidate_id']}`",
+        f"- SK 框定方式: `{final_e2e['scope_strategy']}`",
+        f"- Option 配置: `{json.dumps(final_e2e['option_config'], ensure_ascii=False, sort_keys=True)}`",
+        f"- 判定依据: {final_e2e['reason_zh']}",
+    ]
     if "evidence_import" in session:
         manifest = _read_object(
             root / session["evidence_import"]["path"], "evidence import"
@@ -1586,7 +1864,9 @@ def render_final_report(session_path, output_path=None, summary_path=None):
             ]
         )
     evidence = final_e2e["evidence_artifacts"]
-    lines.append("- E2E evidence: " + (", ".join(f"`{item}`" for item in evidence) or "无"))
+    lines.append(
+        "- E2E evidence: " + (", ".join(f"`{item}`" for item in evidence) or "无")
+    )
     labels = {
         "environment": "环境与准备",
         "s0": "S0 基线",
@@ -1639,7 +1919,9 @@ def render_final_report(session_path, output_path=None, summary_path=None):
             declared_options = round_data.get("declared_option_changes", [])
             if isinstance(declared_options, list):
                 for change in declared_options:
-                    if isinstance(change, dict) and isinstance(change.get("pointer"), str):
+                    if isinstance(change, dict) and isinstance(
+                        change.get("pointer"), str
+                    ):
                         options.append(change["pointer"])
         classifications = {}
         decisions = experiment.get("performance_scope_decisions", [])
@@ -1649,10 +1931,16 @@ def render_final_report(session_path, output_path=None, summary_path=None):
                     continue
                 classification = decision.get("classification")
                 if isinstance(classification, str):
-                    classifications[classification] = classifications.get(classification, 0) + 1
+                    classifications[classification] = (
+                        classifications.get(classification, 0) + 1
+                    )
         config = "; ".join(
             f"{key}={experiment[key]}"
-            for key in ("source_revision", "baseline_config_fingerprint", "control_fingerprint")
+            for key in (
+                "source_revision",
+                "baseline_config_fingerprint",
+                "control_fingerprint",
+            )
             if isinstance(experiment.get(key), str)
         )
         classification_text = ", ".join(
@@ -1672,9 +1960,7 @@ def render_final_report(session_path, output_path=None, summary_path=None):
         )
     lines.extend(["", "## 阶段交接", ""])
     for step in session["steps"]:
-        lines.append(
-            f"- `{step['step_id']}` / `{step['agent_id']}`: `{step['state']}`"
-        )
+        lines.append(f"- `{step['step_id']}` / `{step['agent_id']}`: `{step['state']}`")
     _atomic_text(target, "\n".join(lines) + "\n")
     return target
 
@@ -1690,7 +1976,9 @@ def main(argv=None):
     initialize.add_argument("--session", required=True, type=Path)
     initialize.add_argument("--artifact-root", required=True, type=Path)
     initialize.add_argument("--session-id", required=True)
-    initialize.add_argument("--optional-mode", required=True, choices=sorted(OPTIONAL_MODES))
+    initialize.add_argument(
+        "--optional-mode", required=True, choices=sorted(OPTIONAL_MODES)
+    )
     derive = commands.add_parser("derive-session")
     source_range = commands.add_parser("source-range-from-smap")
     for derived_parser in (derive, source_range):
@@ -1727,7 +2015,11 @@ def main(argv=None):
     report = commands.add_parser("render-final-report")
     report.add_argument("--session", required=True, type=Path)
     report.add_argument("--output", type=Path)
-    report.add_argument("--summary", type=Path, help="Read-only report_summary JSON override for historical reports")
+    report.add_argument(
+        "--summary",
+        type=Path,
+        help="Read-only report_summary JSON override for historical reports",
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -1772,7 +2064,11 @@ def main(argv=None):
             print(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True))
             return 0 if output["valid"] else 1
         else:
-            output = {"report": str(render_final_report(args.session, args.output, args.summary))}
+            output = {
+                "report": str(
+                    render_final_report(args.session, args.output, args.summary)
+                )
+            }
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(json.dumps({"valid": False, "errors": [str(error)]}, ensure_ascii=False))
         return 1

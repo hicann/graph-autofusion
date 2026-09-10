@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Run a fingerprinted model plugin and seal a conforming multistream capture."""
 
 import argparse
@@ -31,7 +38,11 @@ CAPTURE_SCHEMAS = {
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -66,11 +77,17 @@ def read_csv_rows(path, required_columns=()):
         with Path(path).open(newline="") as stream:
             reader = csv.DictReader(stream)
             fields = reader.fieldnames
-            if not fields or any(not item for item in fields) or len(fields) != len(set(fields)):
+            if (
+                not fields
+                or any(not item for item in fields)
+                or len(fields) != len(set(fields))
+            ):
                 raise ValueError("CSV header must contain unique non-empty columns")
             missing = sorted(set(required_columns) - set(fields))
             if missing:
-                raise ValueError(f"CSV is missing required columns: {', '.join(missing)}")
+                raise ValueError(
+                    f"CSV is missing required columns: {', '.join(missing)}"
+                )
             return [dict(row) for row in reader]
     except (OSError, csv.Error) as error:
         raise ValueError(f"cannot load CSV {path}: {error}") from error
@@ -96,7 +113,9 @@ def parse_number(value, label, *, minimum=0.0, positive=False):
     except (TypeError, ValueError) as error:
         raise ValueError(f"{label} must be a finite number") from error
     if not math.isfinite(parsed) or parsed < minimum or (positive and parsed <= 0):
-        raise ValueError(f"{label} must be a finite {'positive' if positive else 'non-negative'} number")
+        raise ValueError(
+            f"{label} must be a finite {'positive' if positive else 'non-negative'} number"
+        )
     return parsed
 
 
@@ -184,7 +203,9 @@ def _load_plugin(plugin_root, binding):
     if not isinstance(capabilities, (list, tuple)) or not capabilities:
         raise ValueError("plugin.CAPABILITIES must be a non-empty list")
     capabilities = tuple(_text(item, "plugin.CAPABILITIES[]") for item in capabilities)
-    if len(capabilities) != len(set(capabilities)) or set(capabilities) - set(CAPTURE_SCHEMAS):
+    if len(capabilities) != len(set(capabilities)) or set(capabilities) - set(
+        CAPTURE_SCHEMAS
+    ):
         raise ValueError("plugin.CAPABILITIES contains duplicates or unsupported kinds")
     producer = getattr(module, "produce_capture", None)
     if not callable(producer):
@@ -210,8 +231,13 @@ def _validate_inputs(root, value):
     for name in sorted(value):
         _text(name, "inputs key")
         binding = value[name]
-        if not isinstance(binding, dict) or set(binding) != {"path", "file_fingerprint"}:
-            raise ValueError(f"inputs.{name} must contain exactly path and file_fingerprint")
+        if not isinstance(binding, dict) or set(binding) != {
+            "path",
+            "file_fingerprint",
+        }:
+            raise ValueError(
+                f"inputs.{name} must contain exactly path and file_fingerprint"
+            )
         path = _rooted(root, binding["path"], f"inputs.{name}.path")
         actual = file_fingerprint(path)
         if binding["file_fingerprint"] != actual:
@@ -260,11 +286,17 @@ def _conform(kind, capture_path, root, validation):
         }
     if kind == "logical_graph":
         if set(validation) != {"request_fingerprint"}:
-            raise ValueError("logical_graph validation must contain exactly request_fingerprint")
+            raise ValueError(
+                "logical_graph validation must contain exactly request_fingerprint"
+            )
         graph = multistream_logical_graph.validate(read_json(capture_path))
-        expected = _text(validation["request_fingerprint"], "validation.request_fingerprint")
+        expected = _text(
+            validation["request_fingerprint"], "validation.request_fingerprint"
+        )
         if graph["request_fingerprint"] != expected:
-            raise ValueError("logical graph request_fingerprint differs from validation")
+            raise ValueError(
+                "logical graph request_fingerprint differs from validation"
+            )
         return {
             "analyzer": multistream_logical_graph.SCHEMA,
             "graph_id": graph["graph_id"],
@@ -272,11 +304,17 @@ def _conform(kind, capture_path, root, validation):
         }
     if kind == "critical_path":
         if set(validation) != {"request_fingerprint"}:
-            raise ValueError("critical_path validation must contain exactly request_fingerprint")
+            raise ValueError(
+                "critical_path validation must contain exactly request_fingerprint"
+            )
         result = multistream_critical_path.analyze(read_json(capture_path))
-        expected = _text(validation["request_fingerprint"], "validation.request_fingerprint")
+        expected = _text(
+            validation["request_fingerprint"], "validation.request_fingerprint"
+        )
         if result["request_fingerprint"] != expected:
-            raise ValueError("critical path request_fingerprint differs from validation")
+            raise ValueError(
+                "critical path request_fingerprint differs from validation"
+            )
         return {
             "analyzer": multistream_critical_path.ANALYSIS_SCHEMA,
             "decision": result["decision"],
@@ -284,7 +322,9 @@ def _conform(kind, capture_path, root, validation):
         }
     if kind == "operator_order":
         if set(validation) != {"request_fingerprint"}:
-            raise ValueError("operator_order validation must contain exactly request_fingerprint")
+            raise ValueError(
+                "operator_order validation must contain exactly request_fingerprint"
+            )
         result = multistream_operator_order.analyze(
             capture_path,
             root,
@@ -300,9 +340,13 @@ def _conform(kind, capture_path, root, validation):
             ),
         }
     if set(validation) != {"action_manifest"}:
-        raise ValueError("post_dispatch validation must contain exactly action_manifest")
+        raise ValueError(
+            "post_dispatch validation must contain exactly action_manifest"
+        )
     action = _rooted(root, validation["action_manifest"], "validation.action_manifest")
-    result = multistream_operator_order.build_dispatch_evidence(action, capture_path, root)
+    result = multistream_operator_order.build_dispatch_evidence(
+        action, capture_path, root
+    )
     return {
         "analyzer": multistream_operator_order.DISPATCH_EVIDENCE_SCHEMA,
         "decision": result["decision"],
@@ -313,15 +357,31 @@ def _conform(kind, capture_path, root, validation):
 def produce(job_path, plugin_root):
     job = read_json(job_path)
     required = {
-        "schema_version", "job_id", "capture_kind", "artifact_root", "plugin",
-        "inputs", "parameters", "validation", "capture_path", "receipt_path",
+        "schema_version",
+        "job_id",
+        "capture_kind",
+        "artifact_root",
+        "plugin",
+        "inputs",
+        "parameters",
+        "validation",
+        "capture_path",
+        "receipt_path",
     }
-    if not isinstance(job, dict) or set(job) != required or job.get("schema_version") != JOB_SCHEMA:
-        raise ValueError(f"capture job must use {JOB_SCHEMA} with exactly {sorted(required)}")
+    if (
+        not isinstance(job, dict)
+        or set(job) != required
+        or job.get("schema_version") != JOB_SCHEMA
+    ):
+        raise ValueError(
+            f"capture job must use {JOB_SCHEMA} with exactly {sorted(required)}"
+        )
     job_id = _text(job["job_id"], "job_id")
     kind = _text(job["capture_kind"], "capture_kind")
     if kind not in CAPTURE_SCHEMAS:
-        raise ValueError(f"capture_kind must be one of: {', '.join(sorted(CAPTURE_SCHEMAS))}")
+        raise ValueError(
+            f"capture_kind must be one of: {', '.join(sorted(CAPTURE_SCHEMAS))}"
+        )
     root = Path(_text(job["artifact_root"], "artifact_root")).resolve()
     if not root.is_dir() or not root.is_absolute():
         raise ValueError("artifact_root must be an existing absolute directory")
@@ -406,7 +466,10 @@ def main(argv=None):
         if args.command == "inspect-plugin":
             result = inspect_plugin(
                 args.plugin_root,
-                {"path": args.plugin.as_posix(), "file_fingerprint": args.plugin_fingerprint},
+                {
+                    "path": args.plugin.as_posix(),
+                    "file_fingerprint": args.plugin_fingerprint,
+                },
             )
         else:
             result = produce(args.job, args.plugin_root)

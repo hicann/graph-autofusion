@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Build an auditable many-to-many SK-to-source-unit map."""
 
 from __future__ import annotations
@@ -60,9 +67,14 @@ def _validated_steps_for_targets(projection, calibration_node_keys):
     return sorted(valid_steps)
 
 
-def build_sk_source_map(projection, source_manifest, block_inventory,
-                        fused_inventory, unit_assignments,
-                        calibration_source_manifest=None):
+def build_sk_source_map(
+    projection,
+    source_manifest,
+    block_inventory,
+    fused_inventory,
+    unit_assignments,
+    calibration_source_manifest=None,
+):
     projection = require_object(projection, "calibration projection")
     if projection.get("protocol") != "source_calibration_projection_v2":
         raise ValueError("calibration projection protocol is unsupported")
@@ -80,7 +92,9 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
     ):
         raise ValueError("calibration projection does not preserve the business graph")
     expected_projection = projection.get("projection_fingerprint")
-    if expected_projection != _fingerprint_without(projection, "projection_fingerprint"):
+    if expected_projection != _fingerprint_without(
+        projection, "projection_fingerprint"
+    ):
         raise ValueError("calibration projection fingerprint mismatch")
 
     source_manifest = require_object(source_manifest, "source manifest")
@@ -88,7 +102,9 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
     if expected_source != _fingerprint_without(source_manifest, "manifest_fingerprint"):
         raise ValueError("source manifest fingerprint mismatch")
     units = {}
-    for index, raw in enumerate(require_list(source_manifest.get("units"), "source units")):
+    for index, raw in enumerate(
+        require_list(source_manifest.get("units"), "source units")
+    ):
         item = require_object(raw, f"source units[{index}]")
         unit_id = require_text(item.get("unit_id"), f"source unit {index}.unit_id")
         if unit_id in units:
@@ -149,13 +165,19 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
     expected_inventory_source = calibration_source_fingerprint or expected_source
     if block_inventory.get("source_manifest_fingerprint") != expected_inventory_source:
         raise ValueError("block inventory source manifest fingerprint mismatch")
-    adapter = require_object(source_manifest.get("model_adapter"), "source model adapter")
+    adapter = require_object(
+        source_manifest.get("model_adapter"), "source model adapter"
+    )
     if block_inventory.get("model_adapter_fingerprint") != adapter.get("fingerprint"):
         raise ValueError("block inventory model adapter fingerprint mismatch")
     instances = {}
-    for index, raw in enumerate(require_list(block_inventory.get("instances"), "block instances")):
+    for index, raw in enumerate(
+        require_list(block_inventory.get("instances"), "block instances")
+    ):
         item = require_object(raw, f"block instances[{index}]")
-        block_id = require_text(item.get("block_instance_id"), f"block instances[{index}].block_instance_id")
+        block_id = require_text(
+            item.get("block_instance_id"), f"block instances[{index}].block_instance_id"
+        )
         if block_id in instances:
             raise ValueError(f"duplicate block instance {block_id}")
         template_id = require_text(
@@ -163,25 +185,38 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
             f"block instances[{index}].block_template_id",
         )
         if template_id not in template_ids:
-            raise ValueError(f"block instance {block_id} references an unknown template")
+            raise ValueError(
+                f"block instance {block_id} references an unknown template"
+            )
         binding = require_object(
             item.get("runtime_scope_binding"),
             f"block instances[{index}].runtime_scope_binding",
         )
         if binding.get("method") != "exact_scope_name":
-            raise ValueError(f"block instance {block_id} uses an unsupported scope binding")
+            raise ValueError(
+                f"block instance {block_id} uses an unsupported scope binding"
+            )
         require_text(binding.get("value"), f"block instance {block_id} scope binding")
         require_text(
-            item.get("control_flow_path"), f"block instance {block_id} control_flow_path"
+            item.get("control_flow_path"),
+            f"block instance {block_id} control_flow_path",
         )
         instances[block_id] = item
 
     correspondence = {}
     coordinates = {}
-    for index, raw in enumerate(require_list(projection.get("occurrences"), "projection occurrences")):
+    for index, raw in enumerate(
+        require_list(projection.get("occurrences"), "projection occurrences")
+    ):
         item = require_object(raw, f"projection occurrences[{index}]")
-        original = require_text(item.get("original_node_key"), f"projection occurrences[{index}].original_node_key")
-        calibration = require_text(item.get("calibration_node_key"), f"projection occurrences[{index}].calibration_node_key")
+        original = require_text(
+            item.get("original_node_key"),
+            f"projection occurrences[{index}].original_node_key",
+        )
+        calibration = require_text(
+            item.get("calibration_node_key"),
+            f"projection occurrences[{index}].calibration_node_key",
+        )
         if original in correspondence or calibration in coordinates:
             raise ValueError("projection correspondence is not bijective")
         correspondence[original] = calibration
@@ -194,7 +229,9 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
     unit_nodes = defaultdict(set)
     block_nodes = defaultdict(set)
     control_flow = {}
-    for index, raw in enumerate(require_list(unit_assignments.get("assignments"), "assignments")):
+    for index, raw in enumerate(
+        require_list(unit_assignments.get("assignments"), "assignments")
+    ):
         item = require_object(raw, f"assignments[{index}]")
         evidence_records = require_list(
             item.get("evidence_records"), f"assignments[{index}].evidence_records"
@@ -208,15 +245,25 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
             require_text(evidence.get("artifact_id"), "assignment evidence artifact_id")
             require_text(evidence.get("record_id"), "assignment evidence record_id")
             require_sha256(
-                evidence.get("record_fingerprint"), "assignment evidence record_fingerprint"
+                evidence.get("record_fingerprint"),
+                "assignment evidence record_fingerprint",
             )
-        node_key = require_text(item.get("calibration_node_key"), f"assignments[{index}].calibration_node_key")
-        block_id = require_text(item.get("block_instance_id"), f"assignments[{index}].block_instance_id")
+        node_key = require_text(
+            item.get("calibration_node_key"),
+            f"assignments[{index}].calibration_node_key",
+        )
+        block_id = require_text(
+            item.get("block_instance_id"), f"assignments[{index}].block_instance_id"
+        )
         unit_id = require_text(item.get("unit_id"), f"assignments[{index}].unit_id")
         if node_key in assignment_by_node or node_key not in coordinates:
-            raise ValueError(f"assignment node {node_key} is duplicate or not projected")
+            raise ValueError(
+                f"assignment node {node_key} is duplicate or not projected"
+            )
         if block_id not in instances or unit_id not in units:
-            raise ValueError(f"assignment {node_key} references an unknown block or unit")
+            raise ValueError(
+                f"assignment {node_key} references an unknown block or unit"
+            )
         if units[unit_id].get("block_template_id") != instances[block_id].get(
             "block_template_id"
         ):
@@ -224,7 +271,9 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
         assignment_by_node[node_key] = (block_id, unit_id)
         unit_nodes[(block_id, unit_id)].add(node_key)
         block_nodes[block_id].add(node_key)
-        path = require_text(item.get("control_flow_path"), f"assignments[{index}].control_flow_path")
+        path = require_text(
+            item.get("control_flow_path"), f"assignments[{index}].control_flow_path"
+        )
         if path != instances[block_id].get("control_flow_path"):
             raise ValueError(f"assignment {node_key} control-flow path mismatch")
         previous = control_flow.setdefault(block_id, path)
@@ -253,10 +302,15 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
             require_sha256(
                 evidence.get("record_fingerprint"), "fused evidence record_fingerprint"
             )
-        block_id = require_text(group.get("block_instance_id"), f"sk_groups[{index}].block_instance_id")
+        block_id = require_text(
+            group.get("block_instance_id"), f"sk_groups[{index}].block_instance_id"
+        )
         children = [
             require_text(key, f"sk_groups[{index}].original_child_node_keys")
-            for key in require_list(group.get("original_child_node_keys"), f"sk_groups[{index}].original_child_node_keys")
+            for key in require_list(
+                group.get("original_child_node_keys"),
+                f"sk_groups[{index}].original_child_node_keys",
+            )
         ]
         if (
             not children
@@ -299,7 +353,8 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
             "validated_step_ids": validated_step_ids,
             "target_assignment_complete": target_assignment_complete,
             "ordinal": require_integer(
-                group.get("block_local_sk_ordinal"), f"sk_groups[{index}].block_local_sk_ordinal"
+                group.get("block_local_sk_ordinal"),
+                f"sk_groups[{index}].block_local_sk_ordinal",
             ),
         }
         normalized_groups.append(normalized)
@@ -318,17 +373,28 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
         for signature in stream_signatures.values():
             signature_counts[signature] += 1
         stream_ambiguous = any(count > 1 for count in signature_counts.values())
-        ordered_streams = sorted(streams, key=lambda role: (stream_signatures[role], role))
+        ordered_streams = sorted(
+            streams, key=lambda role: (stream_signatures[role], role)
+        )
         for local_role, role in enumerate(ordered_streams):
-            for local_ordinal, (_, node_key, op, core) in enumerate(sorted(streams[role])):
+            for local_ordinal, (_, node_key, op, core) in enumerate(
+                sorted(streams[role])
+            ):
                 block_local_coordinates[node_key] = [
-                    f"block-stream-role-{local_role}", local_ordinal, op, core
+                    f"block-stream-role-{local_role}",
+                    local_ordinal,
+                    op,
+                    core,
                 ]
-        local_groups = [item for item in normalized_groups if item["block_id"] == block_id]
+        local_groups = [
+            item for item in normalized_groups if item["block_id"] == block_id
+        ]
         if len({item["ordinal"] for item in local_groups}) != len(local_groups):
             raise ValueError(f"block {block_id} has duplicate block-local SK ordinals")
         seed = {
-            "business_occurrences": sorted(block_local_coordinates[key] for key in nodes),
+            "business_occurrences": sorted(
+                block_local_coordinates[key] for key in nodes
+            ),
             "sk_groups": sorted(
                 [
                     {
@@ -359,7 +425,8 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
         child_set = item["calibration_children"]
         intersecting = (
             sorted(
-                unit_id for (candidate_block, unit_id), nodes in unit_nodes.items()
+                unit_id
+                for (candidate_block, unit_id), nodes in unit_nodes.items()
                 if candidate_block == block_id and nodes & child_set
             )
             if item["target_assignment_complete"]
@@ -367,7 +434,8 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
         )
         exact_units = (
             sorted(
-                unit_id for unit_id in intersecting
+                unit_id
+                for unit_id in intersecting
                 if unit_nodes[(block_id, unit_id)] == child_set
             )
             if item["target_assignment_complete"]
@@ -402,15 +470,19 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
             "device_id": require_integer(group.get("device_id"), "sk group device_id"),
             "model_id": require_scalar_id(group.get("model_id"), "sk group model_id"),
             "block_instance_id": block_id,
-            "source_scope": require_text(group.get("source_scope"), "sk group source_scope"),
+            "source_scope": require_text(
+                group.get("source_scope"), "sk group source_scope"
+            ),
             "candidate_source_scope": require_text(
                 group.get("candidate_source_scope"), "sk group candidate_source_scope"
             ),
             "sk_occurrence_fingerprint": require_sha256(
-                group.get("sk_occurrence_fingerprint"), "sk group occurrence fingerprint"
+                group.get("sk_occurrence_fingerprint"),
+                "sk group occurrence fingerprint",
             ),
             "baseline_projection_fingerprint": require_sha256(
-                group.get("baseline_projection_fingerprint"), "baseline projection fingerprint"
+                group.get("baseline_projection_fingerprint"),
+                "baseline projection fingerprint",
             ),
             "structural_family": family,
             "block_local_sk_ordinal": item["ordinal"],
@@ -428,7 +500,10 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
             "mapping_blockers": [
                 blocker
                 for blocker, active in (
-                    ("target_child_assignment_missing", bool(item["missing_assignment_nodes"])),
+                    (
+                        "target_child_assignment_missing",
+                        bool(item["missing_assignment_nodes"]),
+                    ),
                     (
                         "target_child_block_mismatch",
                         bool(item["cross_block_assignment_nodes"]),
@@ -441,9 +516,7 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
                 if active
             ],
             "missing_calibration_node_keys": item["missing_assignment_nodes"],
-            "cross_block_calibration_node_keys": item[
-                "cross_block_assignment_nodes"
-            ],
+            "cross_block_calibration_node_keys": item["cross_block_assignment_nodes"],
             "consensus": {
                 "supporting_block_instances": [block_id],
                 "counterexample_block_instances": [],
@@ -452,7 +525,12 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
             "source_intervals": [
                 {
                     field: units[unit_id][field]
-                    for field in ("source_file", "start_offset", "end_offset", "syntax_tree_hash")
+                    for field in (
+                        "source_file",
+                        "start_offset",
+                        "end_offset",
+                        "syntax_tree_hash",
+                    )
                 }
                 for unit_id in covered
             ],
@@ -468,16 +546,17 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
             for item in observations
             if item["relation"] == "exact_cover"
         }
-        consensus_exact = (
-            len(exact_unit_sets) == 1
-            and all(item["relation"] == "exact_cover" for item in observations)
+        consensus_exact = len(exact_unit_sets) == 1 and all(
+            item["relation"] == "exact_cover" for item in observations
         )
         support = (
             sorted({item["block_instance_id"] for item in observations})
             if consensus_exact
             else []
         )
-        mapping["consensus"]["supporting_block_instances"] = support or [mapping["block_instance_id"]]
+        mapping["consensus"]["supporting_block_instances"] = support or [
+            mapping["block_instance_id"]
+        ]
         mapping["consensus"]["counterexample_block_instances"] = (
             []
             if consensus_exact
@@ -508,8 +587,12 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
             else {}
         ),
         "calibration_projection_fingerprint": expected_projection,
-        "original_collection_fingerprint": projection["original_collection_fingerprint"],
-        "calibration_collection_fingerprint": projection["calibration_collection_fingerprint"],
+        "original_collection_fingerprint": projection[
+            "original_collection_fingerprint"
+        ],
+        "calibration_collection_fingerprint": projection[
+            "calibration_collection_fingerprint"
+        ],
         "algorithm_versions": {
             "set_relation": "target-business-occurrence-set-equality-v2",
             "structural_family": "block-local-business-structure-v1",
@@ -528,7 +611,9 @@ def build_sk_source_map(projection, source_manifest, block_inventory,
                 item["processing_status"] == "skipped" for item in mappings
             ),
         },
-        "mappings": sorted(mappings, key=lambda item: item["sk_occurrence_fingerprint"]),
+        "mappings": sorted(
+            mappings, key=lambda item: item["sk_occurrence_fingerprint"]
+        ),
         "mapping_groups": [],
     }
     result["map_fingerprint"] = canonical_sha256(result)

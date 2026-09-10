@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import copy
 import json
 import sys
@@ -9,24 +16,24 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from build_sk_source_map import build_sk_source_map
-from generate_source_unit_manifest import build_manifest
-from marker_only_calibration import (
+from build_sk_source_map import build_sk_source_map  # noqa: E402 - load sibling scripts after sys.path setup
+from generate_source_unit_manifest import build_manifest  # noqa: E402 - load sibling scripts after sys.path setup
+from marker_only_calibration import (  # noqa: E402 - load sibling scripts after sys.path setup
     build_marker_only_calibration,
     validate_marker_only_calibration,
 )
-from normalize_business_graph import normalize_origin_graph
-from partition_calibration_scope_log import partition_scope_log, semantic_unit_matches
-from project_calibration_graph import project_graphs
-from source_calibration_common import atomic_write_json, canonical_sha256, file_sha256
-from source_scope_map_v2 import (
+from normalize_business_graph import normalize_origin_graph  # noqa: E402 - load sibling scripts after sys.path setup
+from partition_calibration_scope_log import partition_scope_log, semantic_unit_matches  # noqa: E402 - load sibling scripts after sys.path setup
+from project_calibration_graph import project_graphs  # noqa: E402 - load sibling scripts after sys.path setup
+from source_calibration_common import atomic_write_json, canonical_sha256, file_sha256  # noqa: E402 - load sibling scripts after sys.path setup
+from source_scope_map_v2 import (  # noqa: E402 - load sibling scripts after sys.path setup
     _content_fingerprint,
     _replay_calibration_projection,
     build_source_scope_map_v2,
     load_source_scope_map_v2,
 )
-from structural_association import graph_fingerprint, graph_from_sk_origin
-from analyze_fusion_performance import _source_scope_entry_matches
+from structural_association import graph_fingerprint, graph_from_sk_origin  # noqa: E402 - load sibling scripts after sys.path setup
+from analyze_fusion_performance import _source_scope_entry_matches  # noqa: E402 - load sibling scripts after sys.path setup
 
 
 def _graph(node_key, stream_role, *, collection):
@@ -101,14 +108,14 @@ class SourceCalibrationTest(unittest.TestCase):
             path.write_text(
                 json.dumps(self._origin_graph("ComputeA", "ComputeB")), encoding="utf-8"
             )
-            result = normalize_origin_graph(
-                path, collection_fingerprint="a" * 64
-            )
+            result = normalize_origin_graph(path, collection_fingerprint="a" * 64)
             self.assertEqual(result["protocol"], "normalized_business_graph_v2")
             self.assertEqual(
                 [node["stream_ordinal"] for node in result["nodes"]], [0, 1]
             )
-            self.assertEqual([edge["kind"] for edge in result["edges"]], ["STREAM_ORDER"])
+            self.assertEqual(
+                [edge["kind"] for edge in result["edges"]], ["STREAM_ORDER"]
+            )
             self.assertEqual(result["identity"], {"device_id": 0, "model_id": "48"})
 
     def test_origin_graph_normalizer_rejects_unguarded_scope_sentinel(self):
@@ -116,9 +123,7 @@ class SourceCalibrationTest(unittest.TestCase):
             path = Path(temporary) / "sk_graph_origin.json"
             path.write_text(
                 json.dumps(
-                    self._origin_graph(
-                        "sk_scope_kernel_begin_dav_2201", "ComputeA"
-                    )
+                    self._origin_graph("sk_scope_kernel_begin_dav_2201", "ComputeA")
                 ),
                 encoding="utf-8",
             )
@@ -130,9 +135,7 @@ class SourceCalibrationTest(unittest.TestCase):
             path = Path(temporary) / "sk_graph_origin.json"
             path.write_text(
                 json.dumps(
-                    self._origin_graph(
-                        "sk_scope_kernel_begin_dav_2201", "ComputeA"
-                    )
+                    self._origin_graph("sk_scope_kernel_begin_dav_2201", "ComputeA")
                 ),
                 encoding="utf-8",
             )
@@ -280,7 +283,9 @@ class SourceCalibrationTest(unittest.TestCase):
             self.assertEqual(summary["ignored_break_trigger_business_node_count"], 1)
             self.assertEqual(summary["skipped_node_count"], 1)
 
-    def test_stable_source_manifest_and_marker_only_calibration_restore_auto_source(self):
+    def test_stable_source_manifest_and_marker_only_calibration_restore_auto_source(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             stable_root = root / "stable"
@@ -288,9 +293,7 @@ class SourceCalibrationTest(unittest.TestCase):
             stable_root.mkdir()
             calibration_root.mkdir()
             (stable_root / "model.dsl").write_bytes(b"compute\n")
-            (calibration_root / "model.dsl").write_bytes(
-                b"BEGIN\ncompute\nEND\n"
-            )
+            (calibration_root / "model.dsl").write_bytes(b"BEGIN\ncompute\nEND\n")
             common = {
                 "base_revision": "auto-base-rev",
                 "calibration_revision": "auto-calibration-rev",
@@ -393,7 +396,11 @@ class SourceCalibrationTest(unittest.TestCase):
             tampered = copy.deepcopy(bridge)
             tampered["files"][0]["stable_sha256"] = "f" * 64
             tampered["bridge_fingerprint"] = canonical_sha256(
-                {key: value for key, value in tampered.items() if key != "bridge_fingerprint"}
+                {
+                    key: value
+                    for key, value in tampered.items()
+                    if key != "bridge_fingerprint"
+                }
             )
             with self.assertRaisesRegex(ValueError, "stable source SHA"):
                 validate_marker_only_calibration(
@@ -408,9 +415,7 @@ class SourceCalibrationTest(unittest.TestCase):
         source = root / "worktree"
         source.mkdir()
         content = (
-            b"compute\n"
-            if source_mode == "stable_source"
-            else b"BEGIN\ncompute\nEND\n"
+            b"compute\n" if source_mode == "stable_source" else b"BEGIN\ncompute\nEND\n"
         )
         (source / "model.dsl").write_bytes(content)
         adapter_output = {
@@ -467,16 +472,16 @@ class SourceCalibrationTest(unittest.TestCase):
             )
         bundle = root / "bundle"
         snapshot = bundle / "source" / "snapshot"
-        source_manifest, _ = build_manifest(adapter_output, source, snapshot_root=snapshot)
+        source_manifest, _ = build_manifest(
+            adapter_output, source, snapshot_root=snapshot
+        )
         source_manifest_path = bundle / "source" / "source-unit-manifest.json"
         atomic_write_json(source_manifest_path, source_manifest)
         auto_evidence = {}
         if source_mode == "stable_source":
             calibration_source = root / "calibration-worktree"
             calibration_source.mkdir()
-            (calibration_source / "model.dsl").write_bytes(
-                b"BEGIN\ncompute\nEND\n"
-            )
+            (calibration_source / "model.dsl").write_bytes(b"BEGIN\ncompute\nEND\n")
             calibration_spec = copy.deepcopy(adapter_output)
             calibration_spec.update(
                 {
@@ -543,17 +548,17 @@ class SourceCalibrationTest(unittest.TestCase):
             collection=canonical_sha256("calibration"),
         )
         runtime_validation = [
-                {
-                    "step_id": step,
-                    "business_occurrence_count": 1,
-                    "assigned_occurrence_count": 1,
-                    "unscoped_occurrence_count": 0,
-                    "conflicting_assignment_count": 0,
-                    "parent_binding_exact": True,
-                    "unit_assignment_complete": True,
-                }
-                for step in (1, 2, 3)
-            ]
+            {
+                "step_id": step,
+                "business_occurrence_count": 1,
+                "assigned_occurrence_count": 1,
+                "unscoped_occurrence_count": 0,
+                "conflicting_assignment_count": 0,
+                "parent_binding_exact": True,
+                "unit_assignment_complete": True,
+            }
+            for step in (1, 2, 3)
+        ]
         evidence_dir = bundle / "evidence"
         original_graph_path = evidence_dir / "original-graph.json"
         calibration_graph_path = evidence_dir / "calibration-graph.json"
@@ -631,9 +636,12 @@ class SourceCalibrationTest(unittest.TestCase):
             **{
                 field: fused_inventory["sk_groups"][0][field]
                 for field in (
-                    "device_id", "model_id", "block_instance_id",
+                    "device_id",
+                    "model_id",
+                    "block_instance_id",
                     "candidate_source_scope",
-                    "sk_occurrence_fingerprint", "original_child_node_keys",
+                    "sk_occurrence_fingerprint",
+                    "original_child_node_keys",
                 )
             },
         }
@@ -685,7 +693,9 @@ class SourceCalibrationTest(unittest.TestCase):
         )
         assignments["evidence_catalog"] = {
             "assignment-log": {
-                "relative_path": assignment_evidence_path.relative_to(bundle).as_posix(),
+                "relative_path": assignment_evidence_path.relative_to(
+                    bundle
+                ).as_posix(),
                 "sha256": file_sha256(assignment_evidence_path),
             }
         }
@@ -713,7 +723,9 @@ class SourceCalibrationTest(unittest.TestCase):
         collection_paths = {}
         for name in ("original-candidate", "calibration", "baseline"):
             path = bundle / name / "association-artifact-manifest.json"
-            atomic_write_json(path, {"kind": name, "manifest_fingerprint": canonical_sha256(name)})
+            atomic_write_json(
+                path, {"kind": name, "manifest_fingerprint": canonical_sha256(name)}
+            )
             collection_paths[name] = path
 
         required = {
@@ -723,7 +735,9 @@ class SourceCalibrationTest(unittest.TestCase):
             "calibration_projection": projection_path,
             "original_fused_inventory": fused_path,
             "unit_assignments": assignments_path,
-            "original_candidate_collection_manifest": collection_paths["original-candidate"],
+            "original_candidate_collection_manifest": collection_paths[
+                "original-candidate"
+            ],
             "calibration_collection_manifest": collection_paths["calibration"],
             "baseline_collection_manifest": collection_paths["baseline"],
             **{
@@ -750,7 +764,9 @@ class SourceCalibrationTest(unittest.TestCase):
         dag_dependencies = {
             "source_manifest": ["source_snapshot_manifest"],
             "calibration_projection": [
-                "original_graph", "calibration_graph", "runtime_validation"
+                "original_graph",
+                "calibration_graph",
+                "runtime_validation",
             ],
             "original_fused_inventory": ["fused_log_records"],
             "unit_assignments": ["assignment_log_records"],
@@ -840,9 +856,7 @@ class SourceCalibrationTest(unittest.TestCase):
 
     def test_automatic_source_map_uses_marker_only_calibration_and_stable_source(self):
         with tempfile.TemporaryDirectory() as temporary:
-            artifacts = self._artifacts(
-                Path(temporary), source_mode="stable_source"
-            )
+            artifacts = self._artifacts(Path(temporary), source_mode="stable_source")
             result = load_source_scope_map_v2(
                 artifacts["scope_map"],
                 expected_source_revision="stable-rev",
@@ -866,9 +880,7 @@ class SourceCalibrationTest(unittest.TestCase):
                 },
             )
 
-            artifacts["marker_only_calibration"].write_text(
-                "{}\n", encoding="utf-8"
-            )
+            artifacts["marker_only_calibration"].write_text("{}\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "marker_only_calibration SHA"):
                 load_source_scope_map_v2(
                     artifacts["scope_map"],
@@ -918,8 +930,14 @@ class SourceCalibrationTest(unittest.TestCase):
             "collection_fingerprint": "original",
             "identity": {"device_id": 0, "model_id": "model-x"},
             "nodes": [
-                {"node_key": key, "stream_role": "s", "stream_ordinal": ordinal,
-                 "canonical_op": "Same", "core_family": "VECTOR", "observable_signature": {}}
+                {
+                    "node_key": key,
+                    "stream_role": "s",
+                    "stream_ordinal": ordinal,
+                    "canonical_op": "Same",
+                    "core_family": "VECTOR",
+                    "observable_signature": {},
+                }
                 for ordinal, key in enumerate(("a", "b"))
             ],
             "edges": [],
@@ -952,8 +970,12 @@ class SourceCalibrationTest(unittest.TestCase):
                     for ordinal, key in enumerate(keys)
                 ],
                 "edges": [
-                    {"source": left, "target": right,
-                     "kind": "STREAM_ORDER", "ports": {}}
+                    {
+                        "source": left,
+                        "target": right,
+                        "kind": "STREAM_ORDER",
+                        "ports": {},
+                    }
                     for left, right in zip(keys, keys[1:])
                 ],
             }
@@ -1006,16 +1028,8 @@ class SourceCalibrationTest(unittest.TestCase):
                 ],
             }
 
-        exact = (
-            ["calibration-target"]
-            if target_assigned
-            else ["calibration-outside"]
-        )
-        skipped = (
-            ["calibration-outside"]
-            if target_assigned
-            else ["calibration-target"]
-        )
+        exact = ["calibration-target"] if target_assigned else ["calibration-outside"]
+        skipped = ["calibration-outside"] if target_assigned else ["calibration-target"]
         runtime_validation = [
             {
                 "step_id": step,
@@ -1038,9 +1052,7 @@ class SourceCalibrationTest(unittest.TestCase):
         )
 
     def test_partial_assignment_requires_a_complete_disjoint_partition(self):
-        original = _graph(
-            "original-node", "original-stream", collection="original"
-        )
+        original = _graph("original-node", "original-stream", collection="original")
         calibration = _graph(
             "calibration-node", "calibration-stream", collection="calibration"
         )
@@ -1087,9 +1099,7 @@ class SourceCalibrationTest(unittest.TestCase):
             assignments = json.loads(
                 (bundle / "mapping" / "unit-assignments.json").read_text()
             )
-            assignments["assignments"][0]["calibration_node_key"] = (
-                "calibration-target"
-            )
+            assignments["assignments"][0]["calibration_node_key"] = "calibration-target"
 
             result = build_sk_source_map(
                 projection,
@@ -1128,9 +1138,7 @@ class SourceCalibrationTest(unittest.TestCase):
             assignments = json.loads(
                 (bundle / "mapping" / "unit-assignments.json").read_text()
             )
-            assignments["assignments"][0]["calibration_node_key"] = (
-                "calibration-target"
-            )
+            assignments["assignments"][0]["calibration_node_key"] = "calibration-target"
 
             result = build_sk_source_map(
                 projection,
@@ -1195,7 +1203,9 @@ class SourceCalibrationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             artifacts = self._artifacts(Path(temporary))
             projection = json.loads(
-                (artifacts["bundle"] / "mapping" / "calibration-projection.json").read_text()
+                (
+                    artifacts["bundle"] / "mapping" / "calibration-projection.json"
+                ).read_text()
             )
             projection["occurrences"][0]["original"][2] = "ForgedCompute"
             projection["projection_fingerprint"] = canonical_sha256(
@@ -1279,7 +1289,11 @@ class SourceCalibrationTest(unittest.TestCase):
                 projection["occurrences"]
             )
             projection["projection_fingerprint"] = canonical_sha256(
-                {key: value for key, value in projection.items() if key != "projection_fingerprint"}
+                {
+                    key: value
+                    for key, value in projection.items()
+                    if key != "projection_fingerprint"
+                }
             )
             source_manifest = json.loads(
                 (bundle / "source" / "source-unit-manifest.json").read_text()
@@ -1288,7 +1302,11 @@ class SourceCalibrationTest(unittest.TestCase):
             second_unit["unit_id"] = "block.alternative"
             source_manifest["units"].append(second_unit)
             source_manifest["manifest_fingerprint"] = canonical_sha256(
-                {key: value for key, value in source_manifest.items() if key != "manifest_fingerprint"}
+                {
+                    key: value
+                    for key, value in source_manifest.items()
+                    if key != "manifest_fingerprint"
+                }
             )
             block_inventory = {
                 "model_adapter_fingerprint": "a" * 64,
@@ -1364,7 +1382,9 @@ class SourceCalibrationTest(unittest.TestCase):
                 {"source_unit_exact"},
             )
             first = result["mappings"][0]
-            self.assertIn("block-3", first["consensus"]["counterexample_block_instances"])
+            self.assertIn(
+                "block-3", first["consensus"]["counterexample_block_instances"]
+            )
 
 
 if __name__ == "__main__":

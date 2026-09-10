@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Run one parent-flow command under the shared SuperKernel NPU lease protocol."""
 
 import argparse
@@ -24,7 +31,11 @@ MANIFEST_SCHEMA = "superkernel-shared-device-lease-command-v2"
 
 def _fingerprint(value):
     encoded = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     ).encode()
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
@@ -49,17 +60,34 @@ def _atomic_json(path, value):
 
 
 def run_command(
-    argv, *, lease_root, device_ids, timeout_seconds, cwd, manifest_out,
-    environment=None, command_id="parent-command", lease_timeout_seconds=None,
+    argv,
+    *,
+    lease_root,
+    device_ids,
+    timeout_seconds,
+    cwd,
+    manifest_out,
+    environment=None,
+    command_id="parent-command",
+    lease_timeout_seconds=None,
 ):
-    if not isinstance(argv, list) or not argv or any(not isinstance(item, str) or not item for item in argv):
+    if (
+        not isinstance(argv, list)
+        or not argv
+        or any(not isinstance(item, str) or not item for item in argv)
+    ):
         raise ValueError("command argv must be a non-empty string array")
     executable = Path(argv[0])
     if not executable.is_absolute() or not executable.is_file():
         raise ValueError("command executable must be an existing absolute file")
     devices = sorted(device_ids)
-    if not devices or len(devices) != len(set(devices)) or any(
-        isinstance(item, bool) or not isinstance(item, int) or item < 0 for item in devices
+    if (
+        not devices
+        or len(devices) != len(set(devices))
+        or any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+            for item in devices
+        )
     ):
         raise ValueError("device_ids must be sorted unique non-negative integers")
     cwd = Path(cwd).resolve()
@@ -98,8 +126,18 @@ def run_command(
             record = multistream_runner._run_argv(
                 argv, cwd, child_environment, stdout_path, stderr_path, timeout_seconds
             )
-        status = "passed" if record["return_code"] == 0 and not record["timed_out"] else "failed"
-        reason = None if status == "passed" else "command_timeout" if record["timed_out"] else "command_nonzero"
+        status = (
+            "passed"
+            if record["return_code"] == 0 and not record["timed_out"]
+            else "failed"
+        )
+        reason = (
+            None
+            if status == "passed"
+            else "command_timeout"
+            if record["timed_out"]
+            else "command_nonzero"
+        )
     except TimeoutError as error:
         record = None
         status = "blocked"
@@ -121,7 +159,9 @@ def run_command(
         "lease_mode": lease_mode if record is not None else None,
         "executable": {
             "path": str(executable.resolve()),
-            "file_fingerprint": multistream_runner.file_fingerprint(executable.resolve()),
+            "file_fingerprint": multistream_runner.file_fingerprint(
+                executable.resolve()
+            ),
         },
         "command": record,
         "logs": {
@@ -150,7 +190,11 @@ def main(argv=None):
     if command[:1] == ["--"]:
         command = command[1:]
     try:
-        environment = json.loads(args.environment_json.read_text()) if args.environment_json else None
+        environment = (
+            json.loads(args.environment_json.read_text())
+            if args.environment_json
+            else None
+        )
         result = run_command(
             command,
             lease_root=args.lease_root,
@@ -165,7 +209,9 @@ def main(argv=None):
     except (OSError, ValueError, json.JSONDecodeError) as error:
         parser.error(str(error))
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0 if result["status"] == "passed" else 2 if result["status"] == "blocked" else 1
+    return (
+        0 if result["status"] == "passed" else 2 if result["status"] == "blocked" else 1
+    )
 
 
 if __name__ == "__main__":

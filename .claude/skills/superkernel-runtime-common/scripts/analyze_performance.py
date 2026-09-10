@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Summarize multi-rank inference logs and compare SuperKernel candidates."""
 
 import argparse
@@ -42,9 +49,7 @@ STAGE_A_EMPTY_OPTION_FIELDS = (
 
 
 def _canonical_json(value):
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _sha256_json(value):
@@ -83,15 +88,15 @@ def validate_screening_matrix(matrix, candidate_names):
             raise ValueError(f"screening matrix {prefix} must be an object")
         candidate_id = _required_text(entry.get("id"), f"{prefix}.id")
         if candidate_id in ids:
-            raise ValueError(f"screening matrix has duplicate candidate id: {candidate_id}")
+            raise ValueError(
+                f"screening matrix has duplicate candidate id: {candidate_id}"
+            )
         ids.add(candidate_id)
         strategy_kind = _required_text(
             entry.get("strategy_kind"), f"{prefix}.strategy_kind"
         )
         covered_strategies.add(strategy_kind)
-        only_change = _required_text(
-            entry.get("only_change"), f"{prefix}.only_change"
-        )
+        only_change = _required_text(entry.get("only_change"), f"{prefix}.only_change")
         status = _required_text(entry.get("status"), f"{prefix}.status")
         if status not in SETTLED_SCREENING_STATUSES:
             choices = ", ".join(sorted(SETTLED_SCREENING_STATUSES))
@@ -144,9 +149,7 @@ def validate_screening_matrix(matrix, candidate_names):
                 "evidence": evidence,
             }
             settled_nonexecuted.append(normalized_entry)
-    missing_strategies = sorted(
-        REQUIRED_SCREENING_STRATEGIES - covered_strategies
-    )
+    missing_strategies = sorted(REQUIRED_SCREENING_STRATEGIES - covered_strategies)
     if missing_strategies:
         raise ValueError(
             "screening matrix missing required strategy kinds: "
@@ -159,10 +162,14 @@ def validate_screening_matrix(matrix, candidate_names):
     if missing_candidates or extra_candidates:
         details = []
         if missing_candidates:
-            details.append("missing executed candidates: " + ", ".join(missing_candidates))
+            details.append(
+                "missing executed candidates: " + ", ".join(missing_candidates)
+            )
         if extra_candidates:
             details.append("undeclared candidates: " + ", ".join(extra_candidates))
-        raise ValueError("screening candidate set mismatch (" + "; ".join(details) + ")")
+        raise ValueError(
+            "screening candidate set mismatch (" + "; ".join(details) + ")"
+        )
 
     return {
         "schema_version": SCREENING_MATRIX_SCHEMA,
@@ -185,16 +192,22 @@ def validate_stage_a_config(config_path):
     try:
         raw = config_path.read_bytes()
     except OSError as error:
-        raise ValueError(f"Stage-A config cannot be read: {config_path}: {error}") from error
+        raise ValueError(
+            f"Stage-A config cannot be read: {config_path}: {error}"
+        ) from error
     try:
         config = yaml.safe_load(raw)
     except yaml.YAMLError as error:
-        raise ValueError(f"Stage-A config is not valid YAML: {config_path}: {error}") from error
+        raise ValueError(
+            f"Stage-A config is not valid YAML: {config_path}: {error}"
+        ) from error
     if not isinstance(config, dict):
         raise ValueError(f"Stage-A config must be a YAML mapping: {config_path}")
     model_config = config.get("model_config")
     if not isinstance(model_config, dict):
-        raise ValueError(f"Stage-A config model_config must be a mapping: {config_path}")
+        raise ValueError(
+            f"Stage-A config model_config must be a mapping: {config_path}"
+        )
     custom_params = model_config.get("custom_params")
     if not isinstance(custom_params, dict):
         raise ValueError(
@@ -225,7 +238,9 @@ def validate_stage_a_candidate_configs(candidates):
     validated = {}
     for name, candidate_path in candidates.items():
         candidate_path = Path(candidate_path)
-        run_paths = sorted(item for item in candidate_path.glob("run-*") if item.is_dir())
+        run_paths = sorted(
+            item for item in candidate_path.glob("run-*") if item.is_dir()
+        )
         if not run_paths:
             raise ValueError(f"{candidate_path}: no run-* directories found")
         run_configs = []
@@ -311,7 +326,9 @@ def summarize_run(path, warmup=8, expected_ranks=8):
         decode = parsed["decode_ms"][warmup:]
         decode_exact = parsed["decode_exact_ms"][warmup:]
         if not decode:
-            raise ValueError(f"{log_path}: no decode samples remain after warmup={warmup}")
+            raise ValueError(
+                f"{log_path}: no decode samples remain after warmup={warmup}"
+            )
         ranks[str(rank)] = _statistics(decode)
         ranks[str(rank)]["mean_exact_ms"] = str(
             sum(decode_exact, Decimal("0")) / len(decode_exact)
@@ -343,9 +360,7 @@ def summarize_candidate(path, warmup=8, expected_ranks=8):
         for run_path in run_paths
     ]
     worst_rank_means = [run["worst_rank_mean_ms"] for run in runs]
-    worst_rank_exact_means = [
-        run["worst_rank_mean_exact_ms"] for run in runs
-    ]
+    worst_rank_exact_means = [run["worst_rank_mean_exact_ms"] for run in runs]
     all_decode = [
         sample
         for run in runs
@@ -377,7 +392,9 @@ def _improvement_pct(baseline_value, candidate_value):
 
 
 def evaluate_baseline_stability(baseline_summary):
-    values = [float(value) for value in baseline_summary.get("run_worst_rank_means_ms", [])]
+    values = [
+        float(value) for value in baseline_summary.get("run_worst_rank_means_ms", [])
+    ]
     exact_values = baseline_summary.get("run_worst_rank_means_exact_ms")
     if exact_values is None:
         decimal_values = [Decimal(str(value)) for value in values]
@@ -387,9 +404,7 @@ def evaluate_baseline_stability(baseline_summary):
         except (TypeError, ValueError, ArithmeticError):
             decimal_values = []
     spread_ms = (
-        float(max(decimal_values) - min(decimal_values))
-        if decimal_values
-        else None
+        float(max(decimal_values) - min(decimal_values)) if decimal_values else None
     )
     mean_ms = (
         sum(decimal_values, Decimal("0")) / len(decimal_values)
@@ -403,9 +418,7 @@ def evaluate_baseline_stability(baseline_summary):
     )
     checks = {
         "required_run_count": len(values) == S0_REQUIRED_RUNS,
-        "max_spread_pct": (
-            spread_pct is not None and spread_pct <= S0_MAX_SPREAD_PCT
-        ),
+        "max_spread_pct": (spread_pct is not None and spread_pct <= S0_MAX_SPREAD_PCT),
     }
     return {
         "stable": all(checks.values()),
@@ -466,13 +479,10 @@ def evaluate_promotion(
         candidate_summary["decode"]["stddev_ms"],
         baseline_summary["decode"]["stddev_ms"],
     )
-    mean_improvement_passed = (
-        mean_improvement is not None
-        and (
-            mean_improvement > 0.0
-            if require_strict_positive_mean_gain
-            else mean_improvement >= min_improvement_pct
-        )
+    mean_improvement_passed = mean_improvement is not None and (
+        mean_improvement > 0.0
+        if require_strict_positive_mean_gain
+        else mean_improvement >= min_improvement_pct
     )
     checks = {
         "baseline_stable": baseline_stable,
@@ -498,7 +508,9 @@ def evaluate_promotion(
         "candidate_min_runs": CANDIDATE_MIN_RUNS,
         "min_improvement_pct": min_improvement_pct,
         "mean_improvement_rule": (
-            "strictly_positive" if require_strict_positive_mean_gain else "at_least_threshold"
+            "strictly_positive"
+            if require_strict_positive_mean_gain
+            else "at_least_threshold"
         ),
         "allow_p90_regression_pct": allow_p90_regression_pct,
         "allow_stddev_regression_pct": allow_stddev_regression_pct,
@@ -627,7 +639,9 @@ def compare_candidates(
             details.append("missing: " + ", ".join(missing_names))
         if extra_names:
             details.append("extra: " + ", ".join(extra_names))
-        raise ValueError("replay evidence mapping mismatch (" + "; ".join(details) + ")")
+        raise ValueError(
+            "replay evidence mapping mismatch (" + "; ".join(details) + ")"
+        )
     replay_validations = {
         name: validate_replay_report(replay_evidence[name], expected_candidate=name)
         for name in replay_required_names
@@ -641,7 +655,9 @@ def compare_candidates(
         raise ValueError("replay evidence invalid (" + "; ".join(invalid_replays) + ")")
     baseline_mean = baseline_summary["worst_rank_mean_ms"]
     for name, path in candidates.items():
-        summary = summarize_candidate(path, warmup=warmup, expected_ranks=expected_ranks)
+        summary = summarize_candidate(
+            path, warmup=warmup, expected_ranks=expected_ranks
+        )
         summary["improvement_pct"] = (
             (baseline_mean - summary["worst_rank_mean_ms"]) / baseline_mean * 100
         )
@@ -728,10 +744,14 @@ def compare_candidates(
         "stage": decision_stage,
         "best_superkernel_candidate": best[0] if best else None,
         "recommended": recommended,
-        "selected_for_deep_analysis": recommended if selection_only and eligible else None,
+        "selected_for_deep_analysis": recommended
+        if selection_only and eligible
+        else None,
         "baseline_retained": recommended == "baseline",
         "promoted_candidates": [name for name, _ in promoted],
-        "screening_eligible_candidates": [name for name, _ in eligible] if selection_only else [],
+        "screening_eligible_candidates": [name for name, _ in eligible]
+        if selection_only
+        else [],
         "ranked_eligible_candidates": (
             [name for name, _ in ranked_eligible] if selection_only else []
         ),
@@ -800,7 +820,9 @@ def _print_table(report):
     decision_label = (
         "screening-eligible"
         if selection_only
-        else "option-accepted" if option_trial else "promoted"
+        else "option-accepted"
+        if option_trial
+        else "promoted"
     )
     print(
         "candidate runs worst-rank-mean-ms p50-ms p90-ms stddev-ms "
@@ -906,11 +928,11 @@ def main(argv=None):
         promotion_modes = dict(args.promotion_mode)
         if len(promotion_modes) != len(args.promotion_mode):
             raise ValueError("--promotion-mode has duplicate candidate name")
-        replay_evidence = _candidate_mapping(
-            args.replay_evidence, "--replay-evidence"
-        )
+        replay_evidence = _candidate_mapping(args.replay_evidence, "--replay-evidence")
         if args.selection_only and args.option_trial:
-            raise ValueError("--selection-only and --option-trial are mutually exclusive")
+            raise ValueError(
+                "--selection-only and --option-trial are mutually exclusive"
+            )
         if args.selection_only and args.screening_matrix is None:
             raise ValueError("--selection-only requires --screening-matrix")
         if not args.selection_only and args.screening_matrix is not None:

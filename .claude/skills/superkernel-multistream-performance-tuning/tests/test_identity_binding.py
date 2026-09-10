@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import copy
 import json
 import sys
@@ -37,35 +44,48 @@ class IdentityBindingTest(unittest.TestCase):
     def _value(self):
         observations = [
             self._observation(
-                "source", None,
+                "source",
+                None,
                 {"source_file": "model.py", "start_offset": 10, "end_offset": 20},
                 "exact_source_span",
             )
         ]
         for index in range(3):
             alignment = f"decode-{index}"
-            observations.extend([
-                self._observation(
-                    "sk_off", alignment, {"origin_uid": f"off-{index}"},
-                    "compiler_origin_uid",
-                ),
-                self._observation(
-                    "sk_on", alignment, {"origin_uid": f"on-{index}"},
-                    "sk_meta_origin_exact",
-                ),
-            ])
+            observations.extend(
+                [
+                    self._observation(
+                        "sk_off",
+                        alignment,
+                        {"origin_uid": f"off-{index}"},
+                        "compiler_origin_uid",
+                    ),
+                    self._observation(
+                        "sk_on",
+                        alignment,
+                        {"origin_uid": f"on-{index}"},
+                        "sk_meta_origin_exact",
+                    ),
+                ]
+            )
         value = {
             "schema_version": multistream_identity_binding.OBSERVATIONS_SCHEMA,
             "observation_set_id": "identity-set-1",
             "request_fingerprint": "request-fp-1",
-            "evidence_files": [{
-                "path": "mapping.json",
-                "size_bytes": self.evidence.stat().st_size,
-                "file_fingerprint": multistream_identity_binding.file_fingerprint(self.evidence),
-            }],
+            "evidence_files": [
+                {
+                    "path": "mapping.json",
+                    "size_bytes": self.evidence.stat().st_size,
+                    "file_fingerprint": multistream_identity_binding.file_fingerprint(
+                        self.evidence
+                    ),
+                }
+            ],
             "observations": observations,
         }
-        value["observations_fingerprint"] = multistream_identity_binding.fingerprint(value)
+        value["observations_fingerprint"] = multistream_identity_binding.fingerprint(
+            value
+        )
         return value
 
     def _build(self, value):
@@ -77,9 +97,10 @@ class IdentityBindingTest(unittest.TestCase):
         registry = self._build(self._value())
         self.assertTrue(registry["complete"])
         self.assertEqual(registry["blockers"], [])
-        self.assertEqual(registry["entries"][0]["aligned_occurrence_ids"], [
-            "decode-0", "decode-1", "decode-2"
-        ])
+        self.assertEqual(
+            registry["entries"][0]["aligned_occurrence_ids"],
+            ["decode-0", "decode-1", "decode-2"],
+        )
         self.assertEqual(len(registry["forward_index"]), 7)
         registry_path = self.root / "registry.json"
         registry_path.write_text(json.dumps(registry) + "\n")
@@ -95,7 +116,11 @@ class IdentityBindingTest(unittest.TestCase):
         duplicate["statement_id"] = "statement-2"
         value["observations"].append(duplicate)
         value["observations_fingerprint"] = multistream_identity_binding.fingerprint(
-            {key: item for key, item in value.items() if key != "observations_fingerprint"}
+            {
+                key: item
+                for key, item in value.items()
+                if key != "observations_fingerprint"
+            }
         )
         registry = self._build(value)
         codes = {item["code"] for item in registry["blockers"]}
@@ -106,7 +131,11 @@ class IdentityBindingTest(unittest.TestCase):
         value = self._value()
         value["observations"][-1]["alignment_id"] = "decode-other"
         value["observations_fingerprint"] = multistream_identity_binding.fingerprint(
-            {key: item for key, item in value.items() if key != "observations_fingerprint"}
+            {
+                key: item
+                for key, item in value.items()
+                if key != "observations_fingerprint"
+            }
         )
         registry = self._build(value)
         self.assertIn(
@@ -118,7 +147,11 @@ class IdentityBindingTest(unittest.TestCase):
         value = self._value()
         value["observations"][1]["binding_method"] = "operator_name"
         value["observations_fingerprint"] = multistream_identity_binding.fingerprint(
-            {key: item for key, item in value.items() if key != "observations_fingerprint"}
+            {
+                key: item
+                for key, item in value.items()
+                if key != "observations_fingerprint"
+            }
         )
         with self.assertRaisesRegex(ValueError, "not an exact method"):
             self._build(value)

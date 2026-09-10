@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Validate and merge portable SuperKernel experiment handoffs."""
 
 from __future__ import annotations
@@ -290,7 +297,9 @@ def _validate_declared_change_set(value, location):
     elif len(pointers) != len(set(pointers)):
         errors.append(f"{location}.allowed_json_pointers must not contain duplicates")
     only_change_zh = value.get("only_change_zh")
-    if not _is_non_empty_string(only_change_zh) or not _contains_chinese(only_change_zh):
+    if not _is_non_empty_string(only_change_zh) or not _contains_chinese(
+        only_change_zh
+    ):
         errors.append(f"{location}.only_change_zh must contain non-empty Chinese text")
     return errors
 
@@ -406,9 +415,7 @@ def _validate_decision(
     for field in ("round_id", "range_id", "sk_id", "source_scope"):
         if not _is_non_empty_string(decision.get(field)):
             errors.append(f"{location}.{field} must be a non-empty string")
-        elif _has_surrounding_whitespace(
-            decision.get(field)
-        ):
+        elif _has_surrounding_whitespace(decision.get(field)):
             errors.append(f"{location}.{field} must not contain surrounding whitespace")
     mapping_method = decision.get("mapping_method")
     mapping_confidence = decision.get("mapping_confidence")
@@ -466,11 +473,14 @@ def _validate_decision(
                 "insufficient_evidence",
             )
         }
-    if not (
-        _enum_member(classification, PERFORMANCE_CLASSES)
-        and _enum_member(action, PERFORMANCE_ACTIONS)
-        and _enum_member(status, DECISION_STATUSES)
-    ) or decision_tuple not in allowed_tuples:
+    if (
+        not (
+            _enum_member(classification, PERFORMANCE_CLASSES)
+            and _enum_member(action, PERFORMANCE_ACTIONS)
+            and _enum_member(status, DECISION_STATUSES)
+        )
+        or decision_tuple not in allowed_tuples
+    ):
         errors.append(
             f"{location} classification/action/status tuple {decision_tuple!r} "
             f"is invalid for {collection}"
@@ -488,14 +498,10 @@ def _validate_decision(
         not _mapping_is_performance_exact(decision)
         and classification != "insufficient_evidence"
     ):
-        errors.append(
-            f"{location} non-exact mapping must remain insufficient_evidence"
-        )
+        errors.append(f"{location} non-exact mapping must remain insufficient_evidence")
 
     round_id = decision.get("round_id")
-    round_data = (
-        rounds_by_id.get(round_id) if _is_non_empty_string(round_id) else None
-    )
+    round_data = rounds_by_id.get(round_id) if _is_non_empty_string(round_id) else None
     if round_data is None:
         errors.append(f"{location}.round_id must reference a declared round")
     errors.extend(_validate_fingerprints(decision, location, round_data))
@@ -527,8 +533,7 @@ def _validate_decision(
         )
     effective_keep = action == "keep" and status in ("applied", "verified")
     if effective_keep and not (
-        classification == "beneficial"
-        and _mapping_is_source_actionable(decision)
+        classification == "beneficial" and _mapping_is_source_actionable(decision)
     ):
         errors.append(
             f"{location} effective keep requires source-actionable beneficial mapping"
@@ -840,7 +845,8 @@ def _validate_experiment_result(result):
     if result.get("parent_experiment_id") != experiment_id:
         errors.append("parent_experiment_id must equal experiment_id")
     if not isinstance(result.get("next_agent_guidance_zh"), str) or not any(
-        "\u4e00" <= char <= "\u9fff" for char in result.get("next_agent_guidance_zh", "")
+        "\u4e00" <= char <= "\u9fff"
+        for char in result.get("next_agent_guidance_zh", "")
     ):
         errors.append("next_agent_guidance_zh must contain Chinese guidance")
     for field in (
@@ -883,7 +889,9 @@ def _validate_experiment_result(result):
         if not _is_non_empty_string(round_id):
             errors.append(f"{location}.round_id must be a non-empty string")
         elif _has_surrounding_whitespace(round_id):
-            errors.append(f"{location}.round_id must not contain surrounding whitespace")
+            errors.append(
+                f"{location}.round_id must not contain surrounding whitespace"
+            )
         elif round_id in rounds_by_id:
             errors.append(f"duplicate round_id: {round_id}")
         else:
@@ -903,7 +911,9 @@ def _validate_experiment_result(result):
         if not _enum_member(scope_kind, SCOPE_KINDS):
             errors.append(f"{location}.scope_kind is invalid")
         if round_kind == "automatic_aot" and scope_kind != "automatic_aot":
-            errors.append(f"{location} automatic_aot round requires automatic_aot scope_kind")
+            errors.append(
+                f"{location} automatic_aot round requires automatic_aot scope_kind"
+            )
         if round_kind == "base" and scope_kind != "manual":
             errors.append(f"{location} base round requires manual scope_kind")
         if _enum_member(round_kind, ROUND_KINDS):
@@ -933,7 +943,10 @@ def _validate_experiment_result(result):
             ) != result.get(field):
                 errors.append(f"{location}.{field} must match the experiment")
 
-        if round_kind != "automatic_aot" or "performance_decision_range_ids" in round_data:
+        if (
+            round_kind != "automatic_aot"
+            or "performance_decision_range_ids" in round_data
+        ):
             errors.extend(
                 _validate_string_list(
                     round_data.get("performance_decision_range_ids"),
@@ -973,9 +986,9 @@ def _validate_experiment_result(result):
         ):
             normalized_baseline_path = Path(baseline_path).as_posix()
             normalized_baseline_fingerprint = baseline_fingerprint.strip()
-            baseline_path_fingerprints.setdefault(
-                normalized_baseline_path, set()
-            ).add(normalized_baseline_fingerprint)
+            baseline_path_fingerprints.setdefault(normalized_baseline_path, set()).add(
+                normalized_baseline_fingerprint
+            )
             baseline_fingerprint_paths.setdefault(
                 normalized_baseline_fingerprint, set()
             ).add(normalized_baseline_path)
@@ -996,9 +1009,7 @@ def _validate_experiment_result(result):
             candidate_profile_fingerprints.append(candidate_fingerprint.strip())
     if len(candidate_profile_paths) != len(set(candidate_profile_paths)):
         errors.append("candidate_profile must be unique across profiling rounds")
-    if len(candidate_profile_fingerprints) != len(
-        set(candidate_profile_fingerprints)
-    ):
+    if len(candidate_profile_fingerprints) != len(set(candidate_profile_fingerprints)):
         errors.append(
             "candidate_profile_fingerprint must be unique across profiling rounds"
         )
@@ -1018,9 +1029,7 @@ def _validate_experiment_result(result):
             "baseline and candidate profile paths must be disjoint: "
             + ", ".join(sorted(conflicting_profile_paths))
         )
-    conflicting_profile_fingerprints = set(
-        all_baseline_profile_fingerprints
-    ) & set(
+    conflicting_profile_fingerprints = set(all_baseline_profile_fingerprints) & set(
         all_candidate_profile_fingerprints
     )
     if conflicting_profile_fingerprints:
@@ -1071,14 +1080,14 @@ def _validate_experiment_result(result):
             )
         if optimization_round_kinds.count("final") > 1:
             errors.append("optimization rounds may contain at most one final round")
-        if "final" in optimization_round_kinds and optimization_round_kinds[-1] != "final":
+        if (
+            "final" in optimization_round_kinds
+            and optimization_round_kinds[-1] != "final"
+        ):
             errors.append("final must be the last optimization round")
-        requires_final = (
-            optimization_round_kinds[0] == "base"
-            or any(
-                kind in {"performance_prune", "final"}
-                for kind in optimization_round_kinds[1:]
-            )
+        requires_final = optimization_round_kinds[0] == "base" or any(
+            kind in {"performance_prune", "final"}
+            for kind in optimization_round_kinds[1:]
         )
         if (
             requires_final
@@ -1087,8 +1096,10 @@ def _validate_experiment_result(result):
         ):
             blockers = result.get("blockers")
             last_lifecycle = optimization_rounds[-1][1].get("lifecycle")
-            explicit_blockers = isinstance(blockers, list) and bool(blockers) and all(
-                _is_non_empty_string(blocker) for blocker in blockers
+            explicit_blockers = (
+                isinstance(blockers, list)
+                and bool(blockers)
+                and all(_is_non_empty_string(blocker) for blocker in blockers)
             )
             terminal_incomplete = isinstance(last_lifecycle, dict) and any(
                 last_lifecycle.get(gate) in ("failed", "blocked", "not_run")
@@ -1170,8 +1181,7 @@ def _validate_experiment_result(result):
     ):
         lifecycle = round_data.get("lifecycle")
         if not isinstance(lifecycle, dict) or any(
-            lifecycle.get(gate) != "passed"
-            for gate in ("correctness", "profiling")
+            lifecycle.get(gate) != "passed" for gate in ("correctness", "profiling")
         ):
             errors.append(
                 f"{location} optimization round cannot be followed by "
@@ -1212,7 +1222,9 @@ def _validate_experiment_result(result):
                     identity = (decision_round_id, decision_range_id)
                     previous_collection = decision_identities.get(identity)
                     if previous_collection == field:
-                        errors.append(f"{field} contains duplicate round/range identity")
+                        errors.append(
+                            f"{field} contains duplicate round/range identity"
+                        )
                     elif previous_collection is not None:
                         errors.append(
                             f"{field} contains a conflicting round/range identity "
@@ -1232,14 +1244,18 @@ def _validate_experiment_result(result):
         if isinstance(item, dict)
     ]
     if promotion_mode == "whole_scope":
-        if len(rounds) != 1 or not isinstance(rounds[0], dict) or rounds[0].get(
-            "round_kind"
-        ) not in {"base", "automatic_aot"}:
+        if (
+            len(rounds) != 1
+            or not isinstance(rounds[0], dict)
+            or rounds[0].get("round_kind") not in {"base", "automatic_aot"}
+        ):
             errors.append(
                 "whole_scope promotion requires exactly one unchanged base or automatic_aot round"
             )
         elif rounds[0].get("round_id") not in profiling_round_ids:
-            errors.append("whole_scope promotion requires correctness-passed fresh profiling")
+            errors.append(
+                "whole_scope promotion requires correctness-passed fresh profiling"
+            )
         whole_scope_records = decisions + unresolved
         if not whole_scope_records:
             errors.append("whole_scope promotion requires complete per-SK decisions")
@@ -1288,7 +1304,10 @@ def _validate_experiment_result(result):
         for previous in reversed(rounds[:round_index]):
             if not isinstance(previous, dict):
                 continue
-            if required_kind is not None and previous.get("round_kind") != required_kind:
+            if (
+                required_kind is not None
+                and previous.get("round_kind") != required_kind
+            ):
                 continue
             candidate = previous.get("candidate_config_fingerprint")
             if _is_non_empty_string(candidate):
@@ -1302,9 +1321,7 @@ def _validate_experiment_result(result):
         and item.get("action") == "keep"
         and item.get("status") in ("applied", "verified")
         and _is_non_empty_string(item.get("range_id"))
-        and _safe_mapping_get(rounds_by_id, item.get("round_id"), {}).get(
-            "round_kind"
-        )
+        and _safe_mapping_get(rounds_by_id, item.get("round_id"), {}).get("round_kind")
         != "final"
     }
 
@@ -1384,15 +1401,15 @@ def _validate_experiment_result(result):
         elif round_kind == "final":
             final_retained = round_data.get("retained_range_ids")
             errors.extend(
-                _validate_string_list(
-                    final_retained, f"{location}.retained_range_ids"
-                )
+                _validate_string_list(final_retained, f"{location}.retained_range_ids")
             )
             retained_set = _string_set(final_retained)
             if retained_set != retained_range_ids:
                 errors.append(f"{location} final must reference all retained ranges")
             if reference_set != retained_set:
-                errors.append(f"{location} final decision references must match final ranges")
+                errors.append(
+                    f"{location} final decision references must match final ranges"
+                )
             if round_id not in profiling_round_ids:
                 errors.append(f"{location} final requires fresh profiling analysis")
             final_range_ids = retained_set
@@ -1511,7 +1528,9 @@ def _validate_analysis_binding(result, round_data, analysis, analysis_path, root
         try:
             input_path.relative_to(root)
         except ValueError as error:
-            raise ValueError(f"{location} inputs.{field} escapes artifact root") from error
+            raise ValueError(
+                f"{location} inputs.{field} escapes artifact root"
+            ) from error
         if not input_path.exists():
             raise ValueError(f"{location} inputs.{field} artifact is missing")
 
@@ -1564,9 +1583,9 @@ def _validate_analysis_decisions(result, analyses):
             round_id = decision["round_id"]
             range_id = decision["range_id"]
             location = f"{collection}[{index}]"
-            submitted_by_round.setdefault(round_id, {}).setdefault(
-                range_id, []
-            ).append(location)
+            submitted_by_round.setdefault(round_id, {}).setdefault(range_id, []).append(
+                location
+            )
             if round_id not in producer_by_round:
                 raise ValueError(
                     f"{location} has no profiling analyzer result for its round"
@@ -1686,11 +1705,6 @@ def validate_experiment_result(result, artifact_root=None):
 
 
 def _promoted_conditional_records(result):
-    rounds_by_id = {
-        round_data["round_id"]: round_data
-        for round_data in result["rounds"]
-        if isinstance(round_data, dict) and _is_canonical_string(round_data.get("round_id"))
-    }
     promoted = []
     for decision in result["performance_scope_decisions"]:
         if (
@@ -1755,7 +1769,9 @@ def _migrate_v1_ledger(ledger):
         if not _is_canonical_string(experiment_id):
             raise ValueError("schema 1 ledger experiment IDs must be canonical strings")
         if experiment_id in legacy_experiments:
-            raise ValueError(f"schema 1 experiment {experiment_id} has duplicate legacy identity")
+            raise ValueError(
+                f"schema 1 experiment {experiment_id} has duplicate legacy identity"
+            )
         if _is_task6_experiment(experiment):
             validation = validate_experiment_result(experiment)
             if not validation["valid"]:
@@ -1864,9 +1880,13 @@ def _validate_legacy_experiments(legacy_experiments):
         if not _is_canonical_string(experiment_id):
             raise ValueError("ledger legacy experiment IDs must be canonical strings")
         if not isinstance(experiment, dict):
-            raise ValueError(f"ledger legacy experiment {experiment_id} must be an object")
+            raise ValueError(
+                f"ledger legacy experiment {experiment_id} must be an object"
+            )
         if experiment.get("experiment_id") != experiment_id:
-            raise ValueError(f"ledger legacy experiment {experiment_id} identity mismatch")
+            raise ValueError(
+                f"ledger legacy experiment {experiment_id} identity mismatch"
+            )
         path_errors = _relative_artifact_errors(
             experiment, f"legacy_experiments.{experiment_id}"
         )
@@ -1964,9 +1984,7 @@ def merge_experiment_result(ledger, result, artifact_root=None):
         )
     merged["conditional_performance_evidence"] = rebuilt_conditional
     historical_experiments = {**legacy_experiments, **experiments}
-    _validate_historical_artifact_registry(
-        historical_experiments, legacy_verified
-    )
+    _validate_historical_artifact_registry(historical_experiments, legacy_verified)
     experiment_id = result["experiment_id"]
     if experiment_id in legacy_experiments:
         raise ValueError(
@@ -1981,8 +1999,8 @@ def merge_experiment_result(ledger, result, artifact_root=None):
         if validation["artifact_evidence_validated"]:
             validated_ids.add(experiment_id)
             merged["artifact_validated_experiment_ids"] = sorted(validated_ids)
-            merged["conditional_performance_evidence"] = (
-                _rebuild_conditional_evidence(experiments, validated_ids)
+            merged["conditional_performance_evidence"] = _rebuild_conditional_evidence(
+                experiments, validated_ids
             )
         return merged
 
@@ -2001,7 +2019,9 @@ def merge_experiment_result(ledger, result, artifact_root=None):
             raise ValueError(
                 f"ledger experiment {existing_experiment_id} has invalid analysis evidence"
             )
-        if any(not _is_non_empty_string(value) for value in existing_agent_ids.values()):
+        if any(
+            not _is_non_empty_string(value) for value in existing_agent_ids.values()
+        ):
             raise ValueError(
                 f"ledger experiment {existing_experiment_id} has invalid analysis Agent IDs"
             )
@@ -2097,9 +2117,13 @@ def merge_experiment_result(ledger, result, artifact_root=None):
     for existing_experiment in experiments.values():
         historical_profile_paths.update(_all_profile_paths(existing_experiment))
     result_profile_paths = _all_profile_paths(result)
-    conflicting_historical_artifact_roles = used_analysis_paths & historical_profile_paths
+    conflicting_historical_artifact_roles = (
+        used_analysis_paths & historical_profile_paths
+    )
     if conflicting_historical_artifact_roles:
-        raise ValueError("ledger analysis result and profile path roles must be disjoint")
+        raise ValueError(
+            "ledger analysis result and profile path roles must be disjoint"
+        )
     analysis_reused_profile_paths = normalized_result_paths & historical_profile_paths
     if analysis_reused_profile_paths:
         raise ValueError(
@@ -2113,8 +2137,7 @@ def merge_experiment_result(ledger, result, artifact_root=None):
             + ", ".join(sorted(profile_reused_analysis_paths))
         )
     result_candidate_paths = {
-        Path(round_data["candidate_profile"]).as_posix()
-        for round_data in result_rounds
+        Path(round_data["candidate_profile"]).as_posix() for round_data in result_rounds
     }
     result_candidate_fingerprints = {
         round_data["candidate_profile_fingerprint"].strip()
@@ -2178,9 +2201,7 @@ def merge_experiment_result(ledger, result, artifact_root=None):
                 "baseline profile path must retain its content fingerprint: "
                 + baseline_path
             )
-        historical_paths = baseline_fingerprint_paths.get(
-            baseline_fingerprint, set()
-        )
+        historical_paths = baseline_fingerprint_paths.get(baseline_fingerprint, set())
         if historical_paths and historical_paths != {baseline_path}:
             raise ValueError(
                 "baseline profile fingerprint must retain its artifact path: "
@@ -2200,8 +2221,7 @@ def merge_experiment_result(ledger, result, artifact_root=None):
         ):
             raise ValueError(
                 "baseline profile fingerprint may only be reused with the same frozen "
-                "baseline: "
-                + baseline_fingerprint
+                "baseline: " + baseline_fingerprint
             )
 
     _validate_historical_artifact_registry(
@@ -2244,9 +2264,7 @@ def main(argv=None):
         except Exception as error:
             validation = {
                 "valid": False,
-                "errors": [
-                    f"invalid JSON input: {type(error).__name__}: {error}"
-                ],
+                "errors": [f"invalid JSON input: {type(error).__name__}: {error}"],
             }
         else:
             validation = validate_experiment_result(

@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Partition calibration business nodes by semantic scope-log markers."""
 
 from __future__ import annotations
@@ -26,9 +33,7 @@ UNIT = re.compile(
 
 def semantic_unit_matches(scope_name: str, unit_ids: set[str]) -> list[tuple[str, str]]:
     """Resolve unit tokens against the manifest despite outer-scope suffixes."""
-    prefixes = re.finditer(
-        r"(?:^|_)skcal\.unit\.([A-Za-z0-9-]+)\.", scope_name
-    )
+    prefixes = re.finditer(r"(?:^|_)skcal\.unit\.([A-Za-z0-9-]+)\.", scope_name)
     matches = []
     ordered_ids = sorted(unit_ids, key=lambda value: (-len(value), value))
     for prefix in prefixes:
@@ -92,8 +97,7 @@ def partition_scope_log(
         raise ValueError("this marker run must bind exactly one block template")
     template_id = next(iter(template_ids))
     node_id_to_key = {
-        int(item["provenance"]["node_id"]): item["node_key"]
-        for item in graph["nodes"]
+        int(item["provenance"]["node_id"]): item["node_key"] for item in graph["nodes"]
     }
     all_node_keys = set(node_id_to_key.values())
 
@@ -110,7 +114,9 @@ def partition_scope_log(
             ignored_trigger_node_ids.extend(scope["trigger_node_ids"])
             continue
         if len(set(block_matches)) != 1 or len(set(unit_matches)) != 1:
-            raise ValueError(f"scope has ambiguous marker tokens: {scope['scope_name']}")
+            raise ValueError(
+                f"scope has ambiguous marker tokens: {scope['scope_name']}"
+            )
         block_id = block_matches[0]
         unit_block_id, unit_id = unit_matches[0]
         if unit_block_id != block_id:
@@ -122,8 +128,7 @@ def partition_scope_log(
 
         next_scope = scopes[scope_index + 1] if scope_index + 1 < len(scopes) else None
         continuation = (
-            next_scope is not None
-            and next_scope["scope_name"] == scope["scope_name"]
+            next_scope is not None and next_scope["scope_name"] == scope["scope_name"]
         )
         scoped_nodes = [(node_id, "scope_member") for node_id in scope["node_ids"]]
         if continuation:

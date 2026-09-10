@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Build a bounded, deduplicated multistream trial candidate matrix."""
 
 import argparse
@@ -24,7 +31,11 @@ RISK_PENALTY = {"low": 0, "medium": 10, "high": 25}
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -92,7 +103,9 @@ def _load_history(path):
     for index, trial in enumerate(trials):
         required = {"json_pointer", "after", "status"}
         if not isinstance(trial, dict) or set(trial) != required:
-            raise ValueError(f"settled_trials[{index}] must contain exactly {sorted(required)}")
+            raise ValueError(
+                f"settled_trials[{index}] must contain exactly {sorted(required)}"
+            )
         pointer = _text(trial["json_pointer"], f"settled_trials[{index}].json_pointer")
         status = _text(trial["status"], f"settled_trials[{index}].status")
         if status in SETTLED_STATUSES:
@@ -103,7 +116,12 @@ def _load_history(path):
 def _validate_catalog(catalog, root, target_ids):
     if not isinstance(catalog, dict) or catalog.get("schema_version") != CATALOG_SCHEMA:
         raise ValueError(f"action catalog must use {CATALOG_SCHEMA}")
-    if set(catalog) != {"schema_version", "options", "source_actions", "catalog_fingerprint"}:
+    if set(catalog) != {
+        "schema_version",
+        "options",
+        "source_actions",
+        "catalog_fingerprint",
+    }:
         raise ValueError("action catalog fields are invalid")
     if catalog["catalog_fingerprint"] != fingerprint(
         {key: value for key, value in catalog.items() if key != "catalog_fingerprint"}
@@ -116,32 +134,54 @@ def _validate_catalog(catalog, root, target_ids):
     normalized_options = []
     for index, option in enumerate(options):
         required = {
-            "option_name", "json_pointer", "before", "accepted_values",
-            "accepted_evidence", "applies_to", "risk", "priority",
+            "option_name",
+            "json_pointer",
+            "before",
+            "accepted_values",
+            "accepted_evidence",
+            "applies_to",
+            "risk",
+            "priority",
         }
         if not isinstance(option, dict) or set(option) != required:
-            raise ValueError(f"options[{index}] must contain exactly {sorted(required)}")
+            raise ValueError(
+                f"options[{index}] must contain exactly {sorted(required)}"
+            )
         values = option["accepted_values"]
         if not isinstance(values, list) or not values:
             raise ValueError(f"options[{index}].accepted_values must be non-empty")
         if len({_canonical(item) for item in values}) != len(values):
             raise ValueError(f"options[{index}].accepted_values contains duplicates")
         if any(_canonical(item) == _canonical(option["before"]) for item in values):
-            raise ValueError(f"options[{index}].accepted_values must differ from before")
+            raise ValueError(
+                f"options[{index}].accepted_values must differ from before"
+            )
         applies = option["applies_to"]
         if not isinstance(applies, list) or not applies:
             raise ValueError(f"options[{index}].applies_to must be non-empty")
         if any(item != "*" and item not in target_ids for item in applies):
             raise ValueError(f"options[{index}].applies_to references unknown target")
-        evidence = _rooted(root, option["accepted_evidence"], f"options[{index}].accepted_evidence")
+        evidence = _rooted(
+            root, option["accepted_evidence"], f"options[{index}].accepted_evidence"
+        )
         priority = option["priority"]
-        if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
-            raise ValueError(f"options[{index}].priority must be an integer in [0, 100]")
+        if (
+            isinstance(priority, bool)
+            or not isinstance(priority, int)
+            or not 0 <= priority <= 100
+        ):
+            raise ValueError(
+                f"options[{index}].priority must be an integer in [0, 100]"
+            )
         normalized_options.append(
             {
                 **option,
-                "option_name": _text(option["option_name"], f"options[{index}].option_name"),
-                "json_pointer": _text(option["json_pointer"], f"options[{index}].json_pointer"),
+                "option_name": _text(
+                    option["option_name"], f"options[{index}].option_name"
+                ),
+                "json_pointer": _text(
+                    option["json_pointer"], f"options[{index}].json_pointer"
+                ),
                 "accepted_evidence": _relative(root, evidence),
                 "risk": _risk(option["risk"], f"options[{index}].risk"),
             }
@@ -149,17 +189,32 @@ def _validate_catalog(catalog, root, target_ids):
     normalized_sources = []
     for index, action in enumerate(sources):
         required = {
-            "range_id", "change_kind", "source_file", "start_offset", "end_offset",
-            "boundary_change", "insertions", "risk", "priority",
+            "range_id",
+            "change_kind",
+            "source_file",
+            "start_offset",
+            "end_offset",
+            "boundary_change",
+            "insertions",
+            "risk",
+            "priority",
         }
         if not isinstance(action, dict) or set(action) != required:
-            raise ValueError(f"source_actions[{index}] must contain exactly {sorted(required)}")
+            raise ValueError(
+                f"source_actions[{index}] must contain exactly {sorted(required)}"
+            )
         if action["range_id"] not in target_ids:
             raise ValueError(f"source_actions[{index}] references unknown target")
         if action["change_kind"] not in {"scope_split", "range_exclusion"}:
             raise ValueError(f"source_actions[{index}].change_kind is invalid")
         start, end = action["start_offset"], action["end_offset"]
-        if any(isinstance(item, bool) or not isinstance(item, int) for item in (start, end)) or not 0 <= start < end:
+        if (
+            any(
+                isinstance(item, bool) or not isinstance(item, int)
+                for item in (start, end)
+            )
+            or not 0 <= start < end
+        ):
             raise ValueError(f"source_actions[{index}] byte range is invalid")
         insertions = action["insertions"]
         if not isinstance(insertions, list) or not insertions:
@@ -168,9 +223,15 @@ def _validate_catalog(catalog, root, target_ids):
             action["change_kind"], start, end, insertions
         )
         priority = action["priority"]
-        if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
+        if (
+            isinstance(priority, bool)
+            or not isinstance(priority, int)
+            or not 0 <= priority <= 100
+        ):
             raise ValueError(f"source_actions[{index}].priority must be in [0, 100]")
-        normalized_sources.append({**action, "risk": _risk(action["risk"], f"source_actions[{index}].risk")})
+        normalized_sources.append(
+            {**action, "risk": _risk(action["risk"], f"source_actions[{index}].risk")}
+        )
     return normalized_options, normalized_sources
 
 
@@ -178,9 +239,12 @@ def _target_score(target):
     parallelism = {"degraded": 50, "preserved": 10, "improved": 0, "unknown": -100}[
         target["parallelism_effect"]
     ]
-    net = {"beneficial": 30, "regressed": 20, "neutral": 10, "insufficient_evidence": -50}[
-        target["net_effect"]
-    ]
+    net = {
+        "beneficial": 30,
+        "regressed": 20,
+        "neutral": 10,
+        "insufficient_evidence": -50,
+    }[target["net_effect"]]
     decomposition = target.get("diagnostic_decomposition", {})
     lost_cv = decomposition.get("lost_cube_vector_overlap_us", 0.0)
     if isinstance(lost_cv, bool) or not isinstance(lost_cv, (int, float)):
@@ -208,15 +272,18 @@ def _reorder_candidates(
     for target in analysis["targets"]:
         range_id = target["range_id"]
         if range_id not in trace_targets or range_id not in analysis_targets:
-            raise ValueError(f"operator reorder target is not declared by request: {range_id}")
+            raise ValueError(
+                f"operator reorder target is not declared by request: {range_id}"
+            )
         trace_target = trace_targets[range_id]
         if trace_target["parallelism_effect"] != "degraded":
             raise ValueError(
                 f"operator reorder target {range_id} requires degraded parallelism"
             )
-        if target["graph_occurrence_fingerprint"] != analysis_targets[range_id][
-            "graph_occurrence_fingerprint"
-        ]:
+        if (
+            target["graph_occurrence_fingerprint"]
+            != analysis_targets[range_id]["graph_occurrence_fingerprint"]
+        ):
             raise ValueError(f"operator reorder target {range_id} occurrence differs")
         binding = analysis_targets[range_id]
         boundary = binding.get("boundary") or {}
@@ -225,9 +292,10 @@ def _reorder_candidates(
             "start_offset": target["range_start_offset"],
             "end_offset": target["range_end_offset"],
         }
-        if (
-            binding["mapping_method"], binding["mapping_confidence"]
-        ) != ("source_scope_map", "exact") or any(
+        if (binding["mapping_method"], binding["mapping_confidence"]) != (
+            "source_scope_map",
+            "exact",
+        ) or any(
             boundary.get(field) != value for field, value in expected_boundary.items()
         ):
             raise ValueError(
@@ -260,7 +328,11 @@ def _reorder_candidates(
                 "score": score,
                 "route": "route2",
                 "activation_condition": "immediate",
-                "action": {**base_action, "after_order": target["route2_order"], "route": "route2"},
+                "action": {
+                    **base_action,
+                    "after_order": target["route2_order"],
+                    "route": "route2",
+                },
             }
         )
         for index, order in enumerate(target["route3_orders"], start=1):
@@ -300,7 +372,9 @@ def plan(
     catalog = json.loads(catalog_path.read_text())
     target_ids = set(request_summary["target_range_ids"])
     options, sources = _validate_catalog(catalog, root, target_ids)
-    history_path = _rooted(root, request["artifacts"]["option_history"], "option history")
+    history_path = _rooted(
+        root, request["artifacts"]["option_history"], "option history"
+    )
     history, settled = _load_history(history_path)
     trace_targets = {item["range_id"]: item for item in trace["targets"]}
     candidates = []
@@ -312,7 +386,9 @@ def plan(
             raise ValueError(
                 "dependency_safe_operator_reorder requires --operator-order-analysis"
             )
-        order_path = _rooted(root, operator_order_analysis_path, "operator order analysis")
+        order_path = _rooted(
+            root, operator_order_analysis_path, "operator order analysis"
+        )
         reorder_candidates, order_validation = _reorder_candidates(
             request, request_summary, trace_targets, order_path, root
         )
@@ -320,9 +396,7 @@ def plan(
     component_transform_record = None
     if multistream_component_reorder.CHANGE_KIND in requested:
         if component_transform_path is None:
-            raise ValueError(
-                "component_overlap_reorder requires --component-transform"
-            )
+            raise ValueError("component_overlap_reorder requires --component-transform")
         transform_path = _rooted(root, component_transform_path, "component transform")
         source_map_path = _rooted(
             root, request["artifacts"]["component_source_map"], "component source map"
@@ -336,30 +410,45 @@ def plan(
         )
         capture = json.loads(capture_path.read_text())
         transform = json.loads(transform_path.read_text())
-        normalized, component_validation = multistream_component_reorder.validate_transform(
-            transform, source_map, capture, source_root, root
+        normalized, component_validation = (
+            multistream_component_reorder.validate_transform(
+                transform, source_map, capture, source_root, root
+            )
         )
-        target_ranges = sorted(item["range_id"] for item in source_map["target_bindings"])
-        candidates.append({
-            "change_kind": multistream_component_reorder.CHANGE_KIND,
-            "target_range_ids": target_ranges,
-            "global_effect": False,
-            "risk": "high",
-            "score": max(_target_score(trace_targets[item]) for item in target_ranges) + 100,
-            "route": "component_exception",
-            "activation_condition": "immediate",
-            "action": {
-                "component_transform": _relative(root, transform_path),
-                "component_transform_fingerprint": normalized["transform_fingerprint"],
-                "component_source_map": _relative(root, source_map_path),
-                "component_source_map_fingerprint": source_map["mapping_fingerprint"],
-                "component_order_capture": _relative(root, capture_path),
-                "component_order_capture_fingerprint": capture["capture_fingerprint"],
-                "target_set_id": source_map["target_set_id"],
-                "before_order": component_validation["before_order"],
-                "after_order": component_validation["after_order"],
-            },
-        })
+        target_ranges = sorted(
+            item["range_id"] for item in source_map["target_bindings"]
+        )
+        candidates.append(
+            {
+                "change_kind": multistream_component_reorder.CHANGE_KIND,
+                "target_range_ids": target_ranges,
+                "global_effect": False,
+                "risk": "high",
+                "score": max(
+                    _target_score(trace_targets[item]) for item in target_ranges
+                )
+                + 100,
+                "route": "component_exception",
+                "activation_condition": "immediate",
+                "action": {
+                    "component_transform": _relative(root, transform_path),
+                    "component_transform_fingerprint": normalized[
+                        "transform_fingerprint"
+                    ],
+                    "component_source_map": _relative(root, source_map_path),
+                    "component_source_map_fingerprint": source_map[
+                        "mapping_fingerprint"
+                    ],
+                    "component_order_capture": _relative(root, capture_path),
+                    "component_order_capture_fingerprint": capture[
+                        "capture_fingerprint"
+                    ],
+                    "target_set_id": source_map["target_set_id"],
+                    "before_order": component_validation["before_order"],
+                    "after_order": component_validation["after_order"],
+                },
+            }
+        )
         component_transform_record = {
             "path": _relative(root, transform_path),
             "transform_fingerprint": normalized["transform_fingerprint"],
@@ -367,7 +456,11 @@ def plan(
         }
     if "option" in requested:
         for option in options:
-            applicable = sorted(target_ids if option["applies_to"] == ["*"] else set(option["applies_to"]))
+            applicable = sorted(
+                target_ids
+                if option["applies_to"] == ["*"]
+                else set(option["applies_to"])
+            )
             opportunity_targets = [
                 item
                 for item in applicable
@@ -375,7 +468,9 @@ def plan(
             ]
             if not opportunity_targets:
                 continue
-            trigger_score = max(_target_score(trace_targets[item]) for item in opportunity_targets)
+            trigger_score = max(
+                _target_score(trace_targets[item]) for item in opportunity_targets
+            )
             for value in option["accepted_values"]:
                 key = (option["json_pointer"], _canonical(value))
                 if key in settled:
@@ -394,7 +489,9 @@ def plan(
                         "target_range_ids": applicable,
                         "global_effect": True,
                         "risk": option["risk"],
-                        "score": trigger_score + option["priority"] - RISK_PENALTY[option["risk"]],
+                        "score": trigger_score
+                        + option["priority"]
+                        - RISK_PENALTY[option["risk"]],
                         "action": {
                             "option_name": option["option_name"],
                             "json_pointer": option["json_pointer"],
@@ -419,8 +516,13 @@ def plan(
             "start_offset": action["start_offset"],
             "end_offset": action["end_offset"],
         }
-        if binding["mapping_method"] != "source_scope_map" or binding["mapping_confidence"] != "exact":
-            raise ValueError(f"source action {range_id} lacks source_scope_map + exact binding")
+        if (
+            binding["mapping_method"] != "source_scope_map"
+            or binding["mapping_confidence"] != "exact"
+        ):
+            raise ValueError(
+                f"source action {range_id} lacks source_scope_map + exact binding"
+            )
         if any(boundary.get(field) != value for field, value in expected.items()):
             raise ValueError(f"source action {range_id} differs from analyzer boundary")
         candidates.append(
@@ -429,7 +531,9 @@ def plan(
                 "target_range_ids": [range_id],
                 "global_effect": False,
                 "risk": action["risk"],
-                "score": _target_score(trace_targets[range_id]) + action["priority"] - RISK_PENALTY[action["risk"]],
+                "score": _target_score(trace_targets[range_id])
+                + action["priority"]
+                - RISK_PENALTY[action["risk"]],
                 "action": {
                     "source_scope_map": source_map,
                     **expected,
@@ -443,7 +547,8 @@ def plan(
             0 if item.get("activation_condition", "immediate") == "immediate" else 1,
             -item["score"],
             0 if item.get("route") == "route2" else 1,
-            RISK_PENALTY[item["risk"]], item["change_kind"],
+            RISK_PENALTY[item["risk"]],
+            item["change_kind"],
             _canonical(item["action"]),
         )
     )
@@ -452,7 +557,8 @@ def plan(
         candidate["candidate_id"] = f"MS-C{index:03d}"
         candidate["rank"] = index
         candidate["selected_for_execution"] = (
-            index <= maximum and candidate.get("activation_condition", "immediate") == "immediate"
+            index <= maximum
+            and candidate.get("activation_condition", "immediate") == "immediate"
         )
         candidate["acceptance_gate"] = "incremental_clean_end_to_end_only"
     matrix = {
@@ -479,8 +585,10 @@ def plan(
         "candidates": candidates,
         "deduplicated_candidates": deduplicated,
         "stop_conditions": [
-            "budget_exhausted", "all_legal_candidates_settled",
-            "correctness_or_runtime_failure", "three_trace_recollections_exhausted",
+            "budget_exhausted",
+            "all_legal_candidates_settled",
+            "correctness_or_runtime_failure",
+            "three_trace_recollections_exhausted",
             "no_incremental_clean_gain",
         ],
     }
@@ -498,7 +606,11 @@ def plan(
 
 def validate_matrix(path, request_path, artifact_root=None):
     path = Path(path).resolve()
-    root = Path(artifact_root).resolve() if artifact_root else Path(request_path).resolve().parent
+    root = (
+        Path(artifact_root).resolve()
+        if artifact_root
+        else Path(request_path).resolve().parent
+    )
     value = json.loads(path.read_text())
     if not isinstance(value, dict) or value.get("schema_version") != MATRIX_SCHEMA:
         raise ValueError(f"candidate matrix must use {MATRIX_SCHEMA}")

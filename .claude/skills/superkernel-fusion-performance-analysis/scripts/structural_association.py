@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Canonical structural graphs for SuperKernel and profiler artifacts."""
 
 import csv
@@ -7,11 +14,10 @@ import io
 import json
 import math
 import re
-from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, is_dataclass, replace
-from decimal import Decimal, DecimalException, InvalidOperation, localcontext
+from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
 
 from artifact_contract import (
@@ -66,9 +72,7 @@ _FUSED_CANN_LOG_LINE = re.compile(
     r"\[sk_optimizer\.cpp:[0-9]+\] \[PrintSKNodesDetail\] +"
     r"(?P<payload>[^\r\n]+)$"
 )
-_FUSED_KERNEL_TYPES = frozenset(
-    ("AIC_ONLY", "AIV_ONLY", "MIX_1_1", "MIX_1_2")
-)
+_FUSED_KERNEL_TYPES = frozenset(("AIC_ONLY", "AIV_ONLY", "MIX_1_1", "MIX_1_2"))
 
 _MIB = 1024 * 1024
 _CANDIDATE_MANIFEST_MAX_BYTES = 16 * _MIB
@@ -513,7 +517,10 @@ def _raw_parameter_evidence(value):
             for key, child in item.items():
                 child_path = f"{path}.{key}"
                 lowered = key.lower()
-                if any(token in lowered for token in ("addr", "address", "handle", "ptr", "hash")):
+                if any(
+                    token in lowered
+                    for token in ("addr", "address", "handle", "ptr", "hash")
+                ):
                     evidence[child_path] = child
                 if isinstance(child, (dict, list)):
                     stack.append((child_path, child))
@@ -547,9 +554,16 @@ def _graph_from_sk_origin_value(value, *, model_role):
     """Build a canonical graph from one already-read origin JSON value."""
     role = _model_role(model_role)
     document = _mapping(value, "sk_graph_origin")
-    for field in ("version", "modelId", "deviceId", "totalStreams", "totalNodes", "streams"):
-        if field not in document:
-            raise ValueError(f"sk_graph_origin missing field: {field}")
+    for field_name in (
+        "version",
+        "modelId",
+        "deviceId",
+        "totalStreams",
+        "totalNodes",
+        "streams",
+    ):
+        if field_name not in document:
+            raise ValueError(f"sk_graph_origin missing field: {field_name}")
     model_id = _identity(document["modelId"], "modelId")
     device_id = _identity(document["deviceId"], "deviceId")
     total_streams = _integer(document["totalStreams"], "totalStreams")
@@ -565,8 +579,7 @@ def _graph_from_sk_origin_value(value, *, model_role):
     stream_values = _list(document["streams"], "streams")
     if len(stream_values) > _ORIGIN_GRAPH_MAX_STREAMS:
         raise ValueError(
-            "sk_graph_origin exceeds actual stream limit "
-            f"{_ORIGIN_GRAPH_MAX_STREAMS}"
+            f"sk_graph_origin exceeds actual stream limit {_ORIGIN_GRAPH_MAX_STREAMS}"
         )
     if len(stream_values) != total_streams:
         raise ValueError("totalStreams does not match streams")
@@ -576,9 +589,9 @@ def _graph_from_sk_origin_value(value, *, model_role):
     observed_nodes = 0
     for stream_index, stream_value in enumerate(stream_values):
         stream = _mapping(stream_value, f"streams[{stream_index}]")
-        for field in ("streamIdxInGraph", "nodeCount", "nodes"):
-            if field not in stream:
-                raise ValueError(f"streams[{stream_index}] missing field: {field}")
+        for field_name in ("streamIdxInGraph", "nodeCount", "nodes"):
+            if field_name not in stream:
+                raise ValueError(f"streams[{stream_index}] missing field: {field_name}")
         stream_id = _identity(stream["streamIdxInGraph"], "streamIdxInGraph")
         if stream_id in stream_ids:
             raise ValueError(f"duplicate streamIdxInGraph: {stream_id}")
@@ -590,12 +603,9 @@ def _graph_from_sk_origin_value(value, *, model_role):
         observed_nodes += len(node_values)
         if observed_nodes > _ORIGIN_GRAPH_MAX_NODES:
             raise ValueError(
-                "sk_graph_origin exceeds actual node limit "
-                f"{_ORIGIN_GRAPH_MAX_NODES}"
+                f"sk_graph_origin exceeds actual node limit {_ORIGIN_GRAPH_MAX_NODES}"
             )
-        stream_containers.append(
-            (stream_index, stream_id, declared_count, node_values)
-        )
+        stream_containers.append((stream_index, stream_id, declared_count, node_values))
 
     if observed_nodes != total_nodes:
         raise ValueError("totalNodes does not match stream node counts")
@@ -628,7 +638,9 @@ def _graph_from_sk_origin_value(value, *, model_role):
             node_ids.add(node_id)
             node_stream = _identity(node["streamIdxInGraph"], "node streamIdxInGraph")
             if node_stream != stream_id:
-                raise ValueError(f"{label} streamIdxInGraph conflicts with parent stream")
+                raise ValueError(
+                    f"{label} streamIdxInGraph conflicts with parent stream"
+                )
             ordinal = _integer(node["nodeIdxInStream"], "node ordinal")
             if ordinal in ordinals:
                 raise ValueError(f"duplicate ordinal {ordinal} in stream {stream_id}")
@@ -659,12 +671,17 @@ def _graph_from_sk_origin_value(value, *, model_role):
                 kernel_params = []
                 for info in task_infos:
                     params = _mapping(info.get("kernelParams"), f"{label}.kernelParams")
-                    for field in ("funcName", "kernelType", "numBlocks"):
-                        if field not in params:
-                            raise ValueError(f"{label}.kernelParams missing field: {field}")
+                    for field_name in ("funcName", "kernelType", "numBlocks"):
+                        if field_name not in params:
+                            raise ValueError(
+                                f"{label}.kernelParams missing field: {field_name}"
+                            )
                     _integer(params["numBlocks"], "numBlocks")
                     kernel_params.append(params)
-                func_names = {_identity(params["funcName"], "funcName") for params in kernel_params}
+                func_names = {
+                    _identity(params["funcName"], "funcName")
+                    for params in kernel_params
+                }
                 core_names = {
                     _identity(params["kernelType"], "kernelType")
                     for params in kernel_params
@@ -697,7 +714,9 @@ def _graph_from_sk_origin_value(value, *, model_role):
 
             key = f"sk:node:{node_id}"
             stream_key = f"sk:stream:{stream_id}"
-            task_ids = [_optional_identity(info.get("taskId"), "taskId") for info in task_infos]
+            task_ids = [
+                _optional_identity(info.get("taskId"), "taskId") for info in task_infos
+            ]
             provenance = _provenance(
                 source="sk_graph_origin",
                 model_id=model_id,
@@ -728,18 +747,14 @@ def _graph_from_sk_origin_value(value, *, model_role):
                 )
             )
             event_by_key[key] = event_id
-            stream_dependencies.append(
-                (ordinal, node_id, previous_node, next_node)
-            )
+            stream_dependencies.append((ordinal, node_id, previous_node, next_node))
         if sorted(ordinals) != list(range(declared_count)):
             raise ValueError(f"node ordinal sequence is invalid for stream {stream_id}")
         stream_dependencies.sort(key=lambda item: item[0])
         for index, (_, node_id, previous_node, next_node) in enumerate(
             stream_dependencies
         ):
-            expected_previous = (
-                stream_dependencies[index - 1][1] if index else None
-            )
+            expected_previous = stream_dependencies[index - 1][1] if index else None
             expected_next = (
                 stream_dependencies[index + 1][1]
                 if index + 1 < len(stream_dependencies)
@@ -812,7 +827,9 @@ def _csv_rows_from_bytes(data, label, required_headers, *, max_rows=None):
         reader = csv.DictReader(io.StringIO(text, newline=""), strict=True)
         headers = reader.fieldnames
         if headers is None:
-            raise ValueError(f"{label} missing headers: {', '.join(sorted(required_headers))}")
+            raise ValueError(
+                f"{label} missing headers: {', '.join(sorted(required_headers))}"
+            )
         if len(headers) != len(set(headers)):
             raise ValueError(f"{label} has duplicate headers")
         missing = sorted(required_headers - set(headers))
@@ -867,9 +884,7 @@ def _freeze_json(value, *, label="JSON", depth=0):
             raise ValueError(f"{label} contains non-finite number")
         return value
     if isinstance(value, list):
-        return tuple(
-            _freeze_json(item, label=label, depth=depth + 1) for item in value
-        )
+        return tuple(_freeze_json(item, label=label, depth=depth + 1) for item in value)
     if isinstance(value, dict):
         if not all(isinstance(key, str) for key in value):
             raise ValueError(f"{label} object keys must be strings")
@@ -1020,7 +1035,9 @@ def _candidate_artifact_max_bytes(role):
     try:
         return limits[role]
     except KeyError as error:
-        raise ValueError(f"unsupported candidate profile artifact role: {role}") from error
+        raise ValueError(
+            f"unsupported candidate profile artifact role: {role}"
+        ) from error
 
 
 def _read_manifest_artifact(manifest, record, label):
@@ -1063,9 +1080,13 @@ def _revalidate_profile_input_sources(manifest, inputs):
     sources = []
     for value in inputs:
         if getattr(value, "_seal", None) is not _PROFILE_EVIDENCE_SEAL:
-            raise TypeError("candidate profile input was not created by a public loader")
+            raise TypeError(
+                "candidate profile input was not created by a public loader"
+            )
         if value.binding != manifest.binding:
-            raise ValueError("candidate profile inputs have different producer/session evidence")
+            raise ValueError(
+                "candidate profile inputs have different producer/session evidence"
+            )
         sources.extend(_wrapper_sources(value))
     manifest_records = {
         (record.role, record.relative_path): record
@@ -1075,7 +1096,9 @@ def _revalidate_profile_input_sources(manifest, inputs):
     for source in sources:
         key = (source.record.role, source.record.relative_path)
         if manifest_records.get(key) != source.record:
-            raise ValueError("candidate profile artifact wrapper changed after validation")
+            raise ValueError(
+                "candidate profile artifact wrapper changed after validation"
+            )
         _revalidate_input_evidence(
             _input_evidence_dict(source.evidence),
             source.record.role,
@@ -1215,8 +1238,8 @@ def _candidate_sk_name_parts(name, label):
     if start_marker < body_start or end_marker <= start_marker + len("_start_"):
         raise ValueError(invalid)
     scope = name[body_start:start_marker].strip()
-    start = name[start_marker + len("_start_"):end_marker]
-    end = name[end_marker + len("_end_"):]
+    start = name[start_marker + len("_start_") : end_marker]
+    end = name[end_marker + len("_end_") :]
     if not scope or not start or not end:
         raise ValueError(invalid)
     return sk_id, scope, start, end
@@ -1311,7 +1334,9 @@ def _load_candidate_kernel_rows_core(manifest):
                 row.name,
             )
             if identity in seen:
-                raise ValueError("duplicate candidate kernel parent across profile files")
+                raise ValueError(
+                    "duplicate candidate kernel parent across profile files"
+                )
             seen.add(identity)
             parsed.append(row)
     parsed.sort(
@@ -1341,7 +1366,6 @@ def load_candidate_kernel_rows(manifest):
     )
 
 
-
 def _load_profile_fused_groups_core(manifest):
     sources = []
     for record in manifest.records_for("sk_fused_nodes"):
@@ -1356,9 +1380,7 @@ def _load_profile_fused_groups_core(manifest):
         except UnicodeDecodeError as error:
             raise ValueError("sk_fused_nodes must be UTF-8 text") from error
         sources.append(EvidenceBoundText(source, text))
-    return FusedGroups(
-        manifest.binding, tuple(sources), _PROFILE_EVIDENCE_SEAL
-    )
+    return FusedGroups(manifest.binding, tuple(sources), _PROFILE_EVIDENCE_SEAL)
 
 
 def load_profile_fused_groups(manifest):
@@ -1370,9 +1392,7 @@ def load_profile_fused_groups(manifest):
 
 
 def _candidate_fused_integer(value, label, *, positive=False):
-    return _candidate_bounded_nonnegative_integer(
-        value, label, positive=positive
-    )
+    return _candidate_bounded_nonnegative_integer(value, label, positive=positive)
 
 
 def _candidate_fused_fields(value, label):
@@ -1500,9 +1520,7 @@ def _candidate_origin_index(graph):
                 blockers.add("metadata_origin_kernel_type_duplicate")
             else:
                 blockers.add("metadata_origin_provenance_duplicate")
-        node_ids = tuple(
-            value for key, value in node.provenance if key == "node_id"
-        )
+        node_ids = tuple(value for key, value in node.provenance if key == "node_id")
         if not node_ids:
             blockers.add("metadata_origin_node_id_provenance_missing")
         elif len(node_ids) == 1:
@@ -1551,9 +1569,7 @@ def _candidate_origin_kernel_type(origin_node):
         raise ValueError("origin CanonicalNode kernel_type provenance is duplicated")
     kernel_type = kernel_types[0]
     if kernel_type not in _FUSED_KERNEL_TYPES:
-        raise ValueError(
-            f"unsupported origin CanonicalNode kernel_type: {kernel_type}"
-        )
+        raise ValueError(f"unsupported origin CanonicalNode kernel_type: {kernel_type}")
     return kernel_type
 
 
@@ -1565,8 +1581,11 @@ def _candidate_fused_local_origin(line, origin_index, label):
     origin_node_id = _candidate_fused_integer(
         match.group("origin"), f"{label} origin nodeId"
     )
-    return match, local_index, origin_node_id, _candidate_origin_node(
-        origin_index, origin_node_id
+    return (
+        match,
+        local_index,
+        origin_node_id,
+        _candidate_origin_node(origin_index, origin_node_id),
     )
 
 
@@ -1585,7 +1604,7 @@ def _parse_candidate_fused_kernel_line(line, origin_index, label):
     if origin_fields.get("nodeId") != str(origin_node_id):
         raise ValueError(f"{label} origin nodeId conflicts")
     kernel_fields = _candidate_fused_field_map(
-        line[marker_index + len(marker):-1], f"{label} KernelInfos"
+        line[marker_index + len(marker) : -1], f"{label} KernelInfos"
     )
     required = {"funcName", "kernelType", "numBlocks", "cubeNum", "vecNum"}
     missing = sorted(required - set(kernel_fields))
@@ -1609,12 +1628,8 @@ def _parse_candidate_fused_kernel_line(line, origin_index, label):
     num_blocks = _candidate_fused_integer(
         kernel_fields["numBlocks"], f"{label} numBlocks"
     )
-    cube_num = _candidate_fused_integer(
-        kernel_fields["cubeNum"], f"{label} cubeNum"
-    )
-    vec_num = _candidate_fused_integer(
-        kernel_fields["vecNum"], f"{label} vecNum"
-    )
+    cube_num = _candidate_fused_integer(kernel_fields["cubeNum"], f"{label} cubeNum")
+    vec_num = _candidate_fused_integer(kernel_fields["vecNum"], f"{label} vecNum")
     expected_geometry = {
         "AIC_ONLY": (num_blocks, 0),
         "AIV_ONLY": (0, num_blocks),
@@ -1895,7 +1910,10 @@ def _parse_candidate_fused_source(
         if (
             node_count is None
             or len(unique_local) != node_count
-            or (unique_local and (min(unique_local) != 0 or max(unique_local) != node_count - 1))
+            or (
+                unique_local
+                and (min(unique_local) != 0 or max(unique_local) != node_count - 1)
+            )
         ):
             blockers.add("metadata_local_sequence_invalid")
         kernel_nodes = tuple(node for node in nodes if not node.topology_only)
@@ -1926,8 +1944,7 @@ def _parse_candidate_fused_source(
                 group,
                 blockers=tuple(
                     sorted(
-                        set(group.blockers)
-                        | {"metadata_source_unattributed_failure"}
+                        set(group.blockers) | {"metadata_source_unattributed_failure"}
                     )
                 ),
             )
@@ -1970,7 +1987,9 @@ def _parse_candidate_fused_metadata_core(graphs, fused):
                 remaining_groups,
             )
         )
-        if len(groups) >= _FUSED_METADATA_MAX_GROUPS and source_index + 1 < len(sources):
+        if len(groups) >= _FUSED_METADATA_MAX_GROUPS and source_index + 1 < len(
+            sources
+        ):
             groups = [
                 replace(
                     group,
@@ -1988,16 +2007,14 @@ def _parse_candidate_fused_metadata_core(graphs, fused):
             ]
             break
     if any(
-        "metadata_source_unattributed_failure" in group.blockers
-        for group in groups
+        "metadata_source_unattributed_failure" in group.blockers for group in groups
     ):
         groups = [
             replace(
                 group,
                 blockers=tuple(
                     sorted(
-                        set(group.blockers)
-                        | {"metadata_source_unattributed_failure"}
+                        set(group.blockers) | {"metadata_source_unattributed_failure"}
                     )
                 ),
             )
@@ -2017,17 +2034,21 @@ def _parse_candidate_fused_metadata_core(graphs, fused):
         else group
         for group in groups
     ]
-    return tuple(sorted(groups, key=lambda group: (
-        group.device_id is None,
-        -1 if group.device_id is None else group.device_id,
-        group.model_id is None,
-        -1 if group.model_id is None else group.model_id,
-        group.sk_id is None,
-        -1 if group.sk_id is None else group.sk_id,
-        group.name,
-        group.fused_fingerprint,
-    )))
-
+    return tuple(
+        sorted(
+            groups,
+            key=lambda group: (
+                group.device_id is None,
+                -1 if group.device_id is None else group.device_id,
+                group.model_id is None,
+                -1 if group.model_id is None else group.model_id,
+                group.sk_id is None,
+                -1 if group.sk_id is None else group.sk_id,
+                group.name,
+                group.fused_fingerprint,
+            ),
+        )
+    )
 
 
 def _node_label(node):
@@ -2043,8 +2064,7 @@ def _node_label(node):
 def _partition_colors(signatures):
     serialized = [canonical_json(signature) for signature in signatures]
     palette = {
-        signature: color
-        for color, signature in enumerate(sorted(set(serialized)))
+        signature: color for color, signature in enumerate(sorted(set(serialized)))
     }
     return tuple(palette[signature] for signature in serialized), serialized
 
@@ -2118,9 +2138,7 @@ def _refine_stream_partition(partition, incoming, outgoing):
                     tuple(tuple(sorted(edges)) for edges in outgoing_by_cell),
                 )
                 groups[signature].append(stream)
-            refined.extend(
-                tuple(groups[signature]) for signature in sorted(groups)
-            )
+            refined.extend(tuple(groups[signature]) for signature in sorted(groups))
         refined = tuple(refined)
         if refined == partition:
             return refined
@@ -2333,8 +2351,6 @@ def graph_fingerprint(graph):
         )
         for source, target, kind, _ in edge_records
     )
-    canonical_graph = _canonical_stream_serialization(
-        stream_labels, structural_edges
-    )
+    canonical_graph = _canonical_stream_serialization(stream_labels, structural_edges)
     payload = {"model_role": role, "graph": canonical_graph}
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()

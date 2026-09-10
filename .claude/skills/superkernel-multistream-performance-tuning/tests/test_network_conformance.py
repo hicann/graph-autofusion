@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import json
 import sys
 import tempfile
@@ -39,12 +46,20 @@ class NetworkConformanceTest(unittest.TestCase):
         (self.root / "closure.json").write_text(json.dumps(closure) + "\n")
         (self.root / "screening.json").write_text(json.dumps(screening) + "\n")
         self._adapter(
-            "adapter-reference", "minimal_reference", "real_npu_closure",
-            "closure.json", "no_gain", "adapter-reference.json",
+            "adapter-reference",
+            "minimal_reference",
+            "real_npu_closure",
+            "closure.json",
+            "no_gain",
+            "adapter-reference.json",
         )
         self._adapter(
-            "adapter-large-model", "distributed_large_model", "resource_screening",
-            "screening.json", "no_reorder_candidate", "adapter-large-model.json",
+            "adapter-large-model",
+            "distributed_large_model",
+            "resource_screening",
+            "screening.json",
+            "no_reorder_candidate",
+            "adapter-large-model.json",
         )
 
     def tearDown(self):
@@ -67,7 +82,8 @@ class NetworkConformanceTest(unittest.TestCase):
             "schema_version": conformance.PLAN_SCHEMA,
             "suite_id": "two-network-suite",
             "core_files": ["core.py"],
-            "adapters": adapters or ["adapter-reference.json", "adapter-large-model.json"],
+            "adapters": adapters
+            or ["adapter-reference.json", "adapter-large-model.json"],
         }
         plan = conformance.freeze_plan(draft, self.root)
         path = self.root / "plan.json"
@@ -104,7 +120,9 @@ class NetworkConformanceTest(unittest.TestCase):
                     "adapter_id": "adapter-large-model",
                     "network_class": "distributed_large_model",
                     "capabilities": ["resource_screening"],
-                    "evidence": [{"kind": "resource_screening", "path": "screening.json"}],
+                    "evidence": [
+                        {"kind": "resource_screening", "path": "screening.json"}
+                    ],
                     "expected_decision": "no_reorder_candidate",
                 },
                 self.root,
@@ -113,14 +131,17 @@ class NetworkConformanceTest(unittest.TestCase):
     def test_adapter_identity_in_generic_core_is_rejected(self):
         (self.skill / "core.py").write_text("SPECIAL = 'adapter-large-model'\n")
         path = self._plan()
-        with self.assertRaisesRegex(ValueError, "generic core contains adapter identities"):
+        with self.assertRaisesRegex(
+            ValueError, "generic core contains adapter identities"
+        ):
             conformance.build_report(path, self.root)
 
     def test_sealed_adapter_evidence_tampering_is_rejected(self):
         (self.root / "closure.json").write_text('{"tampered": true}\n')
         with self.assertRaisesRegex(ValueError, "sealed identity mismatch"):
             conformance.validate_adapter(
-                json.loads((self.root / "adapter-reference.json").read_text()), self.root
+                json.loads((self.root / "adapter-reference.json").read_text()),
+                self.root,
             )
 
 

@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Render SuperKernel round-report JSON into Chinese Markdown."""
 
 from __future__ import annotations
@@ -55,7 +62,9 @@ def _histogram(value):
         except (TypeError, ValueError):
             return (1, str(raw))
 
-    return ", ".join(f"{count}:{total}" for count, total in sorted(value.items(), key=key))
+    return ", ".join(
+        f"{count}:{total}" for count, total in sorted(value.items(), key=key)
+    )
 
 
 def _percent(value):
@@ -144,8 +153,14 @@ def _overview_rows(round_report):
         ),
         ("有效 child 总数", effective.get("effective_child_node_total", 0)),
         ("浅融合 child 总数", effective.get("shallow_child_node_total", 0)),
-        ("有效 child 分布", _histogram(effective.get("effective_child_count_histogram"))),
-        ("浅融合 child 分布", _histogram(effective.get("shallow_child_count_histogram"))),
+        (
+            "有效 child 分布",
+            _histogram(effective.get("effective_child_count_histogram")),
+        ),
+        (
+            "浅融合 child 分布",
+            _histogram(effective.get("shallow_child_count_histogram")),
+        ),
         ("有效预计 launch 减少", effective.get("effective_launch_reduction", 0)),
         ("全部融合预计 launch 减少", effective.get("all_fused_launch_reduction", 0)),
     ]
@@ -153,9 +168,9 @@ def _overview_rows(round_report):
 
 def _single_child_rows(round_report, limit):
     rows = []
-    for row in (round_report.get("single_child_exclusion") or {}).get(
-        "candidates", []
-    )[:limit]:
+    for row in (round_report.get("single_child_exclusion") or {}).get("candidates", [])[
+        :limit
+    ]:
         rows.append(
             [
                 row.get("function"),
@@ -209,7 +224,9 @@ def _non_fusion_rows(round_report, limit):
     return rows
 
 
-def render_markdown(reports, *, title="SuperKernel 单轮融合报告", top_sk=20, top_non_fusion=20):
+def render_markdown(
+    reports, *, title="SuperKernel 单轮融合报告", top_sk=20, top_non_fusion=20
+):
     lines = [
         f"# {title}",
         "",
@@ -218,7 +235,9 @@ def render_markdown(reports, *, title="SuperKernel 单轮融合报告", top_sk=2
 
     for source, round_report in reports:
         source_path = Path(source)
-        round_name = round_report.get("round_name") or source_path.parent.name or "unknown"
+        round_name = (
+            round_report.get("round_name") or source_path.parent.name or "unknown"
+        )
         lines.extend(
             ["", f"## {round_name}", "", f"- 来源: `{_portable_path(source_path)}`"]
         )
@@ -227,7 +246,6 @@ def render_markdown(reports, *, title="SuperKernel 单轮融合报告", top_sk=2
         lines.extend(_table(["指标", "值"], _overview_rows(round_report)))
 
         lines.extend(["", "### Child count 结构描述", ""])
-        single_child = round_report.get("single_child_exclusion") or {}
         lines.append(
             "child_count、深度和预计 launch 减少只描述 metadata。所有可靠 mapped SK "
             "都进入 fresh profiling；keep/prune/reprofile/block 只由 profiling 分析决定。"

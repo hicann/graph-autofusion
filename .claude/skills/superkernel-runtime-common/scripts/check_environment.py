@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Check whether the active torch_npu runtime can run SuperKernel experiments."""
 
 import argparse
@@ -132,7 +139,9 @@ def _read_cann_version(home):
     for relative in ("version.info", "version.cfg", "opp/version.info"):
         version_file = Path(home) / relative
         try:
-            lines = version_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            lines = version_file.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()
         except OSError:
             continue
         for line in lines:
@@ -222,7 +231,9 @@ def _probe_options(graph_type, category, samples):
             "accepted": bool(accepted_values),
             "accepted_values": accepted_values,
             "rejected_values": rejected_values,
-            "error": None if accepted_values else (
+            "error": None
+            if accepted_values
+            else (
                 rejected_values[0]["error"] if rejected_values else "no values tested"
             ),
         }
@@ -350,7 +361,9 @@ def _print_human(report):
         f"python: {report['python']['implementation']} "
         f"{report['python']['version']} ({report['python']['executable']})"
     )
-    print(f"CANN: {report['cann']['version']} ({report['cann']['home'] or 'unknown home'})")
+    print(
+        f"CANN: {report['cann']['version']} ({report['cann']['home'] or 'unknown home'})"
+    )
     print(f"PyTorch: {report['torch_version']}")
     print(f"torch_npu: {report['torch_npu_version']}")
     print(
@@ -366,7 +379,9 @@ def _print_human(report):
             or "not set"
         )
     )
-    print("apis: " + ", ".join(f"{key}={value}" for key, value in report["apis"].items()))
+    print(
+        "apis: " + ", ".join(f"{key}={value}" for key, value in report["apis"].items())
+    )
     none_scope = report["scope_capabilities"]["explicit_none_exclusion"]
     print(
         "explicit None exclusion: "
@@ -385,7 +400,9 @@ def _print_human(report):
 
 def main(argv=None, torch_module=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--json", action="store_true", help="print the full report as JSON")
+    parser.add_argument(
+        "--json", action="store_true", help="print the full report as JSON"
+    )
     parser.add_argument(
         "--no-device-check",
         action="store_true",

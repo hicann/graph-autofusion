@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Validate multiple network adapters against one unchanged generic core."""
 
 import argparse
@@ -21,7 +28,13 @@ DECISIONS = {"accepted", "no_gain", "no_reorder_candidate", "blocked"}
 
 
 def _canonical(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def fingerprint(value):
@@ -91,10 +104,9 @@ def _evidence_decision(kind, evidence):
     if kind == "real_npu_closure":
         outcome = evidence.get("outcome")
         status = outcome.get("result_status") if isinstance(outcome, dict) else None
-        if (
-            status not in {"accepted", "no_gain"}
-            or outcome.get("incumbent_unchanged") != (status != "accepted")
-        ):
+        if status not in {"accepted", "no_gain"} or outcome.get(
+            "incumbent_unchanged"
+        ) != (status != "accepted"):
             raise ValueError("real NPU closure receipt outcome is inconsistent")
         return status
     if (
@@ -102,7 +114,9 @@ def _evidence_decision(kind, evidence):
         or evidence.get("authorization") != "diagnostic_only"
         or evidence.get("stable_parent_match_count") != 0
     ):
-        raise ValueError("resource screening receipt must prove zero stable parent matches")
+        raise ValueError(
+            "resource screening receipt must prove zero stable parent matches"
+        )
     policy = evidence.get("resource_classification_policy")
     if policy != "accelerator_core_block_num_mix_block_num_v1":
         raise ValueError("resource screening receipt uses an unsupported classifier")
@@ -111,8 +125,12 @@ def _evidence_decision(kind, evidence):
 
 def validate_adapter(value, root, *, require_fingerprint=True):
     required = {
-        "schema_version", "adapter_id", "network_class", "capabilities",
-        "evidence", "expected_decision",
+        "schema_version",
+        "adapter_id",
+        "network_class",
+        "capabilities",
+        "evidence",
+        "expected_decision",
     }
     if require_fingerprint:
         required.add("adapter_fingerprint")
@@ -149,15 +167,20 @@ def validate_adapter(value, root, *, require_fingerprint=True):
         evidence = _load(path)
         expected_schema = EVIDENCE_KINDS[kind]
         actual_fingerprint = file_fingerprint(path)
-        if item["schema_version"] != expected_schema or item["file_fingerprint"] != actual_fingerprint:
+        if (
+            item["schema_version"] != expected_schema
+            or item["file_fingerprint"] != actual_fingerprint
+        ):
             raise ValueError(f"{label} sealed identity mismatch")
         decisions.add(_evidence_decision(kind, evidence))
-        normalized.append({
-            "kind": kind,
-            "path": item["path"],
-            "schema_version": expected_schema,
-            "file_fingerprint": actual_fingerprint,
-        })
+        normalized.append(
+            {
+                "kind": kind,
+                "path": item["path"],
+                "schema_version": expected_schema,
+                "file_fingerprint": actual_fingerprint,
+            }
+        )
     expected_decision = value["expected_decision"]
     if expected_decision not in DECISIONS or decisions != {expected_decision}:
         raise ValueError("adapter expected_decision differs from evidence")
@@ -170,7 +193,10 @@ def validate_adapter(value, root, *, require_fingerprint=True):
         "expected_decision": expected_decision,
     }
     adapter["adapter_fingerprint"] = fingerprint(adapter)
-    if require_fingerprint and value["adapter_fingerprint"] != adapter["adapter_fingerprint"]:
+    if (
+        require_fingerprint
+        and value["adapter_fingerprint"] != adapter["adapter_fingerprint"]
+    ):
         raise ValueError("adapter_fingerprint mismatch")
     return adapter
 
@@ -182,16 +208,20 @@ def freeze_adapter(draft, root):
     records = []
     for item in draft.get("evidence", []):
         if not isinstance(item, dict) or set(item) != {"kind", "path"}:
-            raise ValueError("adapter draft evidence entries must contain kind and path")
+            raise ValueError(
+                "adapter draft evidence entries must contain kind and path"
+            )
         path = _rooted(root, item["path"], "adapter draft evidence.path")
         kind = item["kind"]
         if kind not in EVIDENCE_KINDS:
             raise ValueError("adapter draft evidence kind is unknown")
-        records.append({
-            **item,
-            "schema_version": EVIDENCE_KINDS[kind],
-            "file_fingerprint": file_fingerprint(path),
-        })
+        records.append(
+            {
+                **item,
+                "schema_version": EVIDENCE_KINDS[kind],
+                "file_fingerprint": file_fingerprint(path),
+            }
+        )
     prepared["evidence"] = records
     return validate_adapter(prepared, root, require_fingerprint=False)
 
@@ -209,7 +239,8 @@ def _core_records(paths):
         seen.add(relative)
         actual = file_fingerprint(path)
         if isinstance(item, dict) and (
-            set(item) != {"path", "file_fingerprint"} or item["file_fingerprint"] != actual
+            set(item) != {"path", "file_fingerprint"}
+            or item["file_fingerprint"] != actual
         ):
             raise ValueError(f"core_files[{index}] sealed identity mismatch")
         records.append({"path": relative, "file_fingerprint": actual})
@@ -237,7 +268,8 @@ def validate_plan(value, root, *, require_fingerprint=True):
         adapter = validate_adapter(_load(path), root)
         actual = file_fingerprint(path)
         if isinstance(item, dict) and (
-            set(item) != {"path", "file_fingerprint"} or item["file_fingerprint"] != actual
+            set(item) != {"path", "file_fingerprint"}
+            or item["file_fingerprint"] != actual
         ):
             raise ValueError(f"adapters[{index}] sealed identity mismatch")
         adapter_records.append({"path": relative, "file_fingerprint": actual})
@@ -293,13 +325,16 @@ def build_report(plan_path, root):
         "adapter_count": len(adapters),
         "network_class_count": len({item["network_class"] for item in adapters}),
         "core_adapter_identity_leaks": [],
-        "adapters": [{
-            "adapter_id": item["adapter_id"],
-            "network_class": item["network_class"],
-            "capabilities": item["capabilities"],
-            "decision": item["expected_decision"],
-            "adapter_fingerprint": item["adapter_fingerprint"],
-        } for item in adapters],
+        "adapters": [
+            {
+                "adapter_id": item["adapter_id"],
+                "network_class": item["network_class"],
+                "capabilities": item["capabilities"],
+                "decision": item["expected_decision"],
+                "adapter_fingerprint": item["adapter_fingerprint"],
+            }
+            for item in adapters
+        ],
         "decision": "pass",
     }
     report["report_fingerprint"] = fingerprint(report)

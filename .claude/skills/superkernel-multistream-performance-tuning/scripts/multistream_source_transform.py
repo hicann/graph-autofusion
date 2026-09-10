@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Materialize analyzer-authorized event/stage source transforms without free-form patches."""
 
 import argparse
@@ -17,7 +24,13 @@ ACTION_MANIFEST_SCHEMA = "superkernel-multistream-action-manifest-v2"
 
 
 def _canonical(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def fingerprint(value):
@@ -65,15 +78,31 @@ def _validate_action(catalog, action_id):
 
 def validate(value, catalog, source_root):
     required = {
-        "schema_version", "trial_id", "action_catalog_fingerprint", "action_id", "source_file",
-        "input_source_fingerprint", "single_stream_projection_fingerprint_before",
-        "single_stream_projection_fingerprint_after", "allowed_multistream_ranges",
-        "dependency_evidence_fingerprint_before", "dependency_evidence_fingerprint_after",
-        "safety_proofs", "stage_state_contract", "replacements", "transform_fingerprint",
+        "schema_version",
+        "trial_id",
+        "action_catalog_fingerprint",
+        "action_id",
+        "source_file",
+        "input_source_fingerprint",
+        "single_stream_projection_fingerprint_before",
+        "single_stream_projection_fingerprint_after",
+        "allowed_multistream_ranges",
+        "dependency_evidence_fingerprint_before",
+        "dependency_evidence_fingerprint_after",
+        "safety_proofs",
+        "stage_state_contract",
+        "replacements",
+        "transform_fingerprint",
     }
-    if not isinstance(value, dict) or set(value) != required or value.get("schema_version") != TRANSFORM_SCHEMA:
+    if (
+        not isinstance(value, dict)
+        or set(value) != required
+        or value.get("schema_version") != TRANSFORM_SCHEMA
+    ):
         raise ValueError(f"source transform must use {TRANSFORM_SCHEMA}")
-    unsigned = {key: item for key, item in value.items() if key != "transform_fingerprint"}
+    unsigned = {
+        key: item for key, item in value.items() if key != "transform_fingerprint"
+    }
     if value["transform_fingerprint"] != fingerprint(unsigned):
         raise ValueError("source transform fingerprint mismatch")
     catalog, action = _validate_action(catalog, value["action_id"])
@@ -83,31 +112,61 @@ def validate(value, catalog, source_root):
         raise ValueError("source transform action kind is unsupported")
     if action["change_kind"] == "event_edge_refinement":
         required_proofs = {
-            "producer_before_record", "consumer_after_wait", "event_reuse_safe",
-            "record_stream_lifetime_preserved", "modified_dependency_complete",
+            "producer_before_record",
+            "consumer_after_wait",
+            "event_reuse_safe",
+            "record_stream_lifetime_preserved",
+            "modified_dependency_complete",
         }
         if value["stage_state_contract"] is not None:
-            raise ValueError("event source transform cannot declare stage_state_contract")
+            raise ValueError(
+                "event source transform cannot declare stage_state_contract"
+            )
     else:
         required_proofs = {
-            "alias_safe", "lifetime_preserved", "modified_dependency_complete",
+            "alias_safe",
+            "lifetime_preserved",
+            "modified_dependency_complete",
             "stage_state_explicit",
         }
         state = value["stage_state_contract"]
-        if not isinstance(state, dict) or set(state) != {"inputs", "outputs", "preserved_values", "forbidden_effects"}:
+        if not isinstance(state, dict) or set(state) != {
+            "inputs",
+            "outputs",
+            "preserved_values",
+            "forbidden_effects",
+        }:
             raise ValueError("stage split requires an explicit stage_state_contract")
         for field in ("inputs", "outputs", "preserved_values"):
-            if not isinstance(state[field], list) or not state[field] or any(
-                not isinstance(item, str) or not item.strip() for item in state[field]
+            if (
+                not isinstance(state[field], list)
+                or not state[field]
+                or any(
+                    not isinstance(item, str) or not item.strip()
+                    for item in state[field]
+                )
             ):
-                raise ValueError(f"stage_state_contract.{field} must be non-empty identifiers")
+                raise ValueError(
+                    f"stage_state_contract.{field} must be non-empty identifiers"
+                )
         if state["forbidden_effects"] != []:
             raise ValueError("stage_state_contract cannot cross forbidden effects")
     proofs = value["safety_proofs"]
-    if not isinstance(proofs, dict) or set(proofs) != required_proofs or any(item is not True for item in proofs.values()):
-        raise ValueError("source transform lacks complete action-specific safety proofs")
-    if value["single_stream_projection_fingerprint_before"] != value["single_stream_projection_fingerprint_after"]:
-        raise ValueError("source transform must preserve single_stream_projection fingerprint")
+    if (
+        not isinstance(proofs, dict)
+        or set(proofs) != required_proofs
+        or any(item is not True for item in proofs.values())
+    ):
+        raise ValueError(
+            "source transform lacks complete action-specific safety proofs"
+        )
+    if (
+        value["single_stream_projection_fingerprint_before"]
+        != value["single_stream_projection_fingerprint_after"]
+    ):
+        raise ValueError(
+            "source transform must preserve single_stream_projection fingerprint"
+        )
     source = _rooted(source_root, value["source_file"], "source_file")
     if value["input_source_fingerprint"] != file_fingerprint(source):
         raise ValueError("source transform input source fingerprint mismatch")
@@ -115,7 +174,9 @@ def validate(value, catalog, source_root):
     try:
         ast.parse(original.decode("utf-8"), filename=str(source))
     except (UnicodeDecodeError, SyntaxError) as error:
-        raise ValueError(f"source transform requires valid UTF-8 Python input: {error}") from error
+        raise ValueError(
+            f"source transform requires valid UTF-8 Python input: {error}"
+        ) from error
     replacements = value["replacements"]
     allowed_ranges = value["allowed_multistream_ranges"]
     if not isinstance(allowed_ranges, list) or not allowed_ranges:
@@ -126,30 +187,54 @@ def validate(value, catalog, source_root):
         if not isinstance(item, dict) or set(item) != {"start_offset", "end_offset"}:
             raise ValueError(f"allowed_multistream_ranges[{index}] fields are invalid")
         start, end = item["start_offset"], item["end_offset"]
-        if any(isinstance(entry, bool) or not isinstance(entry, int) for entry in (start, end)) or not 0 <= start < end <= len(original):
-            raise ValueError(f"allowed_multistream_ranges[{index}] byte range is invalid")
+        if any(
+            isinstance(entry, bool) or not isinstance(entry, int)
+            for entry in (start, end)
+        ) or not 0 <= start < end <= len(original):
+            raise ValueError(
+                f"allowed_multistream_ranges[{index}] byte range is invalid"
+            )
         if start < previous_range_end:
-            raise ValueError("allowed_multistream_ranges must be sorted and non-overlapping")
+            raise ValueError(
+                "allowed_multistream_ranges must be sorted and non-overlapping"
+            )
         previous_range_end = end
         normalized_ranges.append({"start_offset": start, "end_offset": end})
-    for field in ("dependency_evidence_fingerprint_before", "dependency_evidence_fingerprint_after"):
+    for field in (
+        "dependency_evidence_fingerprint_before",
+        "dependency_evidence_fingerprint_after",
+    ):
         _text(value[field], field)
     if not isinstance(replacements, list) or not replacements:
         raise ValueError("source transform replacements must be non-empty")
     normalized = []
     previous_end = -1
     changed = False
-    for index, replacement in enumerate(sorted(replacements, key=lambda item: item.get("start_offset", -1) if isinstance(item, dict) else -1)):
+    for index, replacement in enumerate(
+        sorted(
+            replacements,
+            key=lambda item: item.get("start_offset", -1)
+            if isinstance(item, dict)
+            else -1,
+        )
+    ):
         fields = {"start_offset", "end_offset", "before_fingerprint", "replacement"}
         if not isinstance(replacement, dict) or set(replacement) != fields:
             raise ValueError(f"replacements[{index}] fields are invalid")
         start, end = replacement["start_offset"], replacement["end_offset"]
-        if any(isinstance(item, bool) or not isinstance(item, int) for item in (start, end)) or not 0 <= start < end <= len(original):
+        if any(
+            isinstance(item, bool) or not isinstance(item, int) for item in (start, end)
+        ) or not 0 <= start < end <= len(original):
             raise ValueError(f"replacements[{index}] byte range is invalid")
         if start < previous_end:
             raise ValueError("source transform replacement ranges overlap")
-        if not any(start >= allowed["start_offset"] and end <= allowed["end_offset"] for allowed in normalized_ranges):
-            raise ValueError("source transform replacement is outside declared multistream ranges")
+        if not any(
+            start >= allowed["start_offset"] and end <= allowed["end_offset"]
+            for allowed in normalized_ranges
+        ):
+            raise ValueError(
+                "source transform replacement is outside declared multistream ranges"
+            )
         previous_end = end
         try:
             original[:start].decode("utf-8")
@@ -159,16 +244,22 @@ def validate(value, catalog, source_root):
         before = original[start:end]
         expected = "sha256:" + hashlib.sha256(before).hexdigest()
         if replacement["before_fingerprint"] != expected:
-            raise ValueError(f"replacements[{index}].before_fingerprint does not match source")
+            raise ValueError(
+                f"replacements[{index}].before_fingerprint does not match source"
+            )
         text = replacement["replacement"]
         if not isinstance(text, str):
             raise ValueError(f"replacements[{index}].replacement must be a string")
         encoded = text.encode("utf-8")
         changed = changed or encoded != before
-        normalized.append({
-            "start_offset": start, "end_offset": end, "before_fingerprint": expected,
-            "replacement": text,
-        })
+        normalized.append(
+            {
+                "start_offset": start,
+                "end_offset": end,
+                "before_fingerprint": expected,
+                "replacement": text,
+            }
+        )
     if not changed:
         raise ValueError("source transform must change source bytes")
     normalized_value = {
@@ -189,7 +280,7 @@ def materialize(value, catalog, source_root, output_path):
     cursor = 0
     chunks = []
     for replacement in transform["replacements"]:
-        chunks.append(original[cursor:replacement["start_offset"]])
+        chunks.append(original[cursor : replacement["start_offset"]])
         chunks.append(replacement["replacement"].encode("utf-8"))
         cursor = replacement["end_offset"]
     chunks.append(original[cursor:])
@@ -197,9 +288,13 @@ def materialize(value, catalog, source_root, output_path):
     try:
         ast.parse(materialized.decode("utf-8"), filename=str(output_path))
     except (UnicodeDecodeError, SyntaxError) as error:
-        raise ValueError(f"source transform does not preserve valid Python syntax: {error}") from error
+        raise ValueError(
+            f"source transform does not preserve valid Python syntax: {error}"
+        ) from error
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{output_path.name}.", dir=output_path.parent)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", dir=output_path.parent
+    )
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(materialized)
@@ -225,9 +320,15 @@ def materialize(value, catalog, source_root, output_path):
         "output_source_fingerprint": file_fingerprint(output_path),
         "source_transform_fingerprint": transform["transform_fingerprint"],
         "replacements": transform["replacements"],
-        "single_stream_projection_fingerprint": transform["single_stream_projection_fingerprint_before"],
-        "dependency_evidence_fingerprint_before": transform["dependency_evidence_fingerprint_before"],
-        "dependency_evidence_fingerprint_after": transform["dependency_evidence_fingerprint_after"],
+        "single_stream_projection_fingerprint": transform[
+            "single_stream_projection_fingerprint_before"
+        ],
+        "dependency_evidence_fingerprint_before": transform[
+            "dependency_evidence_fingerprint_before"
+        ],
+        "dependency_evidence_fingerprint_after": transform[
+            "dependency_evidence_fingerprint_after"
+        ],
         "safety_proofs": transform["safety_proofs"],
         "stage_state_contract": transform["stage_state_contract"],
         "allowed_multistream_ranges": transform["allowed_multistream_ranges"],
@@ -237,39 +338,73 @@ def materialize(value, catalog, source_root, output_path):
 
 
 def wrap_scope_derivative(
-    scope_action_manifest, candidate, parent_action_manifest, *,
+    scope_action_manifest,
+    candidate,
+    parent_action_manifest,
+    *,
     single_stream_projection_fingerprint_before,
     single_stream_projection_fingerprint_after,
     dependency_evidence_fingerprint_before,
     dependency_evidence_fingerprint_after,
 ):
     """Promote one already-materialized scope action into result-v3 lineage."""
-    if scope_action_manifest.get("schema_version") != "superkernel-multistream-action-manifest-v1":
+    if (
+        scope_action_manifest.get("schema_version")
+        != "superkernel-multistream-action-manifest-v1"
+    ):
         raise ValueError("scope derivative base action must use action-manifest-v1")
-    if scope_action_manifest.get("change_kind") not in {"scope_split", "range_exclusion"}:
+    if scope_action_manifest.get("change_kind") not in {
+        "scope_split",
+        "range_exclusion",
+    }:
         raise ValueError("scope derivative base action must be one exact scope action")
-    if scope_action_manifest.get("single_change_verified") is not True or scope_action_manifest.get("source_adapter_validation") != "passed":
+    if (
+        scope_action_manifest.get("single_change_verified") is not True
+        or scope_action_manifest.get("source_adapter_validation") != "passed"
+    ):
         raise ValueError("scope derivative base action lacks materializer verification")
-    if not isinstance(candidate, dict) or candidate.get("change_kind") != "scope_event_derivative":
+    if (
+        not isinstance(candidate, dict)
+        or candidate.get("change_kind") != "scope_event_derivative"
+    ):
         raise ValueError("scope derivative candidate kind is invalid")
     source_action = candidate.get("source_action")
-    if not isinstance(source_action, dict) or source_action.get("change_kind") != scope_action_manifest["change_kind"]:
-        raise ValueError("scope derivative candidate differs from materialized scope factor")
+    if (
+        not isinstance(source_action, dict)
+        or source_action.get("change_kind") != scope_action_manifest["change_kind"]
+    ):
+        raise ValueError(
+            "scope derivative candidate differs from materialized scope factor"
+        )
     if parent_action_manifest.get("schema_version") != ACTION_MANIFEST_SCHEMA:
         raise ValueError("scope derivative parent must use action-manifest-v2")
     if candidate.get("parent_action_id") != parent_action_manifest.get("action_id"):
         raise ValueError("scope derivative parent action identity mismatch")
-    before = _text(single_stream_projection_fingerprint_before, "single_stream_projection_fingerprint_before")
-    after = _text(single_stream_projection_fingerprint_after, "single_stream_projection_fingerprint_after")
+    before = _text(
+        single_stream_projection_fingerprint_before,
+        "single_stream_projection_fingerprint_before",
+    )
+    after = _text(
+        single_stream_projection_fingerprint_after,
+        "single_stream_projection_fingerprint_after",
+    )
     if before != after:
         raise ValueError("scope derivative must preserve single-stream projection")
-    dependency_before = _text(dependency_evidence_fingerprint_before, "dependency_evidence_fingerprint_before")
-    dependency_after = _text(dependency_evidence_fingerprint_after, "dependency_evidence_fingerprint_after")
+    dependency_before = _text(
+        dependency_evidence_fingerprint_before, "dependency_evidence_fingerprint_before"
+    )
+    dependency_after = _text(
+        dependency_evidence_fingerprint_after, "dependency_evidence_fingerprint_after"
+    )
     if dependency_before == dependency_after:
-        raise ValueError("scope derivative requires independently sealed post-transform dependency evidence")
+        raise ValueError(
+            "scope derivative requires independently sealed post-transform dependency evidence"
+        )
     result = {
         "schema_version": ACTION_MANIFEST_SCHEMA,
-        "trial_id": _text(scope_action_manifest.get("trial_id"), "scope_action_manifest.trial_id"),
+        "trial_id": _text(
+            scope_action_manifest.get("trial_id"), "scope_action_manifest.trial_id"
+        ),
         "change_kind": "scope_event_derivative",
         "action_id": _text(candidate.get("action_id"), "candidate.action_id"),
         "parent_action_id": candidate["parent_action_id"],
@@ -278,8 +413,12 @@ def wrap_scope_derivative(
         "parent_action_manifest_fingerprint": fingerprint(parent_action_manifest),
         "immutable_input_source": scope_action_manifest.get("immutable_input_source"),
         "materialized_source": scope_action_manifest.get("materialized_source"),
-        "input_source_fingerprint": scope_action_manifest.get("input_source_fingerprint"),
-        "output_source_fingerprint": scope_action_manifest.get("output_source_fingerprint"),
+        "input_source_fingerprint": scope_action_manifest.get(
+            "input_source_fingerprint"
+        ),
+        "output_source_fingerprint": scope_action_manifest.get(
+            "output_source_fingerprint"
+        ),
         "single_stream_projection_fingerprint": before,
         "dependency_evidence_fingerprint_before": dependency_before,
         "dependency_evidence_fingerprint_after": dependency_after,
@@ -298,8 +437,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         result = materialize(
-            json.loads(args.transform.read_text()), json.loads(args.catalog.read_text()),
-            args.source_root, args.output,
+            json.loads(args.transform.read_text()),
+            json.loads(args.catalog.read_text()),
+            args.source_root,
+            args.output,
         )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         parser.error(str(error))

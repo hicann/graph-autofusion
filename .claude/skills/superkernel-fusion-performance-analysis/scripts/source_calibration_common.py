@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Shared fail-closed helpers for source calibration artifacts."""
 
 from __future__ import annotations
@@ -122,7 +129,9 @@ def resolve_evidence_path(root, value, label):
 
 def load_hashed_json(root, reference, label):
     reference = require_object(reference, label)
-    path = resolve_evidence_path(root, reference.get("relative_path"), f"{label}.relative_path")
+    path = resolve_evidence_path(
+        root, reference.get("relative_path"), f"{label}.relative_path"
+    )
     expected = require_sha256(reference.get("sha256"), f"{label}.sha256")
     if not path.is_file():
         raise ValueError(f"{label} artifact does not exist: {path}")

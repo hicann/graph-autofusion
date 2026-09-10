@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import importlib.util
 import hashlib
 import json
@@ -128,22 +135,32 @@ class AutoTuneSessionTest(unittest.TestCase):
         return {
             "schema_version": "superkernel-report-summary-v1",
             "baseline": {
-                "metric": "TP worst-rank mean", "value_ms": 10.0,
-                "run_count": 5, "reason_zh": "五次基线稳定。",
+                "metric": "TP worst-rank mean",
+                "value_ms": 10.0,
+                "run_count": 5,
+                "reason_zh": "五次基线稳定。",
                 "evidence_artifacts": ["evidence.json"],
             },
             "stages": [
                 {
-                    "stage": "stage_a", "candidate_id": "S1", "kind": "screening",
-                    "metric": "TP worst-rank mean", "baseline_ms": 10.0,
-                    "candidate_ms": 11.0, "run_count": 3, "eligible": False,
-                    "selector_rank": 1, "status": "no_gain",
-                    "reason_zh": "收益未达标。", "gates_zh": "阈值 1%；P90 不通过；stddev 不通过",
+                    "stage": "stage_a",
+                    "candidate_id": "S1",
+                    "kind": "screening",
+                    "metric": "TP worst-rank mean",
+                    "baseline_ms": 10.0,
+                    "candidate_ms": 11.0,
+                    "run_count": 3,
+                    "eligible": False,
+                    "selector_rank": 1,
+                    "status": "no_gain",
+                    "reason_zh": "收益未达标。",
+                    "gates_zh": "阈值 1%；P90 不通过；stddev 不通过",
                     "evidence_artifacts": ["evidence.json"],
                 },
             ],
             "fallback": {
-                "candidate_id": "S0", "scope_strategy": "SK-off",
+                "candidate_id": "S0",
+                "scope_strategy": "SK-off",
                 "reason_zh": "已验证并恢复 SK-off。",
                 "evidence_artifacts": ["evidence.json"],
             },
@@ -154,15 +171,18 @@ class AutoTuneSessionTest(unittest.TestCase):
         self.advance_to_final(session_path)
         session = auto_tune_session.load_session(session_path)
         result = phase_result(
-            session, status=status,
+            session,
+            status=status,
             details_zh={key: "已结算。" for key in auto_tune_session.FINAL_DETAIL_KEYS},
         )
         root = Path(session["artifact_root"])
-        (root / "evidence.json").write_text('{}')
+        (root / "evidence.json").write_text("{}")
         ledger_path = root / result["ledger_path"]
         ledger = json.loads(ledger_path.read_text())
         ledger["experiments"] = {}
-        ledger["report_summary"] = summary if summary is not None else self.report_summary()
+        ledger["report_summary"] = (
+            summary if summary is not None else self.report_summary()
+        )
         ledger_path.write_text(json.dumps(ledger))
         return session_path, result
 
@@ -170,9 +190,13 @@ class AutoTuneSessionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             session_path, result = self.final_with_summary(directory)
             completed = auto_tune_session.seal_handoff(session_path, result)
-            report = (Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md").read_text()
+            report = (
+                Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md"
+            ).read_text()
             self.assertLess(report.index("## 结果速览"), report.index("Session:"))
-            self.assertLess(report.index("## 关键数据对比"), report.index("## 配置与建议"))
+            self.assertLess(
+                report.index("## 关键数据对比"), report.index("## 配置与建议")
+            )
             self.assertIn("10.000000", report)
             self.assertIn("11.000000", report)
             self.assertIn("+1.000000", report)
@@ -187,20 +211,33 @@ class AutoTuneSessionTest(unittest.TestCase):
             _, session_path = self.initialize(directory)
             self.advance_to_final(session_path)
             completed = self.seal_current(
-                session_path, status="not_run",
-                details_zh={key: "已结算。" for key in auto_tune_session.FINAL_DETAIL_KEYS},
+                session_path,
+                status="not_run",
+                details_zh={
+                    key: "已结算。" for key in auto_tune_session.FINAL_DETAIL_KEYS
+                },
             )
             root = Path(completed["artifact_root"])
             self.assertIn("N/A", (root / "FINAL_E2E_REPORT.md").read_text())
             sealed_before = {path: path.read_bytes() for path in root.rglob("*.json")}
-            (root / "evidence.json").write_text('{}')
+            (root / "evidence.json").write_text("{}")
             summary_path = root / "summary.json"
             summary_path.write_text(json.dumps(self.report_summary()))
             output = root / "REPORT.summary.md"
             process = subprocess.run(
-                [sys.executable, str(SCRIPTS / "auto_tune_session.py"), "render-final-report",
-                 "--session", str(session_path), "--summary", str(summary_path), "--output", str(output)],
-                capture_output=True, text=True,
+                [
+                    sys.executable,
+                    str(SCRIPTS / "auto_tune_session.py"),
+                    "render-final-report",
+                    "--session",
+                    str(session_path),
+                    "--summary",
+                    str(summary_path),
+                    "--output",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
             )
             self.assertEqual(process.returncode, 0, process.stderr + process.stdout)
             self.assertIn("11.000000", output.read_text())
@@ -208,54 +245,93 @@ class AutoTuneSessionTest(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), content)
 
     def test_summary_rejects_wrong_metrics_missing_evidence_and_fake_final(self):
-        for field, value in (("metric", "pooled P50"), ("baseline_ms", 20.0),
-                             ("stage", "final_e2e"), ("kind", "final_clean"),
-                             ("candidate_ms", float("nan")), ("run_count", True),
-                             ("evidence_artifacts", ["../outside.json"]),
-                             ("evidence_artifacts", ["missing.json"])):
-            with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as directory:
+        for field, value in (
+            ("metric", "pooled P50"),
+            ("baseline_ms", 20.0),
+            ("stage", "final_e2e"),
+            ("kind", "final_clean"),
+            ("candidate_ms", float("nan")),
+            ("run_count", True),
+            ("evidence_artifacts", ["../outside.json"]),
+            ("evidence_artifacts", ["missing.json"]),
+        ):
+            with (
+                self.subTest(field=field, value=value),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 summary = self.report_summary()
                 summary["stages"][0][field] = value
-                session_path, result = self.final_with_summary(directory, summary=summary)
+                session_path, result = self.final_with_summary(
+                    directory, summary=summary
+                )
                 with self.assertRaisesRegex(ValueError, "report_summary"):
                     auto_tune_session.seal_handoff(session_path, result)
-                self.assertNotEqual(auto_tune_session.load_session(session_path)["status"], "completed")
+                self.assertNotEqual(
+                    auto_tune_session.load_session(session_path)["status"], "completed"
+                )
 
     def test_success_summary_binds_winner_to_final_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
             summary = self.report_summary()
             summary["winner"] = {
-                "candidate_id": "Sbest", "scope_strategy": "explicit_candidates",
-                "promotion_path": "whole-scope", "option_config": {"auto_op_parallel": True},
-                "debug_option_config": {}, "config_path": "evidence.json",
-                "config_fingerprint": "config-123", "reason_zh": "最终验证通过。",
+                "candidate_id": "Sbest",
+                "scope_strategy": "explicit_candidates",
+                "promotion_path": "whole-scope",
+                "option_config": {"auto_op_parallel": True},
+                "debug_option_config": {},
+                "config_path": "evidence.json",
+                "config_fingerprint": "config-123",
+                "reason_zh": "最终验证通过。",
                 "evidence_artifacts": ["evidence.json"],
             }
-            session_path, result = self.final_with_summary(directory, "accepted", summary)
+            session_path, result = self.final_with_summary(
+                directory, "accepted", summary
+            )
             completed = auto_tune_session.seal_handoff(session_path, result)
-            report = (Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md").read_text()
-            for text in ("优胜者：`Sbest`", "whole-scope", "config-123", "Debug options: `{}`", "+10.000000%"):
+            report = (
+                Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md"
+            ).read_text()
+            for text in (
+                "优胜者：`Sbest`",
+                "whole-scope",
+                "config-123",
+                "Debug options: `{}`",
+                "+10.000000%",
+            ):
                 self.assertIn(text, report)
             summary["winner"]["candidate_id"] = "fake-winner"
             summary_path = Path(completed["artifact_root"]) / "override.json"
             summary_path.write_text(json.dumps(summary))
             with self.assertRaisesRegex(ValueError, "report_summary"):
-                auto_tune_session.render_final_report(session_path, summary_path=summary_path)
+                auto_tune_session.render_final_report(
+                    session_path, summary_path=summary_path
+                )
 
-    def test_summary_uses_selector_rank_and_accepted_candidate_before_best_attempt(self):
+    def test_summary_uses_selector_rank_and_accepted_candidate_before_best_attempt(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             summary = self.report_summary()
-            other = dict(summary["stages"][0], candidate_id="S2", selector_rank=2, candidate_ms=10.5)
+            other = dict(
+                summary["stages"][0],
+                candidate_id="S2",
+                selector_rank=2,
+                candidate_ms=10.5,
+            )
             summary["stages"].append(other)
             session_path, result = self.final_with_summary(directory, summary=summary)
             completed = auto_tune_session.seal_handoff(session_path, result)
-            report = (Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md").read_text()
+            report = (
+                Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md"
+            ).read_text()
             self.assertIn("stage_a / S1", report)
             self.assertNotIn("stage_a / S2", report)
             other.update(eligible=True, status="accepted")
             summary_path = Path(completed["artifact_root"]) / "override.json"
             summary_path.write_text(json.dumps(summary))
-            output = auto_tune_session.render_final_report(session_path, summary_path=summary_path)
+            output = auto_tune_session.render_final_report(
+                session_path, summary_path=summary_path
+            )
             self.assertIn("stage_a / S2", output.read_text())
 
     def test_missing_nested_option_map_is_not_reported_as_effective_options(self):
@@ -264,7 +340,9 @@ class AutoTuneSessionTest(unittest.TestCase):
             summary["fallback"]["option_config"] = {"super_kernel_debug_options": {}}
             session_path, result = self.final_with_summary(directory, summary=summary)
             completed = auto_tune_session.seal_handoff(session_path, result)
-            report = (Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md").read_text()
+            report = (
+                Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md"
+            ).read_text()
             self.assertIn("Optimize options: N/A", report)
             self.assertIn("Debug options: `{}`", report)
 
@@ -278,22 +356,29 @@ class AutoTuneSessionTest(unittest.TestCase):
             ledger_path.write_text(json.dumps(ledger))
             auto_tune_session.seal_handoff(session_path, result)
             report = (root / "FINAL_E2E_REPORT.md").read_text()
-            final_row = next(line for line in report.splitlines() if line.startswith("| 最终 E2E"))
+            final_row = next(
+                line for line in report.splitlines() if line.startswith("| 最终 E2E")
+            )
             self.assertIn("| 3 |", final_row)
             self.assertNotIn("120", final_row)
 
     def test_summary_rejects_symlink_evidence_and_inconsistent_improvement(self):
         for failure in ("symlink", "improvement"):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(failure=failure),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 summary = self.report_summary()
                 if failure == "improvement":
                     summary["stages"][0]["improvement_pct"] = 10.0
-                session_path, result = self.final_with_summary(directory, summary=summary)
+                session_path, result = self.final_with_summary(
+                    directory, summary=summary
+                )
                 if failure == "symlink":
                     evidence = session_path.parent / "evidence.json"
                     evidence.unlink()
                     outside = Path(directory) / "outside.json"
-                    outside.write_text('{}')
+                    outside.write_text("{}")
                     evidence.symlink_to(outside)
                 with self.assertRaisesRegex(ValueError, "report_summary"):
                     auto_tune_session.seal_handoff(session_path, result)
@@ -302,12 +387,20 @@ class AutoTuneSessionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             summary = self.report_summary()
             summary["stages"][0]["reason_zh"] = "失败|原因\n下一行"
-            profile = dict(summary["stages"][0], stage="base_profile_source_mapping", kind="profiling",
-                           metric="rank0 profile mean", baseline_ms=20.0, candidate_ms=15.0)
+            profile = dict(
+                summary["stages"][0],
+                stage="base_profile_source_mapping",
+                kind="profiling",
+                metric="rank0 profile mean",
+                baseline_ms=20.0,
+                candidate_ms=15.0,
+            )
             summary["stages"].append(profile)
             session_path, result = self.final_with_summary(directory, summary=summary)
             completed = auto_tune_session.seal_handoff(session_path, result)
-            report = (Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md").read_text()
+            report = (
+                Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md"
+            ).read_text()
             self.assertIn(r"失败\|原因<br>下一行", report)
             self.assertIn("仅诊断，非优胜者", report)
             self.assertIn("最终 E2E 结论: 未执行", report)
@@ -334,9 +427,7 @@ class AutoTuneSessionTest(unittest.TestCase):
             step = auto_tune_session.next_step(session)
             if step["phase"] == "final_e2e_report":
                 return
-            auto_tune_session.seal_handoff(
-                session_path, phase_result(session)
-            )
+            auto_tune_session.seal_handoff(session_path, phase_result(session))
 
     def completed_parent_with_import_evidence(self, directory):
         parent_root = Path(directory) / "parent-artifacts"
@@ -361,7 +452,9 @@ class AutoTuneSessionTest(unittest.TestCase):
             analysis, ensure_ascii=True
         )
         analysis_path = evidence_root / "profiling-analysis.json"
-        analysis_path.write_text(json.dumps(analysis, ensure_ascii=False), encoding="utf-8")
+        analysis_path.write_text(
+            json.dumps(analysis, ensure_ascii=False), encoding="utf-8"
+        )
 
         source_map = {
             "schema_version": "2.0",
@@ -456,7 +549,9 @@ class AutoTuneSessionTest(unittest.TestCase):
                 auto_tune_session.next_step(session)["step_id"], "optional-source-range"
             )
             self.assertTrue(auto_tune_session.verify_session(session_path)["valid"])
-            manifest_path = Path(session["artifact_root"]) / session["evidence_import"]["path"]
+            manifest_path = (
+                Path(session["artifact_root"]) / session["evidence_import"]["path"]
+            )
             manifest = json.loads(manifest_path.read_text())
             self.assertTrue(manifest["authorization"]["approved"])
             self.assertEqual(manifest["parent"]["session_id"], "parent-session")
@@ -477,7 +572,9 @@ class AutoTuneSessionTest(unittest.TestCase):
                     },
                 ),
             )
-            report = (Path(session["artifact_root"]) / "FINAL_E2E_REPORT.md").read_text()
+            report = (
+                Path(session["artifact_root"]) / "FINAL_E2E_REPORT.md"
+            ).read_text()
             self.assertIn("Entrypoint: `source-range-from-smap`", report)
             self.assertIn("Imported parent: `parent-session`", report)
             self.assertEqual(parent["session_path"].read_bytes(), parent_before)
@@ -529,7 +626,9 @@ class AutoTuneSessionTest(unittest.TestCase):
     def test_derived_both_branch_still_rebases_after_accepted_multistream(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = self.completed_parent_with_import_evidence(directory)
-            session, session_path = self.derive_from_parent(directory, parent, mode="both")
+            session, session_path = self.derive_from_parent(
+                directory, parent, mode="both"
+            )
             self.assertEqual(
                 [step["step_id"] for step in session["steps"]],
                 ["optional-multistream", "optional-source-range", "final-e2e-report"],
@@ -569,9 +668,7 @@ class AutoTuneSessionTest(unittest.TestCase):
                 ["optional-multistream", "final-e2e-report"],
             )
             manifest = json.loads(
-                (
-                    child_root / session["evidence_import"]["path"]
-                ).read_text()
+                (child_root / session["evidence_import"]["path"]).read_text()
             )
             self.assertNotIn("source_scope_map", manifest["artifacts"])
 
@@ -603,7 +700,9 @@ class AutoTuneSessionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             session, session_path = self.initialize(directory)
 
-            self.assertEqual(session["schema_version"], "superkernel-auto-tune-session-v1")
+            self.assertEqual(
+                session["schema_version"], "superkernel-auto-tune-session-v1"
+            )
             self.assertEqual(session["optional_mode"], "none")
             self.assertEqual(
                 [step["phase"] for step in session["steps"]],
@@ -618,7 +717,9 @@ class AutoTuneSessionTest(unittest.TestCase):
                 ],
             )
             self.assertEqual(
-                auto_tune_session.next_step(auto_tune_session.load_session(session_path))["agent_id"],
+                auto_tune_session.next_step(
+                    auto_tune_session.load_session(session_path)
+                )["agent_id"],
                 "sk-intake-preparation",
             )
 
@@ -632,7 +733,9 @@ class AutoTuneSessionTest(unittest.TestCase):
                 auto_tune_session.seal_handoff(session_path, handoff)
 
             self.assertEqual(
-                auto_tune_session.next_step(auto_tune_session.load_session(session_path))["phase"],
+                auto_tune_session.next_step(
+                    auto_tune_session.load_session(session_path)
+                )["phase"],
                 "intake_preparation",
             )
 
@@ -645,9 +748,9 @@ class AutoTuneSessionTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "reserved"):
                 auto_tune_session.seal_handoff(session_path, handoff)
             self.assertEqual(
-                auto_tune_session.next_step(auto_tune_session.load_session(session_path))[
-                    "step_id"
-                ],
+                auto_tune_session.next_step(
+                    auto_tune_session.load_session(session_path)
+                )["step_id"],
                 "intake-preparation",
             )
 
@@ -685,19 +788,25 @@ class AutoTuneSessionTest(unittest.TestCase):
             for _ in range(5):
                 self.seal_current(session_path)
             self.assertEqual(
-                auto_tune_session.next_step(auto_tune_session.load_session(session_path))["step_id"],
+                auto_tune_session.next_step(
+                    auto_tune_session.load_session(session_path)
+                )["step_id"],
                 "optional-multistream",
             )
 
             self.seal_current(session_path, status="accepted")
-            inserted = auto_tune_session.next_step(auto_tune_session.load_session(session_path))
+            inserted = auto_tune_session.next_step(
+                auto_tune_session.load_session(session_path)
+            )
             self.assertEqual(inserted["step_id"], "base-profile-derived")
             self.assertEqual(inserted["phase"], "base_profile_source_mapping")
             self.assertTrue(inserted["derived_family_rebase"])
 
             self.seal_current(session_path)
             self.assertEqual(
-                auto_tune_session.next_step(auto_tune_session.load_session(session_path))["step_id"],
+                auto_tune_session.next_step(
+                    auto_tune_session.load_session(session_path)
+                )["step_id"],
                 "optional-source-range",
             )
 
@@ -709,7 +818,9 @@ class AutoTuneSessionTest(unittest.TestCase):
             self.seal_current(session_path, status="no_gain")
 
             self.assertEqual(
-                auto_tune_session.next_step(auto_tune_session.load_session(session_path))["step_id"],
+                auto_tune_session.next_step(
+                    auto_tune_session.load_session(session_path)
+                )["step_id"],
                 "optional-source-range",
             )
 
@@ -727,9 +838,13 @@ class AutoTuneSessionTest(unittest.TestCase):
             _, session_path = self.initialize(directory)
             task = auto_tune_session.create_dispatch_task(session_path)
 
-            self.assertEqual(task["schema_version"], "superkernel-auto-tune-phase-task-v1")
+            self.assertEqual(
+                task["schema_version"], "superkernel-auto-tune-phase-task-v1"
+            )
             self.assertEqual(task["step"]["agent_id"], "sk-intake-preparation")
-            self.assertEqual(task["handoff"]["result_schema"], auto_tune_session.RESULT_SCHEMA)
+            self.assertEqual(
+                task["handoff"]["result_schema"], auto_tune_session.RESULT_SCHEMA
+            )
             self.seal_current(session_path)
             with self.assertRaisesRegex(ValueError, "stale dispatch task"):
                 auto_tune_session.validate_dispatch_task(task, session_path)
@@ -751,8 +866,14 @@ class AutoTuneSessionTest(unittest.TestCase):
                 session_path, [sys.executable, str(runner)]
             )
 
-            self.assertEqual(auto_tune_session.next_step(session)["phase"], "s0_baseline")
-            receipts = list((Path(session["artifact_root"]) / "dispatches").glob("*/dispatch-receipt.json"))
+            self.assertEqual(
+                auto_tune_session.next_step(session)["phase"], "s0_baseline"
+            )
+            receipts = list(
+                (Path(session["artifact_root"]) / "dispatches").glob(
+                    "*/dispatch-receipt.json"
+                )
+            )
             self.assertEqual(len(receipts), 1)
             receipt = json.loads(receipts[0].read_text())
             self.assertEqual(receipt["agent_id"], "sk-intake-preparation")
@@ -767,11 +888,17 @@ class AutoTuneSessionTest(unittest.TestCase):
                 )
 
             current = auto_tune_session.load_session(session_path)
-            self.assertEqual(auto_tune_session.next_step(current)["step_id"], "intake-preparation")
-            receipt_path = next(
-                (Path(current["artifact_root"]) / "dispatches").glob("*/dispatch-receipt.json")
+            self.assertEqual(
+                auto_tune_session.next_step(current)["step_id"], "intake-preparation"
             )
-            self.assertEqual(json.loads(receipt_path.read_text())["runner_status"], "failed")
+            receipt_path = next(
+                (Path(current["artifact_root"]) / "dispatches").glob(
+                    "*/dispatch-receipt.json"
+                )
+            )
+            self.assertEqual(
+                json.loads(receipt_path.read_text())["runner_status"], "failed"
+            )
 
             runner = Path(directory) / "retry_agent.py"
             runner.write_text(
@@ -785,7 +912,9 @@ class AutoTuneSessionTest(unittest.TestCase):
             recovered = auto_tune_session.run_agent_step(
                 session_path, [sys.executable, str(runner)]
             )
-            self.assertEqual(auto_tune_session.next_step(recovered)["phase"], "s0_baseline")
+            self.assertEqual(
+                auto_tune_session.next_step(recovered)["phase"], "s0_baseline"
+            )
             self.assertTrue(auto_tune_session.verify_session(session_path)["valid"])
 
     def test_wrong_agent_host_result_is_archived_without_advancing_session(self):
@@ -806,7 +935,9 @@ class AutoTuneSessionTest(unittest.TestCase):
                     session_path, [sys.executable, str(runner)]
                 )
             session = auto_tune_session.load_session(session_path)
-            self.assertEqual(auto_tune_session.next_step(session)["step_id"], "intake-preparation")
+            self.assertEqual(
+                auto_tune_session.next_step(session)["step_id"], "intake-preparation"
+            )
             receipt = json.loads(
                 next(
                     (Path(session["artifact_root"]) / "dispatches").glob(
@@ -858,9 +989,13 @@ class AutoTuneSessionTest(unittest.TestCase):
                     "final-e2e-report",
                 ],
             )
-            self.assertTrue(all("dispatch_receipt_path" in step for step in session["steps"]))
+            self.assertTrue(
+                all("dispatch_receipt_path" in step for step in session["steps"])
+            )
             self.assertTrue(auto_tune_session.verify_session(session_path)["valid"])
-            report = (Path(session["artifact_root"]) / "FINAL_E2E_REPORT.md").read_text()
+            report = (
+                Path(session["artifact_root"]) / "FINAL_E2E_REPORT.md"
+            ).read_text()
             self.assertIn("最终 E2E 结论: 有收益", report)
             self.assertIn("Sbest-derived", report)
             self.assertIn("10.000000%", report)
@@ -869,8 +1004,14 @@ class AutoTuneSessionTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         runtime = root / "superkernel-runtime-common"
         self.assertTrue((runtime / "scripts" / "analyze_performance.py").is_file())
-        self.assertFalse((root / "superkernel-auto-tune" / "scripts" / "analyze_performance.py").is_file())
-        for skill in set(auto_tune_session.PHASES[phase][1] for phase in auto_tune_session.PHASES):
+        self.assertFalse(
+            (
+                root / "superkernel-auto-tune" / "scripts" / "analyze_performance.py"
+            ).is_file()
+        )
+        for skill in set(
+            auto_tune_session.PHASES[phase][1] for phase in auto_tune_session.PHASES
+        ):
             manifest = json.loads((root / skill / "phase.json").read_text())
             self.assertEqual(manifest["skill"], skill)
             self.assertTrue(manifest["runtime_tools"])
@@ -904,7 +1045,10 @@ class AutoTuneSessionTest(unittest.TestCase):
                 auto_tune_session.seal_handoff(session_path, phase_result(session))
             self.assertEqual(
                 visited,
-                set(auto_tune_session.PHASES[phase][1] for phase in auto_tune_session.PHASES),
+                set(
+                    auto_tune_session.PHASES[phase][1]
+                    for phase in auto_tune_session.PHASES
+                ),
             )
 
     def test_stage_entrypoint_executes_only_an_owned_tool_after_task_validation(self):
@@ -956,7 +1100,9 @@ class AutoTuneSessionTest(unittest.TestCase):
                         session_path, status="accepted", details_zh=details
                     )
                     break
-                status = "accepted" if step["step_id"] == "optional-multistream" else None
+                status = (
+                    "accepted" if step["step_id"] == "optional-multistream" else None
+                )
                 auto_tune_session.seal_handoff(
                     session_path, phase_result(session, status=status)
                 )
@@ -979,9 +1125,7 @@ class AutoTuneSessionTest(unittest.TestCase):
             self.assertTrue(
                 all(step["state"] == "sealed" for step in finished["steps"])
             )
-            self.assertTrue(
-                auto_tune_session.verify_session(session_path)["valid"]
-            )
+            self.assertTrue(auto_tune_session.verify_session(session_path)["valid"])
 
     def test_s0_blocker_short_circuits_to_final_and_seals_not_run_phase_scenes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1005,19 +1149,20 @@ class AutoTuneSessionTest(unittest.TestCase):
             ]
             self.assertTrue(all(step["state"] == "sealed" for step in skipped))
             for step in skipped:
-                record = (
-                    Path(session["artifact_root"])
-                    / step["result_path"]
-                )
+                record = Path(session["artifact_root"]) / step["result_path"]
                 expected_status = (
                     "not_requested"
                     if step["step_id"] == "optional-experiments"
                     else "not_run"
                 )
-                self.assertEqual(json.loads(record.read_text())["status"], expected_status)
+                self.assertEqual(
+                    json.loads(record.read_text())["status"], expected_status
+                )
                 self.assertTrue((record.parent / "PHASE_REPORT.md").is_file())
 
-    def test_every_required_failure_gate_short_circuits_and_preserves_phase_scenes(self):
+    def test_every_required_failure_gate_short_circuits_and_preserves_phase_scenes(
+        self,
+    ):
         cases = (
             ("intake_preparation", "blocked"),
             ("s0_baseline", "failed"),
@@ -1029,39 +1174,70 @@ class AutoTuneSessionTest(unittest.TestCase):
             for phase, status in cases:
                 with self.subTest(phase=phase, status=status):
                     root = Path(directory) / phase
-                    _, session_path = auto_tune_session.initialize_session(
-                        session_path=root / "session.json",
-                        artifact_root=root,
-                        session_id=f"gate-{phase}",
-                        optional_mode="none",
-                    ), root / "session.json"
-                    while auto_tune_session.next_step(auto_tune_session.load_session(session_path))["phase"] != phase:
+                    _, session_path = (
+                        auto_tune_session.initialize_session(
+                            session_path=root / "session.json",
+                            artifact_root=root,
+                            session_id=f"gate-{phase}",
+                            optional_mode="none",
+                        ),
+                        root / "session.json",
+                    )
+                    while (
+                        auto_tune_session.next_step(
+                            auto_tune_session.load_session(session_path)
+                        )["phase"]
+                        != phase
+                    ):
                         session = auto_tune_session.load_session(session_path)
-                        auto_tune_session.seal_handoff(session_path, phase_result(session))
+                        auto_tune_session.seal_handoff(
+                            session_path, phase_result(session)
+                        )
                     session = auto_tune_session.load_session(session_path)
                     settled = auto_tune_session.seal_handoff(
                         session_path, phase_result(session, status=status)
                     )
-                    self.assertEqual(auto_tune_session.next_step(settled)["phase"], "final_e2e_report")
-                    self.assertTrue(auto_tune_session.verify_session(session_path)["valid"])
-                    completed = self.seal_current(
-                        session_path, status="not_run",
-                        details_zh={key: "前置失败，最终未执行。" for key in auto_tune_session.FINAL_DETAIL_KEYS},
+                    self.assertEqual(
+                        auto_tune_session.next_step(settled)["phase"],
+                        "final_e2e_report",
                     )
-                    report = (Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md").read_text()
+                    self.assertTrue(
+                        auto_tune_session.verify_session(session_path)["valid"]
+                    )
+                    completed = self.seal_current(
+                        session_path,
+                        status="not_run",
+                        details_zh={
+                            key: "前置失败，最终未执行。"
+                            for key in auto_tune_session.FINAL_DETAIL_KEYS
+                        },
+                    )
+                    report = (
+                        Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md"
+                    ).read_text()
                     self.assertIn("## 关键数据对比", report)
                     self.assertIn("最终 E2E 结论: 未执行", report)
-                    self.assertTrue(auto_tune_session.verify_session(session_path)["valid"])
+                    self.assertTrue(
+                        auto_tune_session.verify_session(session_path)["valid"]
+                    )
 
     def test_budget_and_final_failure_keep_available_baseline_and_report(self):
-        for status, reason in (("not_run", "预算耗尽，未运行最终验证。"),
-                               ("failed", "最终验证正确性失败。"),
-                               ("blocked", "设备阻塞。"), ("no_gain", "最终性能无收益。")):
-            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+        for status, reason in (
+            ("not_run", "预算耗尽，未运行最终验证。"),
+            ("failed", "最终验证正确性失败。"),
+            ("blocked", "设备阻塞。"),
+            ("no_gain", "最终性能无收益。"),
+        ):
+            with (
+                self.subTest(status=status),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 session_path, result = self.final_with_summary(directory, status)
                 result["summary_zh"] = reason
                 completed = auto_tune_session.seal_handoff(session_path, result)
-                report = (Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md").read_text()
+                report = (
+                    Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md"
+                ).read_text()
                 self.assertIn(reason, report)
                 self.assertIn("10.000000", report)
                 self.assertIn("优胜者：无", report)
@@ -1076,7 +1252,9 @@ class AutoTuneSessionTest(unittest.TestCase):
             self.assertEqual(resumed["session_id"], "session-20260905-a")
             self.assertEqual(resumed["next_step"]["step_id"], "s0-baseline")
 
-    def test_final_stage_requires_complete_chinese_terminal_sections_and_finishes_session(self):
+    def test_final_stage_requires_complete_chinese_terminal_sections_and_finishes_session(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             _, session_path = self.initialize(directory)
             self.advance_to_final(session_path)
@@ -1121,7 +1299,9 @@ class AutoTuneSessionTest(unittest.TestCase):
             session = auto_tune_session.load_session(session_path)
             result = phase_result(
                 session,
-                details_zh={key: "已结算。" for key in auto_tune_session.FINAL_DETAIL_KEYS},
+                details_zh={
+                    key: "已结算。" for key in auto_tune_session.FINAL_DETAIL_KEYS
+                },
             )
             result.pop("ledger_path")
             with self.assertRaisesRegex(ValueError, "ledger_path"):
@@ -1139,7 +1319,9 @@ class AutoTuneSessionTest(unittest.TestCase):
             result = phase_result(
                 session,
                 status="accepted",
-                details_zh={key: "已结算。" for key in auto_tune_session.FINAL_DETAIL_KEYS},
+                details_zh={
+                    key: "已结算。" for key in auto_tune_session.FINAL_DETAIL_KEYS
+                },
             )
             ledger = Path(session["artifact_root"]) / result["ledger_path"]
             payload = json.loads(ledger.read_text())
@@ -1167,11 +1349,16 @@ class AutoTuneSessionTest(unittest.TestCase):
                     result = phase_result(
                         session,
                         status=status,
-                        details_zh={key: "已结算。" for key in auto_tune_session.FINAL_DETAIL_KEYS},
+                        details_zh={
+                            key: "已结算。"
+                            for key in auto_tune_session.FINAL_DETAIL_KEYS
+                        },
                     )
                     completed = auto_tune_session.seal_handoff(session_path, result)
                     self.assertEqual(completed["status"], "completed")
-                    report = (Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md").read_text()
+                    report = (
+                        Path(completed["artifact_root"]) / "FINAL_E2E_REPORT.md"
+                    ).read_text()
                     self.assertIn(f"最终 E2E 结论: {label}", report)
 
             root = Path(directory) / "drift"
@@ -1181,7 +1368,9 @@ class AutoTuneSessionTest(unittest.TestCase):
             result = phase_result(
                 session,
                 status="accepted",
-                details_zh={key: "已结算。" for key in auto_tune_session.FINAL_DETAIL_KEYS},
+                details_zh={
+                    key: "已结算。" for key in auto_tune_session.FINAL_DETAIL_KEYS
+                },
             )
             ledger_path = Path(session["artifact_root"]) / result["ledger_path"]
             ledger = json.loads(ledger_path.read_text())
@@ -1189,6 +1378,7 @@ class AutoTuneSessionTest(unittest.TestCase):
             ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "improvement_pct"):
                 auto_tune_session.seal_handoff(session_path, result)
+
 
 if __name__ == "__main__":
     unittest.main()

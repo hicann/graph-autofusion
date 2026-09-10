@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Safely quarantine mutable state from a terminal multistream trial."""
 
 import argparse
@@ -16,7 +23,11 @@ TERMINAL_STATES = {"accepted", "rejected", "blocked", "failed"}
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -75,12 +86,14 @@ def snapshot(path):
     if path.is_symlink():
         raise ValueError(f"cannot snapshot symlink: {path}")
     if path.is_file():
-        records = [{
-            "path": ".",
-            "kind": "file",
-            "size": path.stat().st_size,
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-        }]
+        records = [
+            {
+                "path": ".",
+                "kind": "file",
+                "size": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        ]
         kind = "file"
     elif path.is_dir():
         records = []
@@ -91,18 +104,24 @@ def snapshot(path):
             if item.is_dir():
                 records.append({"path": relative, "kind": "directory"})
             elif item.is_file():
-                records.append({
-                    "path": relative,
-                    "kind": "file",
-                    "size": item.stat().st_size,
-                    "sha256": hashlib.sha256(item.read_bytes()).hexdigest(),
-                })
+                records.append(
+                    {
+                        "path": relative,
+                        "kind": "file",
+                        "size": item.stat().st_size,
+                        "sha256": hashlib.sha256(item.read_bytes()).hexdigest(),
+                    }
+                )
             else:
                 raise ValueError(f"unsupported filesystem entry: {item}")
         kind = "directory"
     else:
         raise ValueError(f"cannot snapshot missing or unsupported path: {path}")
-    return {"kind": kind, "entry_count": len(records), "fingerprint": fingerprint(records)}
+    return {
+        "kind": kind,
+        "entry_count": len(records),
+        "fingerprint": fingerprint(records),
+    }
 
 
 def _load(path):
@@ -130,9 +149,16 @@ def _write_atomic(path, value):
 
 def validate_plan(plan, *, require_fingerprint=True):
     required = {
-        "schema_version", "cleanup_id", "trial_id", "terminal_state",
-        "isolation_root", "incumbent_root", "quarantine_root",
-        "incumbent_snapshot", "targets", "preserved_paths",
+        "schema_version",
+        "cleanup_id",
+        "trial_id",
+        "terminal_state",
+        "isolation_root",
+        "incumbent_root",
+        "quarantine_root",
+        "incumbent_snapshot",
+        "targets",
+        "preserved_paths",
     }
     if require_fingerprint:
         required.add("plan_fingerprint")
@@ -146,9 +172,15 @@ def validate_plan(plan, *, require_fingerprint=True):
     trial_id = _text(plan["trial_id"], "trial_id")
     if plan["terminal_state"] not in TERMINAL_STATES:
         raise ValueError(f"terminal_state must be one of {sorted(TERMINAL_STATES)}")
-    isolation = _absolute_directory(plan["isolation_root"], "isolation_root", must_exist=True)
-    incumbent = _absolute_directory(plan["incumbent_root"], "incumbent_root", must_exist=True)
-    quarantine = _absolute_directory(plan["quarantine_root"], "quarantine_root", must_exist=False)
+    isolation = _absolute_directory(
+        plan["isolation_root"], "isolation_root", must_exist=True
+    )
+    incumbent = _absolute_directory(
+        plan["incumbent_root"], "incumbent_root", must_exist=True
+    )
+    quarantine = _absolute_directory(
+        plan["quarantine_root"], "quarantine_root", must_exist=False
+    )
     _disjoint(isolation, incumbent, "isolation_root and incumbent_root")
     _disjoint(isolation, quarantine, "isolation_root and quarantine_root")
     _disjoint(incumbent, quarantine, "incumbent_root and quarantine_root")
@@ -179,7 +211,7 @@ def validate_plan(plan, *, require_fingerprint=True):
         target_paths.append(PurePosixPath(relative))
         targets.append({"path": relative, "snapshot": actual})
     for index, left in enumerate(target_paths):
-        for right in target_paths[index + 1:]:
+        for right in target_paths[index + 1 :]:
             if left in right.parents or right in left.parents:
                 raise ValueError("cleanup targets must not overlap")
 
@@ -189,7 +221,12 @@ def validate_plan(plan, *, require_fingerprint=True):
     for index, value in enumerate(plan["preserved_paths"]):
         relative = _relative(value, f"preserved_paths[{index}]")
         preserved_path = PurePosixPath(relative)
-        if any(preserved_path == item or preserved_path in item.parents or item in preserved_path.parents for item in target_paths):
+        if any(
+            preserved_path == item
+            or preserved_path in item.parents
+            or item in preserved_path.parents
+            for item in target_paths
+        ):
             raise ValueError("preserved_paths must not overlap cleanup targets")
         _safe_child(isolation, relative, f"preserved_paths[{index}]")
         preserved.append(relative)
@@ -217,14 +254,21 @@ def validate_plan(plan, *, require_fingerprint=True):
 
 def freeze_plan(draft):
     draft = dict(draft)
-    incumbent = _absolute_directory(draft.get("incumbent_root"), "incumbent_root", must_exist=True)
-    isolation = _absolute_directory(draft.get("isolation_root"), "isolation_root", must_exist=True)
+    incumbent = _absolute_directory(
+        draft.get("incumbent_root"), "incumbent_root", must_exist=True
+    )
+    isolation = _absolute_directory(
+        draft.get("isolation_root"), "isolation_root", must_exist=True
+    )
     raw_targets = draft.get("targets")
     if not isinstance(raw_targets, list):
         raise ValueError("targets must be a list")
     draft["incumbent_snapshot"] = snapshot(incumbent)
     draft["targets"] = [
-        {"path": _relative(value, f"targets[{index}]"), "snapshot": snapshot(_safe_child(isolation, value, f"targets[{index}]"))}
+        {
+            "path": _relative(value, f"targets[{index}]"),
+            "snapshot": snapshot(_safe_child(isolation, value, f"targets[{index}]")),
+        }
         for index, value in enumerate(raw_targets)
     ]
     return validate_plan(draft, require_fingerprint=False)
@@ -233,15 +277,28 @@ def freeze_plan(draft):
 def validate_receipt(receipt, plan):
     plan = validate_plan(plan)
     required = {
-        "schema_version", "cleanup_id", "trial_id", "terminal_state",
-        "plan_fingerprint", "quarantined", "preserved_paths",
-        "incumbent_snapshot", "receipt_fingerprint",
+        "schema_version",
+        "cleanup_id",
+        "trial_id",
+        "terminal_state",
+        "plan_fingerprint",
+        "quarantined",
+        "preserved_paths",
+        "incumbent_snapshot",
+        "receipt_fingerprint",
     }
     if not isinstance(receipt, dict) or set(receipt) != required:
         raise ValueError(f"cleanup receipt must contain exactly {sorted(required)}")
     if receipt["schema_version"] != RECEIPT_SCHEMA:
         raise ValueError(f"cleanup receipt must use {RECEIPT_SCHEMA}")
-    for field in ("cleanup_id", "trial_id", "terminal_state", "plan_fingerprint", "preserved_paths", "incumbent_snapshot"):
+    for field in (
+        "cleanup_id",
+        "trial_id",
+        "terminal_state",
+        "plan_fingerprint",
+        "preserved_paths",
+        "incumbent_snapshot",
+    ):
         if receipt[field] != plan[field]:
             raise ValueError(f"cleanup receipt {field} differs from plan")
     if receipt["quarantined"] != plan["targets"]:
@@ -251,14 +308,26 @@ def validate_receipt(receipt, plan):
     for index, target in enumerate(plan["targets"]):
         source = _safe_child(isolation, target["path"], f"targets[{index}].path")
         destination = _safe_child(quarantine, target["path"], f"targets[{index}].path")
-        if source.exists() or not destination.exists() or snapshot(destination) != target["snapshot"]:
-            raise ValueError(f"cleanup receipt target state is invalid: {target['path']}")
+        if (
+            source.exists()
+            or not destination.exists()
+            or snapshot(destination) != target["snapshot"]
+        ):
+            raise ValueError(
+                f"cleanup receipt target state is invalid: {target['path']}"
+            )
     if snapshot(Path(plan["incumbent_root"])) != plan["incumbent_snapshot"]:
         raise ValueError("incumbent changed after cleanup")
-    unsigned = {key: value for key, value in receipt.items() if key != "receipt_fingerprint"}
+    unsigned = {
+        key: value for key, value in receipt.items() if key != "receipt_fingerprint"
+    }
     if receipt["receipt_fingerprint"] != fingerprint(unsigned):
         raise ValueError("cleanup receipt fingerprint mismatch")
-    return {"valid": True, "terminal_state": plan["terminal_state"], "target_count": len(plan["targets"])}
+    return {
+        "valid": True,
+        "terminal_state": plan["terminal_state"],
+        "target_count": len(plan["targets"]),
+    }
 
 
 def run(plan, receipt_path):
@@ -275,10 +344,14 @@ def run(plan, receipt_path):
         destination = _safe_child(quarantine, target["path"], f"targets[{index}].path")
         if destination.exists():
             if source.exists() or snapshot(destination) != target["snapshot"]:
-                raise ValueError(f"cannot recover partially quarantined target: {target['path']}")
+                raise ValueError(
+                    f"cannot recover partially quarantined target: {target['path']}"
+                )
             continue
         if not source.exists() or snapshot(source) != target["snapshot"]:
-            raise ValueError(f"cleanup target changed before quarantine: {target['path']}")
+            raise ValueError(
+                f"cleanup target changed before quarantine: {target['path']}"
+            )
         destination.parent.mkdir(parents=True, exist_ok=True)
         os.replace(source, destination)
     if snapshot(Path(plan["incumbent_root"])) != plan["incumbent_snapshot"]:

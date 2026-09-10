@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import copy
 import json
 import sys
@@ -9,7 +16,9 @@ from unittest import mock
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
-ADAPTATION_SCRIPTS = Path(__file__).resolve().parents[2] / "superkernel-runtime-common" / "scripts"
+ADAPTATION_SCRIPTS = (
+    Path(__file__).resolve().parents[2] / "superkernel-runtime-common" / "scripts"
+)
 sys.path.insert(0, str(ADAPTATION_SCRIPTS))
 
 import multistream_contract  # noqa: E402
@@ -160,12 +169,8 @@ class MultistreamContractTest(unittest.TestCase):
             "candidate_config_fingerprint": self.request["incumbent"][
                 "config_fingerprint"
             ],
-            "control_fingerprint": self.request["incumbent"][
-                "control_fingerprint"
-            ],
-            "workload_fingerprint": self.request["incumbent"][
-                "workload_fingerprint"
-            ],
+            "control_fingerprint": self.request["incumbent"]["control_fingerprint"],
+            "workload_fingerprint": self.request["incumbent"]["workload_fingerprint"],
             "source_scope_mapping": {
                 "protocol": "source_scope_map_v2",
                 "status": "exact" if source_exact else "not_requested",
@@ -175,9 +180,7 @@ class MultistreamContractTest(unittest.TestCase):
         analysis["analysis_content_fingerprint"] = (
             multistream_contract._analysis_fingerprint(analysis)
         )
-        (self.root / "incumbent-analysis.json").write_text(
-            json.dumps(analysis) + "\n"
-        )
+        (self.root / "incumbent-analysis.json").write_text(json.dumps(analysis) + "\n")
 
     def _write_source_map(self):
         source_map = {
@@ -233,9 +236,7 @@ class MultistreamContractTest(unittest.TestCase):
             "single_change_verified": True,
         }
         (self.root / "action-manifest.json").write_text(json.dumps(action) + "\n")
-        adapter = multistream_plan_compiler.freeze_adapter(
-            self._model_adapter_draft()
-        )
+        adapter = multistream_plan_compiler.freeze_adapter(self._model_adapter_draft())
         (self.root / "model-adapter.json").write_text(json.dumps(adapter) + "\n")
         plan, compilation = multistream_plan_compiler.compile_plan(
             self.request,
@@ -245,9 +246,7 @@ class MultistreamContractTest(unittest.TestCase):
             candidate_config="selected-config.yaml",
         )
         (self.root / "execution-plan.json").write_text(json.dumps(plan) + "\n")
-        (self.root / "plan-compilation.json").write_text(
-            json.dumps(compilation) + "\n"
-        )
+        (self.root / "plan-compilation.json").write_text(json.dumps(compilation) + "\n")
         (self.root / "workspace").mkdir(exist_ok=True)
         for phase in plan["phases"]:
             artifact_path = self.root / phase["required_artifacts"][0]
@@ -298,9 +297,7 @@ class MultistreamContractTest(unittest.TestCase):
                 "artifact_root": plan["artifact_root"],
                 "lease_root": plan["lease_root"],
                 "environment": multistream_runner._phase_environment(plan, phase),
-                "device_ids": (
-                    plan["device_ids"] if phase["requires_device"] else []
-                ),
+                "device_ids": (plan["device_ids"] if phase["requires_device"] else []),
                 "command": {
                     "argv": phase["argv"],
                     "pid": 101,
@@ -320,7 +317,9 @@ class MultistreamContractTest(unittest.TestCase):
                 "sealed_files": sealed,
                 "completed_at": "2026-08-28T00:00:02Z",
             }
-            (self.root / phase["manifest"]).write_text(json.dumps(phase_manifest) + "\n")
+            (self.root / phase["manifest"]).write_text(
+                json.dumps(phase_manifest) + "\n"
+            )
         state = multistream_execution.initialize_state(
             "MS-O1", fingerprint, self.root / "action-manifest.json"
         )
@@ -443,34 +442,72 @@ class MultistreamContractTest(unittest.TestCase):
                 "{skill_root}/scripts/multistream_evidence.py",
             ]
             common_options = [
-                "--artifact-root", "{artifact_root}",
-                "--state-after", state,
-                "--trial-id", "{trial_id}",
-                "--request-fingerprint", "{request_fingerprint}",
-                "--out", "{artifact_root}/phase-artifacts/" + state + ".json",
+                "--artifact-root",
+                "{artifact_root}",
+                "--state-after",
+                state,
+                "--trial-id",
+                "{trial_id}",
+                "--request-fingerprint",
+                "{request_fingerprint}",
+                "--out",
+                "{artifact_root}/phase-artifacts/" + state + ".json",
             ]
             if state == "correctness_passed":
-                validator = common_validator + ["correctness"] + common_options + [
-                    "--run-root", "runs/correctness", "--expected-ranks", "1",
-                ]
+                validator = (
+                    common_validator
+                    + ["correctness"]
+                    + common_options
+                    + [
+                        "--run-root",
+                        "runs/correctness",
+                        "--expected-ranks",
+                        "1",
+                    ]
+                )
             elif state == "profile_collected":
-                validator = common_validator + ["profile"] + common_options + [
-                    "--baseline-manifest", "profiles/baseline/collection-manifest.json",
-                    "--candidate-manifest", "profiles/candidate/collection-manifest.json",
-                ]
+                validator = (
+                    common_validator
+                    + ["profile"]
+                    + common_options
+                    + [
+                        "--baseline-manifest",
+                        "profiles/baseline/collection-manifest.json",
+                        "--candidate-manifest",
+                        "profiles/candidate/collection-manifest.json",
+                    ]
+                )
             elif state == "analysis_validated":
-                validator = common_validator + ["analysis"] + common_options + [
-                    "--analysis-result", "analysis/result.json",
-                ]
+                validator = (
+                    common_validator
+                    + ["analysis"]
+                    + common_options
+                    + [
+                        "--analysis-result",
+                        "analysis/result.json",
+                    ]
+                )
             else:
                 expected_runs = "3" if state == "clean3_passed" else "5"
-                validator = common_validator + ["clean"] + common_options + [
-                    "--baseline-root", "runs/baseline",
-                    "--candidate-root", "runs/candidate",
-                    "--candidate-name", "{trial_id}",
-                    "--expected-ranks", "1", "--warmup", "0",
-                    "--expected-runs", expected_runs,
-                ]
+                validator = (
+                    common_validator
+                    + ["clean"]
+                    + common_options
+                    + [
+                        "--baseline-root",
+                        "runs/baseline",
+                        "--candidate-root",
+                        "runs/candidate",
+                        "--candidate-name",
+                        "{trial_id}",
+                        "--expected-ranks",
+                        "1",
+                        "--warmup",
+                        "0",
+                        "--expected-runs",
+                        expected_runs,
+                    ]
+                )
             phases.append(
                 {
                     "state_after": state,
@@ -496,9 +533,7 @@ class MultistreamContractTest(unittest.TestCase):
                     "required_artifact_templates": [
                         "phase-artifacts/" + state + ".json"
                     ],
-                    "manifest_template": (
-                        "phase-manifests/" + state + ".json"
-                    ),
+                    "manifest_template": ("phase-manifests/" + state + ".json"),
                 }
             )
         return {
@@ -573,13 +608,17 @@ class MultistreamContractTest(unittest.TestCase):
             "schema_version": multistream_trace_analysis.CAPTURE_SCHEMA,
             "capture_id": "capture-1",
             "trial_id": "MS-O1",
-            "request_fingerprint": multistream_contract.content_fingerprint(self.request),
+            "request_fingerprint": multistream_contract.content_fingerprint(
+                self.request
+            ),
             "overflow_detected": overflow,
             "source_files": [
                 {
                     "path": "short-trace.json",
                     "size_bytes": raw.stat().st_size,
-                    "file_fingerprint": multistream_trace_analysis.file_fingerprint(raw),
+                    "file_fingerprint": multistream_trace_analysis.file_fingerprint(
+                        raw
+                    ),
                 }
             ],
             "targets": [
@@ -803,7 +842,9 @@ class MultistreamContractTest(unittest.TestCase):
             ],
             "source_actions": [],
         }
-        catalog["catalog_fingerprint"] = multistream_candidate_planner.fingerprint(catalog)
+        catalog["catalog_fingerprint"] = multistream_candidate_planner.fingerprint(
+            catalog
+        )
         catalog_path = self.root / "action-catalog.json"
         catalog_path.write_text(json.dumps(catalog) + "\n")
         matrix = multistream_candidate_planner.plan(
@@ -882,9 +923,7 @@ class MultistreamContractTest(unittest.TestCase):
 
     def test_model_adapter_compiles_a_trial_bound_frozen_plan(self):
         self._accepted_option_result()
-        adapter = multistream_plan_compiler.freeze_adapter(
-            self._model_adapter_draft()
-        )
+        adapter = multistream_plan_compiler.freeze_adapter(self._model_adapter_draft())
         action = json.loads((self.root / "action-manifest.json").read_text())
 
         plan, compilation = multistream_plan_compiler.compile_plan(
@@ -900,14 +939,14 @@ class MultistreamContractTest(unittest.TestCase):
             plan["phases"][0]["argv"][1],
             str((self.root / "selected-config.yaml").resolve()),
         )
-        self.assertEqual(compilation["adapter_fingerprint"], adapter["adapter_fingerprint"])
+        self.assertEqual(
+            compilation["adapter_fingerprint"], adapter["adapter_fingerprint"]
+        )
         self.assertEqual(compilation["plan_fingerprint"], plan["plan_fingerprint"])
         multistream_runner.validate_plan(plan)
 
     def test_model_adapter_rejects_tampering_and_unknown_placeholders(self):
-        adapter = multistream_plan_compiler.freeze_adapter(
-            self._model_adapter_draft()
-        )
+        adapter = multistream_plan_compiler.freeze_adapter(self._model_adapter_draft())
         adapter["device_ids"] = [1]
         with self.assertRaisesRegex(ValueError, "adapter_fingerprint mismatch"):
             multistream_plan_compiler.validate_adapter(adapter)
@@ -952,7 +991,9 @@ class MultistreamContractTest(unittest.TestCase):
 
     def test_nonaccepted_result_cannot_select_candidate(self):
         result = self._fallback("no_gain")
-        result["selected_candidate"] = self._accepted_option_result()["selected_candidate"]
+        result["selected_candidate"] = self._accepted_option_result()[
+            "selected_candidate"
+        ]
         with self.assertRaisesRegex(ValueError, "selected_candidate=null"):
             multistream_contract.validate_result(self.request, result, self.root)
 
@@ -1111,7 +1152,9 @@ class MultistreamContractTest(unittest.TestCase):
         result["selected_candidate"]["source_revision"] = "source-r2"
         changed_source = self.root / "source" / "model-trial.py"
         changed_source.write_text("def run():\n    return 2\n")
-        changed_file_fingerprint = multistream_execution.file_fingerprint(changed_source)
+        changed_file_fingerprint = multistream_execution.file_fingerprint(
+            changed_source
+        )
         changed_source_fingerprint = multistream_execution.content_fingerprint(
             {
                 "files": [
@@ -1223,9 +1266,7 @@ class MultistreamContractTest(unittest.TestCase):
         audit = family_root / "S3M" / "SEED" / "execution-audit"
         self.assertTrue((audit / "execution-plan.json").is_file())
         self.assertTrue((audit / "model-adapter.json").is_file())
-        self.assertEqual(
-            len(list((audit / "phase-manifests").glob("*.json"))), 5
-        )
+        self.assertEqual(len(list((audit / "phase-manifests").glob("*.json"))), 5)
 
         repeated = bootstrap_derived_family.bootstrap(
             request_path,

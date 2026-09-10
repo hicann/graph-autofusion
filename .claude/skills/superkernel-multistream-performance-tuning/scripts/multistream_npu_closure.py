@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Seal and replay a complete real-NPU multistream tuning closure."""
 
 import argparse
@@ -31,7 +38,11 @@ ARTIFACT_SCHEMAS = {
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -78,20 +89,33 @@ def _rooted(root, relative, label):
 
 def _validate_runtime(value):
     required = {
-        "device_name", "device_count", "backend", "npugraph_ex",
-        "static_kernel_compile", "super_kernel_scope", "stream_count",
+        "device_name",
+        "device_count",
+        "backend",
+        "npugraph_ex",
+        "static_kernel_compile",
+        "super_kernel_scope",
+        "stream_count",
     }
     if not isinstance(value, dict) or set(value) != required:
         raise ValueError(f"runtime must contain exactly {sorted(required)}")
     _text(value["device_name"], "runtime.device_name")
-    if isinstance(value["device_count"], bool) or not isinstance(value["device_count"], int) or value["device_count"] < 1:
+    if (
+        isinstance(value["device_count"], bool)
+        or not isinstance(value["device_count"], int)
+        or value["device_count"] < 1
+    ):
         raise ValueError("runtime.device_count must be a positive integer")
     if value["backend"] != "npugraph_ex":
         raise ValueError("runtime.backend must be npugraph_ex")
     for field in ("npugraph_ex", "static_kernel_compile", "super_kernel_scope"):
         if value[field] is not True:
             raise ValueError(f"runtime.{field} must be true")
-    if isinstance(value["stream_count"], bool) or not isinstance(value["stream_count"], int) or value["stream_count"] < 2:
+    if (
+        isinstance(value["stream_count"], bool)
+        or not isinstance(value["stream_count"], int)
+        or value["stream_count"] < 2
+    ):
         raise ValueError("runtime.stream_count must be at least two")
     return dict(value)
 
@@ -106,14 +130,20 @@ def _artifact_records(paths, root):
         relative = item["path"] if isinstance(item, dict) else item
         path = _rooted(root, relative, f"artifacts.{name}")
         value = _load(path)
-        if not isinstance(value, dict) or value.get("schema_version") != expected_schema:
+        if (
+            not isinstance(value, dict)
+            or value.get("schema_version") != expected_schema
+        ):
             raise ValueError(f"artifacts.{name} must use {expected_schema}")
         actual = file_fingerprint(path)
         if isinstance(item, dict):
             expected = {"path", "schema_version", "file_fingerprint"}
             if set(item) != expected:
                 raise ValueError(f"artifacts.{name} record fields are invalid")
-            if item["schema_version"] != expected_schema or item["file_fingerprint"] != actual:
+            if (
+                item["schema_version"] != expected_schema
+                or item["file_fingerprint"] != actual
+            ):
                 raise ValueError(f"artifacts.{name} sealed identity mismatch")
         records[name] = {
             "path": relative,
@@ -136,17 +166,22 @@ def _semantic_replay(manifest, root, values):
         capture_path, root, expected_request_fingerprint=request_fingerprint
     )
     authorized = [
-        item for item in analysis["targets"]
+        item
+        for item in analysis["targets"]
         if item.get("multistream_reorder_authorized") is True
     ]
     if not authorized:
-        raise ValueError("real NPU closure requires an analyzer-authorized reorder candidate")
+        raise ValueError(
+            "real NPU closure requires an analyzer-authorized reorder candidate"
+        )
 
     action = values["action_manifest"]
     if action.get("trial_id") != manifest["trial_id"]:
         raise ValueError("action trial_id differs from closure")
     if action.get("change_kind") != multistream_execution.REORDER_CHANGE_KIND:
-        raise ValueError("real NPU closure action must be dependency-safe operator reorder")
+        raise ValueError(
+            "real NPU closure action must be dependency-safe operator reorder"
+        )
     if action.get("multistream_only_verified") is not True:
         raise ValueError("real NPU closure action lacks multistream-only verification")
 
@@ -159,7 +194,10 @@ def _semantic_replay(manifest, root, values):
     )
 
     plan = multistream_four_profile.validate_plan(values["four_profile_plan"])
-    if plan["trial_id"] != manifest["trial_id"] or plan["request_fingerprint"] != request_fingerprint:
+    if (
+        plan["trial_id"] != manifest["trial_id"]
+        or plan["request_fingerprint"] != request_fingerprint
+    ):
         raise ValueError("four-profile plan identity differs from closure")
     summary_path = root / manifest["artifacts"]["four_profile_summary"]["path"]
     multistream_four_profile.validate_summary(summary_path, plan, root)
@@ -176,9 +214,15 @@ def _semantic_replay(manifest, root, values):
     result_summary = multistream_contract.validate_result(request, result, root)
     if result_summary["status"] != manifest["outcome"]:
         raise ValueError("closure outcome differs from validated result")
-    trials = [item for item in result.get("trials", []) if item.get("trial_id") == manifest["trial_id"]]
+    trials = [
+        item
+        for item in result.get("trials", [])
+        if item.get("trial_id") == manifest["trial_id"]
+    ]
     if len(trials) != 1:
-        raise ValueError("real NPU closure must contain exactly one matching executed trial")
+        raise ValueError(
+            "real NPU closure must contain exactly one matching executed trial"
+        )
     expected_decision = "accepted" if manifest["outcome"] == "accepted" else "rejected"
     if trials[0].get("decision") != expected_decision:
         raise ValueError("trial decision differs from closure outcome")
@@ -196,8 +240,13 @@ def _semantic_replay(manifest, root, values):
 def validate(manifest, artifact_root, *, require_fingerprint=True):
     root = Path(artifact_root).resolve()
     required = {
-        "schema_version", "closure_id", "request_fingerprint", "trial_id",
-        "runtime", "artifacts", "outcome",
+        "schema_version",
+        "closure_id",
+        "request_fingerprint",
+        "trial_id",
+        "runtime",
+        "artifacts",
+        "outcome",
     }
     if require_fingerprint:
         required.add("closure_fingerprint")
@@ -223,7 +272,10 @@ def validate(manifest, artifact_root, *, require_fingerprint=True):
     }
     replay = _semantic_replay(normalized, root, values)
     normalized["closure_fingerprint"] = fingerprint(normalized)
-    if require_fingerprint and manifest["closure_fingerprint"] != normalized["closure_fingerprint"]:
+    if (
+        require_fingerprint
+        and manifest["closure_fingerprint"] != normalized["closure_fingerprint"]
+    ):
         raise ValueError("closure_fingerprint mismatch")
     return {"valid": True, **replay, "closure": normalized}
 
@@ -267,10 +319,20 @@ def main(argv=None):
     if args.command == "seal":
         result = seal(_load(args.draft), args.artifact_root)
         _write(args.out, result)
-        print(json.dumps({"valid": True, "closure_fingerprint": result["closure_fingerprint"]}, sort_keys=True))
+        print(
+            json.dumps(
+                {"valid": True, "closure_fingerprint": result["closure_fingerprint"]},
+                sort_keys=True,
+            )
+        )
     else:
         result = validate(_load(args.manifest), args.artifact_root)
-        print(json.dumps({key: value for key, value in result.items() if key != "closure"}, sort_keys=True))
+        print(
+            json.dumps(
+                {key: value for key, value in result.items() if key != "closure"},
+                sort_keys=True,
+            )
+        )
 
 
 if __name__ == "__main__":

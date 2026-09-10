@@ -1,4 +1,10 @@
-import json
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import os
 import sys
 import tempfile
@@ -56,18 +62,32 @@ class FourProfileTest(unittest.TestCase):
         profiles = []
         for role in multistream_four_profile.ROLES:
             output = self.artifacts / "profiles" / role / "profile.json"
-            profiles.append({
-                "role": role,
-                "argv": [sys.executable, str(self.helper), "write", str(output), role],
-                "validator_argv": [sys.executable, str(self.helper), "validate", str(output), role],
-                "cwd": "run",
-                "timeout_seconds": 2,
-                "validator_timeout_seconds": 2,
-                "environment_overrides": {},
-                "program_files": programs,
-                "required_artifacts": [f"profiles/{role}/profile.json"],
-                "manifest": f"profiles/{role}/manifest.json",
-            })
+            profiles.append(
+                {
+                    "role": role,
+                    "argv": [
+                        sys.executable,
+                        str(self.helper),
+                        "write",
+                        str(output),
+                        role,
+                    ],
+                    "validator_argv": [
+                        sys.executable,
+                        str(self.helper),
+                        "validate",
+                        str(output),
+                        role,
+                    ],
+                    "cwd": "run",
+                    "timeout_seconds": 2,
+                    "validator_timeout_seconds": 2,
+                    "environment_overrides": {},
+                    "program_files": programs,
+                    "required_artifacts": [f"profiles/{role}/profile.json"],
+                    "manifest": f"profiles/{role}/manifest.json",
+                }
+            )
         return {
             "schema_version": multistream_four_profile.PLAN_SCHEMA,
             "plan_id": "four-profile-1",
@@ -96,9 +116,10 @@ class FourProfileTest(unittest.TestCase):
             replay = multistream_four_profile.run_plan(plan)
         self.assertEqual(set(summary["roles"]), set(multistream_four_profile.ROLES))
         self.assertEqual(summary, replay)
-        self.assertEqual(summary["comparisons"]["candidate_fusion"], [
-            "candidate_sk_off", "candidate_sk_on"
-        ])
+        self.assertEqual(
+            summary["comparisons"]["candidate_fusion"],
+            ["candidate_sk_off", "candidate_sk_on"],
+        )
         validated = multistream_four_profile.validate_summary(
             self.artifacts / "four-profile-summary.json", plan, self.artifacts
         )
@@ -107,20 +128,24 @@ class FourProfileTest(unittest.TestCase):
     def test_refuses_to_run_without_parent_lease_marker(self):
         plan = multistream_four_profile.freeze_plan(self._draft())
         with mock.patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(ValueError, "lacks matching parent lease marker"):
+            with self.assertRaisesRegex(
+                ValueError, "lacks matching parent lease marker"
+            ):
                 multistream_four_profile.run_plan(plan)
 
     def test_profile_failure_stops_before_later_roles(self):
         draft = self._draft()
-        draft["profiles"][1]["argv"] = [
-            sys.executable, "-c", "raise SystemExit(3)"
-        ]
+        draft["profiles"][1]["argv"] = [sys.executable, "-c", "raise SystemExit(3)"]
         plan = multistream_four_profile.freeze_plan(draft)
         with mock.patch.dict(os.environ, self._lease_environment(), clear=False):
             with self.assertRaisesRegex(ValueError, "incumbent_sk_on"):
                 multistream_four_profile.run_plan(plan)
-        self.assertTrue((self.artifacts / "profiles/incumbent_sk_on/manifest.json").is_file())
-        self.assertFalse((self.artifacts / "profiles/candidate_sk_off/manifest.json").exists())
+        self.assertTrue(
+            (self.artifacts / "profiles/incumbent_sk_on/manifest.json").is_file()
+        )
+        self.assertFalse(
+            (self.artifacts / "profiles/candidate_sk_off/manifest.json").exists()
+        )
 
 
 if __name__ == "__main__":

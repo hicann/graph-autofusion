@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import json
 import os
 import sys
@@ -136,7 +143,9 @@ class MultistreamRunnerTest(unittest.TestCase):
                 )
                 self.assertEqual(manifest["environment"]["SUPERKERNEL_DEVICE_IDS"], "0")
             else:
-                self.assertNotIn("SUPERKERNEL_DEVICE_LEASE_HELD", manifest["environment"])
+                self.assertNotIn(
+                    "SUPERKERNEL_DEVICE_LEASE_HELD", manifest["environment"]
+                )
             multistream_runner.validate_phase_manifest(
                 manifest, plan, phase, self.artifacts
             )
@@ -167,7 +176,9 @@ class MultistreamRunnerTest(unittest.TestCase):
         }
         plan = multistream_runner.freeze_plan(draft)
 
-        with self.assertRaisesRegex(ValueError, "blocked until dispatch_order_evidence"):
+        with self.assertRaisesRegex(
+            ValueError, "blocked until dispatch_order_evidence"
+        ):
             multistream_runner.run_plan(
                 plan, self.state_path, self.workspace, self.artifacts, self.leases
             )
@@ -180,31 +191,56 @@ class MultistreamRunnerTest(unittest.TestCase):
     def _event_stage_gate(self, candidate_ordinal):
         action = {
             "schema_version": multistream_source_transform.ACTION_MANIFEST_SCHEMA,
-            "trial_id": "MS-O1", "action_id": "event-1",
+            "trial_id": "MS-O1",
+            "action_id": "event-1",
             "expected_dispatch_change": {
-                "kind": "event_notify_earlier", "logical_id": "aux.ready",
+                "kind": "event_notify_earlier",
+                "logical_id": "aux.ready",
             },
         }
         self.action.write_text(json.dumps(action) + "\n")
-        state = multistream_execution.initialize_state("MS-O1", "sha256:request", self.action)
+        state = multistream_execution.initialize_state(
+            "MS-O1", "sha256:request", self.action
+        )
         state = multistream_execution.advance_state(state, "materialized")
-        state = multistream_execution.advance_state(state, "diff_verified", "action.json")
+        state = multistream_execution.advance_state(
+            state, "diff_verified", "action.json"
+        )
         self.state_path.write_text(json.dumps(state) + "\n")
-        row = lambda logical_id, kind, role, ordinal: {
-            "logical_id": logical_id, "kind": kind, "stream_role": role,
-            "dispatch_ordinal": ordinal,
-        }
-        occurrences = [{
-            "alignment_id": f"decode-{index}",
-            "baseline": [row("main", "stage", "main", 0), row("aux.ready", "event_notify", "aux", 3)],
-            "candidate": [row("main", "stage", "main", 0), row("aux.ready", "event_notify", "aux", candidate_ordinal)],
-        } for index in range(3)]
-        evidence = multistream_event_stage_dispatch.build("MS-O1", "sha256:request", action, occurrences)
+
+        def row(logical_id, kind, role, ordinal):
+            return {
+                "logical_id": logical_id,
+                "kind": kind,
+                "stream_role": role,
+                "dispatch_ordinal": ordinal,
+            }
+
+        occurrences = [
+            {
+                "alignment_id": f"decode-{index}",
+                "baseline": [
+                    row("main", "stage", "main", 0),
+                    row("aux.ready", "event_notify", "aux", 3),
+                ],
+                "candidate": [
+                    row("main", "stage", "main", 0),
+                    row("aux.ready", "event_notify", "aux", candidate_ordinal),
+                ],
+            }
+            for index in range(3)
+        ]
+        evidence = multistream_event_stage_dispatch.build(
+            "MS-O1", "sha256:request", action, occurrences
+        )
         evidence_path = self.artifacts / "dispatch/event-stage.json"
         evidence_path.parent.mkdir()
         evidence_path.write_text(json.dumps(evidence) + "\n")
         draft = self._draft()
-        draft["pre_profile_evidence"] = {"kind": "event_stage_dispatch", "path": "dispatch/event-stage.json"}
+        draft["pre_profile_evidence"] = {
+            "kind": "event_stage_dispatch",
+            "path": "dispatch/event-stage.json",
+        }
         return multistream_runner.freeze_plan(draft)
 
     def test_event_stage_plan_runs_only_after_effective_dispatch_evidence(self):
@@ -220,7 +256,9 @@ class MultistreamRunnerTest(unittest.TestCase):
             multistream_runner.run_plan(
                 plan, self.state_path, self.workspace, self.artifacts, self.leases
             )
-        self.assertEqual(json.loads(self.state_path.read_text())["state"], "correctness_passed")
+        self.assertEqual(
+            json.loads(self.state_path.read_text())["state"], "correctness_passed"
+        )
 
     def test_validator_failure_seals_logs_and_marks_failed(self):
         plan = multistream_runner.freeze_plan(
@@ -245,9 +283,7 @@ class MultistreamRunnerTest(unittest.TestCase):
         )
 
     def test_clean3_no_gain_marks_rejected_without_running_clean5(self):
-        plan = multistream_runner.freeze_plan(
-            self._draft(reject_state="clean3_passed")
-        )
+        plan = multistream_runner.freeze_plan(self._draft(reject_state="clean3_passed"))
 
         with self.assertRaisesRegex(RuntimeError, "validator_reject"):
             multistream_runner.run_plan(
@@ -255,9 +291,7 @@ class MultistreamRunnerTest(unittest.TestCase):
             )
 
         self.assertEqual(json.loads(self.state_path.read_text())["state"], "rejected")
-        self.assertFalse(
-            (self.artifacts / "phases/clean5_passed.json").exists()
-        )
+        self.assertFalse((self.artifacts / "phases/clean5_passed.json").exists())
 
     def test_timeout_terminates_process_group_and_marks_failed(self):
         plan = multistream_runner.freeze_plan(
@@ -328,7 +362,10 @@ class MultistreamRunnerTest(unittest.TestCase):
 
     def test_partial_logs_without_manifest_fail_closed(self):
         plan = multistream_runner.freeze_plan(self._draft())
-        log = self.artifacts / multistream_runner._phase_log_paths(plan["phases"][0])["command_stdout"]
+        log = (
+            self.artifacts
+            / multistream_runner._phase_log_paths(plan["phases"][0])["command_stdout"]
+        )
         log.parent.mkdir(parents=True)
         log.write_text("partial")
 
@@ -337,7 +374,9 @@ class MultistreamRunnerTest(unittest.TestCase):
                 plan, self.state_path, self.workspace, self.artifacts, self.leases
             )
 
-        self.assertEqual(json.loads(self.state_path.read_text())["state"], "diff_verified")
+        self.assertEqual(
+            json.loads(self.state_path.read_text())["state"], "diff_verified"
+        )
 
     def test_runtime_roots_must_match_the_frozen_plan(self):
         plan = multistream_runner.freeze_plan(self._draft())

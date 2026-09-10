@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import csv
 import io
 import hashlib
@@ -17,12 +24,12 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parents[2] / "superkernel-runtime-common" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-import analyze_performance
-import experiment_ledger
-import analyze_sk_meta
-import check_environment
-import recommend_sk_strategy
-import render_round_report
+import analyze_performance  # noqa: E402 - load sibling scripts after sys.path setup
+import experiment_ledger  # noqa: E402 - load sibling scripts after sys.path setup
+import analyze_sk_meta  # noqa: E402 - load sibling scripts after sys.path setup
+import check_environment  # noqa: E402 - load sibling scripts after sys.path setup
+import recommend_sk_strategy  # noqa: E402 - load sibling scripts after sys.path setup
+import render_round_report  # noqa: E402 - load sibling scripts after sys.path setup
 
 
 class EnvironmentProbeTest(unittest.TestCase):
@@ -72,9 +79,7 @@ class EnvironmentProbeTest(unittest.TestCase):
         self.assertTrue(result["accepted"])
         self.assertEqual(result["status"], "accepted")
         self.assertEqual(calls, [("begin", None), ("end", None)])
-        self.assertEqual(
-            result["semantic_validation"], "not_proven_by_api_probe"
-        )
+        self.assertEqual(result["semantic_validation"], "not_proven_by_api_probe")
 
     def test_explicit_none_exclusion_reports_wrapper_rejection(self):
         class Npu:
@@ -121,11 +126,14 @@ class EnvironmentProbeTest(unittest.TestCase):
 
     def test_cli_marks_missing_runtime_as_not_run_instead_of_rejected(self):
         output = io.StringIO()
-        with mock.patch.object(
-            check_environment,
-            "collect_environment",
-            side_effect=check_environment.RuntimeEnvironmentError("missing CANN"),
-        ), redirect_stdout(output):
+        with (
+            mock.patch.object(
+                check_environment,
+                "collect_environment",
+                side_effect=check_environment.RuntimeEnvironmentError("missing CANN"),
+            ),
+            redirect_stdout(output),
+        ):
             exit_code = check_environment.main(["--json"])
 
         report = json.loads(output.getvalue())
@@ -152,9 +160,7 @@ def _write_performance_runs(root, desired_worst_rank_means):
         )
         for rank in range(8):
             (run_path / f"log_{rank}.log").write_text(
-                "\n".join(
-                    f"Inference time (decode): {sample} ms" for sample in samples
-                )
+                "\n".join(f"Inference time (decode): {sample} ms" for sample in samples)
                 + "\n"
             )
 
@@ -205,9 +211,7 @@ def _write_fused_metadata(
         f"sk_17_{scope}_start_static_kernel_{first_op}_{function_token}_"
         f"end_static_kernel_{last_op}_{function_token}"
     )
-    lines = [
-        f"SK Function: {function}, scope id: 17, Node Count: {len(op_sequence)}"
-    ]
+    lines = [f"SK Function: {function}, scope id: 17, Node Count: {len(op_sequence)}"]
     for offset, op_type in enumerate(op_sequence):
         lines.append(
             f"[nodeId:{node_start + offset}, streamId:1] - "
@@ -324,7 +328,9 @@ class PerformanceAnalysisTest(unittest.TestCase):
         self.assertAlmostEqual(result["mean_ms"], 10.0)
         self.assertAlmostEqual(result["spread_pct"], 5.0)
 
-    def test_absolute_half_ms_spread_can_be_unstable_when_relative_spread_exceeds_five_percent(self):
+    def test_absolute_half_ms_spread_can_be_unstable_when_relative_spread_exceeds_five_percent(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             baseline = Path(directory) / "S0"
             _write_performance_runs(baseline, [9.6, 9.7, 9.8, 9.9, 10.1])
@@ -334,9 +340,7 @@ class PerformanceAnalysisTest(unittest.TestCase):
 
         self.assertFalse(result["stable"])
         self.assertEqual(result["required_run_count"], 5)
-        self.assertEqual(
-            result["run_worst_rank_means_ms"], [9.6, 9.7, 9.8, 9.9, 10.1]
-        )
+        self.assertEqual(result["run_worst_rank_means_ms"], [9.6, 9.7, 9.8, 9.9, 10.1])
         self.assertAlmostEqual(result["spread_ms"], 0.5)
         self.assertGreater(result["spread_pct"], 5.0)
 
@@ -404,7 +408,9 @@ class PerformanceAnalysisTest(unittest.TestCase):
             baseline_summary = analyze_performance.summarize_candidate(baseline)
             candidate_summary = analyze_performance.summarize_candidate(candidate)
 
-        promotion = analyze_performance.evaluate_promotion(baseline_summary, candidate_summary)
+        promotion = analyze_performance.evaluate_promotion(
+            baseline_summary, candidate_summary
+        )
 
         self.assertFalse(promotion["checks"]["baseline_stable"])
         self.assertFalse(promotion["promoted"])
@@ -517,9 +523,7 @@ class PerformanceAnalysisTest(unittest.TestCase):
     def test_selection_only_rejects_missing_or_nonempty_stage_a_options(self):
         mutations = {
             "missing": (
-                "model_config:\n"
-                "  custom_params:\n"
-                "    super_kernel_debug_options: {}\n",
+                "model_config:\n  custom_params:\n    super_kernel_debug_options: {}\n",
                 "explicitly define super_kernel_optimize_options",
             ),
             "nonempty": (
@@ -548,7 +552,9 @@ class PerformanceAnalysisTest(unittest.TestCase):
                         screening_matrix=_screening_matrix(executed=("S1",)),
                     )
 
-    def test_option_trial_accepts_any_strictly_positive_gain_without_replay_or_profiling(self):
+    def test_option_trial_accepts_any_strictly_positive_gain_without_replay_or_profiling(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             incumbent = root / "O0-incumbent"
@@ -565,9 +571,7 @@ class PerformanceAnalysisTest(unittest.TestCase):
         summary = report["candidates"]["O1"]
         self.assertEqual(report["selection"]["stage"], "winner_option_trial")
         self.assertTrue(summary["option_trial_evaluation"]["accepted"])
-        self.assertEqual(
-            summary["option_trial_evaluation"]["min_improvement_pct"], 0.0
-        )
+        self.assertEqual(summary["option_trial_evaluation"]["min_improvement_pct"], 0.0)
         self.assertEqual(
             summary["option_trial_evaluation"]["mean_improvement_rule"],
             "strictly_positive",
@@ -575,9 +579,7 @@ class PerformanceAnalysisTest(unittest.TestCase):
         self.assertGreater(
             summary["option_trial_evaluation"]["mean_improvement_pct"], 0.0
         )
-        self.assertLess(
-            summary["option_trial_evaluation"]["mean_improvement_pct"], 2.0
-        )
+        self.assertLess(summary["option_trial_evaluation"]["mean_improvement_pct"], 2.0)
         self.assertTrue(report["selection"]["option_trial_accepted"])
         self.assertEqual(report["selection"]["retained_incumbent"], "O1")
         self.assertEqual(
@@ -614,9 +616,7 @@ class PerformanceAnalysisTest(unittest.TestCase):
 
     def test_option_trial_requires_one_candidate_and_rejects_other_modes(self):
         with self.assertRaisesRegex(ValueError, "exactly one candidate"):
-            analyze_performance.compare_candidates(
-                "/tmp/O0", {}, option_trial=True
-            )
+            analyze_performance.compare_candidates("/tmp/O0", {}, option_trial=True)
         with self.assertRaisesRegex(ValueError, "mutually exclusive"):
             analyze_performance.compare_candidates(
                 "/tmp/S0",
@@ -637,9 +637,7 @@ class PerformanceAnalysisTest(unittest.TestCase):
         matrix["candidates"] = matrix["candidates"][:3]
 
         with self.assertRaisesRegex(ValueError, "semantic_segment"):
-            analyze_performance.validate_screening_matrix(
-                matrix, {"S1", "S2", "S3"}
-            )
+            analyze_performance.validate_screening_matrix(matrix, {"S1", "S2", "S3"})
 
     def test_selection_only_rejects_existing_eligible_as_s4_skip_reason(self):
         matrix = _screening_matrix(
@@ -651,17 +649,13 @@ class PerformanceAnalysisTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "illegal early-stop blocker"):
-            analyze_performance.validate_screening_matrix(
-                matrix, {"S1", "S2", "S3"}
-            )
+            analyze_performance.validate_screening_matrix(matrix, {"S1", "S2", "S3"})
 
     def test_selection_only_rejects_executed_candidate_set_mismatch(self):
         matrix = _screening_matrix(executed=("S1", "S2", "S3", "S4"))
 
         with self.assertRaisesRegex(ValueError, "missing executed candidates: S4"):
-            analyze_performance.validate_screening_matrix(
-                matrix, {"S1", "S2", "S3"}
-            )
+            analyze_performance.validate_screening_matrix(matrix, {"S1", "S2", "S3"})
 
     def test_selection_only_cli_requires_screening_matrix(self):
         with self.assertRaises(SystemExit):
@@ -689,7 +683,9 @@ class PerformanceAnalysisTest(unittest.TestCase):
             root = Path(directory)
             baseline = root / "baseline"
             candidate = root / "candidate"
-            evidence = _write_replay_evidence(root / "S2-replay.json", candidate_name="S2")
+            evidence = _write_replay_evidence(
+                root / "S2-replay.json", candidate_name="S2"
+            )
             _write_performance_runs(baseline, [10.0, 10.1, 10.2, 10.3, 10.4])
             _write_performance_runs(candidate, [8.0, 8.0, 8.0])
 
@@ -708,7 +704,9 @@ class PerformanceAnalysisTest(unittest.TestCase):
             candidate = root / "candidate"
             _write_performance_runs(baseline, [10.0, 10.1, 10.2, 10.3, 10.4])
             _write_performance_runs(candidate, [8.0, 8.0, 8.0])
-            evidence = _write_replay_evidence(root / "S1-replay.json", candidate_name="S1")
+            evidence = _write_replay_evidence(
+                root / "S1-replay.json", candidate_name="S1"
+            )
 
             with self.assertRaisesRegex(ValueError, "candidate_name"):
                 analyze_performance.compare_candidates(
@@ -830,10 +828,10 @@ class MetadataAnalysisTest(unittest.TestCase):
             (model / "sk_scope_split.log").write_text(
                 "Scope 1 (scopeId=1): 3 nodes, 2 streams, scopeNames=[decoder.layer.0.attention]\n"
                 "BreakInfo: breakReason=There exists unfusible node in scope, triggerNode=13, "
-                "triggerStream=1, fusionFailReason=Insufficient resources, detail=\"split\"\n"
+                'triggerStream=1, fusionFailReason=Insufficient resources, detail="split"\n'
                 "Scope 1 (scopeId=1): 3 nodes, 2 streams, scopeNames=[decoder.layer.0.attention]\n"
                 "BreakInfo: breakReason=There exists unfusible node in scope, triggerNode=13, "
-                "triggerStream=1, fusionFailReason=Insufficient resources, detail=\"split\"\n"
+                'triggerStream=1, fusionFailReason=Insufficient resources, detail="split"\n'
             )
             (model / "sk_fusion_fail_reasons.log").write_text("")
             report = analyze_sk_meta.analyze_metadata(directory)
@@ -888,13 +886,19 @@ class MetadataAnalysisTest(unittest.TestCase):
         self.assertEqual(round_report["min_child_nodes"], 5)
         self.assertEqual(round_report["effective_fusion"]["effective_group_count"], 1)
         self.assertEqual(round_report["effective_fusion"]["shallow_group_count"], 1)
-        self.assertEqual(round_report["effective_fusion"]["effective_child_node_total"], 5)
-        self.assertEqual(round_report["effective_fusion"]["effective_launch_reduction"], 4)
+        self.assertEqual(
+            round_report["effective_fusion"]["effective_child_node_total"], 5
+        )
+        self.assertEqual(
+            round_report["effective_fusion"]["effective_launch_reduction"], 4
+        )
         self.assertEqual(
             [item["child_count"] for item in round_report["per_sk_fusion_table"]],
             [5, 4],
         )
-        self.assertFalse(round_report["per_sk_fusion_table"][1]["counts_as_effective_fusion"])
+        self.assertFalse(
+            round_report["per_sk_fusion_table"][1]["counts_as_effective_fusion"]
+        )
         op_rows = round_report["non_fusion_operator_table"]
         self.assertIn(
             ("OP_UNSUPPORT", "Custom"),
@@ -909,7 +913,10 @@ class MetadataAnalysisTest(unittest.TestCase):
             any("round-evidence.json" in field for field in evidence_fields)
         )
         self.assertFalse(
-            any("clean performance versus S0 baseline" == field for field in evidence_fields)
+            any(
+                "clean performance versus S0 baseline" == field
+                for field in evidence_fields
+            )
         )
 
     def test_round_report_keeps_child_count_descriptive_without_scope_action(self):
@@ -953,7 +960,9 @@ class MetadataAnalysisTest(unittest.TestCase):
         self.assertIn("descriptive", round_report["filter_policy"])
         self.assertIn("profiling", round_report["filter_policy"])
 
-    def test_round_report_does_not_force_adjustment_for_two_to_four_child_shallow_groups(self):
+    def test_round_report_does_not_force_adjustment_for_two_to_four_child_shallow_groups(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             model = Path(directory) / "model_1_1"
             model.mkdir()
@@ -982,7 +991,9 @@ class MetadataAnalysisTest(unittest.TestCase):
         self.assertFalse(adjustment["requires_scope_adjustment"])
         self.assertEqual(adjustment["single_child_group_count"], 0)
         self.assertEqual(adjustment["shallow_non_single_child_group_count"], 2)
-        self.assertEqual(report["round_report"]["effective_fusion"]["effective_group_count"], 1)
+        self.assertEqual(
+            report["round_report"]["effective_fusion"]["effective_group_count"], 1
+        )
 
     def test_automatic_aot_single_child_defers_action_to_profiling(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1051,10 +1062,7 @@ class MetadataAnalysisTest(unittest.TestCase):
             report = analyze_sk_meta.analyze_metadata(directory)
 
         self.assertEqual(report["root"], ".")
-        paths = [
-            item["path"]
-            for item in report["round_report"]["per_sk_fusion_table"]
-        ]
+        paths = [item["path"] for item in report["round_report"]["per_sk_fusion_table"]]
         self.assertTrue(paths)
         self.assertTrue(all(not Path(path).is_absolute() for path in paths))
 
@@ -1337,12 +1345,8 @@ class MetadataAnalysisTest(unittest.TestCase):
         )
 
         self.assertEqual(matched, [])
-        self.assertEqual(
-            compat_only[0]["graph_occurrence_fingerprint"], "a" * 64
-        )
-        self.assertEqual(
-            verify_only[0]["graph_occurrence_fingerprint"], "b" * 64
-        )
+        self.assertEqual(compat_only[0]["graph_occurrence_fingerprint"], "a" * 64)
+        self.assertEqual(verify_only[0]["graph_occurrence_fingerprint"], "b" * 64)
 
     def test_fusion_replay_accepts_auto_round_for_candidate_family(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1537,8 +1541,12 @@ class MetadataAnalysisTest(unittest.TestCase):
                 function_token="verify_hash",
                 node_start=900,
             )
-            compat_config = _write_config_manifest(root / "compat-config.json", {"x": 1})
-            verify_config = _write_config_manifest(root / "verify-config.json", {"x": 1})
+            compat_config = _write_config_manifest(
+                root / "compat-config.json", {"x": 1}
+            )
+            verify_config = _write_config_manifest(
+                root / "verify-config.json", {"x": 1}
+            )
 
             replay = analyze_sk_meta.compare_deep_fusion_replay(
                 compat_root,
@@ -1569,8 +1577,12 @@ class MetadataAnalysisTest(unittest.TestCase):
                 function_token="verify_hash",
                 node_start=900,
             )
-            compat_config = _write_config_manifest(root / "compat-config.json", {"x": 1})
-            verify_config = _write_config_manifest(root / "verify-config.json", {"x": 1})
+            compat_config = _write_config_manifest(
+                root / "compat-config.json", {"x": 1}
+            )
+            verify_config = _write_config_manifest(
+                root / "verify-config.json", {"x": 1}
+            )
 
             replay = analyze_sk_meta.compare_deep_fusion_replay(
                 compat_root,
@@ -1627,8 +1639,12 @@ class MetadataAnalysisTest(unittest.TestCase):
                 function_token="verify_hash",
                 node_start=900,
             )
-            compat_config = _write_config_manifest(root / "compat-config.json", {"x": 1})
-            verify_config = _write_config_manifest(root / "verify-config.json", {"x": 1})
+            compat_config = _write_config_manifest(
+                root / "compat-config.json", {"x": 1}
+            )
+            verify_config = _write_config_manifest(
+                root / "verify-config.json", {"x": 1}
+            )
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 exit_code = analyze_sk_meta.main(
@@ -1684,8 +1700,12 @@ class MetadataAnalysisTest(unittest.TestCase):
                 function_token="verify_hash",
                 node_start=900,
             )
-            compat_config = _write_config_manifest(root / "compat-config.json", {"x": 1})
-            verify_config = _write_config_manifest(root / "verify-config.json", {"x": 1})
+            compat_config = _write_config_manifest(
+                root / "compat-config.json", {"x": 1}
+            )
+            verify_config = _write_config_manifest(
+                root / "verify-config.json", {"x": 1}
+            )
 
             with redirect_stdout(io.StringIO()):
                 exit_code = analyze_sk_meta.main(
@@ -1813,9 +1833,9 @@ class MetadataAnalysisTest(unittest.TestCase):
                 "threshold": lambda value: value.__setitem__(
                     "replay_min_child_nodes", 5
                 ),
-                "matched_groups": lambda value: value["matched_fusion_groups"][0].__setitem__(
-                    "source_scope", "other_scope"
-                ),
+                "matched_groups": lambda value: value["matched_fusion_groups"][
+                    0
+                ].__setitem__("source_scope", "other_scope"),
                 "lifecycle_claim": lambda value: value.__setitem__(
                     "fusion_reproducible", False
                 ),
@@ -1901,8 +1921,12 @@ class MetadataAnalysisTest(unittest.TestCase):
                 function_token="verify_hash",
                 node_start=900,
             )
-            compat_config = _write_config_manifest(root / "compat-config.json", {"x": 1})
-            verify_config = _write_config_manifest(root / "verify-config.json", {"x": 1})
+            compat_config = _write_config_manifest(
+                root / "compat-config.json", {"x": 1}
+            )
+            verify_config = _write_config_manifest(
+                root / "verify-config.json", {"x": 1}
+            )
 
             with redirect_stdout(io.StringIO()):
                 exit_code = analyze_sk_meta.main(
@@ -1925,17 +1949,27 @@ class MetadataAnalysisTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
 
-    def test_deep_fusion_replay_rejects_mismatched_config_and_validator_reports_it(self):
+    def test_deep_fusion_replay_rejects_mismatched_config_and_validator_reports_it(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             compat_root = root / "compat"
             verify_root = root / "verify"
             replay_out = root / "replay.json"
             child_ops = ["A", "B", "C", "D", "E"]
-            _write_fused_metadata(compat_root, "scope", child_ops, function_token="a", node_start=1)
-            _write_fused_metadata(verify_root, "scope", child_ops, function_token="b", node_start=20)
-            compat_config = _write_config_manifest(root / "compat-config.json", {"scope": "S2"})
-            verify_config = _write_config_manifest(root / "verify-config.json", {"scope": "S3"})
+            _write_fused_metadata(
+                compat_root, "scope", child_ops, function_token="a", node_start=1
+            )
+            _write_fused_metadata(
+                verify_root, "scope", child_ops, function_token="b", node_start=20
+            )
+            compat_config = _write_config_manifest(
+                root / "compat-config.json", {"scope": "S2"}
+            )
+            verify_config = _write_config_manifest(
+                root / "verify-config.json", {"scope": "S3"}
+            )
 
             replay = analyze_sk_meta.compare_deep_fusion_replay(
                 compat_root,
@@ -1962,9 +1996,15 @@ class MetadataAnalysisTest(unittest.TestCase):
             compat_root = root / "compat"
             verify_root = root / "verify"
             child_ops = ["A", "B", "C", "D", "E"]
-            _write_fused_metadata(compat_root, "scope", child_ops, function_token="a", node_start=1)
-            _write_fused_metadata(verify_root, "scope", child_ops, function_token="b", node_start=20)
-            verify_config = _write_config_manifest(root / "verify-config.json", {"scope": "S2"})
+            _write_fused_metadata(
+                compat_root, "scope", child_ops, function_token="a", node_start=1
+            )
+            _write_fused_metadata(
+                verify_root, "scope", child_ops, function_token="b", node_start=20
+            )
+            verify_config = _write_config_manifest(
+                root / "verify-config.json", {"scope": "S2"}
+            )
 
             replay = analyze_sk_meta.compare_deep_fusion_replay(
                 compat_root,
@@ -1982,11 +2022,17 @@ class MetadataAnalysisTest(unittest.TestCase):
             compat_root = root / "compat"
             verify_root = root / "verify"
             child_ops = ["A", "B", "C", "D", "E"]
-            _write_fused_metadata(compat_root, "scope", child_ops, function_token="a", node_start=1)
-            _write_fused_metadata(verify_root, "scope", child_ops, function_token="b", node_start=20)
+            _write_fused_metadata(
+                compat_root, "scope", child_ops, function_token="a", node_start=1
+            )
+            _write_fused_metadata(
+                verify_root, "scope", child_ops, function_token="b", node_start=20
+            )
             invalid_config = root / "compat-config.json"
             invalid_config.write_text("{")
-            verify_config = _write_config_manifest(root / "verify-config.json", {"scope": "S2"})
+            verify_config = _write_config_manifest(
+                root / "verify-config.json", {"scope": "S2"}
+            )
 
             replay = analyze_sk_meta.compare_deep_fusion_replay(
                 compat_root,
@@ -2401,9 +2447,7 @@ class ExperimentLedgerTest(unittest.TestCase):
             "next_agent_guidance_zh": "后续实验沿用已验证的性能范围结论。",
         }
 
-    def _freshen_profiling_evidence(
-        self, result, prefix, *, fresh_baseline=False
-    ):
+    def _freshen_profiling_evidence(self, result, prefix, *, fresh_baseline=False):
         rounds_by_id = {}
         for round_data in result["rounds"]:
             round_id = round_data["round_id"]
@@ -2426,8 +2470,7 @@ class ExperimentLedgerTest(unittest.TestCase):
                     f"{prefix}-{round_id}-baseline-profile-fp"
                 )
         result["profiling_analysis_agent_ids"] = {
-            round_id: f"{prefix}-{round_id}-prof-agent"
-            for round_id in rounds_by_id
+            round_id: f"{prefix}-{round_id}-prof-agent" for round_id in rounds_by_id
         }
         result["profiling_analysis_result"] = {
             round_id: f"{prefix}/{round_id}/profiling-analysis/result.json"
@@ -2517,22 +2560,14 @@ class ExperimentLedgerTest(unittest.TestCase):
             "child_agent_id": "agent-real",
             "scope_kind": "automatic_aot",
             "source_revision": analysis["source_revision"],
-            "baseline_config_fingerprint": analysis[
-                "baseline_config_fingerprint"
-            ],
-            "candidate_config_fingerprint": analysis[
-                "candidate_config_fingerprint"
-            ],
+            "baseline_config_fingerprint": analysis["baseline_config_fingerprint"],
+            "candidate_config_fingerprint": analysis["candidate_config_fingerprint"],
             "control_fingerprint": analysis["control_fingerprint"],
             "workload_fingerprint": analysis["workload_fingerprint"],
             "baseline_profile": artifact("baseline_profile"),
-            "baseline_profile_fingerprint": analysis[
-                "baseline_profile_fingerprint"
-            ],
+            "baseline_profile_fingerprint": analysis["baseline_profile_fingerprint"],
             "candidate_profile": artifact("candidate_profile"),
-            "candidate_profile_fingerprint": analysis[
-                "candidate_profile_fingerprint"
-            ],
+            "candidate_profile_fingerprint": analysis["candidate_profile_fingerprint"],
             "declared_change_set": json.loads(
                 json.dumps(analysis["declared_change_set"])
             ),
@@ -2604,7 +2639,9 @@ class ExperimentLedgerTest(unittest.TestCase):
                     ),
                 }
             )
-            target = decisions if producer["action"] in {"keep", "prune"} else unresolved
+            target = (
+                decisions if producer["action"] in {"keep", "prune"} else unresolved
+            )
             target.append(decision)
         return {
             "experiment_id": "S4",
@@ -2612,14 +2649,10 @@ class ExperimentLedgerTest(unittest.TestCase):
             "child_agent_id": "agent-real",
             "baseline_revision": "baseline-real",
             "source_revision": analysis["source_revision"],
-            "baseline_config_fingerprint": analysis[
-                "baseline_config_fingerprint"
-            ],
+            "baseline_config_fingerprint": analysis["baseline_config_fingerprint"],
             "control_fingerprint": analysis["control_fingerprint"],
             "workload_fingerprint": analysis["workload_fingerprint"],
-            "profiling_analysis_agent_ids": {
-                round_id: analysis["analysis_agent_id"]
-            },
+            "profiling_analysis_agent_ids": {round_id: analysis["analysis_agent_id"]},
             "profiling_analysis_result": {
                 round_id: str(analysis_path.relative_to(root))
             },
@@ -2671,10 +2704,7 @@ class ExperimentLedgerTest(unittest.TestCase):
 
         self.assertFalse(validation["valid"])
         self.assertTrue(
-            any(
-                "round_kind is invalid" in error
-                for error in validation["errors"]
-            ),
+            any("round_kind is invalid" in error for error in validation["errors"]),
             validation["errors"],
         )
 
@@ -2814,7 +2844,9 @@ class ExperimentLedgerTest(unittest.TestCase):
         )
         self.assertNotIn("Traceback", stderr.getvalue())
 
-    def test_object_merge_without_artifact_root_cannot_promote_conditional_evidence(self):
+    def test_object_merge_without_artifact_root_cannot_promote_conditional_evidence(
+        self,
+    ):
         ledger = experiment_ledger.merge_experiment_result({}, self._result())
 
         self.assertIn("S3", ledger["experiments"])
@@ -2845,9 +2877,7 @@ class ExperimentLedgerTest(unittest.TestCase):
             strategy = recommend_sk_strategy.build_strategy(
                 {"S4": analysis}, analysis_paths={"S4": analysis_path}
             )
-            self.assertEqual(
-                strategy["candidates"]["S4"]["source_round_id"], "S4-BASE"
-            )
+            self.assertEqual(strategy["candidates"]["S4"]["source_round_id"], "S4-BASE")
 
             result = self._automatic_result_from_analysis(root, analysis_path)
             result_path = root / "experiment-result.json"
@@ -2855,22 +2885,20 @@ class ExperimentLedgerTest(unittest.TestCase):
             stdout = io.StringIO()
             stderr = io.StringIO()
             with redirect_stdout(stdout), redirect_stderr(stderr):
-                validate_exit = experiment_ledger.main(
-                    ["validate", str(result_path)]
-                )
+                validate_exit = experiment_ledger.main(["validate", str(result_path)])
             validation = json.loads(stdout.getvalue())
             self.assertEqual(validate_exit, 0, validation["errors"])
             self.assertTrue(validation["artifact_evidence_validated"])
 
-            merge_exit, _, merge_stderr, output = self._run_merge_cli(
-                root, {}, result
-            )
+            merge_exit, _, merge_stderr, output = self._run_merge_cli(root, {}, result)
             self.assertEqual(merge_exit, 0, merge_stderr)
             ledger = json.loads(output.read_text())
             self.assertEqual(ledger["artifact_validated_experiment_ids"], ["S4"])
             self.assertIn("S4", ledger["experiments"])
 
-    @unittest.skip("legacy task-range exact fixture; source_scope_map_v2 flow is covered in sibling tests")
+    @unittest.skip(
+        "legacy task-range exact fixture; source_scope_map_v2 flow is covered in sibling tests"
+    )
     def test_real_base_p_strategy_rounds_flow_into_complete_schema2_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2906,9 +2934,7 @@ class ExperimentLedgerTest(unittest.TestCase):
                 analysis_paths={"S4": [base_path, p_path]},
             )["candidates"]["S4"]["next_candidate_matrix"]
             self.assertEqual(prune_plan["id"], "S4-P1")
-            self.assertEqual(
-                {item["comparison_to"] for item in final_plan}, {"S4-P1"}
-            )
+            self.assertEqual({item["comparison_to"] for item in final_plan}, {"S4-P1"})
 
             base_result = self._automatic_result_from_analysis(root, base_path)
             p_result = self._automatic_result_from_analysis(root, p_path)
@@ -2959,9 +2985,7 @@ class ExperimentLedgerTest(unittest.TestCase):
             result_path.write_text(json.dumps(base_result) + "\n")
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                validate_exit = experiment_ledger.main(
-                    ["validate", str(result_path)]
-                )
+                validate_exit = experiment_ledger.main(["validate", str(result_path)])
             validation = json.loads(stdout.getvalue())
             self.assertEqual(validate_exit, 0, validation["errors"])
             self.assertTrue(validation["artifact_evidence_validated"])
@@ -2982,9 +3006,7 @@ class ExperimentLedgerTest(unittest.TestCase):
             root = Path(directory)
             analysis_path, _ = StrategyTest._write_real_analysis_fixture(root)
             result = self._automatic_result_from_analysis(root, analysis_path)
-            first_exit, _, first_stderr, output = self._run_merge_cli(
-                root, {}, result
-            )
+            first_exit, _, first_stderr, output = self._run_merge_cli(root, {}, result)
             self.assertEqual(first_exit, 0, first_stderr)
             ledger = json.loads(output.read_text())
             self.assertEqual(ledger["artifact_validated_experiment_ids"], ["S4"])
@@ -3019,19 +3041,18 @@ class ExperimentLedgerTest(unittest.TestCase):
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                validate_exit = experiment_ledger.main(
-                    ["validate", str(result_path)]
-                )
+                validate_exit = experiment_ledger.main(["validate", str(result_path)])
             validation = json.loads(stdout.getvalue())
             self.assertEqual(validate_exit, 1)
             self.assertTrue(
-                any("complete analyzer coverage" in error for error in validation["errors"]),
+                any(
+                    "complete analyzer coverage" in error
+                    for error in validation["errors"]
+                ),
                 validation["errors"],
             )
 
-            merge_exit, merge_stdout, _, output = self._run_merge_cli(
-                root, {}, result
-            )
+            merge_exit, merge_stdout, _, output = self._run_merge_cli(root, {}, result)
             self.assertEqual(merge_exit, 1)
             self.assertTrue(
                 any(
@@ -3057,19 +3078,18 @@ class ExperimentLedgerTest(unittest.TestCase):
 
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                validate_exit = experiment_ledger.main(
-                    ["validate", str(result_path)]
-                )
+                validate_exit = experiment_ledger.main(["validate", str(result_path)])
             validation = json.loads(stdout.getvalue())
             self.assertEqual(validate_exit, 1)
             self.assertTrue(
-                any("complete analyzer coverage" in error for error in validation["errors"]),
+                any(
+                    "complete analyzer coverage" in error
+                    for error in validation["errors"]
+                ),
                 validation["errors"],
             )
 
-            merge_exit, merge_stdout, _, output = self._run_merge_cli(
-                root, {}, result
-            )
+            merge_exit, merge_stdout, _, output = self._run_merge_cli(root, {}, result)
             self.assertEqual(merge_exit, 1)
             self.assertTrue(
                 any(
@@ -3202,7 +3222,9 @@ class ExperimentLedgerTest(unittest.TestCase):
         validation = experiment_ledger.validate_experiment_result(result)
 
         self.assertFalse(validation["valid"])
-        self.assertTrue(any("child_agent_id" in error for error in validation["errors"]))
+        self.assertTrue(
+            any("child_agent_id" in error for error in validation["errors"])
+        )
 
     def test_rejects_duplicate_profiling_analysis_agent_ids(self):
         result = self._result()
@@ -3293,9 +3315,9 @@ class ExperimentLedgerTest(unittest.TestCase):
 
     def test_rejects_effective_prune_without_exact_producer_mapping(self):
         result = self._result()
-        result["performance_scope_decisions"][1][
-            "mapping_confidence"
-        ] = "diagnostic_only"
+        result["performance_scope_decisions"][1]["mapping_confidence"] = (
+            "diagnostic_only"
+        )
 
         validation = experiment_ledger.validate_experiment_result(result)
 
@@ -3304,25 +3326,27 @@ class ExperimentLedgerTest(unittest.TestCase):
 
     def test_rejects_effective_keep_without_exact_producer_mapping(self):
         result = self._result()
-        result["performance_scope_decisions"][0][
-            "mapping_confidence"
-        ] = "diagnostic_only"
+        result["performance_scope_decisions"][0]["mapping_confidence"] = (
+            "diagnostic_only"
+        )
 
         validation = experiment_ledger.validate_experiment_result(result)
 
         self.assertFalse(validation["valid"])
-        self.assertTrue(any("effective keep" in error for error in validation["errors"]))
+        self.assertTrue(
+            any("effective keep" in error for error in validation["errors"])
+        )
 
     def test_rejects_prune_round_without_eligible_decision(self):
         result = self._result()
-        result["rounds"][1]["performance_decision_range_ids"] = [
-            "range-beneficial"
-        ]
+        result["rounds"][1]["performance_decision_range_ids"] = ["range-beneficial"]
 
         validation = experiment_ledger.validate_experiment_result(result)
 
         self.assertFalse(validation["valid"])
-        self.assertTrue(any("performance_prune" in error for error in validation["errors"]))
+        self.assertTrue(
+            any("performance_prune" in error for error in validation["errors"])
+        )
 
     def test_prune_round_accepts_applied_decision_without_verification_fields(self):
         result = self._result()
@@ -3384,12 +3408,8 @@ class ExperimentLedgerTest(unittest.TestCase):
 
     def test_multi_range_prune_allows_evidence_for_an_unpruned_range(self):
         result = self._result()
-        result["rounds"][0]["performance_decision_range_ids"].append(
-            "range-neutral-2"
-        )
-        result["rounds"][1]["performance_decision_range_ids"].append(
-            "range-neutral-2"
-        )
+        result["rounds"][0]["performance_decision_range_ids"].append("range-neutral-2")
+        result["rounds"][1]["performance_decision_range_ids"].append("range-neutral-2")
         result["performance_scope_decisions"].extend(
             [
                 self._decision(
@@ -3428,7 +3448,10 @@ class ExperimentLedgerTest(unittest.TestCase):
 
                 self.assertFalse(validation["valid"])
                 self.assertTrue(
-                    any("forbids option changes" in error for error in validation["errors"]),
+                    any(
+                        "forbids option changes" in error
+                        for error in validation["errors"]
+                    ),
                     validation["errors"],
                 )
 
@@ -3436,15 +3459,18 @@ class ExperimentLedgerTest(unittest.TestCase):
         for index, round_kind in ((1, "performance_prune"), (2, "final")):
             with self.subTest(round_kind=round_kind):
                 result = self._result()
-                result["rounds"][index]["declared_change_set"]["allowed_json_pointers"] = [
-                    "/superkernel/options/auto_op_parallel"
-                ]
+                result["rounds"][index]["declared_change_set"][
+                    "allowed_json_pointers"
+                ] = ["/superkernel/options/auto_op_parallel"]
 
                 validation = experiment_ledger.validate_experiment_result(result)
 
                 self.assertFalse(validation["valid"])
                 self.assertTrue(
-                    any("must not target options" in error for error in validation["errors"]),
+                    any(
+                        "must not target options" in error
+                        for error in validation["errors"]
+                    ),
                     validation["errors"],
                 )
 
@@ -3457,7 +3483,12 @@ class ExperimentLedgerTest(unittest.TestCase):
         validation = experiment_ledger.validate_experiment_result(result)
 
         self.assertFalse(validation["valid"])
-        self.assertTrue(any("final requires fresh profiling" in error for error in validation["errors"]))
+        self.assertTrue(
+            any(
+                "final requires fresh profiling" in error
+                for error in validation["errors"]
+            )
+        )
 
     def test_rejects_conflicting_records_for_one_round_and_range(self):
         result = self._result()
@@ -3625,10 +3656,15 @@ class ExperimentLedgerTest(unittest.TestCase):
 
     def test_validate_cli_rejects_nonstandard_json_constants(self):
         for constant in ("NaN", "Infinity", "-Infinity"):
-            with self.subTest(constant=constant), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(constant=constant),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 path = Path(directory) / "invalid.json"
                 payload = json.dumps(self._result())
-                path.write_text(payload.replace('"blockers": []', f'"blockers": [{constant}]'))
+                path.write_text(
+                    payload.replace('"blockers": []', f'"blockers": [{constant}]')
+                )
                 stdout = io.StringIO()
                 stderr = io.StringIO()
 
@@ -3710,9 +3746,7 @@ class ExperimentLedgerTest(unittest.TestCase):
             output_path = root / "merged.json"
             output_path.mkdir()
 
-            exit_code, stdout, stderr, _ = self._run_merge_cli(
-                directory, {}, result
-            )
+            exit_code, stdout, stderr, _ = self._run_merge_cli(directory, {}, result)
 
             payload = json.loads(stdout)
             self.assertEqual(exit_code, 1)
@@ -3826,7 +3860,9 @@ class ExperimentLedgerTest(unittest.TestCase):
         self.assertEqual(merged["conditional_performance_evidence"], {})
 
     def test_legacy_experiment_id_cannot_be_reused_by_active_experiment(self):
-        with self.assertRaisesRegex(ValueError, "legacy.*cannot be reused|cannot.*legacy"):
+        with self.assertRaisesRegex(
+            ValueError, "legacy.*cannot be reused|cannot.*legacy"
+        ):
             experiment_ledger.merge_experiment_result(
                 self._legacy_v1_ledger("S3"), self._result()
             )
@@ -3837,15 +3873,13 @@ class ExperimentLedgerTest(unittest.TestCase):
         self._sync_round_binding_field(result, "S3-BASE", "candidate_profile")
 
         with self.assertRaisesRegex(ValueError, "artifact|role"):
-            experiment_ledger.merge_experiment_result(
-                self._legacy_v1_ledger(), result
-            )
+            experiment_ledger.merge_experiment_result(self._legacy_v1_ledger(), result)
 
     def test_legacy_single_segment_artifact_remains_reserved_after_migration(self):
         legacy = self._legacy_v1_ledger()
-        legacy["experiments"]["S2"]["single_child_exclusions"][0][
-            "source_evidence"
-        ] = "reserved"
+        legacy["experiments"]["S2"]["single_child_exclusions"][0]["source_evidence"] = (
+            "reserved"
+        )
         legacy["verified_exclusions"][0]["source_evidence"] = "reserved"
         result = self._result()
         result["rounds"][0]["candidate_profile"] = "reserved"
@@ -3896,7 +3930,9 @@ class ExperimentLedgerTest(unittest.TestCase):
     def test_rejects_unknown_ledger_schema_version(self):
         for version in (99, True, None, [], {}):
             with self.subTest(version=version):
-                with self.assertRaisesRegex(ValueError, "unsupported ledger schema version"):
+                with self.assertRaisesRegex(
+                    ValueError, "unsupported ledger schema version"
+                ):
                     experiment_ledger.merge_experiment_result(
                         {"schema_version": version}, self._result()
                     )
@@ -3908,9 +3944,9 @@ class ExperimentLedgerTest(unittest.TestCase):
                 ledger = self._mark_artifact_validated(ledger, "S3")
                 key = next(iter(ledger["conditional_performance_evidence"]))
                 if mutation == "tampered":
-                    ledger["conditional_performance_evidence"][key][
-                        "evidence_kind"
-                    ] = "invalid"
+                    ledger["conditional_performance_evidence"][key]["evidence_kind"] = (
+                        "invalid"
+                    )
                 else:
                     del ledger["conditional_performance_evidence"][key]
                 second = self._result()
@@ -3940,18 +3976,10 @@ class ExperimentLedgerTest(unittest.TestCase):
                 }
             ),
             lambda result: result["rounds"][1]["artifacts"].update(
-                {
-                    "round_evidence": result["rounds"][0]["artifacts"][
-                        "round_evidence"
-                    ]
-                }
+                {"round_evidence": result["rounds"][0]["artifacts"]["round_evidence"]}
             ),
             lambda result: result["rounds"][0]["artifacts"].update(
-                {
-                    "round_report": result["rounds"][0]["artifacts"][
-                        "round_evidence"
-                    ]
-                }
+                {"round_report": result["rounds"][0]["artifacts"]["round_evidence"]}
             ),
         )
         for mutate in mutations:
@@ -3963,7 +3991,10 @@ class ExperimentLedgerTest(unittest.TestCase):
 
                 self.assertFalse(validation["valid"])
                 self.assertTrue(
-                    any("artifact" in error or "role" in error for error in validation["errors"]),
+                    any(
+                        "artifact" in error or "role" in error
+                        for error in validation["errors"]
+                    ),
                     validation["errors"],
                 )
 
@@ -3990,7 +4021,10 @@ class ExperimentLedgerTest(unittest.TestCase):
 
                 self.assertFalse(validation["valid"])
                 self.assertTrue(
-                    any("artifact" in error or "role" in error for error in validation["errors"]),
+                    any(
+                        "artifact" in error or "role" in error
+                        for error in validation["errors"]
+                    ),
                     validation["errors"],
                 )
 
@@ -4005,8 +4039,7 @@ class ExperimentLedgerTest(unittest.TestCase):
         self.assertFalse(validation["valid"])
         self.assertTrue(
             any(
-                "artifact" in error or "role" in error
-                for error in validation["errors"]
+                "artifact" in error or "role" in error for error in validation["errors"]
             ),
             validation["errors"],
         )
@@ -4071,9 +4104,9 @@ class ExperimentLedgerTest(unittest.TestCase):
     def test_same_semantic_artifact_aliases_are_allowed(self):
         result = self._result()
         analysis_path = result["profiling_analysis_result"]["S3-BASE"]
-        result["performance_scope_decisions"][0][
-            "profiling_analysis_result"
-        ] = analysis_path
+        result["performance_scope_decisions"][0]["profiling_analysis_result"] = (
+            analysis_path
+        )
         result["rounds"][0]["artifacts"]["metadata"] = "S3-BASE/sk-meta.json"
         result["metadata"] = {"compat": "S3-BASE/sk-meta.json"}
         result["notes"] = {
@@ -4101,9 +4134,9 @@ class ExperimentLedgerTest(unittest.TestCase):
                         second, "S3-BASE", "candidate_profile"
                     )
                 else:
-                    second["rounds"][0]["artifacts"]["round_report"] = first[
-                        "rounds"
-                    ][0]["candidate_profile"]
+                    second["rounds"][0]["artifacts"]["round_report"] = first["rounds"][
+                        0
+                    ]["candidate_profile"]
 
                 with self.assertRaisesRegex(ValueError, "artifact|role"):
                     experiment_ledger.merge_experiment_result(ledger, second)
@@ -4298,7 +4331,9 @@ class ExperimentLedgerTest(unittest.TestCase):
 
                 self.assertFalse(validation["valid"])
                 self.assertTrue(
-                    any("profile_fingerprint" in error for error in validation["errors"]),
+                    any(
+                        "profile_fingerprint" in error for error in validation["errors"]
+                    ),
                     validation["errors"],
                 )
 
@@ -4313,9 +4348,7 @@ class ExperimentLedgerTest(unittest.TestCase):
                     item["round_id"]: item[field] for item in second["rounds"]
                 }
                 self._freshen_profiling_evidence(second, "S4")
-                rounds_by_id = {
-                    item["round_id"]: item for item in second["rounds"]
-                }
+                rounds_by_id = {item["round_id"]: item for item in second["rounds"]}
                 for round_id, value in original_values.items():
                     rounds_by_id[round_id][field] = value
                 for collection in (
@@ -4487,9 +4520,7 @@ class ExperimentLedgerTest(unittest.TestCase):
                 second = self._result()
                 second["experiment_id"] = "S4"
                 second["parent_experiment_id"] = "S4"
-                self._freshen_profiling_evidence(
-                    second, "S4", fresh_baseline=True
-                )
+                self._freshen_profiling_evidence(second, "S4", fresh_baseline=True)
                 baseline_field = f"baseline_{suffix}"
                 candidate_field = f"candidate_{suffix}"
                 second["rounds"][0][candidate_field] = first["rounds"][0][
@@ -4620,7 +4651,9 @@ class ExperimentLedgerTest(unittest.TestCase):
 
     def test_manual_round_cannot_continue_after_incomplete_round(self):
         for round_index in (0, 1):
-            with self.subTest(round_id=self._result()["rounds"][round_index]["round_id"]):
+            with self.subTest(
+                round_id=self._result()["rounds"][round_index]["round_id"]
+            ):
                 result = self._result()
                 round_id = result["rounds"][round_index]["round_id"]
                 result["rounds"][round_index]["lifecycle"]["profiling"] = "not_run"
@@ -4631,7 +4664,9 @@ class ExperimentLedgerTest(unittest.TestCase):
 
                 self.assertFalse(validation["valid"])
                 self.assertTrue(
-                    any("cannot be followed" in error for error in validation["errors"]),
+                    any(
+                        "cannot be followed" in error for error in validation["errors"]
+                    ),
                     validation["errors"],
                 )
 
@@ -4699,7 +4734,9 @@ class ExperimentLedgerTest(unittest.TestCase):
 
         self.assertFalse(validation["valid"])
         self.assertTrue(
-            any("explicit non-empty blockers" in error for error in validation["errors"]),
+            any(
+                "explicit non-empty blockers" in error for error in validation["errors"]
+            ),
             validation["errors"],
         )
 
@@ -4716,15 +4753,18 @@ class ExperimentLedgerTest(unittest.TestCase):
             for round_id, value in result["profiling_analysis_result"].items()
             if round_id in {"S3-BASE", "S3-P1"}
         }
-        result["performance_scope_decisions"] = result[
-            "performance_scope_decisions"
-        ][:2]
+        result["performance_scope_decisions"] = result["performance_scope_decisions"][
+            :2
+        ]
 
         validation = experiment_ledger.validate_experiment_result(result)
 
         self.assertFalse(validation["valid"])
         self.assertTrue(
-            any("successful manual experiment requires" in error for error in validation["errors"]),
+            any(
+                "successful manual experiment requires" in error
+                for error in validation["errors"]
+            ),
             validation["errors"],
         )
 
@@ -4795,7 +4835,10 @@ class ExperimentLedgerTest(unittest.TestCase):
 
         self.assertFalse(validation["valid"])
         self.assertTrue(
-            any("whole_scope" in error and "insufficient_evidence" in error for error in validation["errors"]),
+            any(
+                "whole_scope" in error and "insufficient_evidence" in error
+                for error in validation["errors"]
+            ),
             validation["errors"],
         )
 
@@ -4814,7 +4857,10 @@ class ExperimentLedgerTest(unittest.TestCase):
 
         self.assertFalse(validation["valid"])
         self.assertTrue(
-            any("analysis" in error and "profile" in error for error in validation["errors"]),
+            any(
+                "analysis" in error and "profile" in error
+                for error in validation["errors"]
+            ),
             validation["errors"],
         )
 
@@ -4835,9 +4881,9 @@ class ExperimentLedgerTest(unittest.TestCase):
                         second, "S3-BASE", "candidate_profile"
                     )
                 else:
-                    second["profiling_analysis_result"]["S3-BASE"] = first[
-                        "rounds"
-                    ][0]["candidate_profile"]
+                    second["profiling_analysis_result"]["S3-BASE"] = first["rounds"][0][
+                        "candidate_profile"
+                    ]
                     for collection in (
                         "performance_scope_decisions",
                         "unresolved_performance_ranges",
@@ -4848,7 +4894,9 @@ class ExperimentLedgerTest(unittest.TestCase):
                                     "profiling_analysis_result"
                                 ]["S3-BASE"]
 
-                with self.assertRaisesRegex(ValueError, "analysis.*profile|profile.*analysis"):
+                with self.assertRaisesRegex(
+                    ValueError, "analysis.*profile|profile.*analysis"
+                ):
                     experiment_ledger.merge_experiment_result(ledger, second)
 
     def test_decision_source_requires_passed_profiling_and_analysis_evidence(self):
@@ -4886,7 +4934,9 @@ class ExperimentLedgerTest(unittest.TestCase):
         validation = experiment_ledger.validate_experiment_result(result)
 
         self.assertFalse(validation["valid"])
-        self.assertTrue(any("strictly later" in error for error in validation["errors"]))
+        self.assertTrue(
+            any("strictly later" in error for error in validation["errors"])
+        )
 
     def test_verified_prune_requires_a_later_performance_prune_round(self):
         for verification_round_id in ("S3-FINAL",):
@@ -4908,9 +4958,7 @@ class ExperimentLedgerTest(unittest.TestCase):
 
     def test_verified_prune_must_be_referenced_by_its_verification_round(self):
         result = self._result()
-        result["rounds"][1]["performance_decision_range_ids"] = [
-            "range-beneficial"
-        ]
+        result["rounds"][1]["performance_decision_range_ids"] = ["range-beneficial"]
 
         validation = experiment_ledger.validate_experiment_result(result)
 
@@ -4937,7 +4985,10 @@ class ExperimentLedgerTest(unittest.TestCase):
 
                 self.assertFalse(validation["valid"])
                 self.assertTrue(
-                    any("fresh applied keep decision" in error for error in validation["errors"]),
+                    any(
+                        "fresh applied keep decision" in error
+                        for error in validation["errors"]
+                    ),
                     validation["errors"],
                 )
 
@@ -5068,11 +5119,7 @@ class ExperimentLedgerTest(unittest.TestCase):
                 self.assertTrue(validation["valid"], validation["errors"])
                 self.assertEqual(ledger["conditional_performance_evidence"], {})
                 self.assertEqual(
-                    len(
-                        ledger["experiments"]["S1"][
-                            "unresolved_performance_ranges"
-                        ]
-                    ),
+                    len(ledger["experiments"]["S1"]["unresolved_performance_ranges"]),
                     1,
                 )
 
@@ -5096,8 +5143,7 @@ class ExperimentLedgerTest(unittest.TestCase):
         promoted = experiment_ledger._promoted_conditional_records(result)
         self.assertTrue(
             any(
-                evidence_kind == "prune"
-                and decision["round_id"] == "S1-AUTO"
+                evidence_kind == "prune" and decision["round_id"] == "S1-AUTO"
                 for evidence_kind, decision in promoted
             )
         )
@@ -5106,7 +5152,10 @@ class ExperimentLedgerTest(unittest.TestCase):
         validation = experiment_ledger.validate_experiment_result(result)
         self.assertFalse(validation["valid"])
         self.assertTrue(
-            any("preserve the starter scope_kind" in error for error in validation["errors"]),
+            any(
+                "preserve the starter scope_kind" in error
+                for error in validation["errors"]
+            ),
             validation["errors"],
         )
 
@@ -5161,8 +5210,12 @@ class ExperimentLedgerTest(unittest.TestCase):
             lambda round_data: round_data.pop("baseline_profile"),
             lambda round_data: round_data.pop("baseline_profile_fingerprint"),
             lambda round_data: round_data.pop("candidate_profile_fingerprint"),
-            lambda round_data: round_data.update({"candidate_profile": "/tmp/profile.json"}),
-            lambda round_data: round_data.update({"baseline_profile": "../profile.json"}),
+            lambda round_data: round_data.update(
+                {"candidate_profile": "/tmp/profile.json"}
+            ),
+            lambda round_data: round_data.update(
+                {"baseline_profile": "../profile.json"}
+            ),
             lambda round_data: round_data.update({"declared_change_set": {}}),
             lambda round_data: round_data.update(
                 {
@@ -5185,7 +5238,9 @@ class ExperimentLedgerTest(unittest.TestCase):
     def test_decision_requires_exact_source_round_binding(self):
         mutations = (
             lambda decision: decision.pop("baseline_profile"),
-            lambda decision: decision.update({"candidate_profile": "other/profile.json"}),
+            lambda decision: decision.update(
+                {"candidate_profile": "other/profile.json"}
+            ),
             lambda decision: decision.update(
                 {
                     "declared_change_set": {
@@ -5206,7 +5261,9 @@ class ExperimentLedgerTest(unittest.TestCase):
                 validation = experiment_ledger.validate_experiment_result(result)
 
                 self.assertFalse(validation["valid"])
-                self.assertTrue(any("source round" in error for error in validation["errors"]))
+                self.assertTrue(
+                    any("source round" in error for error in validation["errors"])
+                )
 
     def test_conditional_evidence_retains_complete_profiling_binding(self):
         result = self._result()
@@ -5251,9 +5308,7 @@ class ExperimentLedgerTest(unittest.TestCase):
         result["experiment_id"] = "S1"
         result["parent_experiment_id"] = "S1"
         result["child_agent_id"] = "agent-1"
-        result["rounds"] = [
-            self._round("S1", "automatic_aot", "candidate-auto-fp", [])
-        ]
+        result["rounds"] = [self._round("S1", "automatic_aot", "candidate-auto-fp", [])]
         result["rounds"][0]["child_agent_id"] = "agent-1"
         result["rounds"][0]["scope_kind"] = "automatic_aot"
         result["profiling_analysis_agent_ids"] = {"S1": "prof-agent-auto"}
@@ -5359,15 +5414,18 @@ class StrategyTest(unittest.TestCase):
                 "source_revision",
             )
         }
-        analysis["analysis_id"] = "analysis-" + hashlib.sha256(
-            json.dumps(
-                identity,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=analysis.get("schema_version") == "1.2",
-                allow_nan=False,
-            ).encode("utf-8")
-        ).hexdigest()
+        analysis["analysis_id"] = (
+            "analysis-"
+            + hashlib.sha256(
+                json.dumps(
+                    identity,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=analysis.get("schema_version") == "1.2",
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+        )
         return StrategyTest._seal_analysis_content(analysis)
 
     @staticmethod
@@ -5618,9 +5676,7 @@ class StrategyTest(unittest.TestCase):
     @staticmethod
     def _completed_history(recommended_experiments):
         return [
-            StrategyTest._analysis(
-                recommended_experiments=recommended_experiments
-            ),
+            StrategyTest._analysis(recommended_experiments=recommended_experiments),
             StrategyTest._stable_p_analysis(recommended_experiments=[]),
         ]
 
@@ -5721,31 +5777,30 @@ class StrategyTest(unittest.TestCase):
                         )
                         writer.writerow(
                             {
-                            "Step Id": occurrence,
-                            "Device_id": 0,
-                            "Model ID": "48",
-                            "Task ID": task_id,
-                            "Stream ID": 1,
-                            "Name": name,
-                            "Type": op_type,
-                            "OP State": "static",
-                            "Accelerator Core": "AI_VECTOR_CORE",
-                            "Start Time(us)": start,
-                            "Duration(us)": duration,
-                            "Wait Time(us)": 0,
-                            "Block Num": 1,
-                            "Mix Block Num": 0,
-                            "aic_scalar_time(us)": 0,
-                            "aic_scalar_ratio": 0,
-                            "aiv_scalar_time(us)": duration * scalar_ratio,
-                            "aiv_scalar_ratio": scalar_ratio,
+                                "Step Id": occurrence,
+                                "Device_id": 0,
+                                "Model ID": "48",
+                                "Task ID": task_id,
+                                "Stream ID": 1,
+                                "Name": name,
+                                "Type": op_type,
+                                "OP State": "static",
+                                "Accelerator Core": "AI_VECTOR_CORE",
+                                "Start Time(us)": start,
+                                "Duration(us)": duration,
+                                "Wait Time(us)": 0,
+                                "Block Num": 1,
+                                "Mix Block Num": 0,
+                                "aic_scalar_time(us)": 0,
+                                "aic_scalar_ratio": 0,
+                                "aiv_scalar_time(us)": duration * scalar_ratio,
+                                "aiv_scalar_ratio": scalar_ratio,
                             }
                         )
 
         child_name = "static_kernel_A_hash"
         sk_name = (
-            "sk_1_decoder.layer.0_start_static_kernel_A_hash_"
-            "end_static_kernel_A_hash"
+            "sk_1_decoder.layer.0_start_static_kernel_A_hash_end_static_kernel_A_hash"
         )
         baseline_rows = [(10, child_name, "A", 8)]
         candidate_rows = []
@@ -5795,9 +5850,7 @@ class StrategyTest(unittest.TestCase):
             else root / "BASE" / "config.json"
         )
         candidate_config = root / "S4" / "config.json"
-        runtime_evidence = (
-            {"dcci_state": "enabled"} if dcci_recommendation else None
-        )
+        runtime_evidence = {"dcci_state": "enabled"} if dcci_recommendation else None
         baseline_config_data = {
             "runtime": {"rank_size": 8},
             "superkernel": {"enabled": False, "scope": []},
@@ -5912,9 +5965,7 @@ class StrategyTest(unittest.TestCase):
                     "runtime_evidence": {"dcci_state": "enabled"},
                     "options": {
                         "optimize_options": {
-                            option: {
-                                "accepted_values": [["^static_kernel_A_hash$"]]
-                            }
+                            option: {"accepted_values": [["^static_kernel_A_hash$"]]}
                             for option in (
                                 "dcci_before_kernel_start",
                                 "dcci_after_kernel_end",
@@ -6021,7 +6072,9 @@ class StrategyTest(unittest.TestCase):
             )
         return analysis_path, artifacts
 
-    @unittest.skip("legacy task-range exact fixture; source_scope_map_v2 flow is covered in sibling tests")
+    @unittest.skip(
+        "legacy task-range exact fixture; source_scope_map_v2 flow is covered in sibling tests"
+    )
     def test_cli_accepts_ordered_duplicate_name_real_base_p_history(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -6053,9 +6106,7 @@ class StrategyTest(unittest.TestCase):
             matrix = report["candidates"]["S4"]["next_candidate_matrix"]
             self.assertEqual(exit_code, 0)
             self.assertEqual(matrix, [])
-            self.assertEqual(
-                {item["comparison_to"] for item in matrix}, {"S4-P1"}
-            )
+            self.assertEqual({item["comparison_to"] for item in matrix}, {"S4-P1"})
             self.assertEqual(
                 {item["source_analysis_round_id"] for item in matrix},
                 {"S4-BASE"},
@@ -6072,9 +6123,7 @@ class StrategyTest(unittest.TestCase):
 
         matrix = strategy["candidates"]["S1"]["next_candidate_matrix"]
         followups = [
-            item
-            for item in matrix
-            if item["round_kind"] == "source_mapping_completion"
+            item for item in matrix if item["round_kind"] == "source_mapping_completion"
         ]
         whole_scope = [
             item
@@ -6086,16 +6135,12 @@ class StrategyTest(unittest.TestCase):
         followup = followups[0]
         self.assertEqual(followup["round_kind"], "source_mapping_completion")
         self.assertEqual(followup["target_range_ids"], ["range-contract"])
-        self.assertEqual(
-            followup["graph_occurrence_fingerprints"], ["6" * 64]
-        )
+        self.assertEqual(followup["graph_occurrence_fingerprints"], ["6" * 64])
         for forbidden in ("source_scope", "source_file", "start_offset", "end_offset"):
             self.assertNotIn(forbidden, followup)
         self.assertEqual(followup["source_revision_role"], "stable_source")
         self.assertEqual(
-            strategy["candidates"]["S1"]["scope_strategy"][
-                "source_mapping_status"
-            ],
+            strategy["candidates"]["S1"]["scope_strategy"]["source_mapping_status"],
             "required",
         )
 
@@ -6141,10 +6186,7 @@ class StrategyTest(unittest.TestCase):
             ["range-neutral"],
         )
         self.assertFalse(
-            any(
-                item["round_kind"] == "source_mapping_completion"
-                for item in matrix
-            )
+            any(item["round_kind"] == "source_mapping_completion" for item in matrix)
         )
         self.assertEqual(
             candidate["scope_strategy"]["source_range_optimization_status"],
@@ -6180,13 +6222,16 @@ class StrategyTest(unittest.TestCase):
 
             def invoke(extra_args):
                 stdout = io.StringIO()
-                with mock.patch.object(
-                    recommend_sk_strategy,
-                    "_run_read_only_reanalysis",
-                    side_effect=lambda name, report, path: json.loads(
-                        json.dumps(report)
+                with (
+                    mock.patch.object(
+                        recommend_sk_strategy,
+                        "_run_read_only_reanalysis",
+                        side_effect=lambda name, report, path: json.loads(
+                            json.dumps(report)
+                        ),
                     ),
-                ), redirect_stdout(stdout):
+                    redirect_stdout(stdout),
+                ):
                     exit_code = recommend_sk_strategy.main(
                         ["--profiling-analysis", f"S1={source}", *extra_args]
                     )
@@ -6228,13 +6273,17 @@ class StrategyTest(unittest.TestCase):
             ):
                 with self.subTest(invalid_args=invalid_args):
                     stderr = io.StringIO()
-                    with mock.patch.object(
-                        recommend_sk_strategy,
-                        "_run_read_only_reanalysis",
-                        side_effect=lambda name, report, path: json.loads(
-                            json.dumps(report)
+                    with (
+                        mock.patch.object(
+                            recommend_sk_strategy,
+                            "_run_read_only_reanalysis",
+                            side_effect=lambda name, report, path: json.loads(
+                                json.dumps(report)
+                            ),
                         ),
-                    ), redirect_stderr(stderr), self.assertRaises(SystemExit):
+                        redirect_stderr(stderr),
+                        self.assertRaises(SystemExit),
+                    ):
                         recommend_sk_strategy.main(
                             [
                                 "--profiling-analysis",
@@ -6265,13 +6314,17 @@ class StrategyTest(unittest.TestCase):
             p1_path.write_text(json.dumps(p1))
             stderr = io.StringIO()
 
-            with mock.patch.object(
-                recommend_sk_strategy,
-                "_run_read_only_reanalysis",
-                side_effect=lambda name, report, path: json.loads(
-                    json.dumps(report)
+            with (
+                mock.patch.object(
+                    recommend_sk_strategy,
+                    "_run_read_only_reanalysis",
+                    side_effect=lambda name, report, path: json.loads(
+                        json.dumps(report)
+                    ),
                 ),
-            ), redirect_stderr(stderr), self.assertRaises(SystemExit):
+                redirect_stderr(stderr),
+                self.assertRaises(SystemExit),
+            ):
                 recommend_sk_strategy.main(
                     [
                         "--profiling-analysis",
@@ -6331,17 +6384,22 @@ class StrategyTest(unittest.TestCase):
 
         self.assertEqual(whole_scope, [])
         self.assertEqual(len(source_mapping), 1)
-        self.assertEqual(source_mapping[0]["target_range_ids"], [
-            "range-beneficial",
-            "range-neutral",
-            "range-regressed",
-        ])
+        self.assertEqual(
+            source_mapping[0]["target_range_ids"],
+            [
+                "range-beneficial",
+                "range-neutral",
+                "range-regressed",
+            ],
+        )
         self.assertEqual(source_mapping[0]["source_revision_role"], "stable_marker")
         self.assertEqual(
             source_mapping[0]["source_edit_policy"], "stable_marker_calibration"
         )
 
-    def test_completed_source_mapping_skips_unmapped_ranges_and_allows_whole_scope(self):
+    def test_completed_source_mapping_skips_unmapped_ranges_and_allows_whole_scope(
+        self,
+    ):
         analysis = self._structural_auto_analysis()
         analysis["source_scope_mapping"] = {
             "protocol": "source_scope_map_v2",
@@ -6373,9 +6431,7 @@ class StrategyTest(unittest.TestCase):
         )
 
     def test_insufficient_evidence_blocks_whole_scope_clean_validation(self):
-        candidate = self._build_strategy({"S4": self._analysis()})["candidates"][
-            "S4"
-        ]
+        candidate = self._build_strategy({"S4": self._analysis()})["candidates"]["S4"]
 
         self.assertFalse(
             any(
@@ -6408,9 +6464,7 @@ class StrategyTest(unittest.TestCase):
         analysis = self._structural_auto_analysis()
         for field in ("per_sk_decisions", "scope_actions"):
             analysis[field][0]["mapping_confidence"] = "ambiguous"
-            analysis[field][0]["mapping_blockers"] = [
-                "structural_mapping_not_unique"
-            ]
+            analysis[field][0]["mapping_blockers"] = ["structural_mapping_not_unique"]
         analysis["mapping_coverage"].update(
             {
                 "exact_projected_trace_sk_ids": 0,
@@ -6427,9 +6481,9 @@ class StrategyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             analysis_path, artifacts = self._write_real_analysis_fixture(root)
-            input_files = [
-                path for path in artifacts.values() if path.is_file()
-            ] + [analysis_path]
+            input_files = [path for path in artifacts.values() if path.is_file()] + [
+                analysis_path
+            ]
             before = {path: path.read_bytes() for path in input_files}
             stdout = io.StringIO()
             previous_cwd = Path.cwd()
@@ -6512,7 +6566,7 @@ class StrategyTest(unittest.TestCase):
                             stdout="ANALYZER_STDOUT_SECRET",
                             stderr=(
                                 "Traceback (most recent call last):\n"
-                                "  File \"analyzer.py\", line 1\n"
+                                '  File "analyzer.py", line 1\n'
                                 "RuntimeError: analyzer failed"
                             ),
                         ),
@@ -6623,9 +6677,9 @@ class StrategyTest(unittest.TestCase):
         base = self._analysis()
         p1 = self._analysis(round_id="S4-P1")
 
-        matrix = self._build_source_range_strategy({"S4": [base, p1]})[
-            "candidates"
-        ]["S4"]["next_candidate_matrix"]
+        matrix = self._build_source_range_strategy({"S4": [base, p1]})["candidates"][
+            "S4"
+        ]["next_candidate_matrix"]
 
         self.assertEqual([item["id"] for item in matrix], ["S4-P2"])
         self.assertEqual(matrix[0]["round_kind"], "performance_prune")
@@ -6896,7 +6950,9 @@ class StrategyTest(unittest.TestCase):
 
         for analysis in mutations:
             with self.subTest(analysis=analysis):
-                with self.assertRaisesRegex(ValueError, "scope_actions|per_sk_decisions"):
+                with self.assertRaisesRegex(
+                    ValueError, "scope_actions|per_sk_decisions"
+                ):
                     self._build_strategy({"S4": analysis})
 
         minimal_forgery = {
@@ -6951,9 +7007,9 @@ class StrategyTest(unittest.TestCase):
             if decision["classification"] in {"beneficial", "regressed"}
         ]
         self._seal_analysis_content(analysis)
-        matrix = self._build_source_range_strategy({"S4": analysis})[
-            "candidates"
-        ]["S4"]["next_candidate_matrix"]
+        matrix = self._build_source_range_strategy({"S4": analysis})["candidates"][
+            "S4"
+        ]["next_candidate_matrix"]
         self.assertEqual([item["id"] for item in matrix], ["S4-P4"])
 
         for invalid in ("S4", "S4-P0", "Other-BASE", "S4-X1", "S4-FINAL-more"):
@@ -6966,7 +7022,9 @@ class StrategyTest(unittest.TestCase):
     def test_conflicting_or_duplicate_recommendations_block_all_related_entries(self):
         original = self._analysis()["recommended_experiments"][0]
         fixtures = []
-        fixtures.append([json.loads(json.dumps(original)), json.loads(json.dumps(original))])
+        fixtures.append(
+            [json.loads(json.dumps(original)), json.loads(json.dumps(original))]
+        )
 
         same_source = json.loads(json.dumps(original))
         same_source["value"] = 0
@@ -7059,7 +7117,10 @@ class StrategyTest(unittest.TestCase):
                         recommend_sk_strategy.main(argv)
                     self.assertNotIn("Traceback", stderr.getvalue())
 
-            self.assertEqual(json.loads(source.read_text())["analysis_id"], self._analysis()["analysis_id"])
+            self.assertEqual(
+                json.loads(source.read_text())["analysis_id"],
+                self._analysis()["analysis_id"],
+            )
 
     def test_deep_json_is_rejected_without_recursion_traceback(self):
         analysis = self._analysis()
@@ -7076,13 +7137,17 @@ class StrategyTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "deep.json"
-            path.write_text('{"schema_version":"1.0","nested":' + "[" * 1200 + "0" + "]" * 1200 + "}")
+            path.write_text(
+                '{"schema_version":"1.0","nested":'
+                + "[" * 1200
+                + "0"
+                + "]" * 1200
+                + "}"
+            )
             stderr = io.StringIO()
 
             with redirect_stderr(stderr), self.assertRaises(SystemExit):
-                recommend_sk_strategy.main(
-                    ["--profiling-analysis", f"S4={path}"]
-                )
+                recommend_sk_strategy.main(["--profiling-analysis", f"S4={path}"])
 
             self.assertNotIn("Traceback", stderr.getvalue())
             self.assertRegex(stderr.getvalue(), "嵌套|递归")
@@ -7104,9 +7169,13 @@ class StrategyTest(unittest.TestCase):
                 return real_replace(source_path, target_path)
 
             stderr = io.StringIO()
-            with mock.patch.object(
-                recommend_sk_strategy.os, "replace", side_effect=fail_json_replace
-            ), redirect_stderr(stderr), self.assertRaises(SystemExit):
+            with (
+                mock.patch.object(
+                    recommend_sk_strategy.os, "replace", side_effect=fail_json_replace
+                ),
+                redirect_stderr(stderr),
+                self.assertRaises(SystemExit),
+            ):
                 recommend_sk_strategy.main(
                     [
                         "--profiling-analysis",
@@ -7225,9 +7294,7 @@ class StrategyTest(unittest.TestCase):
         reordered_first = json.loads(json.dumps(first))
         reordered_first["recommended_experiments"].reverse()
         self._seal_analysis_content(reordered_first)
-        right = self._build_source_range_strategy(
-            {"S4": reordered_first, "S5": second}
-        )
+        right = self._build_source_range_strategy({"S4": reordered_first, "S5": second})
 
         self.assertEqual(
             recommend_sk_strategy._markdown(left),
@@ -7305,7 +7372,10 @@ class StrategyTest(unittest.TestCase):
             "declared_changed",
         )
         for mutation in mutations:
-            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(mutation=mutation),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 analysis_path, artifacts = self._write_real_analysis_fixture(root)
                 if mutation == "profile_changed":

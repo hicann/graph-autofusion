@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """从 profiling 分析结果生成整 scope 晋级及细粒度优化计划。"""
 
 import argparse
@@ -122,14 +129,10 @@ def _analysis_input_fields(schema_version):
 
 def _candidate_arg(value):
     if "=" not in value:
-        raise argparse.ArgumentTypeError(
-            "profiling 分析输入必须使用 NAME=PATH 格式"
-        )
+        raise argparse.ArgumentTypeError("profiling 分析输入必须使用 NAME=PATH 格式")
     name, path = value.split("=", 1)
     if not name or not path:
-        raise argparse.ArgumentTypeError(
-            "profiling 分析输入必须使用 NAME=PATH 格式"
-        )
+        raise argparse.ArgumentTypeError("profiling 分析输入必须使用 NAME=PATH 格式")
     return name, Path(path)
 
 
@@ -154,7 +157,9 @@ def _load_json(path):
             f"profiling 分析结果 JSON 嵌套过深或递归结构无效：{artifact}"
         ) from error
     except ValueError as error:
-        raise ValueError(f"profiling 分析结果不是标准 JSON：{artifact}: {error}") from error
+        raise ValueError(
+            f"profiling 分析结果不是标准 JSON：{artifact}: {error}"
+        ) from error
     if not isinstance(value, dict):
         raise ValueError("profiling 分析结果顶层必须是 JSON 对象")
     _validate_json_value(value, "profiling 分析结果")
@@ -294,7 +299,9 @@ def _is_text(value):
 
 
 def _contains_chinese(value):
-    return isinstance(value, str) and any("\u4e00" <= char <= "\u9fff" for char in value)
+    return isinstance(value, str) and any(
+        "\u4e00" <= char <= "\u9fff" for char in value
+    )
 
 
 def _migration_error(version):
@@ -308,12 +315,11 @@ def _migration_error(version):
 
 def _validate_analysis_content_fingerprint(name, analysis):
     fingerprint = analysis.get("analysis_content_fingerprint")
-    if not isinstance(fingerprint, str) or re.fullmatch(
-        r"[0-9a-f]{64}", fingerprint
-    ) is None:
-        raise ValueError(
-            f"{name}: analysis_content_fingerprint 必须是非空小写 SHA-256"
-        )
+    if (
+        not isinstance(fingerprint, str)
+        or re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None
+    ):
+        raise ValueError(f"{name}: analysis_content_fingerprint 必须是非空小写 SHA-256")
     unsigned = copy.deepcopy(analysis)
     unsigned.pop("analysis_content_fingerprint")
     if fingerprint != _schema_canonical_sha256(
@@ -353,9 +359,8 @@ def _validate_analysis(name, analysis):
         "candidate_name": candidate_name,
         "source_revision": analysis["source_revision"],
     }
-    expected_analysis_id = (
-        "analysis-"
-        + _schema_canonical_sha256(identity, analysis["schema_version"])
+    expected_analysis_id = "analysis-" + _schema_canonical_sha256(
+        identity, analysis["schema_version"]
     )
     if analysis["analysis_id"] != expected_analysis_id:
         raise ValueError(f"{name}: analysis_id 与 analyzer 身份字段不一致")
@@ -540,9 +545,7 @@ def _validated_decision(
             or Path(source_file).is_absolute()
             or ".." in Path(source_file).parts
         ):
-            raise ValueError(
-                f"{location}.boundary.source_file 必须是非空相对源码路径"
-            )
+            raise ValueError(f"{location}.boundary.source_file 必须是非空相对源码路径")
         start = boundary["start_offset"]
         end = boundary["end_offset"]
         if (
@@ -574,13 +577,13 @@ def _validate_per_sk_decisions(name, decisions, *, schema_version):
     seen_sks = set()
     for index, decision in enumerate(decisions):
         location = f"{name}.per_sk_decisions[{index}]"
-        item = _validated_decision(
-            location, decision, schema_version=schema_version
-        )
+        item = _validated_decision(location, decision, schema_version=schema_version)
         if item["range_id"] in seen_ranges:
             raise ValueError(f"{location}: per_sk_decisions range_id 重复")
         if item["sk_id"] in seen_sks:
-            raise ValueError(f"{location}: per_sk_decisions 同一 sk_id 映射到多个 range")
+            raise ValueError(
+                f"{location}: per_sk_decisions 同一 sk_id 映射到多个 range"
+            )
         seen_ranges.add(item["range_id"])
         seen_sks.add(item["sk_id"])
         validated.append(item)
@@ -677,9 +680,7 @@ def _validate_structural_proof(name, analysis, decision, location):
     proof_map = analysis.get("graph_alignment_proof")
     proof = proof_map.get(identity_key) if isinstance(proof_map, dict) else None
     fingerprint = (
-        proof.get("graph_occurrence_fingerprint")
-        if isinstance(proof, dict)
-        else None
+        proof.get("graph_occurrence_fingerprint") if isinstance(proof, dict) else None
     )
     alternatives = (
         proof.get("alternative_solution_count_by_step")
@@ -762,11 +763,18 @@ def _validate_accepted_evidence(option, value, evidence):
         if runtime_state.get("state") != derived_state:
             return "DCCI runtime state 与 sources 派生状态不一致。"
         if derived_state != "enabled":
-            return f"DCCI runtime sources 派生状态为 {derived_state}，不能运行挽救实验。"
-        if not isinstance(option_acceptance, dict) or "accepted_value" not in option_acceptance:
+            return (
+                f"DCCI runtime sources 派生状态为 {derived_state}，不能运行挽救实验。"
+            )
+        if (
+            not isinstance(option_acceptance, dict)
+            or "accepted_value" not in option_acceptance
+        ):
             return "DCCI 挽救实验缺少 exact accepted_value 证据。"
         if option_acceptance.get("source") not in accepted_sources:
-            return "DCCI option_acceptance.source 未指向对应 option 的 accepted_values。"
+            return (
+                "DCCI option_acceptance.source 未指向对应 option 的 accepted_values。"
+            )
         accepted_value = option_acceptance["accepted_value"]
     else:
         if "accepted_value" not in evidence:
@@ -776,7 +784,9 @@ def _validate_accepted_evidence(option, value, evidence):
         accepted_value = evidence["accepted_value"]
     if not _same_json(accepted_value, value):
         if option in DCCI_OPTIONS:
-            return "DCCI accepted_evidence 中的 exact accepted_value 与推荐 value 不一致。"
+            return (
+                "DCCI accepted_evidence 中的 exact accepted_value 与推荐 value 不一致。"
+            )
         return "accepted_evidence 中的 exact accepted_value 与推荐 value 不一致。"
     return None
 
@@ -990,9 +1000,8 @@ def _candidate_plan(
         action
         for action in actions
         if action["classification"] != "insufficient_evidence"
-        and (
-            action.get("mapping_method"), action.get("mapping_confidence")
-        ) in PERFORMANCE_EXACT_MAPPINGS
+        and (action.get("mapping_method"), action.get("mapping_confidence"))
+        in PERFORMANCE_EXACT_MAPPINGS
         and not _source_interval_is_exact(action)
     ]
     source_mapping_context = analysis["source_scope_mapping"]
@@ -1031,9 +1040,7 @@ def _candidate_plan(
             )
         else:
             batch_proven, batch_reason = _prune_batch_is_proven(prune_actions)
-            selected_actions = (
-                prune_actions if batch_proven else prune_actions[:1]
-            )
+            selected_actions = prune_actions if batch_proven else prune_actions[:1]
             if len(prune_actions) > 1 and not batch_proven:
                 blockers.append(
                     _blocker(
@@ -1120,9 +1127,7 @@ def _candidate_plan(
                 "整 scope 晋级仍由完整性能映射和端到端收益决定。"
             ),
             "source_range_optimization_status": (
-                "requested"
-                if source_range_optimization_requested
-                else "not_requested"
+                "requested" if source_range_optimization_requested else "not_requested"
             ),
             "source_mapping_status": (
                 "required"
@@ -1143,9 +1148,7 @@ def _candidate_plan(
 
 
 def _normalized_history(name, analysis_value, path_value):
-    analyses = (
-        analysis_value if isinstance(analysis_value, list) else [analysis_value]
-    )
+    analyses = analysis_value if isinstance(analysis_value, list) else [analysis_value]
     paths = path_value if isinstance(path_value, list) else [path_value]
     if not analyses or len(analyses) != len(paths):
         raise ValueError(f"{name}: analysis_paths 必须逐轮对应 profiling 分析历史")
@@ -1197,9 +1200,7 @@ def _validate_analysis_history(name, analyses, validations):
         if phase in {"BASE", "P"} and kind == "FINAL" and index == len(analyses) - 1:
             phase = "FINAL"
             continue
-        raise ValueError(
-            f"{name}: profiling 历史必须严格遵循 BASE -> P* -> FINAL"
-        )
+        raise ValueError(f"{name}: profiling 历史必须严格遵循 BASE -> P* -> FINAL")
 
 
 def _normalize_source_range_optimization(value, candidate_names):
@@ -1211,9 +1212,7 @@ def _normalize_source_range_optimization(value, candidate_names):
         )
     names = list(value)
     if not all(_is_text(name) for name in names):
-        raise ValueError(
-            "source_range_optimization 中每个候选名称必须是非空字符串"
-        )
+        raise ValueError("source_range_optimization 中每个候选名称必须是非空字符串")
     if len(names) != len(set(names)):
         raise ValueError("source_range_optimization 候选名称不得重复")
     unknown = sorted(set(names) - set(candidate_names))
@@ -1261,8 +1260,7 @@ def build_strategy(
             validations.append(validation)
         source_range_optimization_requested = name in source_range_optimization
         if not source_range_optimization_requested and any(
-            validation["round"]["kind"] in {"P", "FINAL"}
-            for validation in validations
+            validation["round"]["kind"] in {"P", "FINAL"} for validation in validations
         ):
             raise ValueError(
                 f"{name}: P/FINAL profiling 历史要求通过 "
@@ -1387,8 +1385,7 @@ def _load_named_analyses(parser, named_paths):
             candidate_name = analysis.get("candidate_name")
             if candidate_name != name:
                 raise ValueError(
-                    f"输入名称 {name!r} 与结果 candidate_name "
-                    f"{candidate_name!r} 不一致"
+                    f"输入名称 {name!r} 与结果 candidate_name {candidate_name!r} 不一致"
                 )
             analyses.setdefault(name, []).append(analysis)
             analysis_paths.setdefault(name, []).append(path)
@@ -1449,7 +1446,9 @@ def _profile_fingerprint(path):
     try:
         return hashlib.sha256(kernel_details.read_bytes()).hexdigest()
     except OSError as error:
-        raise ValueError(f"无法读取 profiling 数据 {kernel_details}: {error}") from error
+        raise ValueError(
+            f"无法读取 profiling 数据 {kernel_details}: {error}"
+        ) from error
 
 
 def _analysis_input_path(name, analysis, analysis_path, field):
@@ -1477,7 +1476,9 @@ def _validate_analysis_artifacts(name, analysis, analysis_path):
         )
     }
     baseline_config = _load_artifact_json(paths["baseline_config"], "baseline config")
-    candidate_config = _load_artifact_json(paths["candidate_config"], "candidate config")
+    candidate_config = _load_artifact_json(
+        paths["candidate_config"], "candidate config"
+    )
     baseline_workload = _load_artifact_json(
         paths["baseline_workload"], "baseline workload"
     )
@@ -1488,11 +1489,11 @@ def _validate_analysis_artifacts(name, analysis, analysis_path):
         paths["declared_change_set"], "declared change set"
     )
     if not _same_json(declared_change_set, analysis["declared_change_set"]):
-        raise ValueError(f"{name}: declared_change_set 文件内容与 profiling report 不一致")
+        raise ValueError(
+            f"{name}: declared_change_set 文件内容与 profiling report 不一致"
+        )
     actual = {
-        "baseline_profile_fingerprint": _profile_fingerprint(
-            paths["baseline_profile"]
-        ),
+        "baseline_profile_fingerprint": _profile_fingerprint(paths["baseline_profile"]),
         "candidate_profile_fingerprint": _profile_fingerprint(
             paths["candidate_profile"]
         ),
@@ -1533,9 +1534,7 @@ def _validated_reanalysis_thresholds(name, analysis):
         "min_occurrences",
     }
     if set(thresholds) != expected_fields:
-        raise ValueError(
-            f"{name}: thresholds 必须且只能包含 {sorted(expected_fields)}"
-        )
+        raise ValueError(f"{name}: thresholds 必须且只能包含 {sorted(expected_fields)}")
     relative = thresholds["min_relative_change_pct"]
     absolute = thresholds["min_absolute_change_us"]
     occurrences = thresholds["min_occurrences"]
@@ -1553,7 +1552,11 @@ def _validated_reanalysis_thresholds(name, analysis):
         or absolute < 0
     ):
         raise ValueError(f"{name}: min_absolute_change_us 必须是有限非负数")
-    if isinstance(occurrences, bool) or not isinstance(occurrences, int) or occurrences < 1:
+    if (
+        isinstance(occurrences, bool)
+        or not isinstance(occurrences, int)
+        or occurrences < 1
+    ):
         raise ValueError(f"{name}: min_occurrences 必须是大于等于 1 的整数")
     return thresholds
 
@@ -1562,7 +1565,9 @@ def _run_read_only_reanalysis(name, analysis, analysis_path):
     analysis_path = _resolve_path(analysis_path)
     stored_analysis = _load_json(analysis_path)
     if not _same_json(stored_analysis, analysis):
-        raise ValueError(f"{name}: analysis_paths 指向的报告与传入 profiling report 不一致")
+        raise ValueError(
+            f"{name}: analysis_paths 指向的报告与传入 profiling report 不一致"
+        )
     _validate_analysis_artifacts(name, analysis, analysis_path)
 
     analyzer = _analyzer_script_path()
@@ -1619,7 +1624,9 @@ def _run_read_only_reanalysis(name, analysis, analysis_path):
                 line.strip() for line in completed.stderr.splitlines() if line.strip()
             ]
             detail = stderr_lines[-1] if stderr_lines else "子进程未提供错误详情"
-            detail = re.sub("traceback", "子进程异常", detail, flags=re.IGNORECASE)[:500]
+            detail = re.sub("traceback", "子进程异常", detail, flags=re.IGNORECASE)[
+                :500
+            ]
             raise ValueError(
                 f"{name}: 只读重分析失败（退出码 {completed.returncode}）：{detail}"
             )
@@ -1655,17 +1662,13 @@ def _validate_cli_artifact_output_conflicts(
     analyses, analysis_paths, json_out, markdown_out
 ):
     outputs = {
-        _resolve_path(path)
-        for path in (json_out, markdown_out)
-        if path is not None
+        _resolve_path(path) for path in (json_out, markdown_out) if path is not None
     }
     if not outputs:
         return
     artifacts = set()
     for name, analysis_value in analyses.items():
-        history, paths = _normalized_history(
-            name, analysis_value, analysis_paths[name]
-        )
+        history, paths = _normalized_history(name, analysis_value, analysis_paths[name])
         for analysis, analysis_path in zip(history, paths):
             resolved_path = _resolve_path(analysis_path)
             required_inputs, _ = _analysis_input_fields(analysis["schema_version"])
@@ -1745,10 +1748,7 @@ def main(argv=None):
         action="append",
         default=[],
         metavar="NAME",
-        help=(
-            "显式授权指定候选进入可选 P/FINAL 源码范围优化；"
-            "可为多个候选重复传入"
-        ),
+        help=("显式授权指定候选进入可选 P/FINAL 源码范围优化；可为多个候选重复传入"),
     )
     parser.add_argument("--json-out", type=Path)
     parser.add_argument("--markdown-out", type=Path)

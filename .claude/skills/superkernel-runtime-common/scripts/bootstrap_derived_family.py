@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Register an accepted multi-stream result as a fresh derived-family SEED."""
 
 import argparse
 import fcntl
 import hashlib
 import json
+import sys
 import os
 import re
 import shutil
@@ -15,11 +23,8 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 MULTISTREAM_SCRIPTS = (
-    SCRIPT_DIR.parent.parent
-    / "superkernel-multistream-performance-tuning"
-    / "scripts"
+    SCRIPT_DIR.parent.parent / "superkernel-multistream-performance-tuning" / "scripts"
 )
-import sys
 
 sys.path.insert(0, str(MULTISTREAM_SCRIPTS))
 import multistream_contract  # noqa: E402
@@ -69,7 +74,9 @@ def _atomic_json(path, value):
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w") as stream:
-            stream.write(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+            stream.write(
+                json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            )
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
@@ -98,7 +105,10 @@ def _read_registry(path):
     if not path.exists():
         return {"schema_version": REGISTRY_SCHEMA, "families": {}}
     registry = _load_json(path)
-    if not isinstance(registry, dict) or registry.get("schema_version") != REGISTRY_SCHEMA:
+    if (
+        not isinstance(registry, dict)
+        or registry.get("schema_version") != REGISTRY_SCHEMA
+    ):
         raise ValueError(f"registry must use {REGISTRY_SCHEMA}")
     if not isinstance(registry.get("families"), dict):
         raise ValueError("registry.families must be an object")
@@ -137,7 +147,9 @@ def _register_family(
     audit_artifacts = {
         field: {
             "path": accepted_trial[field],
-            "file_fingerprint": _file_fingerprint(artifact_root / accepted_trial[field]),
+            "file_fingerprint": _file_fingerprint(
+                artifact_root / accepted_trial[field]
+            ),
         }
         for field in (
             "action_manifest",
@@ -181,9 +193,13 @@ def _register_family(
     existing = registry["families"].get(family_id)
     if existing is not None:
         if existing.get("lineage_fingerprint") != lineage_fingerprint:
-            raise ValueError(f"derived family ID already belongs to different lineage: {family_id}")
+            raise ValueError(
+                f"derived family ID already belongs to different lineage: {family_id}"
+            )
         if not destination.is_dir():
-            raise ValueError("registry contains derived family but its directory is missing")
+            raise ValueError(
+                "registry contains derived family but its directory is missing"
+            )
         return existing
 
     if destination.exists():
@@ -194,7 +210,9 @@ def _register_family(
             )
         existing_lineage = _load_json(existing_lineage_path)
         if _fingerprint(existing_lineage) != lineage_fingerprint:
-            raise ValueError(f"derived family directory has conflicting lineage: {destination}")
+            raise ValueError(
+                f"derived family directory has conflicting lineage: {destination}"
+            )
     else:
         with tempfile.TemporaryDirectory(
             prefix=f".{family_id}.staging-", dir=family_root
@@ -208,7 +226,10 @@ def _register_family(
             shutil.copy2(request_path, staging_path / "multistream-request.json")
             shutil.copy2(result_path, staging_path / "multistream-result.json")
             for field, name in (
-                ("config_snapshot", "config-snapshot" + Path(selected["config_snapshot"]).suffix),
+                (
+                    "config_snapshot",
+                    "config-snapshot" + Path(selected["config_snapshot"]).suffix,
+                ),
                 ("config_manifest", "config-manifest.json"),
                 ("source_manifest", "source-manifest.json"),
             ):
@@ -250,7 +271,9 @@ def _register_family(
     return entry
 
 
-def bootstrap(request_path, result_path, current_incumbent_path, registry_path, family_root):
+def bootstrap(
+    request_path, result_path, current_incumbent_path, registry_path, family_root
+):
     request_path = Path(request_path).resolve()
     result_path = Path(result_path).resolve()
     artifact_root = request_path.parent
@@ -258,14 +281,18 @@ def bootstrap(request_path, result_path, current_incumbent_path, registry_path, 
     result = _load_json(result_path)
     validation = multistream_contract.validate_result(request, result, artifact_root)
     if validation["status"] != "accepted":
-        raise ValueError("only an accepted multi-stream result can create a derived family")
+        raise ValueError(
+            "only an accepted multi-stream result can create a derived family"
+        )
 
     current_value = _load_json(current_incumbent_path)
     current = current_value.get("incumbent", current_value)
     current_identity = _identity(current, "current incumbent")
     request_identity = _identity(request["incumbent"], "request incumbent")
     if current_identity != request_identity:
-        raise ValueError("stale_result: current incumbent differs from request incumbent")
+        raise ValueError(
+            "stale_result: current incumbent differs from request incumbent"
+        )
 
     registry_path = Path(registry_path).resolve()
     registry_path.parent.mkdir(parents=True, exist_ok=True)

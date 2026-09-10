@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Generate a model-independent source-unit manifest from adapter output."""
 
 from __future__ import annotations
@@ -56,7 +63,9 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
     if revision_role == "calibration" and stable_marker_revision is not None:
         raise ValueError("calibration revision must not declare stable_marker_revision")
     if revision_role == "stable_source" and stable_marker_revision is not None:
-        raise ValueError("stable_source revision must not declare stable_marker_revision")
+        raise ValueError(
+            "stable_source revision must not declare stable_marker_revision"
+        )
     units = []
     file_bytes = {}
     unit_ids = set()
@@ -67,13 +76,21 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
         if unit_id in unit_ids:
             raise ValueError(f"duplicate unit_id {unit_id}")
         unit_ids.add(unit_id)
-        relative = safe_relative_path(unit.get("source_file"), f"units[{index}].source_file")
+        relative = safe_relative_path(
+            unit.get("source_file"), f"units[{index}].source_file"
+        )
         source_candidate = source_root.joinpath(relative)
         if source_candidate.is_symlink():
             raise ValueError(f"units[{index}].source_file must not be a symlink")
         source_file = source_candidate.resolve()
-        if source_root not in source_file.parents or not source_file.is_file() or source_file.is_symlink():
-            raise ValueError(f"units[{index}].source_file is not a regular file under source_root")
+        if (
+            source_root not in source_file.parents
+            or not source_file.is_file()
+            or source_file.is_symlink()
+        ):
+            raise ValueError(
+                f"units[{index}].source_file is not a regular file under source_root"
+            )
         content = file_bytes.setdefault(relative.as_posix(), source_file.read_bytes())
         envelope = validate_byte_span(unit, len(content), f"units[{index}]")
         normalized_markers = None
@@ -87,15 +104,23 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
                 unit.get("marker_operations"), f"units[{index}].marker_operations"
             )
             normalized_markers = {}
-            for name, operation_kind in (("begin", "scope_begin"), ("end", "scope_end")):
+            for name, operation_kind in (
+                ("begin", "scope_begin"),
+                ("end", "scope_end"),
+            ):
                 marker = require_object(
-                    marker_operations.get(name), f"units[{index}].marker_operations.{name}"
+                    marker_operations.get(name),
+                    f"units[{index}].marker_operations.{name}",
                 )
                 marker_span = validate_byte_span(
                     marker, len(content), f"units[{index}].marker_operations.{name}"
                 )
-                if marker.get("operation_kind") != operation_kind or not _inside(marker_span, envelope):
-                    raise ValueError(f"units[{index}] has an invalid {name} marker operation")
+                if marker.get("operation_kind") != operation_kind or not _inside(
+                    marker_span, envelope
+                ):
+                    raise ValueError(
+                        f"units[{index}] has an invalid {name} marker operation"
+                    )
                 normalized_marker = {
                     "operation_kind": operation_kind,
                     "parser_node_id": require_text(
@@ -135,9 +160,16 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
                         }
                     )
                 normalized_markers[name] = normalized_marker
-            if normalized_markers["begin"]["end_offset"] > normalized_markers["end"]["start_offset"]:
-                raise ValueError(f"units[{index}] marker operations overlap or are reversed")
-        syntax = require_object(unit.get("normalized_syntax"), f"units[{index}].normalized_syntax")
+            if (
+                normalized_markers["begin"]["end_offset"]
+                > normalized_markers["end"]["start_offset"]
+            ):
+                raise ValueError(
+                    f"units[{index}] marker operations overlap or are reversed"
+                )
+        syntax = require_object(
+            unit.get("normalized_syntax"), f"units[{index}].normalized_syntax"
+        )
         normalized = {
             "unit_id": unit_id,
             "block_template_id": require_text(
@@ -176,7 +208,9 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
                     )
     templates = []
     template_ids = set()
-    for index, raw in enumerate(require_list(spec.get("block_templates"), "block_templates")):
+    for index, raw in enumerate(
+        require_list(spec.get("block_templates"), "block_templates")
+    ):
         item = require_object(raw, f"block_templates[{index}]")
         template_id = require_text(
             item.get("block_template_id"), f"block_templates[{index}].block_template_id"
@@ -191,7 +225,8 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
                     item.get("source_symbol"), f"block_templates[{index}].source_symbol"
                 ),
                 "instance_binding": require_text(
-                    item.get("instance_binding"), f"block_templates[{index}].instance_binding"
+                    item.get("instance_binding"),
+                    f"block_templates[{index}].instance_binding",
                 ),
                 "binding_fingerprint": require_sha256(
                     item.get("binding_fingerprint"),
@@ -199,9 +234,13 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
                 ),
             }
         )
-    unknown_templates = sorted({unit["block_template_id"] for unit in units} - template_ids)
+    unknown_templates = sorted(
+        {unit["block_template_id"] for unit in units} - template_ids
+    )
     if unknown_templates:
-        raise ValueError(f"units reference unknown block templates: {unknown_templates}")
+        raise ValueError(
+            f"units reference unknown block templates: {unknown_templates}"
+        )
     manifest = {
         "schema_version": "1.0",
         "revision_role": revision_role,
@@ -214,7 +253,9 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
         "offset_encoding": "utf-8-byte-offset-v1",
         "source_language": require_text(spec.get("source_language"), "source_language"),
         "model_adapter": normalized_adapter,
-        "file_sha256": {name: bytes_sha256(value) for name, value in sorted(file_bytes.items())},
+        "file_sha256": {
+            name: bytes_sha256(value) for name, value in sorted(file_bytes.items())
+        },
         "algorithm_versions": copy.deepcopy(
             require_object(
                 spec.get(
@@ -229,7 +270,9 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
                 "algorithm_versions",
             )
         ),
-        "block_templates": sorted(templates, key=lambda item: item["block_template_id"]),
+        "block_templates": sorted(
+            templates, key=lambda item: item["block_template_id"]
+        ),
         "units": sorted(units, key=lambda item: item["unit_id"]),
     }
     manifest["manifest_fingerprint"] = canonical_sha256(manifest)
@@ -238,14 +281,20 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
         "protocol": "source_snapshot_manifest_v1",
         "source_revision": source_revision,
         "files": [
-            {"relative_path": name, "sha256": bytes_sha256(content), "size_bytes": len(content)}
+            {
+                "relative_path": name,
+                "sha256": bytes_sha256(content),
+                "size_bytes": len(content),
+            }
             for name, content in sorted(file_bytes.items())
         ],
     }
     snapshot_manifest["manifest_fingerprint"] = canonical_sha256(snapshot_manifest)
     for name, content in file_bytes.items():
         if source_root.joinpath(name).read_bytes() != content:
-            raise ValueError(f"source file changed while manifest was generated: {name}")
+            raise ValueError(
+                f"source file changed while manifest was generated: {name}"
+            )
     if snapshot_root is not None:
         snapshot_root = Path(snapshot_root)
         if snapshot_root.exists():
@@ -255,7 +304,9 @@ def build_manifest(spec, source_root, *, snapshot_root=None):
             destination = snapshot_root / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(file_bytes[name])
-        atomic_write_json(snapshot_root / "source-snapshot-manifest.json", snapshot_manifest)
+        atomic_write_json(
+            snapshot_root / "source-snapshot-manifest.json", snapshot_manifest
+        )
     return manifest, snapshot_manifest
 
 

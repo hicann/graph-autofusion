@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Generate a reviewed five-phase model adapter from a compact model run spec."""
 
 import argparse
@@ -49,9 +56,14 @@ def _templates(value, label, *, nonempty=True):
 
 def _phase(value, name):
     required = {
-        "command_argv_template", "cwd_template", "timeout_seconds",
-        "validator_timeout_seconds", "environment_overrides",
-        "program_file_templates", "output_templates", "validator_inputs",
+        "command_argv_template",
+        "cwd_template",
+        "timeout_seconds",
+        "validator_timeout_seconds",
+        "environment_overrides",
+        "program_file_templates",
+        "output_templates",
+        "validator_inputs",
     }
     if not isinstance(value, dict) or set(value) != required:
         raise ValueError(f"phases.{name} must contain exactly {sorted(required)}")
@@ -65,9 +77,15 @@ def _phase(value, name):
         raise ValueError(f"phases.{name}.validator_inputs must be an object")
     return {
         **value,
-        "command_argv_template": _templates(value["command_argv_template"], f"phases.{name}.command_argv_template"),
-        "program_file_templates": _templates(value["program_file_templates"], f"phases.{name}.program_file_templates"),
-        "output_templates": _templates(value["output_templates"], f"phases.{name}.output_templates", nonempty=False),
+        "command_argv_template": _templates(
+            value["command_argv_template"], f"phases.{name}.command_argv_template"
+        ),
+        "program_file_templates": _templates(
+            value["program_file_templates"], f"phases.{name}.program_file_templates"
+        ),
+        "output_templates": _templates(
+            value["output_templates"], f"phases.{name}.output_templates", nonempty=False
+        ),
         "cwd_template": _text(value["cwd_template"], f"phases.{name}.cwd_template"),
     }
 
@@ -84,54 +102,109 @@ def _validator_argv(phase, state, inputs, expected_ranks, warmup, evidence_out):
         "{skill_root}/scripts/multistream_evidence.py",
     ]
     common_options = [
-        "--artifact-root", "{artifact_root}",
-        "--state-after", state,
-        "--trial-id", "{trial_id}",
-        "--request-fingerprint", "{request_fingerprint}",
-        "--out", "{artifact_root}/" + evidence_out,
+        "--artifact-root",
+        "{artifact_root}",
+        "--state-after",
+        state,
+        "--trial-id",
+        "{trial_id}",
+        "--request-fingerprint",
+        "{request_fingerprint}",
+        "--out",
+        "{artifact_root}/" + evidence_out,
     ]
     if phase == "correctness":
-        return common + ["correctness"] + common_options + [
-            "--run-root", _input(inputs, "run_root", phase),
-            "--expected-ranks", str(expected_ranks),
-        ]
+        return (
+            common
+            + ["correctness"]
+            + common_options
+            + [
+                "--run-root",
+                _input(inputs, "run_root", phase),
+                "--expected-ranks",
+                str(expected_ranks),
+            ]
+        )
     if phase == "profile":
-        argv = common + ["profile"] + common_options + [
-            "--baseline-manifest", _input(inputs, "baseline_manifest", phase),
-            "--candidate-manifest", _input(inputs, "candidate_manifest", phase),
-        ]
+        argv = (
+            common
+            + ["profile"]
+            + common_options
+            + [
+                "--baseline-manifest",
+                _input(inputs, "baseline_manifest", phase),
+                "--candidate-manifest",
+                _input(inputs, "candidate_manifest", phase),
+            ]
+        )
         trace_analysis = inputs.get("trace_analysis")
         if trace_analysis is not None:
-            argv.extend(["--trace-analysis", _text(trace_analysis, "phases.profile.validator_inputs.trace_analysis")])
+            argv.extend(
+                [
+                    "--trace-analysis",
+                    _text(
+                        trace_analysis, "phases.profile.validator_inputs.trace_analysis"
+                    ),
+                ]
+            )
         return argv
     if phase == "analysis":
-        return common + ["analysis"] + common_options + [
-            "--analysis-result", _input(inputs, "analysis_result", phase),
-        ]
+        return (
+            common
+            + ["analysis"]
+            + common_options
+            + [
+                "--analysis-result",
+                _input(inputs, "analysis_result", phase),
+            ]
+        )
     expected_runs = "3" if phase == "clean3" else "5"
-    return common + ["clean"] + common_options + [
-        "--baseline-root", _input(inputs, "baseline_root", phase),
-        "--candidate-root", _input(inputs, "candidate_root", phase),
-        "--candidate-name", _input(inputs, "candidate_name", phase),
-        "--expected-ranks", str(expected_ranks),
-        "--warmup", str(warmup),
-        "--expected-runs", expected_runs,
-    ]
+    return (
+        common
+        + ["clean"]
+        + common_options
+        + [
+            "--baseline-root",
+            _input(inputs, "baseline_root", phase),
+            "--candidate-root",
+            _input(inputs, "candidate_root", phase),
+            "--candidate-name",
+            _input(inputs, "candidate_name", phase),
+            "--expected-ranks",
+            str(expected_ranks),
+            "--warmup",
+            str(warmup),
+            "--expected-runs",
+            expected_runs,
+        ]
+    )
 
 
 def generate(spec):
     if not isinstance(spec, dict) or spec.get("schema_version") != SPEC_SCHEMA:
         raise ValueError(f"model run spec must use {SPEC_SCHEMA}")
     required = {
-        "schema_version", "adapter_id", "workspace_root", "artifact_root",
-        "lease_root", "environment", "device_ids", "lease_timeout_seconds",
-        "expected_ranks", "warmup", "phases",
+        "schema_version",
+        "adapter_id",
+        "workspace_root",
+        "artifact_root",
+        "lease_root",
+        "environment",
+        "device_ids",
+        "lease_timeout_seconds",
+        "expected_ranks",
+        "warmup",
+        "phases",
     }
     if set(spec) != required:
         raise ValueError(f"model run spec must contain exactly {sorted(required)}")
     expected_ranks = spec["expected_ranks"]
     warmup = spec["warmup"]
-    if isinstance(expected_ranks, bool) or not isinstance(expected_ranks, int) or expected_ranks < 1:
+    if (
+        isinstance(expected_ranks, bool)
+        or not isinstance(expected_ranks, int)
+        or expected_ranks < 1
+    ):
         raise ValueError("expected_ranks must be a positive integer")
     if isinstance(warmup, bool) or not isinstance(warmup, int) or warmup < 0:
         raise ValueError("warmup must be a non-negative integer")
@@ -145,7 +218,9 @@ def generate(spec):
         evidence = f"trials/{{trial_id}}/semantic/{state}.json"
         required_artifacts = list(phase["output_templates"])
         if evidence in required_artifacts:
-            raise ValueError(f"phases.{phase_name}.output_templates duplicates semantic evidence")
+            raise ValueError(
+                f"phases.{phase_name}.output_templates duplicates semantic evidence"
+            )
         required_artifacts.append(evidence)
         adapter_phases.append(
             {
@@ -153,7 +228,12 @@ def generate(spec):
                 "phase_id_template": "{trial_id}-" + phase_name,
                 "argv_template": phase["command_argv_template"],
                 "validator_argv_template": _validator_argv(
-                    phase_name, state, phase["validator_inputs"], expected_ranks, warmup, evidence
+                    phase_name,
+                    state,
+                    phase["validator_inputs"],
+                    expected_ranks,
+                    warmup,
+                    evidence,
                 ),
                 "cwd_template": phase["cwd_template"],
                 "timeout_seconds": phase["timeout_seconds"],

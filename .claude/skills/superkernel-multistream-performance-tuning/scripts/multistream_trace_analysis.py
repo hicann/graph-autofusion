@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Validate bound short traces and classify parent-SK internal parallelism."""
 
 import argparse
@@ -23,7 +30,11 @@ PARALLELISM_EFFECTS = {"improved", "preserved", "degraded", "unknown"}
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -80,7 +91,9 @@ def _number(value, label, *, positive=False):
         raise ValueError(f"{label} must be a finite number")
     value = float(value)
     if not math.isfinite(value) or value < 0 or (positive and value <= 0):
-        raise ValueError(f"{label} must be a finite {'positive' if positive else 'non-negative'} number")
+        raise ValueError(
+            f"{label} must be a finite {'positive' if positive else 'non-negative'} number"
+        )
     return value
 
 
@@ -101,7 +114,9 @@ def _validate_source_files(root, records):
     seen = set()
     for index, record in enumerate(records):
         if not isinstance(record, dict) or set(record) != {
-            "path", "size_bytes", "file_fingerprint"
+            "path",
+            "size_bytes",
+            "file_fingerprint",
         }:
             raise ValueError(f"source_files[{index}] is invalid")
         path = _rooted(root, record["path"], f"source_files[{index}]")
@@ -110,10 +125,17 @@ def _validate_source_files(root, records):
             raise ValueError(f"duplicate short trace source file: {relative}")
         seen.add(relative)
         actual = file_fingerprint(path)
-        if path.stat().st_size != record["size_bytes"] or actual != record["file_fingerprint"]:
+        if (
+            path.stat().st_size != record["size_bytes"]
+            or actual != record["file_fingerprint"]
+        ):
             raise ValueError(f"short trace source file changed: {relative}")
         normalized.append(
-            {"path": relative, "size_bytes": path.stat().st_size, "file_fingerprint": actual}
+            {
+                "path": relative,
+                "size_bytes": path.stat().st_size,
+                "file_fingerprint": actual,
+            }
         )
     return sorted(normalized, key=lambda item: item["path"])
 
@@ -160,8 +182,15 @@ def _max_active_streams(events):
 
 def _validate_event(value, label):
     required = {
-        "child_origin_identity", "lane_id", "stream_id", "accelerator_core",
-        "block_num", "mix_block_num", "start_us", "duration_us", "event_kind",
+        "child_origin_identity",
+        "lane_id",
+        "stream_id",
+        "accelerator_core",
+        "block_num",
+        "mix_block_num",
+        "start_us",
+        "duration_us",
+        "event_kind",
     }
     if not isinstance(value, dict) or set(value) != required:
         raise ValueError(f"{label} must contain exactly {sorted(required)}")
@@ -200,7 +229,10 @@ def _occurrence_metrics(value, label):
     raw_events = value["events"]
     if not isinstance(raw_events, list) or not raw_events:
         raise ValueError(f"{label}.events must be non-empty")
-    events = [_validate_event(item, f"{label}.events[{index}]") for index, item in enumerate(raw_events)]
+    events = [
+        _validate_event(item, f"{label}.events[{index}]")
+        for index, item in enumerate(raw_events)
+    ]
     intervals = [(item["start_us"], item["end_us"]) for item in events]
     by_stream = defaultdict(list)
     by_stream_family = defaultdict(list)
@@ -214,7 +246,7 @@ def _occurrence_metrics(value, label):
     same_overlap = []
     mix_overlap = []
     for left_index, left_stream in enumerate(streams):
-        for right_stream in streams[left_index + 1:]:
+        for right_stream in streams[left_index + 1 :]:
             overlap = _pair_overlap(by_stream[left_stream], by_stream[right_stream])
             if overlap:
                 any_overlap.append(overlap)
@@ -232,7 +264,10 @@ def _occurrence_metrics(value, label):
                     families = {left_family, right_family}
                     if families == {"CUBE", "VECTOR"}:
                         cv_overlap.append(value_us)
-                    if left_family == right_family and left_family not in {"WAIT", "OTHER"}:
+                    if left_family == right_family and left_family not in {
+                        "WAIT",
+                        "OTHER",
+                    }:
                         same_overlap.append(value_us)
                     if "MIX" in families and families & {"CUBE", "VECTOR"}:
                         mix_overlap.append(value_us)
@@ -265,13 +300,16 @@ def _occurrence_metrics(value, label):
         "max_active_streams": _max_active_streams(events),
         "stream_pair_overlap_us": sum(any_overlap),
         "cube_vector_overlap_us": sum(cv_overlap),
-        "cube_vector_overlap_ratio": sum(cv_overlap) / interval_us if interval_us else 0.0,
+        "cube_vector_overlap_ratio": sum(cv_overlap) / interval_us
+        if interval_us
+        else 0.0,
         "same_resource_overlap_us": sum(same_overlap),
         "mix_competition_overlap_us": sum(mix_overlap),
         "wait_sync_duration_us": sum(
             item["duration_us"]
             for item in events
-            if item["core_family"] == "WAIT" or item["event_kind"].lower() in {"wait", "sync", "barrier"}
+            if item["core_family"] == "WAIT"
+            or item["event_kind"].lower() in {"wait", "sync", "barrier"}
         ),
     }
 
@@ -298,7 +336,10 @@ def _stats(values):
 def _summarize_occurrences(values, label):
     if not isinstance(values, list) or len(values) < 3:
         raise ValueError(f"{label} requires at least three occurrences")
-    occurrences = [_occurrence_metrics(item, f"{label}[{index}]") for index, item in enumerate(values)]
+    occurrences = [
+        _occurrence_metrics(item, f"{label}[{index}]")
+        for index, item in enumerate(values)
+    ]
     ids = [item["alignment_id"] for item in occurrences]
     if len(ids) != len(set(ids)):
         raise ValueError(f"{label} has duplicate alignment_id")
@@ -306,10 +347,17 @@ def _summarize_occurrences(values, label):
     if any(item != child_sets[0] for item in child_sets[1:]):
         raise ValueError(f"{label} child origin identity set is unstable")
     metric_names = (
-        "interval_us", "duration_sum_us", "union_duration_us", "overlap_work_us",
+        "interval_us",
+        "duration_sum_us",
+        "union_duration_us",
+        "overlap_work_us",
         "max_active_streams",
-        "stream_pair_overlap_us", "cube_vector_overlap_us", "cube_vector_overlap_ratio",
-        "same_resource_overlap_us", "mix_competition_overlap_us", "wait_sync_duration_us",
+        "stream_pair_overlap_us",
+        "cube_vector_overlap_us",
+        "cube_vector_overlap_ratio",
+        "same_resource_overlap_us",
+        "mix_competition_overlap_us",
+        "wait_sync_duration_us",
     )
     return {
         "occurrence_count": len(occurrences),
@@ -358,7 +406,10 @@ def _actionability(baseline, candidate, effect, degraded_ratio, minimum_overlap_
         return "blocked", "parallelism_evidence_incomplete"
     if effect != "degraded":
         return "no_action", None
-    if not baseline["cube_vector_identity_complete"] or not candidate["cube_vector_identity_complete"]:
+    if (
+        not baseline["cube_vector_identity_complete"]
+        or not candidate["cube_vector_identity_complete"]
+    ):
         return "blocked", "degraded_overlap_not_resource_complementary"
     before = baseline["metrics"]["cube_vector_overlap_us"]["p50"]
     after = candidate["metrics"]["cube_vector_overlap_us"]["p50"]
@@ -429,14 +480,22 @@ def analyze(
     capture_path = _rooted(root, capture_path, "short trace capture")
     capture = json.loads(capture_path.read_text())
     required = {
-        "schema_version", "capture_id", "trial_id", "request_fingerprint",
-        "overflow_detected", "source_files", "targets", "capture_fingerprint",
+        "schema_version",
+        "capture_id",
+        "trial_id",
+        "request_fingerprint",
+        "overflow_detected",
+        "source_files",
+        "targets",
+        "capture_fingerprint",
     }
     if not isinstance(capture, dict) or set(capture) != required:
         raise ValueError(f"short trace capture must contain exactly {sorted(required)}")
     if capture["schema_version"] != CAPTURE_SCHEMA:
         raise ValueError(f"short trace capture must use {CAPTURE_SCHEMA}")
-    if capture["capture_fingerprint"] != fingerprint(_unsigned(capture, "capture_fingerprint")):
+    if capture["capture_fingerprint"] != fingerprint(
+        _unsigned(capture, "capture_fingerprint")
+    ):
         raise ValueError("short trace capture fingerprint mismatch")
     if capture["request_fingerprint"] != request_summary["request_fingerprint"]:
         raise ValueError("short trace request fingerprint mismatch")
@@ -457,23 +516,45 @@ def analyze(
     blockers = []
     for index, target in enumerate(raw_targets):
         expected_fields = {
-            "range_id", "graph_occurrence_fingerprint", "parent_identity",
-            "baseline_occurrences", "candidate_occurrences",
+            "range_id",
+            "graph_occurrence_fingerprint",
+            "parent_identity",
+            "baseline_occurrences",
+            "candidate_occurrences",
         }
         if not isinstance(target, dict) or set(target) != expected_fields:
-            raise ValueError(f"targets[{index}] must contain exactly {sorted(expected_fields)}")
+            raise ValueError(
+                f"targets[{index}] must contain exactly {sorted(expected_fields)}"
+            )
         range_id = _text(target["range_id"], f"targets[{index}].range_id")
         request_target = targets_by_id[range_id]
-        if target["graph_occurrence_fingerprint"] != request_target["graph_occurrence_fingerprint"]:
+        if (
+            target["graph_occurrence_fingerprint"]
+            != request_target["graph_occurrence_fingerprint"]
+        ):
             raise ValueError(f"target {range_id} graph occurrence fingerprint mismatch")
         parent = target["parent_identity"]
-        if not isinstance(parent, dict) or set(parent) != {"device_id", "model_id", "parent_sk_id"}:
+        if not isinstance(parent, dict) or set(parent) != {
+            "device_id",
+            "model_id",
+            "parent_sk_id",
+        }:
             raise ValueError(f"target {range_id} parent_identity is incomplete")
         for field in ("device_id", "model_id", "parent_sk_id"):
-            if isinstance(parent[field], bool) or not isinstance(parent[field], int) or parent[field] < 0:
-                raise ValueError(f"target {range_id} parent_identity.{field} is invalid")
-        baseline = _summarize_occurrences(target["baseline_occurrences"], f"target {range_id} baseline")
-        candidate = _summarize_occurrences(target["candidate_occurrences"], f"target {range_id} candidate")
+            if (
+                isinstance(parent[field], bool)
+                or not isinstance(parent[field], int)
+                or parent[field] < 0
+            ):
+                raise ValueError(
+                    f"target {range_id} parent_identity.{field} is invalid"
+                )
+        baseline = _summarize_occurrences(
+            target["baseline_occurrences"], f"target {range_id} baseline"
+        )
+        candidate = _summarize_occurrences(
+            target["candidate_occurrences"], f"target {range_id} candidate"
+        )
         if baseline["alignment_ids"] != candidate["alignment_ids"]:
             raise ValueError(f"target {range_id} occurrence alignment differs")
         if baseline["child_origin_identities"] != candidate["child_origin_identities"]:
@@ -556,9 +637,15 @@ def analyze(
     return analysis
 
 
-def validate_analysis(path, request_path, artifact_root=None, *, expected_trial_id=None):
+def validate_analysis(
+    path, request_path, artifact_root=None, *, expected_trial_id=None
+):
     path = Path(path).resolve()
-    root = Path(artifact_root).resolve() if artifact_root else Path(request_path).resolve().parent
+    root = (
+        Path(artifact_root).resolve()
+        if artifact_root
+        else Path(request_path).resolve().parent
+    )
     value = json.loads(path.read_text())
     validate_bound_analysis(
         path,
@@ -568,7 +655,9 @@ def validate_analysis(path, request_path, artifact_root=None, *, expected_trial_
     )
     if not isinstance(value, dict) or value.get("schema_version") != ANALYSIS_SCHEMA:
         raise ValueError(f"trace analysis must use {ANALYSIS_SCHEMA}")
-    if value.get("analysis_fingerprint") != fingerprint(_unsigned(value, "analysis_fingerprint")):
+    if value.get("analysis_fingerprint") != fingerprint(
+        _unsigned(value, "analysis_fingerprint")
+    ):
         raise ValueError("trace analysis fingerprint mismatch")
     if expected_trial_id is not None and value.get("trial_id") != expected_trial_id:
         raise ValueError("trace analysis trial_id mismatch")
@@ -605,7 +694,9 @@ def validate_bound_analysis(
     value = json.loads(path.read_text())
     if not isinstance(value, dict) or value.get("schema_version") != ANALYSIS_SCHEMA:
         raise ValueError(f"trace analysis must use {ANALYSIS_SCHEMA}")
-    if value.get("analysis_fingerprint") != fingerprint(_unsigned(value, "analysis_fingerprint")):
+    if value.get("analysis_fingerprint") != fingerprint(
+        _unsigned(value, "analysis_fingerprint")
+    ):
         raise ValueError("trace analysis fingerprint mismatch")
     if value.get("request_fingerprint") != expected_request_fingerprint:
         raise ValueError("trace analysis request fingerprint mismatch")
@@ -658,7 +749,9 @@ def main(argv=None):
             if args.minimum_overlap_us <= 0:
                 raise ValueError("minimum_overlap_us must be greater than 0")
             result = analyze(
-                args.request, args.capture, args.artifact_root,
+                args.request,
+                args.capture,
+                args.artifact_root,
                 degraded_ratio=args.degraded_ratio,
                 improved_ratio=args.improved_ratio,
                 minimum_overlap_us=args.minimum_overlap_us,
@@ -668,7 +761,9 @@ def main(argv=None):
             _atomic_json(args.out, result)
         else:
             result = validate_analysis(
-                args.analysis, args.request, args.artifact_root,
+                args.analysis,
+                args.request,
+                args.artifact_root,
                 expected_trial_id=args.trial_id,
             )
     except (OSError, ValueError, json.JSONDecodeError) as error:

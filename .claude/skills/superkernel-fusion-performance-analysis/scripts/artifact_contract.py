@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Collection-side freshness contract for structural association artifacts.
 
 The manifest records protocol and filesystem freshness evidence. It does not
@@ -158,9 +165,7 @@ def _validate_standard_json(value, path="$"):
         stack.append(("leave", identity, None, None))
         if isinstance(item, list):
             for index in range(len(item) - 1, -1, -1):
-                stack.append(
-                    ("visit", item[index], f"{item_path}[{index}]", depth)
-                )
+                stack.append(("visit", item[index], f"{item_path}[{index}]", depth))
             continue
         pairs = list(item.items())
         for key, child in reversed(pairs):
@@ -218,9 +223,10 @@ def round_belongs_to_candidate(candidate_name, round_id):
     if not round_id or round_id != round_id.strip():
         return False
     prefix = f"{candidate_name}-"
-    return round_id.startswith(prefix) and ROUND_SUFFIX.fullmatch(
-        round_id[len(prefix) :]
-    ) is not None
+    return (
+        round_id.startswith(prefix)
+        and ROUND_SUFFIX.fullmatch(round_id[len(prefix) :]) is not None
+    )
 
 
 def _reject_json_constant(value):
@@ -306,9 +312,7 @@ def _open_input_regular_file(path, label):
     descriptor = None
     try:
         for component in components[:-1]:
-            next_fd, _ = _open_directory_component(
-                directory_fd, component, label
-            )
+            next_fd, _ = _open_directory_component(directory_fd, component, label)
             os.close(directory_fd)
             directory_fd = next_fd
         try:
@@ -393,9 +397,7 @@ def _verify_input_leaf_binding(parent_fd, leaf, descriptor_stat, label):
         leaf_stat = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
     except OSError as error:
         raise ValueError(f"{label} path binding changed while reading") from error
-    if _input_binding_signature(leaf_stat) != _input_binding_signature(
-        descriptor_stat
-    ):
+    if _input_binding_signature(leaf_stat) != _input_binding_signature(descriptor_stat):
         raise ValueError(f"{label} path binding changed while reading")
 
 
@@ -560,11 +562,7 @@ def _create_collection_marker(root_fd, record):
         try:
             descriptor = os.open(
                 candidate,
-                os.O_WRONLY
-                | os.O_CREAT
-                | os.O_EXCL
-                | os.O_NOFOLLOW
-                | os.O_CLOEXEC,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                 0o600,
                 dir_fd=root_fd,
             )
@@ -640,11 +638,7 @@ def _load_recoverable_session(session_path, role, root):
 def _load_published_session(session_path, expected_record, role, root):
     record, evidence = _load_json(session_path, "session record")
     existing_role, existing_root = _validate_session_record(record)
-    if (
-        record != expected_record
-        or existing_role != role
-        or existing_root != root
-    ):
+    if record != expected_record or existing_role != role or existing_root != root:
         raise ValueError("published session record does not match collection")
     return record, evidence
 
@@ -686,9 +680,7 @@ def begin_collection_session(*, role, root, session_out):
             )
         else:
             started_ns = _integer(time.time_ns(), "started_ns")
-            expected_record = _session_record(
-                role, root_resolved, started_ns
-            )
+            expected_record = _session_record(role, root_resolved, started_ns)
             _atomic_write_json(session_path, expected_record)
             record, session_evidence = _load_published_session(
                 session_path, expected_record, role, root_resolved
@@ -731,9 +723,7 @@ def _parse_file_specs(file_specs):
         if file_role not in ALL_FILE_ROLES:
             raise ValueError(f"unknown artifact file role: {file_role}")
         if any(not 0x20 <= ord(character) <= 0x7E for character in relative_text):
-            raise ValueError(
-                "artifact path must use printable ASCII POSIX characters"
-            )
+            raise ValueError("artifact path must use printable ASCII POSIX characters")
         if "\\" in relative_text:
             raise ValueError("artifact path must use POSIX '/' separators")
         if relative_text.startswith("/"):
@@ -770,7 +760,9 @@ def _open_capture_root(root):
             os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
         )
     except OSError as error:
-        raise ValueError("capture root must be an openable regular directory") from error
+        raise ValueError(
+            "capture root must be an openable regular directory"
+        ) from error
     if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
         os.close(descriptor)
         raise ValueError("capture root must be a regular directory")
@@ -788,14 +780,10 @@ def _open_directory_component(parent_fd, name, label):
     except OSError as error:
         if error.errno in {errno.ELOOP, errno.ENOTDIR}:
             try:
-                component_stat = os.stat(
-                    name, dir_fd=parent_fd, follow_symlinks=False
-                )
+                component_stat = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
             except OSError:
                 component_stat = None
-            if component_stat is not None and stat.S_ISLNK(
-                component_stat.st_mode
-            ):
+            if component_stat is not None and stat.S_ISLNK(component_stat.st_mode):
                 raise ValueError(f"{label} path contains a symlink") from error
         raise ValueError(
             f"{label} path contains a missing or non-directory component"
@@ -861,9 +849,7 @@ def _verify_relative_binding(
 ):
     current_fd = os.dup(root_fd)
     try:
-        for component, expected_identity in zip(
-            parts[:-1], expected_directories
-        ):
+        for component, expected_identity in zip(parts[:-1], expected_directories):
             next_fd, current_stat = _open_directory_component(
                 current_fd, component, label
             )
@@ -877,11 +863,9 @@ def _verify_relative_binding(
             )
         except OSError as error:
             raise ValueError(f"{label} path changed while hashing") from error
-        if (
-            not stat.S_ISREG(current_file_stat.st_mode)
-            or _directory_identity(current_file_stat)
-            != _directory_identity(expected_file_stat)
-        ):
+        if not stat.S_ISREG(current_file_stat.st_mode) or _directory_identity(
+            current_file_stat
+        ) != _directory_identity(expected_file_stat):
             raise ValueError(f"{label} path changed while hashing")
     finally:
         os.close(current_fd)
@@ -912,15 +896,13 @@ def _read_descriptor_bytes(descriptor, label):
 
 
 def _read_stable_relative_file(root_fd, relative_text, label, reader):
-    descriptor, parent_fd, parts, directories, before = (
-        _open_relative_regular_file(root_fd, relative_text, label)
+    descriptor, parent_fd, parts, directories, before = _open_relative_regular_file(
+        root_fd, relative_text, label
     )
     try:
         value = reader(descriptor, relative_text)
         after = os.fstat(descriptor)
-        _verify_relative_binding(
-            root_fd, parts, directories, before, label
-        )
+        _verify_relative_binding(root_fd, parts, directories, before, label)
         if _descriptor_signature(before) != _descriptor_signature(after):
             raise ValueError(f"{label} changed while hashing: {relative_text}")
         return value, after
@@ -963,13 +945,13 @@ def _scan_capture_directory(directory_fd, relative_prefix, started_ns):
     with os.scandir(directory_fd) as entries:
         snapshot = list(entries)
     for entry in snapshot:
-        relative = (
-            f"{relative_prefix}/{entry.name}" if relative_prefix else entry.name
-        )
+        relative = f"{relative_prefix}/{entry.name}" if relative_prefix else entry.name
         try:
             entry_stat = entry.stat(follow_symlinks=False)
         except OSError as error:
-            raise ValueError(f"capture entry changed during scan: {relative}") from error
+            raise ValueError(
+                f"capture entry changed during scan: {relative}"
+            ) from error
         if relative == COLLECTION_MARKER:
             if not stat.S_ISREG(entry_stat.st_mode):
                 raise ValueError("collection marker must be a regular file")
@@ -998,11 +980,9 @@ def _scan_capture_directory(directory_fd, relative_prefix, started_ns):
                 raise ValueError(
                     f"capture entry changed during scan: {relative}"
                 ) from error
-            if (
-                not stat.S_ISDIR(rebound_stat.st_mode)
-                or _directory_identity(rebound_stat)
-                != _directory_identity(opened_stat)
-            ):
+            if not stat.S_ISDIR(rebound_stat.st_mode) or _directory_identity(
+                rebound_stat
+            ) != _directory_identity(opened_stat):
                 raise ValueError(f"capture entry changed during scan: {relative}")
             continue
         if not stat.S_ISREG(entry_stat.st_mode):
@@ -1014,14 +994,14 @@ def _scan_capture_directory(directory_fd, relative_prefix, started_ns):
                 dir_fd=directory_fd,
             )
         except OSError as error:
-            raise ValueError(f"capture entry changed during scan: {relative}") from error
+            raise ValueError(
+                f"capture entry changed during scan: {relative}"
+            ) from error
         try:
             opened_stat = os.fstat(file_fd)
-            if (
-                not stat.S_ISREG(opened_stat.st_mode)
-                or _directory_identity(opened_stat)
-                != _directory_identity(entry_stat)
-            ):
+            if not stat.S_ISREG(opened_stat.st_mode) or _directory_identity(
+                opened_stat
+            ) != _directory_identity(entry_stat):
                 raise ValueError(f"capture entry changed during scan: {relative}")
             if opened_stat.st_ctime_ns < started_ns:
                 raise ValueError(
@@ -1030,14 +1010,14 @@ def _scan_capture_directory(directory_fd, relative_prefix, started_ns):
             rebound_stat = os.stat(
                 entry.name, dir_fd=directory_fd, follow_symlinks=False
             )
-            if (
-                not stat.S_ISREG(rebound_stat.st_mode)
-                or _directory_identity(rebound_stat)
-                != _directory_identity(opened_stat)
-            ):
+            if not stat.S_ISREG(rebound_stat.st_mode) or _directory_identity(
+                rebound_stat
+            ) != _directory_identity(opened_stat):
                 raise ValueError(f"capture entry changed during scan: {relative}")
         except OSError as error:
-            raise ValueError(f"capture entry changed during scan: {relative}") from error
+            raise ValueError(
+                f"capture entry changed during scan: {relative}"
+            ) from error
         finally:
             os.close(file_fd)
 
@@ -1052,9 +1032,7 @@ def _validate_producer(native_pid, started_ns, ended_ns, command_fingerprint):
     ended_ns = _integer(ended_ns, "ended_ns")
     if ended_ns <= started_ns:
         raise ValueError("ended_ns must be greater than started_ns")
-    command_fingerprint = _valid_sha256(
-        command_fingerprint, "command_fingerprint"
-    )
+    command_fingerprint = _valid_sha256(command_fingerprint, "command_fingerprint")
     return {
         "native_pid": native_pid,
         "started_ns": started_ns,
@@ -1080,9 +1058,7 @@ def finalize_collection_manifest(
     """Finalize one capture manifest from already-collected files."""
     session_record, session_evidence, root = _validated_session(session)
     source_revision = _trimmed_string(source_revision, "source_revision")
-    producer = _validate_producer(
-        native_pid, started_ns, ended_ns, command_fingerprint
-    )
+    producer = _validate_producer(native_pid, started_ns, ended_ns, command_fingerprint)
     capture_started_ns = session_record["started_ns"]
     if producer["started_ns"] < capture_started_ns:
         raise ValueError("producer run started before capture session")
@@ -1110,14 +1086,12 @@ def finalize_collection_manifest(
         )
 
     out_path = _publication_path(out)
-    input_paths = {
-        Path(evidence["path"]) for _, evidence in input_evidences
-    }
-    input_identities = {
-        _input_identity(evidence) for _, evidence in input_evidences
-    }
+    input_paths = {Path(evidence["path"]) for _, evidence in input_evidences}
+    input_identities = {_input_identity(evidence) for _, evidence in input_evidences}
     if len(input_paths) != 4 or len(input_identities) != 4:
-        raise ValueError("session, workload, config, and control inputs must be distinct")
+        raise ValueError(
+            "session, workload, config, and control inputs must be distinct"
+        )
 
     files = {}
     artifact_identities = set()
@@ -1152,7 +1126,9 @@ def finalize_collection_manifest(
     for records in files.values():
         for record in records:
             if record["ctime_ns"] > finalized_ns:
-                raise ValueError(f"artifact ctime is after finalization: {record['path']}")
+                raise ValueError(
+                    f"artifact ctime is after finalization: {record['path']}"
+                )
     for records in files.values():
         records.sort(key=lambda item: item["path"])
     files = {key: files[key] for key in sorted(files)}
@@ -1270,10 +1246,7 @@ def _validate_manifest(manifest, expected_role, root):
     if finalized_ns <= capture_started_ns:
         raise ValueError("capture.finalized_ns must be greater than capture.started_ns")
     expected_session = _session_record(expected_role, root, capture_started_ns)
-    if (
-        capture["session_fingerprint"]
-        != expected_session["session_fingerprint"]
-    ):
+    if capture["session_fingerprint"] != expected_session["session_fingerprint"]:
         raise ValueError(f"{expected_role} session fingerprint mismatch")
 
     producer = manifest["producer"]
@@ -1412,17 +1385,13 @@ def _validate_manifest_set_with_evidence(manifests, expected_roles=None):
         "roles": {
             role: {
                 "manifest_fingerprint": loaded[role]["manifest_fingerprint"],
-                "session_fingerprint": loaded[role]["capture"][
-                    "session_fingerprint"
-                ],
+                "session_fingerprint": loaded[role]["capture"]["session_fingerprint"],
             }
             for role in roles
         },
     }
     summary["set_fingerprint"] = canonical_sha256(summary)
-    labeled_evidences = [
-        (f"{role} manifest", evidences[role]) for role in roles
-    ]
+    labeled_evidences = [(f"{role} manifest", evidences[role]) for role in roles]
     _revalidate_input_evidences(labeled_evidences)
     return summary, labeled_evidences
 
@@ -1539,9 +1508,7 @@ def main(argv=None):
         if args.json_out is None:
             print(canonical_json(result))
         else:
-            output = _validate_summary_output_path(
-                args.json_out, manifest_evidences
-            )
+            output = _validate_summary_output_path(args.json_out, manifest_evidences)
             _revalidate_input_evidences(manifest_evidences)
             _atomic_write_json(output, result)
         return 0

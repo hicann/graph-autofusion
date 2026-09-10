@@ -1,3 +1,10 @@
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 import copy
 import io
 import json
@@ -16,7 +23,7 @@ SCRIPTS = PACKAGE_ROOT / "scripts"
 SCRIPT = SCRIPTS / "artifact_contract.py"
 sys.path.insert(0, str(SCRIPTS))
 
-import artifact_contract
+import artifact_contract  # noqa: E402 - load sibling scripts after sys.path setup
 
 
 CAPTURE_STARTED_NS = 1
@@ -81,7 +88,9 @@ class WorkloadContractTest(unittest.TestCase):
         normalized = artifact_contract.normalize_workload(value)
         runtime["options"].append("changed")
 
-        self.assertEqual(normalized["runtime"], {"options": ["static", {"cache": True}]})
+        self.assertEqual(
+            normalized["runtime"], {"options": ["static", {"cache": True}]}
+        )
         self.assertEqual(
             artifact_contract.canonical_sha256(normalized),
             artifact_contract.canonical_sha256(
@@ -328,7 +337,9 @@ class CollectionContractTest(unittest.TestCase):
         payload = dict(manifest)
         payload.pop("manifest_fingerprint", None)
         manifest["manifest_fingerprint"] = artifact_contract.canonical_sha256(payload)
-        path.write_text(artifact_contract.canonical_json(manifest) + "\n", encoding="utf-8")
+        path.write_text(
+            artifact_contract.canonical_json(manifest) + "\n", encoding="utf-8"
+        )
 
     def _run_cli(self, *args):
         return subprocess.run(
@@ -657,9 +668,7 @@ class CollectionContractTest(unittest.TestCase):
 
     def test_json_loader_rejects_leaf_replacement_after_descriptor_read(self):
         target = self._write_json("replaced-input.json", {"stable": True})
-        replacement = self._write_json(
-            "replacement-input.json", {"replacement": True}
-        )
+        replacement = self._write_json("replacement-input.json", {"replacement": True})
         original_reader = artifact_contract._read_input_descriptor_bytes
         triggered = False
 
@@ -729,9 +738,7 @@ class CollectionContractTest(unittest.TestCase):
 
         for index, (name, (mutate, message)) in enumerate(mutations.items()):
             with self.subTest(case=name):
-                prepared = self._prepare_capture(
-                    "baseline_profile", suffix=f"-{index}"
-                )
+                prepared = self._prepare_capture("baseline_profile", suffix=f"-{index}")
                 with self.assertRaisesRegex(ValueError, message):
                     self._finalize_capture(prepared, specs=mutate(prepared))
 
@@ -782,9 +789,7 @@ class CollectionContractTest(unittest.TestCase):
         )
         for index, (field, value, message) in enumerate(cases):
             with self.subTest(field=field):
-                prepared = self._prepare_capture(
-                    "baseline_profile", suffix=f"-{index}"
-                )
+                prepared = self._prepare_capture("baseline_profile", suffix=f"-{index}")
                 if field == "producer_ended_ns":
                     prepared["producer_started_ns"] = 10
                 prepared[field] = value
@@ -864,7 +869,9 @@ class CollectionContractTest(unittest.TestCase):
         self.assertEqual(manifest["schema_version"], "1.0")
         self.assertEqual(manifest["capture_role"], "candidate_profile")
         self.assertEqual(manifest["capture_root"], ".")
-        self.assertEqual(set(manifest["files"]), artifact_contract.ROLE_FILES["candidate_profile"])
+        self.assertEqual(
+            set(manifest["files"]), artifact_contract.ROLE_FILES["candidate_profile"]
+        )
         self.assertEqual(
             manifest["workload"],
             artifact_contract.normalize_workload(self.default_workload),
@@ -908,7 +915,9 @@ class CollectionContractTest(unittest.TestCase):
                     )
                 with self.assertRaisesRegex(
                     ValueError,
-                    "content fingerprint changed" if mutation == "content" else "stat fingerprint changed",
+                    "content fingerprint changed"
+                    if mutation == "content"
+                    else "stat fingerprint changed",
                 ):
                     artifact_contract.validate_manifest_set(manifests)
 
@@ -982,7 +991,9 @@ class CollectionContractTest(unittest.TestCase):
             "_read_descriptor_sha256",
             side_effect=swap_to_symlink,
         ):
-            with self.assertRaisesRegex(ValueError, "artifact path changed while hashing"):
+            with self.assertRaisesRegex(
+                ValueError, "artifact path changed while hashing"
+            ):
                 artifact_contract.validate_manifest_set(manifests)
         self.assertTrue(triggered)
 
@@ -991,8 +1002,7 @@ class CollectionContractTest(unittest.TestCase):
             with self.subTest(mutation=mutation):
                 manifests = self._create_manifest_set(
                     role_overrides={
-                        role: {"suffix": f"-manifest-binding-{index}"}
-                        for role in ROLES
+                        role: {"suffix": f"-manifest-binding-{index}"} for role in ROLES
                     }
                 )
                 target = manifests["baseline_profile"]
@@ -1024,9 +1034,7 @@ class CollectionContractTest(unittest.TestCase):
 
     def test_validate_set_rechecks_manifest_bindings_before_json_publication(self):
         manifests = self._create_manifest_set(
-            role_overrides={
-                role: {"suffix": "-json-output-binding"} for role in ROLES
-            }
+            role_overrides={role: {"suffix": "-json-output-binding"} for role in ROLES}
         )
         target = manifests["baseline_profile"]
         json_out = self.base / "binding-summary.json"
@@ -1042,12 +1050,14 @@ class CollectionContractTest(unittest.TestCase):
 
         stderr = io.StringIO()
         stdout = io.StringIO()
-        with mock.patch.object(
-            artifact_contract,
-            "_validate_summary_output_path",
-            side_effect=mutate_after_output_check,
-        ), mock.patch.object(sys, "stderr", stderr), mock.patch.object(
-            sys, "stdout", stdout
+        with (
+            mock.patch.object(
+                artifact_contract,
+                "_validate_summary_output_path",
+                side_effect=mutate_after_output_check,
+            ),
+            mock.patch.object(sys, "stderr", stderr),
+            mock.patch.object(sys, "stdout", stdout),
         ):
             result = artifact_contract.main(
                 [
@@ -1068,8 +1078,7 @@ class CollectionContractTest(unittest.TestCase):
             with self.subTest(field=field):
                 manifests = self._create_manifest_set(
                     role_overrides={
-                        role: {"suffix": f"-tamper-{field}-{index}"}
-                        for role in ROLES
+                        role: {"suffix": f"-tamper-{field}-{index}"} for role in ROLES
                     }
                 )
                 manifest = self._load_manifest(manifests["candidate_verify"])
@@ -1088,7 +1097,9 @@ class CollectionContractTest(unittest.TestCase):
         copied = manifests["candidate_compat"].parent / "verify-manifest.json"
         copied.write_bytes(manifests["candidate_verify"].read_bytes())
         overlapping = dict(manifests, candidate_verify=copied)
-        with self.assertRaisesRegex(ValueError, "capture roots must be pairwise distinct"):
+        with self.assertRaisesRegex(
+            ValueError, "capture roots must be pairwise distinct"
+        ):
             artifact_contract.validate_manifest_set(overlapping)
 
         manifests = self._create_manifest_set(
@@ -1128,8 +1139,7 @@ class CollectionContractTest(unittest.TestCase):
     def test_validate_set_accepts_profile_comparison_role_subset(self):
         manifests = self._create_manifest_set()
         profile_manifests = {
-            role: manifests[role]
-            for role in ("baseline_profile", "candidate_profile")
+            role: manifests[role] for role in ("baseline_profile", "candidate_profile")
         }
 
         summary = artifact_contract.validate_manifest_set(
@@ -1187,7 +1197,9 @@ class CollectionContractTest(unittest.TestCase):
     def test_validate_set_output_is_deterministic_for_function_and_cli(self):
         manifests = self._create_manifest_set()
         first = artifact_contract.validate_manifest_set(manifests)
-        second = artifact_contract.validate_manifest_set(dict(reversed(manifests.items())))
+        second = artifact_contract.validate_manifest_set(
+            dict(reversed(manifests.items()))
+        )
         self.assertEqual(first, second)
         self.assertEqual(
             artifact_contract.canonical_json(first),
@@ -1213,8 +1225,7 @@ class CollectionContractTest(unittest.TestCase):
             with self.subTest(case=case):
                 manifests = self._create_manifest_set(
                     role_overrides={
-                        role: {"suffix": f"-output-{case}-{index}"}
-                        for role in ROLES
+                        role: {"suffix": f"-output-{case}-{index}"} for role in ROLES
                     }
                 )
                 if case == "existing":
@@ -1229,14 +1240,22 @@ class CollectionContractTest(unittest.TestCase):
                 else:
                     target = manifests["baseline_profile"].parent
 
-                before = target.read_bytes() if target.is_file() else sorted(target.iterdir())
+                before = (
+                    target.read_bytes()
+                    if target.is_file()
+                    else sorted(target.iterdir())
+                )
                 result = self._run_cli(
                     "validate-set",
                     *self._validate_cli_args(manifests),
                     "--json-out",
                     target,
                 )
-                after = target.read_bytes() if target.is_file() else sorted(target.iterdir())
+                after = (
+                    target.read_bytes()
+                    if target.is_file()
+                    else sorted(target.iterdir())
+                )
                 self.assertEqual(result.returncode, 2)
                 self.assertNotIn("Traceback", result.stderr)
                 self.assertEqual(after, before)
@@ -1283,7 +1302,9 @@ class CollectionContractTest(unittest.TestCase):
     def test_machine_readable_schema_documents_manifest_and_roles(self):
         schema_path = PACKAGE_ROOT / "references" / "collection-manifest-schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
+        self.assertEqual(
+            schema["$schema"], "https://json-schema.org/draft/2020-12/schema"
+        )
         self.assertEqual(schema["properties"]["schema_version"]["const"], "1.0")
         self.assertIn("config", schema["required"])
         self.assertIn("control", schema["required"])
@@ -1305,7 +1326,9 @@ class CollectionContractTest(unittest.TestCase):
     def test_schema_artifact_path_pattern_matches_runtime_path_contract(self):
         schema_path = PACKAGE_ROOT / "references" / "collection-manifest-schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        pattern = re.compile(schema["$defs"]["fileRecord"]["properties"]["path"]["pattern"])
+        pattern = re.compile(
+            schema["$defs"]["fileRecord"]["properties"]["path"]["pattern"]
+        )
         cases = {
             "kernel_details.csv": True,
             "profiler/kernel_details.csv": True,
@@ -1350,9 +1373,7 @@ class CollectionContractTest(unittest.TestCase):
             with self.subTest(value=value):
                 schema_accepts = pattern.fullmatch(value) is not None
                 try:
-                    artifact_contract._parse_file_specs(
-                        [f"kernel_details={value}"]
-                    )
+                    artifact_contract._parse_file_specs([f"kernel_details={value}"])
                 except ValueError:
                     runtime_accepts = False
                 else:

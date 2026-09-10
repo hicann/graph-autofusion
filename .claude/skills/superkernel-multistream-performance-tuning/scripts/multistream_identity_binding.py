@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Build an auditable source/SK-off/SK-on identity registry for capture plugins."""
 
 import argparse
@@ -23,7 +30,11 @@ BINDING_METHODS = {
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -113,7 +124,9 @@ def _validate_evidence_files(root, values):
     for index, record in enumerate(values):
         label = f"evidence_files[{index}]"
         if not isinstance(record, dict) or set(record) != {
-            "path", "size_bytes", "file_fingerprint"
+            "path",
+            "size_bytes",
+            "file_fingerprint",
         }:
             raise ValueError(f"{label} fields are invalid")
         path = _rooted(root, record["path"], f"{label}.path")
@@ -121,7 +134,10 @@ def _validate_evidence_files(root, values):
         if relative in result:
             raise ValueError(f"duplicate evidence file: {relative}")
         actual = file_fingerprint(path)
-        if record["size_bytes"] != path.stat().st_size or record["file_fingerprint"] != actual:
+        if (
+            record["size_bytes"] != path.stat().st_size
+            or record["file_fingerprint"] != actual
+        ):
             raise ValueError(f"evidence file changed: {relative}")
         result[relative] = {
             "path": relative,
@@ -140,8 +156,14 @@ def _identity(value, label):
 
 def _observation(value, label, evidence_files):
     required = {
-        "domain", "identity", "operator_id", "statement_id", "alignment_id",
-        "binding_method", "evidence_path", "evidence_locator",
+        "domain",
+        "identity",
+        "operator_id",
+        "statement_id",
+        "alignment_id",
+        "binding_method",
+        "evidence_path",
+        "evidence_locator",
     }
     if not isinstance(value, dict) or set(value) != required:
         raise ValueError(f"{label} must contain exactly {sorted(required)}")
@@ -172,7 +194,9 @@ def _observation(value, label, evidence_files):
         "alignment_id": alignment,
         "binding_method": method,
         "evidence_path": evidence_path,
-        "evidence_locator": _text(value["evidence_locator"], f"{label}.evidence_locator"),
+        "evidence_locator": _text(
+            value["evidence_locator"], f"{label}.evidence_locator"
+        ),
     }
 
 
@@ -189,14 +213,22 @@ def build(observations_path, artifact_root=None):
         raise ValueError("identity observations escape artifact root") from error
     value = json.loads(observations_path.read_text())
     required = {
-        "schema_version", "observation_set_id", "request_fingerprint",
-        "evidence_files", "observations", "observations_fingerprint",
+        "schema_version",
+        "observation_set_id",
+        "request_fingerprint",
+        "evidence_files",
+        "observations",
+        "observations_fingerprint",
     }
     if not isinstance(value, dict) or set(value) != required:
-        raise ValueError(f"identity observations must contain exactly {sorted(required)}")
+        raise ValueError(
+            f"identity observations must contain exactly {sorted(required)}"
+        )
     if value["schema_version"] != OBSERVATIONS_SCHEMA:
         raise ValueError(f"identity observations must use {OBSERVATIONS_SCHEMA}")
-    unsigned = {key: item for key, item in value.items() if key != "observations_fingerprint"}
+    unsigned = {
+        key: item for key, item in value.items() if key != "observations_fingerprint"
+    }
     if value["observations_fingerprint"] != fingerprint(unsigned):
         raise ValueError("identity observations fingerprint mismatch")
     evidence_files = _validate_evidence_files(root, value["evidence_files"])
@@ -216,7 +248,9 @@ def build(observations_path, artifact_root=None):
         raw_assignments[raw_key].add((item["operator_id"], item["statement_id"]))
         statement_assignments[item["operator_id"]].add(item["statement_id"])
         pairs[(item["operator_id"], item["statement_id"])][item["domain"]].append(item)
-    for (domain, identity_fp, alignment), assignments in sorted(raw_assignments.items()):
+    for (domain, identity_fp, alignment), assignments in sorted(
+        raw_assignments.items()
+    ):
         statement_ids = {item[1] for item in assignments}
         if len(statement_ids) > 1 or (domain != "source" and len(assignments) > 1):
             blockers.append(
@@ -276,8 +310,10 @@ def build(observations_path, artifact_root=None):
             entry_domains[domain] = sorted(
                 domains.get(domain, []),
                 key=lambda item: (
-                    item["alignment_id"] or "", item["identity_fingerprint"],
-                    item["evidence_path"], item["evidence_locator"],
+                    item["alignment_id"] or "",
+                    item["identity_fingerprint"],
+                    item["evidence_path"],
+                    item["evidence_locator"],
                 ),
             )
         entries.append(
@@ -289,7 +325,9 @@ def build(observations_path, artifact_root=None):
             }
         )
     forward_index = []
-    for (domain, identity_fp, alignment), assignments in sorted(raw_assignments.items()):
+    for (domain, identity_fp, alignment), assignments in sorted(
+        raw_assignments.items()
+    ):
         forward_index.append(
             {
                 "domain": domain,
@@ -304,7 +342,9 @@ def build(observations_path, artifact_root=None):
     registry = {
         "schema_version": REGISTRY_SCHEMA,
         "observation_set_id": _text(value["observation_set_id"], "observation_set_id"),
-        "request_fingerprint": _text(value["request_fingerprint"], "request_fingerprint"),
+        "request_fingerprint": _text(
+            value["request_fingerprint"], "request_fingerprint"
+        ),
         "observations": {
             "path": observations_path.relative_to(root).as_posix(),
             "file_fingerprint": file_fingerprint(observations_path),
@@ -327,7 +367,9 @@ def validate(registry_path, artifact_root=None, *, require_complete=False):
     if not isinstance(value, dict) or value.get("schema_version") != REGISTRY_SCHEMA:
         raise ValueError(f"identity registry must use {REGISTRY_SCHEMA}")
     actual = value.get("registry_fingerprint")
-    unsigned = {key: item for key, item in value.items() if key != "registry_fingerprint"}
+    unsigned = {
+        key: item for key, item in value.items() if key != "registry_fingerprint"
+    }
     if actual != fingerprint(unsigned):
         raise ValueError("identity registry fingerprint mismatch")
     observation_path = _rooted(
@@ -366,7 +408,9 @@ def main(argv=None):
             _atomic_json(args.out, result)
         else:
             result = validate(
-                args.registry, args.artifact_root, require_complete=args.require_complete
+                args.registry,
+                args.artifact_root,
+                require_complete=args.require_complete,
             )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         parser.error(str(error))

@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Build and validate marker-only calibration evidence for an unmarked source tree."""
 
 from __future__ import annotations
@@ -68,7 +75,9 @@ def _normalized_inputs(stable_manifest, calibration_manifest):
     if stable.get("base_revision") != calibration.get("base_revision"):
         raise ValueError("marker-only calibration base revisions differ")
     if stable.get("calibration_revision") != calibration.get("source_revision"):
-        raise ValueError("calibration manifest is not the declared calibration revision")
+        raise ValueError(
+            "calibration manifest is not the declared calibration revision"
+        )
     if stable.get("model_adapter") != calibration.get("model_adapter"):
         raise ValueError("marker-only calibration model adapter identity differs")
     if stable.get("block_templates") != calibration.get("block_templates"):
@@ -104,14 +113,21 @@ def _build_file_proofs(stable_files, calibration_files, calibration_units):
                 unit.get("marker_operations", {}).get(marker_kind),
                 f"calibration unit {unit_id} {marker_kind} marker",
             )
-            if "insertion_start_offset" not in marker or "insertion_end_offset" not in marker:
+            if (
+                "insertion_start_offset" not in marker
+                or "insertion_end_offset" not in marker
+            ):
                 raise ValueError(
                     f"calibration unit {unit_id} {marker_kind} lacks insertion span"
                 )
             start = marker["insertion_start_offset"]
             end = marker["insertion_end_offset"]
             content = calibration_files[source_file]
-            if not isinstance(start, int) or not isinstance(end, int) or not (0 <= start < end <= len(content)):
+            if (
+                not isinstance(start, int)
+                or not isinstance(end, int)
+                or not (0 <= start < end <= len(content))
+            ):
                 raise ValueError(
                     f"calibration unit {unit_id} {marker_kind} insertion span is invalid"
                 )
@@ -163,8 +179,13 @@ def _build_file_proofs(stable_files, calibration_files, calibration_units):
     return proofs
 
 
-def build_marker_only_calibration(*, stable_manifest, calibration_manifest,
-                                  stable_snapshot_root, calibration_snapshot_root):
+def build_marker_only_calibration(
+    *,
+    stable_manifest,
+    calibration_manifest,
+    stable_snapshot_root,
+    calibration_snapshot_root,
+):
     stable, calibration, stable_units, calibration_units = _normalized_inputs(
         stable_manifest, calibration_manifest
     )
@@ -178,21 +199,22 @@ def build_marker_only_calibration(*, stable_manifest, calibration_manifest,
         "stable_source_revision": stable["source_revision"],
         "calibration_revision": calibration["source_revision"],
         "stable_source_manifest_fingerprint": stable["manifest_fingerprint"],
-        "calibration_source_manifest_fingerprint": calibration[
-            "manifest_fingerprint"
-        ],
+        "calibration_source_manifest_fingerprint": calibration["manifest_fingerprint"],
         "unit_ids": sorted(stable_units),
-        "files": _build_file_proofs(
-            stable_files, calibration_files, calibration_units
-        ),
+        "files": _build_file_proofs(stable_files, calibration_files, calibration_units),
     }
     result["bridge_fingerprint"] = canonical_sha256(result)
     return result
 
 
-def validate_marker_only_calibration(value, *, stable_manifest,
-                                     calibration_manifest, stable_snapshot_root,
-                                     calibration_snapshot_root):
+def validate_marker_only_calibration(
+    value,
+    *,
+    stable_manifest,
+    calibration_manifest,
+    stable_snapshot_root,
+    calibration_snapshot_root,
+):
     value = require_object(value, "marker-only calibration bridge")
     if value.get("protocol") != "marker_only_calibration_v1":
         raise ValueError("marker-only calibration protocol is unsupported")

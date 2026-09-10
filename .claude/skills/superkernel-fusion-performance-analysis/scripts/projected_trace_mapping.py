@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Map fused SuperKernel children to SK-off rows through kernel projection.
 
 The mapper deliberately avoids joining host profiler timestamps with device
@@ -157,10 +164,10 @@ def load_baseline_rows(path, *, device_id, model_id):
                     "task_id": int(task_text) if task_text.isdecimal() else None,
                     "name": str(row["Name"]).strip(),
                     "type": str(row["Type"]).strip(),
-                    "core_family": projection_core(row["Accelerator Core"], row["Name"]),
-                    "projected_op": projection_op(
-                        row["Name"], row["Accelerator Core"]
+                    "core_family": projection_core(
+                        row["Accelerator Core"], row["Name"]
                     ),
+                    "projected_op": projection_op(row["Name"], row["Accelerator Core"]),
                     "start_us": _decimal(
                         row["Start Time(us)"], f"baseline row {source_row} start"
                     ),
@@ -275,12 +282,9 @@ def _sentinel_chain_proposal(graph):
                 blockers.add("scope_sentinel_chain_incomplete")
             if len(set(tags)) != 1:
                 blockers.add("scope_sentinel_chain_tag_inconsistent")
-            if (
-                tuple(ordinals[:3])
-                != tuple(range(ordinals[0], ordinals[0] + 3))
-                or tuple(ordinals[3:])
-                != tuple(range(ordinals[3], ordinals[3] + 3))
-            ):
+            if tuple(ordinals[:3]) != tuple(
+                range(ordinals[0], ordinals[0] + 3)
+            ) or tuple(ordinals[3:]) != tuple(range(ordinals[3], ordinals[3] + 3)):
                 blockers.add("scope_sentinel_chain_noncontiguous")
             if ordinals[3] <= ordinals[2] + 1:
                 blockers.add("scope_sentinel_business_interval_missing")
@@ -475,17 +479,16 @@ def guarded_sentinel_exclusion(
     origin_proposals = _same_model_origin_proposals(graph_set, model_id)
     evidence["origin_graph_count"] = len(origin_proposals)
     origin_consistent = bool(origin_proposals) and all(
-        item["status"] == "proposed"
-        and item["signature"] == proposal["signature"]
+        item["status"] == "proposed" and item["signature"] == proposal["signature"]
         for _, item in origin_proposals
     )
     gates["all_origin_graphs_consistent"] = origin_consistent
     if not origin_consistent:
         blockers.add("scope_sentinel_origin_graph_inconsistent")
 
-    referenced = {
-        node.node_key for group in groups for node in group.nodes
-    } & set(proposal["node_keys"])
+    referenced = {node.node_key for group in groups for node in group.nodes} & set(
+        proposal["node_keys"]
+    )
     gates["absent_from_fused_children"] = not referenced
     if referenced:
         blockers.add("scope_sentinel_referenced_by_fused_group")
@@ -591,8 +594,7 @@ def baseline_step_projection(rows):
             )
             projected_streams[stream_id] = {
                 "signature": tuple(
-                    (row["projected_op"], row["core_family"])
-                    for row in stream_rows
+                    (row["projected_op"], row["core_family"]) for row in stream_rows
                 ),
                 "rows": tuple(stream_rows),
             }
@@ -842,9 +844,7 @@ def build_mapping(baseline_path, profile_manifest_path, *, device_id, model_id):
         == target_graph_parent
     )
     filtered_fused = FusedGroups(fused.binding, target_sources, fused._seal)
-    groups = _parse_candidate_fused_metadata_core(
-        filtered_graph_set, filtered_fused
-    )
+    groups = _parse_candidate_fused_metadata_core(filtered_graph_set, filtered_fused)
     groups = [
         group
         for group in groups
@@ -878,9 +878,7 @@ def build_mapping(baseline_path, profile_manifest_path, *, device_id, model_id):
         device_id=device_id,
         model_id=model_id,
     )
-    source_streams, node_locations = source_kernel_projection(
-        graph, excluded_node_keys
-    )
+    source_streams, node_locations = source_kernel_projection(graph, excluded_node_keys)
     assignments, alignment_blockers, alternatives = align_projection_steps(
         source_streams, baseline_steps, required_steps
     )
@@ -1026,18 +1024,26 @@ def render_markdown(result):
             f"- blockers：`{', '.join(exclusion['blockers']) if exclusion['blockers'] else 'none'}`",
         ]
     )
-    lines.extend(["", "## 映射清单", "", "| SK | child | 状态 | P50 baseline interval (us) |", "|---:|---:|---|---:|"])
+    lines.extend(
+        [
+            "",
+            "## 映射清单",
+            "",
+            "| SK | child | 状态 | P50 baseline interval (us) |",
+            "|---:|---:|---|---:|",
+        ]
+    )
     for item in result["mappings"]:
         intervals = sorted(
-            occurrence["interval_us"]
-            for occurrence in item["baseline_occurrences"]
+            occurrence["interval_us"] for occurrence in item["baseline_occurrences"]
         )
         p50 = intervals[len(intervals) // 2] if intervals else None
         lines.append(
             f"| {item['sk_id']} | {item['child_count']} | "
             f"`{item['mapping_confidence']}` | "
-            f"{p50:.6f} |" if p50 is not None else
-            f"| {item['sk_id']} | {item['child_count']} | "
+            f"{p50:.6f} |"
+            if p50 is not None
+            else f"| {item['sk_id']} | {item['child_count']} | "
             f"`{item['mapping_confidence']}` | N/A |"
         )
     if summary["blocker_counts"]:

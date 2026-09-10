@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Project an original business graph onto a calibration graph uniquely."""
 
 from __future__ import annotations
@@ -47,7 +54,9 @@ def _normalize_graph(value, label):
     if graph.get("protocol") != "normalized_business_graph_v2":
         raise ValueError(f"{label}.protocol must be normalized_business_graph_v2")
     identity = require_object(graph.get("identity"), f"{label}.identity")
-    device_id = require_integer(identity.get("device_id"), f"{label}.identity.device_id")
+    device_id = require_integer(
+        identity.get("device_id"), f"{label}.identity.device_id"
+    )
     model_id = require_scalar_id(identity.get("model_id"), f"{label}.identity.model_id")
     nodes = {}
     streams = defaultdict(list)
@@ -81,7 +90,9 @@ def _normalize_graph(value, label):
     for role, sequence in streams.items():
         ordinals = sorted(node["stream_ordinal"] for node in sequence)
         if ordinals != list(range(len(sequence))):
-            raise ValueError(f"{label} stream {role} ordinals must be contiguous from zero")
+            raise ValueError(
+                f"{label} stream {role} ordinals must be contiguous from zero"
+            )
     edge_counter = Counter()
     edge_records = []
     for index, raw in enumerate(require_list(graph.get("edges"), f"{label}.edges")):
@@ -97,7 +108,12 @@ def _normalize_graph(value, label):
         token = (source, target, kind, signature)
         edge_counter[token] += 1
         edge_records.append(
-            {"source": source, "target": target, "kind": kind, "ports": edge.get("ports", {})}
+            {
+                "source": source,
+                "target": target,
+                "kind": kind,
+                "ports": edge.get("ports", {}),
+            }
         )
     normalized_graph = {
         "protocol": "normalized_business_graph_v2",
@@ -106,7 +122,10 @@ def _normalize_graph(value, label):
         "edges": sorted(
             edge_records,
             key=lambda item: (
-                item["source"], item["target"], item["kind"], canonical_sha256(item["ports"])
+                item["source"],
+                item["target"],
+                item["kind"],
+                canonical_sha256(item["ports"]),
             ),
         ),
     }
@@ -128,8 +147,10 @@ def _incident_signature(graph, key):
         if target == key:
             incoming[(kind, ports, _node_label(graph["nodes"][source]))] += count
     return canonical_sha256(
-        {"incoming": sorted((repr(k), v) for k, v in incoming.items()),
-         "outgoing": sorted((repr(k), v) for k, v in outgoing.items())}
+        {
+            "incoming": sorted((repr(k), v) for k, v in incoming.items()),
+            "outgoing": sorted((repr(k), v) for k, v in outgoing.items()),
+        }
     )
 
 
@@ -152,7 +173,10 @@ def _edge_consistent(original, calibration, mapping, source, target):
     reverse = {value: key for key, value in mapping.items()}
     for (left, right, kind, ports), count in original["edges"].items():
         if left in mapping and right in mapping:
-            if calibration["edges"][(mapping[left], mapping[right], kind, ports)] != count:
+            if (
+                calibration["edges"][(mapping[left], mapping[right], kind, ports)]
+                != count
+            ):
                 return False
     for (left, right, kind, ports), count in calibration["edges"].items():
         if left in reverse and right in reverse:
@@ -182,7 +206,10 @@ def _find_node_solutions(original, calibration, *, limit=2):
             for candidate_key, candidate in calibration["nodes"].items():
                 if candidate_key in used or _node_label(node) != _node_label(candidate):
                     continue
-                if candidate["stream_role"] not in stream_candidates[node["stream_role"]]:
+                if (
+                    candidate["stream_role"]
+                    not in stream_candidates[node["stream_role"]]
+                ):
                     continue
                 existing_stream = {
                     calibration["nodes"][mapped]["stream_role"]
@@ -194,12 +221,15 @@ def _find_node_solutions(original, calibration, *, limit=2):
                 owners = {
                     original["nodes"][source]["stream_role"]
                     for source, mapped in mapping.items()
-                    if calibration["nodes"][mapped]["stream_role"] == candidate["stream_role"]
+                    if calibration["nodes"][mapped]["stream_role"]
+                    == candidate["stream_role"]
                 }
                 if owners and node["stream_role"] not in owners:
                     continue
                 tentative = {**mapping, key: candidate_key}
-                if _edge_consistent(original, calibration, tentative, key, candidate_key):
+                if _edge_consistent(
+                    original, calibration, tentative, key, candidate_key
+                ):
                     candidates.append(candidate_key)
             choices.append((len(candidates), key, sorted(candidates)))
         _, key, candidates = min(choices)
@@ -284,8 +314,16 @@ def _find_stream_chain_solutions(original, calibration, *, limit=2):
                 solutions.append(dict(node_mapping))
             return
         choices = [
-            (len([candidate for candidate in candidates[role] if candidate not in used_roles]),
-             role)
+            (
+                len(
+                    [
+                        candidate
+                        for candidate in candidates[role]
+                        if candidate not in used_roles
+                    ]
+                ),
+                role,
+            )
             for role in original_chains
             if role not in role_mapping
         ]
@@ -310,25 +348,30 @@ def _find_stream_chain_solutions(original, calibration, *, limit=2):
 
 
 def _find_solutions(original, calibration, *, limit=2):
-    stream_solutions = _find_stream_chain_solutions(
-        original, calibration, limit=limit
-    )
+    stream_solutions = _find_stream_chain_solutions(original, calibration, limit=limit)
     if stream_solutions is not None:
         return stream_solutions
     return _find_node_solutions(original, calibration, limit=limit)
 
 
-def project_graphs(original_value, calibration_value, *, runtime_validation=None,
-                   evidence_catalog=None,
-                   original_collection_fingerprint=None,
-                   calibration_collection_fingerprint=None):
+def project_graphs(
+    original_value,
+    calibration_value,
+    *,
+    runtime_validation=None,
+    evidence_catalog=None,
+    original_collection_fingerprint=None,
+    calibration_collection_fingerprint=None,
+):
     original = _normalize_graph(original_value, "original graph")
     calibration = _normalize_graph(calibration_value, "calibration graph")
     if original["identity"] != calibration["identity"]:
         raise ValueError("original and calibration graph identities differ")
     if len(original["nodes"]) != len(calibration["nodes"]):
         raise ValueError("business kernel count differs")
-    if Counter((kind, ports) for _, _, kind, ports in original["edges"].elements()) != Counter(
+    if Counter(
+        (kind, ports) for _, _, kind, ports in original["edges"].elements()
+    ) != Counter(
         (kind, ports) for _, _, kind, ports in calibration["edges"].elements()
     ):
         raise ValueError("typed business edge counts differ")
@@ -350,8 +393,12 @@ def project_graphs(original_value, calibration_value, *, runtime_validation=None
             "skipped_calibration_node_keys",
             "conflicting_calibration_node_keys",
         )
-        provided_partition_fields = [field for field in partition_fields if field in item]
-        if provided_partition_fields and len(provided_partition_fields) != len(partition_fields):
+        provided_partition_fields = [
+            field for field in partition_fields if field in item
+        ]
+        if provided_partition_fields and len(provided_partition_fields) != len(
+            partition_fields
+        ):
             raise ValueError(
                 f"runtime_validation[{index}] must provide all assignment partition fields"
             )
@@ -373,7 +420,9 @@ def project_graphs(original_value, calibration_value, *, runtime_validation=None
                     )
                 assignment_partitions[field] = set(values)
             partition_union = set().union(*assignment_partitions.values())
-            partition_total = sum(len(values) for values in assignment_partitions.values())
+            partition_total = sum(
+                len(values) for values in assignment_partitions.values()
+            )
             if partition_total != len(partition_union):
                 raise ValueError(
                     f"runtime_validation[{index}] assignment partitions overlap"
@@ -388,21 +437,27 @@ def project_graphs(original_value, calibration_value, *, runtime_validation=None
             and require_integer(
                 item.get("business_occurrence_count"),
                 f"runtime_validation[{index}].business_occurrence_count",
-            ) == len(original["nodes"])
+            )
+            == len(original["nodes"])
             and require_integer(
                 item.get("assigned_occurrence_count"),
                 f"runtime_validation[{index}].assigned_occurrence_count",
-            ) == len(calibration["nodes"])
+            )
+            == len(calibration["nodes"])
             and require_integer(
                 item.get("unscoped_occurrence_count"),
                 f"runtime_validation[{index}].unscoped_occurrence_count",
-            ) == 0
+            )
+            == 0
             and require_integer(
                 item.get("conflicting_assignment_count"),
                 f"runtime_validation[{index}].conflicting_assignment_count",
-            ) == 0
+            )
+            == 0
         )
-        step_id = require_integer(item.get("step_id"), f"runtime_validation[{index}].step_id")
+        step_id = require_integer(
+            item.get("step_id"), f"runtime_validation[{index}].step_id"
+        )
         normalized = {**copy.deepcopy(item), "passed": passed}
         if assignment_partitions:
             if require_integer(
@@ -440,15 +495,26 @@ def project_graphs(original_value, calibration_value, *, runtime_validation=None
         target_node = calibration["nodes"][target]
         node_label_fingerprint = canonical_sha256(_node_label(source_node))
         incident_edge_fingerprint = canonical_sha256(
-            [_incident_signature(original, source), _incident_signature(calibration, target)]
+            [
+                _incident_signature(original, source),
+                _incident_signature(calibration, target),
+            ]
         )
         occurrence = {
             "original_node_key": source,
             "calibration_node_key": target,
-            "original": [source_node["stream_role"], source_node["stream_ordinal"],
-                         source_node["canonical_op"], source_node["core_family"]],
-            "calibration": [target_node["stream_role"], target_node["stream_ordinal"],
-                            target_node["canonical_op"], target_node["core_family"]],
+            "original": [
+                source_node["stream_role"],
+                source_node["stream_ordinal"],
+                source_node["canonical_op"],
+                source_node["core_family"],
+            ],
+            "calibration": [
+                target_node["stream_role"],
+                target_node["stream_ordinal"],
+                target_node["canonical_op"],
+                target_node["core_family"],
+            ],
             "node_label_fingerprint": node_label_fingerprint,
             "incident_edge_fingerprint": incident_edge_fingerprint,
         }
@@ -465,11 +531,13 @@ def project_graphs(original_value, calibration_value, *, runtime_validation=None
         "protocol": "source_calibration_projection_v2",
         "protocol_versions": copy.deepcopy(PROTOCOL_VERSIONS),
         "original_collection_fingerprint": require_text(
-            original_collection_fingerprint or original_value.get("collection_fingerprint"),
+            original_collection_fingerprint
+            or original_value.get("collection_fingerprint"),
             "original_collection_fingerprint",
         ),
         "calibration_collection_fingerprint": require_text(
-            calibration_collection_fingerprint or calibration_value.get("collection_fingerprint"),
+            calibration_collection_fingerprint
+            or calibration_value.get("collection_fingerprint"),
             "calibration_collection_fingerprint",
         ),
         "device_id": original["identity"]["device_id"],
@@ -508,8 +576,12 @@ def main(argv=None):
         result = project_graphs(
             load_json(args.original_graph, "original graph"),
             load_json(args.calibration_graph, "calibration graph"),
-            runtime_validation=(load_json(args.runtime_validation) if args.runtime_validation else []),
-            evidence_catalog=(load_json(args.evidence_catalog) if args.evidence_catalog else {}),
+            runtime_validation=(
+                load_json(args.runtime_validation) if args.runtime_validation else []
+            ),
+            evidence_catalog=(
+                load_json(args.evidence_catalog) if args.evidence_catalog else {}
+            ),
             original_collection_fingerprint=args.original_collection_fingerprint,
             calibration_collection_fingerprint=args.calibration_collection_fingerprint,
         )

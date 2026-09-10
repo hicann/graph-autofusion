@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Compare bound critical-path analyses to validate join-shortening mechanisms."""
 
 import argparse
@@ -13,7 +20,13 @@ SCHEMA = "superkernel-multistream-join-validation-v1"
 
 
 def _canonical(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def fingerprint(value):
@@ -21,10 +34,17 @@ def fingerprint(value):
 
 
 def _validate_analysis(value, label):
-    if not isinstance(value, dict) or value.get("schema_version") != multistream_critical_path.ANALYSIS_SCHEMA:
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != multistream_critical_path.ANALYSIS_SCHEMA
+    ):
         raise ValueError(f"{label} is not a critical path analysis")
-    unsigned = {key: item for key, item in value.items() if key != "analysis_fingerprint"}
-    if value.get("analysis_fingerprint") != multistream_critical_path.fingerprint(unsigned):
+    unsigned = {
+        key: item for key, item in value.items() if key != "analysis_fingerprint"
+    }
+    if value.get("analysis_fingerprint") != multistream_critical_path.fingerprint(
+        unsigned
+    ):
         raise ValueError(f"{label} fingerprint mismatch")
     return value
 
@@ -40,7 +60,9 @@ def compare(trial_id, action_manifest_fingerprint, baseline, candidate):
         raise ValueError("baseline and candidate request fingerprints differ")
     if not isinstance(trial_id, str) or not trial_id.strip():
         raise ValueError("trial_id must be non-empty")
-    if not isinstance(action_manifest_fingerprint, str) or not action_manifest_fingerprint.startswith("sha256:"):
+    if not isinstance(
+        action_manifest_fingerprint, str
+    ) or not action_manifest_fingerprint.startswith("sha256:"):
         raise ValueError("action_manifest_fingerprint must be a SHA256 fingerprint")
     before_targets = {item["join_id"]: item for item in baseline["targets"]}
     after_targets = {item["join_id"]: item for item in candidate["targets"]}
@@ -63,15 +85,17 @@ def compare(trial_id, action_manifest_fingerprint, baseline, candidate):
             reason = "join_stall_regressed"
         else:
             reason = None
-        targets.append({
-            "join_id": join_id,
-            "alignment_ids": before_alignment,
-            "join_ready_delta_us": ready_delta,
-            "join_stall_delta_us": stall_delta,
-            "critical_branch_before": before["critical_branch_stage_id"],
-            "critical_branch_after": after["critical_branch_stage_id"],
-            "reason": reason,
-        })
+        targets.append(
+            {
+                "join_id": join_id,
+                "alignment_ids": before_alignment,
+                "join_ready_delta_us": ready_delta,
+                "join_stall_delta_us": stall_delta,
+                "critical_branch_before": before["critical_branch_stage_id"],
+                "critical_branch_after": after["critical_branch_stage_id"],
+                "reason": reason,
+            }
+        )
     result = {
         "schema_version": SCHEMA,
         "trial_id": trial_id,
@@ -79,7 +103,9 @@ def compare(trial_id, action_manifest_fingerprint, baseline, candidate):
         "action_manifest_fingerprint": action_manifest_fingerprint,
         "baseline_analysis_fingerprint": baseline["analysis_fingerprint"],
         "candidate_analysis_fingerprint": candidate["analysis_fingerprint"],
-        "decision": "validated" if any(item["reason"] is None for item in targets) else "not_effective",
+        "decision": "validated"
+        if any(item["reason"] is None for item in targets)
+        else "not_effective",
         "targets": targets,
     }
     result["validation_fingerprint"] = fingerprint(result)
@@ -88,13 +114,25 @@ def compare(trial_id, action_manifest_fingerprint, baseline, candidate):
 
 def validate(value):
     required = {
-        "schema_version", "trial_id", "request_fingerprint", "action_manifest_fingerprint",
-        "baseline_analysis_fingerprint", "candidate_analysis_fingerprint", "decision", "targets",
+        "schema_version",
+        "trial_id",
+        "request_fingerprint",
+        "action_manifest_fingerprint",
+        "baseline_analysis_fingerprint",
+        "candidate_analysis_fingerprint",
+        "decision",
+        "targets",
         "validation_fingerprint",
     }
-    if not isinstance(value, dict) or set(value) != required or value.get("schema_version") != SCHEMA:
+    if (
+        not isinstance(value, dict)
+        or set(value) != required
+        or value.get("schema_version") != SCHEMA
+    ):
         raise ValueError(f"join validation must use {SCHEMA}")
-    unsigned = {key: item for key, item in value.items() if key != "validation_fingerprint"}
+    unsigned = {
+        key: item for key, item in value.items() if key != "validation_fingerprint"
+    }
     if value["validation_fingerprint"] != fingerprint(unsigned):
         raise ValueError("join validation fingerprint mismatch")
     if value["decision"] not in {"validated", "not_effective"}:
@@ -114,16 +152,30 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == "compare":
-            if not all((args.trial_id, args.action_manifest_fingerprint, args.baseline, args.candidate, args.out)):
-                raise ValueError("compare requires trial identity, baseline, candidate, and out")
+            if not all(
+                (
+                    args.trial_id,
+                    args.action_manifest_fingerprint,
+                    args.baseline,
+                    args.candidate,
+                    args.out,
+                )
+            ):
+                raise ValueError(
+                    "compare requires trial identity, baseline, candidate, and out"
+                )
             if args.out.exists():
                 raise ValueError(f"output already exists: {args.out}")
             result = compare(
-                args.trial_id, args.action_manifest_fingerprint,
-                json.loads(args.baseline.read_text()), json.loads(args.candidate.read_text()),
+                args.trial_id,
+                args.action_manifest_fingerprint,
+                json.loads(args.baseline.read_text()),
+                json.loads(args.candidate.read_text()),
             )
             args.out.parent.mkdir(parents=True, exist_ok=True)
-            args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+            args.out.write_text(
+                json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            )
         else:
             if not args.evidence:
                 raise ValueError("validate requires --evidence")

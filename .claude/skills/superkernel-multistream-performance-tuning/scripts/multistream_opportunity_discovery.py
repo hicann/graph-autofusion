@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Discover and audit complete multi-stream parallelism-screening coverage."""
 
 import argparse
@@ -22,7 +29,11 @@ EXACT_MAPPINGS = {
 
 def _canonical(value):
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -92,17 +103,27 @@ def _multi_stream_evidence(decision):
     if not isinstance(example, dict):
         return None
     analysis = example.get("multi_stream_analysis")
-    if not isinstance(analysis, dict) or analysis.get("multi_stream_detected") is not True:
+    if (
+        not isinstance(analysis, dict)
+        or analysis.get("multi_stream_detected") is not True
+    ):
         return None
     stream_count = example.get("stream_count")
-    if isinstance(stream_count, bool) or not isinstance(stream_count, int) or stream_count < 2:
+    if (
+        isinstance(stream_count, bool)
+        or not isinstance(stream_count, int)
+        or stream_count < 2
+    ):
         return None
     stream_ids = example.get("stream_ids")
     if (
         not isinstance(stream_ids, list)
         or len(stream_ids) != stream_count
         or len(set(stream_ids)) != stream_count
-        or any(isinstance(item, bool) or not isinstance(item, int) or item < 0 for item in stream_ids)
+        or any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+            for item in stream_ids
+        )
     ):
         return None
     return {
@@ -134,7 +155,12 @@ def discover(analysis_path, artifact_root=None):
             raise ValueError(f"per_sk_decisions[{index}] must be an object")
         range_id = decision.get("range_id")
         occurrence_fp = decision.get("graph_occurrence_fingerprint")
-        if not isinstance(range_id, str) or not range_id or not isinstance(occurrence_fp, str) or not occurrence_fp:
+        if (
+            not isinstance(range_id, str)
+            or not range_id
+            or not isinstance(occurrence_fp, str)
+            or not occurrence_fp
+        ):
             excluded.append({"index": index, "reason": "missing_stable_identity"})
             continue
         identity = (range_id, occurrence_fp)
@@ -150,36 +176,55 @@ def discover(analysis_path, artifact_root=None):
             reason = "mapping_not_performance_exact"
         elif decision.get("classification") == "insufficient_evidence":
             reason = "net_effect_insufficient_evidence"
-        elif not isinstance(decision.get("candidate_occurrence_count"), int) or decision["candidate_occurrence_count"] < 3:
+        elif (
+            not isinstance(decision.get("candidate_occurrence_count"), int)
+            or decision["candidate_occurrence_count"] < 3
+        ):
             reason = "candidate_occurrences_below_three"
         else:
             original = decision.get("original")
-            interval = original.get("interval_us") if isinstance(original, dict) else None
-            if not isinstance(interval, dict) or not isinstance(interval.get("count"), int) or interval["count"] < 3:
+            interval = (
+                original.get("interval_us") if isinstance(original, dict) else None
+            )
+            if (
+                not isinstance(interval, dict)
+                or not isinstance(interval.get("count"), int)
+                or interval["count"] < 3
+            ):
                 reason = "baseline_occurrences_below_three"
         multistream = _multi_stream_evidence(decision)
         if reason is None and multistream is None:
             reason = "not_proven_multistream"
         if reason is not None:
-            excluded.append({
+            excluded.append(
+                {
+                    "range_id": range_id,
+                    "graph_occurrence_fingerprint": occurrence_fp,
+                    "reason": reason,
+                }
+            )
+            continue
+        eligible.append(
+            {
                 "range_id": range_id,
                 "graph_occurrence_fingerprint": occurrence_fp,
-                "reason": reason,
-            })
-            continue
-        eligible.append({
-            "range_id": range_id,
-            "graph_occurrence_fingerprint": occurrence_fp,
-            "net_effect": decision["classification"],
-            "parallelism_effect": "unknown",
-            "optimization_status": "blocked",
-            "child_count": _integer(decision.get("child_count"), f"decision {range_id}.child_count", 1),
-            "baseline_occurrence_count": decision["original"]["interval_us"]["count"],
-            "candidate_occurrence_count": decision["candidate_occurrence_count"],
-            **multistream,
-        })
+                "net_effect": decision["classification"],
+                "parallelism_effect": "unknown",
+                "optimization_status": "blocked",
+                "child_count": _integer(
+                    decision.get("child_count"), f"decision {range_id}.child_count", 1
+                ),
+                "baseline_occurrence_count": decision["original"]["interval_us"][
+                    "count"
+                ],
+                "candidate_occurrence_count": decision["candidate_occurrence_count"],
+                **multistream,
+            }
+        )
 
-    eligible.sort(key=lambda item: (item["range_id"], item["graph_occurrence_fingerprint"]))
+    eligible.sort(
+        key=lambda item: (item["range_id"], item["graph_occurrence_fingerprint"])
+    )
     result = {
         "schema_version": DISCOVERY_SCHEMA,
         "profiling_analysis": {
@@ -199,9 +244,15 @@ def discover(analysis_path, artifact_root=None):
         "summary": {
             "profiling_decision_count": len(decisions),
             "eligible_target_count": len(eligible),
-            "beneficial_target_count": sum(item["net_effect"] == "beneficial" for item in eligible),
-            "neutral_target_count": sum(item["net_effect"] == "neutral" for item in eligible),
-            "regressed_target_count": sum(item["net_effect"] == "regressed" for item in eligible),
+            "beneficial_target_count": sum(
+                item["net_effect"] == "beneficial" for item in eligible
+            ),
+            "neutral_target_count": sum(
+                item["net_effect"] == "neutral" for item in eligible
+            ),
+            "regressed_target_count": sum(
+                item["net_effect"] == "regressed" for item in eligible
+            ),
             "excluded_target_count": len(excluded),
         },
     }
@@ -215,7 +266,9 @@ def audit_coverage(discovery_path, trace_analysis_path, artifact_root=None):
     discovery_path = _rooted(root, discovery_path, "opportunity discovery")
     trace_path = _rooted(root, trace_analysis_path, "trace analysis")
     discovery = json.loads(discovery_path.read_text())
-    if discovery.get("schema_version") != DISCOVERY_SCHEMA or discovery.get("discovery_fingerprint") != fingerprint(_unsigned(discovery, "discovery_fingerprint")):
+    if discovery.get("schema_version") != DISCOVERY_SCHEMA or discovery.get(
+        "discovery_fingerprint"
+    ) != fingerprint(_unsigned(discovery, "discovery_fingerprint")):
         raise ValueError("opportunity discovery is invalid")
     analysis_binding = discovery.get("profiling_analysis", {})
     analysis_path = _rooted(
@@ -224,17 +277,18 @@ def audit_coverage(discovery_path, trace_analysis_path, artifact_root=None):
     if file_fingerprint(analysis_path) != analysis_binding.get("file_fingerprint"):
         raise ValueError("discovery profiling analysis file changed")
     analysis = json.loads(analysis_path.read_text())
-    if (
-        analysis.get("analysis_content_fingerprint")
-        != analysis_binding.get("analysis_content_fingerprint")
-        or analysis.get("analysis_content_fingerprint")
-        != multistream_contract._analysis_fingerprint(analysis)
-    ):
+    if analysis.get("analysis_content_fingerprint") != analysis_binding.get(
+        "analysis_content_fingerprint"
+    ) or analysis.get(
+        "analysis_content_fingerprint"
+    ) != multistream_contract._analysis_fingerprint(analysis):
         raise ValueError("discovery profiling analysis content changed")
     trace = json.loads(trace_path.read_text())
     if trace.get("schema_version") != multistream_trace_analysis.ANALYSIS_SCHEMA:
         raise ValueError("trace analysis schema is invalid")
-    if trace.get("analysis_fingerprint") != multistream_trace_analysis.fingerprint(_unsigned(trace, "analysis_fingerprint")):
+    if trace.get("analysis_fingerprint") != multistream_trace_analysis.fingerprint(
+        _unsigned(trace, "analysis_fingerprint")
+    ):
         raise ValueError("trace analysis fingerprint mismatch")
     multistream_trace_analysis.validate_bound_analysis(
         trace_path,

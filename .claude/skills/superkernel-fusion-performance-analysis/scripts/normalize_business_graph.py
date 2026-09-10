@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 """Normalize one sk_graph_origin artifact into a calibration business graph."""
 
 from __future__ import annotations
@@ -74,7 +81,9 @@ def _validated_projection_exclusions(value, graph, *, device_id, model_id):
             "projection trace uses an unsupported sentinel exclusion protocol"
         )
     excluded = exclusion.get("excluded_node_keys")
-    if not isinstance(excluded, list) or any(not isinstance(key, str) for key in excluded):
+    if not isinstance(excluded, list) or any(
+        not isinstance(key, str) for key in excluded
+    ):
         raise ValueError("projection trace excluded_node_keys must be a string list")
     if excluded and exclusion.get("status") != "accepted":
         raise ValueError("projection trace sentinel exclusion was not accepted")
@@ -85,7 +94,9 @@ def _marker_keys(graph):
     return {
         node.key
         for node in graph.nodes
-        if _SCOPE_SENTINEL_FUNCTION.fullmatch(dict(node.provenance).get("func_name", ""))
+        if _SCOPE_SENTINEL_FUNCTION.fullmatch(
+            dict(node.provenance).get("func_name", "")
+        )
     }
 
 
@@ -103,14 +114,14 @@ def normalize_origin_graph(
     model_role = require_text(model_role, "model_role")
     origin_sha256 = file_sha256(origin_graph_path)
     graph = graph_from_sk_origin(origin_graph_path, model_role=model_role)
-    raw = require_object(load_json(origin_graph_path, "sk_graph_origin"), "sk_graph_origin")
+    raw = require_object(
+        load_json(origin_graph_path, "sk_graph_origin"), "sk_graph_origin"
+    )
     try:
         device_id = int(str(raw.get("deviceId")))
     except (TypeError, ValueError) as error:
         raise ValueError("sk_graph_origin.deviceId must be an integer") from error
-    origin_model_id = require_scalar_id(
-        raw.get("modelId"), "sk_graph_origin.modelId"
-    )
+    origin_model_id = require_scalar_id(raw.get("modelId"), "sk_graph_origin.modelId")
     model_id = _base_model_id(origin_model_id, "sk_graph_origin.modelId")
 
     excluded = frozenset()
@@ -127,8 +138,10 @@ def normalize_origin_graph(
         raise ValueError(
             "scope sentinel nodes require an accepted, complete projection exclusion"
         )
-    if any(not node.topology_only and node.key in excluded and node.key not in markers
-           for node in graph.nodes):
+    if any(
+        not node.topology_only and node.key in excluded and node.key not in markers
+        for node in graph.nodes
+    ):
         raise ValueError("projection trace attempts to exclude a business kernel")
 
     retained = {
@@ -180,11 +193,15 @@ def normalize_origin_graph(
         _, source_position, source_sequence = locations[edge.source]
         _, target_position, target_sequence = locations[edge.target]
         source = next(
-            (key for key in reversed(source_sequence[:source_position]) if key in retained),
+            (
+                key
+                for key in reversed(source_sequence[:source_position])
+                if key in retained
+            ),
             None,
         )
         target = next(
-            (key for key in target_sequence[target_position + 1:] if key in retained),
+            (key for key in target_sequence[target_position + 1 :] if key in retained),
             None,
         )
         if source is not None and target is not None:
@@ -217,7 +234,9 @@ def normalize_origin_graph(
         "edges": sorted(
             edges,
             key=lambda item: (
-                item["source"], item["target"], item["kind"],
+                item["source"],
+                item["target"],
+                item["kind"],
                 canonical_sha256(item["ports"]),
             ),
         ),
