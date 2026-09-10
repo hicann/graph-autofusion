@@ -23,6 +23,10 @@ class TransposeFusionCaseGenerator : public FusionCaseGenerator {
     return true;
   }
 
+ protected:
+  virtual Status GenerateScoreFuncForUbReorder(const ascir::HintGraph &graph, const af::AscNodePtr &transpose_node,
+                                               std::string &score_func);
+
  private:
   static std::vector<af::AscNodePtr> FindTransposeNodes(const ascir::HintGraph &owner_graph);
   Status TransposeNodeInputsAndOutputsCheck(const af::AscNodePtr &transpose_node) const;
@@ -31,8 +35,6 @@ class TransposeFusionCaseGenerator : public FusionCaseGenerator {
                         const std::vector<int64_t> &reordered_sched_axis) const;
   void UpdateAxis(ascir::HintGraph &graph, const af::AscNodePtr &transpose_node) const;
   Status TransposeConvertProcess(ascir::HintGraph &graph, const af::AscNodePtr &transpose_node) const;
-  static Status GenerateScoreFuncForUbReorder(const ascir::HintGraph &graph, const af::AscNodePtr &transpose_node,
-                                              std::string &score_func);
 };
 
 class TransposeScoreFunctionGenerator {
