@@ -25,45 +25,7 @@ fi
 
 source "${BASEPATH}/aot/_lib/common.sh"
 
-usage() {
-    echo "Usage: bash super_kernel/examples/run_example.sh --npu-arch=<dav-2201|dav-3510>"
-}
-
-NPU_ARCH=""
-parsed_args=$(getopt -a -o h -l help,npu-arch: -- "$@") || {
-    usage
-    exit 2
-}
-eval set -- "${parsed_args}"
-
-while true; do
-    case "$1" in
-        -h | --help)
-            usage
-            exit 0
-            ;;
-        --npu-arch)
-            NPU_ARCH="$2"
-            shift 2
-            ;;
-        --)
-            shift
-            break
-            ;;
-        *)
-            echo "ERROR: undefined option: $1" >&2
-            usage
-            exit 2
-            ;;
-    esac
-done
-
-if [ -z "${NPU_ARCH}" ]; then
-    echo "ERROR: --npu-arch is required." >&2
-    usage
-    exit 2
-fi
-sk_validate_npu_arch "${NPU_ARCH}"
+sk_parse_npu_arch "$@" || exit $?
 
 echo "---------------- Start running examples ----------------"
 if [[ "${NPU_ARCH}" == "dav-2201" ]]; then
@@ -75,10 +37,9 @@ else
     echo "[INFO] Skipping SuperKernel JIT examples on ${NPU_ARCH}."
 fi
 
-export SK_NPU_ARCH="${NPU_ARCH}"
 export PYTHON_CMD
-bash "${BASEPATH}/aot/example01_dual_stream/run.sh"
-bash "${BASEPATH}/aot/example02_sk_options/run.sh"
-bash "${BASEPATH}/aot/example03_kernel_pybind/run.sh"
+bash "${BASEPATH}/aot/example01_dual_stream/run.sh" --npu-arch="${NPU_ARCH}"
+bash "${BASEPATH}/aot/example02_sk_options/run.sh" --npu-arch="${NPU_ARCH}"
+bash "${BASEPATH}/aot/example03_kernel_pybind/run.sh" --npu-arch="${NPU_ARCH}"
 
 echo "Run all examples success"

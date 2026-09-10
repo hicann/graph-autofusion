@@ -5,7 +5,7 @@ This sample creates control dependencies with two NPU streams and events, and en
 Run from the repository root:
 
 ```bash
-bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
+bash super_kernel/examples/aot/example01_dual_stream/run.sh --npu-arch=dav-2201
 ```
 
 This sample supports `dav-2201` and `dav-3510`, and uses the currently visible NPU.

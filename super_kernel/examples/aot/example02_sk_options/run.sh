@@ -13,8 +13,8 @@ CURRENT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "${CURRENT_DIR}" || exit 1
 source ../_lib/common.sh
 
-sk_require_npu_arch || exit $?
-case "${SK_NPU_ARCH}" in
+sk_parse_npu_arch "$@" || exit $?
+case "${NPU_ARCH}" in
     dav-2201) PY_SCRIPT=main-dav-2201.py ;;
     dav-3510) PY_SCRIPT=main-dav-3510.py ;;
 esac

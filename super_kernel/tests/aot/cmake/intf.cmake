@@ -29,8 +29,8 @@ target_link_libraries(intf_llt_options INTERFACE
 )
 
 if(ENABLE_CPP_UTEST)
-    add_library(intf_llt_pub INTERFACE)
-    target_compile_definitions(intf_llt_pub INTERFACE CFG_BUILD_DEBUG)
-    target_compile_options(intf_llt_pub INTERFACE -g -w -fPIC -pipe -Werror -Wno-error=deprecated-declarations)
-    target_link_libraries(intf_llt_pub INTERFACE intf_llt_options GTest::gtest mockcpp)
+    add_library(intf_llt_ut INTERFACE)
+    target_compile_definitions(intf_llt_ut INTERFACE CFG_BUILD_DEBUG)
+    target_compile_options(intf_llt_ut INTERFACE -g -w -fPIC -pipe -Werror -Wno-error=deprecated-declarations)
+    target_link_libraries(intf_llt_ut INTERFACE intf_llt_options GTest::gtest mockcpp)
 endif()

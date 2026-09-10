@@ -21,12 +21,36 @@ sk_validate_npu_arch() {
     esac
 }
 
-sk_require_npu_arch() {
-    if [ -z "${SK_NPU_ARCH:-}" ]; then
-        echo "ERROR: SK_NPU_ARCH is required; run the sample through super_kernel/examples/run_example.sh --npu-arch=<ARCH>." >&2
+sk_parse_npu_arch() {
+    local parsed_args
+    NPU_ARCH=""
+    parsed_args=$(getopt -a -o h -l help,npu-arch: -- "$@") || return 2
+    eval set -- "${parsed_args}"
+    while true; do
+        case "$1" in
+            -h | --help)
+                echo "Usage: bash $0 --npu-arch=<dav-2201|dav-3510>"
+                exit 0
+                ;;
+            --npu-arch)
+                NPU_ARCH="$2"
+                shift 2
+                ;;
+            --)
+                shift
+                break
+                ;;
+        esac
+    done
+    if [ "$#" -ne 0 ]; then
+        echo "ERROR: unexpected arguments: $*" >&2
         return 2
     fi
-    sk_validate_npu_arch "${SK_NPU_ARCH}"
+    if [ -z "${NPU_ARCH}" ]; then
+        echo "ERROR: --npu-arch is required." >&2
+        return 2
+    fi
+    sk_validate_npu_arch "${NPU_ARCH}"
 }
 
 sk_cleanup_local() {

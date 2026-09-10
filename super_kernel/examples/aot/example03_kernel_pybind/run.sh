@@ -12,7 +12,7 @@
 cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
 source ../_lib/common.sh
 
-sk_require_npu_arch || exit $?
+sk_parse_npu_arch "$@" || exit $?
 sk_cleanup_local || exit 1
 
 RUN_LOG="${PWD}/tmp/run.log"
@@ -32,7 +32,7 @@ cleanup_sample_run() {
 }
 trap cleanup_sample_run EXIT
 
-if ! bash ./ops/aclgraph_add_ops/install.sh; then
+if ! bash ./ops/aclgraph_add_ops/install.sh --npu-arch="${NPU_ARCH}"; then
     echo "ERROR: failed to install aclgraph add op package" >&2
     exit 1
 fi

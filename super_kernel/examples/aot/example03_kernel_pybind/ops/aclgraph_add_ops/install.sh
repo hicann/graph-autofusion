@@ -12,7 +12,9 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "${SCRIPT_DIR}/../../../_lib/common.sh"
+sk_parse_npu_arch "$@"
 
-"${PYTHON_CMD:-python3}" -m pip install --user --no-build-isolation --force-reinstall "${SCRIPT_DIR}"
+SK_NPU_ARCH="${NPU_ARCH}" "${PYTHON_CMD:-python3}" -m pip install --user --no-build-isolation --force-reinstall "${SCRIPT_DIR}"
 
 echo "Installed ACLGraph add op_extension package from ${SCRIPT_DIR}."

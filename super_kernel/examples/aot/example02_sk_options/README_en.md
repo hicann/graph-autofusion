@@ -5,7 +5,7 @@ This sample demonstrates SuperKernel optimize and debug options. It checks the s
 Run from the repository root:
 
 ```bash
-bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
+bash super_kernel/examples/aot/example02_sk_options/run.sh --npu-arch=dav-2201
 ```
 
 This sample supports `dav-2201` and `dav-3510`, selects the corresponding attention network for the target architecture, and uses the currently visible NPU.

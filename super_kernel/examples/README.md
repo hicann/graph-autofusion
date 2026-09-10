@@ -30,14 +30,14 @@ examples/
 
 ## 运行样例
 
-`--npu-arch` 指定 AOT 编译目标，当前支持 `dav-2201` 和 `dav-3510`。样例使用当前可见 NPU。
+`--npu-arch` 指定运行样例对应的 NPU 架构，当前支持 `dav-2201` 和 `dav-3510`。样例使用当前可见 NPU。
 
 ```bash
 bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
 bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
 ```
 
-`dav-2201` 会依次运行全部 JIT 和 AOT Python 样例；`dav-3510` 不支持这些 JIT 样例，因此会跳过 JIT，仅运行 AOT 样例。运行 SuperKernel 样例时必须显式传入 `--npu-arch`，避免为 AOT 编译猜测目标架构。
+`dav-2201` 会依次运行全部 JIT 和 AOT Python 样例；`dav-3510` 不支持这些 JIT 样例，因此会跳过 JIT，仅运行 AOT 样例。运行 SuperKernel 样例时必须显式传入 `--npu-arch`，用于选择适用的样例；样例内部的编译参数由各样例处理。
 
 ## 参考
 

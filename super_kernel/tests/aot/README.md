@@ -17,7 +17,7 @@ ST 链接测试专用 `libascendsk_st.so`，该库使用与生产 `ascendsk`
 
 ST 可执行文件和 `ascendsk_st` 链接同一个 `super_kernel_aot_stub` 共享库，因此故障注入、
 任务状态、分配记录和销毁回调只有一份。`intf_llt_options` 提供 ABI、coverage 和 sanitizer
-选项；UT 的 `intf_llt_pub` 另行引入 gtest/mockcpp，ST 与共享 stub 不依赖 mockcpp。
+选项；UT 的 `intf_llt_ut` 另行引入 gtest/mockcpp，ST 与共享 stub 不依赖 mockcpp。
 
 | 公开 API | 验证边界 |
 | --- | --- |

@@ -30,14 +30,14 @@ Follow the [source build guide](../../docs/en/build.md), then install the Python
 
 ## Running the Samples
 
-`--npu-arch` specifies the AOT compilation target. Supported values are `dav-2201` and `dav-3510`. The samples use the currently visible NPU.
+`--npu-arch` specifies the NPU architecture for running the samples. Supported values are `dav-2201` and `dav-3510`. The samples use the currently visible NPU.
 
 ```bash
 bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
 bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
 ```
 
-With `dav-2201`, the command runs every JIT and AOT Python sample in sequence. The JIT samples do not support `dav-3510`, so that target skips JIT and runs only the AOT samples. An explicit `--npu-arch` is required to avoid guessing the AOT compilation target.
+With `dav-2201`, the command runs every JIT and AOT Python sample in sequence. The JIT samples do not support `dav-3510`, so that target skips JIT and runs only the AOT samples. An explicit `--npu-arch` is required to select the applicable samples. Each sample handles its own compilation parameters.
 
 ## References
 
