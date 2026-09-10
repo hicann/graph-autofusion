@@ -92,6 +92,8 @@ set(ascendc_api_regbase_extend_src
         sin.h
         cos.h
         atan.h
+        sinh.h
+        asinh.h
 )
 
 set(generated_regbase_files)
