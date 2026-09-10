@@ -13,9 +13,9 @@
 namespace sk::test {
 // Shared layout for owned tasks; legacy UT retain the same three-field prefix.
 struct RuntimeTask {
-    uint32_t task_id = 0;
-    aclmdlRITaskType type = ACL_MODEL_RI_TASK_DEFAULT;
-    aclmdlRITaskParams params{};
+  uint32_t task_id = 0;
+  aclmdlRITaskType type = ACL_MODEL_RI_TASK_DEFAULT;
+  aclmdlRITaskParams params{};
 };
 // These adapters are used only by the external API stubs. Unknown legacy UT
 // handles are left to the existing stub behavior, without a global ST mode.

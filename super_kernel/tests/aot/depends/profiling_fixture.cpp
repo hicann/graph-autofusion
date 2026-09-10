@@ -15,21 +15,21 @@ int32_t (*profilingCallback)(uint32_t, void *, uint32_t) = nullptr;
 uint32_t profilingType = 0;
 }  // namespace
 char *MsprofGetPath() {
-    return profilingPath.data();
+  return profilingPath.data();
 }
 int32_t MsprofRegisterCallback(uint32_t type, int32_t (*callback)(uint32_t, void *, uint32_t)) {
-    profilingType = type;
-    profilingCallback = callback;
-    return 0;
+  profilingType = type;
+  profilingCallback = callback;
+  return 0;
 }
 namespace sk::test {
 void SetProfilingPath(const std::string &path) {
-    profilingPath = path;
+  profilingPath = path;
 }
 bool HasProfilingCallback() {
-    return profilingCallback != nullptr;
+  return profilingCallback != nullptr;
 }
 bool NotifyProfiling() {
-    return profilingCallback != nullptr && profilingCallback(profilingType, nullptr, 0) == 0;
+  return profilingCallback != nullptr && profilingCallback(profilingType, nullptr, 0) == 0;
 }
 }  // namespace sk::test

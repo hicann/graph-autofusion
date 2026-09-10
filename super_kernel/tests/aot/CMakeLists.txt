@@ -26,7 +26,7 @@ if(ENABLE_CPP_UTEST OR ENABLE_CPP_STEST)
 
     include(cmake/config.cmake)
     include(cmake/intf.cmake)
-    include(cmake/func.cmake)    
+    include(cmake/func.cmake)
     add_subdirectory(depends)
     if(ENABLE_CPP_UTEST)
         add_subdirectory(ut)

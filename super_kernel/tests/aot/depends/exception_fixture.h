@@ -17,25 +17,25 @@ namespace sk::test {
 // An external Runtime exception. Args are copied verbatim from the real RI task;
 // the fixture never decodes or constructs SuperKernel's private argument layout.
 class Exception {
-   public:
-    explicit Exception(aclmdlRITask task);
-    ~Exception();
-    Exception(const Exception &) = delete;
-    Exception &operator=(const Exception &) = delete;
-    void Raise(bool nullInfo = false);
-    uint32_t Dump(Adx::ExceptionDumpInfo *output, uint32_t capacity, uint32_t *count, Adx::ExceptionDumpMode *mode,
-                  bool nullInfo = false);
-    aclrtExceptionInfo info{};
-    aclrtFuncHandle function = nullptr;
-    void *args = nullptr;
-    uint32_t argsSize = 0;
-    aclError functionResult = ACL_SUCCESS;
-    aclError argsResult = ACL_SUCCESS;
-    rtError_t registersResult = 0;
-    std::vector<rtExceptionErrRegInfo_t> registers;
+ public:
+  explicit Exception(aclmdlRITask task);
+  ~Exception();
+  Exception(const Exception &) = delete;
+  Exception &operator=(const Exception &) = delete;
+  void Raise(bool nullInfo = false);
+  uint32_t Dump(Adx::ExceptionDumpInfo *output, uint32_t capacity, uint32_t *count, Adx::ExceptionDumpMode *mode,
+                bool nullInfo = false);
+  aclrtExceptionInfo info{};
+  aclrtFuncHandle function = nullptr;
+  void *args = nullptr;
+  uint32_t argsSize = 0;
+  aclError functionResult = ACL_SUCCESS;
+  aclError argsResult = ACL_SUCCESS;
+  rtError_t registersResult = 0;
+  std::vector<rtExceptionErrRegInfo_t> registers;
 
-   private:
-    void *storage_ = nullptr;
+ private:
+  void *storage_ = nullptr;
 };
 void RegisterExceptionCallback(aclrtExceptionInfoCallbackFunc callback);
 Exception *FindException(const void *info);
