@@ -347,7 +347,6 @@ stages:
             identifier: process_checkout
             uses: checkout
             with:
-              ref: ${{ atomgit.event.pull_request.merge_commit_sha }}
               token: ${{secrets.GIT_TOKEN}}
               path: "./runner"
           -
@@ -362,6 +361,7 @@ stages:
                 ${{ env.obs_path }}/pr_filelist.txt
                 ${{ env.obs_path }}/pr_filelist_mod.txt
                 ${{ env.obs_path }}/update_file_detail.txt
+                ${{ env.obs_path }}/pre_smoke.sh
               path: ${{ steps.process_checkout.outputs.path }}
           -
             name: smoke executor
@@ -375,7 +375,7 @@ stages:
               export SK=${{secrets.SK}}
               export WORKSPACE=${{ steps.process_checkout.outputs.path }}
               export NPU_ARCH=dav-2201
-              bash "${WORKSPACE}/.gitcode/scripts/pre_smoke.sh"
+              bash ${{ steps.process_checkout.outputs.path }}/pre_smoke.sh
           - name: upload
             uses: obs-upload
             with:

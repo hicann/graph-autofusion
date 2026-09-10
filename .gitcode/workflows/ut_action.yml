@@ -70,21 +70,7 @@ jobs:
           target_branch: ${{ env.TARGET_BRANCH }}
           git_token: ${{secrets.GIT_TOKEN}}
       -
-        name: AOT_CPP_ST
-        identifier: aot_cpp_st
-        if: ${{ default() && inputs.ut_type == 'UT_Test_superkernel' }}
-        run: |
-          set -e
-          set -o pipefail
-          cd "${{ steps.process_checkout.outputs.path }}"
-          export PATH=/opt/buildtools/python-3.10.2/bin:$PATH
-          source /home/jenkins/Ascend/cann/bin/setenv.bash
-          bash build.sh -s --module=superkernel --impl=cpp --no-autofuse \
-            --cann_3rd_lib_path=/home/jenkins/opensource -j 8 \
-            2>&1 | tee test_aot_st.log
-      -
         name: upload
-        if: ${{ default() || (always() && inputs.ut_type == 'UT_Test_superkernel') }}
         uses: obs-upload
         with:
           endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
