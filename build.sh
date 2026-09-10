@@ -584,7 +584,8 @@ function superkernel_cpp_test() {
     build clean &&
     build "${coverage_target}"
   else
-    build "run_super_kernel_aot_${suite}est"
+    build "run_super_kernel_aot_${suite}est" &&
+    build "run_model_specialization_${suite}est"
   fi &&
   echo "Build run cpp ${suite}est success!"
 }
