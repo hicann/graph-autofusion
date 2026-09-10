@@ -243,6 +243,8 @@ TEST_F(SkTaskBuilderTest, Build_FrameworkSyncRequiresScheModeWithAndWithoutEarly
     auto *second = CreateKernelNodeEx(9051, 0, 9050, INVALID_TASK_ID, type);
     first->nodeInfos.kernelInfos.capBits.earlyStartSetFlag = true;
     second->nodeInfos.kernelInfos.capBits.earlyStartWaitFlag = true;
+    first->nodeInfos.kernelInfos.capBits.disableScheMode = true;
+    second->nodeInfos.kernelInfos.capBits.disableScheMode = true;
     for (uint32_t earlyStart : {0U, 1U}) {
       SCOPED_TRACE(testing::Message() << to_string(type) << " earlyStart=" << earlyStart);
       opts->GetOption(aclskOptionType::EARLY_START)->SetValue(earlyStart);

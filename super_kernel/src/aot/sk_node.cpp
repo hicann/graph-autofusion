@@ -573,6 +573,9 @@ bool InitKernelResolvedFuncs(KernelInfos &kernelInfos) {
       "earlyStartSetFlag=%d, disableDcci=%d, disableScheMode=%d, blockDimScaleUp=%d",
       bindMap.size(), aicItor != bindMap.end(), aivItor != bindMap.end(), capBits.earlyStartWaitFlag,
       capBits.earlyStartSetFlag, capBits.disableDcci, capBits.disableScheMode, capBits.blockDimScaleUp);
+  if (capBits.disableScheMode) {
+    kernelInfos.isScheModeOn = false;
+  }
   kernelInfos.resolvedNum = 0;
   for (size_t i = 0; i < K_MAX_SPLIT_BIN_COUNT; ++i) {
     ResolvedFunctionInfo info{};

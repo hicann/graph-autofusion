@@ -1862,7 +1862,7 @@ class SkNodeScheModeTest : public SkNodeTest, public testing::WithParamInterface
   }
 };
 
-TEST_P(SkNodeScheModeTest, KernelInitNode_PreservesOriginalScheMode) {
+TEST_P(SkNodeScheModeTest, KernelInitNode_OnlyDisableScheModeOverridesOriginalMode) {
   const uint64_t cap = std::get<0>(GetParam());
   const bool scheModeOn = std::get<1>(GetParam());
   UtSkNodeRITaskInternal task{};
@@ -1889,8 +1889,10 @@ TEST_P(SkNodeScheModeTest, KernelInitNode_PreservesOriginalScheMode) {
   ASSERT_TRUE(node.InitNode());
   ASSERT_TRUE(node.IsFusible());
   EXPECT_EQ(node.GetNodeInfos().kernelInfos.cap, cap);
-  EXPECT_EQ(node.IsScheModeOn(), scheModeOn);
-  EXPECT_EQ(node.RequiresExactCoreMatch(), scheModeOn && !ParseKernelCapBits(cap).blockDimScaleUp);
+  const bool expectedScheMode = scheModeOn && (cap == 0 || cap == 0x10);
+  EXPECT_EQ(node.IsScheModeOn(), expectedScheMode);
+  EXPECT_EQ(node.RequiresExactCoreMatch(), scheModeOn && cap == 0);
+  EXPECT_EQ(scheModeAttr.value.schemMode, scheModeOn);
 }
 
 INSTANTIATE_TEST_SUITE_P(KernelCaps, SkNodeScheModeTest,
