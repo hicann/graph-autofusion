@@ -637,20 +637,23 @@ std::unique_ptr<CompileState> BuildCompileState(const CompileInfo &compile_info,
                                             attrs.transpose_x2, attrs.offset_x, attrs.op_impl_mode, attrs.enable_hf32);
   gert::OpTilingParseContextBuilder parse_builder;
   const auto input_slots = BuildMatMulInputSlots(inputs, attrs);
-  auto parse_holder = parse_builder.OpType(schema.op_type)
-                          .OpName(schema.op_type)
-                          .IOInstanceNum(MakeMatMulInputInstanceNum(attrs.has_bias, attrs.has_offset_w),
-                                         kSingleOutputInstanceNum)
-                          .InputTensorDesc(0, data_type, format, format)
-                          .InputTensorDesc(1, data_type, format, format)
-                          .InputTensorDesc(2, input_slots[2U] == nullptr ? data_type : DtypeToGeDataType(input_slots[2U]->dtype),
-                                           input_slots[2U] == nullptr ? format : FormatToGeFormat(input_slots[2U]->format),
-                                           input_slots[2U] == nullptr ? format : FormatToGeFormat(input_slots[2U]->format))
-                          .InputTensorDesc(3,
-                                           input_slots[3U] == nullptr ? ge::DT_INT8 : DtypeToGeDataType(input_slots[3U]->dtype),
-                                           input_slots[3U] == nullptr ? format : FormatToGeFormat(input_slots[3U]->format),
-                                           input_slots[3U] == nullptr ? format : FormatToGeFormat(input_slots[3U]->format))
-                          .OutputTensorDesc(0, data_type, format, format)
+  parse_builder.OpType(schema.op_type)
+      .OpName(schema.op_type)
+      .IOInstanceNum(MakeMatMulInputInstanceNum(attrs.has_bias, attrs.has_offset_w), kSingleOutputInstanceNum)
+      .InputTensorDesc(0, data_type, format, format)
+      .InputTensorDesc(1, data_type, format, format);
+  size_t input_desc_index = 2U;
+  if (input_slots[2U] != nullptr) {
+    const auto input_format = FormatToGeFormat(input_slots[2U]->format);
+    parse_builder.InputTensorDesc(input_desc_index++, DtypeToGeDataType(input_slots[2U]->dtype), input_format,
+                                  input_format);
+  }
+  if (input_slots[3U] != nullptr) {
+    const auto input_format = FormatToGeFormat(input_slots[3U]->format);
+    parse_builder.InputTensorDesc(input_desc_index++, DtypeToGeDataType(input_slots[3U]->dtype), input_format,
+                                  input_format);
+  }
+  auto parse_holder = parse_builder.OutputTensorDesc(0, data_type, format, format)
                           .CompiledJson(state->compile_json.c_str())
                           .CompiledInfo(state->compile_info_ptr)
                           .PlatformInfo(const_cast<fe::PlatFormInfos *>(&state->platform_info))
