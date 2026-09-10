@@ -16,6 +16,7 @@ add_executable(super_kernel_aot_utest
     ${CMAKE_CURRENT_SOURCE_DIR}/test_model_fixture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_options_manager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_feature_manager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_super_kernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_graph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_scope_verify.cpp
@@ -42,6 +43,8 @@ add_executable(super_kernel_aot_utest
     ${CMAKE_CURRENT_SOURCE_DIR}/test_sk_common.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_common.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_options_manager.cpp
+    ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/feature_manager.cpp
+    ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/kernel_compile_features.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_graph.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_scope_launch.cpp
     ${GRAPH_AUTOFUSION_ROOT_DIR}/super_kernel/src/aot/sk_scope_verify.cpp
