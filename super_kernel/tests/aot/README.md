@@ -124,4 +124,4 @@ bash build.sh -s --module=superkernel --impl=cpp --no-autofuse -j 8 \
 当前保留两处生产问题的复现：混合流水线的末尾任务同时声明 wait/set 能力时，early-start
 可能构造没有关联节点的同步并返回失败；单 kernel 核数超出设备上限时，scope 拆分可能不终止。
 后者用例 `DISABLED_RuntimeCoreLimitKeepsOversizedKernelOutsideFusion` 默认禁用，不能计入通过数量，
-修复生产代码前不要在常规测试中启用。详见 `docs/zh/superkernel-aot-host-st-design.md` 的主机验证结果。
+修复生产代码前不要在常规测试中启用。
