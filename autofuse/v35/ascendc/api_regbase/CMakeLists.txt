@@ -100,6 +100,8 @@ set(ascendc_api_regbase_extend_src
         sinh.h
         asinh.h
         i1.h
+        asin.h
+        acos.h
 )
 
 set(generated_regbase_files)
