@@ -842,6 +842,11 @@ class I0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"i0_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -866,7 +871,12 @@ class I0eAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "j0";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"i0e_reg_base.h"};
+    return {"modified_bessel_utils_reg_base.h", "modified_bessel_i0_reg_base.h", "i0e_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
@@ -892,7 +902,12 @@ class I1eAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "j1";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"i1e_reg_base.h"};
+    return {"modified_bessel_utils_reg_base.h", "modified_bessel_i1_reg_base.h", "i1e_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
@@ -1146,6 +1161,11 @@ class LogNdtrAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"log_ndtr_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -1169,6 +1189,11 @@ class NextAfterAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"next_after_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -1190,11 +1215,11 @@ class PolyGammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "PolyGammaExtend";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"zeta_reg_base.h", "polygamma_reg_base.h"};
+    return {"trigonometric_function_utils_reg_base.h", "zeta_reg_base.h", "polygamma_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
-        "adv_api/math/lgamma.h",
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -1342,6 +1367,11 @@ class ZetaAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"zeta_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -1457,6 +1487,11 @@ class ChebyshevPolynomialTAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_t_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -1479,6 +1514,11 @@ class ChebyshevPolynomialUAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_u_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
@@ -1503,6 +1543,11 @@ class ChebyshevPolynomialVAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_v_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -1525,6 +1570,11 @@ class ChebyshevPolynomialWAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_w_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),

@@ -11,10 +11,6 @@
 #ifndef __ASCENDC_API_REGBASE_POLYGAMMA_H__
 #define __ASCENDC_API_REGBASE_POLYGAMMA_H__
 
-#include "kernel_operator.h"
-#include "trigonometric_function_utils.h"
-#include "zeta.h"
-
 namespace AscendC {
 namespace PolyGammaAPI {
 

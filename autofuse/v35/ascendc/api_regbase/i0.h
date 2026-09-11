@@ -11,8 +11,6 @@
 #ifndef __ASCENDC_API_REGBASE_I0_H__
 #define __ASCENDC_API_REGBASE_I0_H__
 
-#include "kernel_operator.h"
-
 namespace AscendC {
 
 constexpr float I0_THRESHOLD = 9.0f;

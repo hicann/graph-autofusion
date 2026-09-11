@@ -4615,15 +4615,13 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
       ss << "#ifdef INDUCTOR_CONST_TILING_DATA" << std::endl;
       ss << "  #define _LAUNCH_MATMUL_UB(MATMUL_TILING, API, AT, BT, MD, FL, LO, UB) \\" << std::endl;
       ss << "    do { \\" << std::endl;
-      ss << "      " << graph_name
-         << "<CVAutofuseTilingData, API, AT, BT, 0, MD, FL, LO, 0, UB, 0><<<blockDim, nullptr, stream>>>("
-         << ub_kernel_args << "; \\" << std::endl;
+      ss << "      " << graph_name << "<CVAutofuseTilingData, API, AT, BT, 0, MD, FL, LO, 0, UB, 0><<<blockDim, "
+         << GetDynamicUbSize(fused_schedule_result) << ", stream>>>(" << ub_kernel_args << "; \\" << std::endl;
       ss << "    } while(0)" << std::endl;
       ss << "  #define _LAUNCH_MATMUL_SAFETY(MATMUL_TILING, API, AT, BT, MD, FL, LO, MIX) \\" << std::endl;
       ss << "    do { \\" << std::endl;
-      ss << "      " << graph_name
-         << "<CVAutofuseTilingData, API, AT, BT, 0, MD, FL, LO, 1, 0, MIX><<<blockDim, nullptr, stream>>>("
-         << kernel_args << "; \\" << std::endl;
+      ss << "      " << graph_name << "<CVAutofuseTilingData, API, AT, BT, 0, MD, FL, LO, 1, 0, MIX><<<blockDim, "
+         << GetDynamicUbSize(fused_schedule_result) << ", stream>>>(" << kernel_args << "; \\" << std::endl;
       ss << "    } while(0)" << std::endl;
       ss << "#else" << std::endl;
     }
@@ -4632,9 +4630,8 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
     ss << "      using CvUbTilingT = CVAutofuseUbTilingDataT<MATMUL_TILING>; \\" << std::endl;
     ss << "      const auto &ub_tiling = *reinterpret_cast<const CvUbTilingT *>(&tiling_data->stage_size_name); \\"
        << std::endl;
-    ss << "      " << graph_name
-       << "<CvUbTilingT, API, AT, BT, 0, MD, FL, LO, 0, UB, 0><<<blockDim, nullptr, stream>>>(" << ub_kernel_args
-       << "; \\" << std::endl;
+    ss << "      " << graph_name << "<CvUbTilingT, API, AT, BT, 0, MD, FL, LO, 0, UB, 0><<<blockDim, "
+       << GetDynamicUbSize(fused_schedule_result) << ", stream>>>(" << ub_kernel_args << "; \\" << std::endl;
     ss << "    } while(0)" << std::endl;
     ss << "  #define _LAUNCH_MATMUL_SAFETY(MATMUL_TILING, API, AT, BT, MD, FL, LO, MIX) \\" << std::endl;
     ss << "    do { \\" << std::endl;
@@ -4642,9 +4639,8 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
     ss << "      const auto &full_tiling = *reinterpret_cast<const CvFullTilingT *>(&tiling_data->extern_tiling_data); "
           "\\"
        << std::endl;
-    ss << "      " << graph_name
-       << "<CvFullTilingT, API, AT, BT, 0, MD, FL, LO, 1, 0, MIX><<<blockDim, nullptr, stream>>>(" << kernel_args
-       << "; \\" << std::endl;
+    ss << "      " << graph_name << "<CvFullTilingT, API, AT, BT, 0, MD, FL, LO, 1, 0, MIX><<<blockDim, "
+       << GetDynamicUbSize(fused_schedule_result) << ", stream>>>(" << kernel_args << "; \\" << std::endl;
     ss << "    } while(0)" << std::endl;
     if (is_static) {
       ss << "#endif" << std::endl;
@@ -4725,16 +4721,15 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
       ss << "#ifdef INDUCTOR_CONST_TILING_DATA" << std::endl;
       ss << "  #define _LAUNCH_BATCH_MATMUL_UB(MATMUL_TILING, API, AT, BT, ITER, BMODEL, FL, LO, UB) \\" << std::endl;
       ss << "    do { \\" << std::endl;
-      ss << "      " << graph_name
-         << "<CVAutofuseTilingData, API, AT, BT, ITER, BMODEL, FL, LO, 0, UB, 0><<<blockDim, nullptr, stream>>>("
-         << ub_kernel_args << "; \\" << std::endl;
+      ss << "      " << graph_name << "<CVAutofuseTilingData, API, AT, BT, ITER, BMODEL, FL, LO, 0, UB, 0><<<blockDim, "
+         << GetDynamicUbSize(fused_schedule_result) << ", stream>>>(" << ub_kernel_args << "; \\" << std::endl;
       ss << "    } while(0)" << std::endl;
       ss << "  #define _LAUNCH_BATCH_MATMUL_SAFETY(MATMUL_TILING, API, AT, BT, ITER, BMODEL, FL, LO, MIX) \\"
          << std::endl;
       ss << "    do { \\" << std::endl;
       ss << "      " << graph_name
-         << "<CVAutofuseTilingData, API, AT, BT, ITER, BMODEL, FL, LO, 1, 0, MIX><<<blockDim, nullptr, stream>>>("
-         << kernel_args << "; \\" << std::endl;
+         << "<CVAutofuseTilingData, API, AT, BT, ITER, BMODEL, FL, LO, 1, 0, MIX><<<blockDim, "
+         << GetDynamicUbSize(fused_schedule_result) << ", stream>>>(" << kernel_args << "; \\" << std::endl;
       ss << "    } while(0)" << std::endl;
       ss << "#else" << std::endl;
     }
@@ -4743,9 +4738,8 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
     ss << "      using CvUbTilingT = CVAutofuseUbTilingDataT<MATMUL_TILING>; \\" << std::endl;
     ss << "      const auto &ub_tiling = *reinterpret_cast<const CvUbTilingT *>(&tiling_data->stage_size_name); \\"
        << std::endl;
-    ss << "      " << graph_name
-       << "<CvUbTilingT, API, AT, BT, ITER, BMODEL, FL, LO, 0, UB, 0><<<blockDim, nullptr, stream>>>(" << ub_kernel_args
-       << "; \\" << std::endl;
+    ss << "      " << graph_name << "<CvUbTilingT, API, AT, BT, ITER, BMODEL, FL, LO, 0, UB, 0><<<blockDim, "
+       << GetDynamicUbSize(fused_schedule_result) << ", stream>>>(" << ub_kernel_args << "; \\" << std::endl;
     ss << "    } while(0)" << std::endl;
     ss << "  #define _LAUNCH_BATCH_MATMUL_SAFETY(MATMUL_TILING, API, AT, BT, ITER, BMODEL, FL, LO, MIX) \\"
        << std::endl;
@@ -4754,9 +4748,8 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
     ss << "      const auto &full_tiling = *reinterpret_cast<const CvFullTilingT *>(&tiling_data->extern_tiling_data); "
           "\\"
        << std::endl;
-    ss << "      " << graph_name
-       << "<CvFullTilingT, API, AT, BT, ITER, BMODEL, FL, LO, 1, 0, MIX><<<blockDim, nullptr, stream>>>(" << kernel_args
-       << "; \\" << std::endl;
+    ss << "      " << graph_name << "<CvFullTilingT, API, AT, BT, ITER, BMODEL, FL, LO, 1, 0, MIX><<<blockDim, "
+       << GetDynamicUbSize(fused_schedule_result) << ", stream>>>(" << kernel_args << "; \\" << std::endl;
     ss << "    } while(0)" << std::endl;
     if (is_static) {
       ss << "#endif" << std::endl;
