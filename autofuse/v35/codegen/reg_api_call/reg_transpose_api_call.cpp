@@ -22,7 +22,7 @@
 #include "ascir_node_param/ascir_node_param.h"
 
 namespace {
-constexpr uint64_t kDmaMaxLen = 2U;
+constexpr uint64_t kMaxTileInnerLen = 2U;
 }
 
 namespace codegen {
@@ -67,11 +67,70 @@ Status ReorderInputStrideByOutputAxisOrder(const Tensor &x, const Tensor &y, std
   return af::SUCCESS;
 }
 
+struct VecStrideActualSizeFlag {
+  std::vector<bool> input_stride_use_actual_size;
+  std::vector<bool> output_stride_use_actual_size;
+};
+
+Status GetAxisType(af::AscNodePtr node, int64_t axis_id, ascir::Axis::Type &axis_type) {
+  auto owner_graph = node->GetOwnerComputeGraphBarePtr();
+  GE_ASSERT_NOTNULL(owner_graph);
+  auto graph_attr = owner_graph->GetOrCreateAttrsGroup<af::AscGraphAttr>();
+  GE_ASSERT_NOTNULL(graph_attr);
+  const auto &axis = graph_attr->axis;
+  auto iter =
+      std::find_if(axis.begin(), axis.end(), [axis_id](const af::AxisPtr &axis) { return axis->id == axis_id; });
+  if (iter != axis.end()) {
+    axis_type = (*iter)->type;
+  }
+  return af::SUCCESS;
+}
+
+Status GetVectorizedStrideActualSizeFlag(af::AscNodePtr node, const Tensor &x, const Tensor &y,
+                                         VecStrideActualSizeFlag &stride_actual_size_flag) {
+  GE_ASSERT_TRUE(x.vectorized_axis.size() == y.vectorized_axis.size(),
+                 "Input vectorized_axis size is not equal to output vectorized_axis size");
+  uint32_t tile_inner_axis_num = 0;
+  for (auto axis_iter = x.vectorized_axis.rbegin(); axis_iter != x.vectorized_axis.rend(); axis_iter++) {
+    const auto axis = *axis_iter;
+    ascir::Axis::Type axis_type;
+    GE_ASSERT_SUCCESS(GetAxisType(node, axis, axis_type));
+    if (tile_inner_axis_num < kMaxTileInnerLen) {
+      stride_actual_size_flag.input_stride_use_actual_size.insert(
+          stride_actual_size_flag.input_stride_use_actual_size.begin(), true);
+    } else {
+      stride_actual_size_flag.input_stride_use_actual_size.insert(
+          stride_actual_size_flag.input_stride_use_actual_size.begin(), false);
+    }
+    if (axis_type == ascir::Axis::kAxisTypeTileInner) {
+      tile_inner_axis_num++;
+    }
+  }
+  tile_inner_axis_num = 0;
+  for (auto axis_iter = y.vectorized_axis.rbegin(); axis_iter != y.vectorized_axis.rend(); axis_iter++) {
+    const auto axis = *axis_iter;
+    ascir::Axis::Type axis_type;
+    GE_ASSERT_SUCCESS(GetAxisType(node, axis, axis_type));
+    if (tile_inner_axis_num < kMaxTileInnerLen) {
+      stride_actual_size_flag.output_stride_use_actual_size.insert(
+          stride_actual_size_flag.output_stride_use_actual_size.begin(), true);
+    } else {
+      stride_actual_size_flag.output_stride_use_actual_size.insert(
+          stride_actual_size_flag.output_stride_use_actual_size.begin(), false);
+    }
+    if (axis_type == ascir::Axis::kAxisTypeTileInner) {
+      tile_inner_axis_num++;
+    }
+  }
+  return af::SUCCESS;
+}
+
 void BuildTransposeLoopParams(TransposeSpecificParams &transpose_specific_params,
                               std::vector<ascir::SizeExpr> &out_vectorized_repeats,
                               std::vector<ascir::SizeExpr> &reordered_in_vectorized_strides,
                               std::vector<ascir::SizeExpr> &out_vectorized_strides, uint32_t transpose_total_axis_num,
-                              std::vector<uint64_t> &origin_axis_pos) {
+                              std::vector<uint64_t> &origin_axis_pos,
+                              VecStrideActualSizeFlag &stride_actual_size_flag) {
   for (size_t i = out_vectorized_repeats.size() - transpose_total_axis_num; i < out_vectorized_repeats.size(); i++) {
     transpose_specific_params.output_dims.emplace_back(
         CombinedExpression(ExprItemFactory::ActualSize(out_vectorized_repeats[i])));
@@ -79,14 +138,14 @@ void BuildTransposeLoopParams(TransposeSpecificParams &transpose_specific_params
     // 此时后两根轴的内存排布是紧凑的，因此对应的stride应该使用ActualSize。
     // 如果最后两根向量化轴连续，此时最后一根轴一定不是切分内轴，最后两根轴使用ActualSize或Size没有区别。
     // 除此之外，其他的轴在Load/Store使用的stride默认是Size，因此Transpose的时候也使用Size即可。
-    if (origin_axis_pos[i] + kDmaMaxLen >= out_vectorized_repeats.size()) {
+    if (stride_actual_size_flag.input_stride_use_actual_size[origin_axis_pos[i]]) {
       transpose_specific_params.input_strides.emplace_back(
           CombinedExpression(ExprItemFactory::ActualSize(reordered_in_vectorized_strides[i])));
     } else {
       transpose_specific_params.input_strides.emplace_back(
           CombinedExpression(ExprItemFactory::Size(reordered_in_vectorized_strides[i])));
     }
-    if (i + kDmaMaxLen >= out_vectorized_repeats.size()) {
+    if (stride_actual_size_flag.output_stride_use_actual_size[i]) {
       transpose_specific_params.output_strides.emplace_back(
           CombinedExpression(ExprItemFactory::ActualSize(out_vectorized_strides[i])));
     } else {
@@ -146,8 +205,8 @@ Status TransposeRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<
   std::vector<ascir::SizeExpr> reordered_in_vectorized_strides;
   std::vector<uint64_t> origin_axis_pos;
   GE_CHK_STATUS_RET(ReorderInputStrideByOutputAxisOrder(x, y, origin_axis_pos, reordered_in_vectorized_strides));
-  GE_ASSERT_TRUE(origin_axis_pos.size() == y.vectorized_axis.size(), "InValid origin_axis_pos size: %zu",
-                 origin_axis_pos.size());
+  VecStrideActualSizeFlag stride_actual_size_flag;
+  GetVectorizedStrideActualSizeFlag(this->node, x, y, stride_actual_size_flag);
   // 构建 inner_offset 表达式
   CombinedExpression input_inner_offset = CombinedExpression(
       ExprItemFactory::Direct(ge::Symbol(tpipe.tiler.TensorVectorizedOffset(current_axis, x).c_str())));
@@ -179,7 +238,7 @@ Status TransposeRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<
 
   TransposeSpecificParams transpose_specific_params;
   BuildTransposeLoopParams(transpose_specific_params, out_vectorized_repeats, reordered_in_vectorized_strides,
-                           y.vectorized_strides, transpose_total_axis_num, origin_axis_pos);
+                           y.vectorized_strides, transpose_total_axis_num, origin_axis_pos, stride_actual_size_flag);
   api_param->specific_params = transpose_specific_params;
   GE_ASSERT_SUCCESS(FillTransposeNodeParams(this->node, out_vectorized_repeats, reordered_in_vectorized_strides,
                                             y.vectorized_strides, transpose_inner_axis_num, transpose_total_axis_num));

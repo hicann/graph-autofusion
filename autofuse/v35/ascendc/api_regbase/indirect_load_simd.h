@@ -12,17 +12,50 @@
 #define AUTOFUSE_V35_ASCENDC_API_REGBASE_INDIRECT_LOAD_SIMD_H_
 
 #include <type_traits>
+#include <utility>
 
 #ifndef AUTOFUSE_V35_ASCENDC_API_REGBASE_INDIRECT_LOAD_SIMD_POLICY_H_
 #include "indirect_load_simd_policy.h"
 #endif
 
 namespace AscendC {
+enum class IndirectLoadSimdFallback : uint8_t {
+  kRegisterGather = 0,
+  kGatherApi = 1,
+  kStrided = 2,
+};
+
+template <IndirectLoadSimdFallback Fallback, bool TryEmbedding>
+struct IndirectLoadSimdCaseTag {};
+
 template <int32_t Rank>
 struct IndirectLoadSimdStridedParams {
   uint32_t logical_size;
   uint32_t physical_size;
   int64_t output_offset;
+  int64_t index_sizes[Rank];
+  int64_t input_strides[Rank];
+  int64_t index_strides[Rank];
+  int64_t output_strides[Rank];
+};
+
+template <int32_t Rank>
+struct IndirectLoadSimdDenseParams {
+  uint32_t physical_size;
+  uint32_t input_actual_size;
+  int64_t output_offset;
+  int64_t input_axis;
+  int64_t index_sizes[Rank];
+  int64_t input_strides[Rank];
+};
+
+template <int32_t Rank>
+struct IndirectLoadSimdEmbeddingParams {
+  uint32_t logical_size;
+  uint32_t physical_size;
+  uint32_t input_actual_size;
+  int64_t output_offset;
+  int64_t input_axis;
   int64_t index_sizes[Rank];
   int64_t input_strides[Rank];
   int64_t index_strides[Rank];
@@ -396,14 +429,19 @@ __aicore__ inline bool TryIndirectLoadSimdEmbedding(const LocalTensor<X> &x, con
     int64_t expected_input_stride = 1;
     for (int32_t dim = Rank - 1; dim > Axis; --dim) {
       if (shape[dim] <= 0 || shape[index_stride_base + dim] != 0 ||
-          shape[input_stride_base + dim] != expected_input_stride) {
+          shape[input_stride_base + dim] != expected_input_stride || shape[output_stride_base + dim] != payload_span) {
         return false;
       }
       payload_span *= shape[dim];
       expected_input_stride *= shape[dim];
     }
+    const int64_t output_axis_stride = shape[output_stride_base + Axis];
     if (payload_span <= 0 || shape[input_stride_base + Axis] != expected_input_stride || output_offset < 0 ||
-        shape[output_stride_base + Axis] < payload_span) {
+        output_axis_stride <= 0 || output_axis_stride < payload_span) {
+      return false;
+    }
+    const int64_t index_axis_stride = shape[index_stride_base + Axis];
+    if (index_axis_stride <= 0) {
       return false;
     }
     const int64_t output_slice_span = shape[Axis] * payload_span;
@@ -448,7 +486,7 @@ __aicore__ inline bool TryIndirectLoadSimdEmbedding(const LocalTensor<X> &x, con
           input_offset += coordinate * shape[input_stride_base + dim];
         }
       }
-      const int64_t index_value = static_cast<int64_t>(index.GetValue(index_axis_coordinate));
+      const int64_t index_value = static_cast<int64_t>(index.GetValue(index_axis_coordinate * index_axis_stride));
       const int64_t source_offset = index_value * shape[input_stride_base + Axis] + input_offset + payload_offset;
       const int64_t payload_remaining = payload_span - payload_offset;
       const uint32_t copy_count = static_cast<uint32_t>(
@@ -654,6 +692,116 @@ __aicore__ inline void IndirectLoadSimdGatherApi(const LocalTensor<X> &x, const 
   PipeBarrier<PIPE_V>();
   const LocalTensor<uint32_t> offsets = index.template ReinterpretCast<uint32_t>();
   Gather(y, x, offsets, 0U, actual_size);
+}
+
+namespace Internal {
+template <typename CaseTag, int32_t Rank>
+struct IndirectLoadSimdCaseSelector;
+
+template <IndirectLoadSimdFallback Fallback, bool TryEmbedding, int32_t Rank>
+struct IndirectLoadSimdCaseSelector<IndirectLoadSimdCaseTag<Fallback, TryEmbedding>, Rank> {
+  using Params =
+      std::conditional_t<TryEmbedding, IndirectLoadSimdEmbeddingParams<Rank>,
+                         std::conditional_t<Fallback == IndirectLoadSimdFallback::kStrided,
+                                            IndirectLoadSimdStridedParams<Rank>, IndirectLoadSimdDenseParams<Rank>>>;
+
+  template <typename X, typename Index, int32_t Axis>
+  __aicore__ inline static void RunDense(const LocalTensor<X> &x, const LocalTensor<Index> &index,
+                                         const LocalTensor<X> &y, const Params &params) {
+    static_assert(Fallback != IndirectLoadSimdFallback::kStrided,
+                  "IndirectLoad SIMD dense facade requires a dense fallback.");
+    if constexpr (TryEmbedding) {
+      if (TryEmbeddingImpl<X, Index, Axis>(x, index, y, params, std::make_index_sequence<Rank>{})) {
+        return;
+      }
+    }
+    RunDenseFallback<X, Index, Axis>(x, index, y, params, std::make_index_sequence<Rank>{});
+  }
+
+  template <typename X, typename Index, int32_t Axis>
+  __aicore__ inline static void RunStrided(const LocalTensor<X> &x, const LocalTensor<Index> &index,
+                                           const LocalTensor<X> &y, const LocalTensor<uint8_t> &tmp,
+                                           const Params &params) {
+    static_assert(Fallback == IndirectLoadSimdFallback::kStrided,
+                  "IndirectLoad SIMD strided facade requires a strided fallback.");
+    if constexpr (TryEmbedding) {
+      if (TryEmbeddingImpl<X, Index, Axis>(x, index, y, params, std::make_index_sequence<Rank>{})) {
+        return;
+      }
+    }
+    if constexpr (TryEmbedding) {
+      IndirectLoadSimdStridedParams<Rank> strided_params{
+          params.logical_size, params.physical_size, params.output_offset, {}, {}, {}, {}};
+      for (int32_t dim = 0; dim < Rank; ++dim) {
+        strided_params.index_sizes[dim] = params.index_sizes[dim];
+        strided_params.input_strides[dim] = params.input_strides[dim];
+        strided_params.index_strides[dim] = params.index_strides[dim];
+        strided_params.output_strides[dim] = params.output_strides[dim];
+      }
+      AscendC::IndirectLoadSimdStrided<X, Index, Rank, Axis>(x, index, y, tmp, strided_params);
+    } else {
+      AscendC::IndirectLoadSimdStrided<X, Index, Rank, Axis>(x, index, y, tmp, params);
+    }
+  }
+
+ private:
+  template <typename X, typename Index, int32_t Axis, size_t... Dims>
+  __aicore__ inline static bool TryEmbeddingImpl(const LocalTensor<X> &x, const LocalTensor<Index> &index,
+                                                 const LocalTensor<X> &y, const Params &params,
+                                                 std::index_sequence<Dims...>) {
+    return TryIndirectLoadSimdEmbedding<X, Index, Rank, Axis>(
+        x, index, y, params.logical_size, params.output_offset, params.index_sizes[Dims]...,
+        params.input_strides[Dims]..., params.index_strides[Dims]..., params.output_strides[Dims]...);
+  }
+
+  template <typename X, typename Index, int32_t Axis, size_t... Dims>
+  __aicore__ inline static void RunDenseFallback(const LocalTensor<X> &x, const LocalTensor<Index> &index,
+                                                 const LocalTensor<X> &y, const Params &params,
+                                                 std::index_sequence<Dims...>) {
+    if constexpr (Fallback == IndirectLoadSimdFallback::kRegisterGather) {
+      AscendC::IndirectLoadSimd<X, Index, Rank, Axis>(x, index, y, params.physical_size, params.output_offset,
+                                                      params.input_actual_size, params.input_axis,
+                                                      params.index_sizes[Dims]..., params.input_strides[Dims]...);
+    } else {
+      AscendC::IndirectLoadSimdGatherApi<X, Index, Rank, Axis>(
+          x, index, y, params.physical_size, params.output_offset, params.input_actual_size, params.input_axis,
+          params.index_sizes[Dims]..., params.input_strides[Dims]...);
+    }
+  }
+};
+}  // namespace Internal
+
+template <typename CaseTag, int32_t Rank>
+using IndirectLoadSimdParams = typename Internal::IndirectLoadSimdCaseSelector<CaseTag, Rank>::Params;
+
+template <typename X, typename Index, int32_t Rank, int32_t Axis, bool TryEmbedding>
+__aicore__ inline void IndirectLoadSimd(
+    const LocalTensor<X> &x, const LocalTensor<Index> &index, const LocalTensor<X> &y,
+    IndirectLoadSimdCaseTag<IndirectLoadSimdFallback::kRegisterGather, TryEmbedding>,
+    const IndirectLoadSimdParams<IndirectLoadSimdCaseTag<IndirectLoadSimdFallback::kRegisterGather, TryEmbedding>, Rank>
+        &params) {
+  using CaseTag = IndirectLoadSimdCaseTag<IndirectLoadSimdFallback::kRegisterGather, TryEmbedding>;
+  Internal::IndirectLoadSimdCaseSelector<CaseTag, Rank>::template RunDense<X, Index, Axis>(x, index, y, params);
+}
+
+template <typename X, typename Index, int32_t Rank, int32_t Axis, bool TryEmbedding>
+__aicore__ inline void IndirectLoadSimdGatherApi(
+    const LocalTensor<X> &x, const LocalTensor<Index> &index, const LocalTensor<X> &y,
+    IndirectLoadSimdCaseTag<IndirectLoadSimdFallback::kGatherApi, TryEmbedding>,
+    const IndirectLoadSimdParams<IndirectLoadSimdCaseTag<IndirectLoadSimdFallback::kGatherApi, TryEmbedding>, Rank>
+        &params) {
+  using CaseTag = IndirectLoadSimdCaseTag<IndirectLoadSimdFallback::kGatherApi, TryEmbedding>;
+  Internal::IndirectLoadSimdCaseSelector<CaseTag, Rank>::template RunDense<X, Index, Axis>(x, index, y, params);
+}
+
+template <typename X, typename Index, int32_t Rank, int32_t Axis, bool TryEmbedding>
+__aicore__ inline void IndirectLoadSimdStrided(
+    const LocalTensor<X> &x, const LocalTensor<Index> &index, const LocalTensor<X> &y, const LocalTensor<uint8_t> &tmp,
+    IndirectLoadSimdCaseTag<IndirectLoadSimdFallback::kStrided, TryEmbedding>,
+    const IndirectLoadSimdParams<IndirectLoadSimdCaseTag<IndirectLoadSimdFallback::kStrided, TryEmbedding>, Rank>
+        &params) {
+  using CaseTag = IndirectLoadSimdCaseTag<IndirectLoadSimdFallback::kStrided, TryEmbedding>;
+  Internal::IndirectLoadSimdCaseSelector<CaseTag, Rank>::template RunStrided<X, Index, Axis>(x, index, y, tmp, params);
 }
 
 }  // namespace AscendC

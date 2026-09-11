@@ -13,10 +13,36 @@
 #include <stack>
 #include "ascir_utils.h"
 #include "common_utils.h"
+#include "indirect_load_utils.h"
 #include "tensor_layout_utils.h"
 #include "platform/v1/alignment_strategy.h"
 
 namespace optimize {
+namespace {
+af::Status NormalizeStoreSingletonStrides(const af::AscNodePtr &node) {
+  GE_ASSERT_TRUE(node->outputs().size() == 1UL);
+  auto &attr = node->outputs[0].attr;
+  GE_ASSERT_TRUE(attr.vectorized_axis.size() == attr.vectorized_strides.size());
+  GE_ASSERT_TRUE(attr.axis.size() == attr.repeats.size());
+  af::Expression inner_span = af::sym::kSymbolOne;
+  for (size_t index = attr.vectorized_axis.size(); index > 0UL; --index) {
+    const size_t vector_index = index - 1UL;
+    const auto axis_iter = std::find(attr.axis.begin(), attr.axis.end(), attr.vectorized_axis[vector_index]);
+    GE_ASSERT_TRUE(axis_iter != attr.axis.end());
+    const size_t axis_index = static_cast<size_t>(std::distance(attr.axis.begin(), axis_iter));
+    auto &stride = attr.vectorized_strides[vector_index];
+    if (af::SymbolicUtils::StaticCheckEq(attr.repeats[axis_index], af::sym::kSymbolOne) == af::TriBool::kTrue &&
+        af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      stride = inner_span;
+    }
+    if (af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) != af::TriBool::kTrue) {
+      inner_span = af::sym::Mul(stride, attr.repeats[axis_index]);
+    }
+  }
+  return af::SUCCESS;
+}
+}  // namespace
+
 AlignmentType UnAlignmentStrategy::GetDefaultAlignmentType() {
   return AlignmentType::kNotAligned;
 }
@@ -223,8 +249,10 @@ Status GenLoadToGenNddmaNode(const af::AscNodePtr &node_load) {
 }
 
 Status UnAlignmentStrategy::GetCurrentNodeContinuousTailAxisNum(const af::AscNodePtr &node,
-                                                                uint32_t &continuous_tail_axis_num) {
+                                                                uint32_t &continuous_tail_axis_num,
+                                                                uint32_t &discontinuous_axis_num) {
   continuous_tail_axis_num = 0;
+  uint32_t current_discontinuous_axis_num = 0;
   auto &output_attr = node->outputs[0].attr;
   const auto &output_vec_axis = output_attr.vectorized_axis;
   af::Expression inner_repeat = af::sym::kSymbolOne;
@@ -246,17 +274,26 @@ Status UnAlignmentStrategy::GetCurrentNodeContinuousTailAxisNum(const af::AscNod
       // 向量化轴的stride为0继续合轴，不更新inner_repeat和inner_stride
       continuous_tail_axis_num++;
     } else {
-      break;
+      // 出现第二根非连续轴的时候退出，第一根不连续轴用Compact模式处理
+      if (current_discontinuous_axis_num < discontinuous_axis_num) {
+        inner_repeat = repeat;
+        inner_stride = stride;
+        continuous_tail_axis_num++;
+        current_discontinuous_axis_num++;
+      } else {
+        break;
+      }
     }
   }
   return af::SUCCESS;
 }
 
 Status UnAlignmentStrategy::GetNodeContinuousTailAxisNumByStore(const af::AscNodePtr &node,
-                                                                uint32_t &continuous_tail_axis_num) {
+                                                                uint32_t &continuous_tail_axis_num,
+                                                                uint32_t &discontinuous_axis_num) {
   continuous_tail_axis_num = UINT32_MAX;
   if (af::ops::IsOps<af::ascir_op::Store>(node)) {
-    GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, continuous_tail_axis_num));
+    GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, continuous_tail_axis_num, discontinuous_axis_num));
     return af::SUCCESS;
   }
   for (size_t out_idx = 0U; out_idx < node->GetAllOutDataAnchorsSize(); out_idx++) {
@@ -271,11 +308,13 @@ Status UnAlignmentStrategy::GetNodeContinuousTailAxisNumByStore(const af::AscNod
                        out_idx, in_idx);
       if (af::ops::IsOps<af::ascir_op::Store>(out_node)) {
         uint32_t store_continuous_axis_num = 0;
-        GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(out_node, store_continuous_axis_num));
+        GE_ASSERT_SUCCESS(
+            GetCurrentNodeContinuousTailAxisNum(out_node, store_continuous_axis_num, discontinuous_axis_num));
         continuous_tail_axis_num = std::min(continuous_tail_axis_num, store_continuous_axis_num);
       } else {
         uint32_t out_node_continuous_axis_num = 0;
-        GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByStore(out_node, out_node_continuous_axis_num));
+        GE_ASSERT_SUCCESS(
+            GetNodeContinuousTailAxisNumByStore(out_node, out_node_continuous_axis_num, discontinuous_axis_num));
         continuous_tail_axis_num = std::min(continuous_tail_axis_num, out_node_continuous_axis_num);
       }
     }
@@ -284,10 +323,11 @@ Status UnAlignmentStrategy::GetNodeContinuousTailAxisNumByStore(const af::AscNod
 }
 
 Status UnAlignmentStrategy::GetNodeContinuousTailAxisNumByLoad(const af::AscNodePtr &node,
-                                                               uint32_t &continuous_tail_axis_num) {
+                                                               uint32_t &continuous_tail_axis_num,
+                                                               uint32_t &discontinuous_axis_num) {
   continuous_tail_axis_num = UINT32_MAX;
   if (af::ops::IsOps<af::ascir_op::Load>(node)) {
-    GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, continuous_tail_axis_num));
+    GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, continuous_tail_axis_num, discontinuous_axis_num));
     return af::SUCCESS;
   }
   for (size_t in_idx = 0U; in_idx < node->GetAllInDataAnchorsSize(); in_idx++) {
@@ -300,16 +340,17 @@ Status UnAlignmentStrategy::GetNodeContinuousTailAxisNumByLoad(const af::AscNode
                      in_idx);
     if (af::ops::IsOps<af::ascir_op::Load>(in_node)) {
       uint32_t load_continuous_axis_num = 0;
-      GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(in_node, load_continuous_axis_num));
+      GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(in_node, load_continuous_axis_num, discontinuous_axis_num));
       continuous_tail_axis_num = std::min(continuous_tail_axis_num, load_continuous_axis_num);
     } else if (af::ops::IsOps<af::ascir_op::Broadcast>(node)) {
       // transpose模板中出现的brc节点的输入一定是scalar，向量化轴的对齐按照brc节点本身标注的stride信息进行。
       uint32_t load_continuous_axis_num = 0;
-      GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, load_continuous_axis_num));
+      GE_ASSERT_SUCCESS(GetCurrentNodeContinuousTailAxisNum(node, load_continuous_axis_num, discontinuous_axis_num));
       continuous_tail_axis_num = std::min(continuous_tail_axis_num, load_continuous_axis_num);
     } else {
       uint32_t in_node_continuous_axis_num = 0;
-      GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByLoad(in_node, in_node_continuous_axis_num));
+      GE_ASSERT_SUCCESS(
+          GetNodeContinuousTailAxisNumByLoad(in_node, in_node_continuous_axis_num, discontinuous_axis_num));
       continuous_tail_axis_num = std::min(continuous_tail_axis_num, in_node_continuous_axis_num);
     }
   }
@@ -405,6 +446,8 @@ Status UnAlignmentStrategy::ModifyTransposeFusionVectorizedStrides(af::AscGraph 
   // 收集 Transpose 前序节点
   std::set<af::AscNodePtr> transpose_pre_nodes;
   GE_ASSERT_SUCCESS(CollectTransposePreNodes(graph, transpose_pre_nodes));
+  // ub-transpose模板：Compact模式拷贝，遇到第二根不连续轴时完成连续轴收集
+  uint32_t discontinuous_axis_num = transpose_pre_nodes.empty() ? 0 : 1;
 
   for (const auto &node : graph.GetAllNodes()) {
     if (af::ops::IsOps<af::ascir_op::Data>(node) || af::ops::IsOps<af::ascir_op::Scalar>(node) ||
@@ -416,10 +459,10 @@ Status UnAlignmentStrategy::ModifyTransposeFusionVectorizedStrides(af::AscGraph 
     // 根据节点类型选择不同的连续轴计算策略
     if (!transpose_pre_nodes.empty() && transpose_pre_nodes.find(node) != transpose_pre_nodes.end()) {
       // Transpose前序节点：按 Load 轴判断
-      GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByLoad(node, continuous_tail_axis_num));
+      GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByLoad(node, continuous_tail_axis_num, discontinuous_axis_num));
     } else {
       // Transpose及后续节点或无Transpose：按 Store 轴判断
-      GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByStore(node, continuous_tail_axis_num));
+      GE_ASSERT_SUCCESS(GetNodeContinuousTailAxisNumByStore(node, continuous_tail_axis_num, discontinuous_axis_num));
     }
     // 如果是ub-Transpose模板，则可以走Compact模式搬运，连续轴数量调整为2。
     // 实际上nddma模板也可以走Compact模式，但是codegen目前只能判断显式Transpose节点，暂时不放开。
@@ -440,7 +483,45 @@ Status UnAlignmentStrategy::ModifyTransposeFusionVectorizedStrides(af::AscGraph 
   return af::SUCCESS;
 }
 
+Status UnAlignmentStrategy::ModifyIndirectLoadVectorizedStrides(ascir::ImplGraph &impl_graph) {
+  bool has_transpose = false;
+  bool has_nddma_load = false;
+  for (const auto &node : impl_graph.GetAllNodes()) {
+    has_transpose = has_transpose || node->attr.api.compute_type == af::ComputeType::kComputeTranspose;
+    has_nddma_load = has_nddma_load || (ScheduleUtils::IsLoad(node) && node->attr.type == "Nddma");
+    const auto role = ascgen_utils::indirect_load::GetTemplateRole(node);
+    if (role != ascgen_utils::indirect_load::TemplateRole::kStridedUbPath &&
+        role != ascgen_utils::indirect_load::TemplateRole::kSimdInputPreStridedUbPath) {
+      continue;
+    }
+    for (const auto &output : node->outputs()) {
+      if (!output->attr.vectorized_axis.empty()) {
+        GE_ASSERT_SUCCESS(
+            BaseAlignmentStrategy::SetVectorizedStridesForTensor(node, output->attr, AlignmentType::kAligned));
+      }
+    }
+  }
+  // Only the direct IL->Store boundary inherits the transposed/NDDMA layout.
+  // Other IL stores (for example, stores after elementwise or reduce nodes) use
+  // their own layout and must not be normalized here.
+  if (has_transpose || has_nddma_load) {
+    for (const auto &node : impl_graph.GetAllNodes()) {
+      if (!af::ops::IsOps<af::ascir_op::Store>(node) || node->inputs.Size() != 1UL || node->outputs().size() != 1UL) {
+        continue;
+      }
+      const auto producer = ascgen_utils::indirect_load::GetInputProducer(node, 0UL);
+      if (af::ops::IsOps<af::ascir_op::IndirectLoad>(producer)) {
+        GE_ASSERT_SUCCESS(NormalizeStoreSingletonStrides(node));
+      }
+    }
+  }
+  return af::SUCCESS;
+}
+
 Status UnAlignmentStrategy::ModifyVectorizedStrides(af::AscGraph &impl_graph) {
+  if (ascgen_utils::indirect_load::FindIndirectLoadNode(impl_graph) != nullptr) {
+    return ModifyIndirectLoadVectorizedStrides(impl_graph);
+  }
   bool has_transpose = false;
   for (auto node : impl_graph.GetAllNodes()) {
     if (af::ops::IsOps<af::ascir_op::Transpose>(node)) {

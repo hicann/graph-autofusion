@@ -11,6 +11,7 @@
 #ifndef AUTOFUSE_TESTS_V35_ST_BACKEND_E2E_V2_INDIRECT_LOAD_STORE_TEST_INDIRECT_LOAD_KERNEL_TEST_COMMON_H_
 #define AUTOFUSE_TESTS_V35_ST_BACKEND_E2E_V2_INDIRECT_LOAD_STORE_TEST_INDIRECT_LOAD_KERNEL_TEST_COMMON_H_
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -21,12 +22,19 @@
 #include "autofuse_tiling_data.h"
 
 #if !defined(IL_CASE_STORE) && !defined(IL_CASE_MIXED)
+struct ResLimit;
 extern "C" int64_t AutofuseTiling(AutofuseTilingData *, uint32_t *, uint32_t *, uint32_t, uint32_t);
+extern "C" int64_t AutofuseTilingWithConfig(const char *, AutofuseTilingData *, uint32_t *, uint32_t *, ResLimit *,
+                                            int32_t);
 #endif
 
 #if defined(IL_USER_FANOUT)
 extern "C" __global__ __aicore__ void user_fanout(GM_ADDR indices, GM_ADDR embedding, GM_ADDR weight, GM_ADDR output0,
                                                   GM_ADDR output1, GM_ADDR workspace, GM_ADDR gm_tiling_data);
+#elif defined(IL_USER_FANOUT_SIDE_INPUT)
+extern "C" __global__ __aicore__ void user_fanout_side_input(GM_ADDR indices, GM_ADDR embedding, GM_ADDR side_input,
+                                                             GM_ADDR output0, GM_ADDR output1, GM_ADDR workspace,
+                                                             GM_ADDR gm_tiling_data);
 #elif defined(IL_USER_SIDE_INPUT_FANOUT)
 extern "C" __global__ __aicore__ void user_side_input_fanout(GM_ADDR input0, GM_ADDR input1, GM_ADDR input2,
                                                              GM_ADDR input3, GM_ADDR input4, GM_ADDR input5,
@@ -83,6 +91,10 @@ struct KernelData {
 struct KernelTiling {
   explicit KernelTiling(uint32_t core_num = 48U) : workspace(nullptr, GmFree) {
     EXPECT_EQ(AutofuseTiling(&data, &workspace_size, &block_dim, core_num, 192U * 1024U), 0);
+#ifdef IL_FORCE_TILING_CASE
+    EXPECT_EQ(AutofuseTilingWithConfig(nullptr, &data, &workspace_size, &block_dim, nullptr, IL_FORCE_TILING_CASE), 0);
+    EXPECT_EQ(data.graph0_result0_g0_tiling_data.tiling_key, static_cast<uint32_t>(IL_FORCE_TILING_CASE));
+#endif
     EXPECT_GT(data.block_dim, 0U);
     if (workspace_size != 0U) {
       workspace.reset(reinterpret_cast<uint8_t *>(AscendC::GmAlloc(workspace_size)));
@@ -189,7 +201,9 @@ using OutputType = float;
 #else
 using OutputType = DataType;
 #endif
-#ifdef IL_INDEX_INT64
+#if IL_BOTH_TRANSPOSE
+using IndexType = int32_t;
+#elif defined(IL_INDEX_INT64)
 using IndexType = int64_t;
 #else
 using IndexType = int32_t;
@@ -212,6 +226,12 @@ float BesselK0Reference(float x) {
 }
 
 void RunTiling(AutofuseTilingData &tiling, uint32_t &workspace_size, uint32_t &block_dim) {
+#ifdef IL_FORCE_TILING_CASE
+  ASSERT_EQ(AutofuseTilingWithConfig(nullptr, &tiling, &workspace_size, &block_dim, nullptr, IL_FORCE_TILING_CASE), 0);
+  ASSERT_EQ(tiling.graph0_tiling_key, 0U);
+  ASSERT_EQ(tiling.graph0_result0_g0_tiling_data.tiling_key, static_cast<uint32_t>(IL_FORCE_TILING_CASE));
+  return;
+#endif
 #ifdef IL_STATIC_SHAPE
   AutofuseTiling(&tiling, &workspace_size, &block_dim, 48, 192 * 1024);
 #elif IL_RANK == 2
@@ -648,6 +668,12 @@ TEST(E2EIndirectLoadStore, GeneratedKernelMatchesReference) {
 #ifndef IL_INPUT_ABS_BEFORE_BROADCAST
 #define IL_INPUT_ABS_BEFORE_BROADCAST 0
 #endif
+#ifndef IL_BOTH_TRANSPOSE
+#define IL_BOTH_TRANSPOSE 0
+#endif
+#ifndef IL_INPUT_TRANSPOSE
+#define IL_INPUT_TRANSPOSE 0
+#endif
 #ifndef IL_OUTPUT_S0
 #define IL_OUTPUT_S0 4
 #endif
@@ -664,6 +690,9 @@ TEST(E2EIndirectLoadStore, GeneratedKernelMatchesReference) {
 #if IL_AIC_REPRO
 extern "C" __global__ __aicore__ void indirect_load_aic_repro(GM_ADDR input, GM_ADDR index, GM_ADDR output,
                                                               GM_ADDR workspace, GM_ADDR tiling);
+#elif IL_OUTPUT_BROADCAST_ADD
+extern "C" __global__ __aicore__ void indirect_load_broadcast_test(GM_ADDR x, GM_ADDR index, GM_ADDR bias, GM_ADDR y,
+                                                                   GM_ADDR workspace, GM_ADDR tiling);
 #else
 extern "C" __global__ __aicore__ void indirect_load_broadcast_test(GM_ADDR x, GM_ADDR index, GM_ADDR y,
                                                                    GM_ADDR workspace, GM_ADDR tiling);
@@ -694,7 +723,11 @@ void InitializeAicReproData(DataType *input, IndexType *index, DataType *expecte
 }
 #else
 using DataType = half;
+#if IL_BOTH_TRANSPOSE
+using IndexType = int32_t;
+#else
 using IndexType = int64_t;
+#endif
 constexpr std::array<int32_t, 4> kOutputShape = {IL_OUTPUT_S0, IL_OUTPUT_S1, IL_OUTPUT_S2, IL_OUTPUT_S3};
 constexpr bool kInputBroadcast = IL_INPUT_BROADCAST;
 constexpr bool kIndexBroadcast = IL_INDEX_BROADCAST;
@@ -707,6 +740,8 @@ constexpr bool kRetainBroadcast = IL_RETAIN_BROADCAST;
 constexpr bool kBroadcastPostReduce = IL_BROADCAST_POST_REDUCE;
 constexpr bool kIndexMixedView = IL_INDEX_MIXED_VIEW;
 constexpr bool kInputAbsBeforeBroadcast = IL_INPUT_ABS_BEFORE_BROADCAST;
+constexpr bool kBothTranspose = IL_BOTH_TRANSPOSE;
+constexpr bool kInputTranspose = IL_INPUT_TRANSPOSE;
 constexpr uint32_t kBroadcastAxesMask = IL_BROADCAST_AXES_MASK;
 
 constexpr std::array<int32_t, 4> MakeBroadcastSourceShape() {
@@ -720,8 +755,19 @@ constexpr std::array<int32_t, 4> MakeBroadcastSourceShape() {
 }
 
 constexpr std::array<int32_t, 4> kBroadcastSourceShape = MakeBroadcastSourceShape();
-constexpr std::array<int32_t, 4> kInputShape = kInputBroadcast && !kComplexSimt ? kBroadcastSourceShape : kOutputShape;
-constexpr std::array<int32_t, 4> kIndexShape = kIndexBroadcast ? kBroadcastSourceShape : kOutputShape;
+constexpr std::array<int32_t, 4> MakeTransposeSourceShape(const std::array<int32_t, 4> &shape) {
+  return {shape[1], shape[0], shape[2], shape[3]};
+}
+constexpr std::array<int32_t, 4> kTransposeInputShape = MakeTransposeSourceShape(kOutputShape);
+constexpr std::array<int32_t, 4> MakeGatherTransposeSourceShape(std::array<int32_t, 4> shape) {
+  return {shape[2], shape[1], shape[0], shape[3]};
+}
+constexpr std::array<int32_t, 4> kInputShape =
+    kBothTranspose    ? kTransposeInputShape
+    : kInputTranspose ? MakeGatherTransposeSourceShape(kInputBroadcast ? kBroadcastSourceShape : kOutputShape)
+                      : (kInputBroadcast && !kComplexSimt ? kBroadcastSourceShape : kOutputShape);
+constexpr std::array<int32_t, 4> kIndexShape =
+    kBothTranspose ? kTransposeInputShape : (kIndexBroadcast ? kBroadcastSourceShape : kOutputShape);
 constexpr int32_t kInputElementCount = IL_HAS_INPUT_ELEMENT;
 constexpr int32_t kIndexElementCount = IL_HAS_INDEX_ELEMENT;
 constexpr bool kHasOutputRelu = IL_HAS_OUTPUT_RELU;
@@ -751,12 +797,38 @@ int32_t DenseOffset(const std::array<int32_t, 4> &coordinate, const std::array<i
 }
 
 void InitializeData(DataType *x, IndexType *index, DataType *expected) {
-  for (int32_t i = 0; i < ElementCount(kInputShape); ++i) {
-    x[i] = static_cast<DataType>(static_cast<float>((i % 29) - 14) * 0.25F);
-  }
-  for (int32_t i = 0; i < ElementCount(kIndexShape); ++i) {
-    const int32_t gathered_axis = (i * 3 + 1) % kInputShape[2];
-    index[i] = static_cast<IndexType>(kIndexElementCount == 0 || i % 2 == 0 ? gathered_axis : -gathered_axis);
+  if constexpr (kBothTranspose) {
+    for (int32_t a = 0; a < kInputShape[0]; ++a) {
+      for (int32_t b = 0; b < kInputShape[1]; ++b) {
+        for (int32_t c = 0; c < kInputShape[2]; ++c) {
+          for (int32_t d = 0; d < kInputShape[3]; ++d) {
+            const std::array<int32_t, 4> coordinate = {a, b, c, d};
+            const int32_t value =
+                kOutputShape[0] == kOutputShape[1] ? (a + b) * 7 + c * 3 + d : a * 11 + b * 3 + c * 5 + d;
+            x[DenseOffset(coordinate, kInputShape)] = static_cast<DataType>(static_cast<float>(value) * 0.125F);
+          }
+        }
+      }
+    }
+    for (int32_t a = 0; a < kIndexShape[0]; ++a) {
+      for (int32_t b = 0; b < kIndexShape[1]; ++b) {
+        for (int32_t c = 0; c < kIndexShape[2]; ++c) {
+          for (int32_t d = 0; d < kIndexShape[3]; ++d) {
+            const std::array<int32_t, 4> coordinate = {a, b, c, d};
+            const int32_t value = kOutputShape[0] == kOutputShape[1] ? a + b + c + d : a * 5 + b * 2 + c + d;
+            index[DenseOffset(coordinate, kIndexShape)] = static_cast<IndexType>(value % kInputShape[2]);
+          }
+        }
+      }
+    }
+  } else {
+    for (int32_t i = 0; i < ElementCount(kInputShape); ++i) {
+      x[i] = static_cast<DataType>(static_cast<float>((i % 29) - 14) * 0.25F);
+    }
+    for (int32_t i = 0; i < ElementCount(kIndexShape); ++i) {
+      const int32_t gathered_axis = (i * 3 + 1) % kInputShape[2];
+      index[i] = static_cast<IndexType>(kIndexElementCount == 0 || i % 2 == 0 ? gathered_axis : -gathered_axis);
+    }
   }
   for (int32_t i = 0; i < ElementCount(kOutputShape); ++i) {
     int32_t coordinate = i;
@@ -767,7 +839,8 @@ void InitializeData(DataType *x, IndexType *index, DataType *expected) {
     const int32_t b = coordinate % kOutputShape[1];
     coordinate /= kOutputShape[1];
     const int32_t a = coordinate;
-    std::array<int32_t, 4> index_coordinate = {a, b, c, d};
+    std::array<int32_t, 4> index_coordinate =
+        kBothTranspose ? std::array<int32_t, 4>{b, a, c, d} : std::array<int32_t, 4>{a, b, c, d};
     if (kIndexBroadcast) {
       for (size_t dim = 0UL; dim < index_coordinate.size(); ++dim) {
         if ((kBroadcastAxesMask & (1U << dim)) != 0U) {
@@ -788,13 +861,17 @@ void InitializeData(DataType *x, IndexType *index, DataType *expected) {
       gathered_index = std::abs(gathered_index);
     }
     const int32_t gathered_axis = static_cast<int32_t>(gathered_index);
-    std::array<int32_t, 4> input_coordinate = {a, b, gathered_axis, d};
+    std::array<int32_t, 4> input_coordinate = kBothTranspose ? std::array<int32_t, 4>{b, a, gathered_axis, d}
+                                                             : std::array<int32_t, 4>{a, b, gathered_axis, d};
     if (kInputBroadcast && !kComplexSimt) {
       for (size_t dim = 0UL; dim < input_coordinate.size(); ++dim) {
         if ((kBroadcastAxesMask & (1U << dim)) != 0U) {
           input_coordinate[dim] = 0;
         }
       }
+    }
+    if constexpr (kInputTranspose) {
+      std::swap(input_coordinate[0], input_coordinate[2]);
     }
     const int32_t input_offset = DenseOffset(input_coordinate, kInputShape);
     float value = static_cast<float>(x[input_offset]);
@@ -863,9 +940,25 @@ TEST(E2EIndirectLoadBroadcast, GeneratedKernelMatchesReference) {
   ASSERT_TRUE(tiling.IsValid());
 
   AscendC::SetKernelMode(KernelMode::AIV_MODE);
+#if IL_OUTPUT_BROADCAST_ADD
+  auto bias = indirect_load_test::AllocGmBuffer<DataType>(kOutputShape[3]);
+  ASSERT_NE(bias, nullptr);
+  for (int32_t d = 0; d < kOutputShape[3]; ++d) {
+    bias.get()[d] = static_cast<DataType>(static_cast<float>((d * 7) % 19 - 9) * 0.125F);
+  }
+  for (int32_t i = 0; i < output_count; ++i) {
+    buffers.expected[i] = static_cast<DataType>(static_cast<float>(buffers.expected[i]) +
+                                                static_cast<float>(bias.get()[i % kOutputShape[3]]));
+  }
+  ICPU_RUN_KF(indirect_load_broadcast_test, tiling.data.block_dim, reinterpret_cast<uint8_t *>(buffers.input.get()),
+              reinterpret_cast<uint8_t *>(buffers.index.get()), reinterpret_cast<uint8_t *>(bias.get()),
+              reinterpret_cast<uint8_t *>(buffers.output.get()), tiling.workspace.get(),
+              reinterpret_cast<uint8_t *>(&tiling.data));
+#else
   ICPU_RUN_KF(indirect_load_broadcast_test, tiling.data.block_dim, reinterpret_cast<uint8_t *>(buffers.input.get()),
               reinterpret_cast<uint8_t *>(buffers.index.get()), reinterpret_cast<uint8_t *>(buffers.output.get()),
               tiling.workspace.get(), reinterpret_cast<uint8_t *>(&tiling.data));
+#endif
   for (int32_t i = 0; i < output_count; ++i) {
     EXPECT_NEAR(static_cast<float>(buffers.output.get()[i]),
                 static_cast<float>(buffers.expected[static_cast<size_t>(i)]), 0.0625F)
@@ -938,6 +1031,51 @@ TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
 #if defined(IL_USER_FANOUT_REDUCE)
     EXPECT_NEAR(static_cast<float>(output1.get()[row]), expected_reduce, 0.5F) << "output1 row=" << row;
 #endif
+  }
+}
+
+#elif defined(IL_USER_FANOUT_SIDE_INPUT)
+TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
+  constexpr int32_t kRows = 2;
+  constexpr int32_t kDim = 16;
+  constexpr int32_t kTableRows = 32;
+  auto indices = indirect_load_test::AllocGmBuffer<int64_t>(kRows);
+  auto embedding = indirect_load_test::AllocGmBuffer<bfloat16_t>(kTableRows * kDim);
+  auto side_input = indirect_load_test::AllocGmBuffer<bfloat16_t>(kDim);
+  auto output0 = indirect_load_test::AllocGmBuffer<bfloat16_t>(kRows * kDim);
+  auto output1 = indirect_load_test::AllocGmBuffer<bfloat16_t>(kRows * kDim);
+  ASSERT_TRUE(indices && embedding && side_input && output0 && output1);
+  for (int32_t row = 0; row < kRows; ++row) {
+    indices.get()[row] = row + 1;
+  }
+  for (int32_t row = 0; row < kTableRows; ++row) {
+    for (int32_t col = 0; col < kDim; ++col) {
+      embedding.get()[row * kDim + col] = static_cast<bfloat16_t>((row + 1) * 0.01F + col * 0.001F);
+    }
+  }
+  for (int32_t col = 0; col < kDim; ++col) {
+    side_input.get()[col] = static_cast<bfloat16_t>((col - 3) * 0.02F);
+  }
+  std::fill_n(output0.get(), kRows * kDim, static_cast<bfloat16_t>(0.0F));
+  std::fill_n(output1.get(), kRows * kDim, static_cast<bfloat16_t>(0.0F));
+
+  indirect_load_test::KernelTiling tiling;
+  ASSERT_TRUE(tiling.IsValid());
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(user_fanout_side_input, tiling.block_dim, reinterpret_cast<uint8_t *>(indices.get()),
+              reinterpret_cast<uint8_t *>(embedding.get()), reinterpret_cast<uint8_t *>(side_input.get()),
+              reinterpret_cast<uint8_t *>(output0.get()), reinterpret_cast<uint8_t *>(output1.get()),
+              reinterpret_cast<uint8_t *>(tiling.workspace.get()), reinterpret_cast<uint8_t *>(&tiling.data));
+
+  for (int32_t row = 0; row < kRows; ++row) {
+    for (int32_t col = 0; col < kDim; ++col) {
+      const float value = static_cast<float>(embedding.get()[indices.get()[row] * kDim + col]);
+      const float bias = static_cast<float>(side_input.get()[col]);
+      EXPECT_NEAR(static_cast<float>(output0.get()[row * kDim + col]), value, 0.125F)
+          << "output0 row=" << row << ", col=" << col;
+      EXPECT_NEAR(static_cast<float>(output1.get()[row * kDim + col]), value + bias, 0.125F)
+          << "output1 row=" << row << ", col=" << col;
+    }
   }
 }
 
@@ -1290,6 +1428,9 @@ extern "C" int64_t AutofuseTiling(AutofuseTilingData *, uint32_t *, uint32_t *, 
 #if defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
 extern "C" __global__ __aicore__ void user_masked_embedding_sum(GM_ADDR input0, GM_ADDR input1, GM_ADDR input2,
                                                                 GM_ADDR output, GM_ADDR workspace, GM_ADDR tiling);
+#elif defined(IL_GRAPH_HINT_EMBEDDING_SLICE)
+extern "C" __global__ __aicore__ void autofused_to_copy_embedding_slice_161da55df6362966862381c5d053b7e7(
+    GM_ADDR input0, GM_ADDR input1, GM_ADDR output, GM_ADDR workspace, GM_ADDR tiling);
 #elif defined(IL_GRAPH_HINT_SIMD_REPRO)
 extern "C" __global__ __aicore__ void indirect_load_graph_hint_simd_repro(GM_ADDR input0, GM_ADDR input1,
                                                                           GM_ADDR output, GM_ADDR workspace,
@@ -1387,6 +1528,60 @@ TEST(E2EUserMaskedEmbeddingSum, GeneratedKernelMatchesReference) {
       }
       EXPECT_FLOAT_EQ(output.get()[static_cast<int64_t>(row) * kUserMaskedDim + column], expected)
           << "row=" << row << ", column=" << column;
+    }
+  }
+}
+#elif defined(IL_GRAPH_HINT_EMBEDDING_SLICE)
+constexpr int32_t kGraphHintEmbeddingSliceRows = 128;
+constexpr int32_t kGraphHintEmbeddingSliceColumns = 512;
+constexpr int32_t kGraphHintEmbeddingSliceTableRows = 65536;
+constexpr int32_t kGraphHintEmbeddingSliceIndexStride = 39;
+constexpr int32_t kGraphHintEmbeddingSliceIndexOffset = 13;
+
+TEST(E2EIndirectLoadGraphHintEmbeddingSlice, GeneratedKernelMatchesReference) {
+  constexpr int64_t table_count =
+      static_cast<int64_t>(kGraphHintEmbeddingSliceTableRows) * kGraphHintEmbeddingSliceColumns;
+  constexpr int64_t index_count =
+      static_cast<int64_t>(kGraphHintEmbeddingSliceIndexOffset) +
+      static_cast<int64_t>(kGraphHintEmbeddingSliceRows - 1) * kGraphHintEmbeddingSliceIndexStride + 1;
+  constexpr int64_t output_count = static_cast<int64_t>(kGraphHintEmbeddingSliceRows) * kGraphHintEmbeddingSliceColumns;
+  auto table = indirect_load_test::AllocGmBuffer<float>(table_count);
+  auto index = indirect_load_test::AllocGmBuffer<float>(index_count);
+  auto output = indirect_load_test::AllocGmBuffer<float>(output_count);
+  ASSERT_TRUE(table && index && output);
+
+  for (int32_t row = 0; row < kGraphHintEmbeddingSliceTableRows; ++row) {
+    for (int32_t column = 0; column < kGraphHintEmbeddingSliceColumns; ++column) {
+      table.get()[static_cast<int64_t>(row) * kGraphHintEmbeddingSliceColumns + column] =
+          static_cast<float>((row % 97) * 0.25F + (column % 31) * 0.001F);
+    }
+  }
+  std::fill_n(index.get(), index_count, 0.0F);
+  for (int32_t row = 0; row < kGraphHintEmbeddingSliceRows; ++row) {
+    const int32_t positive_index = (row * 997 + 17) % kGraphHintEmbeddingSliceTableRows;
+    const int32_t index_value = positive_index;
+    index.get()[static_cast<int64_t>(kGraphHintEmbeddingSliceIndexOffset) +
+                static_cast<int64_t>(row) * kGraphHintEmbeddingSliceIndexStride] = static_cast<float>(index_value);
+  }
+  std::fill_n(output.get(), output_count, 0.0F);
+
+  indirect_load_test::KernelTiling tiling;
+  ASSERT_TRUE(tiling.IsValid());
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(autofused_to_copy_embedding_slice_161da55df6362966862381c5d053b7e7, tiling.block_dim,
+              reinterpret_cast<uint8_t *>(table.get()), reinterpret_cast<uint8_t *>(index.get()),
+              reinterpret_cast<uint8_t *>(output.get()), reinterpret_cast<uint8_t *>(tiling.workspace.get()),
+              reinterpret_cast<uint8_t *>(&tiling.data));
+
+  for (int32_t row = 0; row < kGraphHintEmbeddingSliceRows; ++row) {
+    const int32_t raw_index =
+        static_cast<int32_t>(index.get()[static_cast<int64_t>(kGraphHintEmbeddingSliceIndexOffset) +
+                                         static_cast<int64_t>(row) * kGraphHintEmbeddingSliceIndexStride]);
+    const int32_t selected_index = raw_index;
+    for (int32_t column = 0; column < kGraphHintEmbeddingSliceColumns; ++column) {
+      const int64_t offset = static_cast<int64_t>(row) * kGraphHintEmbeddingSliceColumns + column;
+      const int64_t table_offset = static_cast<int64_t>(selected_index) * kGraphHintEmbeddingSliceColumns + column;
+      EXPECT_FLOAT_EQ(output.get()[offset], table.get()[table_offset]) << "row=" << row << ", column=" << column;
     }
   }
 }

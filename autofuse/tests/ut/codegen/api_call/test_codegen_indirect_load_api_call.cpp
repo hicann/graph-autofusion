@@ -16,6 +16,8 @@
 #include "codegen_kernel.h"
 #include "common_utils.h"
 #include "graph/ascendc_ir/utils/asc_tensor_utils.h"
+#include "graph/ascendc_ir/utils/asc_graph_utils.h"
+#include "graph/utils/graph_utils.h"
 #include "indirect_load_utils.h"
 #include "platform_context.h"
 #include "runtime_stub.h"
@@ -1013,7 +1015,9 @@ TEST(IndirectLoadApiCallTest, GenerateSimdDenseSelectsDenseApi) {
 
   EXPECT_NE(result.find("IndirectLoadSimd<half, int32_t, 2, 1>"), std::string::npos);
   EXPECT_EQ(result.find("IndirectLoadSimdStrided"), std::string::npos);
-  EXPECT_EQ(result.find("indirect_load_simd_params"), std::string::npos);
+  EXPECT_NE(result.find("IndirectLoadSimdFallback>(0), false>"), std::string::npos);
+  EXPECT_NE(result.find("IndirectLoadSimdParams<IndirectLoadSimdCase, 2> indirect_load_simd_params"),
+            std::string::npos);
 }
 
 TEST(IndirectLoadApiCallTest, GenerateSimdDenseGatherSelectsGatherApi) {
@@ -1089,7 +1093,7 @@ TEST(IndirectLoadApiCallTest, GenerateFuncDefinitionSimtProducesBodyStruct) {
   EXPECT_NE(def.find("using Context = IndirectLoadSimtContext_"), std::string::npos);
   EXPECT_NE(def.find("__simt_callee__ __aicore__ inline static"), std::string::npos);
   EXPECT_NE(def.find(" Index(uint64_t output_index, const Context &context)"), std::string::npos);
-  EXPECT_NE(def.find(" Output("), std::string::npos);
+  EXPECT_NE(def.find(" Outputs("), std::string::npos);
 }
 
 TEST(IndirectLoadApiCallTest, GenerateFuncDefinitionSimtEmitsMultiOutputEvaluator) {
@@ -1117,6 +1121,79 @@ TEST(IndirectLoadApiCallTest, GenerateFuncDefinitionUsesUint32OffsetsForStaticSh
   EXPECT_NE(def.find("uint32_t output_index"), std::string::npos);
 }
 
+void InsertSimtIdentityBroadcast(ILTestGraph &g, const char *name, const char *producer_name, const char *consumer_name,
+                                 int32_t input_index, ascir::TensorId tensor_id) {
+  const auto producer = g.graph.FindNode(producer_name);
+  const auto consumer = g.graph.FindNode(consumer_name);
+  ASSERT_NE(producer, nullptr);
+  ASSERT_NE(consumer, nullptr);
+  Broadcast broadcast(name);
+  g.graph.AddNode(broadcast);
+  const auto node = g.graph.FindNode(name);
+  ASSERT_NE(node, nullptr);
+  node->attr.sched.axis = producer->attr.sched.axis;
+  node->attr.api.compute_type = af::ComputeType::kComputeBroadcast;
+  node->outputs[0].attr.dtype = producer->outputs[0].attr.dtype;
+  node->outputs[0].attr.axis = producer->outputs[0].attr.axis;
+  node->outputs[0].attr.repeats = producer->outputs[0].attr.repeats;
+  node->outputs[0].attr.strides = producer->outputs[0].attr.strides;
+  node->outputs[0].attr.mem.tensor_id = tensor_id;
+  ASSERT_EQ(SetTemplateRole(node, TemplateRole::kSimtInlineTransform), af::SUCCESS);
+  ASSERT_EQ(af::GraphUtils::ReplaceEdgeSrc(producer->GetOutDataAnchor(0), consumer->GetInDataAnchor(input_index),
+                                           node->GetOutDataAnchor(0)),
+            af::SUCCESS);
+  ASSERT_EQ(af::GraphUtils::AddEdge(producer->GetOutDataAnchor(0), node->GetInDataAnchor(0)), af::SUCCESS);
+  ASSERT_EQ(af::AscGraphUtils::GetComputeGraph(g.graph)->TopologicalSorting(), af::SUCCESS);
+}
+
+TEST_F(IndirectLoadConstructFromNodesTest, OmitsIdentityScalarTemporaries) {
+  ILTestGraph g("simt_identity_chain", 2, 8, 2, 8);
+  BuildSimtGraph(g);
+  ASSERT_NO_FATAL_FAILURE(InsertSimtIdentityBroadcast(g, "identity0", "indirect_load", "store", 0, 20));
+  ASSERT_NO_FATAL_FAILURE(InsertSimtIdentityBroadcast(g, "identity1", "identity0", "store", 0, 21));
+  AnnotateSimtTemplate(g.graph);
+  std::string definition;
+  GenerateSimtFuncDefinitionFromGraph(g, definition);
+  EXPECT_EQ(definition.find("v_20 ="), std::string::npos);
+  EXPECT_EQ(definition.find("v_21 ="), std::string::npos);
+  EXPECT_NE(definition.find("outputs.output0 = value;"), std::string::npos);
+}
+
+TEST_F(IndirectLoadConstructFromNodesTest, KeepsGmLoadMaterializedThroughIdentityBroadcast) {
+  ILTestGraph g("simt_identity_gm_load");
+  BuildSimtPostReduceGraph(g);
+  ASSERT_NO_FATAL_FAILURE(InsertSimtIdentityBroadcast(g, "load_identity", "addend_load", "output_transform", 1, 50));
+  std::string definition;
+  GenerateSimtPostReduceFuncDefinitionFromGraph(g, definition);
+  EXPECT_NE(definition.find("half v_50 = context.gm_9["), std::string::npos);
+  const auto load = definition.find("context.gm_9[");
+  ASSERT_NE(load, std::string::npos);
+  EXPECT_EQ(definition.find("context.gm_9[", load + 1), std::string::npos);
+}
+
+TEST_F(IndirectLoadConstructFromNodesTest, InlinesCompileTimeScalarWithoutTemporary) {
+  ILTestGraph g("simt_inline_scalar");
+  BuildSimtPostReduceGraph(g);
+  Scalar scalar("constant_bias", g.graph);
+  scalar.ir_attr.SetValue("2.5");
+  scalar.y.dtype = af::DT_FLOAT16;
+  const auto scalar_node = g.graph.FindNode("constant_bias");
+  const auto load = g.graph.FindNode("addend_load");
+  const auto add = g.graph.FindNode("output_transform");
+  ASSERT_NE(scalar_node, nullptr);
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(add, nullptr);
+  scalar_node->outputs[0].attr.mem.tensor_id = 40;
+  ASSERT_EQ(af::GraphUtils::ReplaceEdgeSrc(load->GetOutDataAnchor(0), add->GetInDataAnchor(1),
+                                           scalar_node->GetOutDataAnchor(0)),
+            af::SUCCESS);
+  ASSERT_EQ(af::AscGraphUtils::GetComputeGraph(g.graph)->TopologicalSorting(), af::SUCCESS);
+  std::string definition;
+  GenerateSimtPostReduceFuncDefinitionFromGraph(g, definition);
+  EXPECT_EQ(definition.find("v_40 ="), std::string::npos);
+  EXPECT_NE(definition.find("static_cast<half>(2.5"), std::string::npos);
+}
+
 TEST(IndirectLoadApiCallTest, GenerateSimtOutputUsesIndexOffsetForMatchingLoadView) {
   ILTestGraph g("simt_post_offsets");
   std::string definition;
@@ -1137,6 +1214,101 @@ TEST(IndirectLoadApiCallTest, GenerateSimtOutputUsesOutputOffsetForDistinctLoadV
   GenerateSimtPostReduceFuncDefinitionFromGraph(g, definition);
 
   EXPECT_NE(definition.find("context.gm_9[output_index]"), std::string::npos);
+}
+
+TEST(IndirectLoadApiCallTest, GenerateSimtOutputMapsBroadcastLoadToColumn) {
+  ILTestGraph g("simt_post_broadcast_offset", 2, 8, 2, 8);
+  BuildSimtPostReduceGraph(g);
+  // Reuse the side-input fixture with a direct Store, matching the position-bias output chain.
+  const auto reduce = g.graph.FindNode("reduce");
+  ASSERT_NE(reduce, nullptr);
+  ASSERT_EQ(af::GraphUtils::IsolateNodeOneIO(reduce), af::SUCCESS);
+  ASSERT_EQ(af::GraphUtils::RemoveNodeWithoutRelink(af::AscGraphUtils::GetComputeGraph(g.graph), reduce), af::SUCCESS);
+  const auto addend_load = g.graph.FindNode("addend_load");
+  ASSERT_NE(addend_load, nullptr);
+  addend_load->outputs[0].attr.repeats = {af::sym::kSymbolOne, g.s3};
+  addend_load->outputs[0].attr.strides = {af::sym::kSymbolZero, af::sym::kSymbolOne};
+
+  std::string definition;
+  GenerateSimtPostReduceFuncDefinitionFromGraph(g, definition);
+  EXPECT_NE(definition.find("context.gm_9[index_coord_0]"), std::string::npos);
+  EXPECT_NE(definition.find("index_coord_0 = static_cast<uint32_t>(output_index % 8);"), std::string::npos);
+  EXPECT_EQ(definition.find("context.gm_9[output_index]"), std::string::npos);
+  EXPECT_EQ(definition.find("context.gm_9[index_offset]"), std::string::npos);
+}
+
+void GenerateSimtBroadcastPairDefinition(int32_t second_extent, std::string &definition) {
+  SimtCodegenContext context;
+  ILTestGraph g("simt_broadcast_pair", 2, 8, 2, 8);
+  BuildSimtPostReduceGraph(g);
+  const auto reduce = g.graph.FindNode("reduce");
+  ASSERT_NE(reduce, nullptr);
+  ASSERT_EQ(af::GraphUtils::IsolateNodeOneIO(reduce), af::SUCCESS);
+  ASSERT_EQ(af::GraphUtils::RemoveNodeWithoutRelink(af::AscGraphUtils::GetComputeGraph(g.graph), reduce), af::SUCCESS);
+  const auto first_load = g.graph.FindNode("addend_load");
+  ASSERT_NE(first_load, nullptr);
+  first_load->outputs[0].attr.repeats = {af::ops::One, g.s3};
+  first_load->outputs[0].attr.strides = {af::ops::Zero, af::ops::One};
+
+  Data extra("extra", g.graph);
+  extra.ir_attr.SetIndex(3);
+  extra.y.dtype = af::DT_FLOAT16;
+  g.graph.FindNode("extra")->outputs[0].attr.mem.tensor_id = 41;
+  Load second_load("second_bias_load");
+  g.graph.AddNode(second_load);
+  second_load.x = extra.y;
+  second_load.y.dtype = af::DT_FLOAT16;
+  second_load.attr.sched.axis = {g.z2.id, g.z3.id};
+  *second_load.y.axis = {g.z2.id, g.z3.id};
+  *second_load.y.repeats = {af::ops::One, af::Symbol(second_extent)};
+  *second_load.y.strides = {af::ops::Zero, af::ops::One};
+  const auto second_node = g.graph.FindNode("second_bias_load");
+  ASSERT_NE(second_node, nullptr);
+  second_node->outputs[0].attr.mem.tensor_id = 51;
+  ASSERT_EQ(SetTemplateRole(second_node, TemplateRole::kSimtDirectGmBoundary), af::SUCCESS);
+
+  Add add("add_second_bias");
+  g.graph.AddNode(add);
+  const auto add_node = g.graph.FindNode("add_second_bias");
+  const auto first_add = g.graph.FindNode("output_transform");
+  const auto store = g.graph.FindNode("store");
+  ASSERT_NE(add_node, nullptr);
+  ASSERT_NE(first_add, nullptr);
+  ASSERT_NE(store, nullptr);
+  add.y.dtype = af::DT_FLOAT16;
+  add.attr.sched.axis = first_add->attr.sched.axis;
+  *add.y.axis = first_add->outputs[0].attr.axis;
+  *add.y.repeats = first_add->outputs[0].attr.repeats;
+  *add.y.strides = first_add->outputs[0].attr.strides;
+  add_node->outputs[0].attr.mem.tensor_id = 52;
+  ASSERT_EQ(SetTemplateRole(add_node, TemplateRole::kSimtInlineTransform), af::SUCCESS);
+  ASSERT_EQ(af::GraphUtils::ReplaceEdgeSrc(first_add->GetOutDataAnchor(0), store->GetInDataAnchor(0),
+                                           add_node->GetOutDataAnchor(0)),
+            af::SUCCESS);
+  ASSERT_EQ(af::GraphUtils::AddEdge(first_add->GetOutDataAnchor(0), add_node->GetInDataAnchor(0)), af::SUCCESS);
+  ASSERT_EQ(af::GraphUtils::AddEdge(second_node->GetOutDataAnchor(0), add_node->GetInDataAnchor(1)), af::SUCCESS);
+  ASSERT_EQ(af::AscGraphUtils::GetComputeGraph(g.graph)->TopologicalSorting(), af::SUCCESS);
+  GenerateSimtPostReduceFuncDefinitionFromGraph(g, definition);
+}
+
+TEST(IndirectLoadApiCallTest, ReusesBroadcastCoordinatesAcrossLoads) {
+  std::string definition;
+  GenerateSimtBroadcastPairDefinition(8, definition);
+  EXPECT_NE(definition.find("context.gm_9[index_coord_0]"), std::string::npos);
+  EXPECT_NE(definition.find("context.gm_51[index_coord_0]"), std::string::npos);
+  const auto coordinate = definition.find("output_index % 8");
+  ASSERT_NE(coordinate, std::string::npos);
+  EXPECT_EQ(definition.find("output_index % 8", coordinate + 1), std::string::npos);
+  EXPECT_EQ(definition.find("index_coord_1"), std::string::npos);
+}
+
+TEST(IndirectLoadApiCallTest, KeepsDistinctPhysicalExtentsInBroadcastCoordinates) {
+  std::string definition;
+  GenerateSimtBroadcastPairDefinition(4, definition);
+  EXPECT_NE(definition.find("output_index % 8"), std::string::npos);
+  EXPECT_NE(definition.find("output_index % 4"), std::string::npos);
+  EXPECT_NE(definition.find("context.gm_9[index_coord_0]"), std::string::npos);
+  EXPECT_NE(definition.find("context.gm_51[index_coord_1]"), std::string::npos);
 }
 
 TEST(IndirectLoadApiCallTest, GenerateSimtOutputUsesZeroOffsetForScalarLoadView) {
@@ -1263,7 +1435,7 @@ TEST_F(IndirectLoadConstructFromNodesTest, ConnectsRedirectedSimtPostReduceWithP
 
   std::string generated;
   ASSERT_EQ(kernel.root_loop.Generate(kernel.tiler, kernel.tpipe, generated), af::SUCCESS);
-  EXPECT_NE(generated.find("IndirectLoadSimtMulti"), std::string::npos);
+  EXPECT_NE(generated.find("AscendC::IndirectLoadSimt<"), std::string::npos);
   EXPECT_NE(generated.find("global_10.GetPhyAddr()"), std::string::npos);
 }
 
@@ -1319,7 +1491,7 @@ TEST_F(IndirectLoadConstructFromNodesTest, GeneratesSimtMultiOutputCall) {
   Kernel kernel("simt_multi_output_call");
   std::string generated;
   ASSERT_EQ(ParseGraphAndGenerateLoop(g, {"x", "idx"}, kernel, generated, {"y", "second_y"}), af::SUCCESS);
-  EXPECT_NE(generated.find("IndirectLoadSimtMulti"), std::string::npos);
+  EXPECT_NE(generated.find("AscendC::IndirectLoadSimt<"), std::string::npos);
   EXPECT_NE(generated.find("OutputTargets"), std::string::npos);
   EXPECT_NE(generated.find("global_2.GetPhyAddr()"), std::string::npos);
   EXPECT_NE(generated.find("global_10.GetPhyAddr()"), std::string::npos);
@@ -1336,7 +1508,8 @@ TEST_F(IndirectLoadConstructFromNodesTest, GeneratesStaticPowerOfTwoPolicyWithUi
   Kernel kernel("simt_static_power_of_two");
   std::string generated;
   ASSERT_EQ(ParseGraphAndGenerateLoop(g, {"x", "idx"}, kernel, generated), af::SUCCESS);
-  EXPECT_NE(generated.find("IndirectLoadSimtStaticPowerOfTwoPolicy<uint32_t, 1ULL, 8ULL, 1ULL, 8ULL>"),
+  EXPECT_NE(generated.find("IndirectLoadSimtCase>(0), uint32_t, 2, 1, 1ULL, 8ULL, 1ULL, 8ULL"), std::string::npos);
+  EXPECT_NE(generated.find("IndirectLoadSimtParams<IndirectLoadSimtCase> indirect_load_simt_params{}"),
             std::string::npos);
 }
 
@@ -1351,8 +1524,8 @@ TEST_F(IndirectLoadConstructFromNodesTest, GeneratesStaticInnerPolicyForLastAxis
   Kernel kernel("simt_static_inner");
   std::string generated;
   ASSERT_EQ(ParseGraphAndGenerateLoop(g, {"x", "idx"}, kernel, generated), af::SUCCESS);
-  EXPECT_NE(generated.find("IndirectLoadSimtStaticInnerPolicy<uint32_t, 1ULL, 1ULL, 7ULL>"), std::string::npos);
-  EXPECT_NE(generated.find(", 7);"), std::string::npos);
+  EXPECT_NE(generated.find("IndirectLoadSimtCase>(1), uint32_t, 2, 1, 1ULL, 7ULL, 1ULL, 7ULL"), std::string::npos);
+  EXPECT_NE(generated.find("indirect_load_simt_params{static_cast<uint32_t>(7)}"), std::string::npos);
 }
 
 TEST_F(IndirectLoadConstructFromNodesTest, GeneratesSimtPostReduceCallWithUbOutput) {

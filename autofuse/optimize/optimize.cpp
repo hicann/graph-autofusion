@@ -30,6 +30,7 @@
 #include "common_utils.h"
 #include "node_utils.h"
 #include "optimize/graph_pass/pass_runner_handler.h"
+#include "optimize/graph_pass/cast_reorder_pass.h"
 #include "graph/symbolizer/symbolic_utils.h"
 #include "optimize/graph_completeness/dtype_consistency.h"
 #include "pre_process/pre_process.h"
@@ -950,6 +951,11 @@ Status Optimizer::OptimizeForHintGraph(af::AscGraph &hint_graph,
   // dtype 兜底处理：针对算子实际支持的 dtype 与注册不一致的情况，插入必要的 Cast
   GE_CHK_STATUS_RET(DtypeConsistency::EnsureDtypeConsistency(optimize_graph), "Failed to ensure dtype consistency");
   ascir::utils::DumpGraph(optimize_graph, "AfterDtypeConsistency");
+
+  // 重排 Cast 和 Transpose,
+  // 针对GE前端的临时处理，后续如果和Inductor的升精度流程归一，统一放在schedule流程中，该pass可以删除
+  GE_CHK_STATUS_RET(SwapCastWithPrecisionAgnosticOpsPass::Run(optimize_graph), "Failed to reorder Cast and Transpose");
+  ascir::utils::DumpGraph(optimize_graph, "AfterSwapCastWithPrecisionAgnosticOps");
 
   GE_CHK_STATUS_RET(GraphPass(optimize_graph), "Run graph passes failed");
 

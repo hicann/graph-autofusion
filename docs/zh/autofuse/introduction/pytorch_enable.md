@@ -44,6 +44,18 @@ def test_add_ge(x, y, z):
     return torch.ge(torch.add(x, y), z)
 ```
 
+此外，还可以通过设置环境变量 `TORCHINDUCTOR_NPU_BACKEND` 启用 AutoFuse：
+
+```bash
+export TORCHINDUCTOR_NPU_BACKEND="ascendc"
+```
+
+设置该环境变量后，直接使用 `torch.compile` 编译模型即可，无需再通过 `options` 指定后端：
+
+```python
+model = torch.compile(model)
+```
+
 ## 示例代码
 
 以下以 `add + ge` 算子融合为例，展示完整的示例代码。示例使用形状为 `[128, 50]`、数据类型为 `float32` 的输入，在 NPU 上执行 100 次推理，并内置 NPU Profiling。执行后会生成 `profiling` 目录，便于查看融合结果和性能数据。

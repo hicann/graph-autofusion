@@ -31,12 +31,16 @@ class UnAlignmentStrategy : public BaseAlignmentStrategy {
   AlignmentType GetDefaultAlignmentType() override;
   af::Status SetAlignInfoForTailBrcNodes(AlignmentType aligned_type, af::AscNode *node,
                                          std::set<af::Node *> &visited_nodes, std::queue<af::Node *> &node_queue);
-  static af::Status GetCurrentNodeContinuousTailAxisNum(const af::AscNodePtr &node, uint32_t &continuous_tail_axis_num);
-  static af::Status GetNodeContinuousTailAxisNumByStore(const af::AscNodePtr &node, uint32_t &continuous_tail_axis_num);
-  static af::Status GetNodeContinuousTailAxisNumByLoad(const af::AscNodePtr &node, uint32_t &continuous_tail_axis_num);
+  static af::Status GetCurrentNodeContinuousTailAxisNum(const af::AscNodePtr &node, uint32_t &continuous_tail_axis_num,
+                                                        uint32_t &discontinuous_axis_num);
+  static af::Status GetNodeContinuousTailAxisNumByStore(const af::AscNodePtr &node, uint32_t &continuous_tail_axis_num,
+                                                        uint32_t &discontinuous_axis_num);
+  static af::Status GetNodeContinuousTailAxisNumByLoad(const af::AscNodePtr &node, uint32_t &continuous_tail_axis_num,
+                                                       uint32_t &discontinuous_axis_num);
   static af::Status CollectTransposePreNodes(const af::AscGraph &graph, std::set<af::AscNodePtr> &transpose_pre_nodes);
   static af::Status UpdateOutputVectorizedStrides(const af::AscNodePtr &node, uint32_t continuous_tail_axis_num,
                                                   uint32_t align_width);
+  static af::Status ModifyIndirectLoadVectorizedStrides(ascir::ImplGraph &impl_graph);
 };
 
 Status GenLoadToGenNddmaNode(const af::AscNodePtr &node_load);

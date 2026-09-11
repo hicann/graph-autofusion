@@ -44,6 +44,18 @@ def test_add_ge(x, y, z):
     return torch.ge(torch.add(x, y), z)
 ```
 
+Alternatively, set the environment variable `TORCHINDUCTOR_NPU_BACKEND` to enable AutoFuse:
+
+```bash
+export TORCHINDUCTOR_NPU_BACKEND="ascendc"
+```
+
+With this environment variable set, compile the model directly with `torch.compile`, without specifying the backend in `options`:
+
+```python
+model = torch.compile(model)
+```
+
 ## Example Code
 
 The following example demonstrates `add + ge` operator fusion. It uses `float32` inputs with shape `[128, 50]`, performs 100 inference runs on the NPU, and includes NPU Profiling. A `profiling` directory is generated after execution for inspecting fusion results and performance data.

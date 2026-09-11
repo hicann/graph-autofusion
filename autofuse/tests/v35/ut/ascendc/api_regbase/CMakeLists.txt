@@ -17,6 +17,9 @@ add_library(test_regbase_ascendc OBJECT
     ./test_add.cpp
     ./test_airy_ai.cpp
     ./test_bitwise_and.cpp
+    ./test_bitwise_not.cpp
+    ./test_bitwise_or.cpp
+    ./test_bitwise_xor.cpp
     ./test_rshift.cpp
     ./test_sin.cpp
     ./test_pow.cpp
@@ -69,6 +72,7 @@ add_library(test_regbase_ascendc OBJECT
     ./test_log_ndtr.cpp
     ./test_nextafter.cpp
     ./test_i0.cpp
+    ./test_i1.cpp
     ./test_hermite_polynomial_h.cpp
     ./test_hermite_polynomial_he.cpp
     ./test_hypot.cpp

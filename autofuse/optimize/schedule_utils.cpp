@@ -46,21 +46,21 @@ bool IsMulConsumerStruct(const af::NodePtr &node) {
   return false;
 }
 
-Status FindNodeSequence(af::Node *start_node, std::unordered_set<af::Node *> &reduce_sequences) {
+Status CollectPostReduceNodes(af::Node *start_node, std::unordered_set<af::Node *> &post_reduce_nodes) {
   GE_ASSERT_NOTNULL(start_node);
-  if (reduce_sequences.count(start_node) > 0UL) {
+  if (post_reduce_nodes.count(start_node) > 0UL) {
     return af::SUCCESS;
   }
   std::queue<af::Node *> node_queue;
   node_queue.emplace(start_node);
-  reduce_sequences.emplace(start_node);
+  post_reduce_nodes.emplace(start_node);
   while (!node_queue.empty()) {
     auto node = node_queue.front();
     node_queue.pop();
     for (auto &out_node : node->GetOutDataNodes()) {
       GE_ASSERT_NOTNULL(out_node);
-      if (reduce_sequences.count(out_node.get()) == 0UL) {
-        reduce_sequences.emplace(out_node.get());
+      if (post_reduce_nodes.count(out_node.get()) == 0UL) {
+        post_reduce_nodes.emplace(out_node.get());
         node_queue.emplace(out_node.get());
       }
     }
@@ -92,6 +92,66 @@ bool IsNeedFixTopo(const af::AscGraph &graph, bool use_rdfs_v2) {
   }
   GELOGD("Skip fix topo: no reduce multi-consumer found in graph[%s].", graph.GetName().c_str());
   return false;
+}
+
+// BuildLoopGroups的扩散种子：记录节点、loop_axis与发现该种子的轮次（即当时正在填充的分组编号）
+struct LoopGroupSeed {
+  af::AscNode *node;
+  int64_t loop_axis;
+  size_t round;
+};
+
+// 按当前拓扑序返回图中第一个reduce节点，不存在时返回nullptr
+af::AscNode *FindFirstReduce(const af::AscGraph &graph) {
+  for (const auto &node : graph.GetAllNodes()) {
+    if (ScheduleUtils::IsReduce(node)) {
+      return node.get();
+    }
+  }
+  return nullptr;
+}
+
+// 将一组邻接节点编入group_id分组：loop_axis与组轴相同或为-1的节点入组并入fill_queue继续扩散
+// （-1节点按当前组的loop_axis参与排序），不同轴有效节点作为新种子入seed_queue并记录发现轮次
+template <typename NodeContainer>
+Status SpreadLoopGroupNeighbors(const NodeContainer &neighbors, const int64_t group_axis, const size_t group_id,
+                                std::vector<LoopGroup> &loop_groups,
+                                std::unordered_map<af::Node *, size_t> &node_to_group,
+                                std::queue<af::AscNode *> &fill_queue, std::queue<LoopGroupSeed> &seed_queue) {
+  for (const auto &next_node : neighbors) {
+    auto next_asc_node = std::dynamic_pointer_cast<af::AscNode>(next_node);
+    GE_ASSERT_NOTNULL(next_asc_node);
+    if (node_to_group.count(next_asc_node.get()) > 0UL) {
+      continue;  // 已编组的节点不再处理
+    }
+    const int64_t next_axis = next_asc_node->attr.sched.loop_axis;
+    if ((next_axis == group_axis) || (next_axis == af::kIdNone)) {
+      node_to_group.emplace(next_asc_node.get(), group_id);
+      loop_groups[group_id].nodes.emplace_back(next_asc_node.get());
+      fill_queue.emplace(next_asc_node.get());
+    } else {
+      seed_queue.emplace(LoopGroupSeed{next_asc_node.get(), next_axis, group_id});  // 不同轴边界节点作为新组种子
+    }
+  }
+  return af::SUCCESS;
+}
+
+// 从种子沿输入/输出方向BFS填充group_id分组，直至无新的同轴或-1邻接节点可吸收
+Status FillLoopGroupFromSeed(const LoopGroupSeed &seed, const size_t group_id, std::vector<LoopGroup> &loop_groups,
+                             std::unordered_map<af::Node *, size_t> &node_to_group,
+                             std::queue<LoopGroupSeed> &seed_queue) {
+  std::queue<af::AscNode *> fill_queue{{seed.node}};  // 当前组内待向输入/输出方向扩散的节点
+  while (!fill_queue.empty()) {
+    af::AscNode *cur = fill_queue.front();
+    fill_queue.pop();
+    // 向输出方向扩散
+    GE_ASSERT_SUCCESS(SpreadLoopGroupNeighbors(cur->GetOutDataNodes(), seed.loop_axis, group_id, loop_groups,
+                                               node_to_group, fill_queue, seed_queue));
+    // 向输入方向扩散
+    GE_ASSERT_SUCCESS(SpreadLoopGroupNeighbors(cur->GetInDataNodes(), seed.loop_axis, group_id, loop_groups,
+                                               node_to_group, fill_queue, seed_queue));
+  }
+  return af::SUCCESS;
 }
 }  // namespace
 
@@ -349,6 +409,73 @@ bool ScheduleUtils::IsTailAxisAlignedBy(const af::AscNodePtr &node, const uint32
   return GetTailAxisDataSize(node, size) && size % align_bytes == 0;
 }
 
+// 判断图是否满足按循环轴分组的前置条件，成立条件：
+// 1. 所有reduce节点的loop_axis均已赋值（存在未赋值说明尚未经过AutoScheduler，直接不成立）；
+// 2. 全图有效loop_axis种类数 > 1（-1不计入，单一循环轴无需分组）。
+// 其中reduce节点数量 > 1 的检查不是必须条件，与条件2重复，保留只是为了控制影响范围。
+bool ScheduleUtils::IsNeedLoopGrouping(const af::AscGraph &graph) {
+  size_t reduce_cnt = 0U;
+  std::unordered_set<int64_t> unique_loop_axes;
+  for (const auto &node : graph.GetAllNodes()) {
+    const int64_t loop_axis = node->attr.sched.loop_axis;
+    if (loop_axis != af::kIdNone) {
+      unique_loop_axes.insert(loop_axis);
+    }
+    if (!IsReduce(node)) {
+      continue;
+    }
+    ++reduce_cnt;
+    if (loop_axis == af::kIdNone) {
+      // 存在loop_axis未赋值的reduce节点，说明尚未经过AutoScheduler，不进入该方案
+      return false;
+    }
+  }
+  // reduce节点数量>1，且全图有效loop_axis种类数>1（-1不计入），才需要按循环轴分组
+  return (reduce_cnt > 1U) && (unique_loop_axes.size() > 1U);
+}
+
+// 两级BFS编组：外层seed_queue按发现顺序处理边界种子，种子记录发现轮次（即当时正在填充的分组编号）
+// 与loop_axis；未编组种子出队时，若同轮次中已创建相同loop_axis的分组则并入该分组（不新增编号），
+// 否则开创一个新分组（编号即loop_groups下标）；内层FillLoopGroupFromSeed从种子沿输入/输出方向扩散，
+// 吸收loop_axis与本组相同或为-1的邻接节点（-1节点并入当前组并继续扩散，不再阻断）。
+// 每个节点至多编组一次、每条边至多访问两次，整体复杂度O(V+E)。
+Status ScheduleUtils::BuildLoopGroups(const af::AscGraph &graph, std::vector<LoopGroup> &loop_groups,
+                                      std::unordered_map<af::Node *, size_t> &node_to_group) {
+  loop_groups.clear();
+  node_to_group.clear();
+  af::AscNode *first_reduce = FindFirstReduce(graph);
+  GE_ASSERT_NOTNULL(first_reduce);
+  GE_ASSERT_TRUE(first_reduce->attr.sched.loop_axis != af::kIdNone, "The loop_axis of reduce node[%s] is not assigned.",
+                 first_reduce->GetNamePtr());
+
+  // 同轮次同loop_axis的种子归入同一分组：(发现轮次, loop_axis) -> 分组编号
+  std::map<std::pair<size_t, int64_t>, size_t> seed_key_to_group;
+  std::queue<LoopGroupSeed> seed_queue{{LoopGroupSeed{first_reduce, first_reduce->attr.sched.loop_axis, 0U}}};
+  while (!seed_queue.empty()) {
+    const LoopGroupSeed seed = seed_queue.front();
+    seed_queue.pop();
+    if (node_to_group.count(seed.node) > 0UL) {
+      continue;  // 已编组的节点不再处理
+    }
+    size_t group_id = loop_groups.size();
+    const auto seed_key = std::make_pair(seed.round, seed.loop_axis);
+    const auto existing_group = seed_key_to_group.find(seed_key);
+    if (existing_group == seed_key_to_group.cend()) {
+      loop_groups.emplace_back(LoopGroup{seed.loop_axis, {seed.node}});
+      seed_key_to_group.emplace(seed_key, group_id);
+    } else {
+      group_id = existing_group->second;  // 同轮次同轴的种子并入已建分组，不新增编号
+      loop_groups[group_id].nodes.emplace_back(seed.node);
+    }
+    node_to_group.emplace(seed.node, group_id);
+    GE_ASSERT_SUCCESS(FillLoopGroupFromSeed(seed, group_id, loop_groups, node_to_group, seed_queue));
+    GELOGD("Build loop group[%zu]: loop_axis[%ld], node cnt[%zu].", group_id, seed.loop_axis,
+           loop_groups[group_id].nodes.size());
+  }
+  GELOGD("Build %zu loop groups in graph[%s].", loop_groups.size(), graph.GetName().c_str());
+  return af::SUCCESS;
+}
+
 Status ScheduleUtils::TopologicalSorting(af::AscGraph &graph, bool use_rdfs_v2) {
   auto compute_graph = af::AscGraphUtils::GetComputeGraph(graph);
   GE_ASSERT_NOTNULL(compute_graph);
@@ -360,19 +487,39 @@ Status ScheduleUtils::TopologicalSorting(af::AscGraph &graph, bool use_rdfs_v2) 
     return af::SUCCESS;
   }
 
+  if (IsNeedLoopGrouping(graph)) {
+    GELOGI("Graph [%s] will be sorted with loop group rule.", graph.GetName().c_str());
+    std::vector<LoopGroup> loop_groups;
+    std::unordered_map<af::Node *, size_t> node_to_group;
+    GE_ASSERT_SUCCESS(BuildLoopGroups(graph, loop_groups, node_to_group));
+    const auto func = [&node_to_group](const af::NodePtr &node1, const af::NodePtr &node2) -> bool {
+      auto it1 = node_to_group.find(node1.get());
+      auto it2 = node_to_group.find(node2.get());
+      const bool both_grouped = (it1 != node_to_group.cend()) && (it2 != node_to_group.cend());
+      // 组间按for编号从小到大排（未入组节点不参与组序，退化为按topo序比较）
+      if (both_grouped && it1->second != it2->second) {
+        return it1->second < it2->second;
+      }
+      return node1->GetOpDescBarePtr()->GetId() < node2->GetOpDescBarePtr()->GetId();  // 其余按topo序
+    };
+    compute_graph->TopologicalSorting(func);
+    return af::SUCCESS;
+  }
+
   GELOGI("Graph [%s] will be sorted with a specific rule.", graph.GetName().c_str());
-  std::unordered_set<af::Node *> reduce_sequences;
+  std::unordered_set<af::Node *> post_reduce_nodes;
   for (const auto &node : graph.GetAllNodes()) {
     if (IsReduce(node)) {
-      GE_ASSERT_SUCCESS(FindNodeSequence(node.get(), reduce_sequences));
+      GE_ASSERT_SUCCESS(CollectPostReduceNodes(node.get(), post_reduce_nodes));
+      break;
     }
   }
-  const auto func = [&reduce_sequences](const af::NodePtr &node1, const af::NodePtr &node2) -> bool {
-    bool is_node1_in_reduce_seq = reduce_sequences.find(node1.get()) != reduce_sequences.end();
-    bool is_node2_in_reduce_seq = reduce_sequences.find(node2.get()) != reduce_sequences.end();
-    if (is_node1_in_reduce_seq && !is_node2_in_reduce_seq) {
+  const auto func = [&post_reduce_nodes](const af::NodePtr &node1, const af::NodePtr &node2) -> bool {
+    bool is_node1_post_reduce = post_reduce_nodes.find(node1.get()) != post_reduce_nodes.end();
+    bool is_node2_post_reduce = post_reduce_nodes.find(node2.get()) != post_reduce_nodes.end();
+    if (is_node1_post_reduce && !is_node2_post_reduce) {
       return false;
-    } else if (!is_node1_in_reduce_seq && is_node2_in_reduce_seq) {
+    } else if (!is_node1_post_reduce && is_node2_post_reduce) {
       return true;
     } else {
       return node1->GetOpDescBarePtr()->GetId() < node2->GetOpDescBarePtr()->GetId();

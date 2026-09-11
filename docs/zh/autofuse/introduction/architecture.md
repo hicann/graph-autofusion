@@ -38,7 +38,7 @@ AutoFuse 选择 **JIT 自动融合** 方案：优先考虑**泛化能力**，通
 
 ## 关键技术方案
 
-AutoFuse 按计算特征将网络算子分为两类：一类是 Elemwise、Broadcast 和 View 类（Transpose、Slice、Split）等基础计算类型；另一类是 Reduce、Concat、Gather 和 MatMul 等在基础计算类型上扩展融合能力的计算类型。这意味着，各类扩展融合能力都需要支持与基础计算类型进行融合。
+AutoFuse 按计算特征将网络算子分为两类：一类是 Elemwise、Broadcast 和 View 类（Transpose、Slice、Split）等基础计算类型；另一类是 Reduce、Concat 和 MatMul 等在基础计算类型上扩展融合能力的计算类型。这意味着，各类扩展融合能力都需要支持与基础计算类型进行融合。
 
 ### 支持的算子类型
 
@@ -52,23 +52,16 @@ AutoFuse 按计算特征将网络算子分为两类：一类是 Elemwise、Broad
 | **Reduce**    | 规约计算，沿指定轴对多个元素进行聚合                                              | Vector     | ReduceSum、ReduceMax、ReduceMin |
 | **泛 Norm**   | 由同轴 Reduce、Broadcast 和 Elemwise 等计算组合形成的归一化计算模式，并非单一算子 | Vector     | LayerNorm、RMSNorm              |
 | **Concat**    | 拼接计算，沿指定轴将多个 Tensor 拼接为一个 Tensor                                 | MTE/Vector | Concat                          |
-| **Gather**    | 索引选取，按索引从输入 Tensor 中选取元素                                          | Vector     | Gather                          |
-| **MatMul**    | 矩阵计算，包括矩阵乘和卷积等                                                      | Cube       | MatMul、Conv2D                  |
+| **MatMul**    | 矩阵计算，包括矩阵乘和卷积等                                                      | Cube       | MatMul                          |
 
 ### 支持的融合能力
 
-AutoFuse 当前支持的主要融合能力及约束如下：
+AutoFuse 当前主要支持 VV 和 CV 两类融合：
 
-| 融合能力                                              | 约束说明                                                                                                                                                                                                                                   |
-| :---------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Elemwise / Broadcast**                        | 仅支持显式 Broadcast。                                                                                                                                                                                                                     |
-| **View 类**（Transpose、Slice、Split）           | Kernel 内支持任意数量，5 轴以内任意轴的 Transpose、Slice、Split、Elemwise 和 Broadcast 融合。                                                                                                                                               |
-| **Reduce / 泛 Norm** | 1. Reduce 融合（不论前向或后向）支持 Elemwise、Reduce、Slice，以及任意数量、任意轴的 Broadcast。<br>2. View 类算子中仅 Transpose 不支持融合。                                                                                             |
-| **Concat**                                      | 1. 前向融合仅支持 Elemwise、Broadcast 和 Slice。<br>2. 后向融合仅支持 Elemwise。<br>3. 静态 Shape 场景下，Concat 的输入数量不超过 64；输入过多可能导致编译时间过长。<br>4. 动态 Shape 场景下，若 Concat 轴及其后的轴存在动态轴，则不支持 Concat 融合。 |
-| **Gather**                                      | 1. Gather 前向融合支持 Elemwise 和 Broadcast。<br>2. Gather 后向融合支持任意数量的 Elemwise，以及单个置于末尾的 Reduce；G 轴须位于 R 轴外侧或与 R 轴重合。 |
-| **CV 融合**（Cube + Vector）                    | 1. 后向融合支持纯 Elemwise。<br>2. 对于二元 Elemwise，支持后融合 Broadcast：<br>&nbsp;&nbsp;&nbsp;&nbsp;1）Broadcast 的 B 轴须不同于 BatchMatMul 的 Batch 轴。<br>&nbsp;&nbsp;&nbsp;&nbsp;2）Broadcast 不位于 MatMul 的输出链路上。<br>3. 不支持前向融合。 |
-
-> **说明：** A 轴（Active Axis）指 Reduce 操作中保留下来的轴，即未被规约的轴；R 轴（Reduce Axis）指 Reduce 操作中被聚合的轴；G 轴（Gather Axis）指 Gather 操作中索引选取所沿的轴；B 轴（Broadcast Axis）指 Broadcast 操作中进行数据扩展的轴；Batch 轴（Batch Axis）指 BatchMatMul 中用于表示不同矩阵批次的轴。
+| 融合类型 | 可融合算子类型 |
+| :------- | :------------- |
+| **VV 融合**（Vector + Vector） | 支持 Elemwise、Broadcast、View（包括 Transpose、Slice 和 Split）、Reduce、Concat 等 Vector 类算子的融合。 |
+| **CV 融合**（Cube + Vector） | 支持 Cube 类算子与 Vector 类算子的融合。 |
 
 ## 前端适配
 
@@ -147,5 +140,5 @@ graph-autofusion/
 
 ## 相关资料
 
-- [AutoFuse 概述](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/programug/graphdevg/autofuse_1_0000.html)
+- [AutoFuse 概述](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/programug/graphdevg/docs/zh/user_guides/graph_dev/autofuse/overview.md)
 - [Autofuse 简介与快速上手](../../../../autofuse/README.md)

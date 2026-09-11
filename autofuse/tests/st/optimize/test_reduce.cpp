@@ -355,6 +355,26 @@ AscGraph ConstructNormStruct4Elewise4ReduceMultipleCitationsMulOut(const std::st
       .Build();
 }
 
+// 双reduce水平融合 + 多引用结构（load0同输入喂abs0/abs1两路，两路reduce规约轴相同）：
+// 走全流程Optimize验证loop group排序路径（BufQueAllocator在AutoScheduler后以v2模式重排序）
+AscGraph ConstructTwoReduceSameAxisHorizontalFusion(const std::string &name) {
+  return AscGraphBuilder(name)
+      .Loops({Sym(128), Sym(64)})
+      .Data("data0", 0)
+      .Load("load0", "data0")
+      .Abs("abs0", "load0")
+      .Sum("sum0", "abs0", {1})
+      .Relu("relu0", "sum0")
+      .Store("store0", "relu0")
+      .Output("output0", "store0", 0, af::DT_FLOAT)
+      .Abs("abs1", "load0")
+      .Sum("sum1", "abs1", {1})
+      .Relu("relu1", "sum1")
+      .Store("store1", "relu1")
+      .Output("output1", "store1", 1, af::DT_FLOAT)
+      .Build();
+}
+
 namespace optimize {
 class OptimizerReduceSt : public ::testing::Test {
  protected:
@@ -573,5 +593,19 @@ TEST_F(OptimizerReduceSt, TestReduce_Three_Elewise_Store_Multi_Citation_Multi_Ou
   optimizer.Optimize(graph, fused_scheduled_result);
   ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results.size(), 1UL);
   ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results[0UL].size(), 2UL);
+}
+
+// 双reduce水平融合（同输入不同输出、规约轴相同）场景走全流程Optimize，
+// 验证loop group排序分支与调度/内存分配流程兼容
+TEST_F(OptimizerReduceSt, TestReduce_LoopGroupSortTwoReduceSameAxis) {
+  auto graph = ConstructTwoReduceSameAxisHorizontalFusion("reduce_loop_group_sort");
+  ::ascir::FusedScheduledResult fused_scheduled_result;
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  Status res = optimizer.Optimize(graph, fused_scheduled_result);
+  EXPECT_EQ(res, af::SUCCESS);
+  ASSERT_EQ(fused_scheduled_result.node_idx_to_scheduled_results.size(), 1UL);
+  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results[0].empty());
+  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups.empty());
+  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs.empty());
 }
 }  // namespace optimize
