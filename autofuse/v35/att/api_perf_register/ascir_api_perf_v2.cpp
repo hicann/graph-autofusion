@@ -10,7 +10,6 @@
 #include "perf_param_v2.h"
 #include "nddma_model.h"
 #include "v35/att/api_perf_register/ascir_reduce_api_perf_v2.h"
-#include "v35/att/api_perf_register/ascendc_api_perf/broadcast_api_perf_v2.h"
 #include "v35/att/api_perf_register/ascendc_regbase_perf.h"
 #include "api_perf_register/api_perf_factory.h"
 #include "api_perf_register/ascendc_api_perf.h"
@@ -557,65 +556,6 @@ af::Status TransposeApi([[maybe_unused]] const std::vector<TensorShapeInfo> &inp
   GE_ASSERT_SUCCESS(ascendcperf_v2::TransposePerf(node_info, perf_res));
   return af::SUCCESS;
 }
-
-af::Status ValidateBroadcastBasic(const std::vector<TensorShapeInfo> &input_shapes,
-                                  const std::vector<TensorShapeInfo> &output_shapes) {
-  GE_ASSERT_TRUE(input_shapes.size() == 1U && output_shapes.size() == 1U,
-                 "Broadcast requires exactly one input and one output shape.");
-  GE_ASSERT_TRUE(!input_shapes[0].data_type.empty() && !output_shapes[0].data_type.empty(),
-                 "Broadcast input/output dtype is missing.");
-  return af::SUCCESS;
-}
-
-af::Status ValidateBroadcastShapes(const std::vector<TensorShapeInfo> &input_shapes,
-                                   const std::vector<TensorShapeInfo> &output_shapes, const NodeInfo &node) {
-  if (node.broadcast_node_params.is_scalar) {
-    GE_ASSERT_TRUE(node.broadcast_node_params.duplicate_count.IsValid(), "Broadcast scalar actual size is missing.");
-    return af::SUCCESS;
-  }
-  GE_ASSERT_TRUE(!output_shapes[0].dims.empty(), "Broadcast output shape is missing.");
-  GE_ASSERT_TRUE(!input_shapes[0].dims.empty());
-  GE_ASSERT_TRUE(input_shapes[0].dims.size() == output_shapes[0].dims.size(),
-                 "Broadcast input/output shape ranks are different.");
-  GE_ASSERT_TRUE(input_shapes[0].repeats.size() == input_shapes[0].dims.size(),
-                 "Broadcast input repeats length is invalid.");
-  return af::SUCCESS;
-}
-
-af::Status LegacyBroadcastPerf(const std::vector<TensorShapeInfo> &input_shapes,
-                               const std::vector<TensorShapeInfo> &output_shapes, const NodeInfo &node,
-                               PerfOutputInfo &perf_res) {
-  const auto legacy_perf = GetPerfFunc(kBroadcast);
-  GE_ASSERT_NOTNULL(legacy_perf, "Legacy Broadcast performance function is unavailable.");
-  return legacy_perf(input_shapes, output_shapes, node, perf_res);
-}
-
-af::Status BroadcastApiV2([[maybe_unused]] const std::vector<TensorShapeInfo> &input_shapes,
-                          [[maybe_unused]] const std::vector<TensorShapeInfo> &output_shapes, const NodeInfo &node,
-                          PerfOutputInfo &perf_res) {
-  GE_ASSERT_SUCCESS(ValidateBroadcastBasic(input_shapes, output_shapes));
-  if (!node.broadcast_node_params.valid ||
-      (!node.broadcast_node_params.is_scalar &&
-       (node.broadcast_node_params.src_shape.empty() || node.broadcast_node_params.dst_shape.empty()))) {
-    return LegacyBroadcastPerf(input_shapes, output_shapes, node, perf_res);
-  }
-  GE_ASSERT_SUCCESS(ValidateBroadcastShapes(input_shapes, output_shapes, node));
-  NodeDetail node_info;
-  GE_ASSERT_SUCCESS(SetNodeDetail(input_shapes, output_shapes, node_info));
-  node_info.broadcast_node_params = node.broadcast_node_params;
-  if (!input_shapes.empty()) {
-    node_info.repeats = input_shapes[0].repeats;
-  }
-  const auto new_status = ascendcperf_v2::BroadcastPerf(node_info, perf_res);
-  if (new_status == af::SUCCESS) {
-    return af::SUCCESS;
-  }
-  if (!ascendcperf_v2::IsBroadcastFallback(node_info)) {
-    return new_status;
-  }
-  // Only a classified unsupported implementation branch is delegated to the legacy model.
-  return LegacyBroadcastPerf(input_shapes, output_shapes, node, perf_res);
-}
 }  // namespace ascir_v2
 
 REGISTER_EVAL_FUNC_TAG(kStore, V2, ascir_v2::StoreApiV2);
@@ -659,7 +599,6 @@ REGISTER_EVAL_FUNC_TAG(kCast, V2, ascir_v2::CastApi);
 REGISTER_EVAL_FUNC_TAG(kSum, V2, ascir_reduce_v2::SumApi);
 REGISTER_EVAL_FUNC_TAG(kRemovePad, V2, ascir_v2::RemovePadApi);
 REGISTER_EVAL_FUNC_TAG(kWhere, V2, ascir_v2::WhereApi);
-REGISTER_EVAL_FUNC_TAG(kBroadcast, V2, ascir_v2::BroadcastApiV2);
 REGISTER_EVAL_FUNC_TAG(kPow, V2, ascir_v2::PowApi);
 REGISTER_EVAL_FUNC_TAG(kErf, V2, ascir_v2::ErfApi);
 REGISTER_EVAL_FUNC_TAG(kTanh, V2, ascir_v2::TanhApi);
@@ -684,8 +623,7 @@ ApiPerfRegister<ApiPerf> indirect_load_api_perf_v2(ApiPerfRegisterV2(kIndirectLo
                                                                      &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> abs_api_perf_v2(ApiPerfRegisterV2(kAbs, kAbs + "V2", nullptr, &perf_param_table_v2,
                                                            &tiling_schedule_config_table_v2));
-ApiPerfRegister<ApiPerf> broadcast_api_perf_v2(ApiPerfRegisterV2(kBroadcast, GetPerfFunc(kBroadcast + "V2"), nullptr,
-                                                                 &perf_param_table_v2,
+ApiPerfRegister<ApiPerf> broadcast_api_perf_v2(ApiPerfRegisterV2(kBroadcast, kBroadcast, nullptr, &perf_param_table_v2,
                                                                  &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> cast_api_perf_v2(ApiPerfRegisterV2(kCast, kCast + "V2", nullptr, &perf_param_table_v2,
                                                             &tiling_schedule_config_table_v2));

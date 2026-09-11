@@ -25,7 +25,6 @@ namespace {
 constexpr const char *kAscirNodeParams = "AscirNodeParams";
 constexpr const char *kVectorFunc = "VectorFunc";
 constexpr const char *kCast = "Cast";
-constexpr const char *kBroadcast = "Broadcast";
 
 bool IsCompareParamSupported(const std::string &api_name) {
   static const std::set<std::string> kCompareTypes = {"Ge", "Eq", "Ne", "Gt", "Le", "Lt"};
@@ -121,22 +120,6 @@ af::Status RegisterCastAscirNodeParams(const af::AscNodePtr &node) {
   params->api_name = node->GetType();
   params->status = ParamBuildStatus::kBuilt;
   params->specific_params = CastNodeParams{};
-  return RegisterAscirNodeParams(node, params);
-}
-
-af::Status RegisterBroadcastAscirNodeParams(const af::AscNodePtr &node) {
-  GE_ASSERT_NOTNULL(node);
-  const auto existing_params = GetAscirNodeParams(node);
-  if (existing_params != nullptr) {
-    const auto *broadcast_params = GetSpecificParams<BroadcastNodeParams>(*existing_params);
-    if (broadcast_params != nullptr && broadcast_params->valid) {
-      return af::SUCCESS;
-    }
-  }
-  auto params = std::make_shared<AscirNodeParams>();
-  params->api_name = node->GetType();
-  params->status = ParamBuildStatus::kBuilt;
-  params->specific_params = BroadcastNodeParams{};
   return RegisterAscirNodeParams(node, params);
 }
 
@@ -565,9 +548,6 @@ af::Status EnrichAscirNodeParams(const AscirParamSourceContext &source) {
   }
   if (source.node->GetType() == kCast) {
     return RegisterCastAscirNodeParams(source.node);
-  }
-  if (source.node->GetType() == kBroadcast) {
-    return RegisterBroadcastAscirNodeParams(source.node);
   }
   if (IsCompareParamSupported(source.node->GetType())) {
     return RegisterCompareAscirNodeParams(source.node);

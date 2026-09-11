@@ -12,7 +12,6 @@
 #include "node_utils_ex.h"
 #include "graph_utils.h"
 #include "ascendc_ir.h"
-#include "ascir_node_param/ascir_node_param.h"
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
 #include "utils/api_call_factory.h"
@@ -557,28 +556,26 @@ TEST(CodegenKernel, ConstantBrcStore) {
   EXPECT_EQ(result, std::string{"Duplicate(local_1[0], scalar_0, local_1_actual_size);\n"});
 }
 
-TEST(CodegenKernel, BroadcastRegApiCall_BrcAlign_ABAWithTranspose) {
+TEST(CodegenKernel, BroadcastRegApiCall_BrcAlign_ABA) {
   af::AscGraph graph("test_graph");
 
   auto s0 = graph.CreateSizeVar(2);
   auto s1 = graph.CreateSizeVar(2);
-  auto s2 = graph.CreateSizeVar(8);
-  auto z0 = graph.CreateAxis("z0", af::Axis::kAxisTypeTileInner, s0, {}, -1);
-  auto z1 = graph.CreateAxis("z1", af::Axis::kAxisTypeTileInner, s1, {}, -1);
-  auto z2 = graph.CreateAxis("z2", af::Axis::kAxisTypeTileInner, s2, {}, -1);
+  auto s2 = graph.CreateSizeVar(7);
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  auto z2 = graph.CreateAxis("z2", s2);
 
   Data x_op("x", graph);
   Load load_op("load");
   af::ascir_op::Broadcast broadcast_op("broadcast");
-  af::ascir_op::Transpose transpose_op("transpose");
   graph.AddNode(load_op);
   graph.AddNode(broadcast_op);
-  graph.AddNode(transpose_op);
 
   load_op.x = x_op.y;
   load_op.attr.sched.axis = {z0.id, z1.id, z2.id};
   *load_op.y.axis = {z0.id, z1.id, z2.id};
-  *load_op.y.repeats = {s0, One, s2};               // (2, 1, 8)
+  *load_op.y.repeats = {s0, One, s2};               // (2, 1, 7)
   *load_op.y.strides = {af::Symbol(8), Zero, One};  // (8, 0, 1)
   broadcast_op.x = load_op.y;
   *broadcast_op.y.axis = {z0.id, z1.id, z2.id};
@@ -636,14 +633,6 @@ TEST(CodegenKernel, BroadcastRegApiCall_BrcAlign_ABAWithTranspose) {
 
   std::string result;
   call.Generate(tpipe, vector<af::AxisId>{}, result);
-  auto params = ascir_param::GetAscirNodeParams(broadcast);
-  ASSERT_NE(params, nullptr);
-  const auto *broadcast_params = ascir_param::GetSpecificParams<ascir_param::BroadcastNodeParams>(*params);
-  ASSERT_NE(broadcast_params, nullptr);
-  ASSERT_EQ(broadcast_params->dst_shape.size(), 3UL);
-  ASSERT_EQ(broadcast_params->src_shape.size(), 3UL);
-  EXPECT_EQ(broadcast_params->dst_shape.back().role, ascir_param::ParamExprRole::kActualSize);
-  EXPECT_EQ(broadcast_params->src_shape.back().role, ascir_param::ParamExprRole::kActualSize);
   EXPECT_EQ(result,
             "const uint32_t dst_shape_0_brc_to_1[3] = {static_cast<uint32_t>(2), static_cast<uint32_t>(2), "
             "static_cast<uint32_t>(8)};\n"

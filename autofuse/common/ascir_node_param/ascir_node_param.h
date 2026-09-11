@@ -81,16 +81,6 @@ struct CastNodeParams {
   std::vector<ge::Expression> input_strides;
 };
 
-struct BroadcastNodeParams {
-  bool valid{false};
-  bool is_scalar{false};
-  int32_t const_rank{-1};
-  ge::Expression duplicate_count{ge::Symbol(1U)};
-  ParamExprRole duplicate_count_role{ParamExprRole::kSemantic};
-  std::vector<ParamExprLeaf> dst_shape;
-  std::vector<ParamExprLeaf> src_shape;
-};
-
 struct CompareNodeParams {
   bool valid{false};
   bool is_scalar{false};
@@ -130,8 +120,8 @@ struct TransposeNodeParams {
 };
 
 using AnySpecificParams =
-    std::variant<std::monostate, ReduceNodeParams, VectorFuncNodeParams, CastNodeParams, BroadcastNodeParams,
-                 CompareNodeParams, WhereNodeParams, UnaryBitWidthChangeNodeParams, TransposeNodeParams>;
+    std::variant<std::monostate, ReduceNodeParams, VectorFuncNodeParams, CastNodeParams, CompareNodeParams,
+                 WhereNodeParams, UnaryBitWidthChangeNodeParams, TransposeNodeParams>;
 
 struct AscirNodeParams {
   // 扩展属性载荷版本，用于后续兼容。
