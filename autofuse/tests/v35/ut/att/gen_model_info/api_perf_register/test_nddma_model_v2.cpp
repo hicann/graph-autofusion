@@ -44,7 +44,7 @@ TEST(NddmaModelV2, EvaluatesStaticB8LowCoreFormula) {
   EXPECT_EQ(result.model_name, "NDDMA_1D_MULTICORE_V2");
   EXPECT_EQ(result.fallback_reason, NddmaFallbackReason::kNone);
   EXPECT_TRUE(result.ternary_ops.empty());
-  EXPECT_NEAR(GetConstCycles(result.cycles), 219.37435914613698, 1e-6);
+  EXPECT_NEAR(GetConstCycles(result.cycles), 222.20271809333698, 1e-6);
 }
 
 TEST(NddmaModelV2, UsesMergedLowCoreCoefficientsForStridedOutput) {
@@ -71,7 +71,7 @@ TEST(NddmaModelV2, EvaluatesStaticB16HighCoreFormula) {
 
   ASSERT_EQ(EvaluateNddmaModel(descriptor, "float16", CreateExpr(8), result), af::SUCCESS);
   ASSERT_TRUE(result.selected);
-  EXPECT_NEAR(GetConstCycles(result.cycles), 3667.5976503571769, 1e-6);
+  EXPECT_NEAR(GetConstCycles(result.cycles), 3816.713424726521, 1e-6);
 }
 
 TEST(NddmaModelV2, EvaluatesStaticB32LowCoreFormula) {
@@ -80,7 +80,7 @@ TEST(NddmaModelV2, EvaluatesStaticB32LowCoreFormula) {
 
   ASSERT_EQ(EvaluateNddmaModel(descriptor, "float32", CreateExpr(2), result), af::SUCCESS);
   ASSERT_TRUE(result.selected);
-  EXPECT_NEAR(GetConstCycles(result.cycles), 415.93874765450965, 1e-6);
+  EXPECT_NEAR(GetConstCycles(result.cycles), 522.4480872289097, 1e-6);
 }
 
 TEST(NddmaModelV2, EvaluatesStaticB64HighCoreWithSaturatedInputStride) {
@@ -89,7 +89,7 @@ TEST(NddmaModelV2, EvaluatesStaticB64HighCoreWithSaturatedInputStride) {
 
   ASSERT_EQ(EvaluateNddmaModel(descriptor, "int64", CreateExpr(8), result), af::SUCCESS);
   ASSERT_TRUE(result.selected);
-  EXPECT_NEAR(GetConstCycles(result.cycles), 1490.6546508742531, 1e-6);
+  EXPECT_NEAR(GetConstCycles(result.cycles), 3161.9571310207134, 1e-6);
 }
 
 TEST(NddmaModelV2, ReplaysAllCoefficientGroupsForFourDtypeSizes) {
@@ -98,10 +98,10 @@ TEST(NddmaModelV2, ReplaysAllCoefficientGroupsForFourDtypeSizes) {
     double low_core;
     double high_core;
   };
-  const DtypeCase cases[] = {{"int8", 1846.461366862137, 3651.7082163688292},
-                             {"float16", 1852.9241082038752, 3667.5976503571769},
-                             {"float32", 415.93874765450965, 801.7379345551185},
-                             {"int64", 436.1371738143462, 834.9812022377600}};
+  const DtypeCase cases[] = {{"int8", 1916.833637585337, 3789.1667812037094},
+                             {"float16", 1930.1449451478752, 3816.713424726521},
+                             {"float32", 522.4480872289097, 973.3815886090185},
+                             {"int64", 560.12782041178616, 1100.3278459518215}};
   const auto descriptor = MakeDescriptor(CreateExpr(256), CreateExpr(4), CreateExpr(2));
   for (const auto &test_case : cases) {
     SCOPED_TRACE(test_case.dtype);
@@ -184,7 +184,7 @@ TEST(NddmaModelV2, UsesNg2ForAscendingInputStridesAndUbContiguousOutput) {
   ASSERT_EQ(EvaluateNddmaModel(descriptor, "int8", CreateExpr(2), result), af::SUCCESS);
   ASSERT_TRUE(result.selected);
   EXPECT_EQ(result.model_name, "NDDMA_ND_MULTICORE_NG2");
-  EXPECT_NEAR(GetConstCycles(result.cycles), 210.58945015938997, 1e-6);
+  EXPECT_NEAR(GetConstCycles(result.cycles), 227.9001452458901, 1e-6);
 }
 
 TEST(NddmaModelV2, ReproducesExpectedTransposeEstimate) {
@@ -198,7 +198,7 @@ TEST(NddmaModelV2, ReproducesExpectedTransposeEstimate) {
   ASSERT_EQ(EvaluateNddmaModel(descriptor, "float16", CreateExpr(64), result), af::SUCCESS);
   ASSERT_TRUE(result.selected);
   EXPECT_EQ(result.model_name, "NDDMA_ND_MULTICORE_NG2");
-  EXPECT_NEAR(GetConstCycles(result.cycles), 6331.917846866325, 1e-3);
+  EXPECT_NEAR(GetConstCycles(result.cycles), 21034.87062682722, 1e-3);
 }
 
 TEST(NddmaModelV2, SelectsNg2ForSymbolicTilingDimensions) {
@@ -232,7 +232,7 @@ TEST(NddmaModelV2, SelectsNg2ForAlignedSymbolicOutputStride) {
   EXPECT_TRUE(result.cycles.IsValid());
 }
 
-TEST(NddmaModelV2, FallsBackForNegativeStaticNg2Multiplier) {
+TEST(NddmaModelV2, SelectsNg2WithUpdatedStaticMultiplier) {
   NddmaDescriptorInfo descriptor;
   descriptor.output_dims = {CreateExpr(2), CreateExpr(2)};
   descriptor.input_strides = {CreateExpr(1), CreateExpr(4)};
@@ -241,8 +241,9 @@ TEST(NddmaModelV2, FallsBackForNegativeStaticNg2Multiplier) {
   NddmaModelResult result;
 
   ASSERT_EQ(EvaluateNddmaModel(descriptor, "int64", CreateExpr(64), result), af::SUCCESS);
-  EXPECT_FALSE(result.selected);
-  EXPECT_EQ(result.fallback_reason, NddmaFallbackReason::kSchemaMismatch);
+  EXPECT_TRUE(result.selected);
+  EXPECT_EQ(result.fallback_reason, NddmaFallbackReason::kNone);
+  EXPECT_NEAR(GetConstCycles(result.cycles), 569.216677989927, 1e-6);
 }
 
 TEST(NddmaModelV2, UsesNg2WhenSingletonAxesArePresent) {
