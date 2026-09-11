@@ -2262,23 +2262,25 @@ TEST_F(VfPartition, cast_high_to_low_no_fuse_with_output) {
 
   af::ascir_op::Load load("load");
   load.x = data0.y;
-  load.y.dtype = af::DT_INT64;
+  load.y.dtype = af::DT_FLOAT;
 
   af::ascir_op::Abs abs("abs");
   abs.x = load.y;
-  abs.y.dtype = af::DT_INT64;
+  abs.y.dtype = af::DT_FLOAT;
 
+  // 8字节<->4字节的 Cast 已在能力检查中拒绝 VF 融合(设备上仅填充半数 lane),
+  // 高→低场景改用 4字节->2字节组合验证簇合并逻辑。
   af::ascir_op::Cast cast("cast");
   cast.x = abs.y;
-  cast.y.dtype = af::DT_INT32;  // INT64 -> INT32, 高→低
+  cast.y.dtype = af::DT_FLOAT16;  // FLOAT -> FLOAT16, 高→低
 
-  af::ascir_op::Exp exp("exp");
-  exp.x = cast.y;
-  exp.y.dtype = af::DT_INT32;
+  af::ascir_op::Abs abs2("abs2");
+  abs2.x = cast.y;
+  abs2.y.dtype = af::DT_FLOAT16;
 
   af::ascir_op::Store store("store");
-  store.x = exp.y;
-  store.y.dtype = af::DT_INT32;
+  store.x = abs2.y;
+  store.y.dtype = af::DT_FLOAT16;
 
   af::ascir_op::Output out("out");
   out.x = store.y;
@@ -2295,7 +2297,7 @@ TEST_F(VfPartition, cast_high_to_low_no_fuse_with_output) {
 
   // 高→低 Cast 的检查是在合并 Cluster 时进行的
   // 这里只有一个分支，所以所有节点应该能融合
-  EXPECT_EQ(sub_graphs.size(), 1UL);
+  ASSERT_EQ(sub_graphs.size(), 1UL);
   auto cast_node = sub_graphs[0].FindNode("cast");
   EXPECT_NE(cast_node, nullptr);
 }

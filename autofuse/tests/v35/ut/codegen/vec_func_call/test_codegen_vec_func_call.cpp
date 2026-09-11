@@ -630,7 +630,8 @@ TEST(VFLoopTest, UsesLogicalOuterStrideForAlignedArangeLayout) {
       af::SUCCESS);
   const auto arange_call = GetLineContaining(result, "AscendC::Reg::Arange");
   ASSERT_FALSE(arange_call.empty()) << result;
-  EXPECT_NE(arange_call.find("row * t->cols"), std::string::npos);
+  EXPECT_NE(arange_call.find("row * arange_stride_0_0"), std::string::npos);
+  EXPECT_EQ(arange_call.find("t->"), std::string::npos);
   EXPECT_NE(arange_call.find("col * ELEMENT_PER_VECTOR_LENGTH"), std::string::npos);
   EXPECT_EQ(arange_call.find("row * 16"), std::string::npos);
   loop.Destruct();
@@ -1079,6 +1080,7 @@ TEST(CodegenKernel, VfCall_TwoDimLoad) {
 
   std::stringstream func_def;
   EXPECT_EQ(call.GenerateFuncDefinition(tpipe, tiler, func_def), 0);
+  EXPECT_NE(func_def.str().find("sizeof(float)"), std::string::npos);
 
   std::string result;
   call.Generate(tpipe, vector<af::AxisId>{}, result);
@@ -1088,7 +1090,7 @@ TEST(CodegenKernel, VfCall_TwoDimLoad) {
                   "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))\n"
                   "AscendC::SetCtrlSpr<60, 60>(0);\n"
                   "VFCallvf((__local_mem__ float *)local_1[0].GetPhyAddr(), (__local_mem__ float "
-                  "*)local_0[0].GetPhyAddr(), t->s0 * t->s1);\n"
+                  "*)local_0[0].GetPhyAddr(), t->s0 * t->s1, 1, 1);\n"
                   "#endif\n"});
 }
 
@@ -1478,7 +1480,7 @@ TEST(CodegenKernel, VfCall_TwoDim_Scalar) {
                   "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))\n"
                   "AscendC::SetCtrlSpr<60, 60>(0);\n"
                   "VFCallvf((__local_mem__ float *)local_1[0].GetPhyAddr(), (__local_mem__ float "
-                  "*)local_1[0].GetPhyAddr(), scalar_0, t->s0 * t->s1);\n"
+                  "*)local_1[0].GetPhyAddr(), scalar_0, t->s0 * t->s1, 1, 1);\n"
                   "#endif\n"});
 }
 
@@ -1697,7 +1699,7 @@ TEST(CodegenKernel, VfCall_ThreeDimLoad) {
                   "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))\n"
                   "AscendC::SetCtrlSpr<60, 60>(0);\n"
                   "VFCallvf((__local_mem__ float *)local_1[0].GetPhyAddr(), (__local_mem__ float "
-                  "*)local_0[0].GetPhyAddr(), t->s0 * t->s1, t->s2, (2 * t->s2), (2 * t->s2));\n"
+                  "*)local_0[0].GetPhyAddr(), t->s0 * t->s1, t->s2, (2 * t->s2), 1, (2 * t->s2), 1);\n"
                   "#endif\n"});
 }
 
@@ -1885,7 +1887,8 @@ TEST(CodegenKernel, VfCall_FiveDimLoad) {
           "*)local_1[outer_for_0 * (5 * t->s1 * t->s2 * t->s3 * t->s4)].GetPhyAddr(), (__local_mem__ float "
           "*)local_0[outer_for_0 * (t->s1 * t->s2 * t->s3 * t->s4)].GetPhyAddr(), t->s1, t->s2, t->s3, t->s4, (4 * "
           "t->s2 "
-          "* t->s3 * t->s4), (3 * t->s3 * t->s4), (2 * t->s4), (t->s2 * t->s3 * t->s4), (t->s3 * t->s4), t->s4);\n\n"
+          "* t->s3 * t->s4), (3 * t->s3 * t->s4), (2 * t->s4), 1, (t->s2 * t->s3 * t->s4), (t->s3 * t->s4), t->s4, "
+          "1);\n\n"
           "}\n"
           "#endif\n"});
 }

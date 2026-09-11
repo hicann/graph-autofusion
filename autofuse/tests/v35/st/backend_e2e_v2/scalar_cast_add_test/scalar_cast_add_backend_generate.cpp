@@ -48,9 +48,7 @@ TEST_F(TestBackendScalarCastAddE2e, ScalarCastAddE2eCodegen) {
   std::map<std::string, std::string> shape_info({{"s0", "stub_s0"}, {"s1", "stub_s1"}, {"s2", "stub_s2"}});
   auto graph = ascir::ShareGraph::ScalarCastAddFusedGraph(3, af::DT_FLOAT16, af::DT_FLOAT);
   GenerateBackendKernelWithCheck(graph, shape_info, tilig_stub, [](const std::string &kernel) {
-    EXPECT_NE(kernel.find("CastExtend(local_3[0], local_blk_tensor_of_scalar_2[0], "
-                          "{ConvertToUint32(local_3_actual_size)}, {ConvertToUint32(1)}, {ConvertToUint32(1)});"),
-              std::string::npos);
+    EXPECT_NE(kernel.find("Duplicate(local_3[0], static_cast<float>(1.0), local_3_actual_size);"), std::string::npos);
     EXPECT_NE(kernel.find("Add(local_5[0], local_4[0], local_3[0], local_4_actual_size);"), std::string::npos);
   });
 }

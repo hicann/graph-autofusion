@@ -310,12 +310,14 @@ def arange(
                 "Arange requires unit physical stride on the vectorized axis"
             )
         effective_size = size if size is not None else [item.size for item in axis]
-        singleton_start = 0 if last_nonzero is None else last_nonzero[0] + 1
         if any(
-            not (value == ascir.SizeExpr(1))
-            for value in effective_size[singleton_start:]
+            value == ascir.SizeExpr(0) and not (dimension == ascir.SizeExpr(1))
+            for dimension, value in zip(effective_size, stride)
         ):
-            raise ValueError("Arange zero strides require singleton dimensions")
+            raise ValueError(
+                "Arange does not support non-singleton zero strides; "
+                "use 1D Arange followed by explicit Broadcast"
+            )
     meta = _get_metadata(owner_graph)
     name = _generate_op_name(owner_graph, "arange")
     op = ascir.ops.Arange(name, owner_graph)

@@ -359,7 +359,7 @@ Status BuildDataCopyApiParamInNormal(const TPipe &tpipe, CodegenApiParam &api_pa
                                      DmaSpecificParams &dma_specific_params, const Tensor &src, const Tensor &dst,
                                      std::string &gm_offset, bool copy_in, bool has_transpose) {
   DataCopyParams data_copy_param;
-  GE_ASSERT_TRUE(CalculateDmaParams(tpipe, dst, dst, data_copy_param), "CalculateDmaParams failed");
+  GE_ASSERT_TRUE(CalculateDmaParams(tpipe, dst, copy_in ? dst : src, data_copy_param), "CalculateDmaParams failed");
   size_t total_len = data_copy_param.repeats.size();
   const Tensor &ub_tensor = copy_in ? dst : src;
   std::string padding_mode = GetPaddingMode(ub_tensor, data_copy_param, has_transpose);

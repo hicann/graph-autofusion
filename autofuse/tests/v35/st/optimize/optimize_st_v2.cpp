@@ -38,6 +38,7 @@
 #include "platform/platform_factory.h"
 #include "platform_context.h"
 #include "platformv2.h"
+#include "un_alignment_strategy.h"
 #include "tests/depends/runtime/src/runtime_stub.h"
 #include "../../st/optimize/runtime_stub.h"
 #include "backend/backend_spec.h"
@@ -1340,6 +1341,57 @@ TEST_F(OptimizerStV2, TwoAxisSliceNeedAlign) {
   // FP32: align_factor = 32 / 4 = 8, 尾轴 stride = Align(1, 8) = 8, 次尾轴 stride = 8 * s1 = 32
   std::vector<af::Expression> golden_stride{af::Symbol(8) * s1, af::Symbol(8)};
   EXPECT_EQ(load_node->outputs[0].attr.vectorized_strides, golden_stride);
+}
+
+TEST_F(OptimizerStV2, HighRankArangePaddedStoreAlignsUbLayout) {
+  struct Case {
+    std::vector<int64_t> sizes;
+    std::vector<int64_t> logical_strides;
+    std::vector<int64_t> store_strides;
+    std::vector<int64_t> aligned_strides;
+  };
+  const std::vector<Case> cases = {
+      {{2, 3, 4, 5, 7}, {420, 140, 35, 7, 1}, {593, 196, 48, 9, 1}, {480, 160, 40, 8, 1}},
+      {{2, 2, 2, 8, 1}, {32, 16, 8, 1, 1}, {121, 58, 27, 3, 1}, {256, 128, 64, 8, 0}},
+      {{2, 2, 2, 8, 1, 1}, {32, 16, 8, 1, 1, 1}, {224, 109, 52, 6, 3, 1}, {256, 128, 64, 8, 0, 0}},
+  };
+  for (size_t case_index = 0; case_index < cases.size(); ++case_index) {
+    const auto to_exprs = [](const std::vector<int64_t> &values) {
+      std::vector<Expression> result;
+      for (const auto value : values) result.push_back(af::Symbol(value));
+      return result;
+    };
+    const auto sizes = to_exprs(cases[case_index].sizes);
+    af::AscGraph graph(("high_rank_arange_padded_store_" + std::to_string(case_index)).c_str());
+    std::vector<af::AxisId> axes;
+    for (size_t index = 0; index < sizes.size(); ++index) {
+      axes.push_back(graph.CreateAxis("axis" + std::to_string(index), sizes[index]).id);
+    }
+    Arange arange("arange", graph);
+    arange.attr.sched.axis = axes;
+    arange.y.dtype = af::DT_INT32;
+    *arange.y.axis = axes;
+    *arange.y.repeats = sizes;
+    *arange.y.strides = to_exprs(cases[case_index].logical_strides);
+    *arange.y.vectorized_axis = axes;
+    Store store("store");
+    store.attr.sched.axis = axes;
+    store.x = arange.y;
+    store.y.dtype = af::DT_INT32;
+    *store.y.axis = axes;
+    *store.y.repeats = sizes;
+    *store.y.strides = to_exprs(cases[case_index].store_strides);
+    *store.y.vectorized_axis = axes;
+    Output output("output");
+    output.x = store.y;
+    output.y.dtype = af::DT_INT32;
+    output.attr.api.type = af::ApiType::kAPITypeBuffer;
+    output.ir_attr.SetIndex(0);
+    ::optimize::UnAlignmentStrategy strategy;
+    ASSERT_EQ(strategy.AlignVectorizedStrides(graph), af::SUCCESS);
+    EXPECT_EQ(graph.FindNode("arange")->outputs[0].attr.vectorized_strides,
+              to_exprs(cases[case_index].aligned_strides));
+  }
 }
 
 TEST_F(OptimizerStV2, NoNeedAlign_AABToARA) {

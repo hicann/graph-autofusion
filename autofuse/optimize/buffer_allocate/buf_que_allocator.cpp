@@ -21,6 +21,7 @@
 #include "attribute_group/attr_group_symbolic_desc.h"
 #include "platform/platform_factory.h"
 #include "mem_reuse_manager.h"
+#include "v35/optimize/partition/vector_func_partitioner.h"
 
 using namespace af::ascir_op;
 using namespace af::ops;
@@ -904,6 +905,10 @@ Status BufQueAllocator::TopoSortByLoadPriority(af::AscGraph &graph) {
 
 Status BufQueAllocator::ProcessSingleImplGraph(af::AscGraph &impl_graph, BasePlatform &platform, size_t max_que_num,
                                                bool is_reduce_mem_reuse) {
+  // UBFuse 上下文通过内部 graph attr 传递给平台分区逻辑, 不扩展 BasePlatform 公共接口。
+  GE_ASSERT_TRUE(af::AttrUtils::SetBool(af::AscGraphUtils::GetComputeGraph(impl_graph), kGraphAttrIsUBFuseContext,
+                                        cube_type == ascir::CubeTemplateType::kUBFuse),
+                 "Failed to set UBFuse context attr for graph %s.", impl_graph.GetName().c_str());
   GE_ASSERT_SUCCESS(platform.PartitionSubFunctions(impl_graph), "Failed to partition vf func for graph %s.",
                     impl_graph.GetName().c_str());
   if (cube_type == ascir::CubeTemplateType::kUBFuse) {

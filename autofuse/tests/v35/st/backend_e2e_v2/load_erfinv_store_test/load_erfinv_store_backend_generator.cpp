@@ -66,7 +66,13 @@ TEST_F(TestBackendLoadErfinvStoreE2e, LoadErfinvStoreE2eCodegen) {
     codegen::CodegenResult erfinv_result;
     EXPECT_EQ(erfinv_codegen.Generate(erfinv_shape_info, erfinv_fused_result, erfinv_result), 0);
     EXPECT_NE(erfinv_result.kernel.find("Erfinv"), std::string::npos);
-    EXPECT_EQ(erfinv_result.kernel.find("tmp_buf_"), std::string::npos);
+    const auto erfinv_call_begin = erfinv_result.kernel.find("Erfinv(local_");
+    ASSERT_NE(erfinv_call_begin, std::string::npos);
+    const auto erfinv_call_end = erfinv_result.kernel.find(';', erfinv_call_begin);
+    ASSERT_NE(erfinv_call_end, std::string::npos);
+    // Store may need scratch even though the Erfinv call does not.
+    EXPECT_EQ(erfinv_result.kernel.substr(erfinv_call_begin, erfinv_call_end - erfinv_call_begin).find("tmp_buf_"),
+              std::string::npos);
     erfinv_kernel_stream << erfinv_tiling_stub << RemoveSubDirInclude(erfinv_result.kernel);
     erfinv_tiling_stream << erfinv_result.tiling;
     erfinv_data_stream << erfinv_result.tiling_data;

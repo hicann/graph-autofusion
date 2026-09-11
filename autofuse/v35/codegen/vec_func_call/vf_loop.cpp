@@ -114,7 +114,7 @@ Status GetArangeBlockOffset(const TPipe &tpipe, const MicroApiTensor *reg_tensor
     GE_ASSERT_TRUE(!logical_axis_indices.empty(), "Arange vectorized axis has no logical source.");
     const auto axis_index = static_cast<size_t>(logical_axis_indices.back());
     GE_ASSERT_TRUE(axis_index < reg_tensor->axis_strides_.size(), "Arange logical axis stride is missing.");
-    offset << tpipe.tiler.Size(reg_tensor->axis_strides_[axis_index]);
+    offset << "arange_stride_" << reg_tensor->id_ << "_" << axis_index;
     has_offset = true;
   }
   result = has_offset ? offset.str() : "0";
@@ -345,6 +345,16 @@ Status VFLoop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const ascir
 
 void VFLoop::SetMaxDtypeSize(std::string dtype) {
   this->max_dtype_size_ = dtype;
+  this->SetLoopDtype(dtype);
+}
+
+void VFLoop::SetLoopDtype(std::string dtype) const {
+  this->loop_dtype_ = dtype;
+  for (const auto &body : this->bodys_) {
+    if (body.type_ == LoopType::LOOP) {
+      body.loop_->SetLoopDtype(dtype);
+    }
+  }
 }
 
 void VFLoop::Destruct() {
@@ -422,7 +432,7 @@ Status VFLoop::GenerateLoop(const TPipe &tpipe, const TensorManager &tensor_mgr,
      << axis << "++) "
      << "{" << std::endl;
   if (current_depth == depth) {
-    ss << "    preg_" << current_depth << " = " << "AscendC::MicroAPI::UpdateMask<" << this->max_dtype_size_ << ">("
+    ss << "    preg_" << current_depth << " = " << "AscendC::MicroAPI::UpdateMask<" << this->loop_dtype_ << ">("
        << "sreg_" << current_depth << ");\n";
   }
   GE_CHK_STATUS_RET(this->GenerateBody(tpipe, tensor_mgr, depth, current_axis, ss, loop_size_ss, only_loop_max_depth,
@@ -498,7 +508,7 @@ void VFLoop::CollectArangeParams(const TPipe &tpipe, std::vector<ArangeParam> &p
       std::string base;
       std::string step;
       body.call_->GetArangeParams(tpipe, base, step);
-      params.push_back({body.call_->GetOutputTensorIdByIndex(0), std::move(base), std::move(step), "0"});
+      params.push_back({body.call_->GetOutputTensorIdByIndex(0), std::move(base), std::move(step), "0", {}});
     } else if (body.type_ == LoopType::LOOP) {
       body.loop_->CollectArangeParams(tpipe, params);
     }
