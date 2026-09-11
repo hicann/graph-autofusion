@@ -33,6 +33,8 @@ add_library(test_ascir_ut OBJECT
     reg_func/test_reg_func_axpy.cpp
     reg_func/test_reg_func_welford.cpp
     reg_func/test_reg_func_abs.cpp
+    test_ascir_codegen_impl.cpp
+    test_ascir_meta.cpp
     reg_func/test_reg_func_reduce_max.cpp
     code_dumper_unittest.cc
     ascir_utils_unittest.cc
