@@ -243,6 +243,36 @@ TEST(CodegenKernel, StoreRegApiCall_CvUbFuseUsesDtypeAwareStrides) {
   EXPECT_NE(result.find("shapeN - curAivN"), std::string::npos);
 }
 
+TEST(CodegenKernel, StoreRegApiCall_CubeOutputSyncsWithVector) {
+  af::AscGraph graph("test_graph");
+  auto s0 = af::Symbol(16);
+  auto s1 = af::Symbol(7);
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+  BuildStoreCvUbFuseGraph(graph, s0, s1, z0, z1);
+  InitStoreCvUbFuseAttrs(graph, s1, z0, z1);
+  auto load = graph.FindNode("load");
+  auto store = graph.FindNode("store");
+  codegen::Tiler tiler;
+  codegen::TPipe tpipe("tpipe", tiler);
+  InitStoreCvUbFuseTpipe(tpipe, tiler, graph, load, store, s0, s1, z0, z1);
+  codegen::ApiTensor input;
+  input.id = load->outputs[0].attr.mem.tensor_id;
+  tpipe.cube_output_tensor_id = input.id;
+  codegen::StoreRegApiCall call("DataCopyPadExtend");
+  ASSERT_EQ(call.Init(store), af::SUCCESS);
+  call.inputs.push_back(&input);
+  std::string result;
+  ASSERT_EQ(call.Generate(tpipe, vector<af::AxisId>{}, result), af::SUCCESS);
+  const auto copy = result.find("DataCopyPadExtend<");
+  ASSERT_NE(copy, std::string::npos);
+  EXPECT_LT(result.find("TQueSync<PIPE_V, PIPE_MTE3>"), copy);
+  const auto release = result.find("TQueSync<PIPE_MTE3, PIPE_V>");
+  ASSERT_NE(release, std::string::npos);
+  EXPECT_GT(release, copy);
+  EXPECT_EQ(result.find("MTE3_MTE2"), std::string::npos);
+}
+
 TEST(CodegenKernel, StoreRegApiCall_NeetMte3SyncMte2) {
   af::AscGraph graph("test_graph");
 
