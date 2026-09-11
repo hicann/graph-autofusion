@@ -247,6 +247,7 @@ aclError aclrtTaskGetType(aclrtTask task, aclrtTaskType *type);
 aclError aclmdlRIUpdate(aclmdlRI modelRI);
 aclError aclrtGetDeviceInfo(uint32_t deviceId, aclrtDevAttr attr, int64_t *value);
 aclError aclrtGetDevice(int32_t *deviceId);
+aclError aclrtGetDeviceCount(uint32_t *count);
 const char *aclrtGetSocName(void);
 aclError aclrtStreamGetId(aclrtStream stream, int32_t *streamId);
 aclError aclmdlRIDebugJsonPrint(aclmdlRI model, const char *path, uint32_t flag);

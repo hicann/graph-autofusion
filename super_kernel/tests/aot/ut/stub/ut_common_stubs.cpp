@@ -35,6 +35,8 @@ aclError g_aclmdlRIGetStreamsRet[2] = {ACL_SUCCESS, ACL_SUCCESS};
 aclError g_aclrtStreamGetTasksRet[2] = {ACL_SUCCESS, ACL_SUCCESS};
 aclError g_aclrtTaskGetTypeRet = ACL_SUCCESS;
 aclError g_aclrtGetDeviceRet = ACL_SUCCESS;
+uint32_t g_deviceCount = 0;
+aclError g_aclrtGetDeviceCountRet = ACL_SUCCESS;
 aclError g_aclrtGetDeviceInfoRet = ACL_SUCCESS;
 aclError g_aclmdlRIUpdateRet = ACL_SUCCESS;
 aclError g_aclmdlRIGetIdRet = ACL_SUCCESS;
@@ -92,6 +94,8 @@ void SkUtResetCommonStubControls() {
   g_aclrtStreamGetTasksRet[1] = ACL_SUCCESS;
   g_aclrtTaskGetTypeRet = ACL_SUCCESS;
   g_aclrtGetDeviceRet = ACL_SUCCESS;
+  g_deviceCount = 0;
+  g_aclrtGetDeviceCountRet = ACL_SUCCESS;
   g_aclrtGetDeviceInfoRet = ACL_SUCCESS;
   g_aclmdlRIUpdateRet = ACL_SUCCESS;
   g_aclmdlRIGetIdRet = ACL_SUCCESS;
@@ -143,6 +147,22 @@ void SkUtSetAclrtTaskGetTypeRet(aclError ret) {
 
 void SkUtSetAclrtGetDeviceRet(aclError ret) {
   g_aclrtGetDeviceRet = ret;
+}
+
+void SkUtSetDeviceCount(uint32_t count) {
+  g_deviceCount = count;
+}
+
+uint32_t SkUtGetDeviceCount() {
+  return g_deviceCount;
+}
+
+void SkUtSetAclrtGetDeviceCountRet(aclError ret) {
+  g_aclrtGetDeviceCountRet = ret;
+}
+
+aclError SkUtGetAclrtGetDeviceCountRet() {
+  return g_aclrtGetDeviceCountRet;
 }
 
 void SkUtSetAclrtGetDeviceInfoRet(aclError ret) {

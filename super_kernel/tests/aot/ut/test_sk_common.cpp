@@ -437,28 +437,39 @@ TEST_F(SkCommonTest, GetFuncSymbolInfo_ConcurrentCacheAccessReturnsConsistentRes
   EXPECT_TRUE(resultsConsistent.load(std::memory_order_relaxed));
 }
 
-TEST_F(SkCommonTest, GetDeviceCubeCoreNum_GetDeviceFails_Returns0) {
+TEST_F(SkCommonTest, GetDeviceCoreNums_NoDevices_ReturnsInvalidParam) {
   SkUtSetAclrtGetDeviceRet(ACL_ERROR_INVALID_PARAM);
-  int64_t result = GetDeviceCubeCoreNum();
-  EXPECT_EQ(result, 0);
+  int64_t cubeNum = -1, vecNum = -1;
+  EXPECT_EQ(GetDeviceCoreNums(cubeNum, vecNum), ACL_ERROR_INVALID_PARAM);
+  EXPECT_EQ(cubeNum, 0);
+  EXPECT_EQ(vecNum, -1);
 }
 
-TEST_F(SkCommonTest, GetDeviceVecCoreNum_GetDeviceFails_Returns0) {
+TEST_F(SkCommonTest, GetDeviceCoreNums_GetDeviceFails_FallsBackToDeviceZero) {
   SkUtSetAclrtGetDeviceRet(ACL_ERROR_INVALID_PARAM);
-  int64_t result = GetDeviceVecCoreNum();
-  EXPECT_EQ(result, 0);
+  SkUtSetDeviceCount(1);
+  int64_t cubeNum = 0, vecNum = 0;
+  EXPECT_EQ(GetDeviceCoreNums(cubeNum, vecNum), ACL_SUCCESS);
+  EXPECT_EQ(cubeNum, 32);
+  EXPECT_EQ(vecNum, 32);
 }
 
-TEST_F(SkCommonTest, GetDeviceCubeCoreNum_GetDeviceInfoFails_Returns0) {
-  SkUtSetAclrtGetDeviceInfoRet(ACL_ERROR_INVALID_PARAM);
-  int64_t result = GetDeviceCubeCoreNum();
-  EXPECT_EQ(result, 0);
+TEST_F(SkCommonTest, GetDeviceCoreNums_GetDeviceCountFails_ReturnsInvalidParam) {
+  SkUtSetAclrtGetDeviceRet(ACL_ERROR_INVALID_PARAM);
+  SkUtSetDeviceCount(1);
+  SkUtSetAclrtGetDeviceCountRet(ACL_ERROR_FAILURE);
+  int64_t cubeNum = -1, vecNum = -1;
+  EXPECT_EQ(GetDeviceCoreNums(cubeNum, vecNum), ACL_ERROR_INVALID_PARAM);
+  EXPECT_EQ(cubeNum, 0);
+  EXPECT_EQ(vecNum, -1);
 }
 
-TEST_F(SkCommonTest, GetDeviceVecCoreNum_GetDeviceInfoFails_Returns0) {
+TEST_F(SkCommonTest, GetDeviceCoreNums_GetDeviceInfoFails_ReturnsInvalidParam) {
   SkUtSetAclrtGetDeviceInfoRet(ACL_ERROR_INVALID_PARAM);
-  int64_t result = GetDeviceVecCoreNum();
-  EXPECT_EQ(result, 0);
+  int64_t cubeNum = -1, vecNum = -1;
+  EXPECT_EQ(GetDeviceCoreNums(cubeNum, vecNum), ACL_ERROR_INVALID_PARAM);
+  EXPECT_EQ(cubeNum, 0);
+  EXPECT_EQ(vecNum, -1);
 }
 
 TEST_F(SkCommonTest, GetDeviceCoreNums_Success_ReturnsValidValues) {
