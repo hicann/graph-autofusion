@@ -150,22 +150,6 @@ Status UpdateHintGraphAttr(const ::ascir::ImplGraph &graph) {
   return af::SUCCESS;
 }
 
-bool HasCastBrc(const ascir::ImplGraph &graph) {
-  for (auto node : graph.GetAllNodes()) {
-    GE_ASSERT_NOTNULL(node);
-    if (!af::ops::IsOps<af::ascir_op::Cast>(node)) {
-      continue;
-    }
-    for (const auto &out_node : node->GetOutNodes()) {
-      GE_ASSERT_NOTNULL(out_node);
-      if (af::ops::IsOps<af::ascir_op::Broadcast>(out_node)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 bool IsCubeFixpip(const af::AscNodePtr &cube_node) {
   for (auto out_node : cube_node->GetOutNodes()) {
     GE_ASSERT_NOTNULL(out_node);
@@ -585,10 +569,6 @@ Status CubeFusionCaseGenerator::GeneratorUbTask(const std::vector<::ascir::ImplG
       if (af::ops::IsOps<af::ascir_op::Cast>(out_node)) {
         auto ret = SwapCastBrcAndGenNddma(std::dynamic_pointer_cast<af::AscNode>(out_node), node, optimize_graph);
         if (ret == af::UNSUPPORTED) {
-          if (HasCastBrc(optimize_graph)) {
-            GELOGW("The graph %s not support generating ub task.", grouped_graph.GetName().c_str());
-            return af::GRAPH_SUCCESS;
-          }
           continue;
         }
         if (ret != af::GRAPH_SUCCESS) {

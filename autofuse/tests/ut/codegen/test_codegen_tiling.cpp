@@ -3510,6 +3510,11 @@ TEST_F(TestCodegenTiling, CubeWrapperShouldSupportBiasAndOffsetInputs) {
   EXPECT_NE(wrapper_cpp.find("for (const auto *input : input_slots)"), std::string::npos);
   EXPECT_NE(wrapper_cpp.find("DtypeToGeDataType(input.dtype) == ge::DT_UNDEFINED"), std::string::npos);
   EXPECT_NE(wrapper_cpp.find("ge::Format input_format = FormatToGeFormat(input->format);"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("size_t input_desc_index = 2U;"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("if (input_slots[2U] != nullptr)"), std::string::npos);
+  EXPECT_NE(wrapper_cpp.find("if (input_slots[3U] != nullptr)"), std::string::npos);
+  EXPECT_EQ(wrapper_cpp.find(".InputTensorDesc(2, input_slots[2U]"), std::string::npos);
+  EXPECT_EQ(wrapper_cpp.find(".InputTensorDesc(3,"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, MultiGroupInductorShouldContainTopnMainOutputAbi) {
