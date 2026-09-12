@@ -3873,7 +3873,7 @@ class AcosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Acos";
+    return "AcosExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Acos";
@@ -3883,12 +3883,18 @@ class AcosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
       const AscNode &node) {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
         {DT_BF16, DT_FLOAT},
+        {DT_FLOAT16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"acos_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/acos.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -3980,7 +3986,7 @@ class AsinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Asin";
+    return "AsinExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Asin";
@@ -3989,12 +3995,18 @@ class AsinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
       const AscNode &node) override {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
         {DT_BF16, DT_FLOAT},
+        {DT_FLOAT16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"asin_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/asin.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -5335,6 +5347,11 @@ class RemainderAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"remainder_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "simt_api/cpp/kernel_simt_intf.h",
+    };
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) override {

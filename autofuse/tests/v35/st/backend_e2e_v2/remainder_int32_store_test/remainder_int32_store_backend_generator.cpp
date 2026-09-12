@@ -41,6 +41,7 @@ class TestBackendRemainderInt32StoreE2e : public testing::Test {
 
 TEST_F(TestBackendRemainderInt32StoreE2e, RemainderInt32StoreE2eCodegen) {
   bool gen_success = true;
+  constexpr int64_t kRemainderSimtDcacheSize = 40 * 1024;
   std::string remainder_tiling_stub = R"(
 #define REGISTER_TILING_DEFAULT(tiling)
 #define GET_TILING_DATA(t, tiling)  AutofuseTilingData t = *(AutofuseTilingData*)tiling;
@@ -66,7 +67,10 @@ TEST_F(TestBackendRemainderInt32StoreE2e, RemainderInt32StoreE2eCodegen) {
     codegen::CodegenResult remainder_codegen_result;
     EXPECT_EQ(remainder_codegen.Generate(remainder_shape_info, remainder_fused_result, remainder_codegen_result), 0);
     EXPECT_NE(remainder_codegen_result.kernel.find("RemainderExtend"), std::string::npos);
+    EXPECT_NE(remainder_codegen_result.kernel.find("RemainderIntSimtCompute"), std::string::npos);
+    EXPECT_NE(remainder_codegen_result.kernel.find("simt_api/cpp/kernel_simt_intf.h"), std::string::npos);
     EXPECT_NE(remainder_codegen_result.kernel.find("tmp_buf_"), std::string::npos);
+    EXPECT_NE(remainder_codegen_result.tiling.find(std::to_string(kRemainderSimtDcacheSize)), std::string::npos);
     remainder_kernel_stream << remainder_tiling_stub << RemoveSubDirInclude(remainder_codegen_result.kernel);
     remainder_tiling_stream << remainder_codegen_result.tiling;
     remainder_data_stream << remainder_codegen_result.tiling_data;
