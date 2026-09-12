@@ -652,10 +652,10 @@ TEST_F(OptimizerStV2, NddmaScoreFuncTailAxisSplitted_Dynamic) {
                    .Data("data0", 0, af::DT_FLOAT16)
                    .Load("load0", "data0", load0_shape, load0_strides)
                    .Broadcast("broadcast", "load0", {1})  // broadcast on axis 1
-                   .Exp("exp0", "broadcast")
-                   .Abs("abs0", "broadcast")
-                   .Mul("mul0", "exp0", "abs0")
-                   .Store("store", "mul0")
+                   .Scalar("scalar0", "0", af::DT_FLOAT16)
+                   .Add("add0", "broadcast", "scalar0")
+                   .Exp("exp0", "add0")
+                   .Store("store", "exp0")
                    .Output("output", "store", 8, af::DT_FLOAT16)
                    .Build();
 
@@ -699,10 +699,10 @@ TEST_F(OptimizerStV2, NddmaScoreFuncTailAxisSplitted_Static) {
                    .Data("data0", 0, af::DT_FLOAT)
                    .Load("load0", "data0", load0_shape, load0_strides)
                    .Broadcast("broadcast", "load0", {1})  // broadcast on axis 1
-                   .Exp("exp0", "broadcast")
-                   .Abs("abs0", "broadcast")
-                   .Mul("mul0", "exp0", "abs0")
-                   .Store("store", "mul0")
+                   .Scalar("scalar0", "0", af::DT_FLOAT)
+                   .Add("add0", "broadcast", "scalar0")
+                   .Exp("exp0", "add0")
+                   .Store("store", "exp0")
                    .Output("output", "store", 8, af::DT_FLOAT)
                    .Build();
 
@@ -742,7 +742,9 @@ TEST_F(OptimizerStV2, NddmaScoreFuncTailAxisBoundary_Static) {
                      .Data("data0", 0, af::DT_FLOAT)
                      .Load("load0", "data0", load0_shape, load0_strides)
                      .Broadcast("broadcast", "load0", {1})
-                     .Exp("exp0", "broadcast")
+                     .Scalar("scalar0", "0", af::DT_FLOAT)
+                     .Add("add0", "broadcast", "scalar0")
+                     .Exp("exp0", "add0")
                      .Store("store", "exp0")
                      .Output("output", "store", 8, af::DT_FLOAT)
                      .Build();
