@@ -158,6 +158,11 @@ const char *aclrtGetSocName(void) {
   return SkUtGetAclrtGetSocName();
 }
 
+aclError aclrtGetDeviceCount(uint32_t *count) {
+  *count = SkUtGetDeviceCount();
+  return SkUtGetAclrtGetDeviceCountRet();
+}
+
 // 获取设备信息
 aclError aclrtGetDeviceInfo(uint32_t deviceId, aclrtDevAttr attr, int64_t *value) {
   (void)deviceId;
