@@ -25,7 +25,7 @@
 
 ## `AUTOFUSE_FLAGS` 控制项
 
-`AUTOFUSE_FLAGS` 用于控制 AutoFuse 功能。未开启 `--enable_autofuse=true` 时，其他 AutoFuse 功能控制项不生效。
+`AUTOFUSE_FLAGS` 用于控制 AutoFuse 功能。
 
 **仅开启基础 AutoFuse 融合功能（最简配置）：**
 
@@ -102,7 +102,7 @@ export AUTOFUSE_DFX_FLAGS="--codegen_compile_debug=true;--debug_dir=/path/to/dum
 
 ## 使用注意事项
 
-- `AUTOFUSE_FLAGS` 和 `AUTOFUSE_DFX_FLAGS` 适用于使用 GE/AutoFuse 的图编译场景；TensorFlow 用例需要在导入 TensorFlow 和 `npu_bridge` 前设置相关环境变量。
+- `AUTOFUSE_FLAGS` 和 `AUTOFUSE_DFX_FLAGS` 适用于使用 AutoFuse 的图编译场景；TensorFlow 用例需要在导入 TensorFlow 和 `npu_bridge` 前设置相关环境变量。
 - PyTorch 用例通过 `torch.compile(..., options={"npu_backend": "ascendc"})` 选择 AscendC 后端，通常不需要通过 `AUTOFUSE_FLAGS` 开启 AutoFuse。
 - 调测环境变量会增加编译或运行开销，完成问题定位后请及时取消设置。
 - 详细控制点说明请参见 [AUTOFUSE_FLAGS 环境变量控制点](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/910/programug/graphdevg/autofuse_1_0061.html) 和 [AUTOFUSE_DFX_FLAGS 环境变量控制点](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/910/programug/graphdevg/autofuse_1_0062.html)。

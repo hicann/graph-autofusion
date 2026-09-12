@@ -23,7 +23,7 @@ The following variables control core AutoFuse functions and apply to both Tensor
 
 ## `AUTOFUSE_FLAGS` Options
 
-When `--enable_autofuse=true` is not enabled, other AutoFuse options have no effect.
+`AUTOFUSE_FLAGS` controls AutoFuse functions.
 
 **Enable only the basic AutoFuse fusion function (minimal configuration):**
 
@@ -92,7 +92,7 @@ TensorFlow currently has no framework-exclusive environment variables; all Tenso
 
 ## Notes
 
-- `AUTOFUSE_FLAGS` and `AUTOFUSE_DFX_FLAGS` apply to GE/AutoFuse graph-compilation scenarios. TensorFlow examples must set these variables before importing TensorFlow and `npu_bridge`.
+- `AUTOFUSE_FLAGS` and `AUTOFUSE_DFX_FLAGS` apply to AutoFuse graph-compilation scenarios. TensorFlow examples must set these variables before importing TensorFlow and `npu_bridge`.
 - PyTorch examples select the AscendC backend through `torch.compile(..., options={"npu_backend": "ascendc"})` and normally do not need `AUTOFUSE_FLAGS` to enable AutoFuse.
 - Debugging variables add compilation or runtime overhead. Unset them after troubleshooting.
 - For details, see the [AUTOFUSE_FLAGS reference](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/910/programug/graphdevg/autofuse_1_0061.html) and [AUTOFUSE_DFX_FLAGS reference](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/910/programug/graphdevg/autofuse_1_0062.html).
