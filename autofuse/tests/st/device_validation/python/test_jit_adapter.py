@@ -15,7 +15,11 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from jit_adapter import patch_single_operator_tiling, resolve_soc_version
+from jit_adapter import (
+    patch_device_kernel,
+    patch_single_operator_tiling,
+    resolve_soc_version,
+)
 
 SIX_ARG_TILING = """
 extern "C" int64_t AutofuseTiling(uint32_t s0, uint32_t s1, AutofuseTilingData* tiling, uint32_t* workspaceSize, uint32_t *blockDim, ResLimit *res_limit)
@@ -83,3 +87,21 @@ class TestResolveSocVersion:
         profile.write_text(json.dumps({"profile": "x"}), encoding="utf-8")
         with pytest.raises(ValueError):
             resolve_soc_version(str(profile), "")
+
+
+class TestPatchDeviceKernel:
+    @staticmethod
+    def test_names_generated_kernel_and_launch_site():
+        source = (
+            'extern "C" __global__ __aicore__ void (GM_ADDR data, GM_ADDR output, '
+            "GM_ADDR workspace, AutofuseTilingData t) {}\n"
+            "  <<<blockDim, nullptr, stream>>>((uint8_t*)input0);\n"
+        )
+        patched = patch_device_kernel(source)
+        assert "void autofuse_kernel(GM_ADDR data" in patched
+        assert "autofuse_kernel<<<blockDim, nullptr, stream>>>" in patched
+
+    @staticmethod
+    def test_leaves_named_kernel_untouched():
+        source = 'extern "C" __global__ __aicore__ void named(GM_ADDR data) {}'
+        assert patch_device_kernel(source) == source

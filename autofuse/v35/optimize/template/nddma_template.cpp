@@ -604,21 +604,38 @@ bool IsStaticGraph(const af::AscGraph &origin_graph) {
   return true;
 }
 
-std::string GetStaticScoreFunc(const af::AscNodePtr &nddma_node, std::stringstream &ss) {
+// 静态打分用尾轴字节数：尾轴被切分后 repeats.back() 是求解变量（非常量），
+// 优先回溯原始轴求常量；回溯失败或非常量时回退 repeats 尾轴常量。
+bool GetStaticTailAxisSize(const af::AscGraph &nddma_graph, const af::AscNodePtr &nddma_node, uint32_t &size) {
+  af::Expression tail_dim_expr;
+  if (ScheduleUtils::GetOriginTailDimExpr(nddma_graph, nddma_node, tail_dim_expr) && tail_dim_expr.IsConstExpr()) {
+    int64_t last_dim = 0;
+    if (tail_dim_expr.GetConstValue(last_dim)) {
+      const auto dsize = static_cast<uint32_t>(af::GetSizeByDataType(nddma_node->outputs[0].attr.dtype));
+      size = static_cast<uint32_t>(last_dim) * dsize;
+      return true;
+    }
+  }
+  return ScheduleUtils::GetTailAxisDataSize(nddma_node, size);
+}
+
+std::string GetStaticScoreFunc(const af::AscGraph &nddma_graph, const af::AscNodePtr &nddma_node,
+                               std::stringstream &ss) {
   // 默认打分为0，ATT根据性能公式选择模板
   int32_t score = 0;
   const int low_score = -1;
+  const uint32_t align_bytes = 32;
+  const uint32_t large_tail_size = 4096;
+  uint32_t tail_size = 0;
+  const bool has_tail_size = GetStaticTailAxisSize(nddma_graph, nddma_node, tail_size);
   // case1: B8,B16类型时，若尾轴对齐，低分
-  if (IsValidDataType(nddma_node) && ScheduleUtils::IsTailAxisAlignedBy(nddma_node)) {
+  if (IsValidDataType(nddma_node) && has_tail_size && tail_size % align_bytes == 0) {
     GELOGD("Nddma Node [%s] has B8/B16 data type with aligned tail axis, assigning low score.",
            nddma_node->GetNamePtr());
     score = low_score;
   }
   // case2: 尾轴brc时，如果尾轴大于4KB，低分
-  const uint32_t large_tail_size = 4096;
-  uint32_t tail_size = 0;
-  if (IsTailBroadcastNddmaNode(nddma_node) && ScheduleUtils::GetTailAxisDataSize(nddma_node, tail_size) &&
-      tail_size > large_tail_size) {
+  if (IsTailBroadcastNddmaNode(nddma_node) && has_tail_size && tail_size > large_tail_size) {
     GELOGD("Nddma Node [%s] is tail broadcast and with large tail axis, assigning low score.",
            nddma_node->GetNamePtr());
     score = low_score;
@@ -640,7 +657,12 @@ std::string GetDynamicScoreFunc(const af::AscGraph &nddma_graph, const af::AscNo
   }
   const auto &output_attr = nddma_node->outputs[0].attr;
   const auto dsize = af::GetSizeByDataType(output_attr.dtype);
-  const auto dim_expr = output_attr.repeats.back();
+  // 尾轴被 TileSplit 后 repeats.back() 是求解变量（CalcScore 在 DoTiling 前调用时尚未求解），
+  // 打分需回溯原始轴大小（输入变量或常量），保证打分时取值有效；回溯失败回退现状。
+  af::Expression dim_expr;
+  if (!ScheduleUtils::GetOriginTailDimExpr(nddma_graph, nddma_node, dim_expr)) {
+    dim_expr = output_attr.repeats.back();
+  }
   af::Expression last_dim_size = af::Symbol(dsize);
   last_dim_size = last_dim_size * dim_expr;
   ss << "  const auto tail_size = static_cast<int64_t>(" << last_dim_size.Replace(replacements).Str().get() << ");"
@@ -688,7 +710,7 @@ std::string NddmaTemplate::GetScoreFunc(const af::AscGraph &origin_graph, const 
 
   // 静态图
   if (IsStaticGraph(origin_graph)) {
-    return GetStaticScoreFunc(nddma_node, ss);
+    return GetStaticScoreFunc(nddma_graph, nddma_node, ss);
   }
   return GetDynamicScoreFunc(nddma_graph, nddma_node, ss);
 }

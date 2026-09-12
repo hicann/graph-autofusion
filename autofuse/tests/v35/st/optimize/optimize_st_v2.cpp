@@ -655,6 +655,132 @@ TEST_F(OptimizerStV2, NddmaCaseLargeTailBrc_Dynamic) {
   ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
 }
 
+TEST_F(OptimizerStV2, NddmaScoreFuncTailAxisSplitted_Dynamic) {
+  const Expression s0 = af::Symbol("s0");
+  const Expression s1 = af::Symbol("s1");
+
+  // Load with padding: shape {s0, 1}, strides {1, 0}
+  std::vector<Expression> load0_shape = {s0, af::sym::kSymbolOne};
+  std::vector<Expression> load0_strides = {af::sym::kSymbolOne, af::sym::kSymbolZero};
+
+  auto graph = AscGraphBuilder("gen_nddma")
+                   .Loops({s0, s1})
+                   .Data("data0", 0, af::DT_FLOAT16)
+                   .Load("load0", "data0", load0_shape, load0_strides)
+                   .Broadcast("broadcast", "load0", {1})  // broadcast on axis 1
+                   .Exp("exp0", "broadcast")
+                   .Abs("abs0", "broadcast")
+                   .Mul("mul0", "exp0", "abs0")
+                   .Store("store", "mul0")
+                   .Output("output", "store", 8, af::DT_FLOAT16)
+                   .Build();
+
+  ::ascir::FusedScheduledResult fused_scheduled_result;
+  EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
+  const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
+
+  ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
+  // 定位尾轴被 TileSplit 的 B0Y1 nddma case
+  std::string splitted_graph_name;
+  for (const auto &impl_graph : schedule_group.impl_graphs) {
+    if (impl_graph.GetName().find("B0Y1_nddma") != std::string::npos) {
+      splitted_graph_name = impl_graph.GetName();
+      break;
+    }
+  }
+  ASSERT_FALSE(splitted_graph_name.empty());
+  const auto score_func_iter = schedule_group.graph_name_to_score_funcs.find(splitted_graph_name);
+  ASSERT_NE(score_func_iter, schedule_group.graph_name_to_score_funcs.end());
+  // 尾轴表达式应引用原始轴变量 s1 而非切分内轴 z1t_size
+  const auto res =
+      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
+      "  const auto tail_size = static_cast<int64_t>((2 * tiling_data.s1));\n"
+      "  if (tail_size % 32 == 0) { return -1; }\n"
+      "  if (tail_size > 4096) { return -1; }\n"
+      "  return 0;\n"
+      "}\n";
+  EXPECT_EQ(score_func_iter->second, res);
+}
+
+TEST_F(OptimizerStV2, NddmaScoreFuncTailAxisSplitted_Static) {
+  const Expression s0 = af::Symbol(8);
+  const Expression s1 = af::Symbol(2012);
+
+  // Load with padding: shape {s0, 1}, strides {1, 0}
+  std::vector<Expression> load0_shape = {s0, af::sym::kSymbolOne};
+  std::vector<Expression> load0_strides = {af::sym::kSymbolOne, af::sym::kSymbolZero};
+
+  auto graph = AscGraphBuilder("gen_nddma")
+                   .Loops({s0, s1})
+                   .Data("data0", 0, af::DT_FLOAT)
+                   .Load("load0", "data0", load0_shape, load0_strides)
+                   .Broadcast("broadcast", "load0", {1})  // broadcast on axis 1
+                   .Exp("exp0", "broadcast")
+                   .Abs("abs0", "broadcast")
+                   .Mul("mul0", "exp0", "abs0")
+                   .Store("store", "mul0")
+                   .Output("output", "store", 8, af::DT_FLOAT)
+                   .Build();
+
+  ::ascir::FusedScheduledResult fused_scheduled_result;
+  EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
+  const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
+
+  ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
+  std::string splitted_graph_name;
+  for (const auto &impl_graph : schedule_group.impl_graphs) {
+    if (impl_graph.GetName().find("B0Y1_nddma") != std::string::npos) {
+      splitted_graph_name = impl_graph.GetName();
+      break;
+    }
+  }
+  ASSERT_FALSE(splitted_graph_name.empty());
+  const auto score_func_iter = schedule_group.graph_name_to_score_funcs.find(splitted_graph_name);
+  ASSERT_NE(score_func_iter, schedule_group.graph_name_to_score_funcs.end());
+  // 原始尾轴 2012 * 4B = 8048B > 4096B，case2 打低分
+  const auto res =
+      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
+      "  return -1;\n"
+      "}\n";
+  EXPECT_EQ(score_func_iter->second, res);
+}
+
+TEST_F(OptimizerStV2, NddmaScoreFuncTailAxisBoundary_Static) {
+  // Float32: dimensions 1023/1024/1025 correspond to 4092/4096/4100 bytes.
+  // This exercises the strict '> 4096B' boundary after tail-axis recovery.
+  for (const auto dim : {1023, 1024, 1025}) {
+    const Expression s0 = af::Symbol(8);
+    const Expression s1 = af::Symbol(dim);
+    std::vector<Expression> load0_shape = {s0, af::sym::kSymbolOne};
+    std::vector<Expression> load0_strides = {af::sym::kSymbolOne, af::sym::kSymbolZero};
+    auto graph = AscGraphBuilder("gen_nddma")
+                     .Loops({s0, s1})
+                     .Data("data0", 0, af::DT_FLOAT)
+                     .Load("load0", "data0", load0_shape, load0_strides)
+                     .Broadcast("broadcast", "load0", {1})
+                     .Exp("exp0", "broadcast")
+                     .Store("store", "exp0")
+                     .Output("output", "store", 8, af::DT_FLOAT)
+                     .Build();
+    ::ascir::FusedScheduledResult result;
+    EXPECT_EQ(optimizer.Optimize(graph, result), 0);
+    const auto &group = result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
+    std::string nddma_name;
+    for (const auto &impl_graph : group.impl_graphs) {
+      if (impl_graph.GetName().find("B0Y1_nddma") != std::string::npos) {
+        nddma_name = impl_graph.GetName();
+        break;
+      }
+    }
+    ASSERT_FALSE(nddma_name.empty());
+    const auto iter = group.graph_name_to_score_funcs.find(nddma_name);
+    ASSERT_NE(iter, group.graph_name_to_score_funcs.end());
+    const bool low_score = dim > 1024;
+    const auto expected = low_score ? "  return -1;\n" : "  return 0;\n";
+    EXPECT_NE(iter->second.find(expected), std::string::npos) << "dim=" << dim;
+  }
+}
+
 /**
  *           data0         data1
  *             |             |

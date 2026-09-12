@@ -2280,6 +2280,189 @@ TEST_F(TestOptimizerV2, LargeTailBrcToNddmaLowScoreFunc_Dynaminc) {
   EXPECT_EQ(score_func, res);
 }
 
+TEST_F(TestOptimizerV2, NddmaScoreFuncTailAxisSplitted_Dynamic) {
+  af::AscGraph graph("gen_nddma");
+
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+
+  Data data0("data0", graph);
+  data0.y.dtype = af::DT_FLOAT;
+  data0.ir_attr.SetIndex(0);
+
+  Load load0("load0");
+  load0.attr.sched.axis = {z0.id, z1.id};
+  load0.x = data0.y;
+  *load0.y.axis = {z0.id, z1.id};
+  load0.y.dtype = af::DT_FLOAT;
+  *load0.y.strides = {af::Symbol(1), af::Symbol(0)};
+  *load0.y.repeats = {s0, af::Symbol(1)};
+
+  Broadcast broadcast("broadcast");
+  broadcast.x = load0.y;
+  broadcast.attr.sched.axis = {z0.id, z1.id};
+  *broadcast.y.axis = {z0.id, z1.id};
+  broadcast.y.dtype = af::DT_FLOAT;
+  *broadcast.y.strides = {s1, One};
+  *broadcast.y.repeats = {s0, s1};
+
+  Store store_op("store");
+  store_op.attr.sched.axis = {z0.id, z1.id};
+  store_op.x = broadcast.y;
+  *store_op.y.axis = {z0.id, z1.id};
+  store_op.y.dtype = af::DT_FLOAT;
+  *store_op.y.strides = {s1, One};
+  *store_op.y.repeats = {s0, s1};
+
+  Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = af::DT_FLOAT;
+  output_op.ir_attr.SetIndex(8);
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  EXPECT_EQ(Optimizer::MergeContinuousAxis(graph), af::SUCCESS);
+  std::vector<autoschedule::AutoScheduleOutput> impl_graphs;
+  optimize::autoschedule::AutoSchedule autoschedule(graph, impl_graphs);
+  autoschedule.DoAutoSchedule();
+  ASSERT_EQ(impl_graphs.size(), 4);
+  // B0Y1 的尾轴 z1 被 TileSplit，nddma 输出尾轴为求解变量 z1t_size，即打分 bug 场景
+  EXPECT_EQ(impl_graphs[3].scheduled_graph.GetName(), "gen_nddma_B0Y1_nddma");
+
+  const auto nddma_template = af::ComGraphMakeUnique<NddmaTemplate>();
+  const auto score_func = nddma_template->GetScoreFunc(graph, impl_graphs[3].scheduled_graph);
+  const auto res =
+      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
+      "  const auto tail_size = static_cast<int64_t>((4 * tiling_data.s1));\n"
+      "  if (tail_size > 4096) { return -1; }\n"
+      "  return 0;\n"
+      "}\n";
+  EXPECT_EQ(score_func, res);
+}
+
+TEST_F(TestOptimizerV2, NddmaScoreFuncTailAxisSplitted_Static) {
+  af::AscGraph graph("gen_nddma");
+  auto s0 = graph.CreateSizeVar(64);
+  auto s1 = graph.CreateSizeVar(2012);
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+
+  Data data0("data0", graph);
+  data0.y.dtype = af::DT_FLOAT;
+  data0.ir_attr.SetIndex(0);
+
+  Load load0("load0");
+  load0.attr.sched.axis = {z0.id, z1.id};
+  load0.x = data0.y;
+  *load0.y.axis = {z0.id, z1.id};
+  load0.y.dtype = af::DT_FLOAT;
+  *load0.y.strides = {af::Symbol(1), af::Symbol(0)};
+  *load0.y.repeats = {s0, af::Symbol(1)};
+
+  Broadcast broadcast("broadcast");
+  broadcast.x = load0.y;
+  broadcast.attr.sched.axis = {z0.id, z1.id};
+  *broadcast.y.axis = {z0.id, z1.id};
+  broadcast.y.dtype = af::DT_FLOAT;
+  *broadcast.y.strides = {s1, One};
+  *broadcast.y.repeats = {s0, s1};
+
+  Store store_op("store");
+  store_op.attr.sched.axis = {z0.id, z1.id};
+  store_op.x = broadcast.y;
+  *store_op.y.axis = {z0.id, z1.id};
+  store_op.y.dtype = af::DT_FLOAT;
+  *store_op.y.strides = {s1, One};
+  *store_op.y.repeats = {s0, s1};
+
+  Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = af::DT_FLOAT;
+  output_op.ir_attr.SetIndex(8);
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  EXPECT_EQ(Optimizer::MergeContinuousAxis(graph), af::SUCCESS);
+  std::vector<autoschedule::AutoScheduleOutput> impl_graphs;
+  optimize::autoschedule::AutoSchedule autoschedule(graph, impl_graphs);
+  autoschedule.DoAutoSchedule();
+  ASSERT_EQ(impl_graphs.size(), 4);
+  EXPECT_EQ(impl_graphs[3].scheduled_graph.GetName(), "gen_nddma_B0Y1_nddma");
+
+  const auto nddma_template = af::ComGraphMakeUnique<NddmaTemplate>();
+  const auto score_func = nddma_template->GetScoreFunc(graph, impl_graphs[3].scheduled_graph);
+  // 原始尾轴 2012 * 4B = 8048B > 4096B，case2 应打低分；修复前因 z1t_size 非常量恒打 0
+  const auto res =
+      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
+      "  return -1;\n"
+      "}\n";
+  EXPECT_EQ(score_func, res);
+}
+
+TEST_F(TestOptimizerV2, NddmaScoreFuncTailAxisBacktrackFallback) {
+  af::AscGraph graph("gen_nddma");
+
+  auto s0 = graph.CreateSizeVar("s0");
+  auto s1 = graph.CreateSizeVar("s1");
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+
+  Data data0("data0", graph);
+  data0.y.dtype = af::DT_FLOAT;
+  data0.ir_attr.SetIndex(0);
+
+  Load load0("load0");
+  load0.attr.sched.axis = {z0.id, z1.id};
+  load0.x = data0.y;
+  *load0.y.axis = {z0.id, z1.id};
+  load0.y.dtype = af::DT_FLOAT;
+  *load0.y.strides = {af::Symbol(1), af::Symbol(0)};
+  *load0.y.repeats = {s0, af::Symbol(1)};
+
+  Broadcast broadcast("broadcast");
+  broadcast.x = load0.y;
+  broadcast.attr.sched.axis = {z0.id, z1.id};
+  *broadcast.y.axis = {z0.id, z1.id};
+  broadcast.y.dtype = af::DT_FLOAT;
+  *broadcast.y.strides = {s1, One};
+  *broadcast.y.repeats = {s0, s1};
+
+  Store store_op("store");
+  store_op.attr.sched.axis = {z0.id, z1.id};
+  store_op.x = broadcast.y;
+  *store_op.y.axis = {z0.id, z1.id};
+  store_op.y.dtype = af::DT_FLOAT;
+  *store_op.y.strides = {s1, One};
+  *store_op.y.repeats = {s0, s1};
+
+  Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = af::DT_FLOAT;
+  output_op.ir_attr.SetIndex(8);
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  EXPECT_EQ(Optimizer::MergeContinuousAxis(graph), af::SUCCESS);
+  std::vector<autoschedule::AutoScheduleOutput> impl_graphs;
+  optimize::autoschedule::AutoSchedule autoschedule(graph, impl_graphs);
+  autoschedule.DoAutoSchedule();
+  ASSERT_EQ(impl_graphs.size(), 4);
+  EXPECT_EQ(impl_graphs[3].scheduled_graph.GetName(), "gen_nddma_B0Y1_nddma");
+
+  // 破坏 nddma 节点输出尾轴 id，使回溯失败，验证回退到 repeats.back() 的既有行为
+  auto &sched_graph = impl_graphs[3].scheduled_graph;
+  bool corrupted = false;
+  for (auto node : sched_graph.GetAllNodes()) {
+    if (node->attr.type == "Nddma") {
+      node->outputs[0].attr.axis.back() = -1;
+      corrupted = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(corrupted);
+
+  const auto nddma_template = af::ComGraphMakeUnique<NddmaTemplate>();
+  const auto score_func = nddma_template->GetScoreFunc(graph, sched_graph);
+  EXPECT_NE(score_func.find("tiling_data.z1t_size"), std::string::npos);
+  EXPECT_EQ(score_func.find("tiling_data.s1"), std::string::npos);
+}
+
 TEST_F(TestOptimizerV2, LoadBrcToNddmaAlignLowScoreFunc) {
   const auto dtype = af::DT_FLOAT16;
   af::AscGraph graph("gen_nddma");

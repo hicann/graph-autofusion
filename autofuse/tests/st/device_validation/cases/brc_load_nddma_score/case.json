@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "case_id": "brc_load_nddma_score",
+  "graph_name": "brc_load_nddma_score",
+  "inputs": [{"shape": [1], "dtype": "float16", "dynamic": true}],
+  "outputs": [{"shape": [1], "dtype": "float16", "dynamic": true}],
+  "verification": {
+    "functional": true,
+    "precision": true,
+    "atol": 0.01,
+    "rtol": 0.002
+  },
+  "performance": {
+    "required": false,
+    "profiler": true,
+    "metric": "runner_wall_clock",
+    "warmup_count": 10,
+    "kernel_count": 1,
+    "profiler_available": false
+  },
+  "support_matrix": [{
+    "case_id": "brc_load_nddma_score",
+    "backend": "ascendc_real_device",
+    "soc": "ascend950",
+    "compile": "required",
+    "functional": "required",
+    "precision": "required",
+    "performance": "optional",
+    "dtypes": ["float16"],
+    "input_dtypes": ["float16"],
+    "output_dtypes": ["float16"],
+    "shapes": [[64, 1023], [64, 2048], [64, 2050]]
+  }],
+  "variants": {
+    "fused": {"codegen_entry": "input_ascir.py", "graph": "brc_load_nddma_score"}
+  }
+}

@@ -326,6 +326,11 @@ class ScheduleUtils {
                                   const std::vector<af::Expression> &out_repeats);
 
   static bool GetTailAxisDataSize(const af::AscNodePtr &node, uint32_t &size);
+  // 获取节点输出尾轴的原始大小表达式：若尾轴为切分轴（Tile/Block Inner/Outer），
+  // 沿 Axis::from 回溯至原始轴（或合并轴），返回其 size 表达式（输入变量或常量）。
+  // 返回 false 表示尾轴缺失或轴 id 无效，调用方应回退到 repeats 尾轴。
+  static bool GetOriginTailDimExpr(const af::AscGraph &graph, const af::AscNodePtr &node,
+                                   af::Expression &tail_dim_expr);
   static bool IsTailAxisLessThan(const af::AscNodePtr &node, const uint32_t value);
   static bool IsTailAxisAlignedBy(const af::AscNodePtr &node, const uint32_t align_bytes = 32);
 
