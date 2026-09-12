@@ -11,8 +11,6 @@
 #ifndef __ASCENDC_API_REGBASE_ZETA_H__
 #define __ASCENDC_API_REGBASE_ZETA_H__
 
-#include "kernel_operator.h"
-
 namespace AscendC {
 template <typename T>
 __simd_callee__ inline void ZetaSeriesTerm(Reg::RegTensor<T> &bTensor, Reg::RegTensor<T> &aTensor,

@@ -539,7 +539,7 @@ TEST(CodegenKernel, OutputTensorIsScalarDuplicate_test) {
           "TBuf<TPosition::VECCALC> global_1_tbuf;\n"
           "tpipe.InitBuffer(global_1_tbuf, 32);\n"
           "LocalTensor<GlobalTensor<float>> local_blk_tensor_of_global_1 = global_1_tbuf.Get<GlobalTensor<float>>();\n"
-          "Duplicate(local_blk_tensor_of_global_1[0], static_cast<GlobalTensor<float>>(), "
+          "Duplicate(local_blk_tensor_of_global_1[0], static_cast<GlobalTensor<float>>(0), "
           "static_cast<uint64_t>(32/sizeof(GlobalTensor<float>)));\n"
           "AscendC::PipeBarrier<PIPE_V>();\n"});
 }

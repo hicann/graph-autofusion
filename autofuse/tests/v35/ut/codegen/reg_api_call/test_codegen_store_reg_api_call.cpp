@@ -136,7 +136,7 @@ TEST(CodegenKernel, StoreRegApiCall_TwoStoreOneOutput) {
   call_1.inputs.push_back(&x1);
   call_1.Generate(tpipe, vector<af::AxisId>{}, result);
   EXPECT_EQ(result, std::string{"DataCopyPadExtend<float, AscendC::PaddingMode::Normal>(local_1[0 + 1], local_0[0], "
-                                "z0_t_size, 1, (16 - 1), 0);\n"});
+                                "z0_t_size, 1, (8 - 1), 0);\n"});
 }
 
 namespace {

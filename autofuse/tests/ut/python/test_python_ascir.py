@@ -200,6 +200,19 @@ class TestAscir:
             assert not hasattr(values, "vectorized_axis")
             assert not hasattr(values, "vectorized_strides")
 
+            rows = graph.create_size("rows")
+            row_axis = graph.create_axis("row", rows)
+            expanded = ascir_api.Broadcast(
+                graph,
+                values,
+                axis=[row_axis, axis],
+                size=[rows, size],
+                stride=[size, ascir.SizeExpr(1)],
+            )
+            assert expanded.axis == [row_axis.id, axis.id]
+            assert expanded.size == [rows, size]
+            assert expanded.strides == [size, ascir.SizeExpr(1)]
+
             singleton = graph.create_axis("singleton", 1)
             trailing_singleton = ascir_api.arange(
                 graph,
@@ -222,6 +235,108 @@ class TestAscir:
             ascir_api.Output(graph, stored, dtype=ascir.dtypes.int64)
             Autofuser(AutofuserOptions()).schedule(graph)
 
+            broadcast_graph = ascir.HintGraph("explicit_arange_broadcast")
+            b_rows = broadcast_graph.create_size("rows")
+            b_cols = broadcast_graph.create_size("cols")
+            b_row_axis = broadcast_graph.create_axis("row", b_rows)
+            b_col_axis = broadcast_graph.create_axis("col", b_cols)
+            arange_value = ascir_api.arange(
+                broadcast_graph,
+                dtype=ascir.dtypes.int64,
+                base=ascir.SizeExpr(0),
+                step=ascir.SizeExpr(1),
+                axis=[b_col_axis],
+                size=[b_cols],
+                stride=[ascir.SizeExpr(1)],
+            )
+            expanded_value = ascir_api.Broadcast(
+                broadcast_graph,
+                arange_value,
+                axis=[b_row_axis, b_col_axis],
+                size=[b_rows, b_cols],
+                stride=[b_cols, ascir.SizeExpr(1)],
+            )
+            broadcast_stored = ascir_api.Store(
+                broadcast_graph,
+                expanded_value,
+                axis=[b_row_axis, b_col_axis],
+                size=[b_rows, b_cols],
+                stride=[b_cols, ascir.SizeExpr(1)],
+            )
+            ascir_api.Output(
+                broadcast_graph, broadcast_stored, dtype=ascir.dtypes.int64
+            )
+            broadcast_fuser = Autofuser(AutofuserOptions())
+            scheduled = broadcast_fuser.schedule(broadcast_graph)
+            _, _, broadcast_kernel = broadcast_fuser.codegen(scheduled)
+            assert broadcast_kernel
+            assert "for (int64_t arange_b" not in broadcast_kernel
+            assert "BroadcastExtend" in broadcast_kernel
+
+            degenerate_graph = ascir.HintGraph("degenerate_arange_broadcast")
+            d_rows = degenerate_graph.create_size("rows")
+            d_cols = degenerate_graph.create_size("cols")
+            d_row_axis = degenerate_graph.create_axis("row", d_rows)
+            d_col_axis = degenerate_graph.create_axis("col", d_cols)
+            # Pattern A: 退化前缀轴 Arange([1, cols]/[0, 1]) -> Broadcast。
+            col_arange = ascir_api.arange(
+                degenerate_graph,
+                dtype=ascir.dtypes.int64,
+                base=ascir.SizeExpr(0),
+                step=ascir.SizeExpr(1),
+                axis=[d_row_axis, d_col_axis],
+                size=[ascir.SizeExpr(1), d_cols],
+                stride=[ascir.SizeExpr(0), ascir.SizeExpr(1)],
+            )
+            # Pattern B: 退化尾轴 Arange([rows, 1]/[1, 0]) -> Broadcast。
+            row_arange = ascir_api.arange(
+                degenerate_graph,
+                dtype=ascir.dtypes.int64,
+                base=ascir.SizeExpr(0),
+                step=d_cols,
+                axis=[d_row_axis, d_col_axis],
+                size=[d_rows, ascir.SizeExpr(1)],
+                stride=[ascir.SizeExpr(1), ascir.SizeExpr(0)],
+            )
+            col_expanded = ascir_api.Broadcast(
+                degenerate_graph,
+                col_arange,
+                axis=[d_row_axis, d_col_axis],
+                size=[d_rows, d_cols],
+                stride=[d_cols, ascir.SizeExpr(1)],
+            )
+            row_expanded = ascir_api.Broadcast(
+                degenerate_graph,
+                row_arange,
+                axis=[d_row_axis, d_col_axis],
+                size=[d_rows, d_cols],
+                stride=[d_cols, ascir.SizeExpr(1)],
+            )
+            add_value = ascir.ops.Add("add", degenerate_graph)
+            add_value.x1 = col_expanded
+            add_value.x2 = row_expanded
+            add_value.attr.sched.axis = [d_row_axis, d_col_axis]
+            add_value.y.axis = [d_row_axis, d_col_axis]
+            add_value.y.size = [d_rows, d_cols]
+            add_value.y.strides = [d_cols, ascir.SizeExpr(1)]
+            add_value.y.dtype = ascir.dtypes.int64
+            degenerate_stored = ascir_api.Store(
+                degenerate_graph,
+                add_value.y,
+                axis=[d_row_axis, d_col_axis],
+                size=[d_rows, d_cols],
+                stride=[d_cols, ascir.SizeExpr(1)],
+            )
+            ascir_api.Output(
+                degenerate_graph, degenerate_stored, dtype=ascir.dtypes.int64
+            )
+            degenerate_fuser = Autofuser(AutofuserOptions())
+            degenerate_scheduled = degenerate_fuser.schedule(degenerate_graph)
+            _, _, degenerate_kernel = degenerate_fuser.codegen(degenerate_scheduled)
+            assert degenerate_kernel
+            assert "for (int64_t arange_b" not in degenerate_kernel
+            assert "BroadcastExtend" in degenerate_kernel
+
             with pytest.raises(ValueError, match="axis must not be empty"):
                 ascir_api.arange(
                     graph,
@@ -240,7 +355,7 @@ class TestAscir:
                     size=[size],
                     stride=[ascir.SizeExpr(2)],
                 )
-            with pytest.raises(ValueError, match="zero strides require singleton"):
+            with pytest.raises(ValueError, match="explicit Broadcast"):
                 ascir_api.arange(
                     graph,
                     dtype=ascir.dtypes.int32,

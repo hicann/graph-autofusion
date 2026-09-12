@@ -19,9 +19,19 @@
 #include "ascir_register.h"
 
 namespace optimize {
+// 内部 graph attr: 标记当前 impl graph 属于 kUBFuse 调度上下文。
+// 由 BufQueAllocator::ProcessSingleImplGraph 写入, PlatformV2::PartitionSubFunctions 读取,
+// 用于在分区阶段关闭 Arange 的 VF 融合, 避免 UBFuse VectorFunc codegen 路径收到 Arange。
+constexpr char kGraphAttrIsUBFuseContext[] = "af.internal.vf.is_ubfuse_context";
+
+// 前端显式 Arange -> Broadcast 视图规范化: 退化轴视图原样透传, 仅 1D Arange
+// 在合轴前补齐为 Broadcast 输出的同轴数退化视图, 扩维由 Broadcast 通用路径承担。
+af::Status NormalizeArangeBroadcastViews(af::AscGraph &graph);
+
 class VectorFuncPartitioner {
  public:
-  explicit VectorFuncPartitioner(af::AscGraph &impl_graph) : impl_graph_(impl_graph) {};
+  explicit VectorFuncPartitioner(af::AscGraph &impl_graph, bool disable_arange_vf = false)
+      : impl_graph_(impl_graph), disable_arange_vf_(disable_arange_vf) {};
   // VF input graph node names must be unique to keep node and boundary-anchor ordering deterministic.
   af::Status Partition();
 
@@ -74,6 +84,8 @@ class VectorFuncPartitioner {
   ClusterDict cluster_dict_;
   size_t subgraph_id_ = 0UL;
   bool graph_has_reduce_node_ = false;  // 缓存图是否有reduce节点
+  // UBFuse 等上下文中 Arange 不参与 VF 融合, 保留在根图走普通 ArangeApiCall
+  bool disable_arange_vf_ = false;
 };
 }  // namespace optimize
 #endif  // OPTIMIZE_PLATFORM_V2_VECTOR_FUNC_PARTITIONER_H

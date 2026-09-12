@@ -11,8 +11,6 @@
 #ifndef __ASCENDC_API_REGBASE_I1E_H__
 #define __ASCENDC_API_REGBASE_I1E_H__
 
-#include "modified_bessel_i1.h"
-
 // Scaled small-branch factor: i1e removes exp(|x|), keeps x factor (odd function)
 template <typename T>
 __simd_callee__ inline void I1eFactorSmallCompute(AscendC::Reg::RegTensor<T> &absXReg,

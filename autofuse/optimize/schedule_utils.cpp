@@ -398,6 +398,41 @@ bool ScheduleUtils::GetTailAxisDataSize(const af::AscNodePtr &node, uint32_t &si
   return true;
 }
 
+bool ScheduleUtils::GetOriginTailDimExpr(const af::AscGraph &graph, const af::AscNodePtr &node,
+                                         af::Expression &tail_dim_expr) {
+  if (node == nullptr || node->outputs().empty()) {
+    GELOGD("Node is null or has no output, cannot get origin tail dim expr.");
+    return false;
+  }
+  const auto &axis_ids = node->outputs[0].attr.axis;
+  if (axis_ids.empty()) {
+    GELOGD("Node [%s] has no output axis, cannot get origin tail dim expr.", node->GetNamePtr());
+    return false;
+  }
+  const auto is_split_axis = [](const af::Axis *axis) {
+    return (axis->type == af::Axis::kAxisTypeTileInner) || (axis->type == af::Axis::kAxisTypeTileOuter) ||
+           (axis->type == af::Axis::kAxisTypeBlockInner) || (axis->type == af::Axis::kAxisTypeBlockOuter);
+  };
+  // AscGraph::FindAxis 未声明 const（impl 层为 const 纯查询），此处仅做轴查询，const_cast 安全。
+  const auto find_axis = [&graph](const int64_t axis_id) {
+    return const_cast<af::AscGraph &>(graph).FindAxis(axis_id);
+  };
+  const af::Axis *tail_axis = find_axis(axis_ids.back());
+  while ((tail_axis != nullptr) && is_split_axis(tail_axis) && !tail_axis->from.empty()) {
+    const auto parent_axis = find_axis(tail_axis->from[0]);
+    if (parent_axis == nullptr) {
+      break;
+    }
+    tail_axis = parent_axis;
+  }
+  if (tail_axis == nullptr) {
+    GELOGD("Cannot find tail axis [%ld] of node [%s], fallback to repeats.", axis_ids.back(), node->GetNamePtr());
+    return false;
+  }
+  tail_dim_expr = tail_axis->size;
+  return true;
+}
+
 bool ScheduleUtils::IsTailAxisLessThan(const af::AscNodePtr &node, const uint32_t value) {
   uint32_t size = 0;
   return GetTailAxisDataSize(node, size) && size < value;

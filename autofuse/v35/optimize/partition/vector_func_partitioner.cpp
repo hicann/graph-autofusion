@@ -38,6 +38,175 @@ af::Status ValidateUniqueNodeNames(const af::AscGraph &graph) {
   return af::SUCCESS;
 }
 
+// Arange 广播外轴检测: 逻辑 strides 中最后一个非零 stride 为取值轴(lane 轴),
+// 其之前或之后尺寸大于 1 的轴若存在零 stride, 表示 Arange 的取值沿该轴广播(值重复),
+// 轴合并/flatten 后无法用线性等差序列表达。尺寸为 1 的退化轴 stride 为 0 时不影响取值语义。
+// 使用逻辑 strides 而非 vectorized_strides: 调度器轴合并会重写物理视图,
+// 但取值语义始终由逻辑 strides 决定。
+// 同时覆盖 Pattern A(前缀广播, lane 轴在最后)和 Pattern B(尾轴广播, lane 轴在前缀)。
+bool ArangeHasBroadcastOuterAxis(const af::AscNodePtr &node) {
+  for (const auto &output : node->outputs()) {
+    const auto &attr = output->attr;
+    const auto &strides = attr.strides;
+    const auto &repeats = attr.repeats;
+    if (strides.empty() || strides.size() != repeats.size()) {
+      continue;
+    }
+    // 找到唯一的非零 stride 轴(lane 轴)。
+    // Pattern A: lane 轴在最后(如 strides=[0,...,0,1])。
+    // Pattern B: lane 轴在前缀(如 strides=[1,0,...,0])。
+    for (size_t i = 0; i < strides.size(); ++i) {
+      if (af::SymbolicUtils::StaticCheckEq(strides[i], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+        // 该轴 stride 为 0, 检查是否非退化(尺寸>1)。
+        // 非退化的零 stride 轴表示值沿该轴重复, 是广播轴。
+        if (af::SymbolicUtils::StaticCheckNe(repeats[i], af::sym::kSymbolOne) == af::TriBool::kTrue) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// 广播 Arange 保留在根图物化时, 输出按轴尺寸展开为连续物理布局;
+// 逻辑取值语义仍由 strides 决定, 由 ArangeApiCall 的逻辑偏移使用。
+bool MaterializeArangeViewContiguous(const af::AscNodePtr &node) {
+  for (const auto &output : node->outputs()) {
+    auto &attr = output->attr;
+    if (attr.vectorized_axis.empty() || attr.vectorized_strides.empty() ||
+        attr.vectorized_axis.size() != attr.vectorized_strides.size()) {
+      continue;
+    }
+    if (attr.axis.size() != attr.repeats.size()) {
+      return false;
+    }
+    for (const auto &axis_id : attr.vectorized_axis) {
+      if (std::find(attr.axis.begin(), attr.axis.end(), axis_id) == attr.axis.end()) {
+        return false;
+      }
+    }
+    std::vector<af::Expression> flat_strides(attr.vectorized_strides.size());
+    af::Expression stride = af::ops::One;
+    for (size_t i = attr.vectorized_strides.size(); i > 0UL; --i) {
+      flat_strides[i - 1UL] = stride;
+      const auto axis_iter = std::find(attr.axis.begin(), attr.axis.end(), attr.vectorized_axis[i - 1UL]);
+      const auto &axis_size = attr.repeats[static_cast<size_t>(std::distance(attr.axis.begin(), axis_iter))];
+      stride = (i == attr.vectorized_strides.size()) ? axis_size : af::sym::Mul(stride, axis_size);
+    }
+    attr.vectorized_strides = std::move(flat_strides);
+  }
+  return true;
+}
+
+// 判断 Arange 输出轴中某个位置的轴是否退化(size==1 且 stride==0)。
+bool IsDegenerateAxis(const af::AscTensorAttr &attr, size_t index) {
+  return af::SymbolicUtils::StaticCheckEq(attr.repeats[index], af::sym::kSymbolOne) == af::TriBool::kTrue &&
+         af::SymbolicUtils::StaticCheckEq(attr.strides[index], af::sym::kSymbolZero) == af::TriBool::kTrue;
+}
+
+// 前端显式退化轴 Arange -> Broadcast: 前端用多轴退化视图表达通用系数索引
+// (如 c0*p0 + c1*p1 拆成两个退化轴 Arange + Broadcast + Add)。
+// Arange 只负责物化一维等差序列: 退化轴(size 1, stride 0)对物理布局和逻辑取值
+// 均无贡献, 扩维职责由 Broadcast 通用路径(BroadcastExtend)承担, 与退化轴
+// Load -> Broadcast 路径一致。
+// 支持两种模式:
+// Pattern A: Arange 前缀轴退化(如 size=[1,8], stride=[0,1]), 值沿最后轴递增。
+// Pattern B: Arange 尾轴退化(如 size=[4,1], stride=[1,0]), 值沿前缀轴递增。
+// 两种模式均保持退化视图原样透传; 仅 1D Arange(轴数少于 Broadcast 输出)在合轴前
+// 补齐为同轴数退化视图, 缺失轴按 Broadcast 输出位置补 size 1, stride 0。
+af::Status NormalizeArangeBroadcastViewsImpl(af::AscGraph &vf_graph) {
+  for (const auto &broadcast : vf_graph.GetAllNodes()) {
+    if (!af::ops::IsOps<af::ascir_op::Broadcast>(broadcast) || broadcast->inputs().size() != 1UL) {
+      continue;
+    }
+    const auto arange = std::dynamic_pointer_cast<af::AscNode>(broadcast->inputs[0].anchor.GetOwnerNode());
+    if (arange == nullptr || !af::ops::IsOps<af::ascir_op::Arange>(arange) || arange->outputs().size() != 1UL ||
+        arange->GetOutDataNodes().size() != 1UL) {
+      continue;
+    }
+    auto &input = arange->outputs[0].attr;
+    const auto &output = broadcast->outputs[0].attr;
+    if (input.axis.empty() || input.axis.size() != input.repeats.size() || input.axis.size() != input.strides.size() ||
+        output.axis.empty() || output.axis.size() != output.repeats.size() ||
+        output.axis.size() != output.strides.size() || input.axis.size() > output.axis.size() ||
+        arange->GetInControlNodesSize() != 0UL || arange->GetOutControlNodesSize() != 0UL ||
+        broadcast->GetInControlNodesSize() != 0UL || broadcast->GetOutControlNodesSize() != 0UL) {
+      return af::FAILED;
+    }
+    // Broadcast 输出的尾轴必须与 Arange 的尾轴一致。
+    if (output.axis.back() != input.axis.back()) {
+      return af::FAILED;
+    }
+    // Broadcast 输出的尾 stride 必须为 1。
+    if (af::SymbolicUtils::StaticCheckEq(output.strides.back(), af::sym::kSymbolOne) != af::TriBool::kTrue) {
+      return af::FAILED;
+    }
+
+    // Arange 输入必须恰好有一个非退化轴(其余全部退化)。
+    size_t non_degenerate_count = 0;
+    size_t varying_index = 0;
+    for (size_t i = 0; i < input.axis.size(); ++i) {
+      if (!IsDegenerateAxis(input, i)) {
+        ++non_degenerate_count;
+        varying_index = i;
+      }
+    }
+    if (non_degenerate_count != 1UL) {
+      return af::FAILED;
+    }
+    // 保存变化轴 id, 避免后续 input.axis 重写后丢失引用。
+    const af::AxisId varying_axis_id = input.axis[varying_index];
+    // 非退化轴的 stride 必须为 1。
+    if (af::SymbolicUtils::StaticCheckEq(input.strides[varying_index], af::sym::kSymbolOne) != af::TriBool::kTrue) {
+      return af::FAILED;
+    }
+    // Arange 的变化轴必须存在于 Broadcast 输出中。
+    if (std::find(output.axis.begin(), output.axis.end(), varying_axis_id) == output.axis.end()) {
+      return af::FAILED;
+    }
+
+    if (input.axis.size() == output.axis.size()) {
+      // 已是同轴数退化视图: 原样透传, Broadcast 走通用扩维路径。
+      arange->attr.sched.axis = broadcast->attr.sched.axis;
+      continue;
+    }
+
+    // 1D Arange: 按 Broadcast 输出位置补齐退化轴(size 1, stride 0),
+    // 变化轴保持自身 size 和 stride 1。
+    std::vector<af::AxisId> padded_axis;
+    std::vector<af::Expression> padded_repeats;
+    std::vector<af::Expression> padded_strides;
+    const auto &varying_size = input.repeats[varying_index];
+    for (size_t i = 0; i < output.axis.size(); ++i) {
+      padded_axis.push_back(output.axis[i]);
+      if (output.axis[i] == varying_axis_id) {
+        padded_repeats.push_back(varying_size);
+        padded_strides.push_back(af::sym::kSymbolOne);
+      } else {
+        padded_repeats.push_back(af::sym::kSymbolOne);
+        padded_strides.push_back(af::sym::kSymbolZero);
+      }
+    }
+    input.axis = std::move(padded_axis);
+    input.repeats = std::move(padded_repeats);
+    input.strides = std::move(padded_strides);
+    // vectorized 布局按补齐后 repeats 重建为扁平连续布局。
+    input.vectorized_axis = output.vectorized_axis;
+    input.vectorized_strides.assign(output.vectorized_axis.size(), af::sym::kSymbolOne);
+    af::Expression flat_stride = af::sym::kSymbolOne;
+    for (size_t i = output.vectorized_axis.size(); i > 0UL; --i) {
+      input.vectorized_strides[i - 1UL] = flat_stride;
+      const auto axis_iter = std::find(input.axis.begin(), input.axis.end(), output.vectorized_axis[i - 1UL]);
+      GE_ASSERT_TRUE(axis_iter != input.axis.end(), "Arange vectorized axis [%ld] not found in padded view",
+                     static_cast<int64_t>(output.vectorized_axis[i - 1UL]));
+      const auto &axis_size = input.repeats[static_cast<size_t>(std::distance(input.axis.begin(), axis_iter))];
+      flat_stride = af::sym::Mul(flat_stride, axis_size);
+    }
+    arange->attr.sched.axis = broadcast->attr.sched.axis;
+  }
+  return af::SUCCESS;
+}
+
 using NodeIndegrees = std::unordered_map<af::Node *, size_t>;
 using NodeSuccessors = std::unordered_map<af::Node *, std::vector<af::NodePtr>>;
 
@@ -459,6 +628,10 @@ namespace optimize {
 const std::string kNamePrefixLoad = "Load_";
 const std::string kNamePrefixStore = "Store_";
 const std::string kNamePrefixData = "Data_";
+
+af::Status NormalizeArangeBroadcastViews(af::AscGraph &graph) {
+  return NormalizeArangeBroadcastViewsImpl(graph);
+}
 const std::string kNamePrefixScalar = "Scalar_";
 const std::string kNamePrefixOutput = "Output_";
 
@@ -538,6 +711,29 @@ af::Status VectorFuncPartitioner::InitClusterAttr(const std::unique_ptr<af::asci
 void VectorFuncPartitioner::RefineEnableVFFlag(const af::AscNodePtr &node, bool &enable_vf) const {
   if (!enable_vf) {
     return;
+  }
+
+  // Arange: 带控制边时 VF 子图无法保留控制依赖; UBFuse 上下文的 VectorFunc codegen 不支持
+  // Arange。两类 Arange 均在建簇阶段关闭 VF, 保留在根图走普通 ArangeApiCall。
+  if (af::ops::IsOps<af::ascir_op::Arange>(node)) {
+    // 广播外轴(stride 为 0)的 Arange 融合进 VF 后, 轴合并/flatten 会把广播轴折叠为
+    // 线性索引, Reg::Arange 无法表达逐轴重复取值。此类 Arange 保留在根图, 由
+    // ArangeApiCall 按逻辑 stride 物化, 物化布局按轴尺寸展开为连续 stride,
+    // 并在调用内部对非固定广播轴展开逐帧写入以覆盖整个分配范围。
+    const bool has_broadcast_outer_axis = ArangeHasBroadcastOuterAxis(node);
+    if (has_broadcast_outer_axis) {
+      if (!MaterializeArangeViewContiguous(node)) {
+        enable_vf = false;
+        return;
+      }
+    }
+    if (has_broadcast_outer_axis || disable_arange_vf_ || node->GetInControlNodesSize() != 0UL ||
+        node->GetOutControlNodesSize() != 0UL) {
+      GELOGD("Node [%s] is Arange with broadcast outer axis or control edge or in UBFuse context, disable VF support.",
+             node->GetNamePtr());
+      enable_vf = false;
+      return;
+    }
   }
 
   // 1. 如果当前图中有reduce节点，cast不参与vf融合

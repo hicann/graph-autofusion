@@ -10,6 +10,8 @@
 
 #include "platformv2.h"
 
+#include "attr_utils.h"
+#include "graph/ascendc_ir/utils/asc_graph_utils.h"
 #include "ascgraph_info_complete.h"
 #include "un_alignment_strategy.h"
 #include "pass_runner_v2.h"
@@ -34,7 +36,12 @@ PlatformV2::PlatformV2(bool is_default_enabled) {
 }
 
 af::Status PlatformV2::PartitionSubFunctions(af::AscGraph &impl_graph) {
-  VectorFuncPartitioner partitioner(impl_graph);
+  // UBFuse 上下文由 BufQueAllocator 通过内部 graph attr 传入; UBFuse 模板的 VectorFunc
+  // codegen 不支持 Arange, 分区阶段关闭 Arange 的 VF 融合。
+  bool disable_arange_vf = false;
+  (void)af::AttrUtils::GetBool(af::AscGraphUtils::GetComputeGraph(impl_graph), kGraphAttrIsUBFuseContext,
+                               disable_arange_vf);
+  VectorFuncPartitioner partitioner(impl_graph, disable_arange_vf);
   GE_ASSERT_SUCCESS(partitioner.Partition(), "Failed to partition sub funcs for graph [%s].",
                     impl_graph.GetName().c_str());
   return af::SUCCESS;

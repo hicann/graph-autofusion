@@ -242,7 +242,7 @@ class ArangeAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return true;
   }
   [[nodiscard]] std::string GetApiCallName() const override {
-    return "";
+    return "ArangeApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "Arange";
@@ -434,10 +434,9 @@ class CastAscIrCodegenImplV2 : public AscIrCodegenV2 {
 
   [[nodiscard]] bool IsVectorFunctionSupported(const ge::AscNode &node) const override {
     std::map<ge::DataType, std::set<ge::DataType>> supported_map = {
-        {DT_FLOAT, {DT_FLOAT16, DT_INT64, DT_INT16, DT_INT32, DT_BF16}},
+        {DT_FLOAT, {DT_FLOAT16, DT_INT16, DT_INT32, DT_BF16}},
         {DT_FLOAT16, {DT_UINT8, DT_INT8, DT_FLOAT}},
         {DT_INT32, {DT_FLOAT, DT_INT16}},
-        {DT_INT64, {DT_INT32, DT_FLOAT}},
         {DT_BF16, {DT_FLOAT}},
         {DT_UINT8, {DT_FLOAT16}},
         {DT_INT8, {DT_FLOAT16, DT_INT16}},
@@ -449,6 +448,13 @@ class CastAscIrCodegenImplV2 : public AscIrCodegenV2 {
     uint32_t output_dtype_size = GetSizeByDataType(node_outputs[0].attr.dtype);
     // Cast只能处理2倍及以内位宽变化的场景
     if ((input_dtype_size > output_dtype_size * 2U) || (output_dtype_size > input_dtype_size * 2U)) {
+      return false;
+    }
+    // 8字节与4字节之间的转换在 MicroAPI 层要求源/目的使用 RegTraitNumTwo 双寄存器
+    // (dav_m510 的 s642f32/f322s64 实现按 srcReg.reg[0]/reg[1] 取数)。VF codegen 只
+    // 生成单寄存器张量, 该组合在设备上仅填充半数 lane(真机验证: 恰好 50% mismatch,
+    // 交替 -0.0 模式), 因此拒绝 VF 融合, 保留在根图走 CastExtend(真机验证正确)。
+    if ((input_dtype_size == 8U) != (output_dtype_size == 8U)) {
       return false;
     }
 
@@ -842,6 +848,11 @@ class I0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"i0_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -866,7 +877,12 @@ class I0eAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "j0";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"i0e_reg_base.h"};
+    return {"modified_bessel_utils_reg_base.h", "modified_bessel_i0_reg_base.h", "i0e_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
@@ -892,7 +908,12 @@ class I1eAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "j1";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"i1e_reg_base.h"};
+    return {"modified_bessel_utils_reg_base.h", "modified_bessel_i1_reg_base.h", "i1e_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
@@ -1146,6 +1167,11 @@ class LogNdtrAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"log_ndtr_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -1169,6 +1195,11 @@ class NextAfterAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"next_after_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -1190,11 +1221,11 @@ class PolyGammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "PolyGammaExtend";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"zeta_reg_base.h", "polygamma_reg_base.h"};
+    return {"trigonometric_function_utils_reg_base.h", "zeta_reg_base.h", "polygamma_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
-        "adv_api/math/lgamma.h",
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -1342,6 +1373,11 @@ class ZetaAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"zeta_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -1457,6 +1493,11 @@ class ChebyshevPolynomialTAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_t_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -1479,6 +1520,11 @@ class ChebyshevPolynomialUAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_u_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
@@ -1503,6 +1549,11 @@ class ChebyshevPolynomialVAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_v_reg_base.h"};
   }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
+  }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
@@ -1525,6 +1576,11 @@ class ChebyshevPolynomialWAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"chebyshev_polynomial_utils_reg_base.h", "chebyshev_polynomial_w_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
@@ -3880,7 +3936,7 @@ class AcosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Acos";
+    return "AcosExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Acos";
@@ -3890,12 +3946,18 @@ class AcosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
       const AscNode &node) {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
         {DT_BF16, DT_FLOAT},
+        {DT_FLOAT16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"acos_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/acos.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -3987,7 +4049,7 @@ class AsinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Asin";
+    return "AsinExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Asin";
@@ -3996,12 +4058,18 @@ class AsinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
       const AscNode &node) override {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
         {DT_BF16, DT_FLOAT},
+        {DT_FLOAT16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"asin_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/asin.h",
+        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -5362,6 +5430,11 @@ class RemainderAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"remainder_reg_base.h"};
+  }
+  [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    return {
+        "simt_api/cpp/kernel_simt_intf.h",
+    };
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) override {

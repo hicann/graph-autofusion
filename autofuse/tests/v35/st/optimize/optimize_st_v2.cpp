@@ -38,6 +38,7 @@
 #include "platform/platform_factory.h"
 #include "platform_context.h"
 #include "platformv2.h"
+#include "un_alignment_strategy.h"
 #include "tests/depends/runtime/src/runtime_stub.h"
 #include "../../st/optimize/runtime_stub.h"
 #include "backend/backend_spec.h"
@@ -406,25 +407,32 @@ TEST_F(OptimizerStV2, NddmaCaseBrcOutputWithMultiRef) {
                    .Data("data0", 0, af::DT_FLOAT)
                    .Load("load0", "data0", load_shape, load_strides)
                    .Broadcast("broadcast", "load0", {0, 1})  // broadcast on both axes
-                   .Exp("exp0", "broadcast")
-                   .Abs("abs0", "broadcast")
-                   .Mul("mul0", "exp0", "abs0")
-                   .Store("store", "mul0")
+                   .Scalar("scalar0", "0", af::DT_FLOAT)
+                   .Add("exp0", "broadcast", "scalar0")
+                   .Abs("abs0", "exp0")
+                   .Store("store", "abs0")
                    .Output("output", "store", 8, af::DT_FLOAT)
                    .Build();
 
   ::ascir::FusedScheduledResult fused_scheduled_result;
-  EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
-
-  for (const auto &node :
-       fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[1].GetAllNodes()) {
-    if (node->GetOpDesc()->GetId() == 1) {
-      EXPECT_EQ(node->GetOpDesc()->GetType(), "Nddma");
+  ASSERT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
+  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results.empty());
+  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results[0].empty());
+  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups.empty());
+  const auto &impl_graphs = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs;
+  ASSERT_GT(impl_graphs.size(), 1UL);
+  bool has_nddma = false;
+  bool has_vector_func = false;
+  for (const auto &node : impl_graphs[1].GetAllNodes()) {
+    if (node->GetOpDesc()->GetType() == "Nddma") {
+      has_nddma = true;
     }
-    if (node->GetOpDesc()->GetId() == 2) {
-      EXPECT_EQ(node->GetOpDesc()->GetType(), "VectorFunc");
+    if (node->GetOpDesc()->GetType() == "VectorFunc") {
+      has_vector_func = true;
     }
   }
+  EXPECT_TRUE(has_nddma);
+  EXPECT_TRUE(has_vector_func);
 }
 
 TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc) {
@@ -456,16 +464,24 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc) {
   *broadcast0.y.repeats = {s0, s1};
   *broadcast0.y.strides = {s1, af::ops::One};
 
-  Exp exp0("exp0");
+  Scalar scalar0("scalar0", graph);
+  scalar0.y.dtype = dtype;
+  scalar0.attr.sched.axis = {z0.id, z1.id};
+  *scalar0.y.axis = {z0.id, z1.id};
+  *scalar0.y.repeats = {s0, s1};
+  *scalar0.y.strides = {s1, af::ops::One};
+
+  Add exp0("exp0");
   exp0.attr.sched.axis = {z0.id, z1.id};
-  exp0.x = broadcast0.y;
+  exp0.x1 = broadcast0.y;
+  exp0.x2 = scalar0.y;
   *exp0.y.axis = {z0.id, z1.id};
   exp0.y.dtype = dtype;
   *exp0.y.repeats = {s0, s1};
   *exp0.y.strides = {s1, af::ops::One};
 
   Abs abs0("abs0");
-  abs0.x = broadcast0.y;
+  abs0.x = exp0.y;
   abs0.attr.sched.axis = {z0.id, z1.id};
   abs0.y.dtype = dtype;
   *abs0.y.axis = {z0.id, z1.id};
@@ -473,18 +489,9 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc) {
   *abs0.y.strides = {s1, One};
   abs0.attr.api.compute_type = ComputeType::kComputeElewise;
 
-  Mul mul0("mul0");
-  mul0.attr.sched.axis = {z0.id, z1.id};
-  mul0.x1 = exp0.y;
-  mul0.x2 = abs0.y;
-  mul0.y.dtype = dtype;
-  *mul0.y.axis = {z0.id, z1.id};
-  *mul0.y.repeats = {s0, s1};
-  *mul0.y.strides = {s1, One};
-
   Store store_op("store");
   store_op.attr.sched.axis = {z0.id, z1.id};
-  store_op.x = mul0.y;
+  store_op.x = abs0.y;
   *store_op.y.axis = {z0.id, z1.id};
   store_op.y.dtype = dtype;
   *store_op.y.strides = {s1, af::ops::One};
@@ -499,15 +506,8 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc) {
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
   const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
 
-  ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
-
-  const auto score_func_iter = schedule_group.graph_name_to_score_funcs.find(schedule_group.impl_graphs[2].GetName());
-  ASSERT_NE(score_func_iter, schedule_group.graph_name_to_score_funcs.end());
-  const auto res =
-      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
-      "  return -1;\n"
-      "}\n";
-  EXPECT_EQ(score_func_iter->second, res);
+  ASSERT_FALSE(schedule_group.impl_graphs.empty());
+  EXPECT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2UL);
 }
 
 TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc_Dynamic) {
@@ -539,16 +539,24 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc_Dynamic) {
   *broadcast0.y.repeats = {s0, s1};
   *broadcast0.y.strides = {s1, af::ops::One};
 
-  Exp exp0("exp0");
+  Scalar scalar0("scalar0", graph);
+  scalar0.y.dtype = dtype;
+  scalar0.attr.sched.axis = {z0.id, z1.id};
+  *scalar0.y.axis = {z0.id, z1.id};
+  *scalar0.y.repeats = {s0, s1};
+  *scalar0.y.strides = {s1, af::ops::One};
+
+  Add exp0("exp0");
   exp0.attr.sched.axis = {z0.id, z1.id};
-  exp0.x = broadcast0.y;
+  exp0.x1 = broadcast0.y;
+  exp0.x2 = scalar0.y;
   *exp0.y.axis = {z0.id, z1.id};
   exp0.y.dtype = dtype;
   *exp0.y.repeats = {s0, s1};
   *exp0.y.strides = {s1, af::ops::One};
 
   Abs abs0("abs0");
-  abs0.x = broadcast0.y;
+  abs0.x = exp0.y;
   abs0.attr.sched.axis = {z0.id, z1.id};
   abs0.y.dtype = dtype;
   *abs0.y.axis = {z0.id, z1.id};
@@ -556,18 +564,9 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc_Dynamic) {
   *abs0.y.strides = {s1, One};
   abs0.attr.api.compute_type = ComputeType::kComputeElewise;
 
-  Mul mul0("mul0");
-  mul0.attr.sched.axis = {z0.id, z1.id};
-  mul0.x1 = exp0.y;
-  mul0.x2 = abs0.y;
-  mul0.y.dtype = dtype;
-  *mul0.y.axis = {z0.id, z1.id};
-  *mul0.y.repeats = {s0, s1};
-  *mul0.y.strides = {s1, One};
-
   Store store_op("store");
   store_op.attr.sched.axis = {z0.id, z1.id};
-  store_op.x = mul0.y;
+  store_op.x = abs0.y;
   *store_op.y.axis = {z0.id, z1.id};
   store_op.y.dtype = dtype;
   *store_op.y.strides = {s1, af::ops::One};
@@ -582,17 +581,8 @@ TEST_F(OptimizerStV2, NddmaCaseAlignTailBrcScoreFunc_Dynamic) {
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
   const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
 
-  ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
-  const auto score_func_iter = schedule_group.graph_name_to_score_funcs.find(schedule_group.impl_graphs[2].GetName());
-  ASSERT_NE(score_func_iter, schedule_group.graph_name_to_score_funcs.end());
-  const auto res =
-      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
-      "  const auto tail_size = static_cast<int64_t>((2 * tiling_data.s1));\n"
-      "  if (tail_size % 32 == 0) { return -1; }\n"
-      "  if (tail_size > 4096) { return -1; }\n"
-      "  return 0;\n"
-      "}\n";
-  EXPECT_EQ(score_func_iter->second, res);
+  ASSERT_FALSE(schedule_group.impl_graphs.empty());
+  EXPECT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2UL);
 }
 
 TEST_F(OptimizerStV2, NddmaCaseLargeTailBrcScoreFunc) {
@@ -608,25 +598,18 @@ TEST_F(OptimizerStV2, NddmaCaseLargeTailBrcScoreFunc) {
                    .Data("data0", 0, af::DT_FLOAT)
                    .Load("load0", "data0", load0_shape, load0_strides)
                    .Broadcast("broadcast", "load0", {1})  // broadcast on axis 1
-                   .Exp("exp0", "broadcast")
-                   .Abs("abs0", "broadcast")
-                   .Mul("mul0", "exp0", "abs0")
-                   .Store("store", "mul0")
+                   .Scalar("scalar0", "0", af::DT_FLOAT)
+                   .Add("exp0", "broadcast", "scalar0")
+                   .Abs("abs0", "exp0")
+                   .Store("store", "abs0")
                    .Output("output", "store", 8, af::DT_FLOAT)
                    .Build();
 
   ::ascir::FusedScheduledResult fused_scheduled_result;
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
   const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
-  ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
-
-  const auto score_func_iter = schedule_group.graph_name_to_score_funcs.find(schedule_group.impl_graphs[2].GetName());
-  ASSERT_NE(score_func_iter, schedule_group.graph_name_to_score_funcs.end());
-  const auto res =
-      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
-      "  return -1;\n"
-      "}\n";
-  EXPECT_EQ(score_func_iter->second, res);
+  ASSERT_FALSE(schedule_group.impl_graphs.empty());
+  EXPECT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2UL);
 }
 
 TEST_F(OptimizerStV2, NddmaCaseLargeTailBrc_Dynamic) {
@@ -642,17 +625,146 @@ TEST_F(OptimizerStV2, NddmaCaseLargeTailBrc_Dynamic) {
                    .Data("data0", 0, af::DT_FLOAT)
                    .Load("load0", "data0", load0_shape, load0_strides)
                    .Broadcast("broadcast", "load0", {1})  // broadcast on axis 1
-                   .Exp("exp0", "broadcast")
-                   .Abs("abs0", "broadcast")
-                   .Mul("mul0", "exp0", "abs0")
-                   .Store("store", "mul0")
+                   .Scalar("scalar0", "0", af::DT_FLOAT)
+                   .Add("exp0", "broadcast", "scalar0")
+                   .Abs("abs0", "exp0")
+                   .Store("store", "abs0")
                    .Output("output", "store", 8, af::DT_FLOAT)
                    .Build();
 
   ::ascir::FusedScheduledResult fused_scheduled_result;
   EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
   const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
+  ASSERT_FALSE(schedule_group.impl_graphs.empty());
+  EXPECT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2UL);
+}
+
+TEST_F(OptimizerStV2, NddmaScoreFuncTailAxisSplitted_Dynamic) {
+  const Expression s0 = af::Symbol("s0");
+  const Expression s1 = af::Symbol("s1");
+
+  // Load with padding: shape {s0, 1}, strides {1, 0}
+  std::vector<Expression> load0_shape = {s0, af::sym::kSymbolOne};
+  std::vector<Expression> load0_strides = {af::sym::kSymbolOne, af::sym::kSymbolZero};
+
+  auto graph = AscGraphBuilder("gen_nddma")
+                   .Loops({s0, s1})
+                   .Data("data0", 0, af::DT_FLOAT16)
+                   .Load("load0", "data0", load0_shape, load0_strides)
+                   .Broadcast("broadcast", "load0", {1})  // broadcast on axis 1
+                   .Scalar("scalar0", "0", af::DT_FLOAT16)
+                   .Add("add0", "broadcast", "scalar0")
+                   .Exp("exp0", "add0")
+                   .Store("store", "exp0")
+                   .Output("output", "store", 8, af::DT_FLOAT16)
+                   .Build();
+
+  ::ascir::FusedScheduledResult fused_scheduled_result;
+  EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
+  const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
+
   ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
+  // 定位尾轴被 TileSplit 的 B0Y1 nddma case
+  std::string splitted_graph_name;
+  for (const auto &impl_graph : schedule_group.impl_graphs) {
+    if (impl_graph.GetName().find("B0Y1_nddma") != std::string::npos) {
+      splitted_graph_name = impl_graph.GetName();
+      break;
+    }
+  }
+  ASSERT_FALSE(splitted_graph_name.empty());
+  const auto score_func_iter = schedule_group.graph_name_to_score_funcs.find(splitted_graph_name);
+  ASSERT_NE(score_func_iter, schedule_group.graph_name_to_score_funcs.end());
+  // 尾轴表达式应引用原始轴变量 s1 而非切分内轴 z1t_size
+  const auto res =
+      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
+      "  const auto tail_size = static_cast<int64_t>((2 * tiling_data.s1));\n"
+      "  if (tail_size % 32 == 0) { return -1; }\n"
+      "  if (tail_size > 4096) { return -1; }\n"
+      "  return 0;\n"
+      "}\n";
+  EXPECT_EQ(score_func_iter->second, res);
+}
+
+TEST_F(OptimizerStV2, NddmaScoreFuncTailAxisSplitted_Static) {
+  const Expression s0 = af::Symbol(8);
+  const Expression s1 = af::Symbol(2012);
+
+  // Load with padding: shape {s0, 1}, strides {1, 0}
+  std::vector<Expression> load0_shape = {s0, af::sym::kSymbolOne};
+  std::vector<Expression> load0_strides = {af::sym::kSymbolOne, af::sym::kSymbolZero};
+
+  auto graph = AscGraphBuilder("gen_nddma")
+                   .Loops({s0, s1})
+                   .Data("data0", 0, af::DT_FLOAT)
+                   .Load("load0", "data0", load0_shape, load0_strides)
+                   .Broadcast("broadcast", "load0", {1})  // broadcast on axis 1
+                   .Scalar("scalar0", "0", af::DT_FLOAT)
+                   .Add("add0", "broadcast", "scalar0")
+                   .Exp("exp0", "add0")
+                   .Store("store", "exp0")
+                   .Output("output", "store", 8, af::DT_FLOAT)
+                   .Build();
+
+  ::ascir::FusedScheduledResult fused_scheduled_result;
+  EXPECT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
+  const auto schedule_group = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
+
+  ASSERT_EQ(schedule_group.graph_name_to_score_funcs.size(), 2);
+  std::string splitted_graph_name;
+  for (const auto &impl_graph : schedule_group.impl_graphs) {
+    if (impl_graph.GetName().find("B0Y1_nddma") != std::string::npos) {
+      splitted_graph_name = impl_graph.GetName();
+      break;
+    }
+  }
+  ASSERT_FALSE(splitted_graph_name.empty());
+  const auto score_func_iter = schedule_group.graph_name_to_score_funcs.find(splitted_graph_name);
+  ASSERT_NE(score_func_iter, schedule_group.graph_name_to_score_funcs.end());
+  // 原始尾轴 2012 * 4B = 8048B > 4096B，case2 打低分
+  const auto res =
+      "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
+      "  return -1;\n"
+      "}\n";
+  EXPECT_EQ(score_func_iter->second, res);
+}
+
+TEST_F(OptimizerStV2, NddmaScoreFuncTailAxisBoundary_Static) {
+  // Float32: dimensions 1023/1024/1025 correspond to 4092/4096/4100 bytes.
+  // This exercises the strict '> 4096B' boundary after tail-axis recovery.
+  for (const auto dim : {1023, 1024, 1025}) {
+    const Expression s0 = af::Symbol(8);
+    const Expression s1 = af::Symbol(dim);
+    std::vector<Expression> load0_shape = {s0, af::sym::kSymbolOne};
+    std::vector<Expression> load0_strides = {af::sym::kSymbolOne, af::sym::kSymbolZero};
+    auto graph = AscGraphBuilder("gen_nddma")
+                     .Loops({s0, s1})
+                     .Data("data0", 0, af::DT_FLOAT)
+                     .Load("load0", "data0", load0_shape, load0_strides)
+                     .Broadcast("broadcast", "load0", {1})
+                     .Scalar("scalar0", "0", af::DT_FLOAT)
+                     .Add("add0", "broadcast", "scalar0")
+                     .Exp("exp0", "add0")
+                     .Store("store", "exp0")
+                     .Output("output", "store", 8, af::DT_FLOAT)
+                     .Build();
+    ::ascir::FusedScheduledResult result;
+    EXPECT_EQ(optimizer.Optimize(graph, result), 0);
+    const auto &group = result.node_idx_to_scheduled_results[0][0].schedule_groups[0];
+    std::string nddma_name;
+    for (const auto &impl_graph : group.impl_graphs) {
+      if (impl_graph.GetName().find("B0Y1_nddma") != std::string::npos) {
+        nddma_name = impl_graph.GetName();
+        break;
+      }
+    }
+    ASSERT_FALSE(nddma_name.empty());
+    const auto iter = group.graph_name_to_score_funcs.find(nddma_name);
+    ASSERT_NE(iter, group.graph_name_to_score_funcs.end());
+    const bool low_score = dim > 1024;
+    const auto expected = low_score ? "  return -1;\n" : "  return 0;\n";
+    EXPECT_NE(iter->second.find(expected), std::string::npos) << "dim=" << dim;
+  }
 }
 
 /**
@@ -1231,6 +1343,57 @@ TEST_F(OptimizerStV2, TwoAxisSliceNeedAlign) {
   // FP32: align_factor = 32 / 4 = 8, 尾轴 stride = Align(1, 8) = 8, 次尾轴 stride = 8 * s1 = 32
   std::vector<af::Expression> golden_stride{af::Symbol(8) * s1, af::Symbol(8)};
   EXPECT_EQ(load_node->outputs[0].attr.vectorized_strides, golden_stride);
+}
+
+TEST_F(OptimizerStV2, HighRankArangePaddedStoreAlignsUbLayout) {
+  struct Case {
+    std::vector<int64_t> sizes;
+    std::vector<int64_t> logical_strides;
+    std::vector<int64_t> store_strides;
+    std::vector<int64_t> aligned_strides;
+  };
+  const std::vector<Case> cases = {
+      {{2, 3, 4, 5, 7}, {420, 140, 35, 7, 1}, {593, 196, 48, 9, 1}, {480, 160, 40, 8, 1}},
+      {{2, 2, 2, 8, 1}, {32, 16, 8, 1, 1}, {121, 58, 27, 3, 1}, {256, 128, 64, 8, 0}},
+      {{2, 2, 2, 8, 1, 1}, {32, 16, 8, 1, 1, 1}, {224, 109, 52, 6, 3, 1}, {256, 128, 64, 8, 0, 0}},
+  };
+  for (size_t case_index = 0; case_index < cases.size(); ++case_index) {
+    const auto to_exprs = [](const std::vector<int64_t> &values) {
+      std::vector<Expression> result;
+      for (const auto value : values) result.push_back(af::Symbol(value));
+      return result;
+    };
+    const auto sizes = to_exprs(cases[case_index].sizes);
+    af::AscGraph graph(("high_rank_arange_padded_store_" + std::to_string(case_index)).c_str());
+    std::vector<af::AxisId> axes;
+    for (size_t index = 0; index < sizes.size(); ++index) {
+      axes.push_back(graph.CreateAxis("axis" + std::to_string(index), sizes[index]).id);
+    }
+    Arange arange("arange", graph);
+    arange.attr.sched.axis = axes;
+    arange.y.dtype = af::DT_INT32;
+    *arange.y.axis = axes;
+    *arange.y.repeats = sizes;
+    *arange.y.strides = to_exprs(cases[case_index].logical_strides);
+    *arange.y.vectorized_axis = axes;
+    Store store("store");
+    store.attr.sched.axis = axes;
+    store.x = arange.y;
+    store.y.dtype = af::DT_INT32;
+    *store.y.axis = axes;
+    *store.y.repeats = sizes;
+    *store.y.strides = to_exprs(cases[case_index].store_strides);
+    *store.y.vectorized_axis = axes;
+    Output output("output");
+    output.x = store.y;
+    output.y.dtype = af::DT_INT32;
+    output.attr.api.type = af::ApiType::kAPITypeBuffer;
+    output.ir_attr.SetIndex(0);
+    ::optimize::UnAlignmentStrategy strategy;
+    ASSERT_EQ(strategy.AlignVectorizedStrides(graph), af::SUCCESS);
+    EXPECT_EQ(graph.FindNode("arange")->outputs[0].attr.vectorized_strides,
+              to_exprs(cases[case_index].aligned_strides));
+  }
 }
 
 TEST_F(OptimizerStV2, NoNeedAlign_AABToARA) {

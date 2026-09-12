@@ -28,6 +28,7 @@ default ``AUTOFUSE_DEVICE_JIT`` implementation and is device-agnostic:
 import argparse
 import json
 import logging
+import os
 import shutil
 import sys
 import tempfile
@@ -66,6 +67,18 @@ def patch_single_operator_tiling(host_code, rows, cols):
     return host_code.replace(anchor, adapter + anchor, 1)
 
 
+def patch_device_kernel(device_code):
+    """Name the generated AscendC entry so the device compiler accepts it."""
+    unnamed_kernel = 'extern "C" __global__ __aicore__ void (GM_ADDR'
+    named_kernel = 'extern "C" __global__ __aicore__ void autofuse_kernel(GM_ADDR'
+    if unnamed_kernel not in device_code:
+        return device_code
+    device_code = device_code.replace(unnamed_kernel, named_kernel, 1)
+    launch = "  <<<blockDim, nullptr, stream>>>("
+    named_launch = "  autofuse_kernel<<<blockDim, nullptr, stream>>>("
+    return device_code.replace(launch, named_launch, 1)
+
+
 def resolve_soc_version(profile_path, cli_value):
     if cli_value:
         return cli_value
@@ -101,6 +114,9 @@ def main(argv=None):
         return 2
     host_code = (codegen_dir / "host_impl.cpp").read_text(encoding="utf-8")
     host_code = patch_single_operator_tiling(host_code, args.rows, args.cols)
+    device_code = patch_device_kernel(
+        (codegen_dir / "device_impl.cpp").read_text(encoding="utf-8")
+    )
     with tempfile.TemporaryDirectory(prefix="device-validation-jit-") as temp_dir:
         with tempfile.TemporaryDirectory(
             prefix="device-validation-jit-out-"
@@ -110,10 +126,19 @@ def main(argv=None):
                 from autofuse.compiler.python.compile_adapter import jit_compile
             except ImportError:
                 from autofuse.compile_adapter import jit_compile
+            # A repository codegen package may live outside the CANN toolkit.
+            # Let the explicit toolkit environment control device compilation.
+            toolkit = os.environ.get("ASCEND_HOME_PATH")
+            if toolkit:
+                try:
+                    from autofuse.compiler.python import ascendc_compile
+                except ImportError:
+                    from autofuse import ascendc_compile
+                ascendc_compile.ASCEND_PATH = toolkit
             jit_compile(
                 (codegen_dir / "tiling.h").read_text(encoding="utf-8"),
                 host_code,
-                (codegen_dir / "device_impl.cpp").read_text(encoding="utf-8"),
+                device_code,
                 [
                     f"--graph_name={args.graph_name}",
                     f"--output_file={output_file}",
