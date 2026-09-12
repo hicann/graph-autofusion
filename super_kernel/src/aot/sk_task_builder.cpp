@@ -283,6 +283,15 @@ void DumpTaskQueDetail(const TaskQue *que, const char *name, const std::vector<S
         i, to_string(ti.type), ti.index, nodeId, to_string(ti.relatedType), ti.numBlocks, ti.entryCnt,
         (unsigned long long)ti.args, ti.argsSize, (unsigned long long)ti.debugOptions,
         (unsigned long long)ti.extraInfo);
+    const bool isEventTask = ti.type == SkTaskType::TYPE_EVENT_NOTIFY || ti.type == SkTaskType::TYPE_EVENT_WAIT ||
+                             ti.type == SkTaskType::TYPE_EVENT_RESET;
+    if (isEventTask) {
+      SK_LOGD("   eventValue=0x%llx", (unsigned long long)GetEventTaskValue(ti));
+    }
+    if (ti.type == SkTaskType::TYPE_EVENT_WAIT) {
+      const auto waitFlag = static_cast<SkMemoryWaitFlag>(GetEventTaskFlag(ti));
+      SK_LOGD("   waitFlag=%s(%u)", to_string(waitFlag), static_cast<uint32_t>(waitFlag));
+    }
     for (uint32_t j = 0; j < ti.entryCnt; ++j) {
       SK_LOGD("   entry[%u]=0x%llx", j, (unsigned long long)ti.entry[j]);
     }
