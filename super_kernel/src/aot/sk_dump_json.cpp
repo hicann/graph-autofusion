@@ -188,6 +188,16 @@ Json SkTaskToJson(const SkTask &task) {
       taskInfo["args"] = hexStream.str();
       taskInfo["debugOptions"] = singleTaskInfo.debugOptions;
 
+      const bool isEventTask = singleTaskInfo.type == SkTaskType::TYPE_EVENT_NOTIFY ||
+                               singleTaskInfo.type == SkTaskType::TYPE_EVENT_WAIT ||
+                               singleTaskInfo.type == SkTaskType::TYPE_EVENT_RESET;
+      if (isEventTask) {
+        taskInfo["eventValue"] = UintToHexString(GetEventTaskValue(singleTaskInfo));
+      }
+      if (singleTaskInfo.type == SkTaskType::TYPE_EVENT_WAIT) {
+        taskInfo["waitFlag"] = GetEventTaskFlag(singleTaskInfo);
+      }
+
       Json entries = Json::array();
       for (uint32_t j = 0; j < singleTaskInfo.entryCnt && j < 4; ++j) {
         std::stringstream hexStream;

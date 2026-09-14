@@ -619,12 +619,10 @@ TEST_F(SkDumpJsonDirectHelperTest, SkTaskQueueAndFileWritingHelpers) {
   queue->taskInfos[1].index = 11;
   queue->taskInfos[1].type = SkTaskType::TYPE_EVENT_WAIT;
   queue->taskInfos[1].numBlocks = 1;
-  queue->taskInfos[1].entryCnt = 5;
+  queue->taskInfos[1].entryCnt = 0;
   queue->taskInfos[1].args = 0x4000;
   queue->taskInfos[1].entry[0] = 0x5000;
-  queue->taskInfos[1].entry[1] = 0x6000;
-  queue->taskInfos[1].entry[2] = 0x7000;
-  queue->taskInfos[1].entry[3] = 0x8000;
+  queue->taskInfos[1].extraInfo = static_cast<uint64_t>(SkMemoryWaitFlag::AND);
   queue->taskInfos[1].debugOptions = 16;
 
   Json taskJson = SkTaskToJson(task);
@@ -632,7 +630,10 @@ TEST_F(SkDumpJsonDirectHelperTest, SkTaskQueueAndFileWritingHelpers) {
   EXPECT_FALSE(taskJson["taskQue"]["taskInfos"][0].contains("isSimtKernel"));
   EXPECT_FALSE(taskJson["taskQue"]["taskInfos"][1].contains("isSimtKernel"));
   EXPECT_EQ(taskJson["taskQue"]["taskInfos"][0]["entries"].size(), 2);
-  EXPECT_EQ(taskJson["taskQue"]["taskInfos"][1]["entries"].size(), 4);
+  EXPECT_EQ(taskJson["taskQue"]["taskInfos"][1]["entryCnt"], 0);
+  EXPECT_EQ(taskJson["taskQue"]["taskInfos"][1]["entries"].size(), 0);
+  EXPECT_EQ(taskJson["taskQue"]["taskInfos"][1]["eventValue"], "0x5000");
+  EXPECT_EQ(taskJson["taskQue"]["taskInfos"][1]["waitFlag"], static_cast<uint32_t>(SkMemoryWaitFlag::AND));
 
   Json noQueueJson = SkTaskToJson(SkTask());
   EXPECT_FALSE(noQueueJson.contains("taskQue"));
