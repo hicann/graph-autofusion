@@ -577,6 +577,7 @@ TEST_F(SkTaskBuilderTest, AddEventTask_EncodesCustomValueAndWaitFlag) {
 
   EXPECT_EQ(taskQue->taskInfos[1].args,
             static_cast<uint64_t>(reinterpret_cast<uintptr_t>(wait->nodeInfos.syncInfos.addrValue)));
+  EXPECT_EQ(taskQue->taskInfos[1].entryCnt, 0U);
   EXPECT_EQ(taskQue->taskInfos[1].entry[0], 12U);
   EXPECT_EQ(taskQue->taskInfos[1].extraInfo, static_cast<uint64_t>(SkMemoryWaitFlag::AND));
 
