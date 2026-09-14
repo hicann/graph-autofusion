@@ -16,7 +16,7 @@ template <typename T>
 __simt_vf__ __aicore__ LAUNCH_BOUND(TAN_THREAD_NUM) inline void TanSimtCompute(__ubuf__ T *x, __ubuf__ T *y,
                                                                                const int64_t total_num) {
   for (int64_t i = threadIdx.x; i < total_num; i += blockDim.x) {
-    y[i] = Simt::Tan(x[i]);
+    y[i] = tanf(x[i]);
   }
 }
 
