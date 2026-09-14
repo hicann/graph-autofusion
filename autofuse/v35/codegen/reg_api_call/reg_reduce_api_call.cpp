@@ -78,7 +78,7 @@ Status RegReduceApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<asc
 
   ReduceInitCodeGen(x, y, type_value, api_param->api_pre_process, tpipe, dtype_name);
   api_param->api_pre_process.emplace_back("uint32_t tmp_reduce_shape[] = {first_actual, last};\n");
-  std::string new_api_name = this->api_name_ == "ReduceMean" ? "ReduceSum" : this->api_name_;
+  std::string new_api_name = this->api_name_ == "ReduceMean" ? "ReduceSumExtend" : this->api_name_ + "Extend";
   api_param->api_name = new_api_name;
   api_param->template_params.emplace_back(dtype_name);
   api_param->template_params.emplace_back(reduce_pattern);
