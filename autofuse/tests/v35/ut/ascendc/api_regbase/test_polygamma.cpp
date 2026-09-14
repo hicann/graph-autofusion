@@ -14,6 +14,8 @@
 #include "gtest/gtest.h"
 #include "tikicpulib.h"
 #include "test_api_utils.h"
+#include "api_regbase/trigonometric_function_utils.h"
+#include "api_regbase/zeta.h"
 #include "api_regbase/polygamma.h"
 
 using namespace AscendC;

@@ -16,6 +16,7 @@
 #include "gtest/gtest.h"
 #include "tikicpulib.h"
 #include "test_api_utils.h"
+#include "chebyshev_polynomial_utils.h"
 #include "chebyshev_polynomial_u.h"
 #include "boost/math/special_functions/chebyshev.hpp"
 
