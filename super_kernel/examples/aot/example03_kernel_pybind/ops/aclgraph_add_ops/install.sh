@@ -12,9 +12,16 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-source "${SCRIPT_DIR}/../../../_lib/common.sh"
+source "${SCRIPT_DIR}/../../../scripts/common.sh"
 sk_parse_npu_arch "$@"
 
-SK_NPU_ARCH="${NPU_ARCH}" "${PYTHON_CMD:-python3}" -m pip install --user --no-build-isolation --force-reinstall "${SCRIPT_DIR}"
+SAMPLE_DIR=$(cd "${SCRIPT_DIR}/../.." && pwd)
+PACKAGE_DIR="${SAMPLE_DIR}/tmp/python_packages"
+if [ -L "${SAMPLE_DIR}/tmp" ] || [ -e "${PACKAGE_DIR}" ] || [ -L "${PACKAGE_DIR}" ]; then
+    echo "ERROR: temporary package directory must be unused and not redirected" >&2
+    exit 1
+fi
+
+SK_NPU_ARCH="${NPU_ARCH}" "${PYTHON_CMD:-python3}" -m pip install --target "${PACKAGE_DIR}" --no-deps --no-build-isolation "${SCRIPT_DIR}"
 
 echo "Installed ACLGraph add op_extension package from ${SCRIPT_DIR}."

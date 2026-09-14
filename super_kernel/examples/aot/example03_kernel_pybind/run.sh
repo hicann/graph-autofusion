@@ -10,24 +10,23 @@
 # ----------------------------------------------------------------------------------------------------------
 
 cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
-source ../_lib/common.sh
+source ../scripts/common.sh
 
 sk_parse_npu_arch "$@" || exit $?
 sk_cleanup_local || exit 1
 
 RUN_LOG="${PWD}/tmp/run.log"
-OP_PACKAGE_INSTALLED=0
-sk_setup_isolated_python_userbase "${PWD}/tmp/python_userbase" || exit 1
+PACKAGE_DIR="${PWD}/tmp/python_packages"
+export PYTHONPATH="${PACKAGE_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 cleanup_sample_run() {
     local rc=$?
     trap - EXIT
     set +e
-    sk_uninstall_static_kernel_from_log "${RUN_LOG}"
-    if [ "${OP_PACKAGE_INSTALLED}" -eq 1 ]; then
-        bash ./ops/aclgraph_add_ops/uninstall.sh >/dev/null 2>&1 || \
-            echo "WARN: failed to uninstall aclgraph add op package" >&2
-    fi
+    sk_uninstall_static_kernel_from_log "${RUN_LOG}" || \
+        echo "WARN: failed to clean up static kernel packages" >&2
+    bash ./ops/aclgraph_add_ops/uninstall.sh || \
+        echo "WARN: failed to remove temporary op package" >&2
     exit "${rc}"
 }
 trap cleanup_sample_run EXIT
@@ -36,6 +35,5 @@ if ! bash ./ops/aclgraph_add_ops/install.sh --npu-arch="${NPU_ARCH}"; then
     echo "ERROR: failed to install aclgraph add op package" >&2
     exit 1
 fi
-OP_PACKAGE_INSTALLED=1
 sk_run_python_with_log main.py "${RUN_LOG}" && \
     sk_check_static_kernel_outputs "${PWD}/static_kernel_compile_outputs"

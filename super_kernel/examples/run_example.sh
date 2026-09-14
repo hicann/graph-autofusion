@@ -23,7 +23,7 @@ else
     PYTHON_CMD="python3"
 fi
 
-source "${BASEPATH}/aot/_lib/common.sh"
+source "${BASEPATH}/aot/scripts/common.sh"
 
 sk_parse_npu_arch "$@" || exit $?
 

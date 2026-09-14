@@ -8,6 +8,6 @@
 bash super_kernel/examples/aot/example03_kernel_pybind/run.sh --npu-arch=dav-2201
 ```
 
-该样例支持 `dav-2201` 和 `dav-3510`。样例的 `run.sh` 将架构参数显式传给扩展安装脚本；安装脚本仅为本次 Python 构建设置 `SK_NPU_ARCH`，供 `setup.py` 配置 `bisheng --npu-arch`。扩展安装在样例隔离的 Python user base 中，运行结束后自动卸载。样例使用当前可见 NPU。
+该样例支持 `dav-2201` 和 `dav-3510`。样例的 `run.sh` 将架构参数显式传给扩展安装脚本；安装脚本仅为本次 Python 构建设置 `SK_NPU_ARCH`，供 `setup.py` 配置 `bisheng --npu-arch`。扩展通过当前 Python（支持 venv）安装到样例的 `tmp/python_packages`，通过 `PYTHONPATH` 导入，退出时仅清理该目录，不卸载当前环境中的同名包。样例使用当前可见 NPU。
 
 option 参考 [TorchAir SuperKernel 使用说明](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md)。

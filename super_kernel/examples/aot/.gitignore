@@ -1,9 +1,0 @@
-**/__pycache__/
-**/aclnn_static_shape_kernel_outputs/
-**/kernel_meta/
-**/log/
-**/profiling/
-**/sk_meta/
-**/static_kernel_compile_outputs/
-**/tmp/
-**/.static_kernel_records.json

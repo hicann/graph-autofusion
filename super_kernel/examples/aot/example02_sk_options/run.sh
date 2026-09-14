@@ -11,7 +11,7 @@
 
 CURRENT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "${CURRENT_DIR}" || exit 1
-source ../_lib/common.sh
+source ../scripts/common.sh
 
 sk_parse_npu_arch "$@" || exit $?
 case "${NPU_ARCH}" in

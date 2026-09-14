@@ -62,20 +62,6 @@ sk_cleanup_local() {
     mkdir -p "${PWD}/tmp" "${PWD}/log"
 }
 
-sk_setup_isolated_python_userbase() {
-    local userbase="$1"
-    local python_cmd="${PYTHON_CMD:-python3}"
-    local python_site_dir
-
-    python_site_dir=$("${python_cmd}" - <<'PY'
-import sys
-print(f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
-PY
-    ) || return 1
-    export PYTHONUSERBASE="${userbase}"
-    export PYTHONPATH="${PYTHONUSERBASE}/${python_site_dir}${PYTHONPATH:+:${PYTHONPATH}}"
-}
-
 sk_run_python_with_log() {
     local script="$1"
     local run_log="$2"
@@ -106,10 +92,71 @@ sk_check_static_kernel_outputs() {
 
 sk_uninstall_static_kernel_from_log() {
     local run_log="$1"
-    local uninstall_script
+    "${PYTHON_CMD:-python3}" - "${run_log}" "${PWD}/static_kernel_compile_outputs" <<'PY'
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
 
-    [ -f "${run_log}" ] || return 0
-    while IFS= read -r uninstall_script; do
-        [ -n "${uninstall_script}" ] && [ -f "${uninstall_script}" ] && bash "${uninstall_script}" >/dev/null 2>&1
-    done < <(grep -Eo '/[^[:space:]]+/uninstall\.sh' "${run_log}" | sort -u)
+
+def cleanup(run_log, output_dir):
+    if not run_log.is_file():
+        return 0
+    candidates = set(re.findall(r"/[^\s]+/uninstall\.sh", run_log.read_text()))
+    if not candidates:
+        return 0
+    cann_home = os.environ.get("ASCEND_HOME_PATH")
+    if not cann_home:
+        print(
+            "WARN: cannot validate uninstall paths without ASCEND_HOME_PATH",
+            file=sys.stderr,
+        )
+        return 1
+    install_root = Path(cann_home).resolve() / "opp/static_kernel/ai_core"
+    output_root = output_dir.resolve()
+    packages = {
+        package.stem
+        for package in output_dir.rglob("*.run")
+        if package.is_file()
+        and package.resolve().is_relative_to(output_root)
+        and not package.is_symlink()
+    }
+    failed = False
+    for candidate in sorted(candidates):
+        script = Path(candidate)
+        expected = install_root / script.parent.name / "uninstall.sh"
+        if (
+            script.parent.name not in packages
+            or ".." in script.parts
+            or script.is_symlink()
+            or script.parent.is_symlink()
+            or script.resolve() != expected
+            or expected.resolve() != expected
+        ):
+            print(
+                f"WARN: refusing unrelated or redirected uninstall script: {script}",
+                file=sys.stderr,
+            )
+            failed = True
+            continue
+        if not script.exists():
+            continue
+        if not script.is_file():
+            print(
+                f"WARN: uninstall script is not a regular file: {script}",
+                file=sys.stderr,
+            )
+            failed = True
+            continue
+        result = subprocess.run(["bash", str(script)], check=False)
+        if result.returncode:
+            print(f"WARN: uninstall failed: {script}", file=sys.stderr)
+            failed = True
+    return int(failed)
+
+
+if __name__ == "__main__":
+    sys.exit(cleanup(Path(sys.argv[1]), Path(sys.argv[2])))
+PY
 }

@@ -11,4 +11,10 @@
 
 set -euo pipefail
 
-"${PYTHON_CMD:-python3}" -m pip uninstall -y op_extension
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SAMPLE_DIR=$(cd "${SCRIPT_DIR}/../.." && pwd)
+if [ -L "${SAMPLE_DIR}/tmp" ]; then
+    echo "ERROR: refusing to clean a symlinked temporary directory" >&2
+    exit 1
+fi
+rm -rf -- "${SAMPLE_DIR}/tmp/python_packages"
