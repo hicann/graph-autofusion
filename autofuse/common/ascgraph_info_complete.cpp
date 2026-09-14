@@ -81,7 +81,8 @@ void CompleteElewiseApiInfo(af::AscNodePtr &node) {
   node->attr.api.type = af::ApiType::kAPITypeCompute;
   node->attr.api.unit = af::ComputeUnit::kUnitVector;
   if (af::ops::IsOps<Expm1>(node) || af::ops::IsOps<Sin>(node) || af::ops::IsOps<Cos>(node) ||
-      af::ops::IsOps<Asin>(node) || af::ops::IsOps<Acos>(node)) {
+      af::ops::IsOps<Asin>(node) || af::ops::IsOps<Acos>(node) || af::ops::IsOps<Tan>(node) ||
+      af::ops::IsOps<Atanh>(node)) {
     (void)::ascir::SetDcacheSize(node, kSimtDcacheSize);
   }
   if (af::ops::IsOps<Remainder>(node) && node->inputs[0].attr.dtype == ge::DT_INT32) {
@@ -174,6 +175,8 @@ static const std::map<std::string, af::ComputeType> kOpTypeToComputeType = {
     {Cos::Type, af::ComputeType::kComputeElewise},
     {Asin::Type, af::ComputeType::kComputeElewise},
     {Acos::Type, af::ComputeType::kComputeElewise},
+    {Tan::Type, af::ComputeType::kComputeElewise},
+    {Atanh::Type, af::ComputeType::kComputeElewise},
     {Ln::Type, af::ComputeType::kComputeElewise},
     {Expm1::Type, af::ComputeType::kComputeElewise},
     {LogicalNot::Type, af::ComputeType::kComputeElewise},
