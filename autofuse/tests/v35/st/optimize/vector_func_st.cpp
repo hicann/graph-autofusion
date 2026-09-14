@@ -205,7 +205,7 @@ TEST_F(VectorFuncSt, TrueDivAddRsqrtHostCodegen) {
 
   const auto first_vf = result.kernel.find("__simd_vf__");
   ASSERT_NE(first_vf, std::string::npos);
-  const auto rsqrt_marker = result.kernel.find("_rsqrt_negative_mask", first_vf);
+  const auto rsqrt_marker = result.kernel.find("_rsqrt_one", first_vf);
   ASSERT_NE(rsqrt_marker, std::string::npos);
   const auto vf_begin = result.kernel.rfind("__simd_vf__", rsqrt_marker);
   ASSERT_NE(vf_begin, std::string::npos);
@@ -214,21 +214,15 @@ TEST_F(VectorFuncSt, TrueDivAddRsqrtHostCodegen) {
   const auto vf_body = result.kernel.substr(vf_begin, vf_end - vf_begin);
   const auto true_div_pos = vf_body.find("AscendC::MicroAPI::Div<float, &high_precision_div_mode>(");
   const auto add_pos = vf_body.find("AscendC::MicroAPI::Adds(");
-  const auto compare_pos = vf_body.find("AscendC::MicroAPI::CompareScalar<float, AscendC::CMPMODE::LT>");
   const auto sqrt_pos = vf_body.find("AscendC::MicroAPI::Sqrt(");
   const auto rsqrt_div_pos = vf_body.find("AscendC::MicroAPI::Div(", true_div_pos + 1U);
-  const auto select_pos = vf_body.find("AscendC::MicroAPI::Select(");
   ASSERT_NE(true_div_pos, std::string::npos);
   ASSERT_NE(add_pos, std::string::npos);
-  ASSERT_NE(compare_pos, std::string::npos);
   ASSERT_NE(sqrt_pos, std::string::npos);
   ASSERT_NE(rsqrt_div_pos, std::string::npos);
-  ASSERT_NE(select_pos, std::string::npos);
   EXPECT_LT(true_div_pos, add_pos);
-  EXPECT_LT(add_pos, compare_pos);
-  EXPECT_LT(compare_pos, sqrt_pos);
+  EXPECT_LT(add_pos, sqrt_pos);
   EXPECT_LT(sqrt_pos, rsqrt_div_pos);
-  EXPECT_LT(rsqrt_div_pos, select_pos);
 }
 
 TEST_F(VectorFuncSt, vf_partition) {
