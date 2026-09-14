@@ -48,6 +48,12 @@ constexpr const char *kBroadcastType = Broadcast::Type;
 constexpr const char *kCastType = Cast::Type;
 constexpr int64_t kMinBroadcastInputCount = 2;
 
+// scalar-like 生产者（Scalar/ScalarData/IndexExpr）的输出视图为空（无 axis/repeats/strides），
+// 不满足广播后移要求的前后视图轴数一致前提；后移前必须按 scalar 输入支持性门控。
+bool IsScalarLikeProducer(const NodePtr &node) {
+  return node->GetType() == Scalar::Type || node->GetType() == ScalarData::Type || node->GetType() == IndexExpr::Type;
+}
+
 std::vector<std::string> view_op_type = {Transpose::Type, Broadcast::Type, "Slice", Split::Type, Concat::Type,
                                          Gather::Type,    "Sum",           "Mean",  "Max",       "Min",
                                          "Prod",          "Any",           "All"};
@@ -1069,7 +1075,7 @@ Status BackwardMultiRefBroadcast(const NodePtr &candidate_node, const NodePtr &m
   auto bro_in_anchor = bro_nodes.front()->GetInDataAnchor(0);
   auto pre_bro_out_anchor = bro_in_anchor->GetPeerOutAnchor();
   NodePtr pre_bro_node = ToAscNode(pre_bro_out_anchor->GetOwnerNode());
-  bool is_pre_scalar = (pre_bro_node->GetType() == kScalarType);
+  bool is_pre_scalar = IsScalarLikeProducer(pre_bro_node);
 
   if (is_pre_scalar) {
     std::vector<int64_t> bro_axes;
@@ -1157,7 +1163,7 @@ Status CollectBackwardStartNodes(const AscGraph &graph, std::vector<NodePtr> &pr
       GE_ASSERT_SUCCESS(GetPeerOutNodeSafe(cur_node, cur_node, 0));
     }
     bool is_next_support_scalar = true;
-    if (cur_node->GetType() == kScalarType) {
+    if (IsScalarLikeProducer(cur_node)) {
       GE_ASSERT_SUCCESS(JudgeNextCompOpSupportsScalarInput(cur_node, is_next_support_scalar));
     }
 
@@ -1424,6 +1430,20 @@ Status ProcessOriginalBackwardLogic(AscGraph &graph, bool &is_changed, std::set<
               cur_node->GetName().c_str(), next_node->GetName().c_str());
           continue;
         }
+        // 广播后移要求前广播视图与广播输出视图轴数一致；scalar-like 生产者（如 IndexExpr）
+        // 输出视图为空，不满足该前提，后移会产生前后视图不一致的半改写状态，必须整体拒绝。
+        AscTensorAttr *pre_bro_output_attr = nullptr;
+        AscTensorAttr *last_bro_output_attr = nullptr;
+        GE_ASSERT_SUCCESS(GetOutputTensorAttr(pre_bro_node, pre_bro_output_attr));
+        GE_ASSERT_SUCCESS(GetOutputTensorAttr(bro_nodes.back(), last_bro_output_attr));
+        if (pre_bro_output_attr->repeats.size() != last_bro_output_attr->repeats.size()) {
+          GELOGI(
+              "Skip broadcast backward at node[%s]: pre-broadcast node[%s] view has %zu axes but broadcast "
+              "output has %zu axes.",
+              peer_in_node->GetName().c_str(), pre_bro_node->GetName().c_str(), pre_bro_output_attr->repeats.size(),
+              last_bro_output_attr->repeats.size());
+          continue;
+        }
         is_changed = true;
         GE_ASSERT_SUCCESS(BroadcastBackwardReally(compute_nodes, bro_nodes, pre_bro_node));
       }
@@ -1436,6 +1456,25 @@ Status BroadcastBackward(AscGraph &graph) {
   if (ScheduleUtils::HasComputeType(graph, af::ComputeType::kComputeCube)) {
     GELOGI("graph %s fuse type is cube, don't backward broadcast.", graph.GetName().c_str());
     return SUCCESS;
+  }
+
+  // Arange 生产者的广播后移尚未适配：退化轴视图（轴数一致但含 size=1/stride=0 轴）在
+  // 视图改写中丢失广播语义（triu/remainder_cast/degenerate_arange_add_3d 真机 codegen
+  // 失败），partial backward 亦无法保持 tiling 融合性（multi_arange 真机 tiling 失败）。
+  // 专项支持合入前对含 Arange 广播生产者的图整体跳过（fail-closed），避免改写损伤。
+  for (const auto &node : graph.GetAllNodes()) {
+    if (node->GetType() != kBroadcastType) {
+      continue;
+    }
+    NodePtr producer;
+    if (GetPeerOutNodeSafe(node, producer, 0) != SUCCESS || producer == nullptr) {
+      continue;
+    }
+    if (producer->GetType() == Arange::Type) {
+      GELOGI("Skip broadcast backward for graph[%s]: broadcast[%s] has Arange producer[%s].", graph.GetName().c_str(),
+             node->GetName().c_str(), producer->GetName().c_str());
+      return SUCCESS;
+    }
   }
 
   GE_ASSERT_SUCCESS(broadcast_backward_shared_split::SplitSharedBroadcastBranches(graph));
