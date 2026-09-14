@@ -21,7 +21,6 @@
 namespace att {
 const std::string kAlignDelim = "_div_align";
 const std::string kPowBase = "_base";
-const int32_t kDefualtInitValue = 0;
 
 inline bool IsPowerOfTwo(int32_t n) {
   if (n <= 0) {
@@ -72,11 +71,11 @@ Expr ArgsReplacer::ReplaceCommonExpr(const Expr &e, const Expr &align, ExprExprM
     new_expr_replacements.emplace(e, e);
     return e;
   }
-  Expr new_epxr = CreateExpr((Str(e) + kAlignDelim).c_str());
-  new_expr_ori_expr_map.emplace(new_epxr, e);
-  auto replace_var = af::sym::Mul(align, new_epxr);
-  new_expr_replacements.emplace(new_epxr, af::sym::Div(e, align));
-  new_expr_init_values_.emplace(new_epxr, af::sym::kSymbolOne);
+  Expr new_expr = CreateExpr((Str(e) + kAlignDelim).c_str());
+  new_expr_ori_expr_map.emplace(new_expr, e);
+  auto replace_var = af::sym::Mul(align, new_expr);
+  new_expr_replacements.emplace(new_expr, af::sym::Div(e, align));
+  new_expr_init_values_.emplace(new_expr, af::sym::kSymbolOne);
   return replace_var;
 }
 
