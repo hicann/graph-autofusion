@@ -256,6 +256,18 @@ bool ScheduleUtils::IsVectorizedAxisContinuousInGM(const af::AscTensorAttr &outp
   return IsContinuesStrides(vectorized_axis_repeats, vectorized_axis_strides);
 }
 
+bool ScheduleUtils::IsTailAxisContinuousInGM(const af::AscTensorAttr &output_tensor) {
+  const auto &strides = output_tensor.strides;
+  // 从尾轴向前跳过stride为0的广播轴, 第一个非零stride为1则尾轴连续
+  for (int64_t i = static_cast<int64_t>(strides.size()) - 1; i >= 0; --i) {
+    if (af::SymbolicUtils::StaticCheckEq(strides[i], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      continue;
+    }
+    return af::SymbolicUtils::StaticCheckEq(strides[i], af::sym::kSymbolOne) == af::TriBool::kTrue;
+  }
+  return false;
+}
+
 bool ScheduleUtils::IsLastAxisSliceLoad(const af::AscNodePtr &node) {
   if (!af::ops::IsOps<af::ascir_op::Load>(node)) {
     return false;
@@ -652,6 +664,10 @@ Status ScheduleUtils::GetNodeOutVectorRepeats(const ascir::NodeView &node, std::
   GE_ASSERT_TRUE(!node->outputs().empty());
   const auto &attr = node->outputs[0].attr;
   return GetVectorRepeats(attr.repeats, attr.axis, attr.vectorized_axis, vec_repeats);
+}
+
+Status ScheduleUtils::GetVectorAxisStrides(const af::AscTensorAttr &attr, std::vector<af::Expression> &vec_strides) {
+  return GetVectorRepeats(attr.strides, attr.axis, attr.vectorized_axis, vec_strides);
 }
 
 Status ScheduleUtils::GetConcatDim(const af::AscNodePtr &node, size_t &concat_dim) {
