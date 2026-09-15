@@ -344,6 +344,76 @@ TEST_F(BufQueAllocatorUT, AllocBufQueKeepsOldOneShotBehavior) {
   ASSERT_EQ(fused_result.output_nodes.size(), 1UL);
 }
 
+static af::AscGraph MakePartitionReadyArangeGraph(const std::string &name) {
+  af::AscGraph graph(name.c_str());
+  const af::Expression size = graph.CreateSizeVar(64);
+  auto axis = graph.CreateAxis("z0", size);
+
+  af::ascir_op::Arange arange("arange", graph);
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(af::Symbol(1));
+  arange.y.dtype = ge::DT_INT32;
+  *arange.y.axis = {axis.id};
+  *arange.y.repeats = {size};
+  *arange.y.strides = {af::ops::One};
+  *arange.y.vectorized_axis = {axis.id};
+  *arange.y.vectorized_strides = {af::ops::One};
+
+  af::ascir_op::Store store("store");
+  store.x = arange.y;
+  store.attr.api.compute_type = af::ComputeType::kComputeStore;
+  store.attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  store.y.dtype = ge::DT_INT32;
+  *store.y.axis = {axis.id};
+  *store.y.repeats = {size};
+  *store.y.strides = {af::ops::One};
+
+  af::ascir_op::Output output("output");
+  output.x = store.y;
+  output.ir_attr.SetIndex(0);
+  output.y.dtype = ge::DT_INT32;
+
+  for (const auto &node : graph.GetAllNodes()) {
+    node->attr.sched.axis = {axis.id};
+  }
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  return graph;
+}
+
+TEST_F(BufQueAllocatorUT, UBFuseContextKeepsArangeInRootGraph) {
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  auto fused_result = MakeFusedScheduledResultWithGraphs({MakePartitionReadyArangeGraph("ubfuse_arange")});
+  fused_result.node_idx_to_scheduled_results[0][0].cube_type = ascir::CubeTemplateType::kUBFuse;
+
+  BufQueAllocator allocator;
+  ASSERT_EQ(allocator.PrepareImplGraphMemoryPlan(fused_result), af::SUCCESS);
+
+  auto &impl_graph = fused_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
+  // UBFuse 上下文下 Arange 不参与 VF 分区, 保留在根图走普通 ArangeApiCall。
+  EXPECT_NE(impl_graph.FindNode("arange"), nullptr);
+  EXPECT_EQ(impl_graph.FindNode("ubfuse_arange_VfNode_0"), nullptr);
+  std::vector<af::AscGraph> subgraphs;
+  ASSERT_EQ(impl_graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  EXPECT_TRUE(subgraphs.empty());
+}
+
+TEST_F(BufQueAllocatorUT, DefaultContextStillPartitionsArangeIntoVf) {
+  ge::PlatformContext::GetInstance().SetPlatform("3510");
+  auto fused_result = MakeFusedScheduledResultWithGraphs({MakePartitionReadyArangeGraph("default_arange")});
+
+  BufQueAllocator allocator;
+  ASSERT_EQ(allocator.PrepareImplGraphMemoryPlan(fused_result), af::SUCCESS);
+
+  auto &impl_graph = fused_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
+  // 非 UBFuse 上下文行为不变: Arange 仍按既有行为分区进 VF 子图。
+  EXPECT_EQ(impl_graph.FindNode("arange"), nullptr);
+  EXPECT_NE(impl_graph.FindNode("default_arange_VfNode_0"), nullptr);
+  std::vector<af::AscGraph> subgraphs;
+  ASSERT_EQ(impl_graph.GetAllSubGraphs(subgraphs), af::SUCCESS);
+  ASSERT_EQ(subgraphs.size(), 1UL);
+  EXPECT_NE(subgraphs[0].FindNode("arange"), nullptr);
+}
+
 TEST_F(BufQueAllocatorUT, test_reuse_id_vecacc) {
   af::AscGraph graph("test_reuse_id_vecacc");
   const af::Expression s0 = graph.CreateSizeVar("s0");

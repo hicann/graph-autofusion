@@ -756,8 +756,10 @@ TEST_P(Int64ArangeConsumerCodegenTest, GeneratesInt64ConsumerWithoutNarrowing) {
     ASSERT_FALSE(vf_signature.empty());
     EXPECT_EQ(vf_signature,
               "inline __simd_vf__ void VFCallint64_consumer_0_B0Y0_S0G0C0_VfNode_0(__local_mem__ int64_t "
-              "*local_1_addr, uint32_t output_dims_0, int64_t arange_offset_0, int64_t arange_base_0, int64_t "
-              "arange_step_0, int64_t arange_offset_1, int64_t arange_base_1, int64_t arange_step_1)");
+              "*local_1_addr, uint32_t output_dims_0, uint32_t local_1_stride_0, int64_t arange_offset_0, "
+              "int64_t arange_base_0, int64_t arange_step_0, int64_t arange_stride_0_0, int64_t arange_stride_0_1, "
+              "int64_t arange_stride_0_2, int64_t arange_offset_1, int64_t arange_base_1, int64_t arange_step_1, "
+              "int64_t arange_stride_1_0, int64_t arange_stride_1_1, int64_t arange_stride_1_2)");
   }
 }
 

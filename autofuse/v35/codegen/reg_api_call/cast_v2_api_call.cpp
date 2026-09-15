@@ -121,10 +121,8 @@ Status CastV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::Axis
   if (outer_repeats_size == 0U) {
     GELOGD("outer_repeats_size is 0, x_dtype = %s, y_dtype = %s", x_dtype.c_str(), y_dtype.c_str());
     if (x.is_constant) {
-      ss << this->api_name_ << "(" << y << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], "
-         << scalar_local_blk_tensor_name << "[0], "
-         << "{" << "ConvertToUint32(" << y.actual_size << ")" << "}, "
-         << "{ConvertToUint32(1)}, {ConvertToUint32(1)});" << std::endl;
+      ss << "Duplicate(" << y << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], static_cast<"
+         << y_dtype << ">(" << x.GetScalarValue() << "), " << y.actual_size << ");" << std::endl;
     } else {
       ss << this->api_name_ << "(" << y << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x
          << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, x) << "], "

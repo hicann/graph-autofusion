@@ -242,7 +242,7 @@ class ArangeAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return true;
   }
   [[nodiscard]] std::string GetApiCallName() const override {
-    return "";
+    return "ArangeApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
     return "Arange";
@@ -434,10 +434,9 @@ class CastAscIrCodegenImplV2 : public AscIrCodegenV2 {
 
   [[nodiscard]] bool IsVectorFunctionSupported(const ge::AscNode &node) const override {
     std::map<ge::DataType, std::set<ge::DataType>> supported_map = {
-        {DT_FLOAT, {DT_FLOAT16, DT_INT64, DT_INT16, DT_INT32, DT_BF16}},
+        {DT_FLOAT, {DT_FLOAT16, DT_INT16, DT_INT32, DT_BF16}},
         {DT_FLOAT16, {DT_UINT8, DT_INT8, DT_FLOAT}},
         {DT_INT32, {DT_FLOAT, DT_INT16}},
-        {DT_INT64, {DT_INT32, DT_FLOAT}},
         {DT_BF16, {DT_FLOAT}},
         {DT_UINT8, {DT_FLOAT16}},
         {DT_INT8, {DT_FLOAT16, DT_INT16}},
@@ -449,6 +448,13 @@ class CastAscIrCodegenImplV2 : public AscIrCodegenV2 {
     uint32_t output_dtype_size = GetSizeByDataType(node_outputs[0].attr.dtype);
     // Cast只能处理2倍及以内位宽变化的场景
     if ((input_dtype_size > output_dtype_size * 2U) || (output_dtype_size > input_dtype_size * 2U)) {
+      return false;
+    }
+    // 8字节与4字节之间的转换在 MicroAPI 层要求源/目的使用 RegTraitNumTwo 双寄存器
+    // (dav_m510 的 s642f32/f322s64 实现按 srcReg.reg[0]/reg[1] 取数)。VF codegen 只
+    // 生成单寄存器张量, 该组合在设备上仅填充半数 lane(真机验证: 恰好 50% mismatch,
+    // 交替 -0.0 模式), 因此拒绝 VF 融合, 保留在根图走 CastExtend(真机验证正确)。
+    if ((input_dtype_size == 8U) != (output_dtype_size == 8U)) {
       return false;
     }
 

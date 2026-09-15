@@ -28,6 +28,7 @@
 #include "indirect_load_utils.h"
 #include "schedule_utils.h"
 #include "common_utils.h"
+#include "v35/optimize/partition/vector_func_partitioner.h"
 #include "node_utils.h"
 #include "optimize/graph_pass/pass_runner_handler.h"
 #include "graph/symbolizer/symbolic_utils.h"
@@ -958,6 +959,9 @@ Status Optimizer::OptimizeForHintGraph(af::AscGraph &hint_graph,
   utils::DumpGraph(optimize_graph, "AfterGraphPass");
   // cube拆分后再做合轴
   if (!ScheduleUtils::HasComputeType(optimize_graph, af::ComputeType::kComputeCube)) {
+    // 前端显式 1D Arange -> Broadcast: 合轴前补齐退化前缀轴, 保持输入输出同轴数
+    GE_ASSERT_SUCCESS(optimize::NormalizeArangeBroadcastViews(optimize_graph),
+                      "Normalize explicit Arange Broadcast views failed.");
     // 这里concat已经打破了一套轴的约束
     GE_ASSERT_SUCCESS(RemoveAllZeroStrideLoopAxis(optimize_graph), "Remove All zero stride axis failed.");
     GE_ASSERT_SUCCESS(MergeContinuousAxis(optimize_graph), "Merge continuous axes failed.");

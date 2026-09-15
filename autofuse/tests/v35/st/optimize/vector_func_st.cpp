@@ -667,7 +667,10 @@ TEST_F(VectorFuncSt, cast_bit_with) {
   std::vector<af::AscGraph> asc_graphs;
   fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0].GetAllSubGraphs(
       asc_graphs);
-  EXPECT_EQ(asc_graphs.size(), 2UL);
+  // float<->int64 casts cross the 8<->4 byte boundary and stay in the root
+  // graph (CastExtend), so the remaining f16/float nodes merge into a single
+  // VF cluster instead of being split by the int64 bit-width gap.
+  EXPECT_EQ(asc_graphs.size(), 1UL);
 }
 
 TEST_F(VectorFuncSt, cycle_bugfix) {
@@ -1502,7 +1505,10 @@ TEST_F(VectorFuncSt, CastNotFusion) {
       ++cast_num;
     }
   }
-  EXPECT_EQ(cast_num, 1UL);
+  // float->int64 casts cross the 8<->4 byte boundary: the capability gate
+  // keeps them in the root graph (CastExtend) instead of fusing into VF,
+  // so both casts remain visible in the impl graph.
+  EXPECT_EQ(cast_num, 2UL);
 }
 
 TEST_F(VectorFuncSt, MaximumNotFusion) {

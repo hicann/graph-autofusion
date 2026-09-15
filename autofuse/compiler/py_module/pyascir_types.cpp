@@ -417,16 +417,26 @@ PyObject *SizeExpr::FloorDiv(PyObject *self, PyObject *args) {
 }
 
 PyObject *SizeExpr::Compare(PyObject *self, PyObject *other, int op) {
-  if (op == Py_EQ) {
+  if (op == Py_EQ || op == Py_NE) {
     af::Expression left = SizeExpr::AsSizeExpr(self);
     af::Expression right = SizeExpr::AsSizeExpr(other);
-    if (left == right) {
-      return Py_True;
+    // richcompare 必须返回新引用: 直接 return Py_True/Py_False 会把单例的借用引用
+    // 当新引用交给调用方, 调用方释放时对 True/False 多减一次引用计数;
+    // Python 3.10 及以前 True/False 非永生对象, 减穿后在解释器退出阶段触发
+    // 对 _Py_TrueStruct 的非法 free (munmap_chunk invalid pointer)。
+    const bool equal = (left == right);
+    if (op == Py_NE) {
+      if (!equal) {
+        Py_RETURN_TRUE;
+      }
+      Py_RETURN_FALSE;
     }
-    return Py_False;
-  } else {
-    return nullptr;
+    if (equal) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
   }
+  Py_RETURN_NOTIMPLEMENTED;
 }
 }  // namespace pyascir
 
@@ -1097,28 +1107,28 @@ PyObject *FusedScheduledResult::GetOutputNum(PyObject *self_pyobject) {
 PyObject *FusedScheduledResult::IsConvType(PyObject *self_pyobject) {
   auto self = reinterpret_cast<FusedScheduledResult::Object *>(self_pyobject);
   if (self == nullptr) {
-    return Py_False;
+    Py_RETURN_FALSE;
   }
   if (ascgen_utils::IsConv2DFusedScheduled(self->fused_schedule_result)) {
-    return Py_True;
+    Py_RETURN_TRUE;
   }
 
-  return Py_False;
+  Py_RETURN_FALSE;
 }
 
 PyObject *FusedScheduledResult::IsCubeType(PyObject *self_pyobject) {
   auto self = reinterpret_cast<FusedScheduledResult::Object *>(self_pyobject);
   if (self == nullptr) {
-    return Py_False;
+    Py_RETURN_FALSE;
   }
   for (auto scheduled_results : self->fused_schedule_result.node_idx_to_scheduled_results) {
     for (auto scheduled_result : scheduled_results) {
       if (scheduled_result.cube_type != ascir::CubeTemplateType::kDefault) {
-        return Py_True;
+        Py_RETURN_TRUE;
       }
     }
   }
-  return Py_False;
+  Py_RETURN_FALSE;
 }
 
 PyObject *FusedScheduledResult::GetCubeAttributes(PyObject *self_pyobject) {

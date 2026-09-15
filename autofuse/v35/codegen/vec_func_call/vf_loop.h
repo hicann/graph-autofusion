@@ -21,6 +21,7 @@ struct ArangeParam {
   std::string base;
   std::string step;
   std::string offset;
+  std::vector<std::string> logical_strides;
 };
 
 using ArangeOffsetMap = std::map<ascir::TensorId, std::string>;
@@ -59,6 +60,7 @@ class VFLoop {
   Status GenerateCvUbFuse(const TPipe &tpipe, const TensorManager &tensor_mgr, std::string &result,
                           std::string &loop_size_result) const;
   void SetMaxDtypeSize(std::string dtype);
+  void SetLoopDtype(std::string dtype) const;
   void CollectMaskRegTempTensors(const TPipe &tpipe, const TensorManager &tensor_mgr,
                                  std::vector<std::string> &temp_tensors) const;
   void CollectArangeParams(const TPipe &tpipe, std::vector<ArangeParam> &params) const;
@@ -68,6 +70,7 @@ class VFLoop {
   VFLoop *parent_;
   std::vector<VFLoopBody> bodys_;
   std::string max_dtype_size_;
+  mutable std::string loop_dtype_;
 
   Status GenerateLoop(const TPipe &tpipe, const TensorManager &tensor_mgr, int32_t depth,
                       std::vector<ascir::AxisId> &current_axis, std::stringstream &ss, std::stringstream &loop_size_ss,
