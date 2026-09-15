@@ -275,6 +275,7 @@ struct SkLaunchInfo {
   size_t cacheopInfoSize;
   size_t skMaxDcacheSize = 0;          // 所有 SIMT 子任务共同允许的最大 DCache 大小
   bool useSimtEntry = false;           // 是否选择 SIMT entry 并配置对应的动态 UBUF
+  bool isScheModeOn = false;           // 子算子或框架全核同步需要 batch 调度
   void *eventGmAddr;                   // 事件记录 GM 地址
   uint64_t modelIdIndex{0};            // modelId index registered on host
   uint32_t skId;                       // SK 标识

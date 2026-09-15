@@ -267,16 +267,16 @@ SkQueueType ResolveMixWaitEventQueueType(const SuperKernelBaseNode *prevKernel, 
              : ((prevKernelQueueType == SkQueueType::AIV) ? SkQueueType::AIC : SkQueueType::AIV);
 }
 
-// dump device entry args
-uint64_t GetDumpTaskNodeId(uint32_t taskIndex, const std::vector<SuperKernelBaseNode *> &tasks) {
+uint64_t GetTaskNodeIdByIndex(const std::vector<SuperKernelBaseNode *> &tasks, uint32_t taskIndex) {
   return taskIndex < tasks.size() ? tasks[taskIndex]->GetNodeId() : INVALID_TASK_ID;
 }
 
+// dump device entry args
 void DumpTaskQueDetail(const TaskQue *que, const char *name, const std::vector<SuperKernelBaseNode *> &tasks) {
   SK_LOGD("%s TaskQue: cap=%u, tasks=%u", name, que->cap, que->taskCnt);
   for (uint32_t i = 0; i < que->taskCnt; ++i) {
     const TaskInfo &ti = que->taskInfos[i];
-    const uint64_t nodeId = GetDumpTaskNodeId(ti.index, tasks);
+    const uint64_t nodeId = GetTaskNodeIdByIndex(tasks, ti.index);
     SK_LOGD(
         "[%u] type=%s, idx=%u, nodeId=%lu, relatedType=%s, blk=%u, entries=%u, args=0x%llx, argsSize=%u, "
         "debugOptions=0x%llx, extraInfo=0x%llx",
@@ -2175,6 +2175,43 @@ std::string BuildEntryFuncName(const char *baseName, EntryFuncFlag flags) {
 
 }  // namespace
 
+bool SkTaskBuilder::CalculateSkScheMode(const std::vector<SuperKernelBaseNode *> &tasks, const SkTask &aicTask,
+                                        const SkTask &aivTask) const {
+  for (const SkTask *skTask : {&aicTask, &aivTask}) {
+    const TaskQue *queue = skTask->GetTaskQue();
+    if (queue == nullptr) {
+      continue;
+    }
+    for (uint32_t i = 0; i < queue->taskCnt; ++i) {
+      const TaskInfo &taskInfo = queue->taskInfos[i];
+      if (taskInfo.type == SkTaskType::TYPE_FUNC) {
+        const uint64_t nodeId = GetTaskNodeIdByIndex(tasks, taskInfo.index);
+        const auto *node = graph_.GetNodeById(nodeId);
+        if (node->IsScheModeOn()) {
+          return true;
+        }
+
+        // DEBUG_CROSS_CORE_SYNC_CHECK calls SyncAll after MIX sub-kernels inside FUNC, without a SYNC task.
+        const bool enableCrossCoreSyncCheck = (taskInfo.debugOptions & kDebugOptionCrossCoreSyncCheck) != 0;
+        const bool isMixKernel =
+            taskInfo.relatedType == SkKernelType::MIX_AIC_1_1 || taskInfo.relatedType == SkKernelType::MIX_AIC_1_2;
+        if (enableCrossCoreSyncCheck && isMixKernel) {
+          return true;
+        }
+      } else if (taskInfo.type == SkTaskType::TYPE_SYNC) {
+        // Final sync types already cover early-start (C-C/V-V) and DEBUG_SYNC_ALL (ALL_SYNC).
+        // Either all C cores or all V cores needing to synchronize requires batch scheduling.
+        const auto syncType = static_cast<SkCoreSyncType>(taskInfo.args);
+        if (syncType == SkCoreSyncType::ALL_SYNC || syncType == SkCoreSyncType::CROSS_SYNC_AIC_TO_AIC ||
+            syncType == SkCoreSyncType::CROSS_SYNC_AIV_TO_AIV) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 SkHostEntryInfo SkTaskBuilder::GenEntryInfo(SkTask &skTaskCube, SkTask &skTaskVec, const ScopeCoreInfo &scopeCoreInfo,
                                             bool useSimtEntry) {
   SkHostEntryInfo entryInfo;
@@ -2559,6 +2596,7 @@ SkBuildResult SkTaskBuilder::Build(std::string skFuncName, const std::vector<Sup
   launchInfo.skFuncName = skFuncName;
   launchInfo.useSimtEntry = useSimtEntry;
   launchInfo.skMaxDcacheSize = skMaxDcacheSize;
+  launchInfo.isScheModeOn = CalculateSkScheMode(tasks, aicTask, aivTask);
 
   // Generate task queue JSON for aggregation
   SK_LOGI("SkTaskToQueueJson: generating task queue JSON for scopeId=%u", scopeId);

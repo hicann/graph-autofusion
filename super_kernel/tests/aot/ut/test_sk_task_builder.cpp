@@ -216,6 +216,141 @@ class SkTaskBuilderTest : public testing::Test {
   std::unique_ptr<SkTaskBuilder> builder;
 };
 
+TEST_F(SkTaskBuilderTest, Build_ScheModeFollowsSubKernelRegardlessOfBlockDimScaleUp) {
+  opts->AddOption(std::make_unique<NumberOptOption>("split_mode", aclskOptionType::SPLIT_MODE, 1, 1, 4));
+  uint64_t nodeId = 9000;
+  for (auto type :
+       {SkKernelType::AIC_ONLY, SkKernelType::AIV_ONLY, SkKernelType::MIX_AIC_1_1, SkKernelType::MIX_AIC_1_2}) {
+    for (bool scheModeOn : {false, true}) {
+      for (bool scaleUp : {false, true}) {
+        SCOPED_TRACE(testing::Message() << to_string(type) << " scheMode=" << scheModeOn << " scaleUp=" << scaleUp);
+        auto *node = CreateKernelNodeEx(nodeId++, 0, INVALID_TASK_ID, INVALID_TASK_ID, type);
+        node->nodeInfos.kernelInfos.isScheModeOn = scheModeOn;
+        node->nodeInfos.kernelInfos.capBits.blockDimScaleUp = scaleUp;
+        auto result = BuildWithCoreResult("Unknown", {node}, {}, 0);
+        ASSERT_NE(result.launchInfo.entryInfo.skEntryFunc, nullptr);
+        EXPECT_EQ(result.launchInfo.isScheModeOn, scheModeOn);
+      }
+    }
+  }
+}
+
+TEST_F(SkTaskBuilderTest, Build_FrameworkSyncRequiresScheModeWithAndWithoutEarlyStart) {
+  opts->AddOption(std::make_unique<NumberOptOption>("split_mode", aclskOptionType::SPLIT_MODE, 1, 1, 4));
+  opts->AddOption(std::make_unique<NumberOptOption>("early_start", aclskOptionType::EARLY_START, 0, 0, 1));
+  for (auto type : {SkKernelType::AIC_ONLY, SkKernelType::AIV_ONLY}) {
+    auto *first = CreateKernelNodeEx(9050, 0, INVALID_TASK_ID, 9051, type);
+    auto *second = CreateKernelNodeEx(9051, 0, 9050, INVALID_TASK_ID, type);
+    first->nodeInfos.kernelInfos.capBits.earlyStartSetFlag = true;
+    second->nodeInfos.kernelInfos.capBits.earlyStartWaitFlag = true;
+    first->nodeInfos.kernelInfos.capBits.disableScheMode = true;
+    second->nodeInfos.kernelInfos.capBits.disableScheMode = true;
+    for (uint32_t earlyStart : {0U, 1U}) {
+      SCOPED_TRACE(testing::Message() << to_string(type) << " earlyStart=" << earlyStart);
+      opts->GetOption(aclskOptionType::EARLY_START)->SetValue(earlyStart);
+      auto result = BuildWithCoreResult("Unknown", {first, second}, {}, 0);
+      ASSERT_NE(result.launchInfo.entryInfo.skEntryFunc, nullptr);
+      EXPECT_TRUE(result.launchInfo.isScheModeOn);
+
+      const auto *args = result.launchInfo.devArgs.Get();
+      ASSERT_NE(args, nullptr);
+      const bool isCube = type == SkKernelType::AIC_ONLY;
+      const auto offset = isCube ? args->skHeader.aicQueOffset : args->skHeader.aivQueOffset;
+      const auto *queue = reinterpret_cast<const TaskQue *>(reinterpret_cast<const uint8_t *>(args) + offset);
+      const auto expectedSync = isCube ? SkCoreSyncType::CROSS_SYNC_AIC_TO_AIC : SkCoreSyncType::CROSS_SYNC_AIV_TO_AIV;
+      uint32_t syncCount = 0;
+      for (uint32_t i = 0; i < queue->taskCnt; ++i) {
+        const auto &task = queue->taskInfos[i];
+        if (task.type == SkTaskType::TYPE_SYNC && task.args == static_cast<uint64_t>(expectedSync)) {
+          ++syncCount;
+          EXPECT_EQ(task.extraInfo != 0, earlyStart != 0);
+        }
+      }
+      // Early-start retains separate SET/WAIT tasks even when no surplus cores need to execute them.
+      EXPECT_EQ(syncCount, earlyStart != 0 ? 2U : 1U);
+    }
+  }
+}
+
+TEST_F(SkTaskBuilderTest, Build_DebugSyncAllRequiresScheModeForSingleKernel) {
+  opts->AddOption(std::make_unique<NumberOptOption>("split_mode", aclskOptionType::SPLIT_MODE, 1, 1, 4));
+  opts->AddOption(std::make_unique<NumberOptOption>("debug_sync_all", aclskOptionType::DEBUG_SYNC_ALL, 1, 0, 1));
+  auto *node = CreateKernelNodeEx(9070, 0, INVALID_TASK_ID, INVALID_TASK_ID, SkKernelType::AIC_ONLY);
+  auto result = BuildWithCoreResult("Unknown", {node}, {}, 0);
+  ASSERT_NE(result.launchInfo.entryInfo.skEntryFunc, nullptr);
+  EXPECT_TRUE(result.launchInfo.isScheModeOn);
+}
+
+TEST_F(SkTaskBuilderTest, Build_CubeToVectorDependencyIncludesGlobalSync) {
+  opts->AddOption(std::make_unique<NumberOptOption>("split_mode", aclskOptionType::SPLIT_MODE, 1, 1, 4));
+  auto *first = CreateKernelNodeEx(9080, 0, INVALID_TASK_ID, 9081, SkKernelType::AIC_ONLY);
+  auto *second = CreateKernelNodeEx(9081, 0, 9080, INVALID_TASK_ID, SkKernelType::AIV_ONLY);
+  auto result = BuildWithCoreResult("Unknown", {first, second}, {}, 0);
+  ASSERT_NE(result.launchInfo.entryInfo.skEntryFunc, nullptr);
+  EXPECT_TRUE(result.launchInfo.isScheModeOn);
+}
+
+TEST_F(SkTaskBuilderTest, CalculateSkScheMode_DistinguishesGlobalSyncFromCoreGroupHandshake) {
+  const std::pair<SkCoreSyncType, bool> cases[] = {
+      {SkCoreSyncType::CROSS_SYNC_AIC_TO_AIC, true},
+      {SkCoreSyncType::CROSS_SYNC_AIV_TO_AIV, true},
+      {SkCoreSyncType::ALL_SYNC, true},
+      {SkCoreSyncType::INTER_SYNC_SET_AIC_TO_AIV, false},
+      {SkCoreSyncType::INTER_SYNC_WAIT_AIC_TO_AIV, false},
+      {SkCoreSyncType::INTER_SYNC_SET_AIV_TO_AIC, false},
+      {SkCoreSyncType::INTER_SYNC_WAIT_AIV_TO_AIC, false},
+  };
+  SkTask aic;
+  SkTask aiv;
+  ASSERT_TRUE(aic.Init(1));
+  ASSERT_TRUE(aiv.Init(1));
+  for (SkTask *task : {&aic, &aiv}) {
+    auto *queue = task->taskQue.get();
+    queue->taskCnt = 1;
+    for (const auto &testCase : cases) {
+      SCOPED_TRACE(to_string(testCase.first));
+      queue->taskInfos[0] = {};
+      queue->taskInfos[0].type = SkTaskType::TYPE_SYNC;
+      queue->taskInfos[0].args = static_cast<uint64_t>(testCase.first);
+      EXPECT_EQ(builder->CalculateSkScheMode({}, aic, aiv), testCase.second);
+    }
+    queue->taskCnt = 0;
+  }
+}
+
+TEST_F(SkTaskBuilderTest, Build_DebugCrossCoreSyncCheckRequiresScheModeOnlyForMixKernel) {
+  opts->AddOption(std::make_unique<NumberOptOption>("split_mode", aclskOptionType::SPLIT_MODE, 1, 1, 4));
+  opts->AddOption(std::make_unique<NumberOptOption>("debug_cross_core_sync_check",
+                                                    aclskOptionType::DEBUG_CROSS_CORE_SYNC_CHECK, 1, 0, 1));
+  uint64_t nodeId = 9200;
+  for (auto type :
+       {SkKernelType::AIC_ONLY, SkKernelType::AIV_ONLY, SkKernelType::MIX_AIC_1_1, SkKernelType::MIX_AIC_1_2}) {
+    SCOPED_TRACE(to_string(type));
+    auto *node = CreateKernelNodeEx(nodeId++, 0, INVALID_TASK_ID, INVALID_TASK_ID, type);
+    auto result = BuildWithCoreResult("Unknown", {node}, {}, 0);
+    ASSERT_NE(result.launchInfo.entryInfo.skEntryFunc, nullptr);
+    EXPECT_EQ(result.launchInfo.isScheModeOn, type == SkKernelType::MIX_AIC_1_1 || type == SkKernelType::MIX_AIC_1_2);
+  }
+}
+
+TEST_F(SkTaskBuilderTest, CalculateSkScheMode_PreloadAndEventsDoNotRequireBatchScheduling) {
+  SkTask aic;
+  SkTask aiv;
+  ASSERT_TRUE(aic.Init(1));
+  ASSERT_TRUE(aiv.Init(1));
+  EXPECT_FALSE(builder->CalculateSkScheMode({}, aic, aiv));
+  auto *queue = aic.taskQue.get();
+  queue->taskCnt = 1;
+  for (auto type : {SkTaskType::TYPE_PRELOAD, SkTaskType::TYPE_EVENT_NOTIFY, SkTaskType::TYPE_EVENT_WAIT,
+                    SkTaskType::TYPE_EVENT_RESET}) {
+    queue->taskInfos[0] = {};
+    queue->taskInfos[0].type = type;
+    queue->taskInfos[0].index = std::numeric_limits<uint32_t>::max();
+    queue->taskInfos[0].extraInfo = 0xFF;  // Addresses/event values are not early-start flags.
+    EXPECT_FALSE(builder->CalculateSkScheMode({}, aic, aiv));
+  }
+}
+
 TEST_F(SkTaskBuilderTest, Build_EmptyTasks_ReturnEmptyLaunchInfo) {
   std::vector<SuperKernelBaseNode *> tasks;
   std::vector<SuperKernelBaseNode *> customTasks;
