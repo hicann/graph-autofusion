@@ -32,9 +32,62 @@ namespace {
 size_t TWO = 2;
 size_t kMaxFullLoadAxisSize = 3UL;
 size_t NODE_COUNT_AFTER_REDUCE = 4UL;
+constexpr int64_t kBroadcastTailRepeatWorkspaceThreshold = 22500L;
 std::string GetNewNodeName(const af::AscNodePtr &src_node, const af::AscNodePtr &dst_node, const std::string &type,
                            int32_t idx) {
   return src_node->GetName() + "_to_" + dst_node->GetName() + "_" + type + "_" + to_string(idx);
+}
+
+bool IsTailRepeatProductLargeEnough(const std::vector<ascir::SizeExpr> &repeats) {
+  if (repeats.size() <= 1UL) {
+    return false;
+  }
+  int64_t product = 1L;
+  for (size_t i = 1UL; i < repeats.size(); ++i) {
+    int64_t repeat = 0L;
+    if (!repeats[i].GetConstValue(repeat) || repeat <= 0L) {
+      return false;
+    }
+    if (product >= kBroadcastTailRepeatWorkspaceThreshold || repeat >= kBroadcastTailRepeatWorkspaceThreshold ||
+        product > kBroadcastTailRepeatWorkspaceThreshold / repeat) {
+      return true;
+    }
+    product *= repeat;
+  }
+  return product >= kBroadcastTailRepeatWorkspaceThreshold;
+}
+
+bool IsOnlyFirstAxisBroadcast(const af::AscNodePtr &pre_node, const af::AscNodePtr &broadcast_node) {
+  GE_ASSERT_NOTNULL(pre_node);
+  GE_ASSERT_NOTNULL(broadcast_node);
+  GE_ASSERT_TRUE(!pre_node->outputs().empty());
+  GE_ASSERT_TRUE(!broadcast_node->outputs().empty());
+  const auto &pre_repeats = pre_node->outputs[0].attr.repeats;
+  const auto &broadcast_repeats = broadcast_node->outputs[0].attr.repeats;
+  if (pre_repeats.empty() || pre_repeats.size() != broadcast_repeats.size()) {
+    return false;
+  }
+  if (af::SymbolicUtils::StaticCheckEq(pre_repeats[0], broadcast_repeats[0]) == af::TriBool::kTrue) {
+    return false;
+  }
+  for (size_t i = 1UL; i < pre_repeats.size(); ++i) {
+    if (af::SymbolicUtils::StaticCheckEq(pre_repeats[i], broadcast_repeats[i]) != af::TriBool::kTrue) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool NeedWorkspaceBeforeBroadcast(const af::AscNodePtr &broadcast_node) {
+  if (!af::ops::IsOps<af::ascir_op::Broadcast>(broadcast_node) || broadcast_node->GetInDataNodesSize() != 1UL) {
+    return false;
+  }
+  auto pre_node = std::dynamic_pointer_cast<af::AscNode>(broadcast_node->GetInDataNodes().at(0UL));
+  GE_ASSERT_NOTNULL(pre_node);
+  if (!IsOnlyFirstAxisBroadcast(pre_node, broadcast_node)) {
+    return false;
+  }
+  return IsTailRepeatProductLargeEnough(broadcast_node->outputs[0].attr.repeats);
 }
 
 bool IsLegacyFullLoadReduce(const std::vector<ascir::SizeExpr> &input_repeats,
@@ -393,6 +446,39 @@ Status ReducePartitionCaseGenerator::GenerateGeneralCase(ascir::HintGraph &graph
   return ge::GRAPH_SUCCESS;
 }
 
+Status ReducePartitionCaseGenerator::GenerateBroadcastWorkspaceCase(ascir::HintGraph &graph,
+                                                                    std::vector<ascir::ImplGraph> &graphs) {
+  ascir::ImplGraph optimize_graph(graph.GetName().c_str());
+  optimize_graph.CopyFrom(graph);
+  partition_ = false;
+  for (const auto &node : optimize_graph.GetAllNodes()) {
+    if (node->GetOutDataNodes().empty()) {
+      node_order_.emplace_back(node);
+    }
+  }
+  std::vector<af::AscNodePtr> broadcast_nodes;
+  for (const auto &node : optimize_graph.GetAllNodes()) {
+    if (NeedWorkspaceBeforeBroadcast(node)) {
+      broadcast_nodes.emplace_back(node);
+    }
+  }
+  for (auto &broadcast_node : broadcast_nodes) {
+    auto pre_node = std::dynamic_pointer_cast<af::AscNode>(broadcast_node->GetInDataNodes().at(0UL));
+    GE_ASSERT_NOTNULL(pre_node);
+    GE_CHK_STATUS_RET(PartitionByNode(pre_node, broadcast_node, optimize_graph));
+  }
+  if (partition_) {
+    std::sort(node_order_.begin(), node_order_.end(), [](const af::AscNodePtr &lhs, const af::AscNodePtr &rhs) {
+      return lhs->GetOpDescBarePtr()->GetId() < rhs->GetOpDescBarePtr()->GetId();
+    });
+    graphs.emplace_back(optimize_graph);
+  } else {
+    node_order_.clear();
+    graphs.emplace_back(graph);
+  }
+  return ge::GRAPH_SUCCESS;
+}
+
 Status ReducePartitionCaseGenerator::GenerateAllLoadCase(ascir::HintGraph &graph, std::vector<ascir::ImplGraph> &graphs,
                                                          const std::vector<std::string> &score_functions) {
   (void)score_functions;
@@ -400,8 +486,7 @@ Status ReducePartitionCaseGenerator::GenerateAllLoadCase(ascir::HintGraph &graph
     return ge::GRAPH_SUCCESS;
   }
   node_order_.clear();
-  graphs.emplace_back(graph);
-  return ge::GRAPH_SUCCESS;
+  return GenerateBroadcastWorkspaceCase(graph, graphs);
 }
 
 Status ReducePartitionCaseGenerator::ReducePartitionMultipleCitations(ascir::ImplGraph &impl_graph) {
