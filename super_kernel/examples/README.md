@@ -1,37 +1,47 @@
-# super_kernel样例使用指导
+# SuperKernel 样例使用指导
 
 ## 功能描述
 
-使用super_kernel完成算子融合
+本目录提供两类 SuperKernel Python 样例：
+
+- `jit/`：通过 SuperKernel JIT 接口完成融合、编译和运行。
+- `aot/`：通过 TorchAir `npugraph_ex` 静态编译并启用 SuperKernel 优化。
 
 ## 目录结构
+
 ```text
 examples/
-├── super_kernel_base							# 基础功能的样例
-│   └── superkernel_scope.py					# 通过super_kernel完成算子融合
-├── super_kernel_profiling						# 展示profiling的样例
-│   └── superkernel_compare.py					# 使用super_kernel与不使用super_kernel的数据进行对比
-└── super_kernel_runtime_ascendc_only			# 极简super_kernel样例
-    └── superkernel_runtime_ascendc_basic.py	# 通过ascendc编译super_kernel完成算子融合，并使用runtime运行时环境执行
+├── run_example.sh                                      # 样例统一运行入口
+├── jit/
+│   ├── example01_super_kernel_base/                 # SuperKernel 基础功能
+│   ├── example02_super_kernel_profiling/            # SuperKernel profiling 对比
+│   └── example03_super_kernel_runtime_ascendc_only/ # AscendC + Runtime 极简样例
+└── aot/
+    ├── scripts/                              # AOT 样例公共 Bash 函数
+    ├── example01_dual_stream/             # 双流与 NPU Event 控制边
+    ├── example02_sk_options/              # SuperKernel options
+    └── example03_kernel_pybind/           # Pybind 自定义算子融合
 ```
+
 ## 前置说明
-请务必参考[《源码构建指南》](../../docs/zh/build.md)完成前置环境准备。
 
-## 依赖安装
+请先参考[源码构建指南](../../docs/zh/build.md)完成环境准备，并安装
+[requirements.txt](requirements.txt) 中的 Python 依赖。
 
-样例执行所需的Python依赖已写入[requirements.txt](requirements.txt)，可通过以下命令安装：
-```shell
-pip3 install -r requirements.txt
+## 运行样例
+
+`--npu-arch` 指定运行样例对应的 NPU 架构，当前支持 `dav-2201` 和 `dav-3510`。样例使用当前可见 NPU。
+
+```bash
+bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
+bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
 ```
 
-## 用例演示
+`dav-2201` 会依次运行全部 JIT 和 AOT Python 样例；`dav-3510` 不支持这些 JIT 样例，因此会跳过 JIT，仅运行 AOT 样例。运行 SuperKernel 样例时必须显式传入 `--npu-arch`，用于选择适用的样例；样例内部的编译参数由各样例处理。
 
-[用例1](super_kernel_base/README.md)
-
-[用例2](super_kernel_profiling/README.md)
-
-[用例3](super_kernel_runtime_ascendc_only/README.md)
+AOT 样例退出时由 TorchAir 清理静态 kernel；旧式安装的兜底卸载仅接受本次编译产物对应、位于当前 CANN 安装目录且通过路径校验的 `uninstall.sh`。日志中的其他路径不会执行，清理失败会输出告警。
 
 ## 参考
 
-请参考[《Ascend Extension for PyTorch》](https://www.hiascend.com/document/redirect/pytorchuserguide)中“套件与三方库 > PyTorch图模式使用(TorchAir) > API参考 > torchair.scope > super_kernel”的相关内容。
+- SuperKernel option 参考 [TorchAir SuperKernel 使用说明](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md)。
+- [Ascend Extension for PyTorch 用户指南](https://www.hiascend.com/document/redirect/pytorchuserguide)
