@@ -55,7 +55,7 @@ SkQueueType ToQueueType(SkKernelType kernelType) {
     case SkKernelType::MIX_AIC_1_2:
       return SkQueueType::MIX_1_2;
     default:
-      SK_LOGE("unsupported kernel type %s for super kernel, using default value : aic", to_string(kernelType));
+      SK_LOGW("Unsupported kernel type %s for super kernel; using AIC as fallback", to_string(kernelType));
       return SkQueueType::AIC;
   }
 }
