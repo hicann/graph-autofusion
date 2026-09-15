@@ -1,3 +1,11 @@
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 add_library(test_ascir_ut OBJECT
     #test_ascir.cpp
     #test_ascir_ops.cpp
@@ -33,14 +41,15 @@ add_library(test_ascir_ut OBJECT
     reg_func/test_reg_func_axpy.cpp
     reg_func/test_reg_func_welford.cpp
     reg_func/test_reg_func_abs.cpp
-    test_ascir_codegen_impl.cpp
-    test_ascir_meta.cpp
     reg_func/test_reg_func_reduce_max.cpp
+    test_ascir_codegen_impl.cpp
+    test_ascir_att_impl.cpp
+    test_ascir_common.cpp
+    test_ascir_codegen_calc.cpp
+    test_ascir_meta.cpp
     code_dumper_unittest.cc
     ascir_utils_unittest.cc
     test_asc_graph_utils.cpp
-    test_ascir_att_impl.cpp
-    test_ascir_common.cpp
 )
 target_include_directories(test_ascir_ut PRIVATE
     ${CODE_ROOT_DIR}/ascir/generator
