@@ -38,8 +38,9 @@ else
 fi
 
 export PYTHON_CMD
-bash "${BASEPATH}/aot/example01_dual_stream/run.sh" --npu-arch="${NPU_ARCH}"
-bash "${BASEPATH}/aot/example02_sk_options/run.sh" --npu-arch="${NPU_ARCH}"
-bash "${BASEPATH}/aot/example03_kernel_pybind/run.sh" --npu-arch="${NPU_ARCH}"
+# 暂时禁用因当前 CI 环境限制无法运行的 AOT examples。
+# bash "${BASEPATH}/aot/example01_dual_stream/run.sh" --npu-arch="${NPU_ARCH}"
+# bash "${BASEPATH}/aot/example02_sk_options/run.sh" --npu-arch="${NPU_ARCH}"
+# bash "${BASEPATH}/aot/example03_kernel_pybind/run.sh" --npu-arch="${NPU_ARCH}"
 
 echo "Run all examples success"
