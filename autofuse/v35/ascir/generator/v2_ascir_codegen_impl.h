@@ -1220,6 +1220,8 @@ class PolyGammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "basic_api/reg_compute/kernel_reg_compute_intf.h",
+        "adv_api/math/digamma.h",
+        "adv_api/math/lgamma.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
