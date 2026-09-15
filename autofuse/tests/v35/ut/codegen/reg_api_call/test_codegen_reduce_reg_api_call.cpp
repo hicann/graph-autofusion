@@ -140,7 +140,7 @@ TEST_F(RegReduceApicallTest, RegReduceApi_Test_001) {
   EXPECT_EQ(status, af::SUCCESS);
   EXPECT_NE(result.find("first_actual"), std::string::npos);
   EXPECT_NE(result.find("tmp_reduce_shape"), std::string::npos);
-  EXPECT_NE(result.find("ReduceMaxExtend<"), std::string::npos) << result;
+  EXPECT_NE(result.find("ReduceMax<"), std::string::npos);
   EXPECT_NE(result.find("AscendC::Pattern::Reduce::AR"), std::string::npos);
   EXPECT_EQ(result.find("AscirNodeParams"), std::string::npos);
 }

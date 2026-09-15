@@ -32,22 +32,6 @@ set(ascendc_api_regbase_extend_src
         sign.h
         signbit.h
         reduce_init.h
-        reduce_extend.h
-        reduce/reduce_common_util_3510_impl.h
-        reduce/reduce_common_ar_reuse_align_less_than_vl_3510_impl.h
-        reduce/reduce_common_ar_reuse_align_3510_impl.h
-        reduce/reduce_common_ra_reuse_align_3510_impl.h
-        reduce/reduce_common_ar_ra_reuse_unalign_3510_impl.h
-        reduce/reduce_sum_3510_impl.h
-        reduce/reduce_mean_3510_impl.h
-        reduce/reduce_max_3510_impl.h
-        reduce/reduce_min_3510_impl.h
-        reduce/reduce_prod_3510_impl.h
-        reduce/reduce_any_3510_impl.h
-        reduce/reduce_all_3510_impl.h
-        reduce/mean_3510_impl.h
-        reduce/sum_3510_impl.h
-        reduce/reduce_xor_sum_3510_impl.h
         atan2.h
         airy_ai.h
         copy_sign.h

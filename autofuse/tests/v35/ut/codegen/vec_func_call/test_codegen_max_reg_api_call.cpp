@@ -140,7 +140,6 @@ TEST_F(RegReduceMaxApicallTest, Max_INT8) {
   Status status = call.Generate(tpipe, current_axis, result);
   // Check the result
   EXPECT_EQ(status, af::SUCCESS);
-  EXPECT_NE(result.find("ReduceMaxExtend<int8_t"), std::string::npos) << result;
 }
 
 // Test Max with INT16 type

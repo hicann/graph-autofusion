@@ -32,21 +32,6 @@ static std::string StripBroadcastSelfIncludes(const std::string &src) {
   return result;
 }
 
-static std::string StripReduceSelfIncludes(const std::string &src) {
-  std::string result;
-  size_t pos = 0;
-  while (pos < src.size()) {
-    size_t end = src.find('\n', pos);
-    if (end == std::string::npos) end = src.size();
-    std::string line = src.substr(pos, end - pos);
-    if (line.find("#include \"reduce/") == std::string::npos) {
-      result += line + "\n";
-    }
-    pos = end + 1;
-  }
-  return result;
-}
-
 Register::Register() {
   const std::string kAscendcCastRegStr = {
 #include "cast_reg_base.h"
@@ -78,54 +63,6 @@ Register::Register() {
   const std::string kAscendcReduce_initRegBase = {
 #include "reduce_init_reg_base.h"
   };
-  const std::string kAscendcReduceExtendRegBase = StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_common_util_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_common_ar_reuse_align_less_than_vl_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_common_ar_reuse_align_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_common_ra_reuse_align_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_common_ar_ra_reuse_unalign_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_sum_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_mean_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_max_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_min_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_prod_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_any_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_all_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/mean_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/sum_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce/reduce_xor_sum_3510_impl_reg_base.h"
-                                                  }) +
-                                                  StripReduceSelfIncludes(std::string{
-#include "reduce_extend_reg_base.h"
-                                                  });
   const std::string kAscendcFloorDivRegBaseStr = {
 #include "floor_div_reg_base.h"
   };
@@ -415,7 +352,6 @@ Register::Register() {
       {"erf_reg_base.h", kAscendcErfRegBaseStr},
       {"tanh_reg_base.h", kAscendcTanhRegBaseStr},
       {"reduce_init_reg_base.h", kAscendcReduce_initRegBase},
-      {"reduce_extend_reg_base.h", kAscendcReduceExtendRegBase},
       {"floor_div_reg_base.h", kAscendcFloorDivRegBaseStr},
       {"sign_reg_base.h", kAscendcSignRegBaseStr},
       {"where_reg_base.h", kAscendcWhereRegBaseStr},
