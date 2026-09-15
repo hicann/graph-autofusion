@@ -62,9 +62,17 @@ TEST_F(AotSystemTest, SimtEntryPropagatesDynamicUbufLaunchAttribute) {
     const auto entries = Entries(model, stream);
     ASSERT_EQ(entries.size(), 1U);
     EXPECT_EQ(entries[0].function, "sk_entry_aiv_simt");
-    ASSERT_EQ(entries[0].attributes.size(), 1U);
-    EXPECT_EQ(entries[0].attributes[0].id, ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE);
-    EXPECT_EQ(entries[0].attributes[0].value.dynUBufSize, 8192U);
+    ASSERT_EQ(entries[0].attributes.size(), 2U);
+    const auto schemMode =
+        std::find_if(entries[0].attributes.begin(), entries[0].attributes.end(),
+                     [](const auto &attr) { return attr.id == ACL_RT_LAUNCH_KERNEL_ATTR_SCHEM_MODE; });
+    ASSERT_NE(schemMode, entries[0].attributes.end());
+    EXPECT_EQ(schemMode->value.schemMode, 1U);
+    const auto dynUbuf = std::find_if(entries[0].attributes.begin(), entries[0].attributes.end(), [](const auto &attr) {
+      return attr.id == ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE;
+    });
+    ASSERT_NE(dynUbuf, entries[0].attributes.end());
+    EXPECT_EQ(dynUbuf->value.dynUBufSize, 8192U);
     EXPECT_FALSE(entries[0].args.empty());
   }
 }
