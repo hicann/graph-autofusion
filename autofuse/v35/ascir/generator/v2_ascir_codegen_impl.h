@@ -3916,7 +3916,7 @@ class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/cos.h",
-        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/cpp/kernel_simt_utils.h",
         "simt_api/math_functions.h",
     };
   }
@@ -3958,7 +3958,7 @@ class AcosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/acos.h",
-        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/cpp/kernel_simt_utils.h",
         "simt_api/math_functions.h",
     };
   }
@@ -4070,7 +4070,7 @@ class AsinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/asin.h",
-        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/cpp/kernel_simt_utils.h",
         "simt_api/math_functions.h",
     };
   }
@@ -4185,7 +4185,7 @@ class AtanhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/atanh.h",
-        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/cpp/kernel_simt_utils.h",
         "simt_api/math_functions.h",
     };
   }
@@ -5129,7 +5129,7 @@ class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/sin.h",
-        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/cpp/kernel_simt_utils.h",
         "simt_api/math_functions.h",
     };
   }
@@ -5318,7 +5318,7 @@ class TanAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/tan.h",
-        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/cpp/kernel_simt_utils.h",
         "simt_api/math_functions.h",
     };
   }

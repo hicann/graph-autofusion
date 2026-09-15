@@ -74,7 +74,8 @@ TEST_F(TestBackendAcosBf16E2e, AcosBf16E2eCodegen) {
     EXPECT_EQ(codegen.Generate(shape_info, fused_schedule_result, result), 0);
     EXPECT_NE(result.kernel.find("AcosExtend"), std::string::npos);
     EXPECT_NE(result.kernel.find("AcosSimtCompute"), std::string::npos);
-    EXPECT_NE(result.kernel.find("simt_api/cpp/kernel_simt_intf.h"), std::string::npos);
+    EXPECT_NE(result.kernel.find("simt_api/cpp/kernel_simt_utils.h"), std::string::npos);
+    EXPECT_NE(result.kernel.find("simt_api/math_functions.h"), std::string::npos);
     EXPECT_NE(result.tiling.find(std::to_string(kAcosSimtDcacheSize)), std::string::npos);
     kernel_file << tilig_stub << RemoveSubDirInclude(result.kernel);
     tiling_file << result.tiling;
