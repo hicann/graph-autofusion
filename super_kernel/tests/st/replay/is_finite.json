@@ -1,0 +1,56 @@
+{
+  "binFileName": "is_finite",
+  "binFileSuffix": ".o",
+  "blockDim": 1,
+  "coreType": "VectorCore",
+  "core_type": "AIV",
+  "intercoreSync": 0,
+  "kernelName": "is_finite__kernel0",
+  "magic": "RT_DEV_BINARY_MAGIC_ELF_AIVEC",
+  "memoryStamping": [],
+  "opParaSize": 48,
+  "parameters": [
+    null,
+    null,
+    null
+  ],
+  "sha256": "43dd80172b65627db9237870f4e964463747d0233c82a0e654c456df0d337db3",
+  "workspace": {
+    "num": 1,
+    "size": [
+      33554432
+    ],
+    "type": [
+      0
+    ]
+  },
+  "supportSuperKernel": 1,
+  "platformInfo": {
+    "deterministicLevel": 0
+  },
+  "sub_operator_op_type": "IsFinite",
+  "sub_operator_params": [
+    "x_in__",
+    "y_out_",
+    "workspace"
+  ],
+  "sub_operator_kernel_type": "KERNEL_TYPE_AIV_ONLY",
+  "sub_operator_kernel_name": {
+    "AiCore": {
+      "func_name": "is_finite__kernel0_middle",
+      "obj_files": "is_finite.o",
+      "obj_files_split1": "is_finite_split1.o",
+      "obj_files_split2": "is_finite_split2.o",
+      "obj_files_split3": "is_finite_split3.o"
+    }
+  },
+  "sub_operator_early_start_set_flag": false,
+  "sub_operator_early_start_wait_flag": false,
+  "sub_operator_call_dcci_before_kernel_start": false,
+  "sub_operator_call_dcci_after_kernel_end": false,
+  "sub_operator_call_dcci_disable_on_kernel": false,
+  "sub_op_with_sync_all": false,
+  "split_mode": 4,
+  "localMemorySize": 0,
+  "feature_list": {}
+}

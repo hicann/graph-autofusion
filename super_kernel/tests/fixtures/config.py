@@ -41,6 +41,12 @@ def pytest_addoption(parser):
         default=False,
         help="Replace the corresponding golden files under tests/st/data with newly generated JSON and kernel.cpp files",
     )
+    parser.addoption(
+        "--st-live-subkernel",
+        action="store_true",
+        default=False,
+        help="显式启用 CANN OPP 子内核编译；默认 ST 使用目标 910 replay 工件",
+    )
 
 
 def save_golden_files(tmp_path, tests_root):

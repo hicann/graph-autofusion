@@ -12,8 +12,8 @@
 
 
 from pathlib import Path
+import shutil
 import pytest
-from impl.ops_math.dynamic import pows
 from asc_op_compile_base.common.buildcfg.buildcfg import build_config
 from asc_op_compile_base.common.buildcfg.buildcfg_mapping import kernel_meta_parent_dir, \
     op_debug_config, tbe_debug_level
@@ -22,8 +22,46 @@ from asc_op_compile_base.common.context import get_context, op_info
 from asc_op_compile_base.common.context.op_context import OpContext
 from asc_op_compile_base.common.platform.platform_info import set_current_compile_soc_info
 
+REPLAY_ROOT = Path(__file__).resolve().parents[1] / "st" / "replay"
 
-def compile_sub_kernel(kernel_meta_dir, op_name, op_type, func, extend_op_info: dict = None):
+
+def _materialize_replay(kernel_meta_dir, replay_name):
+    """Copy a target-910 subkernel replay into the test's private output tree."""
+    replay_root = Path(kernel_meta_dir)
+    replay_meta_dir = replay_root / "kernel_meta"
+    replay_meta_dir.mkdir(parents=True, exist_ok=True)
+
+    for suffix in (".o", ".json"):
+        source = REPLAY_ROOT / f"{replay_name}{suffix}"
+        if not source.is_file():
+            raise FileNotFoundError(f"Missing ST replay artifact: {source}")
+        shutil.copy2(source, replay_meta_dir / source.name)
+
+    return SubkernelPath(replay_root, replay_name)
+
+
+def compile_sub_kernel(
+    kernel_meta_dir,
+    op_name,
+    op_type,
+    func=None,
+    extend_op_info: dict = None,
+    replay_name=None,
+    live=False,
+):
+    """Compile a live CANN subkernel or replay a fixed target-910 artifact.
+
+    Normal ST uses replay_name so no OPP Python implementation or tiling library
+    is loaded. The live path remains available for explicit CANN integration ST.
+    """
+    if replay_name is not None:
+        return _materialize_replay(kernel_meta_dir, replay_name)
+
+    if not live:
+        raise ValueError("compile_sub_kernel requires replay_name unless live=True")
+    if func is None:
+        raise ValueError("func is required when compiling a live subkernel")
+
     current_build_config()[kernel_meta_parent_dir] = kernel_meta_dir
     current_build_config()[tbe_debug_level] = 0
     set_current_compile_soc_info("Ascend910_9391")
@@ -57,7 +95,7 @@ def compile_sub_kernel(kernel_meta_dir, op_name, op_type, func, extend_op_info: 
         
 class SubkernelPath:
     def __init__(self, path, name):
-        self.root = path
+        self.root = Path(path)
         self.name = name
 
     def o(self):
@@ -66,25 +104,22 @@ class SubkernelPath:
     def json(self):
         return self.name + ".json"
 
+    def replay_json(self):
+        """Return the generated metadata copied alongside the replay object."""
+        return self.root / "kernel_meta" / self.json()
+
 
 @pytest.fixture(scope="function")
 def subkernel_is_inf(tmp_dir):
+    # Keep the legacy fixture replay-only as well; it is not allowed to pull
+    # an OPP implementation into an ordinary test process.
     kernel_meta_dir = Path(tmp_dir) / "subkernel_is_inf"
-
-    from impl.dynamic import is_inf
-    x = {}
-    x["shape"] = [1024]
-    x["ori_shape"] = [1024]
-    x["format"] = "ND"
-    x["ori_format"] = "ND"
-    x["dtype"] = "float16"
-
-    y = {}
-    y["shape"] = [1024]
-    y["ori_shape"] = [1024]
-    y["format"] = "ND"
-    y["ori_format"] = "ND"
-    y["dtype"] = "float16"
+    return compile_sub_kernel(
+        str(kernel_meta_dir),
+        "IsInf",
+        "IsInf",
+        replay_name="is_inf",
+    )
 
 
 def make_1_in_1_out_subkernel_fixture(
@@ -102,7 +137,15 @@ def make_1_in_1_out_subkernel_fixture(
         # 1. 定义内核元数据目录
         kernel_meta_dir = Path(tmp_dir) / f"subkernel_{op_name}"
 
-        # 2. 动态导入实现模块和函数
+        if not request.config.getoption("--st-live-subkernel"):
+            return compile_sub_kernel(
+                str(kernel_meta_dir),
+                op_name,
+                op_type,
+                replay_name=impl_module_name,
+            )
+
+        # Live mode is intentionally opt-in: it exercises CANN OPP/tiling.
         module = __import__(f"impl.ops_math.dynamic.{impl_module_name}", fromlist=[func_name])
         func = getattr(module, func_name)
 
@@ -119,7 +162,7 @@ def make_1_in_1_out_subkernel_fixture(
             "ori_shape": [1024],
             "format": "ND",
             "ori_format": "ND",
-            "dtype": "float16"
+            "dtype": "bool"
         }
         # 4. 编译子内核（传入新的 extend_op_info）
         with build_config():
@@ -128,7 +171,8 @@ def make_1_in_1_out_subkernel_fixture(
                 op_name,
                 op_type,
                 extend_op_info=extend_op_info,
-                func=lambda: func(x, y)  # 调用实际的算子函数
+                func=lambda: func(x, y),  # 调用实际的算子函数
+                live=True,
             )
 
             # 5. 返回路径管理对象
@@ -192,8 +236,18 @@ def subkernel_finite(request):
 
 
 @pytest.fixture(scope="function")
-def subkernel_pows_default(tmp_dir):
+def subkernel_pows_default(tmp_dir, request):
     kernel_meta_dir = Path(tmp_dir) / "subkernel_pows"
+
+    if not request.config.getoption("--st-live-subkernel"):
+        return compile_sub_kernel(
+            str(kernel_meta_dir),
+            "Pows",
+            "Pows",
+            replay_name="pows",
+        )
+
+    from impl.ops_math.dynamic import pows
 
     x = {}
     x["shape"] = [1024]
@@ -217,7 +271,13 @@ def subkernel_pows_default(tmp_dir):
     y["dtype"] = "float16"
 
     with build_config():
-        compile_sub_kernel(str(kernel_meta_dir), "Pows", "Pows", lambda: pows.pows(x, x1, y))
+        compile_sub_kernel(
+            str(kernel_meta_dir),
+            "Pows",
+            "Pows",
+            lambda: pows.pows(x, x1, y),
+            live=True,
+        )
 
     return SubkernelPath(kernel_meta_dir, "pows")
 
