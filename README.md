@@ -36,11 +36,8 @@ Graph-autofusion 是一个面向昇腾（Ascend）芯片的轻量级、解耦式
 
 AutoFuse 可作为上层图编译器和深度学习框架的自动融合后端，为模型编译和执行提供 Ascend C 融合算子生成能力。当前主要集成路径包括：
 
-- **GE**：作为 GE 的自动融合后端。[GE 项目](https://gitcode.com/cann/ge)
-- **PyTorch**：作为 PyTorch Inductor 的 Ascend C 后端，通过 `torch.compile` 使用 AutoFuse。[TorchAir 项目](https://gitcode.com/Ascend/torchair)
-- **TensorFlow**：作为 TensorFlow Adapter 对接 GE 后使用的自动融合后端。[TensorFlow Adapter 项目](https://gitcode.com/cann/tensorflow)
-
-上述集成路径以对应 CANN 版本和上层组件的实际支持情况为准。
+- **GE 路径**：作为 GE 的自动融合后端，上层框架 TensorFlow 或者 PyTorch 可通过GE接入使用，详见[GE 项目](https://gitcode.com/cann/ge)
+- **Inductor 路径**：作为 PyTorch Inductor 的自动融合后端，详见[TorchAir 项目](https://gitcode.com/Ascend/torchair)
 
 ## 🔍目录结构
 

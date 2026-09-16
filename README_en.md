@@ -28,18 +28,15 @@ If you want to understand the architecture, module functions, and skills of Grap
 
 - [AutoFuse Architecture Description](docs/en/autofuse/design/architecture.md): Introduces the overall architecture, key technical solutions, processing flow and module responsibilities of AutoFuse.
 - [Contribution Guide](CONTRIBUTING.md): Describes how to contribute to the project, submit Issues and Pull Requests.
-- [Skills Management Guide](docs/zh/opencode-skill-management.md): Introduces the default Skills used in the repository and their management methods.
-- [Skill Reuse Guide](docs/zh/skill-reuse-guide.md): Introduces how to reuse Skills and use Agent to assist code reading, development and problem location.
+- [Skills Management Guide](docs/en/opencode-skill-management.md): Introduces the default Skills used in the repository and their management methods.
+- [Skill Reuse Guide](docs/en/skill-reuse-guide.md): Introduces how to reuse Skills and use Agent to assist code reading, development and problem location.
 
 ## 🌐 Ecosystem Integration
 
 AutoFuse can be used as an automatic fusion backend for upper-layer graph compilers and deep learning frameworks, providing Ascend C fused operator generation capabilities for model compilation and execution. Currently the main integration paths are:
 
-- **GE**: As the automatic fusion backend for GE. [GE Project](https://gitcode.com/cann/ge)
-- **PyTorch**: As the AscendC backend for PyTorch Inductor, use AutoFuse via `torch.compile`. [TorchAir Project](https://gitcode.com/Ascend/torchair)
-- **TensorFlow**: As the automatic fusion backend after TensorFlow Adapter connects to GE. [TensorFlow Adapter Project](https://gitcode.com/cann/tensorflow)
-
-The above integration paths are subject to the actual support of the corresponding CANN version and upper-layer components.
+- **GE path**: As the automatic fusion backend for GE. Upper-layer frameworks such as TensorFlow and PyTorch can connect to and use AutoFuse through GE. For details, see the [GE project](https://gitcode.com/cann/ge).
+- **Inductor path**: As the automatic fusion backend for PyTorch Inductor. For details, see the [TorchAir project](https://gitcode.com/Ascend/torchair).
 
 ## 🔍Directory Structure
 
