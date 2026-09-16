@@ -264,7 +264,7 @@ stages:
               workspace: ${{ steps.process_checkout.outputs.path }}
               cov_mode: "report"
               ut_field: "superkernel"
-              modules: "UT_Test_superkernel"
+              modules: "UT_Test_superkernel UT_Test_autofuse_framework UT_Test_autofuse_ascendc_api"
               source_branch: ${{ env.SOURCE_BRANCH }}
               target_branch: ${{ env.TARGET_BRANCH }}
               obs_path: ${{ env.obs_path }}
@@ -312,7 +312,7 @@ stages:
               workspace: ${{ steps.process_checkout.outputs.path }}
               cov_mode: "report"
               ut_field: "superkernel"
-              modules: "ST_Test_Python_superkernel"
+              modules: "ST_Test_Python_superkernel ST_Test_autofuse_ascendc_api ST_Test_autofuse_e2e"
               source_branch: ${{ env.SOURCE_BRANCH }}
               target_branch: ${{ env.TARGET_BRANCH }}
               obs_path: ${{ env.obs_path }}
