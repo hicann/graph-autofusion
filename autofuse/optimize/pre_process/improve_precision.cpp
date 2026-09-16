@@ -712,8 +712,7 @@ bool ShouldSkipGraph(optimize::GraphPropertiesCache &cache, const AscGraph &asc_
 
 Status IsAllNodesInBlacklist(const AscGraph &asc_graph, bool &result) {
   const auto &blacklist2 = PreProcessConfig::Instance().GetImprovePrecisionBlacklist();
-  constexpr char kAllNodesType[] = "all";
-  const bool has_all = (blacklist2.find(kAllNodesType) != blacklist2.end());
+  const bool has_all = (blacklist2.find(PreProcessConfig::kAllNodeType) != blacklist2.end());
   result = true;
   for (const auto &node : AscGraphUtils::GetComputeGraph(asc_graph)->GetAllNodes()) {
     if (node->GetType() == af::ascir_op::Output::Type || node->GetType() == af::ascir_op::Data::Type) {
