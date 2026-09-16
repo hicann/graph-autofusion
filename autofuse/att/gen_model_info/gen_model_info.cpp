@@ -35,7 +35,7 @@
 namespace att {
 namespace {
 constexpr uint32_t kPathMax = 4096U;
-const std::string kFileSeperator = "/";
+const std::string kFileSeparator = "/";
 const std::string kModelInfoFileName = "model_info.json";
 constexpr uint32_t kConstType = 1U;
 constexpr uint32_t kVarType = 2U;
@@ -342,8 +342,8 @@ std::string GetRealPath(const std::string &path) {
   }
   std::string root_path = af::RealPath(path.c_str());
   GE_ASSERT_TRUE(!root_path.empty(), "Invalid path: %s", path.c_str());
-  if (!kFileSeperator.empty() && (root_path[root_path.size() - 1U] != kFileSeperator.back())) {
-    root_path += kFileSeperator;
+  if (!kFileSeparator.empty() && (root_path[root_path.size() - 1U] != kFileSeparator.back())) {
+    root_path += kFileSeparator;
   }
 
   return root_path;

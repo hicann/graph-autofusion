@@ -1904,7 +1904,7 @@ TEST(CodegenKernel, LoadGatherRegApiCall_WhenGatherComputeTypeIsLoad_Tail_Axis) 
   EXPECT_EQ(status, af::SUCCESS);
 }
 
-TEST(CodegenKernel, LoadGatherRegApiCall_WhenGatherComputeTypeIsLoad_Faild) {
+TEST(CodegenKernel, LoadGatherRegApiCall_WhenGatherComputeTypeIsLoad_Failed) {
   codegen::Tiler tiler;
   codegen::TPipe tpipe("tpipe", tiler);
   af::AscGraph graph("test");

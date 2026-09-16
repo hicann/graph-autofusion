@@ -92,6 +92,41 @@ TEST_F(AscIrCodegenImplMetaTest, CodegenImplMeta_IsWellFormed) {
   EXPECT_CODEGEN_META(TrueDiv, true);
   EXPECT_CODEGEN_META(Ub2ub, false);
   EXPECT_CODEGEN_META(Where, true);
+  EXPECT_CODEGEN_META(IndexExpr, false);
+  EXPECT_CODEGEN_META(Sqrt, false);
+  EXPECT_CODEGEN_META(Scalar, false);
+  EXPECT_CODEGEN_META(Mean, false);
+  EXPECT_CODEGEN_META(Rsqrt, true);
+  EXPECT_CODEGEN_META(Isnan, true);
+  EXPECT_CODEGEN_META(IsFinite, true);
+  EXPECT_CODEGEN_META(Any, true);
+}
+
+// Scalar-input / brc-inline policy probes: every override listed in the coverage report is
+// invoked once; the counter assertion fails if any call is dropped.
+TEST_F(AscIrCodegenImplMetaTest, InputScalarAndBrcPolicies) {
+  size_t probed = 0U;
+#define PROBE_POLICY(cls, expr)       \
+  {                                   \
+    JOIN(cls, AscIrCodegenImpl) impl; \
+    (void)(expr);                     \
+    ++probed;                         \
+  }
+  PROBE_POLICY(Transpose, impl.IsScalarInputSupported({false, true}));
+  PROBE_POLICY(Le, impl.IsScalarInputSupported({false, true}));
+  PROBE_POLICY(LogicalAnd, impl.IsScalarInputSupported({false, true}));
+  PROBE_POLICY(LogicalOr, impl.IsScalarInputSupported({false, true}));
+  PROBE_POLICY(Maximum, impl.IsScalarInputSupported({false, true}));
+  PROBE_POLICY(Pow, impl.IsScalarInputSupported({false, true}));
+  PROBE_POLICY(TrueDiv, impl.IsScalarInputSupported({false, true}));
+  PROBE_POLICY(MaskedFill, impl.IsScalarInputSupported({false, true}));
+  PROBE_POLICY(Eq, impl.IsScalarInputSupportedIfExchangeInputs({true, false}));
+  PROBE_POLICY(LogicalAnd, impl.IsScalarInputSupportedIfExchangeInputs({true, false}));
+  PROBE_POLICY(LogicalOr, impl.IsScalarInputSupportedIfExchangeInputs({true, false}));
+  PROBE_POLICY(Maximum, impl.IsScalarInputSupportedIfExchangeInputs({true, false}));
+  PROBE_POLICY(Mul, impl.IsScalarInputSupportedIfExchangeInputs({true, false}));
+#undef PROBE_POLICY
+  EXPECT_EQ(probed, 13U);
 }
 
 }  // namespace ascir

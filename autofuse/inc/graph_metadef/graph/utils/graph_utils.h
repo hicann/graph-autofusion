@@ -879,14 +879,14 @@ class GraphUtils {
   /// Relink all edges for cloned ComputeGraph.
   /// @param [in] node: original node.
   /// @param [in] node_clone_map: source-node to cloned-node mapping.
-  /// @return success: GRAPH_SUCESS
+  /// @return success: GRAPH_SUCCESS
   static graphStatus RelinkGraphEdges(const NodePtr &node, const NodeCloneMap &node_clone_map);
 
   /// Relink all edges for cloned ComputeGraph.
   /// @param [in] node: original node.
   /// @param [in] suffix: node name suffix of new node.
   /// @param [in] all_nodes: all nodes in new graph.
-  /// @return success: GRAPH_SUCESS
+  /// @return success: GRAPH_SUCCESS
   static graphStatus RelinkGraphEdges(const NodePtr &node, const std::string &suffix,
                                       const std::unordered_map<std::string, NodePtr> &all_nodes);
 

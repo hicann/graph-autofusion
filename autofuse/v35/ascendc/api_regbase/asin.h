@@ -16,7 +16,7 @@ template <typename T>
 __simt_vf__ __aicore__ LAUNCH_BOUND(ASIN_THREAD_NUM) inline void AsinSimtCompute(__ubuf__ T *x, __ubuf__ T *y,
                                                                                  const int64_t total_num) {
   for (int64_t i = threadIdx.x; i < total_num; i += blockDim.x) {
-    y[i] = Simt::Asin(x[i]);
+    y[i] = asinf(x[i]);
   }
 }
 

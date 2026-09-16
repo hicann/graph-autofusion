@@ -2762,7 +2762,7 @@ GraphUtils::CloneGraph(const ComputeGraphPtr &graph, const std::string &suffix, 
 /// Copy tensor attribute to new node.
 /// @param [in] dst_node: cloned node.
 /// @param [in] src_node: original node.
-/// @return success: GRAPH_SUCESS
+/// @return success: GRAPH_SUCCESS
 graphStatus GraphUtils::CopyTensorAttrs(const OpDescPtr &dst_desc, const NodePtr &src_node) {
   if (dst_desc == nullptr) {
     REPORT_INNER_ERR_MSG("E18888", "param dst_desc is nullptr, check invalid.");
@@ -2862,7 +2862,7 @@ graphStatus RelinkClonedControlEdges(const NodePtr &node, const NodePtr &new_nod
 /// Relink all edges for cloned ComputeGraph.
 /// @param [in] node: original node.
 /// @param [in] node_clone_map: source-node to cloned-node mapping.
-/// @return success: GRAPH_SUCESS
+/// @return success: GRAPH_SUCCESS
 GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY graphStatus
 GraphUtils::RelinkGraphEdges(const NodePtr &node, const NodeCloneMap &node_clone_map) {
   if ((node == nullptr) || (node->GetOpDesc() == nullptr)) {
@@ -2884,7 +2884,7 @@ GraphUtils::RelinkGraphEdges(const NodePtr &node, const NodeCloneMap &node_clone
 /// @param [in] node: original node.
 /// @param [in] suffix: node name suffix of new node.
 /// @param [in] all_nodes: all nodes in new graph.
-/// @return success: GRAPH_SUCESS
+/// @return success: GRAPH_SUCCESS
 GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY graphStatus GraphUtils::RelinkGraphEdges(
     const NodePtr &node, const std::string &suffix, const std::unordered_map<std::string, NodePtr> &all_nodes) {
   if ((node == nullptr) || (node->GetOpDesc() == nullptr)) {

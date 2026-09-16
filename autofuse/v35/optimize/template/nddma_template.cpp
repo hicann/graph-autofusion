@@ -9,6 +9,7 @@
  */
 
 #include "nddma_template.h"
+#include <optional>
 #include <stack>
 #include "ascir_utils.h"
 #include "graph_utils.h"
@@ -24,6 +25,48 @@ constexpr uint32_t kAlignBytes = 32U;
 constexpr int32_t kTwoBytes = 2;
 constexpr int32_t kFourBytes = 4;
 constexpr char kTransposePrefix[] = "transpose_";
+
+// 获取轴的原轴(ORIGINAL类型)大小: 沿切分来源(from)回溯至ORIGINAL轴, 回溯深度不超过3层
+bool GetOriginalAxisSize(af::AscGraph &graph, ascir::Axis &axis, af::Expression &axis_size) {
+  // from回溯深度上限(含起始轴, 不超过3层)
+  GE_WARN_ASSERT(!axis.from.empty());
+  const auto &parent_axis = graph.FindAxis(axis.from.front());
+  GE_WARN_ASSERT(parent_axis != nullptr);
+  GE_WARN_ASSERT(parent_axis->type == af::Axis::Type::kAxisTypeOriginal);
+  axis_size = parent_axis->size;
+  return true;
+}
+
+// 从尾轴(vectorized_axis末位)向前按GM连续性解析, 返回尾组(连续段)的轴数:
+// strides为与vectorized_axis对齐的GM步长; 跳过stride为0的广播轴(计入尾组); 首个非零stride须为1并累积其repeat,
+// 其后每个非零stride须等于内侧repeats的累积乘积, 首个不满足处即为分组断点
+size_t GetContinuousTailAxisCount(const std::vector<af::Expression> &vector_repeats,
+                                  const std::vector<af::Expression> &strides) {
+  size_t tail_len = 0;
+  af::Expression size_product = af::sym::kSymbolOne;
+  bool is_first_non_zero = true;
+  for (int64_t i = static_cast<int64_t>(strides.size()) - 1; i >= 0; --i) {
+    if (af::SymbolicUtils::StaticCheckEq(strides[i], af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      ++tail_len;
+      continue;
+    }
+    if (is_first_non_zero) {
+      if (af::SymbolicUtils::StaticCheckEq(strides[i], af::sym::kSymbolOne) != af::TriBool::kTrue) {
+        break;
+      }
+      is_first_non_zero = false;
+      ++tail_len;
+      size_product = size_product * vector_repeats[i];
+      continue;
+    }
+    if (af::SymbolicUtils::StaticCheckEq(strides[i], size_product) != af::TriBool::kTrue) {
+      break;
+    }
+    ++tail_len;
+    size_product = size_product * vector_repeats[i];
+  }
+  return tail_len;
+}
 
 bool IsNddma(const af::AscNodePtr &node) {
   return ScheduleUtils::IsLoad(node) && node->attr.type == "Nddma";
@@ -45,6 +88,138 @@ Status UpdateSimdIndirectLoadDenseInputLayouts(const af::OutDataAnchorPtr &produ
     layout.kind = ascgen_utils::indirect_load::IndirectLoadLayoutKind::kDense;
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateLogicalView(consumer, logical_view));
   }
+  return af::SUCCESS;
+}
+
+af::Status JudgeByTailBlockSize(const af::AscNodePtr &node_load, const std::vector<af::Expression> &vector_repeats,
+                                const size_t tail_len, af::AscGraph &graph, std::optional<bool> &need_nddma) {
+  // 尾轴连续且尾组字节数达到该值时, 保持Load走连续搬运, 不转Nddma
+  constexpr int64_t kMaxContinuousTailBlockBytes = 128;
+  const auto &output_attr = node_load->outputs[0].attr;
+  int64_t tail_bytes = GetSizeByDataType(output_attr.dtype);
+  int64_t original_axis_numel = 1;
+  bool has_non_const = false;
+  for (size_t i = vector_repeats.size() - tail_len; i < vector_repeats.size(); ++i) {
+    const auto &repeat = vector_repeats[i];
+    const auto axis = graph.FindAxis(output_attr.vectorized_axis[i]);
+    GE_ASSERT_NOTNULL(axis);
+    if (axis->type == af::Axis::Type::kAxisTypeTileInner) {
+      af::Expression axis_size;
+      const auto found = GetOriginalAxisSize(graph, *axis, axis_size);
+      GELOGD("index = %zu, axis type is TILE_IN, original axis found = %d", i, static_cast<int32_t>(found));
+      if (found && axis_size.IsConstExpr()) {
+        int64_t value;
+        GE_ASSERT_TRUE(axis_size.GetConstValue(value));
+        original_axis_numel *= value;
+        GELOGD("original axis size = %ld", i, value);
+      } else {
+        has_non_const = true;
+        GELOGD("original axis is dynamic", i);
+      }
+    } else {
+      if (repeat.IsConstExpr()) {
+        int64_t value = 0;
+        GE_ASSERT_TRUE(repeat.GetConstValue(value));
+        tail_bytes *= value;
+      } else {
+        has_non_const = true;
+      }
+    }
+  }
+  // 尾块的静态shape部分已经足够大, 不需要使用Nddma
+  if (tail_bytes >= kMaxContinuousTailBlockBytes) {
+    GELOGD("keeps Load: tail block const size = %ld bytes", tail_bytes);
+    need_nddma = false;
+    return af::SUCCESS;
+  }
+  // 有动态shape时, 无法确定轴大小, 生成Nddma模板
+  if (has_non_const) {
+    need_nddma = true;
+    GELOGD("converts to Nddma: contains dynamic dims");
+    return af::SUCCESS;
+  }
+  // 将尾块的TileIn轴按Original轴大小计算，仍不够大时, 使用Nddma
+  if ((tail_bytes * original_axis_numel) < kMaxContinuousTailBlockBytes) {
+    GELOGD("Node [%s] converts to Nddma: full tail block size = %ld bytes", node_load->GetNamePtr(),
+           (tail_bytes * original_axis_numel));
+    need_nddma = true;
+    return af::SUCCESS;
+  }
+  need_nddma = std::nullopt;
+  return af::SUCCESS;
+}
+
+// 外组元素乘积计算与判定: TILE_IN轴回溯原轴(ORIGINAL)大小, 其他轴取自身repeat, 任一非常量转Nddma;
+// 元素乘积不超过32保持Load(返回false), 否则转Nddma(返回true)
+af::Status JudgeByHeadBlockSize(const std::vector<int64_t> &vectorized_axis,
+                                const std::vector<af::Expression> &vector_repeats, const size_t tail_len,
+                                af::AscGraph &graph, bool &need_nddma) {
+  // 非尾块的元素数乘积小于该值时, 保持Load不转Nddma
+  need_nddma = true;
+  constexpr int64_t kMinVecTailProductSize = 32;
+  int64_t outer_product = 1;
+  for (size_t i = 0; i < vector_repeats.size() - tail_len; ++i) {
+    const auto axis = graph.FindAxis(vectorized_axis[i]);
+    GE_ASSERT_NOTNULL(axis);
+    af::Expression axis_size;
+    if (axis->type == af::Axis::Type::kAxisTypeTileInner) {
+      const auto found = GetOriginalAxisSize(graph, *axis, axis_size);
+      if (!found) {
+        GELOGI("converts to Nddma: cannot find original axis, axis_id = %ld", vectorized_axis[i]);
+        return af::SUCCESS;
+      }
+    } else {
+      axis_size = vector_repeats[i];
+    }
+    if (!axis_size.IsConstExpr()) {
+      GELOGD("converts to Nddma: outer vectorized is dynamic.");
+      return af::SUCCESS;
+    }
+    int64_t value = 0;
+    GE_ASSERT_TRUE(axis_size.GetConstValue(value));
+    outer_product *= value;
+  }
+  need_nddma = outer_product > kMinVecTailProductSize;
+  GELOGD("non-tail block size = %ld, need_nddma = %d", outer_product, need_nddma);
+  return af::SUCCESS;
+}
+
+// slice load 是否应转为Nddma: 向量化轴在GM上按连续性从尾轴向前分为尾组与外组,
+// 尾组字节数达到128B保持Load, 小于128B转Nddma; 尾组大小未知时按外组元素乘积判定
+af::Status IsSliceLoadNeedNddma(const af::AscNodePtr &node_load, af::AscGraph &graph, bool &need_nddma) {
+  const auto &output_attr = node_load->outputs[0].attr;
+  // 向量化轴在GM上全连续, 保持Load
+  if (ScheduleUtils::IsVectorizedAxisContinuousInGM(output_attr)) {
+    GELOGD("Node [%s] keeps Load: vectorized axis continuous in GM.", node_load->GetNamePtr());
+    need_nddma = false;
+    return af::SUCCESS;
+  }
+  // 尾轴离散, 转NDDMA
+  if (!ScheduleUtils::IsTailAxisContinuousInGM(output_attr)) {
+    GELOGD("vectorized axis is not continuous in GM.");
+    need_nddma = true;
+    return af::SUCCESS;
+  }
+  // 分组: 从尾轴向前按连续性解析, 尾组为连续段, 外组为断点之外的其余轴
+  std::vector<af::Expression> vector_repeats;
+  GE_ASSERT_SUCCESS(ScheduleUtils::GetVectorRepeats(output_attr.repeats, output_attr.axis, output_attr.vectorized_axis,
+                                                    vector_repeats));
+  std::vector<af::Expression> vec_axis_strides;
+  GE_ASSERT_SUCCESS(ScheduleUtils::GetVectorAxisStrides(output_attr, vec_axis_strides));
+  const auto tail_len = GetContinuousTailAxisCount(vector_repeats, vec_axis_strides);
+  GELOGD("Node [%s] vec_repeat = %s, vec_gm_stride = %s, tail_len = %zu", node_load->GetNamePtr(),
+         af::ToString(vector_repeats).c_str(), af::ToString(vec_axis_strides).c_str(), tail_len);
+  // 尾组判定: 非const的repeat按1参与乘积; const项乘积×dtype超过128B保持Load;
+  // 全const且不超过128B转Nddma; 存在非const轴(真实大小未知)时由外组判定
+  std::optional<bool> need_nddma_opt;
+  GE_ASSERT_SUCCESS(JudgeByTailBlockSize(node_load, vector_repeats, tail_len, graph, need_nddma_opt));
+  if (need_nddma_opt.has_value()) {
+    need_nddma = need_nddma_opt.value();
+    return af::SUCCESS;
+  }
+  // 外组判定: TILE_IN轴回溯原轴大小, 其他轴取自身repeat, 任一非常量转Nddma;
+  // 元素乘积小于32(此时尾块大概率超过128B)保持Load, 否则转Nddma
+  GE_ASSERT_SUCCESS(JudgeByHeadBlockSize(output_attr.vectorized_axis, vector_repeats, tail_len, graph, need_nddma));
   return af::SUCCESS;
 }
 }  // namespace
@@ -220,17 +395,19 @@ Status NddmaTemplate::TransposeToNddmaNode(const af::AscNodePtr &transpose_node,
   return af::SUCCESS;
 }
 
-af::Status NddmaTemplate::ProcessSliceToNddma(const af::AscNodePtr &node_load, bool &is_nddma_generated_cur) {
+af::Status NddmaTemplate::ProcessSliceToNddma(const af::AscNodePtr &node_load, bool &is_nddma_generated_cur,
+                                              af::AscGraph &new_case) {
   if (is_nddma_generated_cur) {
     GELOGD("Node [%s] has already converted to Nddma.", node_load->GetNamePtr());
     return af::SUCCESS;
   }
   GE_CHECK_NOTNULL(node_load);
   GE_CHECK_NOTNULL(node_load->GetOpDesc());
-
   bool is_node_no_transpose = node_load->GetName().rfind(kTransposePrefix, 0U) != 0U;
   if (is_node_no_transpose && !(IsTailAxisTransposeV2(node_load) || IsTailAxisTranspose(node_load->outputs[0].attr))) {
-    if (!ScheduleUtils::IsVectorizedAxisContinuousInGM(node_load->outputs[0].attr)) {
+    bool need_nddma = false;
+    GE_ASSERT_SUCCESS(IsSliceLoadNeedNddma(node_load, new_case, need_nddma));
+    if (need_nddma) {
       node_load->GetOpDesc()->SetType("Nddma");
       node_load->attr.type = "Nddma";
       is_nddma_generated_cur = true;
@@ -297,7 +474,7 @@ af::Status NddmaTemplate::Generate([[maybe_unused]] const af::AscGraph &origin_g
         SwapCastBrcAndGenNddma(std::dynamic_pointer_cast<af::AscNode>(out_node), node, new_case) == af::SUCCESS) {
       is_nddma_generated_cur = true;
     }
-    GE_ASSERT_SUCCESS(ProcessSliceToNddma(node, is_nddma_generated_cur));
+    GE_ASSERT_SUCCESS(ProcessSliceToNddma(node, is_nddma_generated_cur, new_case));
     is_nddma_generated = is_nddma_generated || is_nddma_generated_cur;
     ascgen_utils::DiscontinuityInfo info;
     GE_ASSERT_SUCCESS(ascgen_utils::TensorLayoutUtils::AnalyzeLoadDiscontinuity(node->outputs[0].attr, info),
@@ -535,7 +712,7 @@ af::Status NddmaTemplate::IsTransposeContinuousVectorizedAxisNumValid(af::AscGra
       for (auto axis_it = output_vec_axis.rbegin(); axis_it != output_vec_axis.rend(); axis_it++) {
         auto axis = graph.FindAxis(*axis_it);
         GE_ASSERT_NOTNULL(axis);
-        if ((axis->type == af::Axis::Type::kAxisTypeTileInner)) {
+        if (axis->type == af::Axis::Type::kAxisTypeTileInner) {
           transpose_inner_axis_num++;
           break;
         }

@@ -2159,6 +2159,101 @@ TEST_F(TestOptimizerV2, NddmaCaseBrcOutputWithSingleRef) {
   EXPECT_EQ(impl_graphs[1].scheduled_graph.GetName(), "gen_nddma_B0Y0_nddma");
 }
 
+namespace {
+// 判断调度结果中是否存在NddmaTemplate生成的图(名字以_nddma结尾, 排除_load_to_nddma后缀)
+bool HasNddmaSuffixedGraph(const std::vector<autoschedule::AutoScheduleOutput> &impl_graphs) {
+  for (const auto &impl_graph : impl_graphs) {
+    const std::string name = impl_graph.scheduled_graph.GetName();
+    if (name.size() >= 6U && name.compare(name.size() - 6U, 6U, "_nddma") == 0U &&
+        name.find("_load_to_nddma") == std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+}  // namespace
+
+// slice load: GM向量化轴非连续, 尾轴连续且尾轴字节数(256*4)超过128B, 保持Load不转Nddma
+TEST_F(TestOptimizerV2, SliceLoadKeepsLoadWhenTailContinuousAndLarge) {
+  af::AscGraph graph("slice_to_nddma");
+  auto s0 = graph.CreateSizeVar(64);
+  auto s1 = graph.CreateSizeVar(256);
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+
+  Data data0("data0", graph);
+  data0.y.dtype = af::DT_FLOAT;
+  data0.ir_attr.SetIndex(0);
+
+  Load load0("load0");
+  load0.attr.sched.axis = {z0.id, z1.id};
+  load0.x = data0.y;
+  *load0.y.axis = {z0.id, z1.id};
+  load0.y.dtype = af::DT_FLOAT;
+  *load0.y.strides = {af::Symbol(512), af::ops::One};  // 512 != 256, GM向量化轴非连续
+  *load0.y.repeats = {s0, s1};
+
+  Store store_op("store");
+  store_op.attr.sched.axis = {z0.id, z1.id};
+  store_op.x = load0.y;
+  *store_op.y.axis = {z0.id, z1.id};
+  store_op.y.dtype = af::DT_FLOAT;
+  *store_op.y.strides = {af::Symbol(512), af::ops::One};
+  *store_op.y.repeats = {s0, s1};
+
+  Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = af::DT_FLOAT;
+  output_op.ir_attr.SetIndex(8);
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  EXPECT_EQ(Optimizer::MergeContinuousAxis(graph), af::SUCCESS);
+  std::vector<autoschedule::AutoScheduleOutput> impl_graphs;
+  optimize::autoschedule::AutoSchedule autoschedule(graph, impl_graphs);
+  autoschedule.DoAutoSchedule();
+  EXPECT_FALSE(impl_graphs.empty());
+  EXPECT_FALSE(HasNddmaSuffixedGraph(impl_graphs));
+}
+
+// slice load: GM向量化轴非连续, 尾轴连续但尾轴字节数(8*4)不超过128B, 转为Nddma
+TEST_F(TestOptimizerV2, SliceLoadConvertsToNddmaWhenTailSmall) {
+  af::AscGraph graph("slice_to_nddma");
+  auto s0 = graph.CreateSizeVar(64);
+  auto s1 = graph.CreateSizeVar(8);
+  auto z0 = graph.CreateAxis("z0", s0);
+  auto z1 = graph.CreateAxis("z1", s1);
+
+  Data data0("data0", graph);
+  data0.y.dtype = af::DT_FLOAT;
+  data0.ir_attr.SetIndex(0);
+
+  Load load0("load0");
+  load0.attr.sched.axis = {z0.id, z1.id};
+  load0.x = data0.y;
+  *load0.y.axis = {z0.id, z1.id};
+  load0.y.dtype = af::DT_FLOAT;
+  *load0.y.strides = {af::Symbol(16), af::ops::One};  // 16 != 64, GM向量化轴非连续
+  *load0.y.repeats = {s0, s1};
+
+  Store store_op("store");
+  store_op.attr.sched.axis = {z0.id, z1.id};
+  store_op.x = load0.y;
+  *store_op.y.axis = {z0.id, z1.id};
+  store_op.y.dtype = af::DT_FLOAT;
+  *store_op.y.strides = {af::Symbol(16), af::ops::One};
+  *store_op.y.repeats = {s0, s1};
+
+  Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = af::DT_FLOAT;
+  output_op.ir_attr.SetIndex(8);
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+  EXPECT_EQ(Optimizer::MergeContinuousAxis(graph), af::SUCCESS);
+  std::vector<autoschedule::AutoScheduleOutput> impl_graphs;
+  optimize::autoschedule::AutoSchedule autoschedule(graph, impl_graphs);
+  autoschedule.DoAutoSchedule();
+  EXPECT_TRUE(HasNddmaSuffixedGraph(impl_graphs));
+}
+
 TEST_F(TestOptimizerV2, LargeTailBrcToNddmaLowScoreFunc) {
   af::AscGraph graph("gen_nddma");
   auto s0 = graph.CreateSizeVar(64);
@@ -6887,9 +6982,10 @@ TEST_F(TestOptimizerV2, MatmulAndLoadBrcAndAbsBrcAdd) {
 
 TEST_F(TestOptimizerV2, LoadSliceCase) {
   AscGraph graph("gen_nddma_slice");
+  // s1*s2*4B=64B, GM连续尾块不超过128B以触发Nddma转换
   auto s0 = graph.CreateSizeVar(256);
-  auto s1 = graph.CreateSizeVar(50);
-  auto s2 = graph.CreateSizeVar(16);
+  auto s1 = graph.CreateSizeVar(2);
+  auto s2 = graph.CreateSizeVar(8);
   auto s1_orign = graph.CreateSizeVar(100);
   auto z0 = graph.CreateAxis("z0", s0);
   auto z1 = graph.CreateAxis("z1", s1);

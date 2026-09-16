@@ -25,8 +25,6 @@ bool IsAllScalarOrUbScalar(AscNodeInputs &node_inputs);
 bool HasScalarOrUbScalar(AscNodeInputs &node_inputs);
 
 std::vector<std::unique_ptr<TmpBufDesc>> CalcBroadCastTmpSize(const AscNode &node);
-std::vector<std::unique_ptr<TmpBufDesc>> CalcArgmaxTmpSize(const AscNode &node);
-std::vector<std::unique_ptr<TmpBufDesc>> CalcArgmaxWithValueTmpSize(const AscNode &node);
 std::vector<std::unique_ptr<TmpBufDesc>> CalcConcatTmpSize(const AscNode &node);
 std::vector<std::unique_ptr<TmpBufDesc>> CalcConcatTmpSizeV2(const AscNode &node);
 std::vector<std::unique_ptr<TmpBufDesc>> CalcPadTmpSize(const AscNode &node);

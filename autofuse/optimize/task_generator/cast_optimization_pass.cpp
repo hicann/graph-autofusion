@@ -91,7 +91,7 @@ bool CastOptimizationPass::MayCauseDegradation(const AscNodePtr &concat_node, in
     }
   }
   if (alignment_changed && (!::optimize::ConcatInputUnificationPass::CanOptimize(concat_node, concat_dim))) {
-    GELOGI("can not use Gather API");
+    GELOGI("cannot use Gather API");
     return true;
   }
   return false;

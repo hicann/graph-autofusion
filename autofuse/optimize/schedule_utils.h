@@ -349,6 +349,9 @@ class ScheduleUtils {
 
   static bool IsVectorizedAxisContinuousInGM(const af::AscTensorAttr &output_tensor);
 
+  // 尾轴在GM上连续: 从尾轴向前跳过stride为0的广播轴, 第一个非零stride为1
+  static bool IsTailAxisContinuousInGM(const af::AscTensorAttr &output_tensor);
+
   static bool IsLastAxisSliceLoad(const af::AscNodePtr &node);
 
   static bool NotNeedAlignVectorStride(const af::AscGraph &graph);
@@ -394,6 +397,7 @@ class ScheduleUtils {
                                  const std::vector<int64_t> &vector_axis, std::vector<af::Expression> &vector_repeats);
   static Status GetNodeInputVectorRepeats(const ascir::NodeView &node, std::vector<af::Expression> &vector_repeats);
   static Status GetNodeOutVectorRepeats(const ascir::NodeView &node, std::vector<af::Expression> &vec_repeats);
+  static Status GetVectorAxisStrides(const af::AscTensorAttr &attr, std::vector<af::Expression> &vec_strides);
   static Status GetConcatDim(const af::AscNodePtr &node, size_t &concat_dim);
 
   static std::string AxesToString(const std::vector<af::AxisPtr> &axes);

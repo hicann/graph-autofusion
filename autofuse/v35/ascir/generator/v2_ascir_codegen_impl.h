@@ -1226,6 +1226,8 @@ class PolyGammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "basic_api/reg_compute/kernel_reg_compute_intf.h",
+        "adv_api/math/digamma.h",
+        "adv_api/math/lgamma.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -3914,7 +3916,7 @@ class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/cos.h",
-        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/cpp/kernel_simt_utils.h",
         "simt_api/math_functions.h",
     };
   }
@@ -3956,7 +3958,7 @@ class AcosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/acos.h",
-        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/cpp/kernel_simt_utils.h",
         "simt_api/math_functions.h",
     };
   }
@@ -4068,7 +4070,7 @@ class AsinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/asin.h",
-        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/cpp/kernel_simt_utils.h",
         "simt_api/math_functions.h",
     };
   }
@@ -4090,7 +4092,7 @@ class AsinhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Asinh";
+    return "AsinhExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Asinh";
@@ -4101,6 +4103,9 @@ class AsinhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
         {DT_BF16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"asinh_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
@@ -4161,19 +4166,27 @@ class AtanhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Atanh";
+    return "AtanhExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Atanh";
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) override {
-    std::map<ge::DataType, ge::DataType> dtype_conversion_map = {{DT_BF16, DT_FLOAT}};
+    std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
+        {DT_BF16, DT_FLOAT},
+        {DT_FLOAT16, DT_FLOAT},
+    };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"atanh_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/atanh.h",
+        "simt_api/cpp/kernel_simt_utils.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -5116,7 +5129,7 @@ class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/sin.h",
-        "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/cpp/kernel_simt_utils.h",
         "simt_api/math_functions.h",
     };
   }
@@ -5255,7 +5268,7 @@ class SinhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Sinh";
+    return "SinhExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Sinh";
@@ -5266,6 +5279,9 @@ class SinhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
         {DT_BF16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"sinh_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
@@ -5283,7 +5299,7 @@ class TanAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Tan";
+    return "TanExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Tan";
@@ -5292,12 +5308,18 @@ class TanAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
       const AscNode &node) override {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
         {DT_BF16, DT_FLOAT},
+        {DT_FLOAT16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"tan_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/tan.h",
+        "simt_api/cpp/kernel_simt_utils.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {

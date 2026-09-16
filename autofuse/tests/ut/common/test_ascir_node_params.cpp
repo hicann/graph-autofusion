@@ -101,6 +101,96 @@ TEST(AscirNodeParamsTest, EnrichGraphRegistersVectorFuncParams) {
   EXPECT_TRUE(stored->output_dims.empty());
 }
 
+TEST(AscirNodeParamsTest, BroadcastParamsCanBeStoredInAscirNodeParams) {
+  ascir_param::AscirNodeParams params;
+  params.specific_params = ascir_param::BroadcastNodeParams{};
+
+  const auto *stored = ascir_param::GetSpecificParams<ascir_param::BroadcastNodeParams>(params);
+  ASSERT_NE(stored, nullptr);
+  EXPECT_FALSE(stored->valid);
+}
+
+TEST(AscirNodeParamsTest, EnrichGraphRegistersBroadcastParams) {
+  af::AscGraph graph("test_graph");
+  af::ascir_op::Broadcast broadcast_op("broadcast");
+  graph.AddNode(broadcast_op);
+  auto node = graph.FindNode("broadcast");
+  ASSERT_NE(node, nullptr);
+
+  ExpectEnrichSuccess(graph);
+  auto params = ascir_param::GetAscirNodeParams(node);
+  ASSERT_NE(params, nullptr);
+  EXPECT_EQ(params->api_name, "Broadcast");
+  EXPECT_EQ(params->status, ascir_param::ParamBuildStatus::kBuilt);
+  const auto *stored = ascir_param::GetSpecificParams<ascir_param::BroadcastNodeParams>(*params);
+  ASSERT_NE(stored, nullptr);
+  EXPECT_FALSE(stored->valid);
+}
+
+TEST(AscirNodeParamsTest, EnrichGraphPreservesBroadcastParamsAcrossRepeatedCalls) {
+  af::AscGraph graph("test_graph");
+  af::ascir_op::Broadcast broadcast_op("broadcast");
+  graph.AddNode(broadcast_op);
+  auto node = graph.FindNode("broadcast");
+  ASSERT_NE(node, nullptr);
+
+  auto params = std::make_shared<ascir_param::AscirNodeParams>();
+  params->api_name = "Broadcast";
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+  ascir_param::BroadcastNodeParams broadcast;
+  broadcast.valid = true;
+  broadcast.is_scalar = true;
+  broadcast.duplicate_count = Expr(8);
+  broadcast.src_shape = {{Expr(1), ascir_param::ParamExprRole::kSemantic},
+                         {Expr(8), ascir_param::ParamExprRole::kActualSize}};
+  broadcast.dst_shape = {{Expr(4), ascir_param::ParamExprRole::kActualSize},
+                         {Expr(8), ascir_param::ParamExprRole::kActualSize}};
+  params->specific_params = broadcast;
+  ASSERT_TRUE(node->GetOpDesc()->SetExtAttr("AscirNodeParams", params));
+
+  ExpectEnrichSuccess(graph);
+  ExpectEnrichSuccess(graph);
+  params = ascir_param::GetAscirNodeParams(node);
+  ASSERT_NE(params, nullptr);
+  const auto *stored = ascir_param::GetSpecificParams<ascir_param::BroadcastNodeParams>(*params);
+  ASSERT_NE(stored, nullptr);
+  EXPECT_TRUE(stored->valid);
+  EXPECT_TRUE(stored->is_scalar);
+  EXPECT_EQ(stored->duplicate_count, Expr(8));
+  EXPECT_EQ(stored->src_shape[0].expr, Expr(1));
+  EXPECT_EQ(stored->dst_shape[1].role, ascir_param::ParamExprRole::kActualSize);
+}
+
+TEST(AscirNodeParamsTest, EnrichGraphPreservesPrebuiltBroadcastParams) {
+  af::AscGraph graph("test_graph");
+  af::ascir_op::Broadcast broadcast_op("broadcast");
+  graph.AddNode(broadcast_op);
+  auto node = graph.FindNode("broadcast");
+  ASSERT_NE(node, nullptr);
+
+  auto params = std::make_shared<ascir_param::AscirNodeParams>();
+  params->api_name = "Broadcast";
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+  ascir_param::BroadcastNodeParams broadcast;
+  broadcast.valid = true;
+  broadcast.duplicate_count = Expr(16);
+  broadcast.src_shape = {{Expr(1), ascir_param::ParamExprRole::kSemantic},
+                         {Expr(16), ascir_param::ParamExprRole::kSize}};
+  broadcast.dst_shape = {{Expr(2), ascir_param::ParamExprRole::kSize}, {Expr(16), ascir_param::ParamExprRole::kSize}};
+  params->specific_params = broadcast;
+  ASSERT_TRUE(node->GetOpDesc()->SetExtAttr("AscirNodeParams", params));
+
+  ExpectEnrichSuccess(graph);
+  params = ascir_param::GetAscirNodeParams(node);
+  ASSERT_NE(params, nullptr);
+  const auto *stored = ascir_param::GetSpecificParams<ascir_param::BroadcastNodeParams>(*params);
+  ASSERT_NE(stored, nullptr);
+  EXPECT_TRUE(stored->valid);
+  EXPECT_EQ(stored->duplicate_count, Expr(16));
+  EXPECT_EQ(stored->src_shape[1].expr, Expr(16));
+  EXPECT_EQ(stored->dst_shape[0].role, ascir_param::ParamExprRole::kSize);
+}
+
 TEST(AscirNodeParamsTest, EnrichReduceParamsForArSingleReduce) {
   auto env = MakeArReduceEnv("max");
 

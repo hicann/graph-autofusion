@@ -384,7 +384,8 @@ TEST_F(RegReduceApicallTest, RegReduceApi_Test_004) {
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
-  af::ascir_op::Max reduce("reduce");  graph.AddNode(reduce);
+  af::ascir_op::Max reduce("reduce");
+  graph.AddNode(reduce);
 
   auto nodex = graph.FindNode("x");
   af::AscTensor tensorx = nodex->outputs[0];
@@ -487,7 +488,8 @@ TEST_F(RegReduceApicallTest, RegReduceApicallTest_Int32_Inner) {
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
-  af::ascir_op::Sum reduce("reduce");  graph.AddNode(reduce);
+  af::ascir_op::Sum reduce("reduce");
+  graph.AddNode(reduce);
 
   auto nodex = graph.FindNode("x");
   af::AscTensor tensorx = nodex->outputs[0];
@@ -592,7 +594,8 @@ TEST_F(RegReduceApicallTest, RegReduceApicallTest_Int32_Outer) {
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
-  af::ascir_op::Sum reduce("reduce");  graph.AddNode(reduce);
+  af::ascir_op::Sum reduce("reduce");
+  graph.AddNode(reduce);
 
   auto nodex = graph.FindNode("x");
   af::AscTensor tensorx = nodex->outputs[0];
@@ -697,7 +700,8 @@ TEST_F(RegReduceApicallTest, RegReduceApicallTest_ReduceMean_NoNeed_MultiReduce_
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
-  af::ascir_op::Sum reduce("reduce");  graph.AddNode(reduce);
+  af::ascir_op::Sum reduce("reduce");
+  graph.AddNode(reduce);
 
   auto nodex = graph.FindNode("x");
   af::AscTensor tensorx = nodex->outputs[0];
@@ -802,7 +806,8 @@ TEST_F(RegReduceApicallTest, RegReduceApicallTest_ReduceMean_NoNeed_MultiReduce_
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
-  af::ascir_op::Sum reduce("reduce");  graph.AddNode(reduce);
+  af::ascir_op::Sum reduce("reduce");
+  graph.AddNode(reduce);
 
   auto nodex = graph.FindNode("x");
   af::AscTensor tensorx = nodex->outputs[0];

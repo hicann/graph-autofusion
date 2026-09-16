@@ -11,7 +11,9 @@
 #include <gtest/gtest.h>
 
 #include "ascgraph_info_complete.h"
+#include "ascir_ops.h"
 #include "graph/symbolizer/symbolic_utils.h"
+#include "schedule_utils.h"
 
 namespace optimize {
 namespace {
@@ -62,6 +64,30 @@ TEST(FrontendShapeVarsTest, CollectsSymbolsEmbeddedInAxisExpressions) {
   ASSERT_EQ(AscGraphInfoComplete::CollectFrontendShapeVars(graph, vars), af::SUCCESS);
   ASSERT_EQ(AscGraphInfoComplete::NormalizeFrontendShapeVars(vars), af::SUCCESS);
   EXPECT_EQ(GetNames(vars), (std::vector<std::string>{"s0"}));
+}
+
+TEST(FrontendShapeVarsTest, CollectsSymbolsReferencedByScalarLikeIrAttrs) {
+  af::AscGraph graph("scalar_like_shape_vars");
+  const auto ks0 = graph.CreateSizeVar("ks0");
+  graph.CreateAxis("z0", ks0);
+  const auto ks1 = graph.CreateSizeVar("ks1");
+  const auto ks2 = graph.CreateSizeVar("ks2");
+
+  af::ascir_op::IndexExpr index("index", graph);
+  index.ir_attr.SetExpr(ks1 + af::Symbol(2));
+  af::ascir_op::Arange arange("arange", graph);
+  arange.ir_attr.SetBase(af::Symbol(0));
+  arange.ir_attr.SetStep(ks2);
+
+  // AutoScheduler 会先 ClearAllSizeVar 再仅凭 AppendOriginalSizeVar 重建 size var 表，
+  // IndexExpr.expr / Arange base/step 引用的动态符号必须能被重新收集，
+  // 否则 tiling data 缺字段、设备代码裸印符号（use of undeclared identifier）。
+  ASSERT_EQ(ScheduleUtils::ClearAllSizeVar(graph), af::SUCCESS);
+  SizeVarSet var_set;
+  AscGraphInfoComplete::AppendOriginalSizeVar(graph, var_set);
+  std::vector<af::Expression> vars(var_set.begin(), var_set.end());
+  ASSERT_EQ(AscGraphInfoComplete::NormalizeFrontendShapeVars(vars), af::SUCCESS);
+  EXPECT_EQ(GetNames(vars), (std::vector<std::string>{"ks0", "ks1", "ks2"}));
 }
 
 }  // namespace

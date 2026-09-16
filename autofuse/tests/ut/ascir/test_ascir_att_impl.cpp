@@ -29,7 +29,7 @@ class AscIrAttImplTest : public ::testing::Test {
     EXPECT_STREQ(static_cast<const char *>(impl.GetAscendCApiPerfTable()), #ir_name); \
   }
 
-TEST_F(AscIrAttImplTest, GetApiPerfReturnsIrName_ElementWise) {
+TEST_F(AscIrAttImplTest, GetApiPerfReturnsIrName_AllClasses) {
   EXPECT_ATT_IMPL_NAMED(Add);
   EXPECT_ATT_IMPL_NAMED(Gather);
   EXPECT_ATT_IMPL_NAMED(Abs);
@@ -41,15 +41,41 @@ TEST_F(AscIrAttImplTest, GetApiPerfReturnsIrName_ElementWise) {
   EXPECT_ATT_IMPL_NAMED(LogicalAnd);
   EXPECT_ATT_IMPL_NAMED(LogicalOr);
   EXPECT_ATT_IMPL_NAMED(LogicalNot);
-}
-
-TEST_F(AscIrAttImplTest, GetApiPerfReturnsIrName_ReduceArgMax) {
+  EXPECT_ATT_IMPL_NAMED(Maximum);
+  EXPECT_ATT_IMPL_NAMED(Minimum);
+  EXPECT_ATT_IMPL_NAMED(Min);
+  EXPECT_ATT_IMPL_NAMED(Mul);
+  EXPECT_ATT_IMPL_NAMED(Neg);
+  EXPECT_ATT_IMPL_NAMED(Reciprocal);
+  EXPECT_ATT_IMPL_NAMED(Relu);
+  EXPECT_ATT_IMPL_NAMED(ReduceAll);
+  EXPECT_ATT_IMPL_NAMED(ReduceAny);
+  EXPECT_ATT_IMPL_NAMED(ReduceMax);
   EXPECT_ATT_IMPL_NAMED(ReduceArgMax);
   EXPECT_ATT_IMPL_NAMED(ReduceArgMaxMultiRPhase1);
   EXPECT_ATT_IMPL_NAMED(ReduceArgMaxMultiRPhase2);
-}
-
-TEST_F(AscIrAttImplTest, GetApiPerfReturnsIrName_NoModeling) {
+  EXPECT_ATT_IMPL_NAMED(ReduceMean);
+  EXPECT_ATT_IMPL_NAMED(ReduceMin);
+  EXPECT_ATT_IMPL_NAMED(ReduceSum);
+  EXPECT_ATT_IMPL_NAMED(ReduceProd);
+  EXPECT_ATT_IMPL_NAMED(RemovePad);
+  EXPECT_ATT_IMPL_NAMED(Rsqrt);
+  EXPECT_ATT_IMPL_NAMED(Select);
+  EXPECT_ATT_IMPL_NAMED(Sign);
+  EXPECT_ATT_IMPL_NAMED(Sqrt);
+  EXPECT_ATT_IMPL_NAMED(Sub);
+  EXPECT_ATT_IMPL_NAMED(Sum);
+  EXPECT_ATT_IMPL_NAMED(Tanh);
+  EXPECT_ATT_IMPL_NAMED(Where);
+  EXPECT_ATT_IMPL_NAMED(Ge);
+  EXPECT_ATT_IMPL_NAMED(Eq);
+  EXPECT_ATT_IMPL_NAMED(Ne);
+  EXPECT_ATT_IMPL_NAMED(Gt);
+  EXPECT_ATT_IMPL_NAMED(Le);
+  EXPECT_ATT_IMPL_NAMED(Lt);
+  EXPECT_ATT_IMPL_NAMED(Ub2ub);
+  EXPECT_ATT_IMPL_NAMED(Load);
+  EXPECT_ATT_IMPL_NAMED(Store);
   EXPECT_ATT_IMPL_NAMED(Data);
   EXPECT_ATT_IMPL_NAMED(Scalar);
   EXPECT_ATT_IMPL_NAMED(IndexExpr);
@@ -61,6 +87,26 @@ TEST_F(AscIrAttImplTest, GetApiPerfReturnsIrName_NoModeling) {
   EXPECT_ATT_IMPL_NAMED(Nop);
   EXPECT_ATT_IMPL_NAMED(Ln);
   EXPECT_ATT_IMPL_NAMED(Isnan);
+  EXPECT_ATT_IMPL_NAMED(IsFinite);
+  EXPECT_ATT_IMPL_NAMED(IsInf);
+  EXPECT_ATT_IMPL_NAMED(MaskedFill);
+  EXPECT_ATT_IMPL_NAMED(Max);
+  EXPECT_ATT_IMPL_NAMED(Mean);
+  EXPECT_ATT_IMPL_NAMED(Prod);
+  EXPECT_ATT_IMPL_NAMED(Any);
+  EXPECT_ATT_IMPL_NAMED(All);
+  EXPECT_ATT_IMPL_NAMED(Sigmoid);
+  EXPECT_ATT_IMPL_NAMED(TrueDiv);
+  EXPECT_ATT_IMPL_NAMED(Remainder);
+  EXPECT_ATT_IMPL_NAMED(Pow);
+  EXPECT_ATT_IMPL_NAMED(ClipByValue);
+  EXPECT_ATT_IMPL_NAMED(Concat);
+  EXPECT_ATT_IMPL_NAMED(LeakyRelu);
+  EXPECT_ATT_IMPL_NAMED(BitwiseAnd);
+  EXPECT_ATT_IMPL_NAMED(Transpose);
+  EXPECT_ATT_IMPL_NAMED(FloorDiv);
+  EXPECT_ATT_IMPL_NAMED(Gelu);
+  EXPECT_ATT_IMPL_NAMED(Axpy);
 }
 
 }  // namespace ascir

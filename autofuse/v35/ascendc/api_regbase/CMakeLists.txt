@@ -32,6 +32,7 @@ set(ascendc_api_regbase_extend_src
         sign.h
         signbit.h
         reduce_init.h
+        argmax.h
         atan2.h
         airy_ai.h
         copy_sign.h
@@ -102,6 +103,8 @@ set(ascendc_api_regbase_extend_src
         i1.h
         asin.h
         acos.h
+        tan.h
+        atanh.h
 )
 
 set(generated_regbase_files)

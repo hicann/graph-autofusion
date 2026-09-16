@@ -30,21 +30,15 @@ Status MicroRsqrtApiCall::Generate(const TensorManager &tensor_mng, [[maybe_unus
   const auto &input_name = input_tensor->name;
   const auto &output_name = output_tensor->name;
   const std::string one_name = output_name + "_rsqrt_one";
-  const std::string negative_mask_name = output_name + "_rsqrt_negative_mask";
 
   std::stringstream ss;
   // 3510/5102 的公开 MicroAPI 没有提供 Rsqrt，使用相同命名空间下的基础指令组合保持 VF 计算。
   ss << "AscendC::MicroAPI::RegTensor<" << dtype_name << "> " << one_name << ";" << std::endl;
-  ss << "AscendC::MicroAPI::MaskReg " << negative_mask_name << ";" << std::endl;
   ss << "AscendC::MicroAPI::Duplicate(" << one_name << ", static_cast<" << dtype_name << ">(1.0), " << param.p_reg
      << ");" << std::endl;
-  ss << "AscendC::MicroAPI::CompareScalar<" << dtype_name << ", AscendC::CMPMODE::LT>(" << negative_mask_name << ", "
-     << input_name << ", static_cast<" << dtype_name << ">(0.0), " << param.p_reg << ");" << std::endl;
   ss << "AscendC::MicroAPI::Sqrt(" << output_name << ", " << input_name << ", " << param.p_reg << ");" << std::endl;
-  ss << "AscendC::MicroAPI::Div(" << one_name << ", " << one_name << ", " << output_name << ", " << param.p_reg << ");"
-     << std::endl;
-  ss << "AscendC::MicroAPI::Select(" << output_name << ", " << output_name << ", " << one_name << ", "
-     << negative_mask_name << ");" << std::endl;
+  ss << "AscendC::MicroAPI::Div(" << output_name << ", " << one_name << ", " << output_name << ", " << param.p_reg
+     << ");" << std::endl;
   result = ss.str();
   return af::SUCCESS;
 }

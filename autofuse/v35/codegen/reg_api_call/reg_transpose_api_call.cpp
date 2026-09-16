@@ -22,7 +22,7 @@
 #include "ascir_node_param/ascir_node_param.h"
 
 namespace {
-constexpr uint64_t kMaxTileInnerLen = 2U;
+constexpr uint64_t kMaxDiscontinuousAxisNum = 2U;
 }
 
 namespace codegen {
@@ -72,54 +72,29 @@ struct VecStrideActualSizeFlag {
   std::vector<bool> output_stride_use_actual_size;
 };
 
-Status GetAxisType(af::AscNodePtr node, int64_t axis_id, ascir::Axis::Type &axis_type) {
-  auto owner_graph = node->GetOwnerComputeGraphBarePtr();
-  GE_ASSERT_NOTNULL(owner_graph);
-  auto graph_attr = owner_graph->GetOrCreateAttrsGroup<af::AscGraphAttr>();
-  GE_ASSERT_NOTNULL(graph_attr);
-  const auto &axis = graph_attr->axis;
-  auto iter =
-      std::find_if(axis.begin(), axis.end(), [axis_id](const af::AxisPtr &axis) { return axis->id == axis_id; });
-  if (iter != axis.end()) {
-    axis_type = (*iter)->type;
-  }
-  return af::SUCCESS;
-}
+Status GetVectorizedStrideActualSizeFlag(af::AscNodePtr node, const Tensor &tensor,
+                                         std::vector<bool> &stride_actual_size_flag) {
+  af::Expression inner_repeat = af::sym::kSymbolOne;
+  af::Expression inner_stride = af::sym::kSymbolOne;
+  stride_actual_size_flag.assign(tensor.vectorized_axis.size(), false);
+  for (int32_t i = tensor.vectorized_axis.size() - 1; i >= 0; i--) {
+    const auto axis = tensor.vectorized_axis[i];
+    auto axis_tensor_iter = std::find(tensor.axis.begin(), tensor.axis.end(), axis);
+    GE_ASSERT_TRUE(axis_tensor_iter != tensor.axis.end(), "Cannot find vectorized axis [%ld] in [%s]'s tensor.", axis,
+                   node->GetNamePtr());
 
-Status GetVectorizedStrideActualSizeFlag(af::AscNodePtr node, const Tensor &x, const Tensor &y,
-                                         VecStrideActualSizeFlag &stride_actual_size_flag) {
-  GE_ASSERT_TRUE(x.vectorized_axis.size() == y.vectorized_axis.size(),
-                 "Input vectorized_axis size is not equal to output vectorized_axis size");
-  uint32_t tile_inner_axis_num = 0;
-  for (auto axis_iter = x.vectorized_axis.rbegin(); axis_iter != x.vectorized_axis.rend(); axis_iter++) {
-    const auto axis = *axis_iter;
-    ascir::Axis::Type axis_type;
-    GE_ASSERT_SUCCESS(GetAxisType(node, axis, axis_type));
-    if (tile_inner_axis_num < kMaxTileInnerLen) {
-      stride_actual_size_flag.input_stride_use_actual_size.insert(
-          stride_actual_size_flag.input_stride_use_actual_size.begin(), true);
+    const int64_t axis_index = std::distance(tensor.axis.begin(), axis_tensor_iter);
+    const auto &repeat = tensor.axis_size[axis_index];
+    const auto &stride = tensor.vectorized_strides[i];
+    if (af::SymbolicUtils::StaticCheckEq(stride, inner_repeat * inner_stride) == af::TriBool::kTrue) {
+      stride_actual_size_flag[i] = true;
+      inner_repeat = repeat;
+      inner_stride = stride;
+    } else if (af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      // 向量化轴的stride为0继续合轴，不更新inner_repeat和inner_stride
+      stride_actual_size_flag[i] = true;
     } else {
-      stride_actual_size_flag.input_stride_use_actual_size.insert(
-          stride_actual_size_flag.input_stride_use_actual_size.begin(), false);
-    }
-    if (axis_type == ascir::Axis::kAxisTypeTileInner) {
-      tile_inner_axis_num++;
-    }
-  }
-  tile_inner_axis_num = 0;
-  for (auto axis_iter = y.vectorized_axis.rbegin(); axis_iter != y.vectorized_axis.rend(); axis_iter++) {
-    const auto axis = *axis_iter;
-    ascir::Axis::Type axis_type;
-    GE_ASSERT_SUCCESS(GetAxisType(node, axis, axis_type));
-    if (tile_inner_axis_num < kMaxTileInnerLen) {
-      stride_actual_size_flag.output_stride_use_actual_size.insert(
-          stride_actual_size_flag.output_stride_use_actual_size.begin(), true);
-    } else {
-      stride_actual_size_flag.output_stride_use_actual_size.insert(
-          stride_actual_size_flag.output_stride_use_actual_size.begin(), false);
-    }
-    if (axis_type == ascir::Axis::kAxisTypeTileInner) {
-      tile_inner_axis_num++;
+      break;
     }
   }
   return af::SUCCESS;
@@ -206,7 +181,8 @@ Status TransposeRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<
   std::vector<uint64_t> origin_axis_pos;
   GE_CHK_STATUS_RET(ReorderInputStrideByOutputAxisOrder(x, y, origin_axis_pos, reordered_in_vectorized_strides));
   VecStrideActualSizeFlag stride_actual_size_flag;
-  GetVectorizedStrideActualSizeFlag(this->node, x, y, stride_actual_size_flag);
+  GetVectorizedStrideActualSizeFlag(this->node, x, stride_actual_size_flag.input_stride_use_actual_size);
+  GetVectorizedStrideActualSizeFlag(this->node, y, stride_actual_size_flag.output_stride_use_actual_size);
   // 构建 inner_offset 表达式
   CombinedExpression input_inner_offset = CombinedExpression(
       ExprItemFactory::Direct(ge::Symbol(tpipe.tiler.TensorVectorizedOffset(current_axis, x).c_str())));
