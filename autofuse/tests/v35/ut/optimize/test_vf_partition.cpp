@@ -1823,6 +1823,66 @@ TEST_F(VfPartition, test_scalar_brc) {
   ASSERT_EQ(brc_in_root, nullptr);
 }
 
+TEST_F(VfPartition, test_scalardata_brc) {
+  af::AscGraph graph("scalardata_brc_vf");
+  af::ascir_op::Data data0("data0", graph);
+  data0.ir_attr.SetIndex(0);
+
+  af::ascir_op::Load load("load0");
+  load.x = data0.y;
+  load.y.dtype = af::DT_FLOAT16;
+
+  af::ascir_op::Abs abs("abs");
+  abs.x = load.y;
+  abs.y.dtype = af::DT_FLOAT16;
+
+  af::ascir_op::ScalarData scalar_data0("scalar_data0", graph);
+  scalar_data0.ir_attr.SetIndex(1);
+  *scalar_data0.y.repeats = {af::sym::kSymbolOne, af::sym::kSymbolOne};
+  *scalar_data0.y.strides = {af::sym::kSymbolZero, af::sym::kSymbolZero};
+
+  af::ascir_op::Broadcast brc0("brc0");
+  brc0.x = scalar_data0.y;
+  brc0.y.dtype = af::DT_FLOAT16;
+
+  af::ascir_op::Add add0("add0");
+  add0.x1 = abs.y;
+  add0.x2 = brc0.y;
+  add0.y.dtype = af::DT_FLOAT16;
+
+  af::ascir_op::Store store("store");
+  store.x = add0.y;
+  store.y.dtype = af::DT_FLOAT16;
+
+  af::ascir_op::Output out("out");
+  out.x = store.y;
+  out.ir_attr.SetIndex(0);
+
+  SetupGraphAxes(graph, {af::Symbol(32), af::Symbol(16)});
+
+  ASSERT_EQ(AlignmentHandler::AlignVectorizedStrides(graph), af::SUCCESS);
+
+  VectorFuncPartitioner partitioner(graph);
+  ASSERT_EQ(partitioner.Partition(), af::SUCCESS);
+
+  std::vector<af::AscGraph> sub_graphs;
+  EXPECT_EQ(graph.GetAllSubGraphs(sub_graphs), af::SUCCESS);
+  ASSERT_EQ(sub_graphs.size(), 1UL);
+  auto brc_in_root = graph.FindNode("brc0");
+  ASSERT_EQ(brc_in_root, nullptr);
+
+  // ScalarData(运行时标量输入)作为 VF 边界时必须在子图内物化为 Scalar 副本:
+  // codegen 侧按 scalar 值参数链传递并生成 Duplicate; 若误走 Data+Load 边界,
+  // Load 会对值参数生成 LoadAlign, 且其携带的 sched 轴会污染循环深度推导,
+  // 生成未声明的 mask 寄存器引用, 设备侧编译失败。
+  EXPECT_NE(sub_graphs[0].FindNode("Scalar_scalar_data0"), nullptr);
+  for (const auto &node : sub_graphs[0].GetAllNodes()) {
+    const std::string name = node->GetName();
+    EXPECT_NE(name.rfind("Data_scalar_data0", 0UL), 0UL) << "unexpected boundary node: " << name;
+    EXPECT_NE(name.rfind("Load_scalar_data0", 0UL), 0UL) << "unexpected boundary node: " << name;
+  }
+}
+
 TEST_F(VfPartition, test_scalar_brc_unsupport_vf) {
   af::AscGraph graph("brc_abs");
   af::ascir_op::Data data0("data0", graph);
