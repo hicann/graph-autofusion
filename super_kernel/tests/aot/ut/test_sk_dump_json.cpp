@@ -31,6 +31,7 @@
 #include "sk_scope_info.h"
 #include "sk_log.h"
 #include "sk_options_manager.h"
+#include "sk_types.h"
 #include "ut_common_stubs.h"
 
 #include <nlohmann/json.hpp>
@@ -443,6 +444,24 @@ aclError FakeAclmdlRITaskGetParamsFailure(aclmdlRITask task, aclmdlRITaskParams 
   return ACL_ERROR_FAILURE;
 }
 
+static const std::string &MaxLengthDumpFunctionName() {
+  static const std::string name = [] {
+    const std::string prefix = "dump_kernel_";
+    return prefix + std::string(MAX_FUNC_NAME_LEN - 1U - prefix.size(), 'x');
+  }();
+  return name;
+}
+
+aclError FakeAclrtGetFunctionName_MaxLengthDump(aclrtFuncHandle funcHandle, uint32_t maxLen, char *name) {
+  (void)funcHandle;
+  const std::string &functionName = MaxLengthDumpFunctionName();
+  if (name == nullptr || maxLen <= functionName.size()) {
+    return ACL_ERROR_INVALID_PARAM;
+  }
+  errno_t ret = memcpy_s(name, maxLen, functionName.c_str(), functionName.size() + 1U);
+  return ret == EOK ? ACL_SUCCESS : ACL_ERROR_FAILURE;
+}
+
 }  // namespace
 
 TEST_F(SkDumpJsonDirectHelperTest, TaskAndKernelTypeStringHelpers) {
@@ -467,6 +486,19 @@ TEST_F(SkDumpJsonDirectHelperTest, TaskAndKernelTypeStringHelpers) {
 
   EXPECT_EQ(PtrToHexString(reinterpret_cast<void *>(0x1234)), "0x1234");
   EXPECT_EQ(UintToHexString(0xabcd), "0xabcd");
+}
+
+TEST_F(SkDumpJsonDirectHelperTest, BasicKernelParamsAcceptMaximumFunctionName) {
+  aclmdlRIKernelTaskParams params{};
+  params.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x300);
+
+  ASSERT_EQ(MaxLengthDumpFunctionName().size(), MAX_FUNC_NAME_LEN - 1U);
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionName_MaxLengthDump));
+
+  Json kernelParamsJson;
+  AddBasicKernelParams(kernelParamsJson, params);
+
+  EXPECT_EQ(kernelParamsJson["funcName"].get<std::string>(), MaxLengthDumpFunctionName());
 }
 
 TEST_F(SkDumpJsonDirectHelperTest, BinaryBindMapAndResolvedFuncsCoverSuccessAndFailurePaths) {

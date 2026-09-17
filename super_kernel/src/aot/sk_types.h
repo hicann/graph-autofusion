@@ -39,6 +39,7 @@ constexpr uint32_t K_TYPE_AIV_ROLLBACK = 7;
 constexpr uint32_t TASK_QUE_EXPAND_FACTOR = 2;  // TaskQue扩容因子
 
 constexpr uint32_t MAX_SCOPE_NUM = 1024;
+constexpr uint32_t MAX_FUNC_NAME_LEN = 4096;
 constexpr size_t SK_TOTAL_UB_SIZE = 256U * 1024U;
 constexpr uint16_t INVALID_SCOPE_ID = std::numeric_limits<uint16_t>::max();
 constexpr uint32_t INVALID_STREAM_ID = std::numeric_limits<uint32_t>::max();

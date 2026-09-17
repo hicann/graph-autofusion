@@ -879,7 +879,7 @@ struct JudgeTaskKernelInfo {
 };
 
 bool GetScopeKernelInfo(aclmdlRIKernelTaskParams params, JudgeTaskKernelInfo *info) {
-  char kernelName[MAX_SCOPE_NAME_LEN] = {0};
+  char kernelName[MAX_FUNC_NAME_LEN] = {0};
   int32_t ret = aclrtGetFunctionName(params.funcHandle, sizeof(kernelName), kernelName);
   if (ret != ACL_SUCCESS) {
     SK_LOGE("Failed to get kernel name for funcHandle, ret: %d", ret);
@@ -1002,7 +1002,7 @@ bool SuperKernelKernelNode::InitNode(const SuperKernelOptionsManager *opts) {
     nodeInfos.kernelInfos.vecNum = numBlocks << 1;
   }
 
-  char tmpFuncName[256] = {0};
+  char tmpFuncName[MAX_FUNC_NAME_LEN] = {0};
   aclRet = aclrtGetFunctionName(kernelParams.funcHandle, sizeof(tmpFuncName), tmpFuncName);
   if (aclRet != ACL_SUCCESS) {
     SK_LOGE("Failed to get function name for node %s, ret=%d", Format().c_str(), aclRet);

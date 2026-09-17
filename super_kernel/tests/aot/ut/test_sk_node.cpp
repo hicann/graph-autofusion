@@ -203,6 +203,24 @@ aclError FakeAclrtGetFunctionNameRegular(aclrtFuncHandle funcHandle, uint32_t ma
   return snprintf_s(name, maxLen, maxLen, "%s", src) < 0 ? ACL_ERROR_FAILURE : ACL_SUCCESS;
 }
 
+static const std::string &MaxLengthKernelName() {
+  static const std::string name = [] {
+    const std::string prefix = "regular_kernel_";
+    return prefix + std::string(MAX_FUNC_NAME_LEN - 1U - prefix.size(), 'x');
+  }();
+  return name;
+}
+
+aclError FakeAclrtGetFunctionName_MaxLengthKernel(aclrtFuncHandle funcHandle, uint32_t maxLen, char *name) {
+  (void)funcHandle;
+  const std::string &functionName = MaxLengthKernelName();
+  if (name == nullptr || maxLen <= functionName.size()) {
+    return ACL_ERROR_INVALID_PARAM;
+  }
+  errno_t ret = memcpy_s(name, maxLen, functionName.c_str(), functionName.size() + 1U);
+  return ret == EOK ? ACL_SUCCESS : ACL_ERROR_FAILURE;
+}
+
 aclError FakeAclrtGetFunctionNameIgnoredMix(aclrtFuncHandle funcHandle, uint32_t maxLen, char *name) {
   (void)funcHandle;
   const char *src = "IgnoredMix";
@@ -627,6 +645,24 @@ TEST_F(SkNodeTest, KernelUpdate_CustomParamsStoredSeparatelyForDump) {
   EXPECT_EQ(node.GetUpdateParams().type, ACL_MODEL_RI_TASK_VALUE_WRITE);
   EXPECT_EQ(node.GetUpdateParams().valueWriteTaskParams.devAddr, &value);
   EXPECT_EQ(node.GetUpdateParams().valueWriteTaskParams.value, 0x1234U);
+}
+
+TEST_F(SkNodeTest, KernelInitNode_AcceptsMaximumFunctionName) {
+  UtSkNodeRITaskInternal task{};
+  task.taskId = 9;
+  task.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x3009);
+  task.params.kernelTaskParams.numBlocks = 1;
+
+  ASSERT_EQ(MaxLengthKernelName().size(), MAX_FUNC_NAME_LEN - 1U);
+  SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionName_MaxLengthKernel));
+  MOCKER(aclrtGetFunctionAttribute).stubs().will(invoke(FakeAclrtGetFunctionAttributeMix11));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryNonNull));
+
+  ASSERT_TRUE(node.InitNode());
+  EXPECT_EQ(node.nodeInfos.kernelInfos.funcName, MaxLengthKernelName());
 }
 
 TEST_F(SkNodeTest, KernelUpdate_LaunchInfoBuildsBatchAndDynUbufCfg) {
