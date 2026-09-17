@@ -69,17 +69,17 @@ if [ "${target_branch}" == "master" ] || [ "${target_branch}" == "develop" ]; th
 		ST_Test_autofuse_framework)
 			bash build.sh -s -c --module=autofuse_framework --cann_3rd_lib_path="/home/jenkins/opensource" -f ${WORKSPACE}/pr_filelist.txt
 			ret=$?
-			coverage_save="false"
+			coverage_save="true"
 			;;
 		ST_Test_autofuse_ascendc_api)
 			bash build.sh -s -c --module=autofuse_ascendc_api --cann_3rd_lib_path="/home/jenkins/opensource" -f ${WORKSPACE}/pr_filelist.txt -j20
 			ret=$?
-			coverage_save="false"
+			coverage_save="true"
 			;;
 		ST_Test_autofuse_e2e)
 			bash build.sh -s -c  --module=autofuse_e2e --cann_3rd_lib_path="/home/jenkins/opensource" -j20 -f ${WORKSPACE}/pr_filelist.txt
 			ret=$?
-			coverage_save="false"
+			coverage_save="true"
 			;;
         *)
             echo "Skip UT test execution for ${ut_type} on non-master branch"
