@@ -840,7 +840,7 @@ graphStatus GNode::SetAttr(const AscendString &name, std::vector<AscendString> &
   for (auto &attr_val : attr_values) {
     const char_t *const ascend_attr_value = attr_val.GetString();
     if (std::string(ascend_attr_value).empty()) {
-      REPORT_INNER_ERR_MSG("E18888", "param attr values is invalid");
+      REPORT_INNER_ERR_MSG("E18888", "param attr values are invalid");
       GELOGE(GRAPH_PARAM_INVALID, "[Check][Param] SetAttr: attr val error.");
       return GRAPH_PARAM_INVALID;
     }

@@ -584,6 +584,7 @@ def test_execute_compile_scheme_a_without_mspti_keeps_pgo_proxy_runtime_linkage(
     compile_adapter_module, tmpdir, monkeypatch
 ):
     captured = {}
+    warnings = []
 
     def capture_args(args):
         captured["args"] = args
@@ -592,12 +593,22 @@ def test_execute_compile_scheme_a_without_mspti_keeps_pgo_proxy_runtime_linkage(
     monkeypatch.setattr(
         compile_adapter_module.module, "get_inductor_pgo_mspti_config", lambda: None
     )
+    monkeypatch.setattr(
+        compile_adapter_module.module,
+        "logger",
+        types.SimpleNamespace(
+            info=lambda *_args: None,
+            error=lambda *_args: None,
+            warning=lambda message, *args: warnings.append(message % args),
+        ),
+    )
     _execute_scheme_a_host_compile(compile_adapter_module, tmpdir)
 
     compiled_args = captured["args"]
     assert compiled_args.pgo_runner_file.endswith("graph_tiling_func_PgoRunner.cpp")
     assert compiled_args.pgo_device_file.endswith("graph_pgo_device.cpp")
     assert compiled_args.pgo_mspti_config is None
+    assert warnings == ["[PGO] MSPTI is unavailable, skip Inductor PGO sidecars"]
 
 
 def test_execute_compile_scheme_a_rejects_stage_all(

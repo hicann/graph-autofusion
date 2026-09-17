@@ -179,7 +179,8 @@ af::Status GetBroadcastPhysicalAttr(const af::AscNodePtr &broadcast, ascir::Temp
 af::Status InlineBroadcastPath(NodePath &path, int64_t path_broadcast_index, ascir::TemplateId template_id) {
   GE_ASSERT_TRUE(path_broadcast_index >= 0L, "IndirectLoad Broadcast index is invalid.");
   const size_t broadcast_index = static_cast<size_t>(path_broadcast_index);
-  GE_ASSERT_TRUE(broadcast_index < path.size(), "IndirectLoad Broadcast index is out of range.");
+  GE_ASSERT_TRUE(broadcast_index < path.size(), "IndirectLoad Broadcast index %zu is out of range [0, %zu).",
+                 broadcast_index, path.size());
   const af::AscNodePtr broadcast = path[broadcast_index];
   const auto owner_graph = broadcast->GetOwnerComputeGraph();
   GE_ASSERT_NOTNULL(owner_graph);
@@ -564,7 +565,9 @@ af::Status ValidateSimdPostReduceLayout(const af::AscNodePtr &indirect_load, con
   GE_ASSERT_TRUE(axis_index != kIndirectLoadInvalidAxisIndex, "IndirectLoad axis index of node[%s] is invalid.",
                  indirect_load->GetNamePtr());
   const size_t boundary = axis_index;
-  GE_ASSERT_TRUE(boundary <= layout.axes.size(), "IndirectLoad axis is out of range for post Reduce output.");
+  GE_ASSERT_TRUE(boundary <= layout.axes.size(),
+                 "IndirectLoad axis %zu is out of range [0, %zu] for post Reduce output.", boundary,
+                 layout.axes.size());
 
   for (size_t i = 0UL; i < boundary; ++i) {
     if (layout.kinds[i] == ReduceAxisKind::kReduced) {
@@ -827,7 +830,8 @@ af::Status BuildSimdInnerAxis(af::AscGraph &graph, const af::AscNodePtr &input_p
                               const char *name, ascir::AxisId &input_inner_axis) {
   GE_ASSERT_TRUE(!input_producer->outputs().empty(), "IndirectLoad SIMD input tensor producer has no output.");
   const auto input_axes = input_producer->outputs()[0]->attr.axis;
-  GE_ASSERT_TRUE(axis_index < input_axes.size(), "IndirectLoad SIMD input axis index is out of range.");
+  GE_ASSERT_TRUE(axis_index < input_axes.size(), "IndirectLoad SIMD input axis index %zu is out of range [0, %zu).",
+                 axis_index, input_axes.size());
   std::vector<ascir::AxisId> input_inner_axes(input_axes.begin() + static_cast<int64_t>(axis_index), input_axes.end());
   GE_ASSERT_SUCCESS(MergeAxesForTemplate(graph, input_inner_axes, name, input_inner_axis));
   return af::SUCCESS;
@@ -844,7 +848,8 @@ af::Status BuildSkInputInnerAxis(af::AscGraph &graph, const af::AscNodePtr &indi
 af::Status BuildAxisViewByBoundary(af::AscGraph &graph, const std::vector<af::AxisId> &axes, size_t boundary,
                                    af::AxisId &outer_axis, af::AxisId &inner_axis) {
   GE_ASSERT_TRUE(!axes.empty(), "IndirectLoad output axis is empty.");
-  GE_ASSERT_TRUE(boundary <= axes.size(), "IndirectLoad axis boundary is out of range.");
+  GE_ASSERT_TRUE(boundary <= axes.size(), "IndirectLoad axis boundary %zu is out of range [0, %zu].", boundary,
+                 axes.size());
   const size_t split = boundary;
   const std::vector<af::AxisId> outer_axes(axes.begin(), axes.begin() + static_cast<int64_t>(split));
   const std::vector<af::AxisId> inner_axes(axes.begin() + static_cast<int64_t>(split), axes.end());
@@ -999,7 +1004,8 @@ af::Status NormalizeSimdAxesForTemplate(af::AscGraph &graph, const af::AscNodePt
 af::Status NormalizeSimtAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &indirect_load, size_t boundary) {
   const auto output_axes = indirect_load->outputs()[0]->attr.axis;
   GE_ASSERT_TRUE(!output_axes.empty(), "IndirectLoad SIMT output axis is empty.");
-  GE_ASSERT_TRUE(boundary <= output_axes.size(), "IndirectLoad SIMT boundary is out of range.");
+  GE_ASSERT_TRUE(boundary <= output_axes.size(), "IndirectLoad SIMT boundary %zu is out of range [0, %zu].", boundary,
+                 output_axes.size());
   GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, boundary, af::kIdNone, af::kIdNone));
   return af::SUCCESS;
 }

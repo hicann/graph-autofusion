@@ -45,8 +45,8 @@ bool BrcInlineTemplateV2::IsNodeSupportBrcInline(const af::NodePtr &node) {
     // RemovePad不支持的数据类型，broadcast inline也不支持
     const auto &dtype = std::dynamic_pointer_cast<af::AscNode>(node)->outputs[0].attr.dtype;
     if (!ScheduleUtils::IsNodeSupportDataType<af::ascir_op::RemovePad>(dtype)) {
-      GELOGD("Broadcast inline not support dtype=%s, node=%s", ge::TypeUtils::DataTypeToSerialString(dtype).c_str(),
-             node->GetNamePtr());
+      GELOGD("Broadcast inline does not support dtype=%s, node=%s",
+             ge::TypeUtils::DataTypeToSerialString(dtype).c_str(), node->GetNamePtr());
       return false;
     }
     std::unique_ptr<af::AscTensor> input0;
@@ -57,12 +57,12 @@ bool BrcInlineTemplateV2::IsNodeSupportBrcInline(const af::NodePtr &node) {
     ascgen_utils::MergeBrcAxisParams in1(input1->attr.repeats, input1->attr.strides);
     ascgen_utils::MergeBrcAxisRepeats(in0, in1);
     if (in0.merge_repeats.size() > 4UL) {
-      GELOGD("V2 broadcast inline [%s] not support merged axes count > 4", node->GetNamePtr());
+      GELOGD("V2 broadcast inline [%s] does not support merged axes count > 4", node->GetNamePtr());
       return false;
     }
     // 暂时不支持尾轴广播inline，因为涉及VF内节点根据loop_axis重新做topo排序，逻辑非常复杂
     if (in0.merge_repeats.back() != in1.merge_repeats.back()) {
-      GELOGD("V2 broadcast inline [%s] not support broadcast axis is last.", node->GetNamePtr());
+      GELOGD("V2 broadcast inline [%s] does not support broadcast axis is last.", node->GetNamePtr());
       return false;
     }
   }
@@ -142,13 +142,13 @@ af::Status BrcInlineTemplateV2::Generate([[maybe_unused]] const af::AscGraph &or
                                          [[maybe_unused]] const af::AscGraph &based_case, af::AscGraph &new_case) {
   int32_t brc_inlined_count = 0;
   for (const auto &node : new_case.GetAllNodes()) {
-    GE_WARN_ASSERT(!ScheduleUtils::IsReduce(node), "Brc inline not support Reduce[%s] now.", node->GetNamePtr());
+    GE_WARN_ASSERT(!ScheduleUtils::IsReduce(node), "Brc inline does not support Reduce[%s] now.", node->GetNamePtr());
     if (!af::ops::IsOps<af::ascir_op::Broadcast>(node) || ScheduleUtils::IsScalarBroadcastNode(node)) {
       continue;
     }
     GE_ASSERT_TRUE(node->GetOutDataNodesSize() > 0U);
     if (!IsNodeSupportBrcInline(node)) {
-      GELOGD("Graph[%s] Broadcast[%s] is not support brc inline", new_case.GetName().c_str(), node->GetNamePtr());
+      GELOGD("Graph[%s] Broadcast[%s] does not support brc inline", new_case.GetName().c_str(), node->GetNamePtr());
       continue;
     }
     // 若支持inline，要做的是：

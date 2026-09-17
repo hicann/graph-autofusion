@@ -117,7 +117,7 @@ bool ConstantUtils::GetPotentialWeight(const OpDescPtr &op_desc, std::vector<uin
     return false;
   }
   if (weight_indices.size() != weights.size()) {
-    GELOGW("Weight indices not match with weight size on potential const %s.", op_desc->GetName().c_str());
+    GELOGW("Weight indices do not match with weight size on potential const %s.", op_desc->GetName().c_str());
     return false;
   }
   return true;
@@ -135,7 +135,7 @@ bool ConstantUtils::MutablePotentialWeight(const OpDescPtr &op_desc, std::vector
     return false;
   }
   if (weight_indices.size() != weights.size()) {
-    GELOGW("Weight indices not match with weight size on potential const %s.", op_desc->GetName().c_str());
+    GELOGW("Weight indices do not match with weight size on potential const %s.", op_desc->GetName().c_str());
     return false;
   }
   return true;

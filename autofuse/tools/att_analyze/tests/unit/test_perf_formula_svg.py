@@ -47,7 +47,7 @@ def make_case(result_id=1, group_id=0, case_id=0):
 
 
 class TestRenderOpSection(unittest.TestCase):
-    """render_svg 返回 (svg_fragment, height) 元组，fragment 是 <g> 元素"""
+    """render_svg returns (svg_fragment, height) tuple; fragment is <g> element"""
 
     def test_produces_g_fragment(self):
         cases = [make_case()]
@@ -72,7 +72,7 @@ class TestRenderOpSection(unittest.TestCase):
 
 
 class TestBuildFullSvg(unittest.TestCase):
-    """build_full_svg 将多个算子 section 合并为合法单 SVG"""
+    """build_full_svg combines multiple operator sections into a valid single SVG"""
 
     def test_single_root_svg(self):
         sections = [

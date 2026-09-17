@@ -16,6 +16,15 @@ import time
 from typing import List
 from autofuse import ascendc_compile
 import re
+import tbe.common.utils.log as logger
+
+
+def _log_warning(message, *args):
+    warning = getattr(logger, "warning", None)
+    if warning is None:
+        warning = getattr(logger, "warn")
+    warning(message, *args)
+
 
 HOST_DEFAULT_CXX11_ABI = "-D_GLIBCXX_USE_CXX11_ABI=1"
 HOST_CXX11_ABI_PREFIX = "-D_GLIBCXX_USE_CXX11_ABI="
@@ -130,7 +139,7 @@ def parse_compile_args(argv):
     # 使用 parse_known_args 容忍上层透传的未声明参数，避免触发 SystemExit 终止编译。
     args, unknown = parser.parse_known_args(argv)
     if unknown:
-        print(f"[CompileArgs] ignored unrecognized arguments: {unknown}")
+        logger.info("[CompileArgs] ignored unrecognized arguments: %s", unknown)
     return args
 
 
@@ -481,7 +490,7 @@ def write_compile_host_sources(sources, args, tiling_def_file, base_host_file):
     )
     args.pgo_mspti_config = get_inductor_pgo_mspti_config()
     if args.pgo_mspti_config is None:
-        print("[PGO] MSPTI is unavailable, skip Inductor PGO sidecars")
+        _log_warning("[PGO] MSPTI is unavailable, skip Inductor PGO sidecars")
 
 
 def write_compile_device_sources(sources, args, tiling_def_file, base_device_file):

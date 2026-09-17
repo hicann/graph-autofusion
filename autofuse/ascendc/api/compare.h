@@ -403,7 +403,7 @@ inline __aicore__ void CompareScalarExtend(const LocalTensor<T> &dst, const Loca
   }
   const int32_t tail_size = cal_cnt - cnt;
   if (tail_size > 0) {
-    ASSERT(false && "CompareScalarExtend size not support.");
+    ASSERT(false && "CompareScalarExtend size is not supported.");
   }
 }
 
@@ -672,7 +672,7 @@ inline __aicore__ void CompareExtend(const LocalTensor<T> &dst, const LocalTenso
   }
   const int32_t tail_size = cal_cnt - cnt;
   if (tail_size > 0) {
-    ASSERT(false && "CompareExtend size not support.");
+    ASSERT(false && "CompareExtend size is not supported.");
   }
 }
 

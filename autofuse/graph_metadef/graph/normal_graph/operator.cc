@@ -1702,7 +1702,7 @@ graphStatus Operator::GetAttr(const std::string &name, std::vector<std::string> 
 Operator &Operator::SetAttr(const char_t *name, const char_t *attr_value) {
   if ((name == nullptr) || (attr_value == nullptr)) {
     REPORT_INNER_ERR_MSG("E18888", "param name is nullptr or attr_value is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters is nullptr.");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters are nullptr.");
     return *this;
   }
 
@@ -1721,8 +1721,8 @@ Operator &Operator::SetAttr(const char_t *name, const char_t *attr_value) {
 
 Operator &Operator::SetInputAttr(const int32_t index, const char_t *name, const char_t *attr_value) {
   if ((name == nullptr) || (attr_value == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters are nullptr.");
     return *this;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -1746,8 +1746,8 @@ Operator &Operator::SetInputAttr(const int32_t index, const char_t *name, const 
 
 Operator &Operator::SetInputAttr(const char_t *dst_name, const char_t *name, const char_t *attr_value) {
   if ((dst_name == nullptr) || (name == nullptr) || (attr_value == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters are nullptr.");
     return *this;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -1771,8 +1771,8 @@ Operator &Operator::SetInputAttr(const char_t *dst_name, const char_t *name, con
 
 Operator &Operator::SetOutputAttr(const int32_t index, const char_t *name, const char_t *attr_value) {
   if ((name == nullptr) || (attr_value == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator parameters are nullptr.");
     return *this;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -1796,8 +1796,8 @@ Operator &Operator::SetOutputAttr(const int32_t index, const char_t *name, const
 
 Operator &Operator::SetOutputAttr(const char_t *dst_name, const char_t *name, const char_t *attr_value) {
   if ((dst_name == nullptr) || (name == nullptr) || (attr_value == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator output parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator output parameters are nullptr.");
     return *this;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -1822,8 +1822,8 @@ Operator &Operator::SetOutputAttr(const char_t *dst_name, const char_t *name, co
 
 Operator &Operator::SetInputAttr(const int32_t index, const char_t *name, const AscendString &attr_value) {
   if ((name == nullptr) || (attr_value.GetString() == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters are nullptr.");
     return *this;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -1847,8 +1847,8 @@ Operator &Operator::SetInputAttr(const int32_t index, const char_t *name, const 
 
 Operator &Operator::SetInputAttr(const char_t *dst_name, const char_t *name, const AscendString &attr_value) {
   if ((dst_name == nullptr) || (name == nullptr) || (attr_value.GetString() == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters are nullptr.");
     return *this;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -1979,8 +1979,8 @@ graphStatus Operator::GetOutputAttr(const int32_t index, const char_t *name,
 
 Operator &Operator::SetOutputAttr(const int32_t index, const char_t *name, const AscendString &attr_value) {
   if ((name == nullptr) || (attr_value.GetString() == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator output parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator output parameters are nullptr.");
     return *this;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -2004,8 +2004,8 @@ Operator &Operator::SetOutputAttr(const int32_t index, const char_t *name, const
 
 Operator &Operator::SetOutputAttr(const char_t *dst_name, const char_t *name, const AscendString &attr_value) {
   if ((dst_name == nullptr) || (name == nullptr) || (attr_value.GetString() == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator output parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator output parameters are nullptr.");
     return *this;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -2029,8 +2029,8 @@ Operator &Operator::SetOutputAttr(const char_t *dst_name, const char_t *name, co
 
 graphStatus Operator::GetOutputAttr(const char_t *dst_name, const char_t *name, AscendString &attr_value) const {
   if ((dst_name == nullptr) || (name == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator name parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator output parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator name parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator output parameters are nullptr.");
     return ge::GRAPH_FAILED;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -2057,8 +2057,8 @@ graphStatus Operator::GetOutputAttr(const char_t *dst_name, const char_t *name, 
 
 graphStatus Operator::GetInputAttr(const char_t *dst_name, const char_t *name, AscendString &attr_value) const {
   if ((dst_name == nullptr) || (name == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator name parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator name parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters are nullptr.");
     return ge::GRAPH_FAILED;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -2084,8 +2084,8 @@ graphStatus Operator::GetInputAttr(const char_t *dst_name, const char_t *name, A
 
 graphStatus Operator::GetInputAttr(const int32_t index, const char_t *name, AscendString &attr_value) const {
   if (name == nullptr) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator name parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator name parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters are nullptr.");
     return ge::GRAPH_FAILED;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -2111,8 +2111,8 @@ graphStatus Operator::GetInputAttr(const int32_t index, const char_t *name, Asce
 
 graphStatus Operator::GetOutputAttr(const int32_t index, const char_t *name, AscendString &attr_value) const {
   if (name == nullptr) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator output parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator output parameters are nullptr.");
     return ge::GRAPH_FAILED;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -2138,8 +2138,8 @@ graphStatus Operator::GetOutputAttr(const int32_t index, const char_t *name, Asc
 
 Operator &Operator::SetAttr(const char_t *name, const AscendString &attr_value) {
   if ((name == nullptr) || (attr_value.GetString() == nullptr)) {
-    REPORT_INNER_ERR_MSG("E18888", "Operator input parameters is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters is nullptr.");
+    REPORT_INNER_ERR_MSG("E18888", "Operator input parameters are nullptr, check invalid");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters are nullptr.");
     return *this;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {
@@ -2158,7 +2158,7 @@ Operator &Operator::SetAttr(const char_t *name, const AscendString &attr_value) 
 graphStatus Operator::GetAttr(const char_t *name, AscendString &attr_value) const {
   if (name == nullptr) {
     REPORT_INNER_ERR_MSG("E18888", "Operator input parameters name is nullptr, check invalid");
-    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters is nullptr.");
+    GELOGE(ge::GRAPH_FAILED, "[Check][Param] Operator input parameters are nullptr.");
     return ge::GRAPH_FAILED;
   }
   if ((operator_impl_ == nullptr) || (operator_impl_->GetOpDescImpl() == nullptr)) {

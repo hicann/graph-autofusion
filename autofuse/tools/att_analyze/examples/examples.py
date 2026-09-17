@@ -17,8 +17,8 @@ from summary_templates import LogParser, print_summary_table
 
 
 def example_1_cli_usage():
-    """示例1：命令行调用（只展示命令，不会执行）"""
-    print("示例1：命令行调用（只展示命令，不会执行）")
+    """Example 1: Command-line usage (commands only; not executed)"""
+    print("Example 1: Command-line usage (commands only; not executed)")
     print("=" * 80)
     print("请在仓库根目录执行以下命令，并将路径替换为自己的日志或产物目录：")
     commands = (
@@ -36,7 +36,7 @@ def example_1_cli_usage():
 
 def example_2_basic_usage():
     """示例2：基本使用"""
-    print("示例2：基本使用")
+    print("Example 2: Basic usage")
     print("=" * 80)
 
     parser = LogParser()
@@ -47,7 +47,7 @@ def example_2_basic_usage():
 
 def example_3_multiple_operators():
     """示例3：多个算子"""
-    print("示例3：多个算子")
+    print("Example 3: Multiple operators")
     print("=" * 80)
 
     parser = LogParser()
@@ -58,23 +58,23 @@ def example_3_multiple_operators():
 
 def example_4_programmatic_access():
     """示例4：编程方式访问数据"""
-    print("示例4：编程方式访问数据")
+    print("Example 4: Programmatic access")
     print("=" * 80)
 
     parser = LogParser()
     summaries = parser.parse_log_file("test_concat.log")
 
     for summary in summaries:
-        print(f"算子名称: {summary.operator_name}")
+        print(f"Operator name: {summary.operator_name}")
         print(
-            f"选择的配置: graph{summary.graph}_result{summary.result}_g{summary.group}_case{summary.case}"
+            f"Selected configuration: graph{summary.graph}_result{summary.result}_g{summary.group}_case{summary.case}"
         )
-        print("性能指标:")
+        print("Performance metrics:")
         print(f"  - AIV_MTE2: {summary.aiv_mte2}")
         print(f"  - AIV_MTE3: {summary.aiv_mte3}")
         print(f"  - Objective Value: {summary.objective_value}")
         print(f"  - Result Performance: {summary.result_performance}")
-        print("切分参数:")
+        print("Tiling parameters:")
         for key, value in summary.tiling_values.items():
             print(f"  - {key}: {value}")
     print()
@@ -98,17 +98,17 @@ def example_5_custom_processing():
             best_operator = summary
 
     if best_operator:
-        print(f"性能最好的算子: {best_operator.operator_name}")
+        print(f"Best-performing operator: {best_operator.operator_name}")
         print(f"Objective Value: {best_operator.objective_value}")
         print(
-            f"选择的配置: graph{best_operator.graph}_result{best_operator.result}_g{best_operator.group}_case{best_operator.case}"
+            f"Selected configuration: graph{best_operator.graph}_result{best_operator.result}_g{best_operator.group}_case{best_operator.case}"
         )
     print()
 
 
 def example_6_export_to_csv():
     """示例6：导出到CSV"""
-    print("示例6：导出到CSV")
+    print("Example 6: Export to CSV")
     print("=" * 80)
 
     parser = LogParser()
@@ -164,7 +164,7 @@ def example_6_export_to_csv():
 
             writer.writerow(row)
 
-    print("数据已导出到 output.csv")
+    print("Data exported to output.csv")
     print()
 
 
@@ -176,4 +176,4 @@ if __name__ == "__main__":
     example_5_custom_processing()
     example_6_export_to_csv()
 
-    print("所有示例运行完成！")
+    print("All examples completed!")

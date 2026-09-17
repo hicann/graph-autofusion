@@ -37,6 +37,14 @@ from tbe.tikcpp.get_op_tiling import (
 from tbe.common.utils.op_tiling import do_op_tiling
 from tbe.common.context import get_context
 
+
+def _log_warning(message, *args):
+    warning = getattr(logger, "warning", None)
+    if warning is None:
+        warning = getattr(logger, "warn")
+    warning(message, *args)
+
+
 PYF_PATH = os.path.dirname(os.path.realpath(__file__))
 ASCEND_PATH = os.path.join(PYF_PATH, "..", "..", "..")
 timestamp_list = []
@@ -1065,7 +1073,7 @@ def pgo_cleanup_kernel_and_json(pgo_temp_files, config_path=None):
                 os.remove(item)
                 logger.info("[PGO] cleanup file: %s", item)
         except Exception as e:
-            logger.warn("[PGO] cleanup file failed: %s, err: %s", item, str(e))
+            _log_warning("[PGO] cleanup file failed: %s, err: %s", item, str(e))
 
 
 def check_dir_permissions(path):
@@ -1113,7 +1121,7 @@ def get_replace_kernel_root():
     pattern = r'replace_kernel=([^";]+)'
     match = re.search(pattern, autofuse_dfx_flags_env)
     if not match:
-        logger.info(
+        _log_warning(
             "match env replace_kernel failed. AUTOFUSE_DFX_FLAGS is %s: ",
             autofuse_dfx_flags_env,
         )
@@ -1503,7 +1511,7 @@ def asc_pgo_exec(*args, temp_dir, params, op_kernel_src, code_gen):
     logger.info(f"[PGO] Start PGO tuning for graph: {graph_name}")
     mspti_cfg = pgo_get_mspti_config()
     if mspti_cfg is None:
-        logger.warn("[PGO] libmspti.so not installed, skip pgo tuning")
+        _log_warning("[PGO] libmspti.so not installed, skip pgo tuning")
         return
     mspti_dir, mspti_so_list, mspti_link_flags = mspti_cfg
 

@@ -83,7 +83,8 @@ af::Status BuildTensorWindowInfo(const ascgen_utils::indirect_load::IndirectLoad
                                  const Tensor &tensor, size_t axis_pos, LogicalTensorInfo &info) {
   GE_ASSERT_TRUE(layout.axis_ids.size() == layout.sizes.size() && layout.sizes.size() == layout.strides.size(),
                  "IndirectLoad tensor window layout rank mismatch.");
-  GE_ASSERT_TRUE(axis_pos < layout.sizes.size(), "IndirectLoad tensor window axis is out of range.");
+  GE_ASSERT_TRUE(axis_pos < layout.sizes.size(), "IndirectLoad tensor window axis %zu is out of range [0, %zu).",
+                 axis_pos, layout.sizes.size());
   GE_ASSERT_TRUE(tensor.vectorized_axis.size() == tensor.vectorized_strides.size(),
                  "IndirectLoad tensor vectorized axis/stride rank mismatch.");
   info = LogicalTensorInfo(layout);
@@ -736,7 +737,8 @@ Status IndirectLoadRegApiCall::ParseAttr(const ascir::NodeView &node) {
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::AnalyzeIndirectLoadAccess(node, logical_view_, access_info_));
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetImplementation(node, implementation_));
     const int64_t rank = static_cast<int64_t>(logical_view_.input.sizes.size());
-    GE_ASSERT_TRUE(axis >= -rank && axis < rank, "IndirectLoad axis is out of range.");
+    GE_ASSERT_TRUE(axis >= -rank && axis < rank, "IndirectLoad axis %ld is out of range [%ld, %ld).", axis, -rank,
+                   rank);
     axis_ = axis < 0L ? axis + rank : axis;
   } else {
     ascgen_utils::indirect_load::IndirectLoadLoweringMetadata metadata;

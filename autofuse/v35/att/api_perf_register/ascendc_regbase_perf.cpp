@@ -180,7 +180,7 @@ bool IsB64TransferCast(const NodeDetail &node_info) {
 Expr GetUnaryBitWidthChangeCallCount(const NodeDetail &node_info, Expr &cal_count) {
   const auto &params = node_info.unary_bitwidth_change_node_params;
   if (!params.valid) {
-    GE_ASSERT_TRUE(!node_info.input_dims.empty(), "Unary bitwidth change input dims is empty.");
+    GE_ASSERT_TRUE(!node_info.input_dims.empty(), "Unary bitwidth change input dims are empty.");
     cal_count = ProductExprs(node_info.input_dims, node_info.input_dims.size());
     return CreateExpr(1);
   }
@@ -1726,7 +1726,7 @@ af::Status AddWhereExtend2DPerf(const NodeDetail &node_info, Expr &max_latency, 
 
 af::Status AddWhereExtendPerf(const NodeDetail &node_info, Expr &max_latency, Expr &all_vf_instruct_cost) {
   const auto &params = node_info.where_node_params;
-  GE_ASSERT_TRUE(!params.output_dims.empty(), "Where output dims is empty.");
+  GE_ASSERT_TRUE(!params.output_dims.empty(), "Where output dims are empty.");
   GE_ASSERT_TRUE(!node_info.output_dtype.empty(), "Where output dtype is empty.");
   if (params.output_dims.size() == 1U) {
     return AddWhereImplPerf(node_info, max_latency, all_vf_instruct_cost);

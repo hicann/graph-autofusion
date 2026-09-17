@@ -567,11 +567,22 @@ def test_main_host_pgo_builds_bundle_and_skips_plain_copy(
 
 
 def test_main_host_pgo_failure_falls_back_to_plain_tiling(
-    ascendc_compile_module, tmpdir
+    ascendc_compile_module, tmpdir, monkeypatch
 ):
     original_dir = os.getcwd()
     copied = []
+    warnings = []
     args = _make_host_pgo_args(tmpdir, ("/mspti", [], []))
+
+    monkeypatch.setattr(
+        ascendc_compile_module.module,
+        "logger",
+        types.SimpleNamespace(
+            info=lambda *_args: None,
+            error=lambda *_args: None,
+            warning=lambda message, *args: warnings.append(message % args),
+        ),
+    )
 
     def fake_link_tiling_so(*_):
         return str(tmpdir.join("built_tiling.so"))
@@ -595,6 +606,9 @@ def test_main_host_pgo_failure_falls_back_to_plain_tiling(
             str(tmpdir.join("tiling.so")),
             original_dir,
         )
+    ]
+    assert warnings == [
+        "[PGO] Inductor PGO sidecar build failed, skip PGO: sidecar failed"
     ]
     assert os.getcwd() == original_dir
 
@@ -1218,11 +1232,17 @@ def test_build_pch_command_uses_cpp17(ascendc_compile_module):
 
 
 def test_compile_diagnostics_write_trace_to_default_directory(
-    ascendc_compile_module, monkeypatch, tmpdir, capsys
+    ascendc_compile_module, monkeypatch, tmpdir
 ):
     trace_dir = tmpdir.mkdir("trace")
     ascendc_compile_module.module.COMPILE_TRACE_ROOT = str(trace_dir)
     monkeypatch.setenv("AUTOFUSE_DFX_FLAGS", "codegen_compile_debug=true")
+    log_messages = []
+    monkeypatch.setattr(
+        ascendc_compile_module.module.logger,
+        "info",
+        lambda message, *args: log_messages.append(message % args),
+    )
 
     flags = ascendc_compile_module.get_compile_diagnostic_flags("/tmp/host.o")
 
@@ -1230,10 +1250,7 @@ def test_compile_diagnostics_write_trace_to_default_directory(
     trace_flag = next(flag for flag in flags if flag.startswith("-ftime-trace="))
     assert trace_flag.startswith(f"-ftime-trace={trace_dir}/host.o.")
     assert trace_flag.endswith(".json")
-    assert (
-        f"[CompileTrace] {trace_flag.removeprefix('-ftime-trace=')}"
-        in capsys.readouterr().out
-    )
+    assert f"[CompileTrace] {trace_flag.removeprefix('-ftime-trace=')}" in log_messages
 
 
 def test_compile_diagnostics_use_unique_trace_files(

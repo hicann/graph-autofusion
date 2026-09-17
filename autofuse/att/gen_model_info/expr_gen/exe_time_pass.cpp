@@ -189,7 +189,7 @@ af::Status CheckExecConditionBroadcast(const TuningSpacePtr tuning_space, const 
   GE_ASSERT_NOTNULL(fused_axis);
   if (node.exec_condition != af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis &&
       node.exec_condition != af::ExecuteCondition::kCacheBlockSplitOriginBroadcastAxis) {
-    GELOGD("exec_condition not match");
+    GELOGD("exec_condition does not match");
     return af::SUCCESS;
   }
   is_split = true;

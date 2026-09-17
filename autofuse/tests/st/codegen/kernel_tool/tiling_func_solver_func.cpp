@@ -684,7 +684,7 @@ bool AxesReorderSolver::AutoTuning(const bool is_trade_off) {
   // 4.当前档位差于下档位，向下找更优解(考虑多核头开销对小Shape场景的影响和同地址冲突对多核的影响，当前更倾向于下档位)
   if (current_perf > next_lower_perf) {
     OP_LOGD(OP_NAME,
-            "Find lower block dim, as next_lower_perf: %f(block_dim=%u) is better than"
+            "Find lower block dim, as next_lower_perf: %f(block_dim=%u) is better than "
             "current_perf: %f(block_dim=%u), input: %s",
             current_perf, block_dim, next_lower_perf, next_lower_block_dim, input_.DebugString().c_str());
     FindBetterSolutionByLowerBlockDim(next_lower_perf, next_lower_block_dim);

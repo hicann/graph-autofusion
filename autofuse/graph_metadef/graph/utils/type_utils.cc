@@ -102,9 +102,9 @@ std::string TypeUtilsInner::ImplyTypeToSerialString(const domi::ImplyType imply_
   if (it != kImplyTypeToString.end()) {
     return it->second;
   } else {
-    REPORT_INNER_ERR_MSG("E18888", "ImplyTypeToSerialString: imply_type not support %u",
+    REPORT_INNER_ERR_MSG("E18888", "ImplyTypeToSerialString: imply_type is not supported %u",
                          static_cast<uint32_t>(imply_type));
-    GELOGE(GRAPH_FAILED, "[Check][Param] ImplyTypeToSerialString: imply_type not support %u",
+    GELOGE(GRAPH_FAILED, "[Check][Param] ImplyTypeToSerialString: imply_type is not supported %u",
            static_cast<uint32_t>(imply_type));
     return "UNDEFINED";
   }
@@ -131,7 +131,7 @@ std::string TypeUtilsInner::FmkTypeToSerialString(const domi::FrameworkType fmk_
   if (it != kFmkTypeToString.end()) {
     return it->second;
   } else {
-    GELOGW("[Util][Serialize] Framework type %d not support.", fmk_type);
+    GELOGW("[Util][Serialize] Framework type %d is not supported.", fmk_type);
     return "";
   }
 }

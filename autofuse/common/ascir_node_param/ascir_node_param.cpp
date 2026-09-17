@@ -87,7 +87,7 @@ ge::Expression ResolveForAtt(const ParamExprProduct &expr) {
 }
 
 af::Status ValidateReduceNodeParams(const ReduceNodeParams &params) {
-  GE_ASSERT_TRUE(params.canonical_params.valid, "Reduce canonical params is invalid.");
+  GE_ASSERT_TRUE(params.canonical_params.valid, "Reduce canonical params are invalid.");
   GE_ASSERT_SUCCESS(
       ValidateParamExprProduct(params.exprs.merge_size, params.canonical_params.merge_size, "merge size"));
   GE_ASSERT_SUCCESS(

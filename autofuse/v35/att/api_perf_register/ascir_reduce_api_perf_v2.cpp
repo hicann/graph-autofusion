@@ -127,12 +127,12 @@ af::Status BuildReduceContext(const std::vector<TensorShapeInfo> &input_shapes,
                               const std::vector<TensorShapeInfo> &output_shapes, const NodeInfo &node,
                               ascendcapi_v2::ReduceApiPerfContext &context) {
   const auto &params = node.reduce_specific_params;
-  GE_ASSERT_SUCCESS(ascir_param::ValidateReduceNodeParams(params), "Reduce specific params is invalid, node[%s].",
+  GE_ASSERT_SUCCESS(ascir_param::ValidateReduceNodeParams(params), "Reduce specific params are invalid, node[%s].",
                     node.name.c_str());
   const auto &codegen_params = ascir_param::GetCanonicalReduceParams(params);
   GE_ASSERT_TRUE(!input_shapes.empty() && !output_shapes.empty());
   GE_ASSERT_SUCCESS(SetNodeDetail(input_shapes, output_shapes, context.node_detail));
-  GE_ASSERT_TRUE(!context.node_detail.input_dims.empty(), "Reduce input dims is empty, node[%s].", node.name.c_str());
+  GE_ASSERT_TRUE(!context.node_detail.input_dims.empty(), "Reduce input dims are empty, node[%s].", node.name.c_str());
   GE_ASSERT_SUCCESS(ConvertReducePattern(codegen_params.pattern, context.pattern));
   GE_ASSERT_SUCCESS(ConvertReduceMergeMode(codegen_params.merge_mode, context.merge_mode));
   codegen::ReduceSpecificParams current_shape_params;

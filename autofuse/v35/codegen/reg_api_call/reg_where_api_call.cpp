@@ -43,7 +43,7 @@ af::Status FillWhereNodeParams(const af::AscNodePtr &node, bool is_bcast_src0, b
     params->specific_params = ascir_param::WhereNodeParams{};
     where_params = std::get_if<ascir_param::WhereNodeParams>(&params->specific_params);
   }
-  GE_ASSERT_NOTNULL(where_params, "Where specific params is null, node[%s].", node->GetNamePtr());
+  GE_ASSERT_NOTNULL(where_params, "Where specific params are null, node[%s].", node->GetNamePtr());
   params->api_name = node->GetType();
   params->status = ascir_param::ParamBuildStatus::kBuilt;
 

@@ -364,7 +364,7 @@ TensorUtils::CheckShapeByShapeRange(const GeShape &shape, const std::vector<std:
                               std::vector<const char *>({std::to_string(shape_range.size()).c_str(),
                                                          std::to_string(shape.GetDimNum()).c_str()}));
     GELOGE(PARAM_INVALID,
-           "[Check][Param] Given shape_range dim num [%zu] and current dim num [%zu] are not match. "
+           "[Check][Param] Given shape_range dim num [%zu] and current dim num [%zu] do not match. "
            "Please check",
            shape_range.size(), shape.GetDimNum());
     return PARAM_INVALID;

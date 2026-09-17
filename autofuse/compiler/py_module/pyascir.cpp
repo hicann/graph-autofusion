@@ -797,7 +797,8 @@ bool ParseOpsOperatorInitArgs(PyObject *args, bool support_dynamic_output, const
         return false;
       }
       if (output_num > std::numeric_limits<uint32_t>::max()) {
-        PyErr_SetString(PyExc_OverflowError, "Dynamic output num is out of range.");
+        PyErr_Format(PyExc_OverflowError, "Dynamic output num %lu is out of range [0, %u].", output_num,
+                     std::numeric_limits<uint32_t>::max());
         return false;
       }
       dynamic_output_num = static_cast<uint32_t>(output_num);
