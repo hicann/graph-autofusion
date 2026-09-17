@@ -37,7 +37,10 @@ else
     rm -rf /home/jenkins/opensource/lib_cache
     ln -s /home/jenkins/opensource/ubuntu20/lib_cache /home/jenkins/opensource/lib_cache
 fi
-
+if [ "${target_branch}" == "master" ] || [ "${target_branch}" == "develop" ]; then
+	sudo update-alternatives --set lcov /opt/lcov-2.3.2/bin/lcov
+	lcov --version
+fi
 gcc --version
 source /home/jenkins/Ascend/cann/bin/setenv.bash
 pip3 install -r super_kernel/requirements-dev.txt
@@ -63,7 +66,7 @@ if [ "${target_branch}" == "master" ] || [ "${target_branch}" == "develop" ]; th
 			ret=$?
 			;;
 		ST_Test_Python_superkernel)
-			bash build.sh -u -c --impl=py --module=superkernel --cann_3rd_lib_path="/home/jenkins/opensource" -f ${WORKSPACE}/pr_filelist.txt
+			bash build.sh -s -c --impl=py --module=superkernel --cann_3rd_lib_path="/home/jenkins/opensource" -f ${WORKSPACE}/pr_filelist.txt
 			ret=$?
 			;;
 		ST_Test_autofuse_framework)
@@ -105,7 +108,7 @@ else
 			ret=$?
 			;;
 		ST_Test_Python_superkernel)
-			bash build.sh -u -c --impl=py --module=superkernel --cann_3rd_lib_path="/home/jenkins/opensource"
+			bash build.sh -s -c --impl=py --module=superkernel --cann_3rd_lib_path="/home/jenkins/opensource"
 			ret=$?
 			;;
 		ST_Test_autofuse_framework)
