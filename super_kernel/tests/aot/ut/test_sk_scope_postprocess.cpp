@@ -21,7 +21,7 @@
 #include "sk_scope_postprocess.h"
 #include "sk_node.h"
 #include "sk_resource_manager.h"
-#include "stub/ut_common_stubs.h"
+#include "ut_common_stubs.h"
 
 namespace {
 class ScopedModelContext {

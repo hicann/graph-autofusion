@@ -21,7 +21,7 @@
 #include "sk_task_builder.h"
 #include "sk_options_manager.h"
 #include "sk_node.h"
-#include "stub/ut_common_stubs.h"
+#include "ut_common_stubs.h"
 
 namespace {
 

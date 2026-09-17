@@ -374,6 +374,7 @@ stages:
               export AK=${{secrets.AK}}
               export SK=${{secrets.SK}}
               export WORKSPACE=${{ steps.process_checkout.outputs.path }}
+              export NPU_ARCH=dav-2201
               bash ${{ steps.process_checkout.outputs.path }}/pre_smoke.sh
           - name: upload
             uses: obs-upload

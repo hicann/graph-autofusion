@@ -29,8 +29,8 @@
 #include "sk_log.h"
 #include "sk_types.h"
 #include "runtime/kernel.h"
-#include "stub/ut_common_stubs.h"
-#include "stub/dlog_pub.h"
+#include "ut_common_stubs.h"
+#include "dlog_pub.h"
 
 class SkDfxExceptionHandlerTest : public testing::Test {
  protected:
