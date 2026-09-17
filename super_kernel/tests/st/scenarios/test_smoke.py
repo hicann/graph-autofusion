@@ -13,8 +13,8 @@
 """Minimal smoke test ensuring the ST harness executes."""
 
 import pytest
-from superkernel import super_kernel
 from utils import validate_codegen_output, validate_compile_options
+from utils.sk_compile import compile_and_capture
 from asc_op_compile_base.asc_op_compiler.global_storage import global_var_storage
 from asc_op_compile_base.common.platform.platform_info import set_current_compile_soc_info
 from asc_op_compile_base.common.ccec import current_build_config
@@ -29,7 +29,7 @@ from superkernel.super_kernel_feature_manager import *
     #   1. 子内核1 fixture
     #   2. 子内核2 fixture
     #   3. compile_options: 编译前配置的编译选项
-    #   4. golden_codegen_path: 期望编译生成的代码结果路径，路径内部按照${dir}/expect_sk_code.cc ${dir}/expect_compiled_json.json组织
+    #   4. golden_codegen_path: 期望编译生成的代码结果路径，路径内部按照${dir}/expect_sk_code.cc组织
     #   5. golden_options: 期望编译结果的编译选项
     "subkernel_inf, subkernel_pows, compile_options, \
     golden_codegen_path, golden_options",
@@ -180,7 +180,7 @@ def test_sk_1_stream_2_ops(
     kernel_name = "te_superkernel_1_stream_2_ops"
 
     with OpContext('super_kernel'):
-        super_kernel.compile(kernel_info, kernel_name)
+        compile_info = compile_and_capture(kernel_info, kernel_name)
     
     scenario_dir = data_dir / golden_codegen_path
         
@@ -190,11 +190,7 @@ def test_sk_1_stream_2_ops(
         scenario_dir / "expect_sk_code.cc",
     )
     
-    validate_compile_options(
-        kernel_meta_dir,
-        kernel_name,
-        golden_options,
-    )
+    validate_compile_options(compile_info, golden_options)
 
 
 @pytest.mark.parametrize(
@@ -205,7 +201,7 @@ def test_sk_1_stream_2_ops(
     #   4. send_event_list: 发送事件列表
     #   5. recv_event_list: 接收事件列表
     #   6. task_type: 可选dynamic或normal
-    #   7. golden_codegen_path: 期望编译生成的代码结果路径，路径内部按照${dir}/expect_sk_code.cc ${dir}/expect_compiled_json.json组织
+    #   7. golden_codegen_path: 期望编译生成的代码结果路径，路径内部按照${dir}/expect_sk_code.cc组织
     #   8. golden_options: 期望编译结果的编译选项
     "subkernel_inf, subkernel_pows, compile_options, \
     send_event_list, recv_event_list, task_type, golden_codegen_path, golden_options",
@@ -421,10 +417,10 @@ def test_sk_2_stream_2_ops(
     kernel_name = "te_superkernel_2_stream_2_ops"
     if task_type == "dynamic":
         with OpContext('dynamic'):
-            super_kernel.compile(kernel_info, kernel_name)
+            compile_info = compile_and_capture(kernel_info, kernel_name)
     else:
         with OpContext('super_kernel'):
-            super_kernel.compile(kernel_info, kernel_name)
+            compile_info = compile_and_capture(kernel_info, kernel_name)
 
     scenario_dir = data_dir / golden_codegen_path
     
@@ -433,11 +429,7 @@ def test_sk_2_stream_2_ops(
         kernel_name,
         scenario_dir / "expect_sk_code.cc",
     )
-    validate_compile_options(
-        kernel_meta_dir,
-        kernel_name,
-        golden_options,
-    )
+    validate_compile_options(compile_info, golden_options)
 
 
 @pytest.mark.parametrize(
@@ -445,7 +437,7 @@ def test_sk_2_stream_2_ops(
     #   1. 子内核1 fixture
     #   2. 子内核2 fixture
     #   3. compile_options: 编译前配置的编译选项
-    #   4. golden_codegen_path: 期望编译生成的代码结果路径，路径内部按照${dir}/expect_sk_code.cc ${dir}/expect_compiled_json.json组织
+    #   4. golden_codegen_path: 期望编译生成的代码结果路径，路径内部按照${dir}/expect_sk_code.cc组织
     #   5. golden_options: 期望编译结果的编译选项
     "subkernel_inf, subkernel_pows, compile_options, \
     golden_codegen_path, golden_options",
@@ -506,7 +498,7 @@ def test_sk_1_stream_3_ops(
     }
     kernel_name = "te_superkernel_1_stream_3_ops"
     with OpContext('super_kernel'):
-        super_kernel.compile(kernel_info, kernel_name)
+        compile_info = compile_and_capture(kernel_info, kernel_name)
 
     scenario_dir = data_dir / golden_codegen_path
 
@@ -516,11 +508,7 @@ def test_sk_1_stream_3_ops(
         scenario_dir / "expect_sk_code.cc",
     )
 
-    validate_compile_options(
-        kernel_meta_dir,
-        kernel_name,
-        golden_options,
-    )
+    validate_compile_options(compile_info, golden_options)
 
 
 @pytest.mark.parametrize(
@@ -531,7 +519,7 @@ def test_sk_1_stream_3_ops(
     #   4. stream_ids: 各个算子stream_id
     #   5. send_event_list: 发送事件列表
     #   6. recv_event_list: 接收事件列表
-    #   7. golden_codegen_path: 期望编译生成的代码结果路径，路径内部按照${dir}/expect_sk_code.cc ${dir}/expect_compiled_json.json组织
+    #   7. golden_codegen_path: 期望编译生成的代码结果路径，路径内部按照${dir}/expect_sk_code.cc组织
     #   8. golden_options: 期望编译结果的编译选项
     "subkernel_inf, subkernel_pows, compile_options, stream_ids,\
     send_event_lists, recv_event_lists, golden_codegen_path, golden_options",
@@ -607,7 +595,7 @@ def test_sk_2_stream_4_ops(soc_version, tmp_dir, data_dir, json_dir, \
     }
     kernel_name = "te_superkernel_2_stream_4_ops"
     with OpContext('super_kernel'):
-        super_kernel.compile(kernel_info, kernel_name)
+        compile_info = compile_and_capture(kernel_info, kernel_name)
     scenario_dir = data_dir / golden_codegen_path
     validate_codegen_output(kernel_meta_dir, kernel_name, scenario_dir / "expect_sk_code.cc")
-    validate_compile_options(kernel_meta_dir, kernel_name, golden_options)
+    validate_compile_options(compile_info, golden_options)

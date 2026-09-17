@@ -13,11 +13,11 @@
 
 """Validation helpers for system tests."""
 
-import difflib
 import os
 import sys
 from pathlib import Path
 from typing import Iterable, Tuple
+import difflib
 
 
 def _resolve_kernel_paths(kernel_root: Path, kernel_name: str) -> Tuple[Path, Path]:
@@ -32,7 +32,7 @@ def _resolve_kernel_paths(kernel_root: Path, kernel_name: str) -> Tuple[Path, Pa
     return generated_file, log_file
 
 
-def compare_files(golden_path, codegen_path, encoding="utf-8"):
+def compare_files(golden_path, codegen_path, encoding='utf-8'):
     """
     比较两个文件的内容并显示差异
 
@@ -46,17 +46,17 @@ def compare_files(golden_path, codegen_path, encoding="utf-8"):
     """
     try:
         # 读取文件内容
-        with open(golden_path, "r", encoding=encoding) as f:
+        with open(golden_path, 'r', encoding=encoding) as f:
             golden_lines = f.readlines()
 
-        with open(codegen_path, "r", encoding=encoding) as f:
+        with open(codegen_path, 'r', encoding=encoding) as f:
             codegen_lines = f.readlines()
 
     except FileNotFoundError as e:
-        print(f"Error: file not found - {e.filename}", file=sys.stderr)
+        print(f"错误: 文件未找到 - {e.filename}", file=sys.stderr)
         return False
     except UnicodeDecodeError as e:
-        print(f"Error: file encoding error - {e}", file=sys.stderr)
+        print(f"错误: 文件编码错误 - {e}", file=sys.stderr)
         return False
 
     # 比较文件内容
@@ -64,38 +64,41 @@ def compare_files(golden_path, codegen_path, encoding="utf-8"):
     diff = list(differ.compare(golden_lines, codegen_lines))
 
     # 检查是否有差异
-    has_diff = any(line.startswith(("+", "-", "?")) for line in diff)
+    has_diff = any(line.startswith(('+', '-', '?')) for line in diff)
 
     if has_diff:
-        print(f"File contents differ: {golden_path} and {codegen_path}")
+        print(f"文件 {golden_path} 和 {codegen_path} 内容不同:")
         print("=" * 80)
 
         # 打印差异，使用颜色区分（如果终端支持）
         for line in diff:
-            if line.startswith("+"):
+            if line.startswith('+'):
                 # 新增内容（绿色）
-                print(f"\033[92m{line}\033[0m", end="")
-            elif line.startswith("-"):
+                print(f"\033[92m{line}\033[0m", end='')
+            elif line.startswith('-'):
                 # 删除内容（红色）
-                print(f"\033[91m{line}\033[0m", end="")
-            elif line.startswith("?"):
+                print(f"\033[91m{line}\033[0m", end='')
+            elif line.startswith('?'):
                 # 差异标记（黄色）
-                print(f"\033[93m{line}\033[0m", end="")
+                print(f"\033[93m{line}\033[0m", end='')
             else:
                 # 相同内容（默认颜色）
-                print(line, end="")
+                print(line, end='')
 
         print("=" * 80)
     else:
-        print(f"File contents are identical: {golden_path} and {codegen_path}")
+        print(f"文件 {golden_path} 和 {codegen_path} 内容相同")
 
     return not has_diff
 
+def validate_codegen_output(kernel_root: Path, kernel_name: str, expected_source: Path) -> None:
+    """Validate generated code matches expected source code.
 
-def validate_codegen_output(
-    kernel_root: Path, kernel_name: str, expected_source: Path
-) -> None:
-    """Validate generated code matches expected source code."""
+    Only the source produced by the SuperKernel code generator is compared. The
+    device compile backend appends extra metadata sections (mix core DFX
+    sections) to this file, which are produced outside of this repository and
+    are not part of the golden files.
+    """
     generated_file, _ = _resolve_kernel_paths(kernel_root, kernel_name)
 
     if not generated_file.is_file():
@@ -114,36 +117,19 @@ def validate_codegen_output(
 
 
 def validate_compile_options(
-    kernel_root: Path,
-    kernel_name: str,
+    compile_info,
     expected_options: Iterable[str],
 ) -> None:
-    """Ensure the compile log contains all expected options for the given kernel."""
-    generated_file, log_file = _resolve_kernel_paths(kernel_root, kernel_name)
+    """Ensure the compile options of the generated kernel are all present."""
+    options = [str(option) for option in compile_info.get("compile_option", [])]
 
-    if not log_file.is_file():
-        generated_dir = log_file.parent
-        available = sorted(p.name for p in generated_dir.iterdir())
-        raise AssertionError(
-            f"Compile log missing: expected {log_file.name}; available={available}"
-        )
-
-    log_lines = log_file.read_text(encoding="utf-8").splitlines()
-    target_line = None
-    generated_path = str(generated_file)
-    for line in log_lines:
-        if "bisheng" in line and generated_path in line:
-            target_line = line
-            break
-
-    if target_line is None:
-        raise AssertionError(
-            "Failed to locate bisheng compile command for generated kernel "
-            f"{generated_file.name}"
-        )
-
-    missing = [opt for opt in expected_options if opt not in target_line]
+    missing = [
+        option for option in expected_options
+        if not any(option in actual for actual in options)
+    ]
     if missing:
         raise AssertionError(
-            "Missing expected compile options in bisheng command: " + ", ".join(missing)
+            "Missing expected compile options: "
+            + ", ".join(missing)
+            + f"\nreceived: {options}"
         )
