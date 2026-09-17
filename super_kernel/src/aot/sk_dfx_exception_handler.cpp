@@ -1014,7 +1014,7 @@ bool SuperKernelExceptionHandler::PopulateSubKernelFields(Adx::ExceptionDumpInfo
       SK_LOGI("Successfully got function name: %s", funcName);
       snprintf_s(dumpInfo.kernelName, Adx::MAX_KERNELNAME_LEN, Adx::MAX_KERNELNAME_LEN - 1, "%s", funcName);
     } else {
-      SK_LOGI("Failed to get function name, ret=%d", ret);
+      SK_LOGW("Failed to get SK entry function name, ret=%d; continuing without function name", ret);
       memset_s(dumpInfo.kernelName, sizeof(dumpInfo.kernelName), 0, sizeof(dumpInfo.kernelName));
     }
 
@@ -1028,7 +1028,7 @@ bool SuperKernelExceptionHandler::PopulateSubKernelFields(Adx::ExceptionDumpInfo
     // Exception occurred within Superkernel (not in sub-kernel), no sub-kernel args available
     dumpInfo.argAddr = nullptr;
     dumpInfo.argSize = 0;
-    SK_LOGI("Not match sub Kernel, exception occurred within Superkernel");
+    SK_LOGI("Does not match sub kernel, exception occurred within Superkernel");
     return true;
   }
 
@@ -1069,7 +1069,7 @@ aclError SuperKernelExceptionHandler::PopulateDumpInfoFields(Adx::ExceptionDumpI
 
   aclError ret = PopulateSkEntryFields(dumpInfo, exceptionInfo);
   if (ret != ACL_SUCCESS) {
-    SK_LOGI("PopulateSkEntryFields failed, ret=%d", ret);
+    SK_LOGE("Failed to populate SK entry fields, ret=%d", ret);
     return ret;
   }
 

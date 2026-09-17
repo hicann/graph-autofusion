@@ -309,7 +309,7 @@ SkBindMap InitSuperKernelBindMap(aclrtBinHandle binHdl) {
 
   if (int ret =
           rtBinaryGetMetaInfo(binHdl, RT_BINARY_TYPE_SK_INFO, metaNum, metaDataList.data(), infoSize.data()) != 0) {
-    SK_LOGI("rtBinaryGetMetaInfo failed, ret=%d", ret);
+    SK_LOGW("Failed to get SuperKernel metadata from binary, ret=%d; fusion will be skipped", ret);
     return SkBindMap();
   }
 
@@ -484,7 +484,6 @@ bool InitSingleSplitFunc(ResolvedFunctionInfo &info, size_t splitIdx, const SkBi
     res |= InitSingleCoreFunc<SkNodeCoreType::AIV>(aivCtx, binHdl, binDevAddr, validFuncNum);
   }
   if (!res) {
-    SK_LOGI("Failed to initialize kernel function in sk Node split[%zu]", splitIdx);
     return false;
   }
   if (validFuncNum > 0) {
@@ -587,7 +586,7 @@ bool InitKernelResolvedFuncs(KernelInfos &kernelInfos) {
     BindmapFailReason failReason = BindmapFailReason::NONE;
     if (!InitSingleSplitFunc(info, i, bindMap, aicItor, aivItor, binHdl, binDevAddr, kernelInfos.resolvedNum,
                              failReason)) {
-      SK_LOGI("Failed to initialize kernel function in sk Node split[%zu]", i);
+      SK_LOGW("Failed to initialize kernel function for SK node split[%zu]; fusion will be skipped", i);
       kernelInfos.bindmapFailReason = failReason;
       return false;
     }
