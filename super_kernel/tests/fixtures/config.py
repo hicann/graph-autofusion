@@ -52,9 +52,7 @@ def save_golden_files(tmp_path, tests_root):
     # 只有生成的代码是 golden；编译产物 json 由外部编译包产出，不做断言
     for file_path in tmp_path.glob("test_sk_*/kernel_meta/*_kernel.cpp"):
         # 移除路径中的 kernel_meta 字符
-        parts = [
-            p for p in file_path.relative_to(tmp_path).parts if p != "kernel_meta"
-        ]
+        parts = [p for p in file_path.relative_to(tmp_path).parts if p != "kernel_meta"]
         dest_path = save_dir / Path(*parts[:-1]) / "expect_sk_code.cc"
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         # 根据一致的文件名实现替换

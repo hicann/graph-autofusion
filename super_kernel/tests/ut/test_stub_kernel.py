@@ -73,7 +73,9 @@ def test_default_spec_and_overrides():
     mix = resolve_spec("test_sk_2_stream_2_ops_default_aic_1_1", "is_inf")
     assert mix.kernel_type == "KERNEL_TYPE_MIX_AIC_1_1"
 
-    without_split = resolve_spec("test_sk_1_stream_2_ops_json_split_none_aic_only", "is_inf")
+    without_split = resolve_spec(
+        "test_sk_1_stream_2_ops_json_split_none_aic_only", "is_inf"
+    )
     assert without_split.split_mode is None
 
 
@@ -98,7 +100,9 @@ def test_rendered_metadata_follows_spec():
 
     dynamic_meta = render_sub_kernel_json(
         "is_inf",
-        resolve_spec("test_sk_2_stream_2_ops_dynamic_send_recv_default_aic_only", "is_inf"),
+        resolve_spec(
+            "test_sk_2_stream_2_ops_dynamic_send_recv_default_aic_only", "is_inf"
+        ),
         bin_path,
     )
     assert "dynamic_func_names" in dynamic_meta["sub_operator_kernel_name"]

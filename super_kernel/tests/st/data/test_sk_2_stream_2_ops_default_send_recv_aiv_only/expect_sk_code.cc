@@ -168,3 +168,7 @@ extern "C"  __global__ __attribute__((aligned(512))) __aicore__ void auto_gen_te
     }
 }
 
+#if TILING_KEY_VAR == 0UL
+static const struct FunLevelMixCoreType te_superkernel_2_stream_2_ops_mix_aiv_section __attribute__ ((used, section (".ascend.meta.te_superkernel_2_stream_2_ops_mix_aiv"))) = { {{F_TYPE_KTYPE, sizeof(unsigned int)}, K_TYPE_MIX_AIV_MAIN},    {{F_TYPE_MIX_TASK_RATION, sizeof(unsigned int)}, 0, 1} };
+#endif
+#endif

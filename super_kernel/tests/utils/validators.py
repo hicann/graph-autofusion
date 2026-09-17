@@ -32,7 +32,41 @@ def _resolve_kernel_paths(kernel_root: Path, kernel_name: str) -> Tuple[Path, Pa
     return generated_file, log_file
 
 
-def compare_files(golden_path, codegen_path, encoding='utf-8'):
+def _strip_backend_dfx_section(lines):
+    """Drop the mix core DFX section appended by the device compile backend.
+
+    The backend appends metadata sections to the generated kernel source. They
+    are produced outside of this repository and are not part of what the
+    SuperKernel code generator emits, so they are ignored when comparing the
+    generated source with the golden source.
+    """
+    for index, line in enumerate(lines):
+        if not line.startswith("#if TILING_KEY_VAR"):
+            continue
+        rest = [item.strip() for item in lines[index:] if item.strip()]
+        if all(
+            item.startswith("#if")
+            or item.startswith("#endif")
+            or item.startswith("static const struct FunLevel")
+            for item in rest
+        ):
+            return lines[:index]
+    return lines
+
+
+def _drop_trailing_blank_lines(lines):
+    """Ignore trailing blank lines.
+
+    Golden sources cannot keep them because the pre-commit hooks strip them,
+    while the generated kernel source ends with a blank line.
+    """
+    end = len(lines)
+    while end > 0 and not lines[end - 1].strip():
+        end -= 1
+    return lines[:end]
+
+
+def compare_files(golden_path, codegen_path, encoding="utf-8"):
     """
     比较两个文件的内容并显示差异
 
@@ -46,11 +80,16 @@ def compare_files(golden_path, codegen_path, encoding='utf-8'):
     """
     try:
         # 读取文件内容
-        with open(golden_path, 'r', encoding=encoding) as f:
+        with open(golden_path, "r", encoding=encoding) as f:
             golden_lines = f.readlines()
 
-        with open(codegen_path, 'r', encoding=encoding) as f:
+        with open(codegen_path, "r", encoding=encoding) as f:
             codegen_lines = f.readlines()
+
+        golden_lines = _drop_trailing_blank_lines(
+            _strip_backend_dfx_section(golden_lines)
+        )
+        codegen_lines = _drop_trailing_blank_lines(codegen_lines)
 
     except FileNotFoundError as e:
         print(f"错误: 文件未找到 - {e.filename}", file=sys.stderr)
@@ -64,7 +103,7 @@ def compare_files(golden_path, codegen_path, encoding='utf-8'):
     diff = list(differ.compare(golden_lines, codegen_lines))
 
     # 检查是否有差异
-    has_diff = any(line.startswith(('+', '-', '?')) for line in diff)
+    has_diff = any(line.startswith(("+", "-", "?")) for line in diff)
 
     if has_diff:
         print(f"文件 {golden_path} 和 {codegen_path} 内容不同:")
@@ -72,18 +111,18 @@ def compare_files(golden_path, codegen_path, encoding='utf-8'):
 
         # 打印差异，使用颜色区分（如果终端支持）
         for line in diff:
-            if line.startswith('+'):
+            if line.startswith("+"):
                 # 新增内容（绿色）
-                print(f"\033[92m{line}\033[0m", end='')
-            elif line.startswith('-'):
+                print(f"\033[92m{line}\033[0m", end="")
+            elif line.startswith("-"):
                 # 删除内容（红色）
-                print(f"\033[91m{line}\033[0m", end='')
-            elif line.startswith('?'):
+                print(f"\033[91m{line}\033[0m", end="")
+            elif line.startswith("?"):
                 # 差异标记（黄色）
-                print(f"\033[93m{line}\033[0m", end='')
+                print(f"\033[93m{line}\033[0m", end="")
             else:
                 # 相同内容（默认颜色）
-                print(line, end='')
+                print(line, end="")
 
         print("=" * 80)
     else:
@@ -91,7 +130,10 @@ def compare_files(golden_path, codegen_path, encoding='utf-8'):
 
     return not has_diff
 
-def validate_codegen_output(kernel_root: Path, kernel_name: str, expected_source: Path) -> None:
+
+def validate_codegen_output(
+    kernel_root: Path, kernel_name: str, expected_source: Path
+) -> None:
     """Validate generated code matches expected source code.
 
     Only the source produced by the SuperKernel code generator is compared. The
@@ -124,7 +166,8 @@ def validate_compile_options(
     options = [str(option) for option in compile_info.get("compile_option", [])]
 
     missing = [
-        option for option in expected_options
+        option
+        for option in expected_options
         if not any(option in actual for actual in options)
     ]
     if missing:

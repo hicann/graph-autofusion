@@ -42,9 +42,9 @@ from typing import Dict, Iterable, List, Optional
 # to the ``preload`` count written into the generated kernel source, so changing
 # a value here changes the golden files and must be done deliberately.
 STUB_TEXT_SIZE = {
-    "is_inf": 4096,     # ceil(4096 / 2048) = 2
+    "is_inf": 4096,  # ceil(4096 / 2048) = 2
     "is_finite": 4096,  # ceil(4096 / 2048) = 2
-    "pows": 10240,      # ceil(10240 / 2048) = 5
+    "pows": 10240,  # ceil(10240 / 2048) = 5
 }
 
 # Number of ``_splitN`` members generated next to the base object.
@@ -144,8 +144,16 @@ KERNEL_NAME_KEYS = {
     "KERNEL_TYPE_AIC_ONLY": ("AiCore",),
     "KERNEL_TYPE_AIV_ONLY": ("AiCore",),
     "KERNEL_TYPE_MIX_AIC_1_0": ("AiCore", f"dav-{CHIP_VERSION}-cube"),
-    "KERNEL_TYPE_MIX_AIC_1_1": ("AiCore", f"dav-{CHIP_VERSION}-cube", f"dav-{CHIP_VERSION}-vec"),
-    "KERNEL_TYPE_MIX_AIC_1_2": ("AiCore", f"dav-{CHIP_VERSION}-cube", f"dav-{CHIP_VERSION}-vec"),
+    "KERNEL_TYPE_MIX_AIC_1_1": (
+        "AiCore",
+        f"dav-{CHIP_VERSION}-cube",
+        f"dav-{CHIP_VERSION}-vec",
+    ),
+    "KERNEL_TYPE_MIX_AIC_1_2": (
+        "AiCore",
+        f"dav-{CHIP_VERSION}-cube",
+        f"dav-{CHIP_VERSION}-vec",
+    ),
     "KERNEL_TYPE_MIX_AIV_1_0": ("AiCore", f"dav-{CHIP_VERSION}-vec"),
 }
 
@@ -166,54 +174,98 @@ DEFAULT_SPEC = SubKernelSpec()
 # for every sub-kernel, which keeps this table small and reviewable.
 SCENARIO_OVERRIDES = {
     "test_sk_1_stream_2_ops_json_split_none_aic_only": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_AIC_ONLY", split_mode=None, sync_all=False, variant="static"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_AIC_ONLY", split_mode=None, sync_all=False, variant="static"
+        ),
     },
     "test_sk_1_stream_2_ops_split_mode_1_aic_only": {
-        "is_finite": SubKernelSpec("KERNEL_TYPE_AIC_ONLY", split_mode=1, sync_all=False, variant="static"),
-        "is_inf": SubKernelSpec("KERNEL_TYPE_AIC_ONLY", split_mode=1, sync_all=False, variant="static"),
+        "is_finite": SubKernelSpec(
+            "KERNEL_TYPE_AIC_ONLY", split_mode=1, sync_all=False, variant="static"
+        ),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_AIC_ONLY", split_mode=1, sync_all=False, variant="static"
+        ),
     },
     "test_sk_2_stream_2_ops_debug_sync_all_1_aiv_only": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"),
-        "pows": SubKernelSpec("KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"
+        ),
+        "pows": SubKernelSpec(
+            "KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"
+        ),
     },
     "test_sk_2_stream_2_ops_default_aic_1_0": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_MIX_AIC_1_0", split_mode=4, sync_all=False, variant="static"),
-        "pows": SubKernelSpec("KERNEL_TYPE_MIX_AIC_1_0", split_mode=4, sync_all=False, variant="static"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_MIX_AIC_1_0", split_mode=4, sync_all=False, variant="static"
+        ),
+        "pows": SubKernelSpec(
+            "KERNEL_TYPE_MIX_AIC_1_0", split_mode=4, sync_all=False, variant="static"
+        ),
     },
     "test_sk_2_stream_2_ops_default_aic_1_1": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_MIX_AIC_1_1", split_mode=4, sync_all=False, variant="static"),
-        "pows": SubKernelSpec("KERNEL_TYPE_MIX_AIC_1_1", split_mode=4, sync_all=False, variant="static"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_MIX_AIC_1_1", split_mode=4, sync_all=False, variant="static"
+        ),
+        "pows": SubKernelSpec(
+            "KERNEL_TYPE_MIX_AIC_1_1", split_mode=4, sync_all=False, variant="static"
+        ),
     },
     "test_sk_2_stream_2_ops_default_aic_1_2": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_MIX_AIC_1_2", split_mode=4, sync_all=False, variant="static"),
-        "pows": SubKernelSpec("KERNEL_TYPE_MIX_AIC_1_2", split_mode=4, sync_all=False, variant="static"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_MIX_AIC_1_2", split_mode=4, sync_all=False, variant="static"
+        ),
+        "pows": SubKernelSpec(
+            "KERNEL_TYPE_MIX_AIC_1_2", split_mode=4, sync_all=False, variant="static"
+        ),
     },
     "test_sk_2_stream_2_ops_default_aiv_1_0": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_MIX_AIV_1_0", split_mode=4, sync_all=False, variant="static"),
-        "pows": SubKernelSpec("KERNEL_TYPE_MIX_AIV_1_0", split_mode=4, sync_all=False, variant="static"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_MIX_AIV_1_0", split_mode=4, sync_all=False, variant="static"
+        ),
+        "pows": SubKernelSpec(
+            "KERNEL_TYPE_MIX_AIV_1_0", split_mode=4, sync_all=False, variant="static"
+        ),
     },
     "test_sk_2_stream_2_ops_default_send_recv_aiv_only": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"),
-        "pows": SubKernelSpec("KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"
+        ),
+        "pows": SubKernelSpec(
+            "KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"
+        ),
     },
     "test_sk_2_stream_2_ops_dynamic_send_recv_default_aic_only": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_AIC_ONLY", split_mode=4, sync_all=True, variant="dynamic"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_AIC_ONLY", split_mode=4, sync_all=True, variant="dynamic"
+        ),
     },
     "test_sk_2_stream_2_ops_dynamic_send_recv_default_aiv_only": {
-        "is_finite": SubKernelSpec("KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"),
-        "is_inf": SubKernelSpec("KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=True, variant="dynamic"),
+        "is_finite": SubKernelSpec(
+            "KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"
+        ),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=True, variant="dynamic"
+        ),
     },
     "test_sk_2_stream_2_ops_dynamic_send_recv_intersect_aic_only": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_AIC_ONLY", split_mode=4, sync_all=True, variant="dynamic"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_AIC_ONLY", split_mode=4, sync_all=True, variant="dynamic"
+        ),
     },
     "test_sk_2_stream_2_ops_dynamic_send_recv_with_synal_all_1_aic_only": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_AIC_ONLY", split_mode=4, sync_all=True, variant="dynamic"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_AIC_ONLY", split_mode=4, sync_all=True, variant="dynamic"
+        ),
     },
     "test_sk_2_stream_4_ops_remove_crossed_cub_to_vec": {
-        "pows": SubKernelSpec("KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"),
+        "pows": SubKernelSpec(
+            "KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"
+        ),
     },
     "test_sk_2_stream_4_ops_remove_crossed_vec_to_cub": {
-        "is_inf": SubKernelSpec("KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"),
+        "is_inf": SubKernelSpec(
+            "KERNEL_TYPE_AIV_ONLY", split_mode=4, sync_all=False, variant="static"
+        ),
     },
 }
 
@@ -241,9 +293,7 @@ def render_sub_kernel_json(kernel: str, spec: SubKernelSpec, bin_path: Path) -> 
     for index in range(1, SPLIT_MEMBER_COUNT + 1):
         obj_files[f"obj_files_split{index}"] = str(bin_path)[:-2] + f"_split{index}.o"
 
-    kernel_names = {
-        key: dict(obj_files) for key in KERNEL_NAME_KEYS[spec.kernel_type]
-    }
+    kernel_names = {key: dict(obj_files) for key in KERNEL_NAME_KEYS[spec.kernel_type]}
     if spec.variant == "dynamic":
         # Dynamic sub-kernels carry the symbol names used by the switch function.
         kernel_names["dynamic_func_names"] = {
@@ -282,36 +332,36 @@ def _build_elf(text_size: int) -> bytes:
     header = struct.pack(
         _ELF_HEADER_FORMAT,
         b"\x7fELF\x02\x01\x01" + b"\0" * 9,  # e_ident
-        1,                                    # e_type: ET_REL
-        ELF_MACHINE,                          # e_machine
-        1,                                    # e_version
-        0,                                    # e_entry
-        0,                                    # e_phoff
-        section_header_offset,                # e_shoff
-        0,                                    # e_flags
-        _ELF_HEADER_SIZE,                     # e_ehsize
-        0,                                    # e_phentsize
-        0,                                    # e_phnum
-        _SECTION_HEADER_SIZE,                 # e_shentsize
-        3,                                    # e_shnum: null + .text + .shstrtab
-        2,                                    # e_shstrndx
+        1,  # e_type: ET_REL
+        ELF_MACHINE,  # e_machine
+        1,  # e_version
+        0,  # e_entry
+        0,  # e_phoff
+        section_header_offset,  # e_shoff
+        0,  # e_flags
+        _ELF_HEADER_SIZE,  # e_ehsize
+        0,  # e_phentsize
+        0,  # e_phnum
+        _SECTION_HEADER_SIZE,  # e_shentsize
+        3,  # e_shnum: null + .text + .shstrtab
+        2,  # e_shstrndx
     )
     text_section = struct.pack(
         _SECTION_HEADER_FORMAT,
-        1,                                    # sh_name: ".text"
+        1,  # sh_name: ".text"
         _SHT_PROGBITS,
         _SHF_ALLOC | _SHF_EXECINSTR,
-        0,                                    # sh_addr
+        0,  # sh_addr
         text_offset,
         text_size,
-        0,                                    # sh_link
-        0,                                    # sh_info
-        16,                                   # sh_addralign
-        0,                                    # sh_entsize
+        0,  # sh_link
+        0,  # sh_info
+        16,  # sh_addralign
+        0,  # sh_entsize
     )
     strtab_section = struct.pack(
         _SECTION_HEADER_FORMAT,
-        7,                                    # sh_name: ".shstrtab"
+        7,  # sh_name: ".shstrtab"
         _SHT_STRTAB,
         0,
         0,
