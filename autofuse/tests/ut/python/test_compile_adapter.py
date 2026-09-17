@@ -301,6 +301,86 @@ def test_execute_compile_merges_host_files_with_marker(compile_adapter_module, t
     )
 
 
+def _make_many_split_host_impl(seg_count):
+    """Build host_impl with one header segment and seg_count cpp segments."""
+    lines = [
+        "// AUTOFUSE_SPLIT_FILE_BEGIN: TilingHead",
+        "struct CommonType {};",
+        "// AUTOFUSE_SPLIT_FILE_END: TilingHead",
+    ]
+    for i in range(seg_count):
+        lines.append(
+            f"// AUTOFUSE_SPLIT_FILE_BEGIN: asc_graph{i}_schedule_result{i}_g0"
+        )
+        lines.append('#include "autofuse_tiling_func_common.h"')
+        lines.append(f'extern "C" int TilingFunc{i}() {{ return {i}; }}')
+        lines.append(f"// AUTOFUSE_SPLIT_FILE_END: asc_graph{i}_schedule_result{i}_g0")
+    return "\n".join(lines)
+
+
+def test_execute_compile_splits_host_files_when_above_threshold(
+    compile_adapter_module, tmpdir
+):
+    captured = {}
+
+    def fake_main(args):
+        captured["args"] = args
+
+    compile_adapter_module.ascendc_compile.main = fake_main
+    threshold = compile_adapter_module.HOST_SPLIT_COMPILE_THRESHOLD
+    host_impl = _make_many_split_host_impl(threshold)
+    args = _host_compile_args(tmpdir)
+
+    compile_adapter_module.execute_compile(
+        {
+            "tiling_struct_code": "struct AutofuseTilingData {};",
+            "host_impl_code": host_impl,
+            "kernel_impl_code": None,
+        },
+        args,
+    )
+
+    host_dir = os.path.join(str(tmpdir), "host")
+    host_files = captured["args"].host_files
+    # >= threshold: keep split files instead of merging into one cpp.
+    assert isinstance(host_files, list)
+    assert len(host_files) == threshold
+    for source_file in host_files:
+        assert os.path.exists(source_file)
+    # the merged single file must NOT exist in the split path.
+    assert not os.path.exists(os.path.join(host_dir, "graph_tiling_func.cpp"))
+
+
+def test_execute_compile_merges_host_files_when_below_threshold(
+    compile_adapter_module, tmpdir
+):
+    captured = {}
+
+    def fake_main(args):
+        captured["args"] = args
+
+    compile_adapter_module.ascendc_compile.main = fake_main
+    threshold = compile_adapter_module.HOST_SPLIT_COMPILE_THRESHOLD
+    # one fewer segment than the threshold still merges.
+    host_impl = _make_many_split_host_impl(threshold - 1)
+    args = _host_compile_args(tmpdir)
+
+    compile_adapter_module.execute_compile(
+        {
+            "tiling_struct_code": "struct AutofuseTilingData {};",
+            "host_impl_code": host_impl,
+            "kernel_impl_code": None,
+        },
+        args,
+    )
+
+    host_dir = os.path.join(str(tmpdir), "host")
+    host_files = captured["args"].host_files
+    assert isinstance(host_files, str)
+    assert host_files == os.path.join(host_dir, "graph_tiling_func.cpp")
+    assert os.path.exists(host_files)
+
+
 def test_write_split_host_sources_writes_split_headers_without_injecting_common(
     tmpdir, compile_adapter_module
 ):

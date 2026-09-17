@@ -24,6 +24,7 @@ import platform
 import tempfile
 import uuid
 from contextlib import contextmanager, nullcontext
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 import time
 from dataclasses import dataclass
@@ -839,10 +840,22 @@ def compile_host_objs(args: argparse.Namespace, temp_dir, pch_path=None):
     if not host_files:
         return []
     pch_state = {"path": pch_path, "lock": Lock()}
-    return [
-        compile_host_obj_file(args, temp_dir, source_file, pch_state)
-        for source_file in host_files
-    ]
+    if len(host_files) == 1:
+        return [compile_host_obj_file(args, temp_dir, host_files[0], pch_state)]
+
+    obj_files = [None] * len(host_files)
+    worker_count = get_host_compile_worker_count(len(host_files))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_index = {
+            executor.submit(
+                compile_host_obj_file, args, temp_dir, source_file, pch_state
+            ): index
+            for index, source_file in enumerate(host_files)
+        }
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            obj_files[index] = future.result()
+    return obj_files
 
 
 @inductor_compile_duration("CompileHostObj")

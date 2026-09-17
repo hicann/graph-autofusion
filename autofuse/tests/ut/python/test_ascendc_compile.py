@@ -1218,6 +1218,30 @@ def test_build_host_compile_cmd_uses_bisheng_without_cmake(ascendc_compile_modul
     assert "make" not in cmd
 
 
+def test_compile_host_objs_compiles_single_file_serially(
+    ascendc_compile_module, monkeypatch
+):
+    compiled = []
+    host_files = ["/tmp/build/host/graph_tiling_func.cpp"]
+
+    monkeypatch.setattr(
+        ascendc_compile_module.module,
+        "prepare_shared_cv_wrapper",
+        lambda args, temp_dir, files: host_files,
+    )
+    monkeypatch.setattr(
+        ascendc_compile_module.module,
+        "compile_host_obj_file",
+        lambda args, temp_dir, source_file, pch_state: compiled.append(source_file)
+        or source_file + ".o",
+    )
+
+    args = _make_compile_args(host_files[0])
+    result = ascendc_compile_module.compile_host_objs(args, "/tmp/build")
+    assert compiled == host_files
+    assert result == [host_files[0] + ".o"]
+
+
 def test_build_pch_command_uses_cpp17(ascendc_compile_module):
     args = _make_compile_args("/tmp/build/host/graph_tiling_func.cpp")
 
