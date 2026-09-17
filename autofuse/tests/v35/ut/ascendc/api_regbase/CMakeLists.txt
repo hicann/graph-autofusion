@@ -14,6 +14,7 @@ add_library(test_regbase_ascendc OBJECT
     ./test_min.cpp
     ./test_where.cpp
     ./test_reduce_init.cpp
+    ./test_reduce_extend.cpp
     ./test_argmax.cpp
     ./test_add.cpp
     ./test_airy_ai.cpp
@@ -88,4 +89,5 @@ target_link_libraries(test_regbase_ascendc
 target_include_directories(test_regbase_ascendc PUBLIC
     ${CODE_ROOT_DIR}/ascendc
     ${CODE_ROOT_DIR}/v35/ascendc
+    ${ASCEND_INSTALL_PATH}/${CMAKE_SYSTEM_PROCESSOR}-linux/asc/include
 )
