@@ -46,7 +46,7 @@ AutoFuse 当前提供 PyTorch 和 TensorFlow 两种框架下的 Sample 用例，
 - [PyTorch 场景用例](./examples/pytorch/README.md)
 - [TensorFlow 场景用例](./examples/tensorflow/README.md)
 
-以下以 Pytorch 场景为例，指导如何搭建 Pytorch 环境，跑通 Pytorch场景下用例，并通过profiling数据观察最后的kernel性能。
+以下以 PyTorch 场景为例，指导如何搭建 PyTorch 环境，跑通 PyTorch场景下用例，并通过profiling数据观察最后的kernel性能。
 
 ### 安装依赖
 

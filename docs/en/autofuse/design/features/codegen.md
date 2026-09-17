@@ -420,4 +420,4 @@ This mechanism also supports kernel generation for the CV-UB fusion scenario.
 
 ## Related Links
 
-- Back to [AutoFuse Architecture Introduction](../architecture.md)
+- Back to [AutoFuse Architecture Introduction](../../introduction/architecture.md)

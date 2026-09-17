@@ -271,4 +271,4 @@ For a computation graph, there may be multiple implementation methods. Taking ta
 
 ## Related Links
 
-- Back to [AutoFuse Architecture Introduction](../architecture.md)
+- Back to [AutoFuse Architecture Introduction](../../introduction/architecture.md)

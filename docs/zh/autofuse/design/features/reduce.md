@@ -698,10 +698,10 @@ SubAxis *FindAAxis(NodeInfo &node_info) {
 
 **处理流程**：
 1. **Lowering**: Mean → StoreReduction(SUM)
-2. **CanFuse**: 全部融合为单子图
-3. **Schedule**: 选择AllLoad模板
-4. **CodeGen**: AR模式，尾轴满足32B对齐
-5. **ATT**: R轴不分核，一次性计算
+2. **CanFuse**： 全部融合为单子图
+3. **Schedule**： 选择AllLoad模板
+4. **CodeGen**： AR模式，尾轴满足32B对齐
+5. **ATT**： R轴不分核，一次性计算
 
 ### 场景2：ArgMax大R轴
 
@@ -713,12 +713,12 @@ SubAxis *FindAAxis(NodeInfo &node_info) {
 
 **处理流程**：
 1. **Lowering**: ArgMax → StoreReduction(MAX)
-2. **CanFuse**: 单子图
-3. **Schedule**: 选择RCore模板（R轴分核）
-4. **CodeGen**: 两阶段处理
+2. **CanFuse**： 单子图
+3. **Schedule**： 选择RCore模板（R轴分核）
+4. **CodeGen**： 两阶段处理
    - Phase1: 分块计算局部最大值
    - Phase2: 合并所有块的局部结果
-5. **ATT**: R轴分核tiling
+5. **ATT**： R轴分核tiling
 
 ### 场景3：Reduce + Elementwise融合
 
@@ -730,12 +730,12 @@ SubAxis *FindAAxis(NodeInfo &node_info) {
 
 **处理流程**：
 1. **Lowering**: Sum → StoreReduction(SUM)
-2. **CanFuse**: 允许向后融合Add和Mul
-3. **Schedule**: Common模板，两阶段
+2. **CanFuse**： 允许向后融合Add和Mul
+3. **Schedule**： Common模板，两阶段
    - Stage1: Sum规约 → workspace
    - Stage2: Add + Mul计算
-4. **CodeGen**: RA模式可能需要Transpose
-5. **ATT**: 需要选择最优tiling
+4. **CodeGen**： RA模式可能需要Transpose
+5. **ATT**： 需要选择最优tiling
 
 ---
 
@@ -809,3 +809,7 @@ SubAxis *FindAAxis(NodeInfo &node_info) {
 | CodeGen | `codegen/api_call/reduce/reduce_api_call_base.cpp` | `GetIsArAndPattern`, `ReduceDimACodeGen` |
 | ATT | `att/util/att_utils.cpp` | `CollectReduceAxisNames` |
 | ATT | `att/gen_model_info/expr_gen/generate_tiling_expr.cpp` | `FindAAxis` |
+
+## 相关链接
+
+- 返回 [AutoFuse 架构介绍](../../introduction/architecture.md)

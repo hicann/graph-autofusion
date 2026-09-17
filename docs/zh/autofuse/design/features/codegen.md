@@ -417,3 +417,7 @@ VfCall（主框架 ApiCall，生成函数定义与调用点）
 | `autofuse/v35/codegen/vec_func_call/` | VectorFunc 子图封装（VfCall/VFLoop） |
 | `autofuse/v35/codegen/ascendc_reg_base_api_register.cpp` | RegBase API 模板注册 |
 | `autofuse/v35/codegen/ascendc_cube_api_register.cpp` | Cube API 模板注册 |
+
+## 相关链接
+
+- 返回 [AutoFuse 架构介绍](../../introduction/architecture.md)

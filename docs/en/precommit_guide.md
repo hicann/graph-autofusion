@@ -1,5 +1,7 @@
 # pre-commit Usage Guide
 
+English | [简体中文](../zh/precommit_guide.md)
+
 [TOC]
 --
 

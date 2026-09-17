@@ -44,7 +44,7 @@ Users who want to experience the functionality and performance of AutoFuse on As
 AutoFuse currently provides sample use cases for both PyTorch and TensorFlow, with support for additional frameworks planned in the future. Refer to the corresponding documentation based on your actual use case to set up the environment and run the samples:
 
 - [PyTorch Scenario Use Cases](./examples/pytorch/README_en.md)
-- [TensorFlow Scenario Use Cases](./examples/tensorflow/README.md)
+- [TensorFlow Scenario Use Cases](./examples/tensorflow/README_en.md)
 
 The following uses a PyTorch scenario as an example to demonstrate how to set up the PyTorch environment, run the sample, and evaluate the performance of the resulting kernels using profiling data.
 

@@ -268,3 +268,7 @@ Inplace 复用后只需要 2 块内存：
 <div style="text-align: center;">
 <img src="../../figures/schedule_graph_rewrite_template.png" alt="改图模板" style="width: 35%; max-width: 800px;">
 </div>
+
+## 相关链接
+
+- 返回 [AutoFuse 架构介绍](../../introduction/architecture.md)

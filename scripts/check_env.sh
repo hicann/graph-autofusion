@@ -39,6 +39,7 @@ PASS_COUNT=0
 # build.md 原文:
 #   - Python3 >= 3.8.0
 #   - CMake >= 3.16.0 （建议使用3.20.0版本）
+#   - GCC >= 7.3.0
 #   - CANN Toolkit (必需)
 #   - CANN ops    (必需)
 #
@@ -48,6 +49,7 @@ PASS_COUNT=0
 REQUIRED_PYTHON_MIN="3.8.0"
 REQUIRED_CMAKE_MIN="3.16.0"
 REQUIRED_CMAKE_RECOMMEND="3.20.0"
+REQUIRED_GCC_MIN="7.3.0"
 
 # ==================== 工具函数 ====================
 log_pass() {
@@ -229,15 +231,20 @@ else
 fi
 
 # ==================== 4. GCC/G++ ====================
-# build.md 未明确列出 GCC, 但 CMake 编译 C++ 项目隐含需要
-print_header "4. GCC/G++ [build.md 未明确列出, CMake 编译隐含需要]"
+# build.md: GCC >= 7.3.0
+print_header "4. GCC/G++ [build.md: >= $REQUIRED_GCC_MIN]"
 
 if check_command gcc; then
     GCC_RAW=$(gcc -dumpversion)
     GCC_VER=$(extract_version "$GCC_RAW")
-    log_pass "GCC $GCC_VER (build.md 未指定版本要求)"
+    if version_ge "$GCC_VER" "$REQUIRED_GCC_MIN"; then
+        log_pass "GCC $GCC_VER (>= $REQUIRED_GCC_MIN)"
+    else
+        log_error "GCC 版本过低: $GCC_VER (build.md 要求 >= $REQUIRED_GCC_MIN)"
+        log_info "请安装 GCC >= $REQUIRED_GCC_MIN"
+    fi
 else
-    log_warn "未安装 GCC (build.md 未明确要求, 但 CMake 编译通常需要)"
+    log_error "未安装 GCC (build.md 要求 >= $REQUIRED_GCC_MIN)"
     log_info "安装 (Ubuntu): sudo apt-get install build-essential"
 fi
 
