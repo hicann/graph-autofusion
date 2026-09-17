@@ -208,16 +208,44 @@ ExpressionImplPtr ExpressionImpl::Parse(const std::string &expr_str) {
   return ret;
 }
 
-ExpressionImplPtr ExpressionImpl::Deserialize(const std::string &expr_str) {
-  auto ret = Parse(expr_str);
-  GE_WARN_ASSERT(ret != nullptr);
-  if (ret->Str() == expr_str) {
-    return ret;
-  } else {
-    GELOGW("Parse expression str %s abnormal, result is %s, please check the string is valid.", expr_str.c_str(),
-           ret->Str().c_str());
+namespace {
+// 完整解析输入串：解析失败或输入串存在未消费的残留 token（如 "a(s0)" 被截断为 "a"）均视为失败
+ExpressionImplPtr ParseWholeExpression(const std::string &expr_str) {
+  Scanner scanner(expr_str);
+  ExprParser expr_parser(scanner);
+  auto ret = expr_parser.ParserExpression();
+  if ((ret == nullptr) || !expr_parser.IsAtEnd()) {
     return nullptr;
   }
+  return ret;
+}
+}  // namespace
+
+ExpressionImplPtr ExpressionImpl::Deserialize(const std::string &expr_str) {
+  auto ret = ParseWholeExpression(expr_str);
+  if (ret == nullptr) {
+    GELOGE(FAILED, "Parse expression str %s failed or incomplete.", expr_str.c_str());
+    return nullptr;
+  }
+  const std::string reserialized = ret->Str();
+  if (reserialized == expr_str) {
+    return ret;
+  }
+  // SymEngine 表达式树是规范形：语义相同的表达式解析后得到相同的树
+  // （Add 合并同类项、交换律参数按规范化顺序排列）。因此将打印结果再次解析
+  // 并比较两棵树，即可区分"仅打印形式不同"与"语义不等价"。
+  // 背景：SymEngine 规范打印会重排负系数 Add 项、交换交换律算子参数，合法的
+  // 序列化串（如 guard）曾因字节不等被拒，返回 nullptr 后上层 guard 集合
+  // 比较器解引用空指针断言崩溃。
+  const auto reparsed = ParseWholeExpression(reserialized);
+  if ((reparsed != nullptr) && (ret->Compare(*reparsed) == 0)) {
+    GELOGW("Parse expression str %s abnormal, reserialized to %s, they are semantically equal, accepted.",
+           expr_str.c_str(), reserialized.c_str());
+    return ret;
+  }
+  GELOGE(FAILED, "Parse expression str %s abnormal, reserialized to %s, they are not semantically equal.",
+         expr_str.c_str(), reserialized.c_str());
+  return nullptr;
 }
 
 ExpressionImplPtr ExpressionImpl::Replace(const std::map<ExpressionImpl *, ExpressionImpl *> &replace_vars) const {
@@ -678,6 +706,13 @@ ExpressionImplPtr Pow(const ExpressionImplPtr &a, const ExpressionImplPtr &b) {
   GE_ASSERT_TRUE(!a->sym_expr_.is_null());
   GE_ASSERT_TRUE(!b->sym_expr_.is_null());
   SymEngineExprPtr sym_expr = SymEngine::pow(a->sym_expr_, b->sym_expr_);
+  return ExpressionImpl::CreateExpressionImpl<const SymEngineExprPtr &>(sym_expr);
+}
+
+ExpressionImplPtr Exp(const ExpressionImplPtr &a) {
+  GE_ASSERT_NOTNULL(a);
+  GE_ASSERT_TRUE(!a->sym_expr_.is_null());
+  SymEngineExprPtr sym_expr = SymEngine::pow(SymEngine::E, a->sym_expr_);
   return ExpressionImpl::CreateExpressionImpl<const SymEngineExprPtr &>(sym_expr);
 }
 

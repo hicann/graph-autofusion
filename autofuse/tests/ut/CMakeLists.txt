@@ -7,6 +7,7 @@ add_subdirectory(py_module)
 add_subdirectory(e2e)
 add_subdirectory(common)
 add_subdirectory(ascir)
+add_subdirectory(${CODE_ROOT_DIR}/tests/graph_metadef/ut/expression ${CMAKE_CURRENT_BINARY_DIR}/graph_metadef_expression)
 find_program(PYTEST_EXECUTABLE pytest)
 
 if(PYTEST_EXECUTABLE)
