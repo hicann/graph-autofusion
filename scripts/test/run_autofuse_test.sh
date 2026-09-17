@@ -733,7 +733,6 @@ build_backend() {
   cmake $CMAKE_ARGS ../
 
   # st用例可执行文件的列表，inductor split_compile 仅保留 presubmit 代表用例，其余放 nightly。
-  # Temporarily exclude embedding_test and graph_hint_simd_repro because the SIMD embedding fast path has an index-stride issue.
   MAKE_TARGET_LIST="add_abs_test_e2e \
                     axpy_abs_test_e2e \
                     sub_abs_test_e2e \
@@ -845,6 +844,7 @@ build_backend() {
                           indirect_load_broadcast_inner_adjacent_simd_test_e2e_v2 \
                           indirect_load_broadcast_continuous_simd_test_e2e_v2 \
                           indirect_load_broadcast_continuous_index_simt_test_e2e_v2 \
+                          indirect_load_embedding_test_e2e_v2 \
                           indirect_load_embedding_tail_simd_e2e_v2 \
                           indirect_load_embedding_tail_simt_e2e_v2 \
                           indirect_load_embedding_aligned_simd_e2e_v2 \
@@ -855,8 +855,12 @@ build_backend() {
                           indirect_load_complex_input_broadcast_simd_test_e2e_v2 \
                           indirect_load_broadcast_cross_boundary_simt_test_e2e_v2 \
                          indirect_load_broadcast_axis_simt_test_e2e_v2 \
-                           indirect_load_broadcast_reduce_simt_fallback_test_e2e_v2 \
+                         indirect_load_broadcast_reduce_simt_fallback_test_e2e_v2 \
                          indirect_load_broadcast_retained_simt_test_e2e_v2 \
+                         indirect_load_both_transpose_simd_test_e2e_v2 \
+                         indirect_load_both_transpose_simd_fallback_test_e2e_v2 \
+                         indirect_load_both_transpose_simd_nddma_test_e2e_v2 \
+                         indirect_load_both_transpose_simt_test_e2e_v2 \
                         indirect_load_broadcast_elements_sk_test_e2e_v2 \
                         indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 \
                         indirect_load_broadcast_index_mixed_view_simt_test_e2e_v2 \
@@ -872,6 +876,8 @@ build_backend() {
                        indirect_load_rank3_axis1_input_index_outer_gap_simt_test_e2e_v2 \
                        indirect_load_rank3_axis1_torch_gather_frontend_e2e_v2 \
                        indirect_load_graph_hint_reduce_simt_test_e2e_v2 \
+                       indirect_load_graph_hint_simd_repro_e2e_v2 \
+                       indirect_load_graph_hint_embedding_slice_e2e_v2 \
                        indirect_load_embedding_reduce_simt_test_e2e_v2 \
                        indirect_load_add_il_reduce_test_e2e_v2 \
                        indirect_load_user_masked_embedding_minimal_e2e_v2 \
@@ -893,6 +899,7 @@ build_backend() {
                        indirect_load_user_fanout_post_stores_simt_e2e_v2 \
                        indirect_load_user_fanout_post_reduce_simd_e2e_v2 \
                        indirect_load_user_fanout_post_reduce_simt_e2e_v2 \
+                       indirect_load_user_fanout_side_input_simt_e2e_v2 \
                        indirect_load_user_side_input_fanout_simd_e2e_v2 \
                        indirect_load_user_side_input_fanout_simt_e2e_v2 \
                        load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \

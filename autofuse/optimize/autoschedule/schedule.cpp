@@ -629,13 +629,6 @@ Status Scheduler::InitIndirectLoadScheduleCase() {
     return af::SUCCESS;
   }
 
-  for (const af::AscNodePtr &node : graph_.GetAllNodes()) {
-    const auto role = ascgen_utils::indirect_load::GetTemplateRole(node);
-    if (role == ascgen_utils::indirect_load::TemplateRole::kStridedUbPath ||
-        role == ascgen_utils::indirect_load::TemplateRole::kSimdInputPreStridedUbPath) {
-      indirect_load_info_.aligned_strided_path.emplace_back(node);
-    }
-  }
   GE_ASSERT_NOTNULL(tiling_case_.ub_tiling_y.first);
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, indirect_load_info_.axes));
   indirect_load_info_.active = true;
@@ -772,14 +765,6 @@ Status Scheduler::DoScheduler() {
   }
   GE_ASSERT_SUCCESS(NodeCacheMarker(graph_).MarkIfNodeNeedsCache());
   GE_ASSERT_SUCCESS(AlignmentHandler::ModifyVectorizedStrides(graph_));
-  for (const af::AscNodePtr &node : indirect_load_info_.aligned_strided_path) {
-    for (const auto &output : node->outputs()) {
-      if (!output->attr.vectorized_axis.empty()) {
-        GE_ASSERT_SUCCESS(
-            BaseAlignmentStrategy::SetVectorizedStridesForTensor(node, output->attr, AlignmentType::kAligned));
-      }
-    }
-  }
   ascir::utils::DumpGraph(graph_, "AfterDoTiling");
   return af::SUCCESS;
 }

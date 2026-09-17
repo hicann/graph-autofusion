@@ -343,6 +343,35 @@ mark_indirect_load_codegen_and_e2e(indirect_load_broadcast_retained_simd_test IL
 add_indirect_load_broadcast_test(indirect_load_broadcast_retained_simt_test simt 0 0 10 0 0 0 0)
 mark_indirect_load_codegen_and_e2e(indirect_load_broadcast_retained_simt_test IL_RETAIN_BROADCAST=1)
 
+# Retain the two-input Transpose baseline. The other existing targets below compose input Transpose,
+# Broadcast, a plain index, and an output-side broadcast Load without increasing the target count.
+add_indirect_load_broadcast_test(indirect_load_both_transpose_simd_test simd 0 0 0 0 0 0 0)
+mark_indirect_load_static_shape(indirect_load_both_transpose_simd_test)
+mark_indirect_load_codegen_and_e2e(indirect_load_both_transpose_simd_test
+                                   IL_BOTH_TRANSPOSE=1 IL_OUTPUT_S0=2 IL_OUTPUT_S1=2 IL_OUTPUT_S2=1 IL_OUTPUT_S3=4)
+
+# Exercise both SIMD tiling cases explicitly. Mixed cases transpose across the gather axis, broadcast
+# the singleton suffix, and add a column-only GM bias; non-square shapes and non-symmetric data expose
+# both permutation mistakes and output-linear offsets incorrectly used for the broadcast side input.
+add_indirect_load_broadcast_test(indirect_load_both_transpose_simd_fallback_test simd 0 0 8 0 0 1 0)
+mark_indirect_load_static_shape(indirect_load_both_transpose_simd_fallback_test)
+mark_indirect_load_codegen_and_e2e(indirect_load_both_transpose_simd_fallback_test
+                                   IL_INPUT_TRANSPOSE=1 IL_OUTPUT_BROADCAST_ADD=1 IL_FORCE_TILING_CASE=0
+                                   IL_OUTPUT_S0=2 IL_OUTPUT_S1=3 IL_OUTPUT_S2=4 IL_OUTPUT_S3=32)
+mark_indirect_load_red(indirect_load_both_transpose_simd_fallback_test)
+
+add_indirect_load_broadcast_test(indirect_load_both_transpose_simd_nddma_test simd 0 0 8 0 0 1 0)
+mark_indirect_load_static_shape(indirect_load_both_transpose_simd_nddma_test)
+mark_indirect_load_codegen_and_e2e(indirect_load_both_transpose_simd_nddma_test
+                                   IL_INPUT_TRANSPOSE=1 IL_OUTPUT_BROADCAST_ADD=1 IL_FORCE_TILING_CASE=1
+                                   IL_OUTPUT_S0=2 IL_OUTPUT_S1=3 IL_OUTPUT_S2=4 IL_OUTPUT_S3=32)
+
+add_indirect_load_broadcast_test(indirect_load_both_transpose_simt_test simt 0 0 8 0 0 1 0)
+mark_indirect_load_static_shape(indirect_load_both_transpose_simt_test)
+mark_indirect_load_codegen_and_e2e(indirect_load_both_transpose_simt_test
+                                   IL_INPUT_TRANSPOSE=1 IL_OUTPUT_BROADCAST_ADD=1
+                                   IL_OUTPUT_S0=2 IL_OUTPUT_S1=3 IL_OUTPUT_S2=4 IL_OUTPUT_S3=32)
+
 # Keep one SK Broadcast regression outside the SIMD/SIMT matrix.
 add_indirect_load_broadcast_test(indirect_load_broadcast_elements_sk_test sk 2 2 3 0 0)
 add_indirect_load_broadcast_test(indirect_load_broadcast_index_physical_view_simt_test simt 2 2 3 0 0)
@@ -416,6 +445,11 @@ do_backend_e2e_st_test(indirect_load_graph_hint_simd_repro
     TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
 mark_indirect_load_codegen_and_e2e(indirect_load_graph_hint_simd_repro
                                    IL_CASE_BROADCAST_WHERE IL_GRAPH_HINT_SIMD_REPRO)
+
+# Exact reproduction of the user-provided embedding slice GraphHint.
+add_indirect_load_graph_case(indirect_load_graph_hint_embedding_slice
+    indirect_load_graph_hint_embedding_slice 0
+    IL_CASE_BROADCAST_WHERE IL_GRAPH_HINT_EMBEDDING_SLICE)
 
 # Minimal SIMT reproducer: a partially zero-stride mask view is enough to trigger the bad evaluator offset.
 add_indirect_load_graph_case(indirect_load_user_masked_embedding_minimal
@@ -491,6 +525,10 @@ add_indirect_load_user_fanout_case(indirect_load_user_fanout_post_reduce_simd
                                    IL_USER_FANOUT_SIMD IL_USER_FANOUT_POST IL_USER_FANOUT_REDUCE)
 add_indirect_load_user_fanout_case(indirect_load_user_fanout_post_reduce_simt
                                    IL_USER_FANOUT_POST IL_USER_FANOUT_REDUCE)
+
+# Regression: two GM output chains, with one chain reading a broadcast GM side input.
+add_indirect_load_graph_case(indirect_load_user_fanout_side_input_simt
+    indirect_load_user_fanout_side_input 1 IL_USER_FANOUT_SIDE_INPUT)
 
 # Minimal red regression: a post-IndirectLoad fanout Add consumes an independent Load side input.
 add_indirect_load_graph_case(indirect_load_user_side_input_fanout_simd
