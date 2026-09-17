@@ -364,7 +364,7 @@ void SuperKernelExceptionHandler::PrintDfxInfo() const {
           dfxInfo[i].cubeNum, dfxInfo[i].vecNum);
       if (funcNodeIndices_.count(i) > 0) {
         aclrtFuncHandle funcHdl = reinterpret_cast<aclrtFuncHandle>(dfxInfo[i].funcHdlOri);
-        char funcName[256] = {0};
+        char funcName[MAX_FUNC_NAME_LEN] = {0};
         aclError ret = aclrtGetFunctionName(funcHdl, sizeof(funcName), funcName);
         if (ret == ACL_SUCCESS) {
           SK_LOGE("    Origin function name: %s", funcName);
@@ -524,7 +524,7 @@ KernelFuncName SuperKernelExceptionHandler::GetOrLoadKernelSymbols(uint32_t opId
   aclrtFuncHandle funcHdl = reinterpret_cast<aclrtFuncHandle>(dfxInfo[opId].funcHdlOri);
   SK_LOGI("Loading function name for opId=%u, funcHdl=%p", opId, funcHdl);
 
-  char funcName[256] = {0};
+  char funcName[MAX_FUNC_NAME_LEN] = {0};
   constexpr uint32_t maxLen = sizeof(funcName);
   aclError ret = aclrtGetFunctionName(funcHdl, maxLen, funcName);
   if (ret != ACL_SUCCESS) {
@@ -572,7 +572,7 @@ void SuperKernelExceptionHandler::PrintFuncSymbolInfo(uint32_t coreId, rtCoreTyp
 
   // Print origin function name from funcHdlOri
   aclrtFuncHandle funcHdl = reinterpret_cast<aclrtFuncHandle>(dfxNode.funcHdlOri);
-  char funcName[256] = {0};
+  char funcName[MAX_FUNC_NAME_LEN] = {0};
   aclError ret = aclrtGetFunctionName(funcHdl, sizeof(funcName), funcName);
   if (ret == ACL_SUCCESS) {
     SK_LOGE("[Core %u] Origin function name: %s", coreId, funcName);
@@ -857,7 +857,6 @@ aclError SuperKernelExceptionHandler::CheckError(aclError ret, const char *error
 }
 
 bool SuperKernelExceptionHandler::IsSuperKernelException(aclrtExceptionInfo *exceptionInfo) {
-  constexpr uint32_t MAX_FUNC_NAME_LEN = 256;
   char funcName[MAX_FUNC_NAME_LEN] = {0};
 
   // Get exception function handle
@@ -929,7 +928,7 @@ aclError SuperKernelExceptionHandler::PrepareExceptionDump(aclrtExceptionInfo *e
  */
 aclError SuperKernelExceptionHandler::PopulateSkEntryFields(Adx::ExceptionDumpInfo &dumpInfo,
                                                             aclrtExceptionInfo *exceptionInfo) {
-  char skFuncName[Adx::MAX_KERNELNAME_LEN] = {0};
+  char skFuncName[MAX_FUNC_NAME_LEN] = {0};
   aclrtFuncHandle funcHandle = nullptr;
 
   aclError ret = aclrtGetFuncHandleFromExceptionInfo(exceptionInfo, &funcHandle);
@@ -938,7 +937,7 @@ aclError SuperKernelExceptionHandler::PopulateSkEntryFields(Adx::ExceptionDumpIn
     return ACL_ERROR_FAILURE;
   }
 
-  ret = aclrtGetFunctionName(funcHandle, Adx::MAX_KERNELNAME_LEN, skFuncName);
+  ret = aclrtGetFunctionName(funcHandle, MAX_FUNC_NAME_LEN, skFuncName);
   if (ret != ACL_SUCCESS) {
     SK_LOGE("Failed to get function name, ret=%d", ret);
     return ACL_ERROR_FAILURE;
@@ -995,7 +994,6 @@ bool SuperKernelExceptionHandler::PopulateSubKernelFields(Adx::ExceptionDumpInfo
                                                           aclrtExceptionInfo *exceptionInfo) {
   if (errorNodeIdx < 0 || static_cast<uint32_t>(errorNodeIdx) >= skHeaderInfoHost->nodeCnt) {
     SK_LOGI("No sub kernel matched, fill with SK entry fields");
-    constexpr uint32_t MAX_FUNC_NAME_LEN = 256;
     char funcName[MAX_FUNC_NAME_LEN] = {0};
 
     // Get SK entry func handle from exception info

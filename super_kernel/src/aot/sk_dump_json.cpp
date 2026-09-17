@@ -218,7 +218,7 @@ Json SkTaskToJson(const SkTask &task) {
  * @brief Add basic kernel parameters to JSON
  */
 static void AddBasicKernelParams(Json &kernelParamsJson, const aclmdlRIKernelTaskParams &kernelParams) {
-  char funcName[256] = {0};
+  char funcName[MAX_FUNC_NAME_LEN] = {0};
   if (aclrtGetFunctionName(kernelParams.funcHandle, sizeof(funcName), funcName) == ACL_SUCCESS) {
     kernelParamsJson["funcName"] = std::string(funcName);
   }
