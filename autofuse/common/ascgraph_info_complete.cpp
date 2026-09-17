@@ -42,6 +42,17 @@ void InsertFreeSymbolsIntoVarSet(const af::Expression &exp, SizeVarSet &size_var
   size_vars.insert(free_symbols.begin(), free_symbols.end());
 }
 
+static void InsertIrAttrFreeSymbols(const af::NodePtr &node, const char *attr_name, SizeVarSet &size_vars) {
+  auto asc_node = std::dynamic_pointer_cast<af::AscNode>(node);
+  if (asc_node == nullptr || asc_node->attr.ir_attr == nullptr) {
+    return;
+  }
+  af::Expression expr;
+  if (asc_node->attr.ir_attr->GetAttrValue(attr_name, expr) == af::GRAPH_SUCCESS) {
+    InsertFreeSymbolsIntoVarSet(expr, size_vars);
+  }
+}
+
 bool ParseKsIndex(const std::string &name, uint64_t &index) {
   if (name.size() <= 2U || name[0] != 'k' || name[1] != 's') {
     return false;
@@ -271,6 +282,18 @@ void AscGraphInfoComplete::AppendOriginalSizeVar(const af::AscGraph &graph, Size
   }
   auto all_nodes = graph.GetAllNodes();
   for (const auto &node : all_nodes) {
+    // scalar-like 值生产节点（IndexExpr/Arange）无输出视图，其 IR 属性表达式引用的动态符号
+    // 只能从节点属性收集；AutoScheduler 会清空 size var 后仅凭本函数重建，漏扫会使
+    // tiling data 缺字段、设备代码裸印符号（use of undeclared identifier）。
+    if (af::ops::IsOps<IndexExpr>(node)) {
+      InsertIrAttrFreeSymbols(node, "expr", size_vars);
+      continue;
+    }
+    if (af::ops::IsOps<Arange>(node)) {
+      InsertIrAttrFreeSymbols(node, "base", size_vars);
+      InsertIrAttrFreeSymbols(node, "step", size_vars);
+      continue;
+    }
     if (!af::ops::IsOps<Nddma>(node) && !af::ops::IsOps<Store>(node) && !af::ops::IsOps<Load>(node) &&
         !af::ops::IsOps<Gather>(node)) {
       continue;
