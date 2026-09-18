@@ -29,7 +29,7 @@ Graph-autofusion 是一个面向昇腾（Ascend）芯片的轻量级、解耦式
 
 如果希望了解 Graph-autofusion 架构、模块功能、Skills等，可参考以下文档：
 
-- [AutoFuse 架构说明](docs/zh/autofuse/design/architecture.md)：介绍 AutoFuse 的整体架构、关键技术方案、处理流程和模块职责。
+- [AutoFuse 架构说明](docs/zh/autofuse/introduction/architecture.md)：介绍 AutoFuse 的整体架构、关键技术方案、处理流程和模块职责。
 - [贡献指南](CONTRIBUTING.md)：说明如何参与项目贡献、提交 Issue 和 Pull Request。
 - [Skills 管理指南](docs/zh/opencode-skill-management.md)：介绍仓内默认使用的 Skills 及其管理方式。
 - [Skill 复用指南](docs/zh/skill-reuse-guide.md)：介绍如何复用 Skill，并使用 Agent 辅助代码阅读、开发和问题定位。
@@ -53,9 +53,12 @@ graph-autofusion/
 │   ├── zh                                    # 中文文档
 │   │   ├── build.md                          # 一键式构建脚本文档
 │   │   └── ...                               # 其他中文文档
-│   └── en                                    # 英文文档
+│   ├── en                                    # 英文文档
 │       ├── build.md                          # 一键式构建脚本文档
 │       └── ...                               # 其他英文文档
+│   ├── env_install                           # 环境安装文档
+│   ├── figures                               # 文档图片资源
+│   └── guidelines                            # 开发规范文档
 ├── scripts                                   # 构建、环境安装和测试脚本
 │   ├── env_install                           # 环境安装脚本
 │   ├── package                               # 打包脚本
@@ -63,6 +66,7 @@ graph-autofusion/
 │   ├── check_env.sh                          # 环境检查脚本
 │   ├── init_env.sh                           # 环境初始化脚本
 │   ├── oat_check.sh                          # OAT 合规性检查脚本
+│   ├── reject_forbidden_paths.sh             # 禁止路径提交检查脚本
 │   └── support_multiple_versions_of_lcov.sh  # 多版本 lcov 兼容脚本
 ├── super_kernel                              # SuperKernel 组件，SuperKernel 源代码、测试、文档均在该子目录中
 ├── README.md                                 # graph-autofusion 项目整体功能介绍

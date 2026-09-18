@@ -48,7 +48,7 @@ graphStatus ListValueSerializer::Serialize(const AnyValue &av, GeIrAttrDef &def)
 
   const auto iter = type_serializer_map.find(av.GetValueType());
   if (iter == type_serializer_map.end()) {
-    GELOGE(GRAPH_FAILED, "Value type [%d] not support.", static_cast<int32_t>(av.GetValueType()));
+    GELOGE(GRAPH_FAILED, "Value type [%d] is not supported.", static_cast<int32_t>(av.GetValueType()));
     return GRAPH_FAILED;
   }
   return iter->second(av, def);
@@ -70,7 +70,7 @@ graphStatus ListValueSerializer::Deserialize(const GeIrAttrDef &def, AnyValue &a
 
   const auto iter = type_deserializer_map.find(def.list().val_type());
   if (iter == type_deserializer_map.end()) {
-    GELOGE(GRAPH_FAILED, "Value type [%d] not support.", static_cast<int32_t>(def.list().val_type()));
+    GELOGE(GRAPH_FAILED, "Value type [%d] is not supported.", static_cast<int32_t>(def.list().val_type()));
     return GRAPH_FAILED;
   }
   return iter->second(def, av);

@@ -137,7 +137,7 @@ af::Status VfPerfUtils::AddVfInstructPerf(const std::string &vf_instruct_type, c
   GELOGD("Begin to add perf of vf instruct [%s].", vf_instruct_type.c_str());
   for (const auto &api_perf : api_perf_table) {
     if (std::count(api_perf.support_data_types.begin(), api_perf.support_data_types.end(), data_type) > 0) {
-      GELOGD("Found perf of vf instruct [%s]: latency is {%d}, throughput is {%d}, repeat_time is [%s].",
+      GELOGD("Found perf of vf instruct [%s]: latency is {%d} cycles, throughput is {%d} cycles, repeat_time is [%s].",
              vf_instruct_type.c_str(), api_perf.latency, api_perf.throughput,
              af::SymbolicUtils::ToString(repeat_time).c_str());
       latency = af::sym::Max(CreateExpr(api_perf.latency), latency);

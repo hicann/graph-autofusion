@@ -16,6 +16,15 @@ import time
 from typing import List
 from autofuse import ascendc_compile
 import re
+import tbe.common.utils.log as logger
+
+
+def _log_warning(message, *args):
+    warning = getattr(logger, "warning", None)
+    if warning is None:
+        warning = getattr(logger, "warn")
+    warning(message, *args)
+
 
 HOST_DEFAULT_CXX11_ABI = "-D_GLIBCXX_USE_CXX11_ABI=1"
 HOST_CXX11_ABI_PREFIX = "-D_GLIBCXX_USE_CXX11_ABI="
@@ -50,6 +59,9 @@ HISTORICAL_SPLIT_DISCRIMINATOR_KEYS = {
 SPLIT_PGO_RUNNER_KEY = "PgoRunner"
 SPLIT_PGO_DEVICE_SOURCE_KEY = "PgoDeviceSource"
 CANN_ROOT_ENV_NAMES = ("ASCEND_TOOLKIT_HOME", "ASCEND_HOME_PATH", "ASCEND_HOME")
+# 当 host 拆分后的 cpp 段数量达到该阈值时，保留多文件拆分并并发编译，
+# 否则合并为单个 cpp 文件串行编译（默认路径）。
+HOST_SPLIT_COMPILE_THRESHOLD = 10
 
 
 def str2bool(v):
@@ -130,7 +142,7 @@ def parse_compile_args(argv):
     # 使用 parse_known_args 容忍上层透传的未声明参数，避免触发 SystemExit 终止编译。
     args, unknown = parser.parse_known_args(argv)
     if unknown:
-        print(f"[CompileArgs] ignored unrecognized arguments: {unknown}")
+        logger.info("[CompileArgs] ignored unrecognized arguments: %s", unknown)
     return args
 
 
@@ -356,8 +368,13 @@ def write_merged_host_sources(host_file_path, base_host_file, host_impl_code):
 
 
 def write_host_sources(host_file_path, base_host_file, graph_name, host_impl_code):
-    # host 编译为单个 cpp 源文件（cpp 段合并），header 段拆出独立 .h 供 include 引用。
-    # 多文件拆分逻辑保留在 write_split_host_sources 中备用，但当前不调用。
+    # host 编译默认合并为单个 cpp 源文件（cpp 段合并），header 段拆出独立 .h 供 include 引用。
+    # 当拆分后的 cpp 段数量较多（>= HOST_SPLIT_COMPILE_THRESHOLD）时，保留多文件拆分，
+    # 交由 compile_host_objs 并发编译，缩短整体 host 编译耗时。
+    if has_split_host_marker(host_impl_code):
+        _, cpp_sources = parse_split_host_sources(host_impl_code)
+        if len(cpp_sources) >= HOST_SPLIT_COMPILE_THRESHOLD:
+            return write_split_host_sources(host_file_path, graph_name, host_impl_code)
     return write_merged_host_sources(host_file_path, base_host_file, host_impl_code)
 
 
@@ -481,7 +498,7 @@ def write_compile_host_sources(sources, args, tiling_def_file, base_host_file):
     )
     args.pgo_mspti_config = get_inductor_pgo_mspti_config()
     if args.pgo_mspti_config is None:
-        print("[PGO] MSPTI is unavailable, skip Inductor PGO sidecars")
+        _log_warning("[PGO] MSPTI is unavailable, skip Inductor PGO sidecars")
 
 
 def write_compile_device_sources(sources, args, tiling_def_file, base_device_file):

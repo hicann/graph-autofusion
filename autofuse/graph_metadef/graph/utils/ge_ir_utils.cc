@@ -100,7 +100,7 @@ onnx::TensorProto_DataType OnnxUtils::EncodeDataType(const DataType data_type) {
   if (it != kGeDataTypeToOnnxMap.end()) {
     return it->second;
   } else {
-    GELOGW("[Encode][DataType] Datatype %u not support", data_type);
+    GELOGW("[Encode][DataType] Datatype %u is not supported", data_type);
     return onnx::TensorProto_DataType_UNDEFINED;
   }
 }

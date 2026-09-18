@@ -1306,7 +1306,7 @@ bool PGOGetTilingKey(const char *config_file_path, AutofuseTilingData &tiling_da
   if (best_config == 0) {
     std::ifstream config_file(config_file_path);
     if (!config_file.is_open()) {
-      OP_LOGD(OP_NAME, "failed to open or not exist: %s.", config_file_path);
+      OP_LOGD(OP_NAME, "failed to open or does not exist: %s.", config_file_path);
       return false;
     }
     OP_LOGD(OP_NAME, "[Start to use tiling result]: %s.", config_file_path);

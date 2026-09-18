@@ -41,7 +41,7 @@ af::Status FillUnaryBitWidthChangeNodeParams(const af::AscNodePtr &node, const A
     params->specific_params = ascir_param::UnaryBitWidthChangeNodeParams{};
     unary_params = std::get_if<ascir_param::UnaryBitWidthChangeNodeParams>(&params->specific_params);
   }
-  GE_ASSERT_NOTNULL(unary_params, "Unary bitwidth change specific params is null, node[%s].", node->GetNamePtr());
+  GE_ASSERT_NOTNULL(unary_params, "Unary bitwidth change specific params are null, node[%s].", node->GetNamePtr());
   params->api_name = node->GetType();
   params->status = ascir_param::ParamBuildStatus::kBuilt;
 

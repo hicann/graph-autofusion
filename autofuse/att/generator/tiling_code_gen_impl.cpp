@@ -1209,7 +1209,7 @@ bool TilingCodeGenImpl::HitSmallShapePattern(ArgsManager &args_manager) const {
       (hardware_cons.find(HardwareDef::L0A) != hardware_cons.end()) ||
       (hardware_cons.find(HardwareDef::L0B) != hardware_cons.end()) ||
       (hardware_cons.find(HardwareDef::L0C) != hardware_cons.end())) {
-    GELOGD("HitSmallShapePattern: not support this case");
+    GELOGD("HitSmallShapePattern: does not support this case");
     return false;
   }
   // 如果ub相关变量的原始轴和多核相关变量的原始轴不一致，那么不做优化

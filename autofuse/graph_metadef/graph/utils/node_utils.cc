@@ -319,7 +319,7 @@ GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY bool NodeUtils::ClearInputDesc(co
   if (iter < op_desc->impl_->inputs_desc_.end()) {
     (void)op_desc->impl_->inputs_desc_.erase(iter);
   } else {
-    GELOGW("[Clear][InputDesc] inputs_desc_ iterator out of range.");
+    GELOGW("[Clear][InputDesc] index %u is out of range [0, %zu).", index, op_desc->impl_->inputs_desc_.size());
   }
   return true;
 }
@@ -338,7 +338,7 @@ GE_FUNC_DEV_VISIBILITY GE_FUNC_HOST_VISIBILITY bool NodeUtils::ClearOutputDesc(c
   if (iter < op_desc->impl_->outputs_desc_.end()) {
     (void)op_desc->impl_->outputs_desc_.erase(iter);
   } else {
-    GELOGW("[Clear][OutputDesc] outputs_desc_ iterator out of range.");
+    GELOGW("[Clear][OutputDesc] index %u is out of range [0, %zu).", index, op_desc->impl_->outputs_desc_.size());
   }
   return true;
 }
@@ -1141,7 +1141,7 @@ graphStatus NodeUtils::GetInNodeCrossPartionedCallNode(const NodePtr &node, uint
         return GRAPH_SUCCESS;
       }
       // other subgraph(if,while,case) currently not support, return node and warn
-      GELOGW("Node [%s] type [%s], real peer in node [%s] type[%s] has subgraph. Current not support.",
+      GELOGW("Node [%s] type [%s], real peer in node [%s] type[%s] has subgraph. Current operation is not supported.",
              node->GetName().c_str(), node->GetType().c_str(), peer_node->GetName().c_str(),
              peer_node->GetType().c_str());
 

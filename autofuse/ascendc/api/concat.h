@@ -720,11 +720,11 @@ inline __aicore__ void ConcatExtend(const ConcatParams<T, dimSize> &dst, const C
   }
   ASSERT(((sizeof(T) == kOneByte) || (sizeof(T) == kTwoBytes) || (sizeof(T) == kFourBytes) ||
           (sizeof(T) == kEightBytes)) &&
-         "ConcatExtend data type is not support.");
+         "ConcatExtend data type is not supported.");
 
   if (concatDim == 0U) {
     // 首轴concat不使用api方式实现
-    ASSERT(false && "ConcatExtend axis 0 is not support.");
+    ASSERT(false && "ConcatExtend axis 0 is not supported.");
   } else {
     ConcatParams<T, kMergedDimNum> mergedDst{};
     ConcatParams<T, kMergedDimNum> mergedSrcs[inputNum]{};

@@ -296,14 +296,14 @@ bool PluginManager::GetRequiredOppAbiVersion(std::vector<std::pair<uint32_t, uin
   } else if (mmIsDir((model_path + kRuntimePath).c_str()) == EN_OK) {
     version_path = model_path + kRuntimePath + kVersionInfo;
   } else {
-    GELOGW("compiler and runtime not exist");
+    GELOGW("compiler and runtime do not exist");
     return true;
   }
   GELOGI("extract required opp abi version info from %s", version_path.c_str());
 
   std::string version;
   if (!PluginManager::GetVersionFromPathWithName(version_path, version, kRequiredOppAbiVersion)) {
-    GELOGW("Not get required_opp_abi_version from path:%s", version_path.c_str());
+    GELOGW("Failed to get required_opp_abi_version from path:%s", version_path.c_str());
     return true;
   }
 
@@ -1060,7 +1060,7 @@ void PluginManager::GetCurEnvPackageOsAndCpuType(std::string &host_env_os, std::
   } else if (mmAccess2((model_path + kRuntimePath + kScene).c_str(), M_R_OK) == EN_OK) {
     scene = model_path + kRuntimePath + kScene;
   } else {
-    GELOGW("opp and runtime not exist");
+    GELOGW("opp and runtime do not exist");
     return;
   }
   GELOGI("extract os and cpu info from %s", scene.c_str());

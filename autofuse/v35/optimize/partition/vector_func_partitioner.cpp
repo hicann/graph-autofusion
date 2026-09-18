@@ -1214,10 +1214,12 @@ af::Status VectorFuncPartitioner::BuildSubgraph(const ClusterPtr &cluster, af::A
     auto out_anchor = iter.first;
     auto pre_node = out_anchor->GetOwnerNodeBarePtr();
     GE_ASSERT_NOTNULL(pre_node);
-    if (ScheduleUtils::IsConstantScalar(pre_node) && !af::ops::IsOps<af::ascir_op::ScalarData>(pre_node)) {
-      // 常量标量(IndexExpr/Scalar)在子图内物化为 Scalar 副本; 同时作为 VF 的值参数输入:
-      // codegen 侧 ParseInputOutputInfo 会将 const tensor 归入 scalar 参数链传递。
-      // 副本必须与 dynamic input 共享 parent 序号空间, 否则子图内 index 越界。
+    if (ScheduleUtils::IsConstantScalar(pre_node) || af::ops::IsOps<af::ascir_op::ScalarData>(pre_node)) {
+      // 常量 Scalar 与 ScalarData(运行时标量输入)在子图内都物化为 Scalar 副本, 由
+      // codegen 侧 ParseInputOutputInfo 归入 scalar 值参数链传递; 若改走 Data+Load
+      // 边界, Load 会对值参数生成 LoadAlign(非法), 且插入的 Load 节点携带
+      // ScalarData 的 sched 轴, 污染循环深度推导, 生成未声明的 mask 寄存器引用。
+      // 副本与 dynamic input 共享 parent 序号空间, 避免子图内 index 越界。
       GE_ASSERT_SUCCESS(InsertScalarNode(vf_graph, out_anchor, iter.second, parent_in_idx));
       ops.push_back(af::OpDescUtils::CreateOperatorFromNode(out_anchor->GetOwnerNode()));
       af::AscOpOutput op_out(&ops.back(), out_anchor->GetIdx());

@@ -16,9 +16,9 @@
 | **SliceDV2** | x, offsets | y | 同 Slice，但 size 作为属性 |
 | **StridedSlice** | x, begin, end, strides | y | Slice 超集，支持步进 + mask（begin_mask/end_mask/ellipsis_mask/new_axis_mask/shrink_axis_mask） |
 | **StridedSliceV2/V3** | x, begin, end, [axes], [strides] | y | StridedSlice 变体 |
-| **Split** | split_dim, x | y (动态) | 在指定轴**等分**为 N 份，`output_k[i,j] = input[k*S+i, j]` |
-| **SplitV** | x, size_splits, split_dim | y (动态) | 在指定轴**非等分**切分（每份 size 由 size_splits 指定） |
-| **SplitD** | x | y (动态) | 同 Split，但 split_dim/num_split 作为属性 |
+| **Split** | split_dim, x | y（动态） | 在指定轴**等分**为 N 份，`output_k[i,j] = input[k*S+i, j]` |
+| **SplitV** | x, size_splits, split_dim | y（动态） | 在指定轴**非等分**切分（每份 size 由 size_splits 指定） |
+| **SplitD** | x | y（动态） | 同 Split，但 split_dim/num_split 作为属性 |
 
 > GE 中的算子注册定义见 `ge-master/tests/framework/ge_running_env/include/ge_running_env/op_reg.h:304-452`。
 
@@ -296,7 +296,7 @@ i_k = start[k] + o_k × stride[k]
 
 | 阶段 | 节点状态 |
 |------|---------|
-| **BeforeAutofuse** | `x0`(Data, axis `[z0, z1=s1+s2]`) → `load0`(Load, `SetOffset(s1)` 跳过 s1 元素, strides `{s1+s2, One}` 实现步进) → `store`(Store) → `y`(Output) |
+| **BeforeAutofuse** | `x0`(Data, axis `[z0, z1=s1+s2]`) → `load0`(Load, `SetOffset(s1)` 跳过 s1 元素，strides `{s1+s2, One}` 实现步进) → `store`(Store) → `y`(Output) |
 | **AfterInferOutput** | compute_type 赋值：Load→`kComputeLoad`，Store→`kComputeStore` |
 | **AfterGetApiInfo** | API 类型：Load/Store→`kAPITypeCompute`，计算单元→`kUnitMTE2`（内存搬运引擎） |
 | **AfterScheduler** | 轴切分（`TileSplit`/`BlockSplit`/`ApplySplit`），向量化轴/步长设置，对齐到 8 元素（32B/sizeof(float)） |
@@ -739,12 +739,12 @@ REG_OP(SplitV)
 |------|---------|------------|
 | 融合决策基类 | `autofuse/inc/fusion/fusion_decider.h` | `FusionDecider`, `FusionPriority` |
 | Scheduler | `autofuse/optimize/task_generator/split_schedule_case_generator.{h,cpp}` | `SplitFusionCaseGenerator` — `FindSplitNodes`, `ResolveSplitDim`, `ConvertSplitToLoads`, `SplitSplits`, `Prepare` |
-| Codegen | `autofuse/v35/codegen/reg_api_call/split_reg_api_call.{h,cpp}` | `SplitRegApiCall`, `SplitTiling`, `SplitTilingAllAligned<N>`, `SplitAllAligned` (对齐), `GenerateDefault` → `SplitExtend` (未对齐), `IsAllAligned`, `NeedB8ToB16` |
+| Codegen | `autofuse/v35/codegen/reg_api_call/split_reg_api_call.{h,cpp}` | `SplitRegApiCall`, `SplitTiling`, `SplitTilingAllAligned<N>`, `SplitAllAligned`（对齐）, `GenerateDefault` → `SplitExtend`（未对齐）, `IsAllAligned`, `NeedB8ToB16` |
 | Split+Concat 优化 | `autofuse/v35/optimize/graph_pass/split_concat_optimization_pass.{h,cpp}` | `SplitConcatOptimizationPass` — `RunPass`, `OptimizeOutSplit`, `OptimizeOutConcat` |
 | Split 分组 | `autofuse/optimize/task_generator/split_group_partitioner.h` | `SplitGroupPartitioner`, `SplitGroup` |
 | Split 打分 | `autofuse/optimize/task_generator/split_score_function_generator.{h,cpp}` | `SplitScoreFunctionGenerator` — `Generate`, `ParseStride`, `TryGetScoreByConstExpr`, `GenerateForUnaligned`（`kMaxUnalignedRate=0.1`, `kAlignment_=32`） |
 | Split 注册 | `autofuse/ascir/reg_func/split.cpp` | Tiling 常量、对齐辅助 |
-| Split API | `autofuse/v35/ascendc/api_regbase/split.h` | Split API 注册, `SplitExtend`/`SplitExtendInner` (未对齐), `SplitAllAligned` (对齐), `SplitCopy`, `DataCopyGatherVf` |
+| Split API | `autofuse/v35/ascendc/api_regbase/split.h` | Split API 注册，`SplitExtend`/`SplitExtendInner`（未对齐）, `SplitAllAligned`（对齐）, `SplitCopy`, `DataCopyGatherVf` |
 | GE 算子注册 | `ge-master/tests/framework/ge_running_env/include/ge_running_env/op_reg.h:304-452` | `REG_OP(Slice/SliceD/StridedSlice/Split/SplitV)` |
 
 ### 7.3 已确认非 Slice/Split 专用的通用基础设施文件
@@ -770,3 +770,7 @@ REG_OP(SplitV)
 | Split + Concat | 首轴 Split + Concat 可优化掉 Concat |
 
 **核心思想**：通过带 offset 和 stride 的 load/store 实现 Slice/Split/StridedSlice（含 D 变体）的自动融合，将"物理切分"变为"逻辑映射"——后续算子直接从原大张量指定位置（offset+stride）读数，消除无意义内存搬运，使 Slice 变成"读取方式"而非"计算任务"，从而与后续算子（Add/Concat 等）合并为单一任务。
+
+## 相关链接
+
+- 返回 [AutoFuse 架构介绍](../../introduction/architecture.md)

@@ -917,7 +917,7 @@ bool UseSmallTailConcatApi(const af::AscNode &node, bool *output_need_align) {
     gcd = ascgen_utils::Gcd(gcd, src_col_size);
   }
   // 全对齐, 使用全对齐的api性能更好
-  GE_CHK_BOOL_RET_SPECIAL_STATUS(aligned_cnt == node_inputs.Size(), false, "[%s] inputs is all aligned",
+  GE_CHK_BOOL_RET_SPECIAL_STATUS(aligned_cnt == node_inputs.Size(), false, "[%s] inputs are all aligned",
                                  node.GetNamePtr());
   constexpr int64_t kSrcMaxSrcColSize = 64;
   constexpr uint32_t kMaxDstColSize = 96;  // 最大96K的tmp buffer, 只支持96
@@ -963,7 +963,7 @@ bool IsConcatAllInputsAligned(const af::AscNode &node) {
       return false;
     }
   }
-  GELOGI("[%s] All inputs is aligned", node.GetNamePtr());
+  GELOGI("[%s] All inputs are aligned", node.GetNamePtr());
   return true;
 }
 

@@ -809,3 +809,7 @@ SubAxis *FindAAxis(NodeInfo &node_info) {
 | CodeGen | `codegen/api_call/reduce/reduce_api_call_base.cpp` | `GetIsArAndPattern`, `ReduceDimACodeGen` |
 | ATT | `att/util/att_utils.cpp` | `CollectReduceAxisNames` |
 | ATT | `att/gen_model_info/expr_gen/generate_tiling_expr.cpp` | `FindAAxis` |
+
+## Related Links
+
+- Back to [AutoFuse Architecture Introduction](../../introduction/architecture.md)

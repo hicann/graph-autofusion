@@ -120,7 +120,7 @@ std::pair<std::vector<uint32_t>, std::vector<uint32_t>> ParseBlockDimFromLog(con
   return {first_tiling_blocks, second_tiling_blocks};
 }
 
-// 辅助函数：验证二次tiling核数大于首次tiling且大于总核数的80%
+// Verify that secondary tiling uses more than the initial tiling and 80% of total cores.
 bool VerifySecondaryTilingCoreUsage(const std::string &filename, uint32_t total_cores = 64) {
   auto [first_blocks, second_blocks] = ParseBlockDimFromLog(filename);
 
@@ -134,21 +134,22 @@ bool VerifySecondaryTilingCoreUsage(const std::string &filename, uint32_t total_
   uint32_t second_total = second_blocks[0] + second_blocks[1];
   uint32_t threshold = static_cast<uint32_t>(total_cores * 0.8);
 
-  std::cout << "首次tiling核数: Group0=" << first_blocks[0] << ", Group1=" << first_blocks[1]
-            << ", 总和=" << first_total << std::endl;
-  std::cout << "二次tiling核数: Group0=" << second_blocks[0] << ", Group1=" << second_blocks[1]
-            << ", 总和=" << second_total << std::endl;
-  std::cout << "总核数阈值(80%): " << threshold << std::endl;
+  std::cout << "Initial tiling core count: Group0=" << first_blocks[0] << ", Group1=" << first_blocks[1]
+            << ", total=" << first_total << std::endl;
+  std::cout << "Secondary tiling core count: Group0=" << second_blocks[0] << ", Group1=" << second_blocks[1]
+            << ", total=" << second_total << std::endl;
+  std::cout << "Total core threshold (80%): " << threshold << std::endl;
 
   bool condition1 = second_total > first_total;
   bool condition2 = second_total > threshold;
 
   if (!condition1) {
-    std::cerr << "验证失败: 二次tiling核数(" << second_total << ") 不大于首次tiling核数(" << first_total << ")"
-              << std::endl;
+    std::cerr << "Validation failed: secondary tiling core count (" << second_total
+              << ") is not greater than initial tiling core count (" << first_total << ")" << std::endl;
   }
   if (!condition2) {
-    std::cerr << "验证失败: 二次tiling核数(" << second_total << ") 不大于总核数的80%(" << threshold << ")" << std::endl;
+    std::cerr << "Validation failed: secondary tiling core count (" << second_total
+              << ") is not greater than 80% of total cores (" << threshold << ")" << std::endl;
   }
 
   return condition1 && condition2;
@@ -603,7 +604,7 @@ void VerifyTwoGroupTestOutput() {
   EXPECT_EQ(ResultCheckerUtils::IsFileContainsString("./info.log", "Two Group Test"), true);
   EXPECT_EQ(ResultCheckerUtils::IsFileContainsString("./info.log", "Test passed"), true);
   EXPECT_TRUE(VerifySecondaryTilingCoreUsage("./info.log", 64))
-      << "二次tiling核数应该大于首次tiling且大于总核数(64)的80%";
+      << "Secondary tiling core count should exceed the initial tiling core count and 80% of total cores (64)";
 }
 
 // 测试用例：两个Group，每个Group有一个AscGraph

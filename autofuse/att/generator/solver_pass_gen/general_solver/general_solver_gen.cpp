@@ -350,31 +350,35 @@ std::string GeneralSolverGen::GenAlignInput(const Expr arg, const std::string in
 std::string GeneralSolverGen::GenClassAnotataion() {
   uint16_t idx = 0;
   std::string strs = "";
-  strs += "用户可以在派生类中重载Run函数,构造自定义的求解算法,即\n";
+  strs += "Users can override the Run function in a derived class to construct a custom solving algorithm:\n";
   strs += "  void bool Run(int32_t &solution_num, uint64_t *solutions) override;\n";
-  strs += "其中:\n";
-  strs += "  solution_num:int32_t类型的参数,用来输出实际得到的解的个数\n";
-  strs += "  solutions:uint64_t类型的数组,指向一块num_var * top_num的内存,算法将可行解放入该空间\n";
-  strs += "Run函数可以使用下述函数辅助求解:\n";
+  strs += "where:\n";
+  strs += "  solution_num: an int32_t parameter for the actual number of solutions found\n";
+  strs +=
+      "  solutions: a uint64_t array pointing to num_var * top_num elements where the algorithm stores feasible "
+      "solutions\n";
+  strs += "The Run function can use the following helper functions:\n";
   strs += "  bool CheckValid()\n";
-  strs += "    用于检测当前解是否为可行解\n";
+  strs += "    Checks whether the current solution is feasible\n";
   strs += "  bool UpdateCurVarVal(uint64_t value, int32_t idx)\n";
-  strs += "    将下标为idx的待求解变量改为value,同时更新cons_info_->leqs中的值\n";
+  strs += "    Sets the variable at index idx to value and updates cons_info_->leqs\n";
   strs += "  bool RecordBestVarVal()\n";
-  strs += "    待求解变量的当前值所对应的目标函数寻优\n";
-  strs += "Run函数可以使用下述参数辅助求解:\n";
-  strs += "  cons_info_->leqs, double类型的数组, 用于记录不等式约束的函数值, 其下标含义如下:\n";
+  strs += "    Optimizes the objective function for the current variable values\n";
+  strs += "The Run function can use the following parameters:\n";
+  strs +=
+      "  cons_info_->leqs, a double array storing inequality constraint values; its indices are defined as follows:\n";
   for (size_t j = 0u; j < leqs_.size(); j++) {
     strs += "    cons_info_->leqs[" + std::to_string(j) + "] = " + Str(leqs_[j]) + "\n";
   }
-  strs += "  var_info_->cur_vars, uint64_t类型的数组, 用于记录待求解变量的当前值, 其下标含义如下:\n";
+  strs +=
+      "  var_info_->cur_vars, a uint64_t array storing current variable values; its indices are defined as follows:\n";
   for (size_t j = 0u; j < search_args_.size(); j++) {
     if (fixed_args_.find(j) != fixed_args_.end()) {
       strs += "    var_info_->cur_vars[" + std::to_string(idx++) + "] = " + Str(search_args_[j]) + "\n";
     }
   }
-  strs += "  var_info_->upper_bound, uint64_t类型的数组, 用于记录待求解变量的上界\n";
-  strs += "  var_info_->lower_bound, uint64_t类型的数组, 用于记录待求解变量的下界\n";
+  strs += "  var_info_->upper_bound, a uint64_t array storing upper bounds for the variables\n";
+  strs += "  var_info_->lower_bound, a uint64_t array storing lower bounds for the variables\n";
   return AddAnotationBlock(strs);
 }
 
@@ -440,11 +444,11 @@ bool GeneralSolverGen::GenBuffFunc() {
   std::string strs;
   for (const auto &pair : buffer_cost_) {
     strs = "";
-    strs += "函数名:Get" + pair.first + "Cost(重要函数)\n";
-    strs += "功能描述:\n";
-    strs += "  根据待求解变量值" + pair.first + "缓存占用信息(occupy-buff)\n";
-    strs += "输入参数:\n";
-    strs += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+    strs += "Function: Get" + pair.first + "Cost(important)\n";
+    strs += "Description:\n";
+    strs += "  Gets cache occupancy information (occupy-buff) from " + pair.first + "\n";
+    strs += "Input parameters:\n";
+    strs += "  vars:an array of length num_var corresponding to the variables\n";
     impl_codes_ += AddAnotationBlock(strs);
     impl_codes_ += "inline double GeneralSolver";
     impl_codes_ += tiling_case_id_;
@@ -456,12 +460,12 @@ bool GeneralSolverGen::GenBuffFunc() {
     impl_codes_ += "\n";
 
     strs = "";
-    strs += "函数名:GetSmooth" + pair.first + "Cost(重要函数)\n";
-    strs += "功能描述:\n";
-    strs += "  根据待求解变量值" + pair.first + "的平滑化缓存占用信息\n";
-    strs += "  与Get" + pair.first + "Cost函数相比,整除运算被替换为浮点数的除法运算\n";
-    strs += "输入参数:\n";
-    strs += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+    strs += "Function: GetSmooth" + pair.first + "Cost(important)\n";
+    strs += "Description:\n";
+    strs += "  Gets smoothed cache occupancy information from " + pair.first + "\n";
+    strs += "  Compared with Get" + pair.first + "Cost, integer division is replaced with floating-point division\n";
+    strs += "Input parameters:\n";
+    strs += "  vars:an array of length num_var corresponding to the variables\n";
     impl_codes_ += AddAnotationBlock(strs);
     impl_codes_ += "inline double GeneralSolver";
     impl_codes_ += tiling_case_id_;
@@ -498,18 +502,18 @@ bool GeneralSolverGen::GenBuffExpr() {
 std::string GeneralSolverGen::GenAnnotation(FuncType func_type) const {
   std::string strs = "";
   if (func_type == FuncType::OBJ) {
-    strs += "函数名:GetObj(重要函数)\n";
-    strs += "功能描述:\n";
-    strs += "  根据待求解变量值输出目标函数\n";
-    strs += "输入参数:\n";
-    strs += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+    strs += "Function: GetObj(important)\n";
+    strs += "Description:\n";
+    strs += "  Outputs the objective function for the variable values\n";
+    strs += "Input parameters:\n";
+    strs += "  vars:an array of length num_var corresponding to the variables\n";
   } else if (func_type == FuncType::BUFFER) {
-    strs += "函数名:GetBuffCost(重要函数)\n";
-    strs += "功能描述:\n";
-    strs += "  根据待求解变量值输出缓存占用信息的罚函数(sigma(min(0, occupy-buff)^2))\n";
-    strs += "  该函数用于量化解在缓存占用方面的质量\n";
-    strs += "输入参数:\n";
-    strs += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+    strs += "Function: GetBuffCost(important)\n";
+    strs += "Description:\n";
+    strs += "  Outputs the cache occupancy penalty function (sigma(min(0, occupy-buff)^2))\n";
+    strs += "  Quantifies solution quality in terms of cache occupancy\n";
+    strs += "Input parameters:\n";
+    strs += "  vars:an array of length num_var corresponding to the variables\n";
   }
   return AddAnotationBlock(strs);
 }
@@ -564,10 +568,10 @@ bool GeneralSolverGen::GenGetSmoothObj() {
   std::string strs = "";
   std::string pipe_strs = "";
   std::vector<Expr> related_expr;
-  strs += "函数名:GetSmoothObj(重要函数)\n";
-  strs += "功能描述:\n";
-  strs += "  根据待求解变量值输出平滑化目标函数\n";
-  strs += "  与GetObj函数相比,整除运算被替换为浮点数的除法运算\n";
+  strs += "Function: GetSmoothObj(important)\n";
+  strs += "Description:\n";
+  strs += "  Outputs the smoothed objective function for the variable values\n";
+  strs += "  Compared with GetObj, integer division is replaced with floating-point division\n";
   impl_codes_ += AddAnotationBlock(strs);
   impl_codes_ += "inline double GeneralSolver";
   impl_codes_ += tiling_case_id_;
@@ -601,25 +605,31 @@ bool GeneralSolverGen::GenGetSmoothObj() {
 std::string GeneralSolverGen::GenDiffAnnotation(FuncType func_type) const {
   std::string strs = "";
   if (func_type == FuncType::BUFFER) {
-    strs += "函数名:GetBuffDiff(重要函数)\n";
-    strs += "功能描述:\n";
-    strs += "  获取缓冲占用加权差分值,计算平滑缓冲占用的差分\n";
-    strs += "  输出的计算公式为sigma_j(delta_{var_i}(g_j(var))) * g_j(var))\n";
-    strs += "  其中g_j为第j个缓冲占用不等式,delta_{var_i}(g_j(var))为g_j(var)沿var_i方向更新一个单位后的变化值\n";
-    strs += "  该函数用于确定变量沿缓冲占用增大的更新方向\n";
-    strs += "输入参数:\n";
-    strs += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
-    strs += "  weight:一个长度为num_leq的数组,代表了每个缓冲占用的权值\n";
+    strs += "Function: GetBuffDiff(important)\n";
+    strs += "Description:\n";
+    strs += "  Gets the weighted cache occupancy difference for smooth cache occupancy\n";
+    strs += "  The formula is sigma_j(delta_{var_i}(g_j(var))) * g_j(var))\n";
+    strs +=
+        "  where g_j is the j-th cache occupancy inequality, and delta_{var_i}(g_j(var)) is the change in g_j(var) "
+        "when var_i increases by one unit\n";
+    strs += "  Determines the update direction that increases cache occupancy\n";
+    strs += "Input parameters:\n";
+    strs += "  vars:an array of length num_var corresponding to the variables\n";
+    strs += "  weight:an array of length num_leq representing the weight of each cache occupancy\n";
   } else if (func_type == FuncType::LEQ) {
-    strs += "函数名:GetLeqDiff(重要函数)\n";
-    strs += "功能描述:\n";
-    strs += "  获取不等式约束的加权差分值,计算平滑的不等式函数的差分,权值为实际不等式函数值\n";
-    strs += "  输出的计算公式为sigma_j(delta_{var_i}(f_j(var))) * f_j(var))\n";
-    strs += "  其中f_j为第j个不等式约束式,delta_{var_i}(f_j(var))为f_j(var)沿var_i方向更新一个单位后的变化值\n";
-    strs += "  该函数用于确定变量从可行域外侧沿不等式边界方向移动的更新方向\n";
-    strs += "输入参数:\n";
-    strs += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
-    strs += "  weight:一个长度为num_leq的数组,代表了每个缓冲占用的权值\n";
+    strs += "Function: GetLeqDiff(important)\n";
+    strs += "Description:\n";
+    strs +=
+        "  Gets the weighted difference of inequality constraints; the weight is the actual inequality function "
+        "value\n";
+    strs += "  The formula is sigma_j(delta_{var_i}(f_j(var))) * f_j(var))\n";
+    strs +=
+        "  where f_j is the j-th inequality constraint, and delta_{var_i}(f_j(var)) is the change in f_j(var) when "
+        "var_i increases by one unit\n";
+    strs += "  Determines the update direction from outside the feasible region toward the inequality boundary\n";
+    strs += "Input parameters:\n";
+    strs += "  vars:an array of length num_var corresponding to the variables\n";
+    strs += "  weight:an array of length num_leq representing the weight of each cache occupancy\n";
   }
   return AddAnotationBlock(strs);
 }
@@ -871,13 +881,15 @@ std::string GeneralSolverGen::InitiateValue() {
     }
   }
   codes += AddAnotationLine(
-      "可修改参数:待求解变量的上界,过大的上界将导致搜索范围与耗时增加,过小的上界更有可能获得较差的局部最优解\n",
+      "Configurable:Variable upper bounds; overly large bounds increase search range and time, while overly small "
+      "bounds may produce a worse local optimum\n",
       "    ");
   for (size_t i = 0u; i < upper_expr.size(); i++) {
     codes += "    uint_space[" + std::to_string(i) + "] = " + upper_expr[i] + ";\n";
   }
   codes += AddAnotationLine(
-      "可修改参数:待求解变量的下界,过小的下界将导致搜索范围与耗时增加,过大的下界更有可能获得较差的局部最优解\n",
+      "Configurable:Variable lower bounds; overly small bounds increase search range and time, while overly large "
+      "bounds may produce a worse local optimum\n",
       "    ");
   for (size_t i = 0u; i < lower_expr.size(); i++) {
     codes += "    uint_space[" + std::to_string(i + upper_expr.size()) + "] = " + lower_expr[i] + ";\n";
@@ -889,7 +901,8 @@ std::string GeneralSolverGen::InitiateValue() {
       codes += "    }\n";
     }
   }
-  codes += AddAnotationLine("可修改参数:待求解变量的初始值,算法趋向于求初始值附近的局部最优解\n", "    ");
+  codes += AddAnotationLine(
+      "Configurable:Initial variable values; the algorithm tends to find a local optimum near them\n", "    ");
   for (size_t i = 0u; i < init_expr.size(); i++) {
     codes += "    uint_space[" + std::to_string(i + init_offset * upper_expr.size()) + "] = " + init_expr[i] + ";\n";
   }
@@ -899,7 +912,8 @@ std::string GeneralSolverGen::InitiateValue() {
   if (open_dt_ && !training_) {
     codes += GenDTInit();
   }
-  codes += AddAnotationLine("可修改参数:最后更新的待求解变量,设置为true的对应变量会更接近初始值\n", "    ");
+  codes += AddAnotationLine(
+      "Configurable:Last updated variables; variables set to true stay closer to their initial values\n", "    ");
   for (size_t i = 0u; i < update_last.size(); i++) {
     codes += "    bool_space[" + std::to_string(i) + "] = " + update_last[i] + ";\n";
   }
@@ -1019,13 +1033,13 @@ bool GeneralSolverGen::CreateInput() {
   std::string add_log;
   std::string arg_name;
   std::string search_arg_str;
-  invoke_codes_ += AddAnotationLine("以下参数若未注明是可修改参数,则不建议修改\n", "    ");
+  invoke_codes_ += AddAnotationLine("Do not modify parameters unless marked as configurable\n", "    ");
   invoke_codes_ += InitiateDefInputs();
   invoke_codes_ += InitiateDefArgs(hardware_args_);
   invoke_codes_ += InitiateDefArgs(solved_args_);
-  invoke_codes_ += AddAnotationLine("由modelinfo传入的待求解变量个数\n", "    ");
+  invoke_codes_ += AddAnotationLine("Number of variables passed from modelinfo\n", "    ");
   invoke_codes_ += "    int32_t num_var = " + std::to_string(search_args_.size() - fixed_args_.size()) + ";\n";
-  invoke_codes_ += AddAnotationLine("由modelinfo传入的不等式约束个数\n", "    ");
+  invoke_codes_ += AddAnotationLine("Number of inequality constraints passed from modelinfo\n", "    ");
   invoke_codes_ += "    int32_t num_leq = " + std::to_string(leqs_.size()) + ";\n";
   for (size_t i = 0u; i < search_args_.size(); i++) {
     if (IsValid(search_args_[i])) {
@@ -1041,10 +1055,10 @@ bool GeneralSolverGen::CreateInput() {
   }
   invoke_codes_ += "    OP_LOGD(OP_NAME, \"The number of variable is %d(" + search_arg_str +
                    "), the number of constraints is %d.\", num_var, num_leq);\n";
-  invoke_codes_ += AddAnotationLine("初始化解的个数为0\n", "    ");
+  invoke_codes_ += AddAnotationLine("Initialize the number of solutions to 0\n", "    ");
   invoke_codes_ += "    int32_t solution_num = 0;\n";
   invoke_codes_ += GenMemoryPool();
-  invoke_codes_ += AddAnotationLine("通用求解器的输入参数\n", "    ");
+  invoke_codes_ += AddAnotationLine("Generic solver input parameters\n", "    ");
   invoke_codes_ += "    SolverInput input;\n";
   invoke_codes_ += "    input.corenum = corenum_;\n";
   invoke_codes_ += "    input.var_info = var_info;\n";
@@ -1063,10 +1077,10 @@ bool GeneralSolverGen::RunSolver(bool is_dt) {
       "    std::shared_ptr<" + class_name + "> solver = std::make_shared<" + class_name + ">(cfg, tiling_data);\n";
 
   invoke_codes_ += "    if (solver != nullptr) {\n";
-  invoke_codes_ += AddAnotationLine("导入通用求解器的输入参数并完成初始化\n", "        ");
+  invoke_codes_ += AddAnotationLine("Import and initialize generic solver input parameters\n", "        ");
   invoke_codes_ += "        OP_LOGD(OP_NAME, \"Start initializing the input.\");\n";
   invoke_codes_ += "        if (solver -> Init(input)) {\n";
-  invoke_codes_ += AddAnotationLine("运行通用求解器并获取算法的解\n", "            ");
+  invoke_codes_ += AddAnotationLine("Run the generic solver and obtain algorithm solutions\n", "            ");
   invoke_codes_ += "            OP_LOGD(OP_NAME, \"Initialization finished, start running the solver.\");\n";
   invoke_codes_ += "            if (solver -> Run(solution_num, solution)) {\n";
   invoke_codes_ += "                solver -> GetResult(solution_num, solution, tiling_data);\n";

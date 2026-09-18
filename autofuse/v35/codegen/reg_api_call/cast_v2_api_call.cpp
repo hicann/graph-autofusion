@@ -40,7 +40,7 @@ af::Status FillCastNodeParams(const af::AscNodePtr &node, const std::vector<ge::
     params->specific_params = ascir_param::CastNodeParams{};
     cast_params = std::get_if<ascir_param::CastNodeParams>(&params->specific_params);
   }
-  GE_ASSERT_NOTNULL(cast_params, "Cast specific params is null, node[%s].", node->GetNamePtr());
+  GE_ASSERT_NOTNULL(cast_params, "Cast specific params are null, node[%s].", node->GetNamePtr());
   params->api_name = node->GetType();
   params->status = ascir_param::ParamBuildStatus::kBuilt;
 

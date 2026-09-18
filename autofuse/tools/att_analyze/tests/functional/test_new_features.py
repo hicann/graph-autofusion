@@ -25,45 +25,45 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 def test_console_output():
-    """测试控制台输出"""
+    """Test console output"""
     print("=" * 80)
-    print("测试1：控制台输出")
+    print("Test 1: Console output")
     print("=" * 80)
 
     parser = LogParser()
     summaries = parser.parse_log_file(os.path.join(DATA_DIR, "test_concat.log"))
     print_summary_table(summaries)
-    print("\n✅ 控制台输出测试完成\n")
+    print("\n✅ Console output test completed\n")
 
 
 def test_csv_export():
-    """测试CSV导出"""
+    """Test CSV export"""
     print("=" * 80)
-    print("测试2：CSV导出")
+    print("Test 2: CSV export")
     print("=" * 80)
 
     parser = LogParser()
     summaries = parser.parse_log_file(os.path.join(DATA_DIR, "test_complete.log"))
     export_to_csv(summaries, "test_output.csv")
-    print("✅ CSV导出测试完成\n")
+    print("✅ CSV export test completed\n")
 
 
 def test_excel_export():
-    """测试Excel导出"""
+    """Test Excel export"""
     print("=" * 80)
-    print("测试3：Excel导出")
+    print("Test 3: Excel export")
     print("=" * 80)
 
     parser = LogParser()
     summaries = parser.parse_log_file(os.path.join(DATA_DIR, "test_complete.log"))
     export_to_excel(summaries, "test_output.xlsx")
-    print("✅ Excel导出测试完成\n")
+    print("✅ Excel export test completed\n")
 
 
 def test_no_duplicate_performance_keys():
-    """测试性能指标不重复显示"""
+    """Test that performance metrics are not duplicated"""
     print("=" * 80)
-    print("测试4：验证AIV_MTE2/AIV_MTE3不重复显示")
+    print("Test 4: Verify that AIV_MTE2/AIV_MTE3 are not duplicated")
     print("=" * 80)
 
     parser = LogParser()
@@ -78,13 +78,13 @@ def test_no_duplicate_performance_keys():
         all_tiling_keys - set(["ub_size", "block_dim"]) - set(performance_keys)
     )
 
-    print(f"所有切分键: {sorted(all_tiling_keys)}")
-    print(f"动态切分键（排除性能指标）: {dynamic_tiling_keys}")
+    print(f"All tiling keys: {sorted(all_tiling_keys)}")
+    print(f"Dynamic tiling keys (excluding performance metrics): {dynamic_tiling_keys}")
 
     if "AIV_MTE2" not in dynamic_tiling_keys and "AIV_MTE3" not in dynamic_tiling_keys:
-        print("✅ AIV_MTE2和AIV_MTE3没有在动态切分键中重复显示\n")
+        print("✅ AIV_MTE2 and AIV_MTE3 are not duplicated in dynamic tiling keys\n")
     else:
-        print("❌ AIV_MTE2或AIV_MTE3在动态切分键中重复显示\n")
+        print("❌ AIV_MTE2 or AIV_MTE3 are duplicated in dynamic tiling keys\n")
 
 
 if __name__ == "__main__":
@@ -94,5 +94,5 @@ if __name__ == "__main__":
     test_no_duplicate_performance_keys()
 
     print("=" * 80)
-    print("所有测试完成！")
+    print("All tests completed!")
     print("=" * 80)

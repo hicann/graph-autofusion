@@ -295,7 +295,7 @@ af::Status AxesTilingDataGen::AddSplitOuterAxisTailArgs() {
             SetAxisArgExpr(axis->name,
                            {TilingDataType::SPLIT_OUTER_AXIS_TAIL_TAIL_SIZE,
                             GetSplitTailPrefix(parent_axis->name, axis).append(kTailSizeSuffix), tail_part_tail_size}),
-            "Set split outer axis tail tail size failed, axis[%s]", axis->name.c_str());
+            "Set split outer axis tail size failed, axis[%s]", axis->name.c_str());
         // 轴对应的{外轴}Tail{切分类型}{轴}LoopNum = StrCeilDiv({外轴}TailSize / {轴}BaseSize)
         const auto tail_part_loop_num = StrCeilDiv(parent_axis_tail_size.first, axis_base_size_str);
         GE_ASSERT_SUCCESS(

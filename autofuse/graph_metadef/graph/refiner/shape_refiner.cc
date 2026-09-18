@@ -190,7 +190,7 @@ graphStatus UpdateParentNodeForWhile(const ConstNodePtr &node, std::vector<std::
       auto data_shape = tensor.MutableShape();
       // input is dynamic, here use dim_num
       if (data_shape.GetDims() != out_shape.GetDims()) {
-        GELOGI("After infer, While %s %zu output shape [%s] is not match with input shape [%s].Need infer again.",
+        GELOGI("After infer, While %s %zu output shape [%s] does not match input shape [%s]. Need infer again.",
                node->GetName().c_str(), i, out_shape.ToString().c_str(), data_shape.ToString().c_str());
         if (data_shape.GetDimNum() != out_shape.GetDimNum()) {
           ref_out_tensor.SetUnknownDimNumShape();

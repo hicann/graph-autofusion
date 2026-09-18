@@ -143,7 +143,7 @@ af::Status FillTransposeNodeParams(const af::AscNodePtr &node,
     params->specific_params = ascir_param::TransposeNodeParams{};
     transpose_params = std::get_if<ascir_param::TransposeNodeParams>(&params->specific_params);
   }
-  GE_ASSERT_NOTNULL(transpose_params, "Transpose specific params is null, node[%s].", node->GetNamePtr());
+  GE_ASSERT_NOTNULL(transpose_params, "Transpose specific params are null, node[%s].", node->GetNamePtr());
   params->api_name = node->GetType();
   params->status = ascir_param::ParamBuildStatus::kBuilt;
 

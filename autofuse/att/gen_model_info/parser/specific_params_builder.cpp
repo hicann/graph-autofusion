@@ -19,21 +19,21 @@ namespace att {
 namespace {
 af::Status FillReduceParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
   const auto *reduce = ascir_param::GetSpecificParams<ascir_param::ReduceNodeParams>(params);
-  GE_ASSERT_NOTNULL(reduce, "Reduce specific params is null, node[%s].", node_info.name.c_str());
+  GE_ASSERT_NOTNULL(reduce, "Reduce specific params are null, node[%s].", node_info.name.c_str());
   node_info.reduce_specific_params = *reduce;
   return af::SUCCESS;
 }
 
 af::Status FillVectorFuncParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
   const auto *vector_func_params = ascir_param::GetSpecificParams<ascir_param::VectorFuncNodeParams>(params);
-  GE_ASSERT_NOTNULL(vector_func_params, "VectorFunc specific params is null, node[%s].", node_info.name.c_str());
+  GE_ASSERT_NOTNULL(vector_func_params, "VectorFunc specific params are null, node[%s].", node_info.name.c_str());
   node_info.vector_func_params = *vector_func_params;
   return af::SUCCESS;
 }
 
 af::Status FillCastParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
   const auto *cast_params = ascir_param::GetSpecificParams<ascir_param::CastNodeParams>(params);
-  GE_ASSERT_NOTNULL(cast_params, "Cast specific params is null, node[%s].", node_info.name.c_str());
+  GE_ASSERT_NOTNULL(cast_params, "Cast specific params are null, node[%s].", node_info.name.c_str());
   node_info.cast_node_params = *cast_params;
   return af::SUCCESS;
 }
@@ -47,28 +47,28 @@ af::Status FillBroadcastParams(const ascir_param::AscirNodeParams &params, NodeI
 
 af::Status FillCompareParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
   const auto *compare_params = ascir_param::GetSpecificParams<ascir_param::CompareNodeParams>(params);
-  GE_ASSERT_NOTNULL(compare_params, "Compare specific params is null, node[%s].", node_info.name.c_str());
+  GE_ASSERT_NOTNULL(compare_params, "Compare specific params are null, node[%s].", node_info.name.c_str());
   node_info.compare_node_params = *compare_params;
   return af::SUCCESS;
 }
 
 af::Status FillWhereParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
   const auto *where_params = ascir_param::GetSpecificParams<ascir_param::WhereNodeParams>(params);
-  GE_ASSERT_NOTNULL(where_params, "Where specific params is null, node[%s].", node_info.name.c_str());
+  GE_ASSERT_NOTNULL(where_params, "Where specific params are null, node[%s].", node_info.name.c_str());
   node_info.where_node_params = *where_params;
   return af::SUCCESS;
 }
 
 af::Status FillUnaryBitWidthChangeParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
   const auto *unary_params = ascir_param::GetSpecificParams<ascir_param::UnaryBitWidthChangeNodeParams>(params);
-  GE_ASSERT_NOTNULL(unary_params, "Unary bitwidth change specific params is null, node[%s].", node_info.name.c_str());
+  GE_ASSERT_NOTNULL(unary_params, "Unary bitwidth change specific params are null, node[%s].", node_info.name.c_str());
   node_info.unary_bitwidth_change_node_params = *unary_params;
   return af::SUCCESS;
 }
 
 af::Status FillTransposeParams(const ascir_param::AscirNodeParams &params, NodeInfo &node_info) {
   const auto *transpose_params = ascir_param::GetSpecificParams<ascir_param::TransposeNodeParams>(params);
-  GE_ASSERT_NOTNULL(transpose_params, "Transpose specific params is null, node[%s].", node_info.name.c_str());
+  GE_ASSERT_NOTNULL(transpose_params, "Transpose specific params are null, node[%s].", node_info.name.c_str());
   node_info.transpose_node_params = *transpose_params;
   return af::SUCCESS;
 }

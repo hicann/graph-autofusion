@@ -51,7 +51,9 @@ def parse_case_arg(value: Optional[str]) -> Optional[CaseFilter]:
             raw_dim = raw_dim.strip()
             dim = _DIM_ALIASES.get(raw_dim)
             if dim is None:
-                raise ValueError(f"未知维度: {raw_dim!r}，支持 r/result/g/group/c/case")
+                raise ValueError(
+                    f"Unknown dimension: {raw_dim!r}; supported values: r/result/g/group/c/case"
+                )
             current_dim = dim
             if dims[current_dim] is None:
                 dims[current_dim] = []
@@ -59,7 +61,7 @@ def parse_case_arg(value: Optional[str]) -> Optional[CaseFilter]:
         else:
             if current_dim is None:
                 raise ValueError(
-                    f"--case 解析错误：{token!r} 前缺少维度标识（r=/g=/c=）"
+                    f"--case parse error: missing dimension prefix before {token!r} (r=/g=/c=)"
                 )
             dims[current_dim].append(int(token))
     return CaseFilter(**dims)

@@ -148,6 +148,7 @@ struct IndirectLoadSimtStaticPowerOfTwoPolicy {
   using OffsetType = OffsetT;
   static constexpr bool kStructured = true;
   static constexpr bool kUsesInputAxis = true;
+  static constexpr bool kEmbedding = false;
 
   __simt_callee__ __aicore__ inline Internal::IndirectLoadSimtAddress<OffsetT> GetAddress(OffsetT output_index) const {
     constexpr uint32_t output_axis_shift = Internal::IndirectLoadLog2<OutputAxisSpan>();
@@ -163,6 +164,7 @@ struct IndirectLoadSimtStaticInnerPolicy {
   using OffsetType = OffsetT;
   static constexpr bool kStructured = true;
   static constexpr bool kUsesInputAxis = true;
+  static constexpr bool kEmbedding = false;
 
   __aicore__ explicit IndirectLoadSimtStaticInnerPolicy(OffsetT output_axis_span) {
     Internal::IndirectLoadGetUintDivMagicAndShift(output_axis_magic, output_axis_shift, output_axis_span);
@@ -183,6 +185,7 @@ struct IndirectLoadSimtStructuredMagicPolicy {
   using OffsetType = OffsetT;
   static constexpr bool kStructured = true;
   static constexpr bool kUsesInputAxis = true;
+  static constexpr bool kEmbedding = false;
 
   __aicore__ explicit IndirectLoadSimtStructuredMagicPolicy(OffsetT inner_span_arg, OffsetT output_axis_span_arg,
                                                             OffsetT input_axis_stride_arg, OffsetT input_axis_span_arg)
@@ -216,6 +219,7 @@ struct IndirectLoadSimtEmbeddingPolicy {
   using ShapeLayout = IndirectLoadSimtShapeLayout<Rank>;
   static constexpr bool kStructured = true;
   static constexpr bool kUsesInputAxis = true;
+  static constexpr bool kEmbedding = Rank == 2 && Axis == 0 && InputStrideMask == 0U && IndexStrideMask == 0U;
 
   template <typename... ShapeArgs>
   __aicore__ explicit IndirectLoadSimtEmbeddingPolicy(ShapeArgs... shape_args)
@@ -284,6 +288,7 @@ struct IndirectLoadSimtRecursivePolicy {
   using ShapeLayout = IndirectLoadSimtShapeLayout<Rank>;
   static constexpr bool kStructured = false;
   static constexpr bool kUsesInputAxis = true;
+  static constexpr bool kEmbedding = false;
 
   template <typename... ShapeArgs>
   __aicore__ explicit IndirectLoadSimtRecursivePolicy(ShapeArgs... shape_args)
@@ -335,6 +340,7 @@ struct IndirectLoadSimtStridedPolicy {
   using ShapeLayout = IndirectLoadSimtShapeLayout<Rank>;
   static constexpr bool kStructured = false;
   static constexpr bool kUsesInputAxis = (InputStrideMask & (1ULL << Axis)) != 0U;
+  static constexpr bool kEmbedding = false;
 
   template <typename... ShapeArgs>
   __aicore__ explicit IndirectLoadSimtStridedPolicy(ShapeArgs... shape_args)
@@ -407,6 +413,29 @@ struct IndirectLoadSimtStridedPolicy {
 };
 
 namespace Internal {
+template <typename...>
+using IndirectLoadVoidT = void;
+
+template <typename FusedBody, typename = void>
+struct IndirectLoadHasAicoreIndex {
+  static constexpr bool kValue = false;
+};
+
+template <typename FusedBody>
+struct IndirectLoadHasAicoreIndex<FusedBody, IndirectLoadVoidT<decltype(FusedBody::kSupportsAicoreIndex)>> {
+  static constexpr bool kValue = FusedBody::kSupportsAicoreIndex;
+};
+
+template <typename FusedBody, typename = void>
+struct IndirectLoadHasIdentityOutput {
+  static constexpr bool kValue = false;
+};
+
+template <typename FusedBody>
+struct IndirectLoadHasIdentityOutput<FusedBody, IndirectLoadVoidT<decltype(FusedBody::kSimtOutputIdentity)>> {
+  static constexpr bool kValue = FusedBody::kSimtOutputIdentity;
+};
+
 template <typename CaseTag>
 struct IndirectLoadSimtCaseSelector;
 
@@ -523,15 +552,197 @@ __aicore__ inline void LaunchIndirectLoadSimt(__gm__ X *x, typename FusedBody::O
       Simt::Dim3(ThreadNum), x, targets, context, actual_size, output_offset, address_policy);
 }
 
+// Embedding rows share one index across the payload dimension.  Load that
+// index once per warp so boundary fragments do not fall back to one index load
+// for every payload element when a flattened tile cuts through a row.
+template <uint32_t ThreadNum, typename X, typename FusedBody, typename Context, typename AddressPolicy>
+__simt_vf__ __aicore__ LAUNCH_BOUND(ThreadNum) inline void IndirectLoadSimtEmbeddingKernel(
+    __gm__ X *x, typename FusedBody::OutputTargets targets, Context context, uint32_t actual_size,
+    typename AddressPolicy::OffsetType output_offset, AddressPolicy address_policy) {
+  using OffsetT = typename AddressPolicy::OffsetType;
+  const OffsetT inner_size = address_policy.shape[1];
+  const OffsetT index_stride = address_policy.shape[4];
+  const OffsetT input_axis_stride = address_policy.input_axis_stride;
+  const OffsetT payload_stride = address_policy.shape[3];
+  const OffsetT output_end = output_offset + static_cast<OffsetT>(actual_size);
+  const OffsetT first_row = output_offset / inner_size;
+  const OffsetT last_row = (output_end - 1U) / inner_size;
+  const uint32_t warp_id = static_cast<uint32_t>(threadIdx.x) / static_cast<uint32_t>(warpSize);
+  const uint32_t lane_id = static_cast<uint32_t>(threadIdx.x) % static_cast<uint32_t>(warpSize);
+  const uint32_t warp_count =
+      (static_cast<uint32_t>(blockDim.x) + static_cast<uint32_t>(warpSize) - 1U) / static_cast<uint32_t>(warpSize);
+  for (OffsetT row = first_row + static_cast<OffsetT>(warp_id); row <= last_row;
+       row += static_cast<OffsetT>(warp_count)) {
+    const OffsetT row_begin = row * inner_size;
+    const OffsetT begin = output_offset > row_begin ? output_offset : row_begin;
+    const OffsetT row_end = row_begin + inner_size;
+    const OffsetT end = output_end < row_end ? output_end : row_end;
+    const OffsetT index_offset = row * index_stride;
+    OffsetT indirect_index = 0U;
+    if (lane_id == 0U) {
+      indirect_index = static_cast<OffsetT>(FusedBody::Index(index_offset, context));
+    }
+    indirect_index = Simt::WarpShflSync(indirect_index, 0);
+    const OffsetT input_row = indirect_index * input_axis_stride;
+    OffsetT output_index = begin + static_cast<OffsetT>(lane_id);
+    OffsetT input_offset = input_row + (output_index - row_begin) * payload_stride;
+    for (; output_index < end; output_index += static_cast<OffsetT>(warpSize),
+                               input_offset += static_cast<OffsetT>(warpSize) * payload_stride) {
+      const X value = x[input_offset];
+      const typename FusedBody::OutputPack outputs = FusedBody::Outputs(value, output_index, index_offset, context);
+      FusedBody::Store(targets, output_index, output_index - output_offset, outputs);
+    }
+  }
+}
+
+// 根据选embedding行，选择择合适的线程数
+template <typename X, typename FusedBody, typename Context, typename AddressPolicy>
+__aicore__ inline void LaunchIndirectLoadSimtEmbeddingByRows(__gm__ X *x, typename FusedBody::OutputTargets targets,
+                                                             Context context, uint32_t row_count,
+                                                             typename AddressPolicy::OffsetType output_offset,
+                                                             AddressPolicy address_policy) {
+  const uint32_t actual_size = row_count * static_cast<uint32_t>(address_policy.shape[1]);
+  if (row_count <= 1U) {
+    Simt::VF_CALL<IndirectLoadSimtEmbeddingKernel<32U, X, FusedBody, Context, AddressPolicy>>(
+        Simt::Dim3(32U), x, targets, context, actual_size, output_offset, address_policy);
+  } else if (row_count <= 2U) {
+    Simt::VF_CALL<IndirectLoadSimtEmbeddingKernel<64U, X, FusedBody, Context, AddressPolicy>>(
+        Simt::Dim3(64U), x, targets, context, actual_size, output_offset, address_policy);
+  } else if (row_count <= 4U) {
+    Simt::VF_CALL<IndirectLoadSimtEmbeddingKernel<128U, X, FusedBody, Context, AddressPolicy>>(
+        Simt::Dim3(128U), x, targets, context, actual_size, output_offset, address_policy);
+  } else if (row_count <= 8U) {
+    Simt::VF_CALL<IndirectLoadSimtEmbeddingKernel<256U, X, FusedBody, Context, AddressPolicy>>(
+        Simt::Dim3(256U), x, targets, context, actual_size, output_offset, address_policy);
+  } else if (row_count <= 16U) {
+    Simt::VF_CALL<IndirectLoadSimtEmbeddingKernel<512U, X, FusedBody, Context, AddressPolicy>>(
+        Simt::Dim3(512U), x, targets, context, actual_size, output_offset, address_policy);
+  } else {
+    Simt::VF_CALL<IndirectLoadSimtEmbeddingKernel<1024U, X, FusedBody, Context, AddressPolicy>>(
+        Simt::Dim3(1024U), x, targets, context, actual_size, output_offset, address_policy);
+  }
+}
+
+// 处理 embedding 输出中的“残片”——不是完整一行的数据
+template <typename X, typename FusedBody, typename Context, typename AddressPolicy>
+__aicore__ inline void LaunchIndirectLoadSimtEmbeddingFragment(__gm__ X *x, typename FusedBody::OutputTargets targets,
+                                                               Context context, uint32_t actual_size,
+                                                               typename AddressPolicy::OffsetType output_offset,
+                                                               AddressPolicy address_policy) {
+  Simt::VF_CALL<IndirectLoadSimtEmbeddingKernel<32U, X, FusedBody, Context, AddressPolicy>>(
+      Simt::Dim3(32U), x, targets, context, actual_size, output_offset, address_policy);
+}
+
 template <typename AddressPolicy>
 inline __aicore__ constexpr bool IndirectLoadUse2048Threads() {
   return sizeof(typename AddressPolicy::OffsetType) == sizeof(uint32_t);
 }
 
 template <typename X, typename FusedBody, typename Context, typename AddressPolicy>
+__aicore__ inline bool TryIndirectLoadSimtEmbeddingMte(__gm__ X *x, typename FusedBody::OutputTargets targets,
+                                                       Context context, uint32_t actual_size,
+                                                       typename AddressPolicy::OffsetType output_offset,
+                                                       AddressPolicy address_policy) {
+  if constexpr (FusedBody::kGmOutputCount != 1U || FusedBody::kUbOutputCount != 0U ||
+                !IndirectLoadHasAicoreIndex<FusedBody>::kValue || !IndirectLoadHasIdentityOutput<FusedBody>::kValue ||
+                !AddressPolicy::kEmbedding || !std::is_same<X, typename FusedBody::PrimaryOutputType>::value ||
+                (sizeof(X) != sizeof(uint16_t) && sizeof(X) != sizeof(uint32_t))) {
+    return false;
+  } else {
+    using OffsetT = typename AddressPolicy::OffsetType;
+    if (actual_size == 0U) {
+      return true;
+    }
+    constexpr uint32_t kBufferBytes = 192U * 1024U - 256U;
+    constexpr uint32_t kAlignmentBytes = 32U;
+    const OffsetT inner_size = address_policy.shape[1];
+    const OffsetT input_axis_stride = address_policy.input_axis_stride;
+    const OffsetT payload_stride = address_policy.shape[3];
+    const OffsetT index_stride = address_policy.shape[4];
+    const uint64_t row_bytes = static_cast<uint64_t>(inner_size) * sizeof(X);
+    if (inner_size <= static_cast<OffsetT>(warpSize) || payload_stride != 1U || input_axis_stride != inner_size ||
+        row_bytes == 0U || row_bytes > kBufferBytes || row_bytes % kAlignmentBytes != 0U) {
+      return false;
+    }
+    const OffsetT output_row_offset = output_offset % inner_size;
+    const uint32_t prefix_elements =
+        output_row_offset == 0U
+            ? 0U
+            : static_cast<uint32_t>(inner_size - output_row_offset < actual_size ? inner_size - output_row_offset
+                                                                                 : actual_size);
+    const uint32_t remaining_elements = actual_size - prefix_elements;
+    const uint32_t full_row_elements = remaining_elements - remaining_elements % static_cast<uint32_t>(inner_size);
+    const uint32_t row_count = full_row_elements / static_cast<uint32_t>(inner_size);
+    const uint32_t batch_capacity = kBufferBytes / static_cast<uint32_t>(row_bytes);
+    if (batch_capacity == 0U) {
+      return false;
+    }
+    if (row_count == 0U) {
+      LaunchIndirectLoadSimtEmbeddingFragment<X, FusedBody>(x, targets, context, actual_size, output_offset,
+                                                            address_policy);
+      return true;
+    }
+    if (prefix_elements != 0U) {
+      LaunchIndirectLoadSimtEmbeddingFragment<X, FusedBody>(x, targets, context, prefix_elements, output_offset,
+                                                            address_policy);
+    }
+
+    TQue<QuePosition::VECIN, 1> input_queue;
+    if (!GetTPipePtr()->InitBuffer(input_queue, 1U, kBufferBytes)) {
+      return false;
+    }
+    GlobalTensor<X> input_gm;
+    input_gm.SetGlobalBuffer(x);
+    GlobalTensor<X> output_gm;
+    output_gm.SetGlobalBuffer((__gm__ X *)targets.output0);
+    const OffsetT aligned_output_offset = output_offset + static_cast<OffsetT>(prefix_elements);
+    const OffsetT first_row = aligned_output_offset / inner_size;
+    const uint32_t mte_row_count = row_count;
+    for (uint32_t row_offset = 0U; row_offset < mte_row_count; row_offset += batch_capacity) {
+      const uint32_t remaining_rows = mte_row_count - row_offset;
+      const uint32_t batch_rows = remaining_rows < batch_capacity ? remaining_rows : batch_capacity;
+      LocalTensor<X> input_local = input_queue.template AllocTensor<X>();
+      for (uint32_t local_row = 0U; local_row < batch_rows; ++local_row) {
+        const OffsetT row = first_row + static_cast<OffsetT>(row_offset + local_row);
+        const OffsetT indirect_index = static_cast<OffsetT>(FusedBody::AicoreIndex(row * index_stride, context));
+        DataCopy(input_local[static_cast<OffsetT>(local_row) * inner_size],
+                 input_gm[indirect_index * input_axis_stride], static_cast<uint32_t>(inner_size));
+      }
+      input_queue.EnQue(input_local);
+      input_local = input_queue.template DeQue<X>();
+      const int32_t input_ready_event_id = static_cast<int32_t>(GetTPipePtr()->FetchEventID(HardEvent::MTE2_MTE3));
+      SetFlag<HardEvent::MTE2_MTE3>(input_ready_event_id);
+      WaitFlag<HardEvent::MTE2_MTE3>(input_ready_event_id);
+      DataCopy(output_gm[aligned_output_offset + static_cast<OffsetT>(row_offset) * inner_size], input_local,
+               batch_rows * static_cast<uint32_t>(inner_size));
+      if (row_offset + batch_rows < mte_row_count) {
+        const int32_t output_done_event_id = static_cast<int32_t>(GetTPipePtr()->FetchEventID(HardEvent::MTE3_MTE2));
+        SetFlag<HardEvent::MTE3_MTE2>(output_done_event_id);
+        WaitFlag<HardEvent::MTE3_MTE2>(output_done_event_id);
+      }
+      input_queue.FreeTensor(input_local);
+    }
+
+    const uint32_t suffix_elements = remaining_elements - full_row_elements;
+    if (suffix_elements != 0U) {
+      const OffsetT suffix_offset = aligned_output_offset + static_cast<OffsetT>(full_row_elements);
+      LaunchIndirectLoadSimtEmbeddingFragment<X, FusedBody>(x, targets, context, suffix_elements, suffix_offset,
+                                                            address_policy);
+    }
+    return true;
+  }
+}
+
+template <typename X, typename FusedBody, typename Context, typename AddressPolicy>
 __aicore__ inline void DispatchIndirectLoadSimt(__gm__ X *x, typename FusedBody::OutputTargets targets, Context context,
                                                 uint32_t actual_size, typename AddressPolicy::OffsetType output_offset,
                                                 AddressPolicy address_policy) {
+  if constexpr (AddressPolicy::kEmbedding) {
+    if (TryIndirectLoadSimtEmbeddingMte<X, FusedBody>(x, targets, context, actual_size, output_offset,
+                                                      address_policy)) {
+      return;
+    }
+  }
   if (actual_size <= 128U) {
     LaunchIndirectLoadSimt<128U, X, FusedBody>(x, targets, context, actual_size, output_offset, address_policy);
     return;

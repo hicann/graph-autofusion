@@ -59,7 +59,7 @@ af::Status BrcInlineTemplate::Generate(const af::AscGraph &origin_graph, const a
   (void)based_case;
   int32_t brc_inlined_count = 0;
   for (const auto &node : new_case.GetAllNodes()) {
-    GE_WARN_ASSERT(!ScheduleUtils::IsReduce(node), "Brc inline not support Reduce(%s) now.", node->GetNamePtr());
+    GE_WARN_ASSERT(!ScheduleUtils::IsReduce(node), "Brc inline does not support Reduce(%s) now.", node->GetNamePtr());
     if (!af::ops::IsOps<af::ascir_op::Broadcast>(node)) {
       continue;
     }

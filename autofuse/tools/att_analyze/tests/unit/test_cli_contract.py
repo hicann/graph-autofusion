@@ -45,7 +45,7 @@ def test_examples_start_with_cli_usage(capsys):
     examples.example_1_cli_usage()
     output = capsys.readouterr().out
 
-    assert output.startswith("示例1：命令行调用")
+    assert output.startswith("Example 1: Command-line usage")
     for command in (
         "summary",
         "compare",

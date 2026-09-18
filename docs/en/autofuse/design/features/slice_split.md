@@ -770,3 +770,7 @@ The file names and class names in early A3 design materials differ from those in
 | Split + Concat | Concat can be optimized away for first-axis Split + Concat |
 
 **Core idea**: Implementing automatic fusion of Slice/Split/StridedSlice (including D variants) with loads/stores carrying offsets and strides turns "physical splitting" into a "logical mapping": subsequent operators read directly from specified positions in the original large tensor (offset+stride), eliminating unnecessary memory movement. Slice thus becomes a "read method" rather than a "computation task", and can be fused with subsequent operators (Add/Concat, etc.) into a single task.
+
+## Related Links
+
+- Back to [AutoFuse Architecture Introduction](../../introduction/architecture.md)

@@ -2222,8 +2222,9 @@ TEST_F(STestAscirPerfV2, TestReorderGmStrideByTransposeNddmaMultipleCases) {
     std::string description;
   };
 
-  std::vector<TestCase> test_cases = {
-      {{0, 1, 2}, {2, 1, 0}, "完全反转"}, {{0, 1, 2}, {1, 0, 2}, "前两轴交换"}, {{0, 1, 2}, {0, 1, 2}, "无转置"}};
+  std::vector<TestCase> test_cases = {{{0, 1, 2}, {2, 1, 0}, "Full reversal"},
+                                      {{0, 1, 2}, {1, 0, 2}, "Swap first two axes"},
+                                      {{0, 1, 2}, {0, 1, 2}, "No transpose"}};
 
   for (const auto &tc : test_cases) {
     std::vector<att::TensorShapeInfo> input_shapes(1);
@@ -2267,6 +2268,6 @@ TEST_F(STestAscirPerfV2, TestReorderGmStrideByTransposeNddmaMultipleCases) {
     for (auto &pipe_res : perf_res.pipe_res) {
       std::cout << static_cast<int32_t>(pipe_res.first) << " PERF=" << Str(pipe_res.second) << std::endl;
     }
-    EXPECT_EQ(result, af::SUCCESS) << "测试用例失败: " << tc.description;
+    EXPECT_EQ(result, af::SUCCESS) << "Test case failed: " << tc.description;
   }
 }

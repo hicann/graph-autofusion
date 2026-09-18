@@ -28,7 +28,7 @@ Component features:
 
 If you want to understand the architecture, module functions, and skills of Graph-autofusion, please refer to the following documents:
 
-- [AutoFuse Architecture Description](docs/en/autofuse/design/architecture.md): Introduces the overall architecture, key technical solutions, processing flow and module responsibilities of AutoFuse.
+- [AutoFuse Architecture Description](docs/en/autofuse/introduction/architecture.md): Introduces the overall architecture, key technical solutions, processing flow and module responsibilities of AutoFuse.
 - [Contribution Guide](CONTRIBUTING.md): Describes how to contribute to the project, submit Issues and Pull Requests.
 - [Skills Management Guide](docs/en/opencode-skill-management.md): Introduces the default Skills used in the repository and their management methods.
 - [Skill Reuse Guide](docs/en/skill-reuse-guide.md): Introduces how to reuse Skills and use Agent to assist code reading, development and problem location.
@@ -52,9 +52,12 @@ graph-autofusion/
 │   ├── zh                                    # Chinese documentation
 │   │   ├── build.md                          # One-click build script documentation
 │   │   └── ...                               # Other Chinese documentation
-│   └── en                                    # English documentation
+│   ├── en                                    # English documentation
 │       ├── build.md                          # One-click build script documentation
 │       └── ...                               # Other English documentation
+│   ├── env_install                           # Environment installation documentation
+│   ├── figures                               # Documentation figure resources
+│   └── guidelines                            # Development guidelines and templates
 ├── scripts                                   # Build, environment installation, and test scripts
 │   ├── env_install                           # Environment installation scripts
 │   ├── package                               # Packaging scripts
@@ -62,6 +65,7 @@ graph-autofusion/
 │   ├── check_env.sh                          # Environment check script
 │   ├── init_env.sh                           # Environment initialization script
 │   ├── oat_check.sh                          # OAT compliance check script
+│   ├── reject_forbidden_paths.sh             # Forbidden path commit check script
 │   └── support_multiple_versions_of_lcov.sh  # Multi-version lcov compatibility script
 ├── super_kernel                              # SuperKernel component. SuperKernel source code, tests, and documentation are in this subdirectory.
 ├── README.md                                 # Chinese graph-autofusion project introduction

@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sys
+import tbe.common.utils.log as logger
 import shutil
 import argparse
 import subprocess
@@ -23,12 +24,21 @@ import platform
 import tempfile
 import uuid
 from contextlib import contextmanager, nullcontext
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 import time
 from dataclasses import dataclass
 from functools import wraps
 from typing import List
 from asc_op_compile_base.common.platform.platform_info import get_soc_spec
+
+
+def _log_warning(message, *args):
+    warning = getattr(logger, "warning", None)
+    if warning is None:
+        warning = getattr(logger, "warn")
+    warning(message, *args)
+
 
 PYF_PATH = os.path.dirname(os.path.realpath(__file__))
 ASCEND_PATH = os.path.join(PYF_PATH, "..", "..", "..")
@@ -166,7 +176,7 @@ def get_compile_diagnostic_flags(output_file):
         COMPILE_TRACE_ROOT,
         f"{os.path.basename(output_file)}.{uuid.uuid4().hex}.json",
     )
-    print(f"[CompileTrace] {trace_file}")
+    logger.info("[CompileTrace] %s", trace_file)
     return [
         "-ftime-report=per-pass",
         f"-ftime-trace={trace_file}",
@@ -186,7 +196,7 @@ def run_compile_command(cmd: List[str], stage_name):
             error_msg += f"\nstderr: {result.stderr}"
         raise CompileError(error_msg)
     if result.stdout:
-        print(f"[{stage_name}] {result.stdout}")
+        logger.info("[%s] %s", stage_name, result.stdout)
 
 
 def link_shared(target_file, obj_files, link_libraries=None, extra_link_options=None):
@@ -830,10 +840,22 @@ def compile_host_objs(args: argparse.Namespace, temp_dir, pch_path=None):
     if not host_files:
         return []
     pch_state = {"path": pch_path, "lock": Lock()}
-    return [
-        compile_host_obj_file(args, temp_dir, source_file, pch_state)
-        for source_file in host_files
-    ]
+    if len(host_files) == 1:
+        return [compile_host_obj_file(args, temp_dir, host_files[0], pch_state)]
+
+    obj_files = [None] * len(host_files)
+    worker_count = get_host_compile_worker_count(len(host_files))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_index = {
+            executor.submit(
+                compile_host_obj_file, args, temp_dir, source_file, pch_state
+            ): index
+            for index, source_file in enumerate(host_files)
+        }
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            obj_files[index] = future.result()
+    return obj_files
 
 
 @inductor_compile_duration("CompileHostObj")
@@ -929,10 +951,10 @@ def clean_before_modify(temp_dir):
         entry_path = os.path.join(temp_dir, entry)
         if os.path.isfile(entry_path):
             os.remove(entry_path)
-            print(f"delete file: {entry_path}")
+            logger.info("delete file: %s", entry_path)
         elif entry not in keep_dirs:
             shutil.rmtree(entry_path)
-            print(f"delete dir: {entry_path}")
+            logger.info("delete dir: %s", entry_path)
     os.chdir(src_directory)
 
 
@@ -1151,7 +1173,7 @@ def try_static_shape_compile(args: argparse.Namespace, temp_dir, so_path):
     lib.AutofuseIsStaticShape.restype = ctypes.c_bool
     if not bool(lib.AutofuseIsStaticShape()):
         return False
-    print("static shape detected, recompile kernel with const tiling data")
+    logger.info("static shape detected, recompile kernel with const tiling data")
     static_shape_kernel_proc(args, temp_dir)
     with InductorCompileDuration(args, "InitTorchNpu"):
         init_torch_npu_for_const_tiling()
@@ -1205,7 +1227,7 @@ def build_kernel_target(args, tiling_obj_paths, temp_dir):
         args.tiling_repr is not None or has_inductor_const_tiling_data(args, temp_dir)
     ):
         if args.tiling_repr is not None:
-            print("process static shape kernel with tiling_repr")
+            logger.info("process static shape kernel with tiling_repr")
         static_shape_kernel_proc(args, temp_dir, args.tiling_repr)
 
     kernel_obj_path = compile_device_obj(args, temp_dir)
@@ -1252,7 +1274,7 @@ def copy_so_to_output(so_file, args, src_directory):
         )
         if os.path.realpath(shared_cv_wrapper_so) != os.path.realpath(wrapper_dst_file):
             shutil.copy(shared_cv_wrapper_so, wrapper_dst_file)
-    print(f"copy file {so_file} to {dst_file}")
+    logger.info("copy file %s to %s", so_file, dst_file)
     os.chdir(src_directory)
 
 
@@ -1284,7 +1306,7 @@ def build_host_output(args, pch_path=None):
         )
         return None
     except CompileError as ex:
-        print(f"[PGO] Inductor PGO sidecar build failed, skip PGO: {ex}")
+        _log_warning("[PGO] Inductor PGO sidecar build failed, skip PGO: %s", ex)
         return so_file
 
 
@@ -1305,10 +1327,10 @@ def validate_artifact_paths(paths, kind):
 
 
 def main(args):
-    print("compile args:", args)
+    logger.info("compile args: %s", args)
     src_directory = os.getcwd()
     os.chdir(args.temp_dir)
-    print("change work dir:", os.getcwd())
+    logger.info("change work dir: %s", os.getcwd())
     # 原子编译 stage 返回结构化 artifact，避免进程间共享 Python 状态。
     try:
         if args.stage == "host":
@@ -1363,10 +1385,10 @@ def main(args):
 def main_with_except(argv: List[str]):
     """Main process with except exceptions."""
     try:
-        print("Enter main func")
+        logger.info("Enter main func")
         return main(argv)
     except argparse.ArgumentError as ex:
-        print(f"error: check arguments error, {ex}")
+        logger.error("error: check arguments error, %s", ex)
         return False
 
 

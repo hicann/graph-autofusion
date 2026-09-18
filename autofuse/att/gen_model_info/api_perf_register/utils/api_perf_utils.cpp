@@ -110,7 +110,7 @@ af::Status StringToJson(const std::string &json_str, Json &json) {
 af::Status LinearFunc(const std::map<std::string, float> &param_map, const std::vector<Expr> &dims, const Expr &stride,
                       Expr &res) {
   (void)stride;
-  GE_ASSERT_TRUE(!dims.empty(), "Dims is empty.");
+  GE_ASSERT_TRUE(!dims.empty(), "Dims are empty.");
   GE_ASSERT_TRUE(param_map.find("k") != param_map.end(), "Param k not found in param_map.");
   GE_ASSERT_TRUE(param_map.find("b") != param_map.end(), "Param b not found in param_map.");
   Expr k = CreateExpr(param_map.at("k"));
@@ -122,7 +122,7 @@ af::Status LinearFunc(const std::map<std::string, float> &param_map, const std::
 
 af::Status LoadStoreStrideFunc(const std::map<std::string, float> &param_map, const std::vector<Expr> &dims,
                                const Expr &stride, Expr &res) {
-  GE_ASSERT_TRUE(!dims.empty(), "Dims is empty.");
+  GE_ASSERT_TRUE(!dims.empty(), "Dims are empty.");
   GE_ASSERT_TRUE(param_map.find("k") != param_map.end(), "Param k not found in param_map.");
   Expr k = CreateExpr(param_map.at("k"));
   Expr block_count = accumulate(dims.begin(), dims.end() - 1, CreateExpr(1), [](Expr a, Expr b) { return a * b; });
@@ -249,7 +249,7 @@ std::map<std::string, float> EnrichParamMapForModel(const std::map<std::string, 
 
 af::Status LoadStoreStrideV2Func(const std::map<std::string, float> &param_map, const std::vector<Expr> &dims,
                                  const Expr &stride, Expr &res) {
-  GE_ASSERT_TRUE(!dims.empty(), "Dims is empty.");
+  GE_ASSERT_TRUE(!dims.empty(), "Dims are empty.");
   const auto k_iter = param_map.find("k");
   const auto u_iter = param_map.find("u");
   GE_ASSERT_TRUE(k_iter != param_map.end(), "Param k not found in param_map.");
@@ -274,7 +274,7 @@ af::Status LoadStoreStrideV2Func(const std::map<std::string, float> &param_map, 
 
 af::Status LoadStoreStrideV2WithPenaltyFunc(const std::map<std::string, float> &param_map,
                                             const std::vector<Expr> &dims, const Expr &stride, Expr &res) {
-  GE_ASSERT_TRUE(!dims.empty(), "Dims is empty.");
+  GE_ASSERT_TRUE(!dims.empty(), "Dims are empty.");
   const auto k_iter = param_map.find("k");
   const auto u_iter = param_map.find("u");
   GE_ASSERT_TRUE(k_iter != param_map.end(), "Param k not found in param_map.");
@@ -299,7 +299,7 @@ af::Status LoadStoreStrideV2WithPenaltyFunc(const std::map<std::string, float> &
 af::Status LoadStoreFunc(const std::map<std::string, float> &param_map, const std::vector<Expr> &dims,
                          const Expr &stride, Expr &res, bool expand_data) {
   (void)stride;
-  GE_ASSERT_TRUE(!dims.empty(), "Dims is empty.");
+  GE_ASSERT_TRUE(!dims.empty(), "Dims are empty.");
   GE_ASSERT_TRUE(param_map.find("h") != param_map.end(), "Param h not found in param_map.");
   GE_ASSERT_TRUE(param_map.find("a") != param_map.end(), "Param a not found in param_map.");
   GE_ASSERT_TRUE(param_map.find("b") != param_map.end(), "Param b not found in param_map.");
@@ -340,7 +340,7 @@ af::Status LoadUbStride(const std::map<std::string, float> &param_map, const std
 af::Status StoreFunc(const std::map<std::string, float> &param_map, const std::vector<Expr> &dims, const Expr &stride,
                      Expr &res) {
   (void)stride;
-  GE_ASSERT_TRUE(!dims.empty(), "Dims is empty.");
+  GE_ASSERT_TRUE(!dims.empty(), "Dims are empty.");
   GE_ASSERT_TRUE(param_map.find("h") != param_map.end(), "Param h not found in param_map.");
   GE_ASSERT_TRUE(param_map.find("ak") != param_map.end(), "Param ak not found in param_map.");
   GE_ASSERT_TRUE(param_map.find("ab") != param_map.end(), "Param ab not found in param_map.");
