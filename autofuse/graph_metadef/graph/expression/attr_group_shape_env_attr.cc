@@ -424,10 +424,7 @@ graphStatus ShapeEnvAttr::AppendReplacement(const Expression &target, const Expr
       return GRAPH_SUCCESS;
     }
   }
-  // 判断replacement是否成环：成环时跳过该条替换（保留既有替换集合不变），
-  // 不返回失败——等式两侧共享符号的合法自引用约束（如 s1*s1 == s3）同样会命中
-  // 该检测，若拒绝会让推导整体失败并污染 guard 判定结果，静默跳过语义等价于
-  // 不建立该替换（guard 仍正常记录，仅替换关系不进并查集）
+  // 判断replacement是否成环
   if (CheckReplacementCycle(expr1, expr2)) {
     GELOGW("Unsupported append replacement %s to %s, replacement contains the other.",
            SymbolicUtils::ToString(expr1).c_str(), SymbolicUtils::ToString(expr2).c_str());
@@ -487,39 +484,18 @@ bool ShapeEnvAttr::CheckReplacementCycle(const Expression &expr1, const Expressi
     GE_ASSERT_SUCCESS(FindRootExpr(expr2, root_expr2));
   }
 
-  if (root_expr1 == root_expr2) {
-    return false;
-  }
-
   /*
-   * 判断expr1与expr2是否互相包含：
-   * 旧实现仅在某一侧根为单符号时用 ContainVar+Simplify 判断，两根均为复合表达式时
-   * 直接漏判（例如已有 replacement: s0 == s2，再 Append(s0 + s1, s2)：s0 的根是 s2，
-   * expr1 经符号根解析后包含 s2，构成环，旧实现检测不到）。
-   * 新实现逐表达式枚举自由符号并解析其替换根，与对方根比较即可覆盖复合表达式对，
-   * 且无需对根表达式做化简展开（化简在替换链较长时代价高）。
+   * *判断exp1和expr2是否相互包含,
+   * 1) 先判断原表达式是否包含, 例如expr1: s0 + s1, expr2: s1, 则expr1包含expr2
+   * 2) 然后判断化简后是否包含, 例如已有replacement: s1 == s2, expr1: s0 + s1, expr2: s2
+   *    则expr1化简后为s0 + s2, 包含expr2
    */
-  const auto contains_root = [this](const Expression &expr, const Expression &target_root) {
-    for (const auto &symbol : expr.FreeSymbols()) {
-      Expression symbol_root = symbol;
-      if (replacements_.find(symbol) != replacements_.end() && FindRootExpr(symbol, symbol_root) != GRAPH_SUCCESS) {
-        return true;
-      }
-      if (symbol_root == target_root) {
-        return true;
-      }
-      // 根表达式包含对方根的自由符号时构成间接环：如已有 s3 == Min(2, s2) 时再建立
-      // s2 == (s0+s3)*Ceil(s1)，替换链闭合出 s2 -> 复合 -> s3 -> Min(2, s2) 的环
-      // （ContainVar 仅接受无参表达式，复合根需逐自由符号检查）
-      for (const auto &target_sym : target_root.FreeSymbols()) {
-        if (symbol_root.ContainVar(target_sym)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
-  return contains_root(root_expr1, root_expr2) || contains_root(root_expr2, root_expr1);
+  if (root_expr2.IsVariableExpr()) {
+    return root_expr1.ContainVar(root_expr2) || root_expr1.Simplify().ContainVar(root_expr2);
+  } else if (root_expr1.IsVariableExpr()) {
+    return root_expr2.ContainVar(root_expr1) || root_expr2.Simplify().ContainVar(root_expr1);
+  }
+  return false;
 }
 
 }  // namespace af

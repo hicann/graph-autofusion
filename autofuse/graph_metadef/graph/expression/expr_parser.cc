@@ -8,7 +8,6 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include "expr_parser.h"
-#include <unordered_map>
 #include "common/checker.h"
 #include "symengine/real_double.h"
 namespace af {
@@ -29,12 +28,6 @@ graphStatus ExprParser::Eat(TokenType type) {
 }
 
 ExpressionImplPtr ExprParser::ParserFactor() {
-  // 单参函数（Log/Ceil/Floor/Abs/Exp/Sqrt）均为 Func(expr) 结构，走分发表统一派发，
-  // 新增单参函数只需在表中注册，避免本函数分支随函数 token 增长
-  static const std::unordered_map<TokenType, ExpressionImplPtr (ExprParser::*)()> kUnaryFuncParsers = {
-      {TokenType::kLog, &ExprParser::ParserLogFunction},     {TokenType::kCeil, &ExprParser::ParserCeilFunction},
-      {TokenType::kFloor, &ExprParser::ParserFloorFunction}, {TokenType::kAbs, &ExprParser::ParserAbsFunction},
-      {TokenType::kExp, &ExprParser::ParserExpFunction},     {TokenType::kSqrt, &ExprParser::ParserSqrtFunction}};
   switch (currentToken_.type) {
     case TokenType::kIdentifier:
       return ParserIdentifier();
@@ -48,6 +41,14 @@ ExpressionImplPtr ExprParser::ParserFactor() {
       return ParserPowFunction();
     case TokenType::kMod:
       return ParserModFunction();
+    case TokenType::kLog:
+      return ParserLogFunction();
+    case TokenType::kCeil:
+      return ParserCeilFunction();
+    case TokenType::kFloor:
+      return ParserFloorFunction();
+    case TokenType::kAbs:
+      return ParserAbsFunction();
     case TokenType::kRational:
       return ParserRationalFunction();
     case TokenType::kNumber:
@@ -70,14 +71,9 @@ ExpressionImplPtr ExprParser::ParserFactor() {
     case TokenType::kLogicalOr:
       return ParserLogicalOr();
     default:
-      break;
+      GELOGE(ge::PARAM_INVALID, "Unsupported operator %d when Parser factor.", currentToken_.type);
+      return nullptr;
   }
-  const auto it = kUnaryFuncParsers.find(currentToken_.type);
-  if (it != kUnaryFuncParsers.end()) {
-    return (this->*(it->second))();
-  }
-  GELOGE(ge::PARAM_INVALID, "Unsupported operator %d when Parser factor.", currentToken_.type);
-  return nullptr;
 }
 
 ExpressionImplPtr ExprParser::ParserAddSubtract() {
@@ -275,25 +271,6 @@ ExpressionImplPtr ExprParser::ParserRationalFunction() {
   auto arg2 = ParserExpression();
   GE_ASSERT_SUCCESS(Eat(TokenType::kRparen));
   return Rational(arg1, arg2);
-}
-
-// Exp(x)/Sqrt(x) 为打印侧 DefaultPowPrinter 对 Pow(E, x)/Pow(x, 1/2) 的输出形态，
-// 解析时还原为等价的 Pow 表达式，保证序列化-反序列化往返闭环
-ExpressionImplPtr ExprParser::ParserExpFunction() {
-  GE_ASSERT_SUCCESS(Eat(TokenType::kExp));
-  GE_ASSERT_SUCCESS(Eat(TokenType::kLparen));
-  auto arg = ParserExpression();
-  GE_ASSERT_SUCCESS(Eat(TokenType::kRparen));
-  return Exp(arg);
-}
-
-ExpressionImplPtr ExprParser::ParserSqrtFunction() {
-  GE_ASSERT_SUCCESS(Eat(TokenType::kSqrt));
-  GE_ASSERT_SUCCESS(Eat(TokenType::kLparen));
-  auto arg = ParserExpression();
-  GE_ASSERT_SUCCESS(Eat(TokenType::kRparen));
-  return Pow(arg, Rational(ExpressionImpl::CreateExpressionImpl(static_cast<int64_t>(1)),
-                           ExpressionImpl::CreateExpressionImpl(static_cast<int64_t>(2))));
 }
 
 ExpressionImplPtr ExprParser::ParserNumber() {

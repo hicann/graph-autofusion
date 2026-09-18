@@ -38,8 +38,6 @@ enum class TokenType {
   kFloor,       // floor
   kAbs,         // abs
   kRational,    // rational
-  kExp,         // exp: Pow(E, x) 的打印形态
-  kSqrt,        // sqrt: Pow(x, 1/2) 的打印形态
   kEq,          // EXPECT_EQ
   kNe,          // EXPECT_NE
   kLt,          // EXPECT_LT
