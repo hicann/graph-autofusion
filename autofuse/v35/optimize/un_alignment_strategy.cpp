@@ -447,7 +447,18 @@ Status UnAlignmentStrategy::UpdateOutputVectorizedStrides(const af::AscNodePtr &
   return af::SUCCESS;
 }
 
+bool IsGraphHasBroadcast(const af::AscGraph &graph) {
+  for (const auto &node : graph.GetAllNodes()) {
+    if (af::ops::IsOps<af::ascir_op::Broadcast>(node)) {
+      return true;
+    }
+  }
+  return false;
+}
 Status UnAlignmentStrategy::ModifyTransposeFusionVectorizedStrides(af::AscGraph &graph, uint32_t align_width) {
+  if (IsGraphHasBroadcast(graph)) {  // 当前broadcast api在出现不对齐轴的时候默认按照尾轴对齐，因此暂时不做优化。
+    return af::SUCCESS;
+  }
   // 收集 Transpose 前序节点
   std::set<af::AscNodePtr> transpose_pre_nodes;
   GE_ASSERT_SUCCESS(CollectTransposePreNodes(graph, transpose_pre_nodes));
