@@ -73,7 +73,7 @@ export ASCEND_DEVICE_ID=0
 可在以下目录中查看算子执行详情：
 
 ```text
-profiling/PROF_时间戳/mindstudio_profiler_output
+profiling/<hostname>_<pid>_<timestamp>_ascend_pt/PROF_<timestamp>/mindstudio_profiler_output
 ```
 
 打开其中的：
