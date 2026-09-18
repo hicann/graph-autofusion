@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import List
 import ctypes
 import dataclasses
+from contextlib import nullcontext
 
 from superkernel import super_kernel
 from utils import SkCompileContext
@@ -263,7 +264,7 @@ def compile_subkernel(ctx: SkCompileContext):
             output_count=1,  # 输出参数数量
             extend_op_info=None  # 扩展配置
     ):
-        with ctx.tmp_dir as tmp_dir:
+        with nullcontext(ctx.tmp_dir) as tmp_dir:
             # 1. 定义内核元数据目录
             kernel_meta_dir = Path(tmp_dir) / f"subkernel_{op_name}"
 
@@ -321,7 +322,7 @@ def compile_subkernel(ctx: SkCompileContext):
 
 
 def compile_superkernel(ctx: SkCompileContext, sub_kernels: list[KernelResult]):
-    with ctx.tmp_dir as tmp_dir:
+    with nullcontext(ctx.tmp_dir) as tmp_dir:
         kernel_meta_dir = tmp_dir / "superkernel_1"
 
         global_var_storage.set_variable("ascendc_compile_debug_config", True)
