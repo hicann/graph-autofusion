@@ -53,7 +53,7 @@ if [ "${target_branch}" == "master" ] || [ "${target_branch}" == "develop" ]; th
 			bash build.sh -u -c --impl=py --module=superkernel --cann_3rd_lib_path="/home/jenkins/opensource" -j20 -f ${WORKSPACE}/pr_filelist.txt
 			ret=$?
 			;;
-		UT_Test_superkernel)
+		UT_Test_Cpp_superkernel)
 			bash build.sh -u -c --impl=cpp --module=superkernel --cann_3rd_lib_path="/home/jenkins/opensource" -f ${WORKSPACE}/pr_filelist.txt
 			ret=$?
 			;;
@@ -67,6 +67,10 @@ if [ "${target_branch}" == "master" ] || [ "${target_branch}" == "develop" ]; th
 			;;
 		ST_Test_Python_superkernel)
 			bash build.sh -s -c --impl=py --module=superkernel --cann_3rd_lib_path="/home/jenkins/opensource" -f ${WORKSPACE}/pr_filelist.txt
+			ret=$?
+			;;
+		ST_Test_Cpp_superkernel)
+			bash build.sh -s -c --impl=cpp --module=superkernel --no-autofuse --cann_3rd_lib_path="/home/jenkins/opensource" -f ${WORKSPACE}/pr_filelist.txt
 			ret=$?
 			;;
 		ST_Test_autofuse_framework)
@@ -95,7 +99,7 @@ else
 			bash build.sh -u -c --impl=py --module=superkernel --cann_3rd_lib_path="/home/jenkins/opensource"
 			ret=$?
 			;;
-		UT_Test_superkernel)
+		UT_Test_Cpp_superkernel)
 			bash build.sh -u -c --impl=cpp --module=superkernel --cann_3rd_lib_path="/home/jenkins/opensource"
 			ret=$?
 			;;
@@ -109,6 +113,10 @@ else
 			;;
 		ST_Test_Python_superkernel)
 			bash build.sh -s -c --impl=py --module=superkernel --cann_3rd_lib_path="/home/jenkins/opensource"
+			ret=$?
+			;;
+		ST_Test_Cpp_superkernel)
+			bash build.sh -s -c --impl=cpp --module=superkernel --no-autofuse --cann_3rd_lib_path="/home/jenkins/opensource" -f ${WORKSPACE}/pr_filelist.txt
 			ret=$?
 			;;
 		ST_Test_autofuse_framework)

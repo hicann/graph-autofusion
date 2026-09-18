@@ -175,15 +175,24 @@ stages:
           ut_type: 'ST_Test_Python_superkernel'
           ut_package: 'coverage_*.info'
           image_version: ${{ jobs.JOB_image.outputs.ST_Test_Python_superkernel }}
-      JOB_UT_TEST_superkernel:
-        name: UT_Test_superkernel
+      JOB_UT_Test_Cpp_superkernel:
+        name: UT_Test_Cpp_superkernel
         select: selected_by_default
         needs: []
         uses: .gitcode/workflows/ut_action.yml
         with:
-          ut_type: 'UT_Test_superkernel'
+          ut_type: 'UT_Test_Cpp_superkernel'
           ut_package: 'coverage_*.info'
-          image_version: ${{ jobs.JOB_image.outputs.UT_Test_superkernel }}
+          image_version: ${{ jobs.JOB_image.outputs.UT_Test_Cpp_superkernel }}
+      JOB_ST_Test_Cpp_superkernel:
+        name: ST_Test_Cpp_superkernel
+        select: selected_by_default
+        needs: []
+        uses: .gitcode/workflows/ut_action.yml
+        with:
+          ut_type: 'ST_Test_Cpp_superkernel'
+          ut_package: 'coverage_*.info'
+          image_version: ${{ jobs.JOB_image.outputs.ST_Test_Cpp_superkernel }}
       JOB_UT_TEST_autofuse_framework:
         name: UT_Test_autofuse_framework
         select: selected_by_default
