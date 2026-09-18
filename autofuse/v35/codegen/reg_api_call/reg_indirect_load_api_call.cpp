@@ -350,6 +350,9 @@ af::Status EmitSimtEvaluatorNodes(const std::vector<af::AscNodePtr> &nodes, cons
     const auto load = load_metadata.find(node->GetName());
     if (load != load_metadata.end()) {
       const auto output = node->outputs()[0];
+      if (values.count(output->attr.mem.tensor_id) != 0UL) {
+        continue;
+      }
       const char *offset = nullptr;
       std::string custom_offset;
       if (index_offset_expressions != nullptr) {
@@ -420,12 +423,186 @@ af::Status GenerateSimtEvaluatorBody(const std::vector<af::AscNodePtr> &nodes,
   return af::SUCCESS;
 }
 
+bool IsAicoreScalarCastSupported(af::DataType input_dtype, af::DataType output_dtype) {
+  const bool input_supported = input_dtype == af::DT_FLOAT || input_dtype == af::DT_DOUBLE ||
+                               input_dtype == af::DT_INT8 || input_dtype == af::DT_INT16 ||
+                               input_dtype == af::DT_INT32 || input_dtype == af::DT_INT64 ||
+                               input_dtype == af::DT_UINT8 || input_dtype == af::DT_UINT16 ||
+                               input_dtype == af::DT_UINT32 || input_dtype == af::DT_UINT64;
+  const bool output_supported = output_dtype == af::DT_FLOAT || output_dtype == af::DT_DOUBLE ||
+                                output_dtype == af::DT_INT8 || output_dtype == af::DT_INT16 ||
+                                output_dtype == af::DT_INT32 || output_dtype == af::DT_INT64 ||
+                                output_dtype == af::DT_UINT8 || output_dtype == af::DT_UINT16 ||
+                                output_dtype == af::DT_UINT32 || output_dtype == af::DT_UINT64;
+  return input_supported && output_supported;
+}
+
+bool CanGenerateAicoreIndexEvaluator(const std::vector<af::AscNodePtr> &nodes,
+                                     const SimtLoadMetadataMap &load_metadata) {
+  for (const af::AscNodePtr &node : nodes) {
+    if (load_metadata.count(node->GetName()) != 0UL || af::ops::IsOps<af::ascir_op::Scalar>(node) ||
+        af::ops::IsOps<af::ascir_op::ScalarData>(node) || af::ops::IsOps<af::ascir_op::Store>(node) ||
+        af::ops::IsOps<af::ascir_op::Transpose>(node)) {
+      continue;
+    }
+    if (!af::ops::IsOps<af::ascir_op::Cast>(node) || node->inputs().size() != 1UL || node->outputs().empty() ||
+        !IsAicoreScalarCastSupported(node->inputs()[0]->attr.dtype, node->outputs()[0]->attr.dtype)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+af::Status EmitAicoreIndexEvaluatorNodes(const std::vector<af::AscNodePtr> &nodes,
+                                         const SimtLoadMetadataMap &load_metadata,
+                                         const SimtLoadIndexOffsetExpressions &index_offset_expressions,
+                                         std::map<ascir::TensorId, std::string> &values, std::stringstream &ss) {
+  for (const af::AscNodePtr &node : nodes) {
+    const auto load = load_metadata.find(node->GetName());
+    if (load != load_metadata.end()) {
+      const auto output = node->outputs()[0];
+      std::string offset;
+      const auto custom_offset = index_offset_expressions.find(node->GetName());
+      if (custom_offset != index_offset_expressions.end()) {
+        offset = custom_offset->second;
+      } else {
+        switch (load->second.address_source) {
+          case ascgen_utils::indirect_load::SimtLoadAddressSource::kZeroOffset:
+            offset = "0";
+            break;
+          case ascgen_utils::indirect_load::SimtLoadAddressSource::kIndexOffset:
+            offset = "index_offset";
+            break;
+          case ascgen_utils::indirect_load::SimtLoadAddressSource::kOutputOffset:
+            offset = "output_index";
+            break;
+        }
+      }
+      values[output->attr.mem.tensor_id] = "context." + std::string(kSimtGmFieldNamePrefix) +
+                                           std::to_string(output->attr.mem.tensor_id) + "[" + offset + "]";
+      continue;
+    }
+    if (af::ops::IsOps<af::ascir_op::Scalar>(node)) {
+      GE_ASSERT_SUCCESS(EmitSimtScalarInput(node, values));
+      continue;
+    }
+    if (af::ops::IsOps<af::ascir_op::ScalarData>(node)) {
+      const auto output = node->outputs()[0];
+      values[output->attr.mem.tensor_id] =
+          "context." + std::string(kSimtValueNamePrefix) + std::to_string(output->attr.mem.tensor_id);
+      continue;
+    }
+    if (af::ops::IsOps<af::ascir_op::Store>(node)) {
+      continue;
+    }
+    if (af::ops::IsOps<af::ascir_op::Transpose>(node)) {
+      const auto found = values.find(node->inputs()[0]->attr.mem.tensor_id);
+      GE_ASSERT_TRUE(found != values.end(), "AICore index Transpose node[%s] input has no scalar value.",
+                     node->GetNamePtr());
+      values[node->outputs()[0]->attr.mem.tensor_id] = found->second;
+      continue;
+    }
+
+    GE_ASSERT_TRUE(af::ops::IsOps<af::ascir_op::Cast>(node) && node->inputs().size() == 1UL && !node->outputs().empty(),
+                   "AICore index node[%s] is unsupported.", node->GetNamePtr());
+    const auto found = values.find(node->inputs()[0]->attr.mem.tensor_id);
+    GE_ASSERT_TRUE(found != values.end(), "AICore index Cast node[%s] input has no scalar value.", node->GetNamePtr());
+    std::string output_dtype;
+    GE_ASSERT_SUCCESS(Tensor::DtypeName(node->outputs()[0]->attr.dtype, output_dtype));
+    const std::string variable = kSimtValueNamePrefix + std::to_string(node->outputs()[0]->attr.mem.tensor_id);
+    ss << "    " << output_dtype << " " << variable << " = static_cast<" << output_dtype << ">(" << found->second
+       << ");" << std::endl;
+    values[node->outputs()[0]->attr.mem.tensor_id] = variable;
+  }
+  return af::SUCCESS;
+}
+
+af::Status GenerateAicoreIndexEvaluatorBody(const std::vector<af::AscNodePtr> &nodes,
+                                            std::map<ascir::TensorId, std::string> &values,
+                                            ascir::TensorId result_tensor_id, const SimtLoadMetadataMap &load_metadata,
+                                            const SimtLoadIndexOffsetExpressions &index_offset_expressions,
+                                            std::stringstream &ss) {
+  GE_ASSERT_SUCCESS(EmitAicoreIndexEvaluatorNodes(nodes, load_metadata, index_offset_expressions, values, ss));
+  const auto result = values.find(result_tensor_id);
+  GE_ASSERT_TRUE(result != values.end(), "AICore index evaluator result tensor[%ld] has no scalar value.",
+                 result_tensor_id);
+  ss << "    return " << result->second << ";" << std::endl;
+  ss << "  }" << std::endl;
+  return af::SUCCESS;
+}
+
+bool IsSimtFloatingType(af::DataType dtype) {
+  return dtype == af::DT_FLOAT16 || dtype == af::DT_BF16 || dtype == af::DT_FLOAT || dtype == af::DT_DOUBLE;
+}
+
+bool IsSimtSignedIntegerType(af::DataType dtype) {
+  return dtype == af::DT_INT8 || dtype == af::DT_INT16 || dtype == af::DT_INT32 || dtype == af::DT_INT64;
+}
+
+bool IsSimtUnsignedIntegerType(af::DataType dtype) {
+  return dtype == af::DT_UINT8 || dtype == af::DT_UINT16 || dtype == af::DT_UINT32 || dtype == af::DT_UINT64;
+}
+
+bool IsSameSimtCastCategory(af::DataType lhs, af::DataType rhs) {
+  return (IsSimtFloatingType(lhs) && IsSimtFloatingType(rhs)) ||
+         (IsSimtSignedIntegerType(lhs) && IsSimtSignedIntegerType(rhs)) ||
+         (IsSimtUnsignedIntegerType(lhs) && IsSimtUnsignedIntegerType(rhs));
+}
+
+bool IsLosslessSimtCastChain(const std::vector<af::AscNodePtr> &nodes, ascir::TensorId value_tensor_id,
+                             ascir::TensorId result_tensor_id) {
+  ascir::TensorId current_tensor_id = value_tensor_id;
+  af::DataType source_dtype = af::DT_UNDEFINED;
+  std::vector<af::DataType> cast_dtypes;
+  for (const af::AscNodePtr &node : nodes) {
+    if (af::ops::IsOps<af::ascir_op::Store>(node)) {
+      continue;
+    }
+    if (!af::ops::IsOps<af::ascir_op::Cast>(node) || node->inputs().size() != 1UL || node->outputs().empty() ||
+        node->inputs()[0]->attr.mem.tensor_id != current_tensor_id) {
+      return false;
+    }
+    if (cast_dtypes.empty()) {
+      source_dtype = node->inputs()[0]->attr.dtype;
+    }
+    current_tensor_id = node->outputs()[0]->attr.mem.tensor_id;
+    cast_dtypes.emplace_back(node->outputs()[0]->attr.dtype);
+  }
+  if (current_tensor_id != result_tensor_id) {
+    return false;
+  }
+  if (cast_dtypes.empty()) {
+    return true;
+  }
+  if (source_dtype != cast_dtypes.back() || !IsSameSimtCastCategory(source_dtype, cast_dtypes.front())) {
+    return false;
+  }
+  const uint32_t source_size = af::GetSizeByDataType(source_dtype);
+  for (const af::DataType dtype : cast_dtypes) {
+    const uint32_t dtype_size = af::GetSizeByDataType(dtype);
+    if (!IsSameSimtCastCategory(source_dtype, dtype) || dtype_size < source_size ||
+        (dtype_size == source_size && dtype != source_dtype)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 af::Status GenerateSimtOutputsEvaluator(const std::string &input_dtype, const std::string &offset_type,
                                         ascir::TensorId value_tensor_id, const std::vector<SimtOutputChain> &chains,
                                         const std::vector<af::AscNodePtr> &nodes,
                                         const SimtLoadMetadataMap &load_metadata,
                                         const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
                                         const TPipe &tpipe, std::stringstream &ss) {
+  GE_ASSERT_TRUE(!chains.empty(), "IndirectLoad SIMT output chains are empty.");
+  std::string primary_output_dtype;
+  GE_ASSERT_SUCCESS(Tensor::DtypeName(chains[0].dtype, primary_output_dtype));
+  ss << "  using PrimaryOutputType = " << primary_output_dtype << ";" << std::endl;
+  // 只有输出为gm，纯搬运操作，无element算子操作，才走mte快速搬运路径
+  if (chains.size() == 1UL && !chains[0].local_target &&
+      IsLosslessSimtCastChain(nodes, value_tensor_id, chains[0].result_tensor_id)) {
+    ss << "  static constexpr bool kSimtOutputIdentity = true;" << std::endl;
+  }
   ss << "  struct OutputPack {" << std::endl;
   for (size_t i = 0UL; i < chains.size(); ++i) {
     std::string dtype;
@@ -495,6 +672,21 @@ af::Status GenSimtIndexEvaluator(const std::string &index_dtype, const std::stri
   GE_ASSERT_SUCCESS(
       BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type, offsets, ss));
   return GenerateSimtEvaluatorBody(nodes, values, result_tensor_id, load_metadata, ss, &offsets);
+}
+
+af::Status GenAicoreIndexEvaluator(const std::string &index_dtype, const std::string &offset_type,
+                                   ascir::TensorId result_tensor_id, const std::vector<af::AscNodePtr> &nodes,
+                                   const SimtLoadMetadataMap &load_metadata,
+                                   const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
+                                   const TPipe &tpipe, std::stringstream &ss) {
+  std::map<ascir::TensorId, std::string> values;
+  ss << "  static constexpr bool kSupportsAicoreIndex = true;" << std::endl;
+  ss << "  __aicore__ inline static " << index_dtype << " AicoreIndex(" << offset_type
+     << " output_index, const Context &context) {" << std::endl;
+  SimtLoadIndexOffsetExpressions offsets;
+  GE_ASSERT_SUCCESS(
+      BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type, offsets, ss));
+  return GenerateAicoreIndexEvaluatorBody(nodes, values, result_tensor_id, load_metadata, offsets, ss);
 }
 
 af::Status CalcVectorizedElementCount(const Tensor &tensor, af::Expression &element_count) {
@@ -858,6 +1050,11 @@ Status IndirectLoadRegApiCall::GenerateFuncDefinition(const TPipe &tpipe, const 
 
   GE_ASSERT_SUCCESS(GenSimtIndexEvaluator(index_dtype, offset_type, index_result_tensor_id_, index_nodes_,
                                           simt_index_loads_, logical_view_, tpipe, ss));
+  if (simt_policy_.policy == ascgen_utils::indirect_load::SimtAddressPolicy::kEmbedding &&
+      CanGenerateAicoreIndexEvaluator(index_nodes_, simt_index_loads_)) {
+    GE_ASSERT_SUCCESS(GenAicoreIndexEvaluator(index_dtype, offset_type, index_result_tensor_id_, index_nodes_,
+                                              simt_index_loads_, logical_view_, tpipe, ss));
+  }
   GE_ASSERT_SUCCESS(GenerateSimtOutputsEvaluator(input_dtype, offset_type, simt_value_tensor_id_, output_chains_,
                                                  output_nodes_, simt_output_loads_, logical_view_, tpipe, ss));
   ss << "};" << std::endl;
@@ -991,6 +1188,20 @@ Status IndirectLoadRegApiCall::GenerateSimtInvocation(const TPipe &tpipe, const 
   } else {
     actual_size_expr = outer_tb_var + "_loop_size";
     output_offset_expr = "static_cast<" + offset_type + ">(block_dim_offset)";
+  }
+  if (!has_post_reduce_ && simt_policy_.policy == ascgen_utils::indirect_load::SimtAddressPolicy::kEmbedding &&
+      rank == 2UL && axis_ == 0L) {
+    const std::string row_count_expr = PromoteSizeExpr(tpipe.tiler.Size(logical_view_.output.sizes[0]), offset_type);
+    const std::string inner_size_expr = PromoteSizeExpr(tpipe.tiler.Size(logical_view_.output.sizes[1]), offset_type);
+    ss << "  const " << offset_type << " embedding_rows_per_block = (" << row_count_expr << " + static_cast<"
+       << offset_type << ">(t->block_dim) - 1U) / static_cast<" << offset_type << ">(t->block_dim);" << std::endl;
+    ss << "  const " << offset_type << " embedding_row_offset = static_cast<" << offset_type
+       << ">(block_dim) * embedding_rows_per_block;" << std::endl;
+    ss << "  const " << offset_type << " embedding_actual_rows = embedding_row_offset < " << row_count_expr << " ? ("
+       << row_count_expr << " - embedding_row_offset < embedding_rows_per_block ? " << row_count_expr
+       << " - embedding_row_offset : embedding_rows_per_block) : 0U;" << std::endl;
+    actual_size_expr = "embedding_actual_rows * (" + inner_size_expr + ")";
+    output_offset_expr = "embedding_row_offset * (" + inner_size_expr + ")";
   }
   EmitSimtPolicyParams(tpipe, simt_policy_, rank, axis_, ss);
   ss << "  AscendC::IndirectLoadSimt<" << input_dtype << ", " << body_name << ", IndirectLoadSimtCase>(\n";

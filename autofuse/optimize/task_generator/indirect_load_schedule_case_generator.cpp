@@ -31,6 +31,7 @@ namespace {
 constexpr int64_t kIndirectLoadSimtDcacheSize = 32 * 1024;
 constexpr int64_t kEmbeddingSimdPayloadBytesThreshold = 2048;
 constexpr int64_t kEmbeddingSimdLookupCountThreshold = 32;
+constexpr uint32_t kVectorDataBlockBytes = 32U;
 constexpr int32_t kEmbeddingFastPathScore = 2;
 constexpr int32_t kEmbeddingAlternateFastPathScore = 1;
 constexpr size_t kIndirectLoadInputCount = 2UL;
@@ -530,7 +531,25 @@ bool HasSupportedReduceSuffix(const PostReduceLayout &layout, size_t begin) {
   return has_reduce_axis && transitions <= 1UL;
 }
 
-af::Status ValidateSimtPostReduceLayout(const af::AscNodePtr &reduce, size_t &boundary, bool &is_legal) {
+bool IsPostReduceInnermostAxisAligned(const af::AscNodePtr &reduce) {
+  if (reduce == nullptr || reduce->inputs().size() != 1UL || reduce->inputs()[0] == nullptr) {
+    return false;
+  }
+  const auto input = reduce->inputs()[0];
+  if (input->attr.repeats.empty()) {
+    return false;
+  }
+  const uint32_t dtype_size = af::GetSizeByDataType(input->attr.dtype);
+  if (dtype_size == 0U || kVectorDataBlockBytes % dtype_size != 0U) {
+    return false;
+  }
+  const uint32_t alignment = kVectorDataBlockBytes / dtype_size;
+  return af::SymbolicUtils::StaticCheckEq(af::sym::Mod(input->attr.repeats.back(), af::Symbol(alignment)),
+                                          af::ops::Zero) == af::TriBool::kTrue;
+}
+
+af::Status ValidateSimtPostReduceLayout(const af::AscNodePtr &indirect_load, const af::AscNodePtr &reduce,
+                                        size_t &boundary, bool &is_legal) {
   is_legal = true;
   if (reduce == nullptr) {
     return af::SUCCESS;
@@ -544,7 +563,14 @@ af::Status ValidateSimtPostReduceLayout(const af::AscNodePtr &reduce, size_t &bo
     is_legal = false;
     return af::SUCCESS;
   }
-  boundary = layout.first_reduce;
+  const size_t axis_index = GetIndirectLoadAxisIndex(indirect_load);
+  GE_ASSERT_TRUE(axis_index != kIndirectLoadInvalidAxisIndex, "IndirectLoad axis index of node[%s] is invalid.",
+                 indirect_load->GetNamePtr());
+  const bool is_embedding_feature_reduce =
+      axis_index == 0UL && layout.axes.size() == 3UL && layout.kinds.size() == 3UL &&
+      layout.kinds[0] == ReduceAxisKind::kRetained && layout.kinds[1] == ReduceAxisKind::kRetained &&
+      layout.kinds[2] == ReduceAxisKind::kReduced && IsPostReduceInnermostAxisAligned(reduce);
+  boundary = is_embedding_feature_reduce ? 1UL : layout.first_reduce;
   is_legal = HasSupportedReduceSuffix(layout, boundary);
   return af::SUCCESS;
 }
@@ -1740,7 +1766,7 @@ af::Status ValidateTemplate(const af::AscNodePtr &indirect_load, ascir::Template
   if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
     return ValidateSimdPostReduceLayout(indirect_load, analysis.post_reduce, is_candidate_legal);
   }
-  GE_ASSERT_SUCCESS(ValidateSimtPostReduceLayout(analysis.post_reduce, boundary, is_candidate_legal));
+  GE_ASSERT_SUCCESS(ValidateSimtPostReduceLayout(indirect_load, analysis.post_reduce, boundary, is_candidate_legal));
   if (is_candidate_legal) {
     GE_ASSERT_SUCCESS(ValidateSimtTemplateRegion(analysis, is_candidate_legal));
   }
