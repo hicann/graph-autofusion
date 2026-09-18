@@ -12,7 +12,7 @@ SuperKernel is a scheduling optimization technology for network graph models. Th
 
 ***
 
-The original design intent of SuperKernel is to fuse multiple sub-operators into one SuperKernel, saving N-1 operator scheduling overhead. However, to maintain execution order between sub-operators, full-core synchronization operations are typically inserted, which to some extent weakens the benefits of scheduling optimization. Thanks to obtaining all prior information of sub-operators during the compilation phase, SuperKernel can implement more deep optimizations on this basis.
+The original design intent of SuperKernel is to fuse multiple sub-operators into one SuperKernel, saving N-1 operator scheduling overhead. However, to maintain execution order between sub-operators, full-core synchronization operations are typically inserted, which to some extent weakens the benefits of scheduling optimization. Thanks to obtaining all prior information of sub-operators during the compilation phase, SuperKernel can implement deeper optimizations on this basis.
 
 1. **ICache Preload Optimization**
 
