@@ -467,6 +467,12 @@ add_indirect_load_graph_case(indirect_load_user_masked_embedding_sum_full_auto
     indirect_load_user_masked_embedding_sum_full 1
     IL_CASE_BROADCAST_WHERE IL_USER_MASKED_EMBEDDING_SUM_FULL IL_USER_MASKED_EMBEDDING_AUTO_SELECT)
 
+# Exact user position-bias GraphHint: relative-position bucket arithmetic,
+# transposed [8,32,1] table view, axis-1 IndirectLoad, side-input add and no reduction.
+add_indirect_load_graph_case(indirect_load_user_position_bias
+    indirect_load_user_position_bias 1
+    IL_CASE_BROADCAST_WHERE IL_USER_POSITION_BIAS)
+
 # User graph: embedding + Sum over the lookup axis.
 add_indirect_load_graph_case(indirect_load_user_embedding_sum indirect_load_user_embedding_sum 1
     IL_CASE_BROADCAST_WHERE IL_USER_EMBEDDING_SUM)

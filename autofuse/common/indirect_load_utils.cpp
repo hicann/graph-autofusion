@@ -694,7 +694,7 @@ af::Status CollectSimtLoweringBackwardNodes(const af::AscNodePtr &root, const af
       continue;
     }
     if (IsSimtDirectGmBoundary(current) || af::ops::IsOps<af::ascir_op::Scalar>(current) ||
-        af::ops::IsOps<af::ascir_op::ScalarData>(current)) {
+        af::ops::IsOps<af::ascir_op::ScalarData>(current) || af::ops::IsOps<af::ascir_op::Arange>(current)) {
       continue;
     }
     GE_ASSERT_TRUE(current->inputs.Size() > 0UL, "IndirectLoad SIMT node[%s] has no input.", current->GetNamePtr());
@@ -772,8 +772,8 @@ af::Status CollectSimtOutputChainBuilds(const NodePath &graph_nodes, const af::A
 
 af::Status ValidateSimtLoweringNode(const af::AscNodePtr &node) {
   if (IsSimtDirectGmBoundary(node) || af::ops::IsOps<af::ascir_op::Scalar>(node) ||
-      af::ops::IsOps<af::ascir_op::ScalarData>(node) || af::ops::IsOps<af::ascir_op::Store>(node) ||
-      af::ops::IsOps<af::ascir_op::Transpose>(node)) {
+      af::ops::IsOps<af::ascir_op::ScalarData>(node) || af::ops::IsOps<af::ascir_op::Arange>(node) ||
+      af::ops::IsOps<af::ascir_op::Store>(node) || af::ops::IsOps<af::ascir_op::Transpose>(node)) {
     return af::SUCCESS;
   }
   const auto role = GetTemplateRole(node);

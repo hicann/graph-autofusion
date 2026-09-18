@@ -148,7 +148,7 @@ std::string JoinSizeExprs(const std::vector<ascir::SizeExpr> &exprs, const TPipe
 af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
                                                   const std::vector<af::AscNodePtr> &nodes,
                                                   const SimtLoadMetadataMap &load_metadata, const TPipe &tpipe,
-                                                  const std::string &offset_type,
+                                                  const std::string &offset_type, const std::string &output_index_expr,
                                                   SimtLoadIndexOffsetExpressions &expressions, std::stringstream &ss) {
   expressions.clear();
   const size_t rank = logical_view.output.sizes.size();
@@ -183,7 +183,7 @@ af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_l
             base_offset = "index_offset";
             break;
           case ascgen_utils::indirect_load::SimtLoadAddressSource::kOutputOffset:
-            base_offset = "output_index";
+            base_offset = output_index_expr;
             break;
         }
         expressions[node->GetName()] = append_load_offset(base_offset);
@@ -195,7 +195,7 @@ af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_l
                    "SIMT index Load[%s] physical view rank mismatch.", node->GetNamePtr());
     // Dense matching views need no coordinate reconstruction or host tiling expressions in the scalar body.
     if (view.sizes == logical_view.output.sizes && view.strides == logical_view.output.strides) {
-      expressions[node->GetName()] = append_load_offset("output_index");
+      expressions[node->GetName()] = append_load_offset(output_index_expr);
       continue;
     }
 
@@ -216,7 +216,8 @@ af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_l
         const std::string name = "index_coord_" + std::to_string(coordinates.size());
         const bool unit_output_stride =
             af::SymbolicUtils::StaticCheckEq(logical_view.output.strides[dim], af::ops::One) == af::TriBool::kTrue;
-        const std::string dividend = unit_output_stride ? "output_index" : "(output_index / " + output_stride + ")";
+        const std::string dividend =
+            unit_output_stride ? output_index_expr : "((" + output_index_expr + ") / " + output_stride + ")";
         ss << "    const " << offset_type << " " << name << " = static_cast<" << offset_type << ">(" << dividend
            << " % " << output_size << ");" << std::endl;
         found = coordinates.emplace(key, name).first;
@@ -344,8 +345,44 @@ af::Status EmitSimtTransform(const af::AscNodePtr &node, std::map<ascir::TensorI
   return af::SUCCESS;
 }
 
+af::Status EmitSimtArangeExpr(const af::AscNodePtr &node,
+                              const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
+                              const std::string &offset_expr, std::map<ascir::TensorId, std::string> &values) {
+  const auto impl = ascgen_utils::GetAscIrCodegenImpl(node->GetType());
+  GE_ASSERT_NOTNULL(impl, "SIMT zero-input codegen is not registered for node %s[%s].", node->GetTypePtr(),
+                    node->GetNamePtr());
+  const auto *v2_impl = dynamic_cast<af::ascir::AscIrCodegenV2 *>(impl.get());
+  GE_ASSERT_NOTNULL(v2_impl, "SIMT zero-input codegen for node %s[%s] is not V2.", node->GetTypePtr(),
+                    node->GetNamePtr());
+  GE_ASSERT_TRUE(v2_impl->IsSimtScalarSupported(*node), "SIMT scalar codegen is not supported for node %s[%s].",
+                 node->GetTypePtr(), node->GetNamePtr());
+  const auto &output = node->outputs()[0]->attr;
+  const auto varying = std::find_if(output.strides.begin(), output.strides.end(), [](const af::Expression &stride) {
+    return af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) != af::TriBool::kTrue;
+  });
+  GE_ASSERT_TRUE(varying != output.strides.end(), "Arange has no varying axis.");
+  const auto axis = output.axis[static_cast<size_t>(std::distance(output.strides.begin(), varying))];
+  const auto logical_axis = std::find(logical_view.output.axis_ids.begin(), logical_view.output.axis_ids.end(), axis);
+  GE_ASSERT_TRUE(logical_axis != logical_view.output.axis_ids.end(), "Arange varying axis is absent from output view.");
+  const size_t logical_pos = static_cast<size_t>(std::distance(logical_view.output.axis_ids.begin(), logical_axis));
+  GE_ASSERT_TRUE(logical_pos < logical_view.output.sizes.size() && logical_pos < logical_view.output.strides.size(),
+                 "Arange output view metadata is incomplete.");
+  std::string coordinate = std::string("(") + offset_expr;
+  if (af::SymbolicUtils::StaticCheckEq(logical_view.output.strides[logical_pos], af::sym::kSymbolOne) !=
+      af::TriBool::kTrue) {
+    coordinate += std::string(" / ") + logical_view.output.strides[logical_pos].Str().get();
+  }
+  coordinate += std::string(") % (") + logical_view.output.sizes[logical_pos].Str().get() + ")";
+  std::string expr;
+  GE_ASSERT_GRAPH_SUCCESS(v2_impl->GenerateSimtScalarExpr(*node, {coordinate}, expr));
+  values[node->outputs()[0]->attr.mem.tensor_id] = expr;
+  return af::SUCCESS;
+}
+
 af::Status EmitSimtEvaluatorNodes(const std::vector<af::AscNodePtr> &nodes, const SimtLoadMetadataMap &load_metadata,
                                   const SimtLoadIndexOffsetExpressions *index_offset_expressions,
+                                  const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
+                                  const std::string &output_offset_expr, const std::string &arange_offset_expr,
                                   std::map<ascir::TensorId, std::string> &values, std::stringstream &ss) {
   for (const af::AscNodePtr &node : nodes) {
     const auto load = load_metadata.find(node->GetName());
@@ -372,7 +409,7 @@ af::Status EmitSimtEvaluatorNodes(const std::vector<af::AscNodePtr> &nodes, cons
             offset = "index_offset";
             break;
           case ascgen_utils::indirect_load::SimtLoadAddressSource::kOutputOffset:
-            offset = "output_index";
+            offset = output_offset_expr.c_str();
             break;
         }
       }
@@ -389,6 +426,10 @@ af::Status EmitSimtEvaluatorNodes(const std::vector<af::AscNodePtr> &nodes, cons
       const std::string variable =
           "context." + std::string(kSimtValueNamePrefix) + std::to_string(output->attr.mem.tensor_id);
       values[output->attr.mem.tensor_id] = variable;
+      continue;
+    }
+    if (af::ops::IsOps<af::ascir_op::Arange>(node)) {
+      GE_ASSERT_SUCCESS(EmitSimtArangeExpr(node, logical_view, arange_offset_expr, values));
       continue;
     }
     if (af::ops::IsOps<af::ascir_op::Store>(node)) {
@@ -415,8 +456,11 @@ af::Status EmitSimtEvaluatorNodes(const std::vector<af::AscNodePtr> &nodes, cons
 af::Status GenerateSimtEvaluatorBody(const std::vector<af::AscNodePtr> &nodes,
                                      std::map<ascir::TensorId, std::string> &values, ascir::TensorId result_tensor_id,
                                      const SimtLoadMetadataMap &load_metadata, std::stringstream &ss,
+                                     const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
+                                     const std::string &output_offset_expr, const std::string &arange_offset_expr,
                                      const SimtLoadIndexOffsetExpressions *index_offset_expressions = nullptr) {
-  GE_ASSERT_SUCCESS(EmitSimtEvaluatorNodes(nodes, load_metadata, index_offset_expressions, values, ss));
+  GE_ASSERT_SUCCESS(EmitSimtEvaluatorNodes(nodes, load_metadata, index_offset_expressions, logical_view,
+                                           output_offset_expr, arange_offset_expr, values, ss));
   const auto result = values.find(result_tensor_id);
   GE_ASSERT_TRUE(result != values.end(), "SIMT evaluator result tensor[%ld] has no scalar value.", result_tensor_id);
   ss << "    return " << result->second << ";" << std::endl;
@@ -622,9 +666,10 @@ af::Status GenerateSimtOutputsEvaluator(const std::string &input_dtype, const st
   ss << "  __simt_callee__ __aicore__ inline static OutputPack Outputs(" << input_dtype << " value, " << offset_type
      << " output_index, " << offset_type << " index_offset, const Context &context) {" << std::endl;
   SimtLoadIndexOffsetExpressions offsets;
+  GE_ASSERT_SUCCESS(BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type,
+                                                           "output_index", offsets, ss));
   GE_ASSERT_SUCCESS(
-      BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type, offsets, ss));
-  GE_ASSERT_SUCCESS(EmitSimtEvaluatorNodes(nodes, load_metadata, &offsets, values, ss));
+      EmitSimtEvaluatorNodes(nodes, load_metadata, &offsets, logical_view, "output_index", "output_index", values, ss));
   ss << "    OutputPack outputs;" << std::endl;
   for (size_t i = 0UL; i < chains.size(); ++i) {
     const auto found = values.find(chains[i].result_tensor_id);
@@ -667,12 +712,13 @@ af::Status GenSimtIndexEvaluator(const std::string &index_dtype, const std::stri
                                  const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
                                  const TPipe &tpipe, std::stringstream &ss) {
   std::map<ascir::TensorId, std::string> values;
-  ss << "  __simt_callee__ __aicore__ inline static " << index_dtype << " Index(" << offset_type
-     << " output_index, const Context &context) {" << std::endl;
+  ss << "  __simt_callee__ __aicore__ inline static " << index_dtype << " Index(" << offset_type << " output_index, "
+     << offset_type << " index_offset, const Context &context) {" << std::endl;
   SimtLoadIndexOffsetExpressions offsets;
-  GE_ASSERT_SUCCESS(
-      BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type, offsets, ss));
-  return GenerateSimtEvaluatorBody(nodes, values, result_tensor_id, load_metadata, ss, &offsets);
+  GE_ASSERT_SUCCESS(BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type,
+                                                           "index_offset", offsets, ss));
+  return GenerateSimtEvaluatorBody(nodes, values, result_tensor_id, load_metadata, ss, logical_view, "index_offset",
+                                   "output_index", &offsets);
 }
 
 af::Status GenAicoreIndexEvaluator(const std::string &index_dtype, const std::string &offset_type,
@@ -685,8 +731,8 @@ af::Status GenAicoreIndexEvaluator(const std::string &index_dtype, const std::st
   ss << "  __aicore__ inline static " << index_dtype << " AicoreIndex(" << offset_type
      << " output_index, const Context &context) {" << std::endl;
   SimtLoadIndexOffsetExpressions offsets;
-  GE_ASSERT_SUCCESS(
-      BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type, offsets, ss));
+  GE_ASSERT_SUCCESS(BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type,
+                                                           "output_index", offsets, ss));
   return GenerateAicoreIndexEvaluatorBody(nodes, values, result_tensor_id, load_metadata, offsets, ss);
 }
 

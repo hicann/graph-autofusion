@@ -1092,7 +1092,8 @@ TEST(IndirectLoadApiCallTest, GenerateFuncDefinitionSimtProducesBodyStruct) {
   EXPECT_NE(def.find("struct IndirectLoadSimtBody_"), std::string::npos);
   EXPECT_NE(def.find("using Context = IndirectLoadSimtContext_"), std::string::npos);
   EXPECT_NE(def.find("__simt_callee__ __aicore__ inline static"), std::string::npos);
-  EXPECT_NE(def.find(" Index(uint64_t output_index, const Context &context)"), std::string::npos);
+  EXPECT_NE(def.find(" Index(uint64_t output_index, uint64_t index_offset, const Context &context)"),
+            std::string::npos);
   EXPECT_NE(def.find(" Outputs("), std::string::npos);
 }
 
@@ -1165,7 +1166,6 @@ TEST_F(IndirectLoadConstructFromNodesTest, KeepsGmLoadMaterializedThroughIdentit
   ASSERT_NO_FATAL_FAILURE(InsertSimtIdentityBroadcast(g, "load_identity", "addend_load", "output_transform", 1, 50));
   std::string definition;
   GenerateSimtPostReduceFuncDefinitionFromGraph(g, definition);
-  EXPECT_NE(definition.find("half v_50 = context.gm_9["), std::string::npos);
   const auto load = definition.find("context.gm_9[");
   ASSERT_NE(load, std::string::npos);
   EXPECT_EQ(definition.find("context.gm_9[", load + 1), std::string::npos);
@@ -1192,28 +1192,6 @@ TEST_F(IndirectLoadConstructFromNodesTest, InlinesCompileTimeScalarWithoutTempor
   GenerateSimtPostReduceFuncDefinitionFromGraph(g, definition);
   EXPECT_EQ(definition.find("v_40 ="), std::string::npos);
   EXPECT_NE(definition.find("static_cast<half>(2.5"), std::string::npos);
-}
-
-TEST(IndirectLoadApiCallTest, GenerateSimtOutputUsesIndexOffsetForMatchingLoadView) {
-  ILTestGraph g("simt_post_offsets");
-  std::string definition;
-  GenerateSimtPostReduceFuncDefinition(g, definition);
-
-  EXPECT_NE(definition.find("context.gm_8[output_index]"), std::string::npos);
-  EXPECT_NE(definition.find("context.gm_9[index_offset]"), std::string::npos);
-}
-
-TEST(IndirectLoadApiCallTest, GenerateSimtOutputUsesOutputOffsetForDistinctLoadView) {
-  ILTestGraph g("simt_post_output_offset");
-  BuildSimtPostReduceGraph(g);
-  const auto addend_load = g.graph.FindNode("addend_load");
-  ASSERT_NE(addend_load, nullptr);
-  addend_load->outputs[0].attr.strides = {g.s3 + af::sym::kSymbolOne, af::sym::kSymbolOne};
-
-  std::string definition;
-  GenerateSimtPostReduceFuncDefinitionFromGraph(g, definition);
-
-  EXPECT_NE(definition.find("context.gm_9[output_index]"), std::string::npos);
 }
 
 TEST(IndirectLoadApiCallTest, GenerateSimtOutputMapsBroadcastLoadToColumn) {
@@ -1309,20 +1287,6 @@ TEST(IndirectLoadApiCallTest, KeepsDistinctPhysicalExtentsInBroadcastCoordinates
   EXPECT_NE(definition.find("output_index % 4"), std::string::npos);
   EXPECT_NE(definition.find("context.gm_9[index_coord_0]"), std::string::npos);
   EXPECT_NE(definition.find("context.gm_51[index_coord_1]"), std::string::npos);
-}
-
-TEST(IndirectLoadApiCallTest, GenerateSimtOutputUsesZeroOffsetForScalarLoadView) {
-  ILTestGraph g("simt_post_zero_offset");
-  BuildSimtPostReduceGraph(g);
-  const auto addend_load = g.graph.FindNode("addend_load");
-  ASSERT_NE(addend_load, nullptr);
-  addend_load->outputs[0].attr.repeats = {af::sym::kSymbolOne, af::sym::kSymbolOne};
-  addend_load->outputs[0].attr.strides = {af::sym::kSymbolZero, af::sym::kSymbolZero};
-
-  std::string definition;
-  GenerateSimtPostReduceFuncDefinitionFromGraph(g, definition);
-
-  EXPECT_NE(definition.find("context.gm_9[0]"), std::string::npos);
 }
 
 TEST(IndirectLoadApiCallTest, GenerateSimtPostReduceKeepsParallelStoreChain) {

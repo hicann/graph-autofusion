@@ -883,6 +883,7 @@ build_backend() {
                        indirect_load_user_masked_embedding_minimal_e2e_v2 \
                        indirect_load_user_masked_embedding_sum_full_e2e_v2 \
                        indirect_load_user_masked_embedding_sum_full_auto_e2e_v2 \
+                       indirect_load_user_position_bias_e2e_v2 \
                        indirect_load_user_embedding_sum_e2e_v2 \
                        indirect_load_user_embedding_sum_rank2_e2e_v2 \
                        indirect_load_user_embedding_sum_simd_e2e_v2 \

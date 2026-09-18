@@ -409,8 +409,11 @@ bool CollectSimtBackwardRegion(const NodePath &roots, const af::AscNodePtr &indi
     if (!region.emplace(node.get()).second || af::ops::IsOps<af::ascir_op::Load>(node)) {
       continue;
     }
-    if (node->inputs.Size() == 0UL) {
+    if (node->inputs.Size() == 0UL && !af::ops::IsOps<af::ascir_op::Arange>(node)) {
       return false;
+    }
+    if (af::ops::IsOps<af::ascir_op::Arange>(node)) {
+      continue;
     }
     for (size_t i = 0UL; i < node->inputs.Size(); ++i) {
       const af::AscNodePtr producer = ascgen_utils::indirect_load::GetInputProducer(node, i);
@@ -1625,6 +1628,9 @@ af::Status ValidateSimtTemplateRegion(const RewrittenGraphAnalysis &analysis, bo
     }
     // Compile-time Scalar values are emitted as local constants by the SIMT evaluator.
     // ScalarData is runtime input and still requires an explicit context/GM binding.
+    if (af::ops::IsOps<af::ascir_op::Arange>(node)) {
+      continue;
+    }
     if (af::ops::IsOps<af::ascir_op::ScalarData>(node) || HasControlEdge(node)) {
       return af::SUCCESS;
     }

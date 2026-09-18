@@ -532,7 +532,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(ThreadNum) inline void IndirectLoadSimtKerne
   for (uint32_t i = threadIdx.x; i < actual_size; i += blockDim.x) {
     const OffsetT output_index = output_offset + static_cast<OffsetT>(i);
     const auto address = address_policy.GetAddress(output_index);
-    const OffsetT indirect_index = static_cast<OffsetT>(FusedBody::Index(address.index_offset, context));
+    const OffsetT indirect_index = static_cast<OffsetT>(FusedBody::Index(output_index, address.index_offset, context));
     OffsetT input_offset = address.input_base;
     if constexpr (AddressPolicy::kUsesInputAxis) {
       input_offset += indirect_index * address_policy.input_axis_stride;
@@ -580,7 +580,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(ThreadNum) inline void IndirectLoadSimtEmbed
     const OffsetT index_offset = row * index_stride;
     OffsetT indirect_index = 0U;
     if (lane_id == 0U) {
-      indirect_index = static_cast<OffsetT>(FusedBody::Index(index_offset, context));
+      indirect_index = static_cast<OffsetT>(FusedBody::Index(row_begin, index_offset, context));
     }
     indirect_index = Simt::WarpShflSync(indirect_index, 0);
     const OffsetT input_row = indirect_index * input_axis_stride;
