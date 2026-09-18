@@ -896,7 +896,7 @@ std::string AxesReorderSolverGen::InitiateArgs() {
     if (IsValid(arg) && (!input_align_expr.IsConstExpr() ||
                          (input_align_expr.IsConstExpr() &&
                           af::SymbolicUtils::StaticCheckNe(input_align_expr, af::Symbol(1)) == af::TriBool::kTrue))) {
-      std::string input_align = "std::max(1, " + Str(input_align_expr) + ")";
+      std::string input_align = "std::max(1, " + RuntimeAlignExprToCode(Str(input_align_expr)) + ")";
       strs += "    " + arg_string + ".value = (tiling_data.get_" + arg_string + "() + " + input_align + " - 1) / " +
               input_align + " * " + input_align + ";\n";
     } else {
@@ -1362,7 +1362,7 @@ std::string AxesReorderSolverGen::GenInputInfo(std::vector<Expr> &all_cons, std:
     const auto align = arg_align_map_[local_var];
     const auto prompt_align = arg_prompt_align_map_[local_var];
     const auto data_type_size = data_type_size_map_[local_var];
-    strs += "    " + Str(local_var) + ".align = std::max(1, " + Str(align) + ");\n";
+    strs += "    " + Str(local_var) + ".align = std::max(1, " + RuntimeAlignExprToCode(Str(align)) + ");\n";
     if (data_type_size > 0U) {
       strs += "    " + Str(local_var) + ".data_type_size = " + std::to_string(data_type_size) + ";\n";
     }

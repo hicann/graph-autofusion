@@ -143,7 +143,6 @@ REG_ASC_IR(Store)
                             {{"T", TensorType{DT_INT8, DT_UINT8, DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_FLOAT16,
                                               DT_FLOAT, DT_INT64, DT_BF16}}}});
 
-// todo: Broadcast DT_INT64 后面根据需要放开
 REG_ASC_IR(Broadcast)
     .Input("x", "T")
     .Output("y", "T")
@@ -151,7 +150,7 @@ REG_ASC_IR(Broadcast)
     .Impl(v1_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::BroadcastAscIrAttImpl>(),
                             af::ascir::AscIrImplCreator<af::ascir::BroadcastAscIrCodegenImpl>(),
                             {{"T", TensorType{DT_UINT8, DT_INT16, DT_INT32, DT_FLOAT16, DT_FLOAT, DT_INT8, DT_UINT16,
-                                              DT_UINT32, DT_UINT64}}}});
+                                              DT_UINT32, DT_UINT64, DT_INT64}}}});
 
 REG_ASC_IR(RemovePad)
     .Input("x", "T")

@@ -168,6 +168,18 @@ static std::string VectorToStr(const std::vector<T> &vec, char start = '[', char
   return result;
 }
 af::Expression GetTensorSize(const af::AscTensor &tensor);
+
+// cube 融合 tile 内轴的运行时对齐占位符：符号名必须为合法标识符（轴属性经 AscGraph
+// 序列化克隆时需可被表达式 scanner/parser 解析），打印进生成的求解器/tiling 代码时
+// 需还原为函数调用形态（getter 由生成的 tiling 代码提供，运行时求值）
+inline constexpr char kRuntimeAlignFuncName[] = "get_g_basen_basem_align";
+
+inline std::string RuntimeAlignExprToCode(const std::string &expr_str) {
+  if (expr_str == kRuntimeAlignFuncName) {
+    return std::string(kRuntimeAlignFuncName) + "()";
+  }
+  return expr_str;
+}
 af::Expression CalculateOneWorkspaceSize(const af::AscNodePtr &workspace_nodes);
 af::Expression CalculateWorkspaceSize(const std::vector<af::AscNodePtr> &workspace_nodes);
 af::Expression CalcExtraTmpBufForAscGraph(const ascir::ImplGraph &graph);
