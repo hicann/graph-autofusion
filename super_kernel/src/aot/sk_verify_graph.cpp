@@ -95,7 +95,7 @@ aclError ValidateScopeVerifyGraph(const aclskScopeVerifyGraphInfo *verifyGraph) 
     return ACL_ERROR_INVALID_PARAM;
   }
   if (verifyGraph->nodeCount > 0 && verifyGraph->nodes == nullptr) {
-    SK_DLOGE("aclskScopeVerify graph nodes is null, nodeCount=%zu", verifyGraph->nodeCount);
+    SK_DLOGE("aclskScopeVerify graph nodes pointer is null, nodeCount=%zu", verifyGraph->nodeCount);
     return ACL_ERROR_INVALID_PARAM;
   }
   return ACL_SUCCESS;

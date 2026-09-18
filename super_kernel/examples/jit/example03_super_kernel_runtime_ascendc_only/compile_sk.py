@@ -96,17 +96,17 @@ class KernelResult:
 
     def _load_json(self):
         try:
-            # 检查文件是否存在
+            # Check whether the file exists.
             if not os.path.exists(self.json_path()):
-                raise FileNotFoundError(f"文件不存在: {self.json_path()}")
-            # 读取并解析JSON文件
+                raise FileNotFoundError(f"File does not exist: {self.json_path()}")
+            # Read and parse the JSON file.
             with open(self.json_path(), 'r', encoding='utf-8') as f:
                 json_data = json.load(f)
             return json_data
         except json.JSONDecodeError as e:
-            raise json.JSONDecodeError(f"JSON解析错误: {e}")
+            raise json.JSONDecodeError(f"JSON parsing error: {e}")
         except Exception as e:
-            raise Exception(f"读取文件时发生错误: {e}")
+            raise Exception(f"An error occurred while reading the file: {e}")
 
     def _load_bin(self):
         file_path = self.root / "kernel_meta" / (self.name + ".o")
