@@ -191,4 +191,5 @@ def main():
 
 
 if __name__ == "__main__":
+    torch_npu.npu.set_device(0)
     raise SystemExit(main())

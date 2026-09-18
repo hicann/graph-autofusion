@@ -102,6 +102,7 @@ def main():
     seed = 1236
     torch.manual_seed(seed)
     np.random.seed(seed)
+    torch_npu.npu.set_device(0)
     cpu_generator = torch.Generator(device="cpu")
     cpu_generator.manual_seed(seed)
 

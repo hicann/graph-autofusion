@@ -40,9 +40,7 @@ For Atlas A3 or Atlas A2 products:
 bash run.sh --npu-arch=dav-2201
 ```
 
-This sample selects the corresponding attention network for the target architecture and uses the currently visible NPU.
-
-For options, see the [TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md).
+This sample selects the corresponding attention network for the target architecture.
 
 ## Expected Result
 
