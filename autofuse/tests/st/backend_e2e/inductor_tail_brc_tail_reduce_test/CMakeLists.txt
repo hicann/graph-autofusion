@@ -72,4 +72,6 @@ target_compile_definitions(inductor_tail_brc_tail_reduce_test_e2e PRIVATE
 )
 add_test(NAME inductor_tail_brc_tail_reduce_test_e2e
     COMMAND inductor_tail_brc_tail_reduce_test_e2e --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/inductor_tail_brc_tail_reduce_test_e2e.xml)
-set_tests_properties(inductor_tail_brc_tail_reduce_test_e2e PROPERTIES LABELS "st;build_backend_test2;inductor_tail_brc_tail_reduce_test_e2e")
+set_tests_properties(inductor_tail_brc_tail_reduce_test_e2e PROPERTIES
+    LABELS "st;build_backend_test2;inductor_tail_brc_tail_reduce_test_e2e"
+    ENVIRONMENT "LD_LIBRARY_PATH=${INDUCTOR_TAIL_REDUCE_RUNTIME_LD_LIBRARY_PATH}")

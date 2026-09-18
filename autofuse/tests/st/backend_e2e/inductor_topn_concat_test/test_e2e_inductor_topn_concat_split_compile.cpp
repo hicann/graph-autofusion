@@ -15,11 +15,9 @@
 #include <fstream>
 #include <future>
 #include <gtest/gtest.h>
-#include <set>
 
 #include "../common/inductor_split_compile_common.h"
 #include "../common/inductor_split_compile_config.h"
-#include <sstream>
 #include <string>
 #include <sys/wait.h>
 #include <vector>
@@ -29,54 +27,17 @@ namespace {
 using autofuse::tests::FileExists;
 using autofuse::tests::ReadFile;
 
-std::set<std::string> CollectSystemHeaders(const std::string &source) {
-  std::set<std::string> headers;
-  std::stringstream stream(source);
-  std::string line;
-  while (std::getline(stream, line)) {
-    if (line.rfind("#include <", 0) == 0) {
-      const size_t begin = sizeof("#include <") - 1;
-      const size_t end = line.find('>', begin);
-      if (end != std::string::npos) {
-        headers.insert(line.substr(begin, end - begin));
-      }
-      continue;
-    }
-    if (line.rfind("#include \"", 0) == 0) {
-      continue;
-    }
-    if (!headers.empty()) {
-      break;
-    }
-  }
-  return headers;
-}
-
-void ExpectSystemHeaders(const std::string &source, const std::vector<std::string> &expected) {
-  EXPECT_EQ(CollectSystemHeaders(source), std::set<std::string>(expected.begin(), expected.end()));
-}
-
-void VerifyTilingFuncSystemHeaders(const std::string &host_dir) {
-  const std::string normal_group =
-      ReadFile(host_dir + "/inductor_topn_concat_tiling_func_asc_graph0_schedule_result0_g0.cpp");
-  ExpectSystemHeaders(normal_group, {"algorithm", "array", "cfloat", "cmath", "cstddef", "cstdint", "cstdlib", "map",
-                                     "memory", "new", "string", "unordered_map", "vector"});
-  EXPECT_NE(normal_group.find("#include \"autofuse_tiling_func_api.h\""), std::string::npos);
-
-  const std::string reuse_group =
-      ReadFile(host_dir + "/inductor_topn_concat_tiling_func_asc_graph0_schedule_result1_g1.cpp");
-  ExpectSystemHeaders(reuse_group, {"cstdint", "unordered_map"});
-
-  const std::string tail = ReadFile(host_dir + "/inductor_topn_concat_tiling_func_schedule_group_tail.cpp");
-  ExpectSystemHeaders(
-      tail, {"algorithm", "array", "cfloat", "cstddef", "cstdint", "functional", "unordered_map", "utility", "vector"});
-
-  const std::string solver = ReadFile(host_dir + "/inductor_topn_concat_tiling_func_solver_func.cpp");
-  ExpectSystemHeaders(solver, {"algorithm", "cmath", "cstddef", "cstdint", "functional", "utility", "vector"});
-
-  const std::string entry = ReadFile(host_dir + "/inductor_topn_concat_tiling_func_tiling_def_and_tiling_const.cpp");
-  ExpectSystemHeaders(entry, {"algorithm", "cfloat", "cmath", "cstddef", "cstdint", "map", "ostream", "sstream",
-                              "string", "unordered_map", "utility", "vector"});
+void VerifySplitHostArtifacts(const std::string &host_dir) {
+  EXPECT_FALSE(FileExists(host_dir + "/autofuse_tiling_func_common.h"));
+  ASSERT_TRUE(FileExists(host_dir + "/autofuse_tiling_func_state.h"));
+  ASSERT_TRUE(FileExists(host_dir + "/autofuse_tiling_func_log.h"));
+  ASSERT_TRUE(FileExists(host_dir + "/autofuse_tiling_func_pgo.h"));
+  ASSERT_TRUE(FileExists(host_dir + "/autofuse_tiling_func_solver.h"));
+  ASSERT_TRUE(FileExists(host_dir + "/autofuse_tiling_func_api.h"));
+  ASSERT_TRUE(FileExists(host_dir + "/inductor_topn_concat_tiling_func.cpp"));
+  const std::string merged = ReadFile(host_dir + "/inductor_topn_concat_tiling_func.cpp");
+  EXPECT_NE(merged.find("extern \"C\" int64_t AutofuseTiling"), std::string::npos);
+  EXPECT_NE(merged.find("extern \"C\" int64_t GenerateTopnSolutions"), std::string::npos);
 }
 
 constexpr const char *kGraphName = "inductor_topn_concat";
@@ -128,7 +89,7 @@ TEST_F(TestBackendInductorTopnConcatSplitCompile, SplitCompileChainWorks) {
   ASSERT_EQ(autofuse::tests::RunHostCompile(tiling_def, host_code, host_bin, "inductor_topn_concat", "-Werror"), 0);
   ASSERT_TRUE(FileExists(host_bin)) << "host so not found: " << host_bin;
   ASSERT_TRUE(autofuse::tests::HasCxx11AbiSymbols(host_bin)) << "host so should use ABI=1: " << host_bin;
-  VerifyTilingFuncSystemHeaders(OUTPUT_DIR "/host_out/host");
+  VerifySplitHostArtifacts(OUTPUT_DIR "/host_out/host");
   const std::string tiling_repr_file = OUTPUT_DIR "/tiling_repr.txt";
   ASSERT_EQ(autofuse::tests::RunHostHelper(host_bin, tiling_repr_file), 0);
   std::string tiling_repr = ReadFile(tiling_repr_file);

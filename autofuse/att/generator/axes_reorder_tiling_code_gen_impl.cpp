@@ -180,7 +180,22 @@ af::Status AxesReorderTilingCodeGenImpl::GenHardwareCons(const ModelInfo &model_
 }
 
 af::Status AxesReorderTilingCodeGenImpl::GenPipeTypeObj(const ModelInfo &model_info) {
-  (void)model_info;
+  ArgsManager args_manager(model_info);
+  GE_ASSERT_TRUE(args_manager.Process(false), "Args manager process failed.");
+  const std::string solver_name =
+      "AxesReorderSolvercase" + model_info.sub_case_tag + std::to_string(model_info.tiling_case_id);
+  tiling_func_.AddLine("  void CollectPipeEstimates(" + config_.tiling_data_type_name +
+                       " &tiling_data, std::vector<FinalTilingPipeEstimate> &out) override {");
+  for (const auto &pair : args_manager.GetObjectFunc()) {
+    const auto iter = kPipetypeNameMap.find(pair.first);
+    if (iter == kPipetypeNameMap.end()) {
+      continue;
+    }
+    tiling_func_.AddLine("    out.push_back(FinalTilingPipeEstimate{\"" + iter->second + "\", " + solver_name +
+                         "::GetTilingDataPerfStatic(PipeType::" + iter->second + ", tiling_data), true});");
+  }
+  tiling_func_.AddLine("  }");
+  tiling_func_.AddLine("");
   return af::SUCCESS;
 }
 

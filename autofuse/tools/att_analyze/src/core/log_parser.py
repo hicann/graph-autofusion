@@ -9,9 +9,14 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
+import hashlib
+import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+
+from .evidence_schema import FinalTilingRecord, FinalTilingSummaryRecord
 
 
 @dataclass
@@ -50,6 +55,457 @@ class LogParser:
                 r"\[([^\]]+)\]\s+The value of\s+graph(\d+)_result(\d+)\s+is\s+([\d.]+)"
             ),
         }
+
+    @staticmethod
+    def _envelope(line: str) -> Dict[str, str]:
+        """Decode the space separated, shell-escaped ATT envelope."""
+        values: Dict[str, str] = {}
+        index = 0
+        length = len(line)
+        while index < length:
+            while index < length and line[index].isspace():
+                index += 1
+            key_start = index
+            while index < length and line[index] not in "= \t\r\n":
+                index += 1
+            if index >= length or line[index] != "=":
+                while index < length and not line[index].isspace():
+                    index += 1
+                continue
+            key = line[key_start:index]
+            index += 1
+            if index < length and line[index] == '"':
+                index += 1
+                chars = []
+                closed = False
+                while index < length:
+                    char = line[index]
+                    index += 1
+                    if char == '"':
+                        closed = True
+                        break
+                    if char == "\\" and index < length:
+                        escaped = line[index]
+                        index += 1
+                        if escaped == "n":
+                            chars.append("\n")
+                        elif escaped == "r":
+                            chars.append("\r")
+                        elif escaped == "t":
+                            chars.append("\t")
+                        elif escaped in ("\\", '"'):
+                            chars.append(escaped)
+                        else:
+                            chars.extend(("\\", escaped))
+                    else:
+                        chars.append(char)
+                if not closed:
+                    return {}
+                values[key] = "".join(chars)
+            else:
+                value_start = index
+                while index < length and not line[index].isspace():
+                    index += 1
+                values[key] = line[value_start:index]
+        return values
+
+    @staticmethod
+    def _json_field(value: Optional[str]):
+        if value is None:
+            return None
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _integer(value: Optional[str]) -> Optional[int]:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _payload_hash(payload: str, algorithm: str) -> Optional[str]:
+        if algorithm == "sha256":
+            return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if algorithm != "att_mix64_v1":
+            return None
+        value = 0x6D2B79F5
+        for byte in payload.encode("utf-8"):
+            value ^= (
+                byte + 0x9E3779B9 + ((value << 6) & 0xFFFFFFFFFFFFFFFF) + (value >> 2)
+            )
+            value &= 0xFFFFFFFFFFFFFFFF
+            value = ((value << 13) | (value >> 51)) & 0xFFFFFFFFFFFFFFFF
+        return f"{value:016x}"
+
+    def _final_record(
+        self,
+        fields: Dict[str, str],
+        source_path: str,
+        source_line: int,
+        tiling_repr=None,
+        repr_hash: Optional[str] = None,
+        status: str = "ok",
+    ) -> FinalTilingRecord:
+        pipe_value = fields.get("pipe_estimates")
+        pipe_est = self._json_field(pipe_value)
+        if pipe_est is None and pipe_value not in (None, "null"):
+            status = "invalid_final_tiling"
+        if isinstance(pipe_est, dict):
+            for value in pipe_est.values():
+                if value is not None and (
+                    not isinstance(value, (int, float)) or not math.isfinite(value)
+                ):
+                    status = "invalid_final_tiling"
+        repr_value = fields.get("tiling_repr")
+        repr_kind = fields.get("repr_kind")
+        if tiling_repr is None and repr_value is not None:
+            tiling_repr = self._json_field(repr_value)
+            if tiling_repr is None and repr_kind == "full_json" and repr_value:
+                # Inductor's GetTilingDataRepr is a C++ designated-initializer
+                # string rather than JSON. Preserve it verbatim for hashing
+                # and downstream inspection.
+                tiling_repr = repr_value
+            elif tiling_repr is None and not (
+                repr_kind == "unavailable" and repr_value == ""
+            ):
+                status = "invalid_final_tiling"
+        graph = self._integer(fields.get("graph"))
+        result = self._integer(fields.get("result"))
+        group = self._integer(fields.get("group"))
+        key = self._integer(fields.get("tiling_key"))
+        score = self._integer(fields.get("score"))
+        if fields.get("score") is not None and score is None:
+            status = "invalid_final_tiling"
+        if (
+            not fields.get("operator")
+            or graph is None
+            or result is None
+            or group is None
+            or self._integer(fields.get("case_id")) is None
+            or key is None
+            or key < 0
+        ):
+            status = "invalid_final_tiling"
+        schema = fields.get("schema")
+        if schema not in ("1", 1):
+            status = "invalid_final_tiling"
+        if tiling_repr is not None and repr_hash is None:
+            encoded = (
+                json.dumps(tiling_repr, ensure_ascii=False, separators=(",", ":"))
+                if not isinstance(tiling_repr, str)
+                else tiling_repr
+            )
+            repr_hash = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        return FinalTilingRecord(
+            schema=fields.get("schema"),
+            source=fields.get("source"),
+            selection_mode=fields.get("selection_mode"),
+            op=fields.get("operator"),
+            graph=graph,
+            result=result,
+            group=group,
+            case=self._integer(fields.get("case_id")),
+            tiling_key=key,
+            score=score,
+            sub_case_tag=fields.get("sub_case_tag"),
+            template_name=fields.get("template"),
+            pipe_est=pipe_est,
+            tiling_repr=tiling_repr,
+            repr_kind=repr_kind,
+            repr_hash=repr_hash,
+            parse_status=status,
+            source_path=source_path,
+            source_line=source_line,
+        )
+
+    def _parse_final_tiling_end(
+        self, line: str, line_no: int, pending: Dict[str, Dict], source_path: str
+    ):
+        fields = self._envelope(line.split("[ATT][FINAL_TILING_END]", 1)[1])
+        item = pending.pop(fields.get("id"), None)
+        if item is None:
+            return None
+        begin = item["fields"]
+        begin_chunks = self._integer(begin.get("chunks"))
+        end_chunks = self._integer(fields.get("chunks"))
+        chunks = item["chunks"]
+        ordered = end_chunks is not None and list(sorted(chunks)) == list(
+            range(end_chunks)
+        )
+        payload = "".join(chunks[i] for i in range(end_chunks)) if ordered else None
+        begin_len = self._integer(begin.get("len"))
+        end_len = self._integer(fields.get("len"))
+        algorithm = begin.get("hash_alg", "sha256")
+        valid = (
+            ordered
+            and payload is not None
+            and not item["bad"]
+            and begin_chunks is not None
+            and end_chunks == begin_chunks
+            and begin_len is not None
+            and end_len == begin_len
+            and bool(begin.get("hash"))
+            and fields.get("hash") == begin.get("hash")
+            and fields.get("hash_alg", algorithm) == algorithm
+            and self._payload_hash(payload, algorithm) is not None
+        )
+        if valid and end_len is not None and len(payload.encode("utf-8")) != end_len:
+            valid = False
+        actual_hash = (
+            self._payload_hash(payload, algorithm) if payload is not None else None
+        )
+        if valid and actual_hash != fields.get("hash"):
+            valid = False
+        framed_repr = self._json_field(payload) if valid else None
+        if (
+            valid
+            and framed_repr is None
+            and begin.get("repr_kind") == "full_json"
+            and payload
+        ):
+            framed_repr = payload
+        if valid and framed_repr is None:
+            valid = False
+        return self._final_record(
+            begin,
+            source_path,
+            item["line"],
+            tiling_repr=framed_repr,
+            repr_hash=actual_hash if valid else fields.get("hash"),
+            status="ok" if valid else "incomplete_final_tiling",
+        )
+
+    def _append_legacy_final_records(
+        self, records: List[FinalTilingRecord], log_content: str, source_path: str
+    ):
+        if records:
+            return
+        for summary in self._parse_log_content(log_content):
+            records.append(
+                FinalTilingRecord(
+                    schema=None,
+                    source="legacy",
+                    selection_mode=None,
+                    op=summary.operator_name,
+                    graph=summary.graph,
+                    result=summary.result,
+                    group=summary.group,
+                    case=summary.case,
+                    tiling_key=None,
+                    score=None,
+                    sub_case_tag=None,
+                    template_name=None,
+                    pipe_est=None,
+                    tiling_repr=None,
+                    repr_kind=None,
+                    repr_hash=None,
+                    parse_status="inferred_legacy",
+                    source_path=source_path,
+                    source_line=None,
+                )
+            )
+
+    @staticmethod
+    def _mark_duplicate_final_records(records: List[FinalTilingRecord]):
+        identities = {}
+        for record in records:
+            identity = (
+                record.source,
+                record.op,
+                record.graph,
+                record.result,
+                record.group,
+                record.case,
+                record.tiling_key,
+            )
+            identities.setdefault(identity, []).append(record)
+        for group in identities.values():
+            for record in group[1:]:
+                if record.parse_status == "ok":
+                    record.parse_status = "duplicate_final_tiling"
+
+    def extract_final_tiling_records(
+        self, log_content: str, source_path: str = ""
+    ) -> List[FinalTilingRecord]:
+        """Parse FINAL_TILING records, including BEGIN/CHUNK/END framing."""
+        records: List[FinalTilingRecord] = []
+        pending: Dict[str, Dict] = {}
+        for line_no, line in enumerate(log_content.splitlines(), 1):
+            if "[ATT][FINAL_TILING_BEGIN]" in line:
+                fields = self._envelope(line.split("[ATT][FINAL_TILING_BEGIN]", 1)[1])
+                if fields.get("id"):
+                    pending[fields["id"]] = {
+                        "fields": fields,
+                        "line": line_no,
+                        "chunks": {},
+                        "bad": False,
+                    }
+            elif "[ATT][FINAL_TILING_CHUNK]" in line:
+                fields = self._envelope(line.split("[ATT][FINAL_TILING_CHUNK]", 1)[1])
+                item = pending.get(fields.get("id"))
+                seq = self._integer(fields.get("seq"))
+                if (
+                    item is None
+                    or seq is None
+                    or seq in item["chunks"]
+                    or seq != len(item["chunks"])
+                ):
+                    if item is not None:
+                        item["bad"] = True
+                else:
+                    item["chunks"][seq] = fields.get("data", "")
+            elif "[ATT][FINAL_TILING_END]" in line:
+                record = self._parse_final_tiling_end(
+                    line, line_no, pending, source_path
+                )
+                if record is not None:
+                    records.append(record)
+            elif "[ATT][FINAL_TILING]" in line:
+                fields = self._envelope(line.split("[ATT][FINAL_TILING]", 1)[1])
+                records.append(self._final_record(fields, source_path, line_no))
+        for item in pending.values():
+            records.append(
+                self._final_record(
+                    item["fields"],
+                    source_path,
+                    item["line"],
+                    status="incomplete_final_tiling",
+                )
+            )
+        self._append_legacy_final_records(records, log_content, source_path)
+        self._mark_duplicate_final_records(records)
+        return sorted(records, key=lambda record: record.source_line or 0)
+
+    # Explicit alias retained for callers that use the schema terminology.
+    parse_final_tiling_records = extract_final_tiling_records
+
+    def extract_final_tiling_summaries(
+        self, log_content: str, source_path: str = ""
+    ) -> List[FinalTilingSummaryRecord]:
+        """Parse result-level group mappings without changing group records."""
+        summaries: List[FinalTilingSummaryRecord] = []
+        pending: Dict[str, Dict] = {}
+        for line_no, line in enumerate(log_content.splitlines(), 1):
+            if "[ATT][FINAL_TILING_SUMMARY_BEGIN]" in line:
+                fields = self._envelope(
+                    line.split("[ATT][FINAL_TILING_SUMMARY_BEGIN]", 1)[1]
+                )
+                if fields.get("id"):
+                    pending[fields["id"]] = {
+                        "fields": fields,
+                        "line": line_no,
+                        "chunks": {},
+                        "bad": False,
+                    }
+                continue
+            if "[ATT][FINAL_TILING_SUMMARY_CHUNK]" in line:
+                fields = self._envelope(
+                    line.split("[ATT][FINAL_TILING_SUMMARY_CHUNK]", 1)[1]
+                )
+                item = pending.get(fields.get("id"))
+                seq = self._integer(fields.get("seq"))
+                if (
+                    item is None
+                    or seq is None
+                    or seq in item["chunks"]
+                    or seq != len(item["chunks"])
+                ):
+                    if item is not None:
+                        item["bad"] = True
+                else:
+                    item["chunks"][seq] = fields.get("data", "")
+                continue
+            if "[ATT][FINAL_TILING_SUMMARY_END]" in line:
+                fields = self._envelope(
+                    line.split("[ATT][FINAL_TILING_SUMMARY_END]", 1)[1]
+                )
+                item = pending.pop(fields.get("id"), None)
+                if item is None:
+                    continue
+                begin = item["fields"]
+                begin_count = self._integer(begin.get("chunks"))
+                count = self._integer(fields.get("chunks"))
+                payload = (
+                    "".join(item["chunks"].get(index, "") for index in range(count))
+                    if count is not None
+                    and list(sorted(item["chunks"])) == list(range(count))
+                    else None
+                )
+                expected_len = self._integer(fields.get("len"))
+                begin_len = self._integer(begin.get("len"))
+                algorithm = begin.get("hash_alg", "sha256")
+                valid = (
+                    payload is not None
+                    and not item["bad"]
+                    and begin_count is not None
+                    and begin_count == count
+                    and begin_len is not None
+                    and begin_len == expected_len
+                    and expected_len == len(payload.encode("utf-8"))
+                    and fields.get("hash") == begin.get("hash")
+                    and fields.get("hash") == self._payload_hash(payload, algorithm)
+                    and fields.get("hash_alg", algorithm) == algorithm
+                )
+                merged = dict(begin)
+                merged["groups"] = payload if valid else None
+                summaries.append(
+                    self._make_final_tiling_summary(
+                        merged, source_path, item["line"], valid
+                    )
+                )
+                continue
+            marker = "[ATT][FINAL_TILING_SUMMARY]"
+            if marker not in line:
+                continue
+            fields = self._envelope(line.split(marker, 1)[1])
+            summaries.append(
+                self._make_final_tiling_summary(fields, source_path, line_no)
+            )
+        for item in pending.values():
+            summaries.append(
+                self._make_final_tiling_summary(
+                    item["fields"], source_path, item["line"], False
+                )
+            )
+        return summaries
+
+    def _make_final_tiling_summary(
+        self,
+        fields: Dict[str, str],
+        source_path: str,
+        source_line: int,
+        framed_valid: Optional[bool] = None,
+    ) -> FinalTilingSummaryRecord:
+        groups = self._json_field(fields.get("groups"))
+        status = "ok"
+        graph = self._integer(fields.get("graph"))
+        result = self._integer(fields.get("result"))
+        if fields.get("schema") not in ("1", 1):
+            status = "invalid_final_tiling_summary"
+        if framed_valid is False:
+            status = "incomplete_final_tiling_summary"
+        if framed_valid is not False and (
+            not fields.get("operator")
+            or graph is None
+            or result is None
+            or not isinstance(groups, dict)
+        ):
+            status = "invalid_final_tiling_summary"
+        return FinalTilingSummaryRecord(
+            schema=fields.get("schema"),
+            source=fields.get("source"),
+            selection_mode=fields.get("selection_mode"),
+            op=fields.get("operator"),
+            graph=graph,
+            result=result,
+            groups=groups if isinstance(groups, dict) else None,
+            parse_status=status,
+            source_path=source_path,
+            source_line=source_line,
+        )
 
     def extract_operator_names(self, log_content: str) -> List[str]:
         operators = []
@@ -279,6 +735,13 @@ class LogParser:
     ) -> List[OperatorSummary]:
         with open(file_path, "r", encoding="utf-8") as f:
             log_content = f.read()
+
+        return self._parse_log_content(log_content, summary_mode)
+
+    def _parse_log_content(
+        self, log_content: str, summary_mode: str = "best_result_all_groups"
+    ) -> List[OperatorSummary]:
+        """Parse summaries from content already loaded by a caller."""
 
         operator_names = self.extract_operator_names(log_content)
         summaries = []

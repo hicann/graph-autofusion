@@ -33,6 +33,8 @@ python3 autofuse/tools/att_analyze/src/att.py perf-formula generated/ run.log -o
 python3 autofuse/tools/att_analyze/src/att.py verify-tiling generated/ --scene tf --preset B --aiv-num 56 -o verify/
 ```
 
+`FINAL_TILING` records include graph/result/group/case/key, template name, `score`, pipe estimates, and tiling representation. Long records use `FINAL_TILING_BEGIN/CHUNK/END`; the producer uses `hash_alg=att_mix64_v1` for integrity checks, while the parser remains compatible with historical SHA-256 framed logs.
+
 ## NWA `fusion_precision_analyzer`: fusion precision diagnosis
 
 Tool directory: [`nwa_tool/`](nwa_tool/). Compare graphs and NPY data from Autofuse enabled and disabled runs to locate the fusion operator responsible for a precision regression.

@@ -1,0 +1,3 @@
+[ATT][FINAL_TILING] schema=1 source=r operator=Fusion_0 graph=0 result=0 group=0 case_id=2 tiling_key=2 pipe_estimates="{\"M2\":128.0}" tiling_repr="{\"tile_m\":64}"
+[ATT][FINAL_TILING] schema=1 source=r operator=Fusion_0 graph=0 result=0 group=1 case_id=0 tiling_key=0 pipe_estimates="{\"M2\":96.0}" tiling_repr="{\"tile_m\":32}"
+[ATT][FINAL_TILING] schema=1 source=r operator=Fusion_1 graph=0 result=0 group=0 case_id=1 tiling_key=1 pipe_estimates="{\"M2\":112.0}" tiling_repr="{\"tile_m\":128}"

@@ -10,6 +10,61 @@ The CLI provides `summary`, `compare`, `split-slog`, `perf-formula`, `verify-til
 
 `LogParser` exposes `OperatorSummary.parse_status` to make incomplete evidence explicit. `ok` means complete selection records; `inferred_graph_result` means graph/result came from template lines; `missing_group_case`, `missing_result_performance`, and `missing_graph_result` identify missing records. Existing CSV column meanings are unchanged.
 
+## FINAL_TILING log contract
+
+`FINAL_TILING` means that the runtime entry has written the final tiling data. The runtime final
+selection uses `source="runtime"` (`selection_mode` is `default` or `explicit`), and a PGO-loaded
+final tiling uses `source="pgo"` (`selection_mode="pgo"`); candidate searches emit no
+`FINAL_TILING` records, and candidate `GetTilingDataRepr` calls are never treated as runtime
+final records. The parser only accepts the full field names; the historical compact aliases
+(`s=`, `src=`, `k=`, and so on) are no longer parsed. A single-line record is:
+
+```text
+[ATT][FINAL_TILING] schema=1 source="runtime" selection_mode="default" operator="Fusion_0" graph=0 result=0 group=1 case_id=2 tiling_key=5 score=1 sub_case_tag="" template="ConcatCase2" repr_kind="full_json" pipe_estimates="{\"AIV_MTE2\":120.000000,\"V\":null}" tiling_repr="{\"tile_m\":64,\"tile_n\":128}"
+```
+
+`case_id` (case) and `tiling_key` are independent fields. Multi-group and multi-result records
+must retain `graph`, `result`, and `group`. `score` is the final template `CalcScore` value used
+by template selection; it is distinct from pipe cycles, objective values, and measured profiling
+data. `sub_case_tag` is the sub-case label and is an empty string when no sub-case applies;
+`template` is the template name; `repr_kind` is either `full_json` (`tiling_repr` holds the
+complete JSON) or `unavailable` (no repr could be produced, `tiling_repr` is an empty string).
+`pipe_estimates` contains ATT model pipe estimates. Missing estimates are
+JSON `null`; profiling cycles and numeric zero are not substitutes.
+
+If the single-line record exceeds the 700-character line budget, emit one
+`FINAL_TILING_BEGIN`, contiguous `FINAL_TILING_CHUNK` lines, and one `FINAL_TILING_END` with
+the same `id`:
+
+```text
+[ATT][FINAL_TILING_BEGIN] schema=1 source="runtime" selection_mode="default" operator="Fusion_0" graph=0 result=0 group=1 case_id=2 tiling_key=5 score=1 sub_case_tag="" template="ConcatCase2" repr_kind="full_json" pipe_estimates="{...}" id="8:Fusion_0|0|0|1|2|5|0:" chunks=3 len=1842 hash_alg=att_mix64_v1 hash=0e2418542347c1a0
+[ATT][FINAL_TILING_CHUNK] id="8:Fusion_0|0|0|1|2|5|0:" seq=0 data="{\"tiling_key\":5,"
+[ATT][FINAL_TILING_END] id="8:Fusion_0|0|0|1|2|5|0:" chunks=3 len=1842 hash_alg=att_mix64_v1 hash=0e2418542347c1a0
+```
+
+After a multi-group runtime selection completes, one result-level `FINAL_TILING_SUMMARY` line is
+also emitted; its `groups` field is the JSON of every group's selection. Oversized summaries use
+the `FINAL_TILING_SUMMARY_BEGIN/CHUNK/END` framing in the same way.
+
+`hash_alg=att_mix64_v1` identifies the algorithm used for the following `hash`, which covers the reconstructed `tiling_repr` (or summary groups JSON). The parser uses it to detect missing, reordered, truncated, or modified chunks; it is not used for template selection, score calculation, performance estimation, or encryption. The current producer uses `att_mix64_v1`; the parser remains compatible with historical `sha256` framed logs. The parser validates chunk order/count, UTF-8 byte length, and the hash. Missing
+END or failed validation yields `incomplete_final_tiling` without a partial representation.
+Repeated identities (`source`, `operator`, `graph`, `result`, `group`, `case_id`, `tiling_key`)
+keep the first valid record and mark later records
+`duplicate_final_tiling`.
+
+| Input evidence | What it establishes | What it cannot establish |
+| --- | --- | --- |
+| plog/compiler logs only | Candidate template, case/key, and modeled result | The runtime final choice; do not invent `source="runtime"` |
+| plog plus profiling | Modeled candidates compared with measured pipe cycles | Which tiling was written, unless `FINAL_TILING` is present |
+| A runtime log containing `FINAL_TILING` | Final group/result/case/key, template, repr, and available estimates | Profiling cycles, which remain separate evidence |
+
+`summary` appends `Final Source`, `Tiling Key`, `Score`, `Pipe Estimate`, `Tiling Repr`, and
+`Final Parse Status`. `evidence` writes one JSONL object per final record and preserves
+`source_path/source_line`. ATT codegen now emits `FINAL_TILING` after the final selection;
+candidate `GetTilingDataRepr` calls are not treated as runtime final records. A cache hit whose
+sub-case identity cannot be recovered is intentionally omitted rather than reported with the
+wrong template identity.
+
 ## verify-tiling ABI input
 
 Custom input JSON must include an explicit ABI contract. `tf_static` uses no shape dimensions; `tf_dynamic` and `inductor` require one or more shape dimensions. `block_dim_width` is either 32 or 64.

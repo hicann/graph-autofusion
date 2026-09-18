@@ -1175,8 +1175,9 @@ class TestCodegenTiling : public testing::Test, public codegen::TilingLib {
     return this->GenerateForInductor(fused_schedule_result);
   }
 
-  ascir::FusedScheduledResult GenTilingKeyCountResult(const std::vector<std::vector<size_t>> &result_impl_counts) {
-    auto fused_schedule_result = GenBasicFusedScheduleResult();
+  ascir::FusedScheduledResult GenTilingKeyCountResult(const std::vector<std::vector<size_t>> &result_impl_counts,
+                                                      const af::Expression &axis_size = af::ops::Zero) {
+    auto fused_schedule_result = GenBasicFusedScheduleResult({}, axis_size);
     const auto graph = fused_schedule_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs[0];
     std::vector<ascir::ScheduledResult> scheduled_results;
     for (const auto &impl_counts : result_impl_counts) {
@@ -3209,6 +3210,208 @@ TEST_F(TestCodegenTiling, GenerateForInductorShouldUseGetTilingDataReprAsTilingD
   EXPECT_NE(tiling_impl.find("GetTilingDataRepr("), std::string::npos);
 }
 
+// FinalTilingContext metadata is not available at the repr helper boundary.  Keep
+// candidate diagnostics there-free until the final entry supplies the complete
+// graph/result/group identity and pipe estimate.
+TEST_F(TestCodegenTiling, FinalTilingEntriesDoNotEmitRuntimeSourceForCandidateRepr) {
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")}, af::Symbol(1));
+  codegen_func_ = att::GenTilingImplAutoFuseV3;
+  const auto inductor_files = this->GenerateForInductor(fused_schedule_result);
+  ASSERT_TRUE(inductor_files.find(codegen::kTilingDefAndConstIdentify) != inductor_files.end());
+  const auto &inductor_source = inductor_files.at(codegen::kTilingDefAndConstIdentify);
+  EXPECT_NE(inductor_source.find("extern \"C\" int64_t GenerateTopnSolutions("), std::string::npos);
+  EXPECT_NE(inductor_source.find("GetTilingDataRepr(&raw_candidate.tiling_data)"), std::string::npos);
+  EXPECT_EQ(inductor_source.find("source=runtime"), std::string::npos);
+
+  const auto tensorflow_files = this->Generate(fused_schedule_result, {}, "", "0");
+  ASSERT_TRUE(tensorflow_files.find(codegen::kTilingDefAndConstIdentify) != tensorflow_files.end());
+  const auto &tensorflow_source = tensorflow_files.at(codegen::kTilingDefAndConstIdentify);
+  bool has_tensorflow_tiling_call = false;
+  for (const auto &[name, source] : tensorflow_files) {
+    (void)name;
+    const size_t tensorflow_entry = source.find("extern \"C\" ge::graphStatus TilingFunc");
+    if (tensorflow_entry == std::string::npos) {
+      continue;
+    }
+    const size_t tensorflow_tiling_call = source.find("AutofuseTilingWithConfig", tensorflow_entry);
+    has_tensorflow_tiling_call = has_tensorflow_tiling_call || tensorflow_tiling_call != std::string::npos;
+    if (tensorflow_tiling_call != std::string::npos) {
+      EXPECT_LT(tensorflow_entry, tensorflow_tiling_call);
+    }
+  }
+  EXPECT_TRUE(has_tensorflow_tiling_call);
+  EXPECT_EQ(tensorflow_source.find("source=runtime"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, FinalTilingUsesSharedLogHeaderAndSelectionProducer) {
+  const auto fused_schedule_result =
+      this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")}, af::Symbol(1));
+  codegen_func_ = att::GenTilingImplAutoFuseV3;
+  const auto tensorflow_files = this->Generate(fused_schedule_result, {}, "", "0");
+  ASSERT_NE(tensorflow_files.find(codegen::kTilingLogHeaderIdentify), tensorflow_files.end());
+  const auto &log_header = tensorflow_files.at(codegen::kTilingLogHeaderIdentify);
+  EXPECT_NE(log_header.find("struct FinalTilingContext"), std::string::npos);
+  EXPECT_NE(log_header.find("bool ShouldEmitFinalTiling() noexcept"), std::string::npos);
+  EXPECT_NE(log_header.find("FormatFinalTilingRecord"), std::string::npos);
+  EXPECT_NE(log_header.find("FinalTilingChecksum"), std::string::npos);
+  EXPECT_NE(log_header.find("int32_t score;"), std::string::npos);
+  EXPECT_NE(log_header.find("std::to_string(context.score)"), std::string::npos);
+
+  bool has_tensorflow_selection_producer = false;
+  for (const auto &[name, source] : tensorflow_files) {
+    (void)name;
+    has_tensorflow_selection_producer =
+        has_tensorflow_selection_producer || source.find("ShouldEmitFinalTiling()") != std::string::npos;
+    has_tensorflow_selection_producer =
+        has_tensorflow_selection_producer ||
+        source.find("EmitFinalTilingLines(FormatFinalTilingRecord") != std::string::npos;
+  }
+  EXPECT_TRUE(has_tensorflow_selection_producer);
+  bool has_pipe_estimate = false;
+  bool has_summary_producer = false;
+  for (const auto &[name, source] : tensorflow_files) {
+    (void)name;
+    has_pipe_estimate = has_pipe_estimate || source.find("final_pipe_estimates") != std::string::npos;
+    has_summary_producer =
+        has_summary_producer || source.find("EmitFinalTilingSummary(final_summary)") != std::string::npos;
+  }
+  EXPECT_TRUE(has_pipe_estimate);
+  bool has_score = false;
+  for (const auto &[name, source] : tensorflow_files) {
+    (void)name;
+    has_score = has_score || source.find("final_score = final_case_impl->CalcScore") != std::string::npos;
+  }
+  EXPECT_TRUE(has_score);
+  EXPECT_TRUE(has_summary_producer);
+
+  const auto inductor_files = this->GenerateForInductor(fused_schedule_result);
+  ASSERT_NE(inductor_files.find(codegen::kTilingLogHeaderIdentify), inductor_files.end());
+  EXPECT_NE(inductor_files.at(codegen::kTilingLogHeaderIdentify).find("ShouldEmitFinalTiling()"), std::string::npos);
+  bool has_inductor_repr_call = false;
+  for (const auto &[name, source] : inductor_files) {
+    (void)name;
+    has_inductor_repr_call = has_inductor_repr_call || source.find("GetTilingDataRepr") != std::string::npos;
+  }
+  EXPECT_TRUE(has_inductor_repr_call);
+}
+
+TEST_F(TestCodegenTiling, InductorMultiGroupFinalTilingUsesFullRepresentation) {
+  codegen_func_ = att::GenTilingImplAutoFuseV3;
+  // A zero-size axis marks the fixture as an empty-tensor scene, which falls back to the stub
+  // tiling path without ATT codegen, so use a non-zero axis to exercise the ATT generator.
+  const auto tiling_files = this->GenerateForInductor(this->GenTilingKeyCountResult({{1, 1}}, af::Symbol(1)));
+  bool has_full_repr = false;
+  bool has_key_only_repr = false;
+  for (const auto &[name, source] : tiling_files) {
+    (void)name;
+    has_full_repr =
+        has_full_repr || source.find("final_repr_kind = final_tiling_repr.empty() ? \"unavailable\" : \"full_json\"") !=
+                             std::string::npos;
+    has_key_only_repr = has_key_only_repr || source.find("final_repr_kind = \"key_only\"") != std::string::npos;
+  }
+  EXPECT_TRUE(has_full_repr);
+  EXPECT_FALSE(has_key_only_repr);
+}
+
+TEST_F(TestCodegenTiling, FinalTilingKeepsCoreSelectionFreeOfObservabilityWork) {
+  const auto fused_schedule_result =
+      this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")}, af::Symbol(1));
+  codegen_func_ = att::GenTilingImplAutoFuseV3;
+  const auto tensorflow_files = this->Generate(fused_schedule_result, {}, "", "0");
+  const auto core_file = std::find_if(tensorflow_files.cbegin(), tensorflow_files.cend(), [](const auto &file) {
+    return file.second.find("bool GetTilingCore(") != std::string::npos;
+  });
+  ASSERT_NE(core_file, tensorflow_files.cend());
+  const auto wrapper_file = std::find_if(tensorflow_files.cbegin(), tensorflow_files.cend(), [](const auto &file) {
+    return file.second.find("bool GetTiling(") != std::string::npos &&
+           file.second.find("ShouldEmitFinalTiling") != std::string::npos &&
+           file.second.find("if (!final_summary.groups.empty())") != std::string::npos;
+  });
+  ASSERT_NE(wrapper_file, tensorflow_files.cend());
+  const size_t core_begin = core_file->second.find("bool GetTilingCore(");
+  ASSERT_NE(core_begin, std::string::npos);
+  const size_t core_end = core_file->second.find("\nbool GetTiling(", core_begin + 1U);
+  const std::string core_source = core_file->second.substr(core_begin, core_end - core_begin);
+  EXPECT_EQ(core_source.find("ShouldEmitFinalTiling"), std::string::npos);
+  EXPECT_EQ(core_source.find("EmitFinalTiling"), std::string::npos);
+  EXPECT_EQ(core_source.find("FinalTilingSummary"), std::string::npos);
+
+  const std::string &wrapper_source = wrapper_file->second;
+  EXPECT_NE(wrapper_source.find("ShouldEmitFinalTiling"), std::string::npos);
+  EXPECT_NE(wrapper_source.find("EmitFinalTilingSummary"), std::string::npos);
+  EXPECT_NE(wrapper_source.find("g_final_tiling_observe_enabled"), std::string::npos);
+  EXPECT_NE(core_file->second.find("bool GetTilingCore("), std::string::npos);
+  EXPECT_NE(wrapper_source.find("if (!final_summary.groups.empty())"), std::string::npos);
+  EXPECT_NE(core_file->second.find("void EmitFinalTilingByCase("), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, SingleGroupFinalTilingEmitsRuntimeObservation) {
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")}, af::Symbol(1));
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen_func_ = att::GenTilingImplAutoFuseV3;
+  const auto tensorflow_files = this->Generate(fused_schedule_result, {}, "", "0");
+
+  bool has_observe_begin = false;
+  bool has_observe_reset = false;
+  bool has_runtime_emitter_call = false;
+  for (const auto &[name, source] : tensorflow_files) {
+    (void)name;
+    has_observe_begin = has_observe_begin ||
+                        source.find("const bool emit_final_tiling = ShouldEmitFinalTiling();") != std::string::npos;
+    has_observe_reset =
+        has_observe_reset || source.find("::g_final_tiling_observe_enabled = false;") != std::string::npos;
+    has_runtime_emitter_call =
+        has_runtime_emitter_call ||
+        source.find("EmitFinalTilingByCase(tiling_data, tiling_data.get_block_dim(), \"runtime\"") != std::string::npos;
+  }
+  EXPECT_TRUE(has_observe_begin);
+  EXPECT_TRUE(has_observe_reset);
+  EXPECT_TRUE(has_runtime_emitter_call);
+}
+
+TEST_F(TestCodegenTiling, FinalTilingUsesSelectedCaseAndStructuredPipeInterface) {
+  const auto fused_schedule_result =
+      this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")}, af::Symbol(1));
+  codegen_func_ = att::GenTilingImplAutoFuseV3;
+  const auto tensorflow_files = this->Generate(fused_schedule_result, {}, "", "0");
+  bool has_selected_case_factory = false;
+  bool has_selection_case_factory = false;
+  bool has_selected_sub_case_state = false;
+  bool has_selected_sub_case_reset = false;
+  bool has_structured_pipe_interface = false;
+  bool has_axes_pipe_estimate = false;
+  bool has_raw_case_pointer_pipe_call = false;
+  for (const auto &[name, source] : tensorflow_files) {
+    (void)name;
+    has_selected_case_factory =
+        has_selected_case_factory ||
+        source.find("GetSelectedTilingImplPtr(static_cast<uint32_t>(final_case_id), corenum") != std::string::npos;
+    has_selection_case_factory =
+        has_selection_case_factory ||
+        source.find("GetSelectedTilingImplPtr(static_cast<uint32_t>(case_id), tiling_data.get_block_dim()") !=
+            std::string::npos;
+    has_selected_sub_case_state =
+        has_selected_sub_case_state ||
+        source.find("g_final_selected_sub_case_tag = selected_sub_case_tag") != std::string::npos;
+    has_selected_sub_case_reset =
+        has_selected_sub_case_reset || source.find("g_final_selected_sub_case_tag_valid = false") != std::string::npos;
+    has_structured_pipe_interface =
+        has_structured_pipe_interface || source.find("CollectPipeEstimates(tiling_data") != std::string::npos;
+    has_axes_pipe_estimate =
+        has_axes_pipe_estimate ||
+        source.find("GetTilingDataPerfStatic(PipeType::AIV_MTE2, tiling_data)") != std::string::npos;
+    has_raw_case_pointer_pipe_call =
+        has_raw_case_pointer_pipe_call || source.find("final_case_impl->GetAIV_") != std::string::npos;
+  }
+  EXPECT_TRUE(has_selected_case_factory);
+  EXPECT_TRUE(has_selection_case_factory);
+  EXPECT_TRUE(has_selected_sub_case_state);
+  EXPECT_TRUE(has_selected_sub_case_reset);
+  EXPECT_TRUE(has_structured_pipe_interface);
+  EXPECT_TRUE(has_axes_pipe_estimate);
+  EXPECT_FALSE(has_raw_case_pointer_pipe_call);
+}
+
 TEST_F(TestCodegenTiling, SplitHeaderGenerateForInductorShouldEmitHeaderKeysAndCppIncludes) {
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
   auto tiling_files = this->GenerateForInductor(fused_schedule_result);
@@ -3304,6 +3507,7 @@ TEST_F(TestCodegenTiling, SplitHeaderGenerateForTfShouldGuardRuntimeHeadersForCc
 
 TEST_F(TestCodegenTiling, SplitHeaderGenerateForPgoShouldIncludeDirectEntryDependencies) {
   enable_autofuse_pgo_ = true;
+  codegen_func_ = att::GenTilingImplAutoFuseV3;
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol("s0"), af::Symbol("s1")});
   const std::map<std::string, std::string> shape_info;
   auto tiling_files = this->Generate(fused_schedule_result, shape_info, ".", "10");
@@ -3320,6 +3524,7 @@ TEST_F(TestCodegenTiling, SplitHeaderGenerateForPgoShouldIncludeDirectEntryDepen
   bool found_pgo_core_budget_check = false;
   bool found_pgo_config_validation = false;
   bool found_pgo_tiling_isolation = false;
+  bool found_pgo_final_tiling = false;
   for (const auto &[name, source] : tiling_files) {
     (void)name;
     if (source.find("Loaded PGO block_dim %u is outside core budget [1, %u]") != std::string::npos) {
@@ -3335,10 +3540,14 @@ TEST_F(TestCodegenTiling, SplitHeaderGenerateForPgoShouldIncludeDirectEntryDepen
         source.find("*tiling = pgo_tiling;") != std::string::npos) {
       found_pgo_tiling_isolation = true;
     }
+    found_pgo_final_tiling = found_pgo_final_tiling ||
+                             source.find("EmitFinalTilingByCase(*tiling") != std::string::npos ||
+                             source.find("EmitFinalTilingForPgo(*tiling") != std::string::npos;
   }
   EXPECT_TRUE(found_pgo_core_budget_check);
   EXPECT_TRUE(found_pgo_config_validation);
   EXPECT_TRUE(found_pgo_tiling_isolation);
+  EXPECT_TRUE(found_pgo_final_tiling);
 }
 
 TEST_F(TestCodegenTiling, SplitHeaderGenerateForInductorPgoShouldIncludeDirectEntryDependencies) {
@@ -3367,6 +3576,7 @@ TEST_F(TestCodegenTiling, SplitHeaderFallbackShouldEmitUsableApiAndPgoHeaders) {
   EXPECT_NE(api_header.find("inline bool GetTiling("), std::string::npos);
   EXPECT_NE(api_header.find("inline bool PGOSearchTilingKey("), std::string::npos);
   EXPECT_NE(api_header.find("inline bool PGOByCoreNumSearchTilingKey("), std::string::npos);
+  EXPECT_NE(api_header.find("struct FinalTilingGroupSelection;"), std::string::npos);
   EXPECT_NE(pgo_header.find("class PgoConfig"), std::string::npos);
   EXPECT_NE(pgo_header.find("struct SearchConfig"), std::string::npos);
   EXPECT_EQ(api_header.find("#include \"autofuse_tiling_func_"), std::string::npos);
@@ -4715,7 +4925,9 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldEmitSchemeAContract) {
 
 TEST_F(TestCodegenTiling, GenerateForInductorPgoTopnShouldPreserveDefaultCandidateWhenTopnGreaterThanOne) {
   ScopedAutofusePgoFlag pgo_flag(true);
-  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  // A zero-size axis marks the fixture as an empty-tensor scene, which falls back to the stub tiling path
+  // without ATT codegen, so use a non-zero axis to exercise the ATT generator.
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)}, af::Symbol(1));
   fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
   codegen::Codegen codegen(codegen::CodegenOptions{});
   codegen::CodegenResult result;
@@ -4728,6 +4940,23 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoTopnShouldPreserveDefaultCandida
   EXPECT_NE(result.tiling.find("std::rotate(solutions.begin() + 1, default_solution, default_solution + 1);"),
             std::string::npos);
   EXPECT_EQ(result.tiling.find("TORCHINDUCTOR_NPU_EXT_AUTOTUNE_TOPN"), std::string::npos);
+  EXPECT_NE(result.tiling.find("GetTilingCore(default_tiling, -1)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("bool GetTilingCore(AutofuseTilingData &tiling_data, int32_t tiling_case_id, "
+                               "double *perf) {"),
+            std::string::npos);
+  EXPECT_NE(result.tiling.find("EmitFinalTilingByCase(*tiling"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("EmitFinalTiling(*tiling, tiling->get_block_dim(), \"runtime\", \"default\""),
+            std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GenerateForInductorWithoutAttKeepsStubTilingEntry) {
+  ScopedAutofusePgoFlag pgo_flag(false);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  const auto tiling_files = this->GenerateForInductor(fused_schedule_result);
+  ASSERT_NE(tiling_files.find(codegen::kTilingDefAndConstIdentify), tiling_files.end());
+  const auto &source = tiling_files.at(codegen::kTilingDefAndConstIdentify);
+  EXPECT_NE(source.find("if (GetTiling(default_tiling, -1))"), std::string::npos);
+  EXPECT_EQ(source.find("GetTilingCore(default_tiling, -1)"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, GenerateForInductorPgoShouldExcludeCandidatesNotFasterThanDefault) {
@@ -5193,7 +5422,11 @@ TEST_F(TestCodegenTiling, CodegenGenerateForInductorCvFusionShouldFallbackToSafe
 
   EXPECT_EQ(result.tiling.find("if (!optiling::GetTiling(tiling->tiling_data, 1)) {\n      return -1;"),
             std::string::npos);
-  const size_t ub_case1_fail_pos = result.tiling.find("if (!optiling::GetTiling(tiling->tiling_data, 1)) {");
+  const std::string tiling_entry =
+      result.tiling.find("if (!optiling::GetTilingCore(tiling->tiling_data, 1)) {") != std::string::npos
+          ? "GetTilingCore"
+          : "GetTiling";
+  const size_t ub_case1_fail_pos = result.tiling.find("if (!optiling::" + tiling_entry + "(tiling->tiling_data, 1)) {");
   ASSERT_NE(ub_case1_fail_pos, std::string::npos);
   const size_t ub_case1_else_pos = result.tiling.find("    } else {", ub_case1_fail_pos);
   ASSERT_NE(ub_case1_else_pos, std::string::npos);

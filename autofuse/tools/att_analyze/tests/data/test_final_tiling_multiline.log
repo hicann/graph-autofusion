@@ -1,0 +1,4 @@
+[ATT][FINAL_TILING_BEGIN] schema=1 source=r id=Fusion_0_0_0_0_2 operator=Fusion_0 graph=0 result=0 group=0 case_id=2 tiling_key=2 pipe_estimates="{\"M2\":128.0}" chunks=2 len=24 hash=invalid
+[ATT][FINAL_TILING_CHUNK] id=Fusion_0_0_0_0_2 seq=0 data="{\"tile_m\":64,"
+[ATT][FINAL_TILING_CHUNK] id=Fusion_0_0_0_0_2 seq=1 data="\"tile_n\":128}"
+[ATT][FINAL_TILING_END] id=Fusion_0_0_0_0_2 chunks=2 len=24 hash=invalid

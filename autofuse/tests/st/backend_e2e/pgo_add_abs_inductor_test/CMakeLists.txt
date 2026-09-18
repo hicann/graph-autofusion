@@ -77,4 +77,6 @@ target_compile_definitions(pgo_add_abs_inductor_test_e2e PRIVATE
 )
 add_test(NAME pgo_add_abs_inductor_test_e2e
     COMMAND pgo_add_abs_inductor_test_e2e --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/pgo_add_abs_inductor_test_e2e.xml)
-set_tests_properties(pgo_add_abs_inductor_test_e2e PROPERTIES LABELS "st;build_backend_test2;pgo_add_abs_inductor_test_e2e")
+set_tests_properties(pgo_add_abs_inductor_test_e2e PROPERTIES
+    LABELS "st;build_backend_test2;pgo_add_abs_inductor_test_e2e"
+    ENVIRONMENT "LD_LIBRARY_PATH=${PGO_ADD_ABS_INDUCTOR_RUNTIME_LD_LIBRARY_PATH}")
