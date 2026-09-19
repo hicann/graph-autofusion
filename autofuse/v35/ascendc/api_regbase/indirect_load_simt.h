@@ -13,6 +13,13 @@
 
 #include <type_traits>
 
+// The SIMT runtime (async_invoke thread stacks and launch metadata) occupies the top of UB.
+// Kernels containing this header must keep temporary UB buffers below that reserve, e.g. the
+// ReduceInit maskBuf selected by this macro in reduce_init.h.
+#ifndef AUTOFUSE_SIMT_RESERVED_UB_SIZE
+#define AUTOFUSE_SIMT_RESERVED_UB_SIZE 40960  // 32 * 1024 + 8 * 1024
+#endif
+
 namespace AscendC {
 enum class IndirectLoadSimtCase : uint8_t {
   kStaticPowerOfTwo = 0,
