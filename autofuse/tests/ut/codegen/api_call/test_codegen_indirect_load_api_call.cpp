@@ -640,6 +640,13 @@ void BuildSimtPostReduceGraph(ILTestGraph &g, bool add_parallel_output = false) 
     g.graph.ApplySplit(n, z2z3TB->id, z2z3Tb->id);
     g.graph.ApplyReorder(n, {z2z3TB->id, z2z3Tb->id, z2z3t->id});
   }
+  // Production captures the SIMT lowering metadata before the tiling axis transform, so the
+  // GM side load keeps its logical (z2, z3) view there; restore that view after the transform
+  // to keep the fixture rank-consistent with the logical view stamped by AnnotateSimtTemplate.
+  auto addend_node = g.graph.FindNode("addend_load");
+  addend_node->outputs[0].attr.axis = {z2_id, z3_id};
+  addend_node->outputs[0].attr.repeats = {g.s2, g.s3};
+  addend_node->outputs[0].attr.strides = {g.s3, One};
 
   il_node->attr.sched.loop_axis = z2z3Tb->id;
   il_node->outputs[0].attr.vectorized_axis = {z2z3t->id};
@@ -1202,6 +1209,24 @@ TEST(IndirectLoadApiCallTest, GenerateSimtOutputMapsBroadcastLoadToColumn) {
   ASSERT_NE(reduce, nullptr);
   ASSERT_EQ(af::GraphUtils::IsolateNodeOneIO(reduce), af::SUCCESS);
   ASSERT_EQ(af::GraphUtils::RemoveNodeWithoutRelink(af::AscGraphUtils::GetComputeGraph(g.graph), reduce), af::SUCCESS);
+  const auto addend_load = g.graph.FindNode("addend_load");
+  ASSERT_NE(addend_load, nullptr);
+  addend_load->outputs[0].attr.repeats = {af::sym::kSymbolOne, g.s3};
+  addend_load->outputs[0].attr.strides = {af::sym::kSymbolZero, af::sym::kSymbolOne};
+
+  std::string definition;
+  GenerateSimtPostReduceFuncDefinitionFromGraph(g, definition);
+  EXPECT_NE(definition.find("context.gm_9[index_coord_0]"), std::string::npos);
+  EXPECT_NE(definition.find("index_coord_0 = static_cast<uint32_t>(output_index % 8);"), std::string::npos);
+  EXPECT_EQ(definition.find("context.gm_9[output_index]"), std::string::npos);
+  EXPECT_EQ(definition.find("context.gm_9[index_offset]"), std::string::npos);
+}
+
+// A post-Reduce SIMT region still addresses every GM side load with the full logical
+// output_index, so a broadcast side-input view must keep its coordinate folding there.
+TEST(IndirectLoadApiCallTest, GenerateSimtPostReduceMapsBroadcastLoadToColumn) {
+  ILTestGraph g("simt_post_reduce_broadcast_offset", 2, 8, 2, 8);
+  BuildSimtPostReduceGraph(g);
   const auto addend_load = g.graph.FindNode("addend_load");
   ASSERT_NE(addend_load, nullptr);
   addend_load->outputs[0].attr.repeats = {af::sym::kSymbolOne, g.s3};

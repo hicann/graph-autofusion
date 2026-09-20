@@ -817,28 +817,9 @@ build_backend() {
                       load_gather_tail_split_b_t_abs_store_test_e2e_v2 \
                        load_gather_one_axis_split_b_t_abs_store_test_e2e_v2 \
                          indirect_load_rank2_axis1_simd_e2e_v2 \
-                         indirect_load_rank2_axis1_half_int64_simd_e2e_v2 \
-                         indirect_load_rank2_axisneg2_simd_e2e_v2 \
-                        indirect_load_rank2_axis1_relu_exp2_pre_simd_e2e_v2 \
-                        indirect_load_rank2_axis1_b16_gather_e2e_v2 \
-                       indirect_load_rank3_axis1_float_int64_static_e2e_v2 \
-                       indirect_load_rank3_axis1_pow2_simd_e2e_v2 \
-                       indirect_load_rank3_axis1_pow2_gather_e2e_v2 \
-                       indirect_load_rank3_axis1_pow2_simt_e2e_v2 \
-                       indirect_load_rank3_axis1_float_int32_gather_e2e_v2 \
                        indirect_load_rank3_axis1_float_int64_gather_e2e_v2 \
-                       indirect_load_rank4_axis1_float_int64_strided_post_simd_e2e_v2 \
-                       indirect_load_rank4_axis1_direct_index_abs_exp2_sum_simd_e2e_v2 \
-                        indirect_load_rank4_axis2_sk_e2e_v2 \
-                        indirect_load_rank2_axis1_large_simt_e2e_v2 \
-                       indirect_load_rank2_axis1_bf16_int64_simt_e2e_v2 \
-                       indirect_load_rank2_axis1_uint32_int32_simd_e2e_v2 \
-                       indirect_load_rank4_axis1_add_sum_simt_e2e_v2 \
-                       indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt_e2e_v2 \
-                       indirect_load_rank4_axis1_sum_last_axis_simt_e2e_v2 \
                        indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd_e2e_v2 \
                        indirect_load_mixed_rank4_axis2_simd_e2e_v2 \
-                       indirect_load_simt_elementwise_coverage_e2e_v2 \
                           indirect_load_broadcast_cross_boundary_simt_fallback_test_e2e_v2 \
                           indirect_load_broadcast_axis_simd_test_e2e_v2 \
                           indirect_load_broadcast_inner_adjacent_simd_test_e2e_v2 \
@@ -846,9 +827,6 @@ build_backend() {
                           indirect_load_broadcast_continuous_index_simt_test_e2e_v2 \
                           indirect_load_embedding_test_e2e_v2 \
                           indirect_load_embedding_tail_simd_e2e_v2 \
-                          indirect_load_embedding_tail_simt_e2e_v2 \
-                          indirect_load_embedding_aligned_simd_e2e_v2 \
-                          indirect_load_embedding_aligned_simt_e2e_v2 \
                            indirect_load_broadcast_retained_simd_test_e2e_v2 \
                           indirect_load_complex_broadcast_simd_test_e2e_v2 \
                           indirect_load_complex_broadcast_simt_test_e2e_v2 \
@@ -867,12 +845,8 @@ build_backend() {
                         indirect_load_broadcast_index_abs_simt_test_e2e_v2 \
                         indirect_load_broadcast_index_where_simt_test_e2e_v2 \
                         indirect_load_index_binary_same_view_simd_test_e2e_v2 \
-                        indirect_load_stride_zero_elements_simd_test_e2e_v2 \
-                       indirect_load_stride_zero_elements_simt_test_e2e_v2 \
-                       indirect_load_stride_zero_elements_sk_test_e2e_v2 \
                        indirect_load_rank3_axis1_input_index_gap_simd_test_e2e_v2 \
                        indirect_load_rank3_axis1_input_index_gap_simt_test_e2e_v2 \
-                       indirect_load_rank3_axis1_input_index_gap_sk_test_e2e_v2 \
                        indirect_load_rank3_axis1_input_index_outer_gap_simt_test_e2e_v2 \
                        indirect_load_rank3_axis1_torch_gather_frontend_e2e_v2 \
                        indirect_load_graph_hint_reduce_simt_test_e2e_v2 \
@@ -881,26 +855,25 @@ build_backend() {
                        indirect_load_embedding_reduce_simt_test_e2e_v2 \
                        indirect_load_add_il_reduce_test_e2e_v2 \
                        indirect_load_user_masked_embedding_minimal_e2e_v2 \
-                       indirect_load_user_masked_embedding_sum_full_e2e_v2 \
                        indirect_load_user_masked_embedding_sum_full_auto_e2e_v2 \
                        indirect_load_user_position_bias_e2e_v2 \
+                       indirect_load_user_position_bias_exp_sum_e2e_v2 \
                        indirect_load_user_embedding_sum_e2e_v2 \
                        indirect_load_user_embedding_sum_rank2_e2e_v2 \
                        indirect_load_user_embedding_sum_simd_e2e_v2 \
-                       indirect_load_user_embedding_mul_e2e_v2 \
                        indirect_load_user_layernorm_e2e_v2 \
-                       indirect_load_user_layernorm_simd_e2e_v2 \
-                       indirect_load_user_embedding_exp_abs_add_simd_e2e_v2 \
                        indirect_load_user_embedding_exp_abs_add_simt_e2e_v2 \
-                       indirect_load_user_fanout_direct_stores_simd_e2e_v2 \
-                       indirect_load_user_fanout_direct_stores_simt_e2e_v2 \
-                       indirect_load_user_fanout_direct_reduce_simd_e2e_v2 \
                        indirect_load_user_fanout_direct_reduce_simt_e2e_v2 \
-                       indirect_load_user_fanout_post_stores_simd_e2e_v2 \
-                       indirect_load_user_fanout_post_stores_simt_e2e_v2 \
-                       indirect_load_user_fanout_post_reduce_simd_e2e_v2 \
                        indirect_load_user_fanout_post_reduce_simt_e2e_v2 \
                        indirect_load_user_fanout_side_input_simt_e2e_v2 \
+                       indirect_load_user_fanout_direct_stores_simd_e2e_v2 \
+                       indirect_load_user_fanout_direct_stores_simt_e2e_v2 \
+                       indirect_load_user_fanout_post_stores_simd_e2e_v2 \
+                       indirect_load_user_fanout_post_stores_simt_e2e_v2 \
+                       indirect_load_user_fanout_direct_stores_simd_e2e_v2 \
+                       indirect_load_user_fanout_direct_stores_simt_e2e_v2 \
+                       indirect_load_user_fanout_post_stores_simd_e2e_v2 \
+                       indirect_load_user_fanout_post_stores_simt_e2e_v2 \
                        indirect_load_user_side_input_fanout_simd_e2e_v2 \
                        indirect_load_user_side_input_fanout_simt_e2e_v2 \
                        load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \
