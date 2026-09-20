@@ -11,16 +11,16 @@
 
 ```text
 examples/
-├── run_example.sh                                      # 样例统一运行入口
+├── run_example.sh                                   # 样例统一运行入口
 ├── jit/
 │   ├── example01_super_kernel_base/                 # SuperKernel 基础功能
 │   ├── example02_super_kernel_profiling/            # SuperKernel profiling 对比
 │   └── example03_super_kernel_runtime_ascendc_only/ # AscendC + Runtime 极简样例
 └── aot/
-    ├── scripts/                           # AOT 样例公共 Bash 函数
-    ├── example01_dual_stream/             # 双流与 NPU Event 控制边
-    ├── example02_sk_options/              # SuperKernel options
-    └── example03_kernel_pybind/           # Pybind 自定义算子融合
+    ├── scripts/                                     # AOT 样例公共 Bash 函数
+    ├── example01_dual_stream/                       # 双流与 NPU Event 控制边
+    ├── example02_sk_options/                        # SuperKernel options
+    └── example03_kernel_pybind/                     # Pybind 自定义算子融合
 ```
 
 ## 环境依赖

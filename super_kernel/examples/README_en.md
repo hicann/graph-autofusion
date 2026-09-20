@@ -11,16 +11,16 @@ This directory contains two groups of Python samples:
 
 ```text
 examples/
-├── run_example.sh                                      # Unified sample runner
+├── run_example.sh                                   # Unified sample runner
 ├── jit/
 │   ├── example01_super_kernel_base/                 # Basic SuperKernel usage
 │   ├── example02_super_kernel_profiling/            # Profiling comparison
 │   └── example03_super_kernel_runtime_ascendc_only/ # Minimal AscendC and Runtime sample
 └── aot/
-    ├── scripts/                              # Shared Bash functions for AOT samples
-    ├── example01_dual_stream/             # Two streams with NPU events
-    ├── example02_sk_options/              # SuperKernel options
-    └── example03_kernel_pybind/           # Pybind custom operator fusion
+    ├── scripts/                                     # Shared Bash functions for AOT samples
+    ├── example01_dual_stream/                       # Two streams with NPU events
+    ├── example02_sk_options/                        # SuperKernel options
+    └── example03_kernel_pybind/                     # Pybind custom operator fusion
 ```
 
 ## Prerequisites
