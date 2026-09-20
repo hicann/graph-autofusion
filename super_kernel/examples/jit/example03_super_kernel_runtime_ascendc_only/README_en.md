@@ -48,15 +48,34 @@ This use case demonstrates super_kernel basic functionality through compile-time
 > 2. When allocating memory, use strings to express same memory addresses.
 > 3. When launching args, layout follows [pow_in1, pow_in2, pow_ws, isinf_in1, isinf_out1, isinf_ws]
 
+## Environment Requirements
+
+This sample supports the following product models:
+
+- Atlas A3 training series products/Atlas A3 inference series products
+- Atlas A2 training series products/Atlas A2 inference series products
+
+Follow the [source build guide](../../../../docs/en/build.md), then install PyTorch 2.7.1 and
+TorchNPU 2.7.1.post10 (CANN 9.1.0 or later, Python 3.9.x or later) as officially released matching
+versions. For version compatibility and installation, see the
+[Ascend Extension for PyTorch user guide](https://www.hiascend.com/document/redirect/pytorchuserguide).
+Finally, install the sample's [Python dependencies](../../requirements.txt):
+
+```bash
+pip install -r super_kernel/examples/requirements.txt
+```
+
 ## Execution Command
+
+In the sample directory, run:
 
 ```bash
 python3 superkernel_runtime_ascendc_basic.py
 ```
 
-## Expected Execution Result
+## Expected Result
 
-After execution, print shows success:
+On success, the sample prints the following key log:
 ```text
 execute sample success
 ```
