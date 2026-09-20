@@ -265,7 +265,9 @@ def compare_results(dq_res_2_non_sk, dq_res_2_sk, atol=1e-3, rtol=1e-3):
     print(f"{'=' * 60}")
 
     if len(dq_res_2_non_sk) != len(dq_res_2_sk):
-        print(f"  Output count mismatch: Non-SK={len(dq_res_2_non_sk)}, SK={len(dq_res_2_sk)}")
+        print(
+            f"  Output count mismatch: Non-SK={len(dq_res_2_non_sk)}, SK={len(dq_res_2_sk)}"
+        )
         return False
 
     all_outputs_close = True
