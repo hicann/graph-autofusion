@@ -16,6 +16,7 @@
 
 #include "runtime_stub.h"
 #include "platform_context.h"
+#include "common_utils.h"
 
 using namespace af::ops;
 using namespace codegen;
@@ -943,4 +944,29 @@ TEST_F(RegReduceApicallTest, RegReduceApicallTest_ParseAttr) {
   RegReduceApiCall call(api_name);
   auto node_max = graph.FindNode("max0");
   EXPECT_EQ(call.CallParseAttr(node_max), af::SUCCESS);
+}
+
+TEST_F(RegReduceApicallTest, ReduceSumInt8AndInt16DoNotRequireCast) {
+  for (const auto dtype : {af::DT_INT8, af::DT_INT16}) {
+    SCOPED_TRACE(::testing::Message() << "dtype=" << static_cast<int32_t>(dtype));
+    af::AscGraph graph("reduce_sum_integer_dtype");
+
+    af::ascir_op::Data data("data", graph);
+    data.y.dtype = dtype;
+
+    af::ascir_op::Sum sum("sum");
+    sum.x = data.y;
+    sum.y.dtype = dtype;
+
+    auto sum_node = graph.FindNode("sum");
+    ASSERT_NE(sum_node, nullptr);
+    auto codegen_impl = ascgen_utils::GetAscIrCodegenImpl(sum_node->GetType());
+    ASSERT_NE(codegen_impl, nullptr);
+
+    const auto [input_dtypes, output_dtypes] = codegen_impl->GetConversionDtype(*sum_node);
+    ASSERT_EQ(input_dtypes.size(), 1U);
+    ASSERT_EQ(output_dtypes.size(), 1U);
+    EXPECT_EQ(input_dtypes[0], dtype);
+    EXPECT_EQ(output_dtypes[0], dtype);
+  }
 }
