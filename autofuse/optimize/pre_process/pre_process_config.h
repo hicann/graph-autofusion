@@ -26,8 +26,17 @@ class PreProcessConfig {
     return config;
   }
 
+  // 黑名单通配值，表示所有算子类型均命中
+  static constexpr char kAllNodeType[] = "all";
+
   const std::unordered_set<std::string> &GetImprovePrecisionBlacklist() const {
     return blacklist_;
+  }
+
+  // 通用精度黑名单查询：配置 all 或命中指定算子类型时返回 true。
+  // 供 pre-process 精度提升 pass 与 codegen 高精度模式（如 Div）等场景统一使用。
+  bool IsInImprovePrecisionBlacklist(const std::string &op_type) const {
+    return blacklist_.find(kAllNodeType) != blacklist_.end() || blacklist_.find(op_type) != blacklist_.end();
   }
 
   void Reset() {

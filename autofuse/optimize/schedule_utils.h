@@ -11,6 +11,8 @@
 #ifndef OPTIMIZE_SCHEDULE_UTILS_H_
 #define OPTIMIZE_SCHEDULE_UTILS_H_
 
+#include <unordered_map>
+
 #include "ascendc_ir/ascendc_ir_core/ascendc_ir_def.h"
 #include "graph/symbolizer/symbolic_utils.h"
 #include "asc_graph_utils.h"
@@ -22,6 +24,12 @@
 #include "schedule_result.h"
 
 namespace optimize {
+// 按loop_axis连通区域划分出的for循环节点分组，loop_groups中的下标即for循环编号
+struct LoopGroup {
+  int64_t loop_axis = af::kIdNone;  // 组内统一的循环轴ID
+  std::vector<af::Node *> nodes;    // 组内节点，首个节点为该组的扩散种子
+};
+
 class ScheduleUtils {
  public:
   static af::ComputeType GetComputeType(const af::AscNodePtr &node) {
@@ -30,6 +38,29 @@ class ScheduleUtils {
 
   // 后端默认采用逆dfs的拓扑排序方式
   static Status TopologicalSorting(af::AscGraph &graph, bool use_rdfs_v2 = false);
+
+  // 判断图是否满足按循环轴分组的前置条件：
+  // 1. 所有reduce节点的loop_axis均已赋值（保证该处理在AutoScheduler之后才生效）；
+  // 2. 全图有效loop_axis种类数 > 1（-1不计入，单一循环轴无需分组）。
+  // reduce节点数量 > 1 的检查与条件2重复，非必须，仅用于控制影响范围。
+  static bool IsNeedLoopGrouping(const af::AscGraph &graph);
+
+  // 按loop_axis连通区域将图中节点划分为多个for循环分组，供TopologicalSorting使用：
+  // 同循环节点在拓扑排序中相邻排列，避免被其它循环轴的节点穿插而硬拆成多个循环。
+  // 以当前拓扑序的第一个reduce节点为初始种子，从种子沿输入/输出方向BFS扩散，
+  // loop_axis相同或为-1的连通节点归入同一分组（-1节点并入当前组并继续扩散）；
+  // loop_axis不同的有效节点作为新分组种子继续扩散（种子记录发现轮次与loop_axis），
+  // 同一轮扩散中发现的同轴种子归入同一分组，不同轮发现的同轴区域拆分为不同分组。
+  // 分组编号从0开始，即loop_groups的下标。
+  // 规则约束：如下
+  // 1. 同一分组内有效节点的loop_axis必然相同，loop_axis为-1的节点按所在组的轴参与排序；
+  //    同轮发现的同轴种子（即使互不连通）归入同一分组，不同轮发现的同轴区域拆分为不同编号的分组；
+  // 2. loop_axis为-1的节点（如Data/Output等Buffer节点）并入当前分组并继续扩散，不作为新分组种子，
+  //    无法从首个reduce扩散到达的节点不会出现在分组结果中；
+  // 3. 调用方需保证存在loop_axis已赋值的reduce节点（建议先经IsNeedLoopGrouping检查）。
+  // 输出：loop_groups存储各分组及其轴，node_to_group记录节点到分组编号的映射，未入组节点不在其中。
+  static Status BuildLoopGroups(const af::AscGraph &graph, std::vector<LoopGroup> &loop_groups,
+                                std::unordered_map<af::Node *, size_t> &node_to_group);
 
   static bool IsElewise(const af::AscNodePtr &node) {
     return node->attr.api.compute_type == af::ComputeType::kComputeElewise;

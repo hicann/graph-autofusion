@@ -9,6 +9,7 @@
 #include "micro_div_api_call.h"
 #include "micro_api_call_factory.h"
 #include "ascir_ops.h"
+#include "optimize/pre_process/pre_process_config.h"
 
 namespace codegen {
 Status MicroDivApiCall::Generate(const codegen::TensorManager &tensor_mng, [[maybe_unused]] const TPipe &tpipe,
@@ -26,7 +27,11 @@ Status MicroDivApiCall::Generate(const codegen::TensorManager &tensor_mng, [[may
                     static_cast<int32_t>(input_dtype));
   ss << "AscendC::MicroAPI::" << this->api_name_;
   if (input_dtype == ge::DT_FLOAT) {
-    ss << "<" << input_dtype_name << ", &high_precision_div_mode" << ">";
+    ss << "<" << input_dtype_name;
+    if (!af::pre_process::PreProcessConfig::Instance().IsInImprovePrecisionBlacklist(af::ascir_op::Div::Type)) {
+      ss << ", &high_precision_div_mode";
+    }
+    ss << ">";
   }
   ss << "(";
   for (const auto &out_arg : this->outputs_) {

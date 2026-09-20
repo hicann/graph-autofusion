@@ -1084,14 +1084,13 @@ TEST(CodegenKernel, VfCall_TwoDimLoad) {
 
   std::string result;
   call.Generate(tpipe, vector<af::AxisId>{}, result);
-  EXPECT_EQ(
-      result,
-      std::string{"#if defined(__DAV_C310__) || "
-                  "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))\n"
-                  "AscendC::SetCtrlSpr<60, 60>(0);\n"
-                  "VFCallvf((__local_mem__ float *)local_1[0].GetPhyAddr(), (__local_mem__ float "
-                  "*)local_0[0].GetPhyAddr(), t->s0 * t->s1, 1, 1);\n"
-                  "#endif\n"});
+  EXPECT_EQ(result, std::string{"#if defined(__DAV_C310__) || "
+                                "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || "
+                                "__NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))\n"
+                                "AscendC::SetCtrlSpr<60, 60>(0);\n"
+                                "VFCallvf((__local_mem__ float *)local_1[0].GetPhyAddr(), (__local_mem__ float "
+                                "*)local_0[0].GetPhyAddr(), t->s0 * t->s1, 1, 1);\n"
+                                "#endif\n"});
 }
 
 TEST(CodegenKernel, CvUbFuseVfCallUsesCubeBaseMNPhysicalLayout) {
@@ -1474,14 +1473,13 @@ TEST(CodegenKernel, VfCall_TwoDim_Scalar) {
 
   std::string result;
   call.Generate(tpipe, vector<af::AxisId>{}, result);
-  EXPECT_EQ(
-      result,
-      std::string{"#if defined(__DAV_C310__) || "
-                  "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))\n"
-                  "AscendC::SetCtrlSpr<60, 60>(0);\n"
-                  "VFCallvf((__local_mem__ float *)local_1[0].GetPhyAddr(), (__local_mem__ float "
-                  "*)local_1[0].GetPhyAddr(), scalar_0, t->s0 * t->s1, 1, 1);\n"
-                  "#endif\n"});
+  EXPECT_EQ(result, std::string{"#if defined(__DAV_C310__) || "
+                                "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || "
+                                "__NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))\n"
+                                "AscendC::SetCtrlSpr<60, 60>(0);\n"
+                                "VFCallvf((__local_mem__ float *)local_1[0].GetPhyAddr(), (__local_mem__ float "
+                                "*)local_1[0].GetPhyAddr(), scalar_0, t->s0 * t->s1, 1, 1);\n"
+                                "#endif\n"});
 }
 
 TEST(CodegenKernel, VfCall_TwoDim_ScalarData) {
@@ -1693,14 +1691,13 @@ TEST(CodegenKernel, VfCall_ThreeDimLoad) {
 
   std::string result;
   call.Generate(tpipe, vector<af::AxisId>{}, result);
-  EXPECT_EQ(
-      result,
-      std::string{"#if defined(__DAV_C310__) || "
-                  "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))\n"
-                  "AscendC::SetCtrlSpr<60, 60>(0);\n"
-                  "VFCallvf((__local_mem__ float *)local_1[0].GetPhyAddr(), (__local_mem__ float "
-                  "*)local_0[0].GetPhyAddr(), t->s0 * t->s1, t->s2, (2 * t->s2), 1, (2 * t->s2), 1);\n"
-                  "#endif\n"});
+  EXPECT_EQ(result, std::string{"#if defined(__DAV_C310__) || "
+                                "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || "
+                                "__NPU_ARCH__ == 9201 || __NPU_ARCH__ == 9202))\n"
+                                "AscendC::SetCtrlSpr<60, 60>(0);\n"
+                                "VFCallvf((__local_mem__ float *)local_1[0].GetPhyAddr(), (__local_mem__ float "
+                                "*)local_0[0].GetPhyAddr(), t->s0 * t->s1, t->s2, (2 * t->s2), 1, (2 * t->s2), 1);\n"
+                                "#endif\n"});
 }
 
 TEST(CodegenKernel, VfCall_FiveDimLoad) {
@@ -1880,7 +1877,8 @@ TEST(CodegenKernel, VfCall_FiveDimLoad) {
       result,
       std::string{
           "#if defined(__DAV_C310__) || "
-          "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))\n"
+          "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || "
+          "__NPU_ARCH__ == 9202))\n"
           "AscendC::SetCtrlSpr<60, 60>(0);\n"
           "for(int outer_for_0 = 0; outer_for_0 < t->s0; outer_for_0++) {\n"
           "VFCallvf((__local_mem__ float "
