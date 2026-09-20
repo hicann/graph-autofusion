@@ -52,7 +52,7 @@ sh build.sh -s --module=autofuse_e2e -j 8
 
 新增功能、需求、特性或修改关键流程前，先明确假设、影响范围和验证方式。
 
-任何输出设计文档/spec 的场景（包括但不限于 superpowers brainstorming skill、用户直接要求写设计文档、输出设计方案），**必须**先读取 `docs/guidelines/design_document_template.md`，然后按照模板格式输出。模板中的每个章节都必须覆盖。即使 superpowers skill 有自己的格式要求，也要以本模板为准。
+任何输出设计文档/spec 的场景（用户直接要求写设计文档、输出设计方案、需求设计等），**必须**先读取 `docs/guidelines/design_document_template.md`，然后按照模板格式输出。模板中的每个章节都必须覆盖。即使所用技能有自己的格式要求，也要以本模板为准。
 
 设计文档必须额外完成：
 
