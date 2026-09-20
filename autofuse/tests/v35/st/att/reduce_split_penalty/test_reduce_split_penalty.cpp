@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may use this file except in compliance with the License.
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
@@ -114,7 +114,7 @@ TEST_F(STestReduceSplitPenaltyV2, reduce_split_penalty_run) {
       << CreateRunTestMainV2();
   oss.close();
   ret = std::system(
-      "g++ -ggdb3 -O0 tiling_func_main_ReduceSplitPenalty.cpp ReduceSplitPenalty_tiling_func.cpp -o "
+      "g++ -std=c++17 -ggdb3 -O0 tiling_func_main_ReduceSplitPenalty.cpp ReduceSplitPenalty_tiling_func.cpp -o "
       "tiling_func_main_ReduceSplitPenalty -I ./ -DSTUB_LOG");
   EXPECT_EQ(ret, 0);
   ret = std::system("./tiling_func_main_ReduceSplitPenalty");

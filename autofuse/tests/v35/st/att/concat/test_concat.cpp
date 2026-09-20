@@ -458,8 +458,9 @@ int main() {
 )";
   oss << ResultCheckerUtils::DefineCheckerFunction() << kRunTilingFuncMainLocal;
   oss.close();
-  auto ret =
-      std::system("g++ tiling_func_main_concat.cpp Concat_tiling_func.cpp -o tiling_func_main_concat -I ./ -DSTUB_LOG");
+  auto ret = std::system(
+      "g++ -std=c++17 tiling_func_main_concat.cpp Concat_tiling_func.cpp -o tiling_func_main_concat -I ./ "
+      "-DSTUB_LOG");
   EXPECT_EQ(ret, 0);
   ret = std::system("./tiling_func_main_concat > ./info.log");
   EXPECT_EQ(ret, 0);
@@ -501,8 +502,9 @@ int main() {
 )";
   oss << ResultCheckerUtils::DefineCheckerFunction() << kRunTilingFuncMainLocal;
   oss.close();
-  auto ret =
-      std::system("g++ tiling_func_main_concat.cpp Concat_tiling_func.cpp -o tiling_func_main_concat -I ./ -DSTUB_LOG");
+  auto ret = std::system(
+      "g++ -std=c++17 tiling_func_main_concat.cpp Concat_tiling_func.cpp -o tiling_func_main_concat -I ./ "
+      "-DSTUB_LOG");
   EXPECT_EQ(ret, 0);
   ret = std::system("./tiling_func_main_concat");
   EXPECT_EQ(ret, 0);
@@ -590,8 +592,9 @@ void PrepareTwoGroupTestEnv() {
 
 // 辅助函数：编译和运行测试
 void CompileAndRunTwoGroupTest() {
-  auto ret =
-      std::system("g++ tiling_func_main_concat.cpp Concat_tiling_func.cpp -o tiling_func_main_concat -I ./ -DSTUB_LOG");
+  auto ret = std::system(
+      "g++ -std=c++17 tiling_func_main_concat.cpp Concat_tiling_func.cpp -o tiling_func_main_concat -I ./ "
+      "-DSTUB_LOG");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main_concat > ./info.log");
