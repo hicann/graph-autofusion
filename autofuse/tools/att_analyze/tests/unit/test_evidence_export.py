@@ -190,3 +190,86 @@ def test_evidence_accepts_tilingsummary_prefix(tmp_path):
     assert record["tiling_values"] == {"block_dim": 2.0}
     assert record["objective"] == 10.0
     assert record["result_performance"] == 10.0
+
+
+def test_final_tiling_records_are_exported_with_full_pipe_names(tmp_path):
+    output = tmp_path / "evidence"
+    result = subprocess.run(
+        [
+            sys.executable,
+            ENTRYPOINT,
+            "evidence",
+            os.path.join(
+                os.path.dirname(__file__), "../data/test_final_tiling_multigroup.log"
+            ),
+            "-o",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    records = [
+        json.loads(line)
+        for line in (output / "att-evidence.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(records) == 3
+    assert {
+        (r["operator"], r["graph_id"], r["result_id"], r["group_id"]) for r in records
+    } == {("Fusion_0", 0, 0, 0), ("Fusion_0", 0, 0, 1), ("Fusion_1", 0, 0, 0)}
+    assert records[0]["source_path"].endswith("test_final_tiling_multigroup.log")
+    assert records[0]["source_line"] == 1
+    assert records[0]["source"] == "r"
+    assert records[0]["pipe_est"] == {
+        "AIV_MTE2": 128.0,
+        "AIV_MTE3": None,
+        "AIV_VEC": None,
+    }
+
+
+def test_incomplete_final_tiling_has_no_partial_repr(tmp_path):
+    output = tmp_path / "evidence"
+    result = subprocess.run(
+        [
+            sys.executable,
+            ENTRYPOINT,
+            "evidence",
+            os.path.join(
+                os.path.dirname(__file__), "../data/test_final_tiling_multiline.log"
+            ),
+            "-o",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    record = json.loads(
+        (output / "att-evidence.jsonl").read_text(encoding="utf-8").strip()
+    )
+    assert record["parse_status"] == "incomplete_final_tiling"
+    assert record["tiling_repr"] is None
+
+
+def test_summary_only_final_tiling_is_exported(tmp_path):
+    log = tmp_path / "summary-only.log"
+    log.write_text(
+        "[ATT][FINAL_TILING_SUMMARY] schema=1 source=runtime selection_mode=default operator=Fusion "
+        'graph=0 result=1 groups="{\\"0\\":{\\"case_id\\":2,\\"tiling_key\\":7}}"\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "evidence"
+    result = subprocess.run(
+        [sys.executable, ENTRYPOINT, "evidence", str(log), "-o", str(output)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    record = json.loads(
+        (output / "att-evidence.jsonl").read_text(encoding="utf-8").strip()
+    )
+    assert record["record_type"] == "final_tiling_summary"
+    assert record["operator"] == "Fusion"
+    assert record["groups"] == {"0": {"case_id": 2, "tiling_key": 7}}

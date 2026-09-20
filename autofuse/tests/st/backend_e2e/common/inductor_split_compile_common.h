@@ -53,6 +53,16 @@ inline bool FileExists(const std::string &path) {
   return f.good();
 }
 
+inline bool MsptiAvailable() {
+#ifdef MSPTI_DIR
+  const std::string mspti_dir = MSPTI_DIR;
+#else
+  const std::string mspti_dir;
+#endif
+  if (mspti_dir.empty()) return false;
+  return FileExists(mspti_dir + "/include/mspti.h") && FileExists(mspti_dir + "/lib64/libmspti.so");
+}
+
 inline bool HasCxx11AbiSymbols(const std::string &path) {
   return RunCommand("nm -D " + path + " 2>/dev/null | c++filt | grep -q 'std::__cxx11'") == 0;
 }

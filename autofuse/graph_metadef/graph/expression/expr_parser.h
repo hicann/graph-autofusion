@@ -25,6 +25,10 @@ class ExprParser {
     Init();
   }
   ExpressionImplPtr ParserExpression();
+  // ParserExpression 返回后，输入串是否已被完整消费（未残留多余 token）
+  bool IsAtEnd() const {
+    return currentToken_.type == TokenType::kEnd;
+  }
 
  private:
   graphStatus Init();
@@ -41,6 +45,8 @@ class ExprParser {
   ExpressionImplPtr ParserFloorFunction();
   ExpressionImplPtr ParserAbsFunction();
   ExpressionImplPtr ParserRationalFunction();
+  ExpressionImplPtr ParserExpFunction();
+  ExpressionImplPtr ParserSqrtFunction();
   ExpressionImplPtr ParserNumber();
   ExpressionImplPtr ParserIdentifier();
   ExpressionImplPtr ParserLParen();

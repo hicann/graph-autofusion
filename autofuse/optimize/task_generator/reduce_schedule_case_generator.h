@@ -46,6 +46,7 @@ class ReducePartitionCaseGenerator : public FusionCaseGenerator {
   Status GeneratorAllLoadTask(ascir::HintGraph &optimize_graph, std::vector<ScheduleTask> &tasks);
   Status GeneratorRCoreTask(ascir::HintGraph &optimize_graph, std::vector<ScheduleTask> &tasks) const;
   Status ReducePartitionPostFusion(ascir::ImplGraph &impl_graph);
+  Status GenerateBroadcastWorkspaceCase(ascir::HintGraph &graph, std::vector<ascir::ImplGraph> &graphs);
   Status PartitionByNode(af::AscNodePtr &src_node, af::AscNodePtr &dst_node, ascir::ImplGraph &impl_graph);
   bool IsInputNodePartitioned(const std::shared_ptr<af::Node> &start, const std::shared_ptr<af::Node> &node);
   Status FindNormLoop(const af::AscNodePtr &start, std::vector<af::AscNodePtr> &ends);

@@ -232,6 +232,40 @@ Status GetPeerOutNodeSafe(const NodePtr &node, NodePtr &peer_out_node, int32_t i
   return GetPeerOutNode(node, peer_out_node, idx);
 }
 
+// 获取 peer 对应分支上的 Broadcast 节点，支持 Broadcast 直接连接 peer，或经单输入 Cast 连接 peer。
+// 多输入场景下，每个 Broadcast 只扩展一个维度；当各分支存在公共 B 轴时，只后移公共 B 轴对应的 Broadcast。
+// 若 peer 是 Cast，则沿其唯一输入边穿透 Cast，继续查找前置的 Broadcast(B)：
+//   后移前：  x0 -> Broadcast(A) -> Broadcast(B) ------+
+//                                                     +-> MultiInputOp
+//            x1 -> Broadcast(C) -> Broadcast(B) -> Cast-+
+//   后移后：  x0 -> Broadcast(A) ----------------------+
+//                                                     +-> MultiInputOp -> Broadcast(B)
+//            x1 -> Broadcast(C) -> Cast --------------+
+// 返回值表示是否找到符合条件的 Broadcast；retained_cast_peer 用于保留 Broadcast 后面的 Cast 节点。
+bool GetBroadcastPeerThroughCast(const NodePtr &peer, NodePtr &broadcast_peer, NodePtr &retained_cast_peer) {
+  broadcast_peer = nullptr;
+  retained_cast_peer = nullptr;
+  if (peer == nullptr) {
+    return false;
+  }
+  if (peer->GetType() == kBroadcastType) {
+    broadcast_peer = peer;
+    return true;
+  }
+  if (peer->GetType() != kCastType || !IsSingleInNode(peer)) {
+    return false;
+  }
+
+  NodePtr pre_node;
+  if (GetPeerOutNodeSafe(peer, pre_node, 0) != SUCCESS || pre_node == nullptr ||
+      pre_node->GetType() != kBroadcastType) {
+    return false;
+  }
+  broadcast_peer = pre_node;
+  retained_cast_peer = peer;
+  return true;
+}
+
 bool IsNextViewOp(const NodePtr &next_node) {
   std::string type = next_node->GetType();
   return std::find(view_op_type.begin(), view_op_type.end(), type) != view_op_type.end();
@@ -401,26 +435,32 @@ std::set<int64_t> FindSubSet(std::vector<int64_t> &bro_axis_idx1, std::vector<in
 }
 
 bool CollectSameBrcAxis(NodePtr &cur_node, NodePtr &next_node, std::vector<std::vector<NodePtr>> &bro_nodes_list,
-                        std::set<int64_t> &common_axes, std::vector<NodePtr> &origin_bro_nodes) {
+                        std::set<int64_t> &common_axes, std::vector<NodePtr> &origin_bro_nodes,
+                        std::vector<NodePtr> *retained_cast_nodes = nullptr) {
   std::vector<NodePtr> peer_out_nodes;
   GE_ASSERT_SUCCESS(GetPeerOutNodes(next_node, peer_out_nodes));
   for (const auto &node : peer_out_nodes) {
     if ((cur_node != nullptr) && (node == cur_node)) {
       continue;
     }
-    if (node->GetType() != kBroadcastType) {
+    NodePtr broadcast_node;
+    NodePtr retained_cast_node;
+    if (!GetBroadcastPeerThroughCast(node, broadcast_node, retained_cast_node)) {
       bro_nodes_list.clear();
       common_axes.clear();
       return false;
     }
+    if (retained_cast_nodes != nullptr && retained_cast_node != nullptr) {
+      retained_cast_nodes->push_back(retained_cast_node);
+    }
     if (origin_bro_nodes.empty()) {
-      ReverseCollectBrcNodes(node, origin_bro_nodes);
+      ReverseCollectBrcNodes(broadcast_node, origin_bro_nodes);
       std::reverse(origin_bro_nodes.begin(), origin_bro_nodes.end());
       bro_nodes_list.push_back(origin_bro_nodes);
       continue;
     }
     std::vector<NodePtr> temp_bro_nodes;
-    ReverseCollectBrcNodes(node, temp_bro_nodes);
+    ReverseCollectBrcNodes(broadcast_node, temp_bro_nodes);
     std::reverse(temp_bro_nodes.begin(), temp_bro_nodes.end());
     bro_nodes_list.push_back(temp_bro_nodes);
 
@@ -610,13 +650,18 @@ bool IsMulInputsCanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<N
     if (node == cur_node) {
       continue;
     }
-    if (node->GetType() != kBroadcastType) {
+    NodePtr broadcast_node;
+    NodePtr retained_cast_node;
+    if (!GetBroadcastPeerThroughCast(node, broadcast_node, retained_cast_node)) {
       return false;
     }
 
     std::vector<NodePtr> temp_bro_nodes;
-    GE_ASSERT_SUCCESS(ReverseCollectBrcNodes(node, temp_bro_nodes));
+    GE_ASSERT_SUCCESS(ReverseCollectBrcNodes(broadcast_node, temp_bro_nodes));
     std::reverse(temp_bro_nodes.begin(), temp_bro_nodes.end());
+    if (retained_cast_node != nullptr && temp_bro_nodes.size() <= 1U) {
+      return false;
+    }
     if (!IsSameBroNodes(bro_nodes, temp_bro_nodes)) {
       std::vector<std::vector<NodePtr>> bro_nodes_list;
       std::set<int64_t> common_axes;
@@ -1358,17 +1403,18 @@ Status JudgePartBackward(std::set<NodePtr> &mul_input_nodes, bool &is_changed, A
     std::vector<NodePtr> origin_bro_nodes;
     std::vector<NodePtr> origin_need_move_bro_nodes;
     std::vector<NodePtr> compute_nodes;
+    std::vector<NodePtr> retained_cast_nodes;
     std::set<int64_t> common_axises;
     NodePtr peer_out_node = nullptr;
-    if (!CollectSameBrcAxis(peer_out_node, mul_input_node, bro_nodes_list, common_axises, origin_bro_nodes)) {
+    if (!CollectSameBrcAxis(peer_out_node, mul_input_node, bro_nodes_list, common_axises, origin_bro_nodes,
+                            &retained_cast_nodes)) {
       continue;
     }
-    if (bro_nodes_list.empty() || origin_bro_nodes.size() > 1U) {
-      GELOGD("Skip partial broadcast backward at node[%s]: branches=%zu, origin_broadcasts=%zu.",
-             mul_input_node->GetName().c_str(), bro_nodes_list.size(), origin_bro_nodes.size());
+    if (bro_nodes_list.empty() || (origin_bro_nodes.size() > 1U && common_axises.size() > 1)) {
+      GELOGD("Skip partial broadcast backward at node[%s]: branches=%zu, origin_broadcasts=%zu, common_axes=%zu.",
+             mul_input_node->GetName().c_str(), bro_nodes_list.size(), origin_bro_nodes.size(), common_axises.size());
       continue;
     }
-
     TensorInfo expanded_tensor_info;
     GE_ASSERT_SUCCESS(GetTensorInfo(origin_bro_nodes.back(), expanded_tensor_info));
 
@@ -1391,7 +1437,9 @@ Status JudgePartBackward(std::set<NodePtr> &mul_input_nodes, bool &is_changed, A
     for (const auto &row : bro_nodes_list) {
       merged_nodes.insert(merged_nodes.end(), row.begin(), row.end());
     }
+    merged_nodes.insert(merged_nodes.end(), retained_cast_nodes.begin(), retained_cast_nodes.end());
     merged_nodes.insert(merged_nodes.end(), compute_nodes.begin(), compute_nodes.end());
+    RemoveDuplicates(merged_nodes);
     GE_ASSERT_SUCCESS(UpdateOutputTensor(merged_nodes, common_axises));
   }
   if (!next_mul_input_nodes.empty()) {

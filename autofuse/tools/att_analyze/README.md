@@ -19,6 +19,53 @@ python3 autofuse/tools/att_analyze/src/att.py verify-tiling generated/ --scene t
 
 工具不会把缺失值当作有效的 0；请在后续分析中根据 `parse_status` 决定是否需要补充日志。
 
+## FINAL_TILING 日志契约
+
+`FINAL_TILING` 只表示运行期已经写入最终 tiling data 的记录。运行期最终选择使用
+`source="runtime"`（`selection_mode` 为 `default` 或 `explicit`），PGO 加载的最终 tiling 使用
+`source="pgo"`（`selection_mode="pgo"`）；候选搜索阶段不产生 `FINAL_TILING` 记录，仅有候选
+`GetTilingDataRepr` 调用不会被误认为运行期最终记录。解析器只识别完整字段名，历史简略别名
+（`s=`、`src=`、`k=` 等）不再被解析。单行记录的字段如下：
+
+```text
+[ATT][FINAL_TILING] schema=1 source="runtime" selection_mode="default" operator="Fusion_0" graph=0 result=0 group=1 case_id=2 tiling_key=5 score=1 sub_case_tag="" template="ConcatCase2" repr_kind="full_json" pipe_estimates="{\"AIV_MTE2\":120.000000,\"V\":null}" tiling_repr="{\"tile_m\":64,\"tile_n\":128}"
+```
+
+其中 `case_id`（case）和 `tiling_key` 是两个独立字段；多 group 或多 result 必须保留完整的
+`graph`、`result`、`group` 身份。`score` 是最终模板的 `CalcScore` 打分，用于模板筛选；它不是
+pipe cycle、objective 或 profiling 实测值。`sub_case_tag` 是子场景标签，无子场景时为空串；
+`template` 是模板名；`repr_kind` 取 `full_json`（`tiling_repr` 为完整 JSON）或 `unavailable`
+（无法获取 repr，`tiling_repr` 为空串）。`pipe_estimates` 是 ATT 模型的 pipe 估值 JSON，
+无法估计的 pipe 使用 JSON `null`，不能用 profiling 的实测 cycle 或数字 0 代替。
+
+当单行记录超过 700 字符预算时，使用同一个 `id` 的 `FINAL_TILING_BEGIN`、连续
+`FINAL_TILING_CHUNK` 和 `FINAL_TILING_END`：
+
+```text
+[ATT][FINAL_TILING_BEGIN] schema=1 source="runtime" selection_mode="default" operator="Fusion_0" graph=0 result=0 group=1 case_id=2 tiling_key=5 score=1 sub_case_tag="" template="ConcatCase2" repr_kind="full_json" pipe_estimates="{...}" id="8:Fusion_0|0|0|1|2|5|0:" chunks=3 len=1842 hash_alg=att_mix64_v1 hash=0e2418542347c1a0
+[ATT][FINAL_TILING_CHUNK] id="8:Fusion_0|0|0|1|2|5|0:" seq=0 data="{\"tiling_key\":5,"
+[ATT][FINAL_TILING_END] id="8:Fusion_0|0|0|1|2|5|0:" chunks=3 len=1842 hash_alg=att_mix64_v1 hash=0e2418542347c1a0
+```
+
+多 group 的运行期选择完成后还会输出一条 result 级 `FINAL_TILING_SUMMARY`，`groups` 字段是
+各 group 选择信息的 JSON；超长时同样使用 `FINAL_TILING_SUMMARY_BEGIN/CHUNK/END` 分片。
+
+分片记录中的 `hash_alg=att_mix64_v1` 表示后面的 `hash` 使用 ATT-Mix64-v1 对完整 `tiling_repr`（或 summary 的 groups JSON）计算。解析器用它在跨行重组后检测丢块、乱序、截断和内容修改；它不参与模板选择、score 计算、性能估值，也不提供加密。当前 producer 使用 `att_mix64_v1`；解析器仍兼容历史 `sha256` 分片日志。解析器会校验 chunk 顺序、数量、UTF-8 字节长度和哈希；缺少 END 或校验失败时输出 `incomplete_final_tiling`，不会返回部分 `tiling_repr`。同一身份（`source`、`operator`、`graph`、`result`、`group`、`case_id`、`tiling_key`）重复输出时保留第一条有效记录，并将后续记录标为 `duplicate_final_tiling`。
+
+输入证据和结果的关系如下：
+
+| 输入 | 能确认的内容 | 不能推断的内容 |
+| --- | --- | --- |
+| 只有 plog/编译日志 | 候选模板、case/key、模型 result | 运行期最终选择；不得伪造 `source="runtime"` |
+| plog + profiling | 候选模型与实测 pipe cycle 的对照 | 仍不能证明最终写入了哪个 tiling，除非存在 `FINAL_TILING` |
+| 含 `FINAL_TILING` 的运行日志 | 最终 group/result/case/key、模板名、`tiling_repr` 和可用的 pipe 估值 | profiling cycle 仍需从独立 profiling 证据读取 |
+
+`summary` 会追加 `Final Source`、`Tiling Key`、`Score`、`Pipe Estimate`、`Tiling Repr` 和
+`Final Parse Status`；`evidence` 每条最终记录输出一条 JSONL，并保留
+`source_path/source_line`。ATT 代码生成路径会在最终选择完成后生成 `FINAL_TILING`；仅有候选
+`GetTilingDataRepr` 调用不会被工具误认为运行期最终记录。无法恢复 sub-case 的缓存命中会跳过
+最终记录，避免输出错误模板身份。
+
 ## 与 ATT 模板/tiling 分析 Skill 配合
 
 `att_analyze` 由本仓维护，Skill 调用的固定入口是

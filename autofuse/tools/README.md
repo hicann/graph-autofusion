@@ -27,6 +27,13 @@ python3 autofuse/tools/att_analyze/src/att.py --help
 
 - 效果：生成包含 `Operator`、`Case`、`Objective Value` 等列的 CSV；日志字段缺失时保留空值并标记 `parse_status`，不会用 0 或 objective 冒充实测值。
 
+`FINAL_TILING` 运行期记录使用可读值 `src=runtime`（历史紧凑别名 `src=r` 也兼容），候选记录使用 `src=compile` 或
+`src=candidate`。记录至少包含 `graph/result/group/case/key`、模板名、`score`、`pipe_est` 和
+`tiling_repr`；`case` 与 `key` 不应混用。单行记录超过约 800 字符时使用
+`FINAL_TILING_BEGIN/CHUNK/END`，解析器校验 chunk 顺序、长度和 ATT-Mix64-v1，失败标记
+`incomplete_final_tiling` 且不保留部分 repr。只有 plog 时只能分析候选；加入 profiling
+后可以比较模型估值与实测 cycle，但仍需 `FINAL_TILING` 才能确认运行期最终选择。
+
 ### `compare`：比较两次选择结果
 
 - 职责：比较默认配置与 PGO、强制模板或其他候选配置的 CSV，识别字段和性能差异。

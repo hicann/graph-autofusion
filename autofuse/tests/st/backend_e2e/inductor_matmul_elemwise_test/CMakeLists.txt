@@ -87,4 +87,6 @@ target_compile_definitions(inductor_matmul_elemwise_test_e2e PRIVATE
 )
 add_test(NAME inductor_matmul_elemwise_test_e2e
     COMMAND inductor_matmul_elemwise_test_e2e --gtest_output=xml:${CMAKE_INSTALL_PREFIX}/report/st/inductor_matmul_elemwise_test_e2e.xml)
-set_tests_properties(inductor_matmul_elemwise_test_e2e PROPERTIES LABELS "st;build_backend_test2;inductor_matmul_elemwise_test_e2e")
+set_tests_properties(inductor_matmul_elemwise_test_e2e PROPERTIES
+    LABELS "st;build_backend_test2;inductor_matmul_elemwise_test_e2e"
+    ENVIRONMENT "LD_LIBRARY_PATH=${INDUCTOR_MATMUL_ELEMWISE_RUNTIME_LD_LIBRARY_PATH}")

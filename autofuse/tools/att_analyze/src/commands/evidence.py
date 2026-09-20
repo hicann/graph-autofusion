@@ -55,6 +55,54 @@ _GRAPH_SELECTION_RE = re.compile(
 _GRAPH_RE = re.compile(
     rf"{_MESSAGE_PREFIX}The value of\s+graph(\d+)_result(\d+)\s+is\s+({_NUMBER})"
 )
+_PIPE_NAMES = {"M2": "AIV_MTE2", "M3": "AIV_MTE3", "V": "AIV_VEC"}
+_PIPE_ORDER = ("AIV_MTE2", "AIV_MTE3", "AIV_VEC")
+
+
+def _final_record_json(record: Any) -> Dict[str, Any]:
+    pipe = record.pipe_est or {}
+    pipe_est = (
+        {name: pipe.get(name, pipe.get(alias)) for alias, name in _PIPE_NAMES.items()}
+        if pipe
+        else {name: None for name in _PIPE_ORDER}
+    )
+    return {
+        "schema_version": "att-evidence/v1",
+        "operator": record.op,
+        "graph_id": record.graph,
+        "result_id": record.result,
+        "group_id": record.group,
+        "case_id": record.case,
+        "source": record.source,
+        "selection_mode": record.selection_mode,
+        "tiling_key": record.tiling_key,
+        "score": record.score,
+        "sub_case_tag": record.sub_case_tag,
+        "template_name": record.template_name,
+        "pipe_est": pipe_est,
+        "tiling_repr": record.tiling_repr,
+        "repr_kind": record.repr_kind,
+        "repr_hash": record.repr_hash,
+        "parse_status": record.parse_status,
+        "source_path": record.source_path,
+        "source_line": record.source_line,
+    }
+
+
+def _final_summary_json(summary: Any) -> Dict[str, Any]:
+    return {
+        "schema_version": "att-evidence/v1",
+        "record_type": "final_tiling_summary",
+        "operator": summary.op,
+        "graph_id": summary.graph,
+        "result_id": summary.result,
+        "source": summary.source,
+        "selection_mode": summary.selection_mode,
+        "groups": summary.groups,
+        "parse_status": summary.parse_status,
+        "source_path": summary.source_path,
+        "source_line": summary.source_line,
+    }
 
 
 def _log_files(path: str) -> List[str]:
@@ -251,11 +299,56 @@ def export(
     count = 0
     with open(evidence_path, "w", encoding="utf-8") as stream:
         for path in files:
-            for record in _scan_log(path):
+            with open(path, "r", encoding="utf-8") as input_stream:
+                content = input_stream.read()
+            final_records = []
+            final_summaries = []
+            if "[ATT][FINAL_TILING" in content:
+                parser = LogParser()
+                source_path = os.path.abspath(path)
+                final_records = parser.extract_final_tiling_records(
+                    content, source_path
+                )
+                final_summaries = parser.extract_final_tiling_summaries(
+                    content, source_path
+                )
+            records = (
+                []
+                if any(record.source != "legacy" for record in final_records)
+                else _scan_log(path)
+            )
+            if final_records and any(
+                record.source != "legacy" for record in final_records
+            ):
+                seen = set()
+                for final_record in final_records:
+                    record = _final_record_json(final_record)
+                    identity = (
+                        final_record.op,
+                        final_record.graph,
+                        final_record.result,
+                        final_record.group,
+                    )
+                    if identity in seen and final_record.parse_status == "ok":
+                        record["parse_status"] = "duplicate_final_tiling"
+                    seen.add(identity)
+                    records.append(record)
+            for record in records:
                 stream.write(
                     json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
                 )
                 count += 1
+            if not records and final_summaries:
+                for summary in final_summaries:
+                    stream.write(
+                        json.dumps(
+                            _final_summary_json(summary),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
+                    count += 1
 
     manifest = {
         "manifest_version": "att-tool/v1",

@@ -110,6 +110,11 @@ class TilingCodeGenImpl {
   af::Status GenGetTilingForAllSchedulesResults(const uint32_t asc_graph_id,
                                                 const AscGraphNamepspaceMap &asc_graph_map);
   af::Status GenFusedScheduleResultsGetTilingDefine(const FusedGraphNamespaceMap &namespace_map);
+  af::Status GenFusedScheduleResultsGetTilingCoreDefine(const FusedGraphNamespaceMap &namespace_map);
+  af::Status GenFusedScheduleResultsCoreSelection(const FusedGraphNamespaceMap &namespace_map);
+  af::Status GenFusedScheduleResultsGetTilingObserveWrapper(const FusedGraphNamespaceMap &namespace_map);
+  void GenFinalTilingSummaryForResult(size_t asc_graph_id, size_t result_id,
+                                      const std::map<size_t, std::pair<std::string, std::string>> &groups);
   af::Status GenEnableGroupParallelFunctions(const FusedGraphNamespaceMap &namespace_map);
   af::Status GenEnableGroupParallelInvoke(size_t asc_graph_id, const AscGraphNamepspaceMap &asc_graph_namespace_map);
   af::Status GenEnableGroupParallelPgoInvoke(const std::string &tiling_name, bool is_pointer, const std::string &indent,
@@ -192,6 +197,10 @@ class TilingCodeGenImpl {
                                      const std::string &cache_define_head);
   // 辅助函数：生成GetTiling函数体（GetTilingKey调用和返回逻辑）
   af::Status GenGetTilingFunctionBody(bool use_cache, bool is_tail, const std::string &cache_used);
+  void GenSingleGroupFinalTilingObserveBegin();
+  void GenSingleGroupFinalTilingObserveReset();
+  void GenSingleGroupFinalTilingObserveEmit(bool need_operator_cache);
+  af::Status GenSingleGroupGetTilingCoreAlias();
   // 辅助函数：生成GetTilingKey调用逻辑
   af::Status GenGetTilingKeyCall(const std::string &cache_used);
   // 辅助函数：生成duration代码（begin或end）
@@ -243,6 +252,11 @@ class TilingCodeGenImpl {
   virtual af::Status GenSearchAllTilingbyCaseId();
   // 多模板情况下算法的模板选择逻辑
   virtual af::Status GenGetTilingKey();
+  af::Status GenFinalTilingEmitter();
+  af::Status GenFinalTilingByCaseEmitter();
+  af::Status CollectFinalTilingReprFields(std::set<std::string> &fields);
+  af::Status GenFinalTilingReprFunction();
+  af::Status GenFinalTilingRepresentation();
   virtual af::Status GenPGOSearchTilingKey();
   void GenPGOSearchTilingKeyUniqGroupBatch();
   virtual af::Status ValidateSingleResultAndGroup(bool need_free_memory = false);

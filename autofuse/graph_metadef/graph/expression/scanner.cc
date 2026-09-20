@@ -36,6 +36,8 @@ std::unordered_map<std::string, TokenType> kTokenMap = {{"Max", TokenType::kMax}
                                                         {"False", TokenType::kFalse},
                                                         {"Floor", TokenType::kFloor},
                                                         {"Mod", TokenType::kMod},
+                                                        {"Exp", TokenType::kExp},
+                                                        {"Sqrt", TokenType::kSqrt},
                                                         {"LogicAnd", TokenType::kLogicalAnd},
                                                         {"LogicOr", TokenType::kLogicalOr}};
 }

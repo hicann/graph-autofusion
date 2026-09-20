@@ -208,6 +208,43 @@ class IndexExprAscIrCodegenImplV2 : public AscIrCodegenV2 {
 
 class ArangeAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
+  [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
+    auto &mutable_node = const_cast<AscNode &>(node);
+    if (mutable_node.inputs.Size() != 0UL || mutable_node.outputs().size() != 1UL) {
+      return false;
+    }
+    auto &output = mutable_node.outputs[0].attr;
+    if (output.dtype != DT_INT32 && output.dtype != DT_INT64) {
+      return false;
+    }
+    return std::count_if(output.strides.begin(), output.strides.end(), [](const Expression &stride) {
+             return SymbolicUtils::StaticCheckEq(stride, sym::kSymbolZero) != TriBool::kTrue;
+           }) == 1UL;
+  }
+
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
+                                                       std::string &expr) const override {
+    GE_ASSERT_EQ(inputs.size(), 1UL);
+    auto &mutable_node = const_cast<AscNode &>(node);
+    GE_ASSERT_NOTNULL(mutable_node.attr.ir_attr, "Arange node has no IR attributes.");
+    Expression base;
+    Expression step;
+    GE_ASSERT_GRAPH_SUCCESS(mutable_node.attr.ir_attr->GetAttrValue("base", base));
+    GE_ASSERT_GRAPH_SUCCESS(mutable_node.attr.ir_attr->GetAttrValue("step", step));
+    const auto &output = mutable_node.outputs[0].attr;
+    const auto varying = std::find_if(output.strides.begin(), output.strides.end(), [](const Expression &stride) {
+      return SymbolicUtils::StaticCheckEq(stride, sym::kSymbolZero) != TriBool::kTrue;
+    });
+    GE_ASSERT_TRUE(varying != output.strides.end(), "Arange has no varying axis.");
+    const auto dtype = output.dtype == DT_INT64 ? "int64_t" : "int32_t";
+    // Cast each operand before multiplication. The linear SIMT index is
+    // unsigned; multiplying it by a negative Arange step before the final
+    // cast would wrap to uint32 and produce a large positive coordinate.
+    expr = "(static_cast<" + std::string(dtype) + ">(" + base.Str().get() + ") + static_cast<" + std::string(dtype) +
+           ">(" + inputs[0] + ") * static_cast<" + std::string(dtype) + ">(" + step.Str().get() + "))";
+    return ge::GRAPH_SUCCESS;
+  }
+
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
     auto &mutable_node = const_cast<AscNode &>(node);
     if (mutable_node.outputs().size() != 1UL) {

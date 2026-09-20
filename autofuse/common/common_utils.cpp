@@ -1082,7 +1082,10 @@ af::Status CreateCVFusionResult(ascir::FusedScheduledResult &elemwise_schedule_r
       }
       if (ax->type == ascir::Axis::kAxisTypeTileInner) {
         GELOGI("Add tile inner axis(%s) symbol align for graph(%s)", ax->name.c_str(), graph.GetName().c_str());
-        ax->align = af::Symbol("get_g_basen_basem_align()");
+        // 运行时占位符（由生成 tiling 代码中 set/get_g_basen_basem_align 维护），
+        // 名字必须为合法标识符：轴属性会经 AscGraph 序列化克隆（FusedGraphUnfolder::CloneAscGraphs），
+        // 带 "()" 的名字无法被表达式 scanner/parser 解析，导致克隆图 align 丢失
+        ax->align = af::Symbol(kRuntimeAlignFuncName);
       }
     }
   };

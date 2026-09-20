@@ -27,11 +27,52 @@ or parser internals so that the skill can consume the generated JSONL later.
 
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Dict, Mapping, Optional
 
 
 SCHEMA_VERSION = "att-evidence/v1"
+
+
+@dataclass
+class FinalTilingRecord:
+    """A normalized final ATT tiling observation."""
+
+    schema: Any = None
+    source: Optional[str] = None
+    selection_mode: Optional[str] = None
+    op: Optional[str] = None
+    graph: Optional[int] = None
+    result: Optional[int] = None
+    group: Optional[int] = None
+    case: Optional[int] = None
+    tiling_key: Optional[int] = None
+    score: Optional[int] = None
+    sub_case_tag: Optional[str] = None
+    template_name: Optional[str] = None
+    pipe_est: Optional[Mapping[str, Any]] = None
+    tiling_repr: Optional[Any] = None
+    repr_kind: Optional[str] = None
+    repr_hash: Optional[str] = None
+    parse_status: str = "ok"
+    source_path: str = ""
+    source_line: Optional[int] = None
+
+
+@dataclass
+class FinalTilingSummaryRecord:
+    """Result-level mapping of groups to their final template identities."""
+
+    schema: Any = None
+    source: Optional[str] = None
+    selection_mode: Optional[str] = None
+    op: Optional[str] = None
+    graph: Optional[int] = None
+    result: Optional[int] = None
+    groups: Optional[Mapping[str, Any]] = None
+    parse_status: str = "ok"
+    source_path: str = ""
+    source_line: Optional[int] = None
 
 
 def _json_value(value: Any) -> Any:

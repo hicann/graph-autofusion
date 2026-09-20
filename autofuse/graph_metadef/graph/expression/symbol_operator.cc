@@ -53,6 +53,10 @@ Expression Pow(const Expression &base, const Expression &exp) {
   return Expression(Pow(base.impl_, exp.impl_));
 }
 
+Expression Exp(const Expression &a) {
+  return Expression(Exp(a.impl_));
+}
+
 Expression Mod(const Expression &base, const Expression &exp) {
   return Expression(Mod(base.impl_, exp.impl_));
 }

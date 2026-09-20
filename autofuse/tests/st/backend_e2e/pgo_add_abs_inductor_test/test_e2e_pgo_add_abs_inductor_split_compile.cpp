@@ -233,6 +233,9 @@ TEST_F(TestBackendPgoAddAbsInductorSplitCompile, SplitCompileChainWorks) {
 }
 
 TEST_F(TestBackendPgoAddAbsInductorSplitCompile, PgoRunnerAndDynamicKernelCompile) {
+  if (!autofuse::tests::MsptiAvailable()) {
+    GTEST_SKIP() << "MSPTI is unavailable, skip PGO runner compile test";
+  }
   const std::string tiling_def = ReadFile(PGO_TILING_DEF_FILE);
   const std::string host_code = ReadFile(PGO_HOST_CODE_FILE);
   const std::string device_code = ReadFile(PGO_DEVICE_CODE_FILE);

@@ -413,6 +413,64 @@ TEST(GeneratorUT, AtomicHeaderKeysReplaceHistoricalSplitHeaders) {
   EXPECT_EQ(group_source.find("autofuse_tiling_func_tail.h"), std::string::npos);
 }
 
+TEST(GeneratorUT, TensorFlowFinalTilingIncludesCompleteTilingRepresentation) {
+  auto model_info = CreateModelInfo();
+  model_info.schedule_group_ident = {0UL, 0UL, 0UL};
+  TilingModelInfo model_infos{model_info};
+  ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 0UL}, model_infos), af::SUCCESS);
+
+  TilingCodeGenConfig config;
+  config.type = TilingImplType::HIGH_PERF;
+  config.tiling_data_type_name = "OpTestTilingData";
+  config.is_inductor_scene = false;
+  config.gen_tiling_data = true;
+  std::map<std::string, std::string> tiling_res;
+  TilingCodeGenerator generator;
+  ASSERT_EQ(generator.GenTilingCode(op_name, model_infos, config, tiling_res), af::SUCCESS);
+
+  std::string all_code;
+  for (const auto &[key, value] : tiling_res) {
+    (void)key;
+    all_code += value;
+  }
+  EXPECT_NE(all_code.find("GetTilingDataRepr("), std::string::npos);
+  EXPECT_NE(all_code.find("final_repr_kind = final_tiling_repr.empty() ? \"unavailable\" : \"full_json\""),
+            std::string::npos);
+}
+
+TEST(GeneratorUT, TensorFlowMultiGroupFinalTilingUsesGroupRepresentation) {
+  FusedParsedScheduleResult fused_schedule_result;
+  auto &schedule_result = fused_schedule_result[0UL][0UL];
+  schedule_result.asc_graph_id = 0UL;
+  schedule_result.impl_graph_id = 0UL;
+  auto group0 = CreateModelInfo();
+  group0.schedule_group_ident = {0UL, 0UL, 0UL};
+  auto group1 = CreateModelInfo();
+  group1.schedule_group_ident = {0UL, 0UL, 1UL};
+  schedule_result.groups_tiling_model_info[0UL] = {group0};
+  schedule_result.groups_tiling_model_info[1UL] = {group1};
+  ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 0UL}, schedule_result.groups_tiling_model_info[0UL]),
+            af::SUCCESS);
+  ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 1UL}, schedule_result.groups_tiling_model_info[1UL]),
+            af::SUCCESS);
+
+  TilingCodeGenConfig config;
+  config.type = TilingImplType::HIGH_PERF;
+  config.tiling_data_type_name = "OpTestTilingData";
+  config.gen_tiling_data = true;
+  std::map<std::string, std::string> tiling_res;
+  TilingCodeGenerator generator;
+  ASSERT_EQ(generator.GenTilingCode(op_name, fused_schedule_result, config, tiling_res), af::SUCCESS);
+
+  std::string all_code;
+  for (const auto &[key, value] : tiling_res) {
+    (void)key;
+    all_code += value;
+  }
+  EXPECT_GE(CountSubstr(all_code, "GetTilingDataRepr(const AscGraph0ScheduleResult0G"), 2U);
+  EXPECT_GE(CountSubstr(all_code, "final_repr_kind = final_tiling_repr.empty()"), 2U);
+}
+
 TEST(GeneratorUT, DurationSplitSourcesIncludeDirectDependencies) {
   DurationInitGuard duration_guard(1U);
   TilingModelInfo model_infos{CreateModelInfo()};
@@ -491,6 +549,7 @@ TEST(GeneratorUT, PgoOwnershipKeepsCompleteTilingDataOutOfPgoHeader) {
   EXPECT_NE(api_header.find("struct AutofuseTilingDataPerf;\nnamespace optiling {\nstruct OpTestTilingData;"),
             std::string::npos);
   EXPECT_NE(api_header.find("struct PgoTensorArgs;\nstruct SearchConfig;"), std::string::npos);
+  EXPECT_NE(api_header.find("struct FinalTilingGroupSelection;"), std::string::npos);
   EXPECT_EQ(api_header.find("namespace optiling {\nstruct AutofuseTilingDataPerf;"), std::string::npos);
 }
 
@@ -512,6 +571,7 @@ TEST(GeneratorUT, AutofuseAtomicHeadersOwnPgoConfigAndGlobalApiTypes) {
   EXPECT_NE(pgo_header.find("class PgoConfigRuntimeGuard"), std::string::npos);
   EXPECT_NE(pgo_header.find("void *stream = nullptr;"), std::string::npos);
   EXPECT_NE(api_header.find("struct AutofuseTilingData;\nstruct AutofuseTilingDataPerf;"), std::string::npos);
+  EXPECT_NE(api_header.find("struct FinalTilingGroupSelection;\nstruct AutofuseTilingData;"), std::string::npos);
   EXPECT_NE(api_header.find("uint32_t GetWorkspaceSize(const AutofuseTilingData &tiling_data);"), std::string::npos);
   EXPECT_EQ(api_header.find("namespace optiling {\nstruct AutofuseTilingData;"), std::string::npos);
 }
@@ -836,10 +896,44 @@ TEST(GeneratorUT, ReuseGroupStateHeaderKeepsGroupNamespacesAndForwardDeclaration
                        "string", "vector"});
   EXPECT_NE(reuse_source.find("#include \"autofuse_tiling_data.h\""), std::string::npos);
   EXPECT_NE(reuse_source.find("#include \"autofuse_tiling_func_state.h\""), std::string::npos);
+  EXPECT_NE(reuse_source.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
   EXPECT_NE(reuse_source.find("#include \"autofuse_tiling_func_solver.h\""), std::string::npos);
   EXPECT_NE(reuse_source.find("#include \"autofuse_tiling_func_api.h\""), std::string::npos);
-  EXPECT_EQ(reuse_source.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
   EXPECT_EQ(reuse_source.find("#include \"autofuse_tiling_func_pgo.h\""), std::string::npos);
+}
+
+TEST(GeneratorUT, ReuseGroupFinalTilingSelectionIncludesCompleteType) {
+  TilingModelInfo primary_group{CreateModelInfo()};
+  TilingModelInfo reuse_group{CreateModelInfo()};
+  primary_group[0].schedule_group_ident = {0UL, 0UL, 0UL};
+  reuse_group[0].schedule_group_ident = {0UL, 0UL, 1UL};
+  ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 0UL}, primary_group), af::SUCCESS);
+  ASSERT_EQ(ReuseGroupUtils::InitReuseScheduleGroup({0UL, 0UL, 1UL}, reuse_group), af::SUCCESS);
+  auto shared_reuse_group = primary_group[0].reuse_schedule_group;
+  shared_reuse_group->schedule_group_to_info[{0UL, 0UL, 1UL}] = reuse_group[0].reuse_schedule_group->info;
+  reuse_group[0].reuse_schedule_group = shared_reuse_group;
+
+  FusedParsedScheduleResult fused_schedule_result;
+  auto &schedule_result = fused_schedule_result[0UL][0UL];
+  schedule_result.asc_graph_id = 0UL;
+  schedule_result.impl_graph_id = 0UL;
+  schedule_result.groups_tiling_model_info[0UL] = primary_group;
+  schedule_result.groups_tiling_model_info[1UL] = reuse_group;
+  TilingCodeGenConfig config;
+  config.type = TilingImplType::HIGH_PERF;
+  config.tiling_data_type_name = "AutofuseTilingData";
+  config.is_autofuse = true;
+  config.is_inductor_scene = true;
+  std::map<std::string, std::string> tiling_res;
+  TilingCodeGenerator generator;
+
+  ASSERT_EQ(generator.GenTilingCode(op_name, fused_schedule_result, config, tiling_res), af::SUCCESS);
+  const auto &reuse_source = tiling_res.at("asc_graph0_schedule_result0_g1");
+  // The reuse wrapper assigns FinalTilingGroupSelection members, so its split translation unit must see
+  // the complete definition from the log header instead of the api-header forward declaration.
+  EXPECT_NE(reuse_source.find("bool GetFinalTilingSelection("), std::string::npos);
+  EXPECT_NE(reuse_source.find("selection.group = 1U;"), std::string::npos);
+  EXPECT_NE(reuse_source.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
 }
 
 TEST(GeneratorUT, WorkspaceReuseRelationIsOmittedFromGroupCache) {
@@ -1347,6 +1441,19 @@ TEST(GeneratorUT, GenTilingPGOSuccess) {
   EXPECT_EQ(genImpl.GenTiling(tiling_res, {}, 0, enable_group_parallels), af::SUCCESS);
 
   EXPECT_EQ(genImpl.tiling_func_.GetOutputStr().empty(), false);
+}
+
+TEST(GeneratorUT, PGOByCoreNumSingleGroupUsesGetTilingKey) {
+  TilingCodeGenConfig config;
+  TilingModelInfo tiling_model_info{CreateModelInfo()};
+  ScoreFuncs score_funcs;
+  MockHighPerfTilingCodeGenImpl genImpl("test", config, tiling_model_info, score_funcs, true);
+  genImpl.config_.enable_autofuse_pgo = true;
+
+  ASSERT_EQ(genImpl.GenPGOByCoreNumSearchTilingKey(), af::SUCCESS);
+  const std::string output = genImpl.tiling_func_.GetOutputStr();
+  EXPECT_NE(output.find("GetTilingKey(*tiling_data, tiling_case)"), std::string::npos);
+  EXPECT_EQ(output.find("GetTilingCore(*tiling_data, tiling_case"), std::string::npos);
 }
 
 TEST(GeneratorUT, RootGetTilingFailuresUseWarningLogOnlyForPGOPath) {

@@ -12,6 +12,10 @@
 import unittest
 import os
 import sys
+import csv
+import io
+import tempfile
+from contextlib import redirect_stdout
 from unittest import mock
 
 sys.path.insert(
@@ -264,6 +268,113 @@ class TestSummaryMainAllFlag(unittest.TestCase):
         mock_parser.parse_log_file.assert_called_once_with(
             "/tmp/fake.log", summary_mode="all_results_all_groups"
         )
+
+
+class TestFinalTilingExport(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+
+    def test_final_records_are_preferred_and_append_columns(self):
+        output = os.path.join(self.test_dir, "_final_summary.csv")
+        try:
+            path = os.path.join(self.test_dir, "test_final_tiling_multigroup.log")
+            with open(path, encoding="utf-8") as stream:
+                content = stream.read()
+            records = LogParser().extract_final_tiling_records(content, path)
+            summary_templates.export_to_csv([], output, final_records=records)
+            with open(output, newline="", encoding="utf-8-sig") as stream:
+                rows = list(csv.reader(stream))
+            self.assertEqual(len(rows), 4)
+            self.assertEqual(
+                rows[0][-6:],
+                [
+                    "Final Source",
+                    "Tiling Key",
+                    "Score",
+                    "Pipe Estimate",
+                    "Tiling Repr",
+                    "Final Parse Status",
+                ],
+            )
+            self.assertEqual(
+                rows[1][-6:],
+                [
+                    "r",
+                    "2",
+                    "",
+                    '{"AIV_MTE2":128.0,"AIV_MTE3":null,"AIV_VEC":null}',
+                    '{"tile_m":64}',
+                    "ok",
+                ],
+            )
+            self.assertEqual(
+                {(row[0], row[3]) for row in rows[1:]},
+                {("Fusion_0", "0"), ("Fusion_0", "1"), ("Fusion_1", "0")},
+            )
+        finally:
+            if os.path.exists(output):
+                os.unlink(output)
+
+    def test_final_records_are_exported_to_excel_without_legacy_summary(self):
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        path = os.path.join(self.test_dir, "_final_summary.xlsx")
+        try:
+            with open(
+                os.path.join(self.test_dir, "test_final_tiling_single.log"),
+                encoding="utf-8",
+            ) as stream:
+                records = LogParser().extract_final_tiling_records(stream.read())
+            summary_templates.export_to_excel([], path, final_records=records)
+            workbook = openpyxl.load_workbook(path, read_only=True)
+            headers = [cell.value for cell in next(workbook.active.iter_rows())]
+            self.assertIn("Tiling Repr", headers)
+            self.assertEqual(workbook.active.cell(row=2, column=1).value, "Add_0")
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_mixed_final_and_legacy_rows_retain_historical_tiling_values(self):
+        content = (
+            "[Fusion] [PROF]The value of foo is 7 in graph0_result0_g0_2.\n"
+            "[Fusion] [PROF]The value of ub_size is 8 in graph0_result0_g0_2.\n"
+            "[Fusion] [PROF]The value of block_dim is 9 in graph0_result0_g0_2.\n"
+            "[Fusion] [PROF]Among the templates, tiling case 2 of graph0_result0_g0 is the best choice.\n"
+            "[Fusion] [PROF]Among all schedule results, graph0_result0 is the best choice.\n"
+            '[ATT][FINAL_TILING] schema=1 source=r operator=Fusion graph=0 result=0 group=0 case_id=2 tiling_key=2 pipe_estimates="{}" tiling_repr="{\\"tile_m\\":64}"\n'
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = os.path.join(directory, "mixed.log")
+            output = os.path.join(directory, "summary.csv")
+            with open(log_path, "w", encoding="utf-8") as stream:
+                stream.write(content)
+            parser = LogParser()
+            summaries = parser.parse_log_file(log_path)
+            records = parser.extract_final_tiling_records(content, log_path)
+            summary_templates.export_to_csv(summaries, output, final_records=records)
+            with open(output, newline="", encoding="utf-8-sig") as stream:
+                rows = list(csv.DictReader(stream))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["foo"], "7.0")
+        self.assertEqual(rows[0]["ub_size"], "8.0")
+        self.assertEqual(rows[0]["block_dim"], "9.0")
+
+    def test_summary_main_console_prints_final_records(self):
+        log_path = os.path.join(self.test_dir, "test_final_tiling_multigroup.log")
+        output = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", ["summary_templates", log_path]),
+            redirect_stdout(output),
+        ):
+            summary_templates.main()
+
+        rendered = output.getvalue()
+        self.assertIn("Final Source", rendered)
+        self.assertIn("Fusion_0", rendered)
+        self.assertIn('tile_m":64', rendered)
+        self.assertIn('AIV_MTE2":128.0', rendered)
 
     @mock.patch("summary_templates.print_summary_table")
     @mock.patch("summary_templates.LogParser")

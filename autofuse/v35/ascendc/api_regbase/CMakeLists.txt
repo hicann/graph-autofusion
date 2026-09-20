@@ -20,6 +20,7 @@ set(ascendc_api_regbase_extend_src
         pow.h
         polygamma.h
         random.h
+        randn.h
         split.h
         where.h
         erf.h

@@ -74,7 +74,7 @@ After an example finishes running, a `profiling` directory is generated in the c
 You can view operator execution details in the following directory:
 
 ```text
-profiling/PROF_<timestamp>/mindstudio_profiler_output
+profiling/<hostname>_<pid>_<timestamp>_ascend_pt/PROF_<timestamp>/mindstudio_profiler_output
 ```
 
 Open the following file:

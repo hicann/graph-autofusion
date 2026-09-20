@@ -55,7 +55,9 @@ std::string GenUint64Literal(uint64_t value) {
   return std::to_string(value) + (value >= kInt64TilingKeyCapacity ? "ULL" : "");
 }
 
-void GenInductorCvSafetyFallback(std::stringstream &ss, uint64_t count, const std::string &indent) {
+void GenInductorCvSafetyFallback(std::stringstream &ss, uint64_t count, const std::string &indent,
+                                 const std::string &final_tiling_call = "",
+                                 const std::string &tiling_entry = "GetTiling") {
   ss << indent << "set_g_basen_basem_align(1);" << std::endl;
   ss << indent << "uint32_t vec_core_num = limit->aiv_num;" << std::endl;
   ss << indent << "tiling->tiling_data.set_block_dim(vec_core_num);" << std::endl;
@@ -64,7 +66,7 @@ void GenInductorCvSafetyFallback(std::stringstream &ss, uint64_t count, const st
   ss << indent << "size_t choice_case_id = 2U;" << std::endl;
   ss << indent << "for (size_t i = 2U; i < " << GenUint64Literal(count) << "; i++) {" << std::endl;
   ss << indent << "  double cur_perf;" << std::endl;
-  ss << indent << "  if (!optiling::GetTiling(tiling->tiling_data, i, &cur_perf)) {" << std::endl;
+  ss << indent << "  if (!optiling::" << tiling_entry << "(tiling->tiling_data, i, &cur_perf)) {" << std::endl;
   ss << indent << "    return -1;" << std::endl;
   ss << indent << "  }" << std::endl;
   ss << indent << "  if (cur_perf < min_perf) {" << std::endl;
@@ -96,6 +98,9 @@ void GenInductorCvSafetyFallback(std::stringstream &ss, uint64_t count, const st
   ss << indent << "tiling->cv_tiling_data.cv_aic_num = use_launch_aic_num ? *blockDim : cube_block_dim;" << std::endl;
   ss << indent << "tiling->cv_tiling_data.cv_aiv_num = vec_block_dim;" << std::endl;
   ss << indent << "tiling->cv_tiling_data.cv_vec_wss = vec_wss;" << std::endl;
+  if (!final_tiling_call.empty()) {
+    ss << indent << final_tiling_call << std::endl;
+  }
   ss << indent << "return 0;" << std::endl;
 }
 
@@ -111,19 +116,32 @@ void GenCvTilingDataReset(std::stringstream &ss, const std::string &indent, uint
 }
 
 // 生成tiling函数尾部的GetTiling选模板分支: case 0(UB)失败则尝试case 1, 仍失败走common兜底
-void GenInductorGetTilingBranch(std::stringstream &ss, uint64_t count, uint32_t type_size) {
-  ss << "  if (!optiling::GetTiling(tiling->tiling_data, 0)) {" << std::endl;
+void GenInductorGetTilingBranch(std::stringstream &ss, uint64_t count, uint32_t type_size,
+                                const std::string &final_tiling_call = "",
+                                const std::string &tiling_entry = "GetTiling",
+                                bool emit_selected_final_tiling = false) {
+  ss << "  if (!optiling::" << tiling_entry << "(tiling->tiling_data, 0)) {" << std::endl;
   ss << "    const uint32_t basen_basem_align_tmp = (uint32_t)basen_basem_align;" << std::endl;
   ss << "    set_g_basen_basem_align(basen_align);" << std::endl;
   ss << "    tiling->tiling_data.set_ub_size(limit->ub_size - 256 - basen_basem_align_tmp * " << type_size << ");"
      << std::endl;
-  ss << "    if (!optiling::GetTiling(tiling->tiling_data, 1)) {" << std::endl;
-  GenInductorCvSafetyFallback(ss, count, "      ");
+  ss << "    if (!optiling::" << tiling_entry << "(tiling->tiling_data, 1)) {" << std::endl;
+  GenInductorCvSafetyFallback(ss, count, "      ", final_tiling_call, tiling_entry);
   ss << "    } else {" << std::endl;
   GenCvTilingDataReset(ss, "      ", 1U);
+  if (emit_selected_final_tiling) {
+    ss << "      optiling::EmitFinalTilingByCase(tiling->tiling_data, tiling->tiling_data.get_block_dim(), "
+          "\"runtime\", \"default\", 0U, 1);"
+       << std::endl;
+  }
   ss << "    }" << std::endl;
   ss << "  } else {" << std::endl;
   GenCvTilingDataReset(ss, "    ", 0U);
+  if (emit_selected_final_tiling) {
+    ss << "    optiling::EmitFinalTilingByCase(tiling->tiling_data, tiling->tiling_data.get_block_dim(), "
+          "\"runtime\", \"default\", 0U, 0);"
+       << std::endl;
+  }
   ss << "  }" << std::endl;
 }
 
@@ -367,7 +385,8 @@ void EnsureFallbackAtomicHeaders(std::map<std::string, std::string> &headers, co
     autofuse::RequireSystemHeader(api.dependencies, "vector");
   }
   api.body =
-      "struct AutofuseTilingData;\nstruct AutofuseTilingDataPerf;\nstruct PgoTensorArgs;\n"
+      "struct FinalTilingGroupSelection;\nstruct AutofuseTilingData;\nstruct AutofuseTilingDataPerf;\n"
+      "struct PgoTensorArgs;\n"
       "namespace optiling {\nstruct SearchConfig;\n" +
       api_body + "}  // namespace optiling\n";
   AddFallbackHeader(headers, kTilingApiHeaderIdentify, "__AUTOFUSE_TILING_FUNC_API_H__", std::move(api));
@@ -563,9 +582,12 @@ std::map<std::string, std::string> TilingLib::GenerateForInductor(
   GE_CHK_BOOL_RET_STATUS_NOLOG(CheckTilingHeadersValid(tiling_file_name_to_content), tiling_file_name_to_content);
   std::stringstream ss;
 
-  ss << "#pragma GCC diagnostic push\n" << "#pragma GCC diagnostic ignored \"-Wreturn-type-c-linkage\"\n";
+  ss << "#if defined(__clang__)\n"
+     << "#pragma GCC diagnostic push\n"
+     << "#pragma GCC diagnostic ignored \"-Wreturn-type-c-linkage\"\n"
+     << "#endif\n";
   ss << "extern \"C\" std::string GetTilingDataRepr(const AutofuseTilingData *tiling_data);\n";
-  ss << "#pragma GCC diagnostic pop\n";
+  ss << "#if defined(__clang__)\n#pragma GCC diagnostic pop\n#endif\n";
   ss << TilingFuncDefForInductor(fused_schedule_result, elemwise_schedule_result) << std::endl;
   if (!is_cube_fused_scheduled) {
     GenInductorTopnSources(elemwise_schedule_result, ss, tiling_file_name_to_content);
@@ -1173,13 +1195,21 @@ std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedSchedul
   ss << "  tiling->tiling_data.set_block_dim(limit->aiv_num);" << std::endl;
   ss << "  tiling->tiling_data.set_ub_size(limit->ub_size - 256);" << std::endl;
 
+  const std::string fallback_final_tiling_call =
+      codegen_func_ != nullptr && ascgen_utils::IsSingleGroup(elemwise_schedule_result)
+          ? "optiling::EmitFinalTilingByCase(tiling->tiling_data, tiling->tiling_data.get_block_dim(), \"runtime\", "
+            "\"default\", 0U, static_cast<int32_t>(choice_case_id));"
+          : "";
+
   // fp32且K轴大于阈值且未启用hf32时, CV融合UB模板有精度问题, 强制走common兜底
   std::string fp32_large_k_cond = GenFp32LargeKCondition(cube_info);
   ss << "  if (cube_tiling_key_ub != 1 || (" << fp32_large_k_cond << ")) {" << std::endl;
-  GenInductorCvSafetyFallback(ss, count, "    ");
+  const std::string tiling_entry = codegen_func_ != nullptr ? "GetTilingCore" : "GetTiling";
+  GenInductorCvSafetyFallback(ss, count, "    ", fallback_final_tiling_call, tiling_entry);
   ss << "  }" << std::endl;
 
-  GenInductorGetTilingBranch(ss, count, cube_info.type_size);
+  GenInductorGetTilingBranch(ss, count, cube_info.type_size, fallback_final_tiling_call, tiling_entry,
+                             codegen_func_ != nullptr && ascgen_utils::IsSingleGroup(elemwise_schedule_result));
   ss << "  *blockDim = cube_block_dim;" << std::endl;
   ss << "  *workspaceSize = GetWorkspaceSize(tiling->tiling_data) + ws_size;" << std::endl;
   ss << "  return 0;" << std::endl;

@@ -174,9 +174,13 @@ void TilingLib::GenReprApiTilingFields(std::stringstream &ss, const ascir::ImplG
 std::string TilingLib::GenGetTilingDataReprFuncForInductor(const ascir::FusedScheduledResult &fused_schedule_result,
                                                            const std::string &tiling) const {
   std::stringstream ss;
+  // Final ATT record emission is deferred until the shared formatter and SHA-256
+  // implementation are available. Keep this ABI helper pure until then.
   ss << "// GetTilingDataRepr returns a valid C++ designated initializer string for " << tiling << "." << std::endl;
+  ss << "#if defined(__clang__)" << std::endl;
   ss << "#pragma GCC diagnostic push" << std::endl;
   ss << "#pragma GCC diagnostic ignored \"-Wreturn-type-c-linkage\"" << std::endl;
+  ss << "#endif" << std::endl;
   ss << "extern \"C\" std::string GetTilingDataRepr(const " << tiling << " *tiling_data)" << std::endl;
   ss << "{" << std::endl;
   ss << "  if (tiling_data == nullptr) {" << std::endl;
@@ -211,7 +215,9 @@ std::string TilingLib::GenGetTilingDataReprFuncForInductor(const ascir::FusedSch
   ss << "  repr << std::endl << \"}\";" << std::endl;
   ss << "  return repr.str();" << std::endl;
   ss << "}" << std::endl;
+  ss << "#if defined(__clang__)" << std::endl;
   ss << "#pragma GCC diagnostic pop" << std::endl;
+  ss << "#endif" << std::endl;
   return ss.str();
 }
 
@@ -630,7 +636,8 @@ void TilingLib::GenTopnDefaultTiling(std::stringstream &ss, const std::string &t
   ss << "  std::string default_repr;" << std::endl;
   ss << "  bool found_default_candidate = false;" << std::endl;
   ss << "  " << tiling << " default_tiling = search_tiling;" << std::endl;
-  ss << "  if (GetTiling(default_tiling, -1)) {" << std::endl;
+  ss << "  if (" << (codegen_func_ != nullptr ? "GetTilingCore" : "GetTiling") << "(default_tiling, -1)) {"
+     << std::endl;
   ss << "    default_repr = GetTilingDataRepr(&default_tiling);" << std::endl;
   ss << "  } else {" << std::endl;
   ss << "    OP_LOGW(OP_NAME, \"GetTiling failed for default topn config.\");" << std::endl;

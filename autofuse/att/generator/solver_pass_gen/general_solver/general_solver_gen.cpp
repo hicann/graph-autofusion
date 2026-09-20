@@ -9,6 +9,7 @@
  */
 
 #include "general_solver_gen.h"
+#include "common_utils.h"
 #include "graph/symbolizer/symbolic.h"
 #include "graph/symbolizer/symbolic_utils.h"
 
@@ -340,7 +341,7 @@ std::string GeneralSolverGen::GenAlignInput(const Expr arg, const std::string in
   if (IsValid(arg) && (!input_align_expr.IsConstExpr() ||
                        (input_align_expr.IsConstExpr() &&
                         af::SymbolicUtils::StaticCheckNe(input_align_expr, af::Symbol(1)) == af::TriBool::kTrue))) {
-    input_align = Str(input_align_expr);
+    input_align = ascgen_utils::RuntimeAlignExprToCode(Str(input_align_expr));
     codes += indent + Str(arg) + " = ((" + Str(arg) + " + " + input_align + " - 1) / " + input_align + ") * " +
              input_align + ";\n";
   }

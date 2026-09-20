@@ -21,7 +21,7 @@ METADEF_LIB_PATH=${OUTPUT_PATH}/metadef/lib/
 PYTHON_LIB_PATH=${AUTOFUSE_BUILD_PATH}/tests/
 PYTHON_MODULE_PATH=${AUTOFUSE_PATH}/compiler/python/
 TESTS_ST_PATH="${AUTOFUSE_PATH}/tests/st/"
-LOCAL_RUNTIME_LIB_PATH="${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir/generator:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/expression:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph:${AUTOFUSE_BUILD_PATH}/tests:${AUTOFUSE_BUILD_PATH}/tests/depends/trace:${AUTOFUSE_BUILD_PATH}/tests/depends/runtime"
+LOCAL_RUNTIME_LIB_PATH="${AUTOFUSE_BUILD_PATH}/ascir/generator:${AUTOFUSE_BUILD_PATH}/ascir/meta:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir/generator:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/ascendc_ir:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph/expression:${AUTOFUSE_BUILD_PATH}/graph_metadef/graph:${AUTOFUSE_BUILD_PATH}/tests:${AUTOFUSE_BUILD_PATH}/tests/depends/trace:${AUTOFUSE_BUILD_PATH}/tests/depends/runtime"
 RUN_V35_TESTS="off"
 
 select_compilers() {
@@ -883,6 +883,7 @@ build_backend() {
                        indirect_load_user_masked_embedding_minimal_e2e_v2 \
                        indirect_load_user_masked_embedding_sum_full_e2e_v2 \
                        indirect_load_user_masked_embedding_sum_full_auto_e2e_v2 \
+                       indirect_load_user_position_bias_e2e_v2 \
                        indirect_load_user_embedding_sum_e2e_v2 \
                        indirect_load_user_embedding_sum_rank2_e2e_v2 \
                        indirect_load_user_embedding_sum_simd_e2e_v2 \
