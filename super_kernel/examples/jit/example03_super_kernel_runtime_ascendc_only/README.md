@@ -1,6 +1,6 @@
 # super_kernel极简sample
 
-## 用例功能：
+## 用例功能
 该sample展示了如何使用super_kernel完成算子融合，包括算子融合的定义、编译、执行等。
 核心特点：
 - 依赖简单，仅依赖AscendC与runtime环境。
@@ -47,7 +47,24 @@ graph TB
 > 2. 分配内存时通过字符串来表达内存相同的内存地址
 > 3. launch args时，按照[pow_in1, pow_in2, pow_ws, isinf_in1, isinf_out1, isinf_ws]排布
 
+## 环境依赖
+
+支持如下产品型号：
+
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品
+
+请先参考[源码构建指南](../../../../docs/zh/build.md)完成环境准备，并按照官方发布的Pytorch与TorchNPU版本进行配套安装，
+参见《[Ascend Extension for PyTorch 用户指南](https://www.hiascend.com/document/redirect/pytorchuserguide)》，
+再安装对应的 Python 依赖：
+
+```bash
+pip install -r super_kernel/examples/requirements.txt
+```
+
 ## 执行命令
+
+在样例目录下执行：
 
 ```bash
 python3 superkernel_runtime_ascendc_basic.py
@@ -55,7 +72,8 @@ python3 superkernel_runtime_ascendc_basic.py
 
 ## 预期执行结果
 
-执行后打印显示success
+样例执行成功时会输出如下关键日志：
+
 ```text
 execute sample success
 ```

@@ -22,7 +22,7 @@ from contextlib import nullcontext
 from superkernel import super_kernel
 from utils import SkCompileContext
 
-# TODO: AscendC需要重构部分，需要与tbe解耦
+# TODO: AscendC parts to be refactored, which should be decoupled from tbe
 from asc_op_compile_base.common.context.op_context import OpContext
 from asc_op_compile_base.common.context import op_info
 from asc_op_compile_base.common.context import get_context
@@ -114,13 +114,13 @@ class KernelResult:
         with open(file_path, 'rb') as f:
             data = f.read()
 
-        # 获取文件大小
+        # Get the file size
         file_size = len(data)
 
-        # 创建ctypes缓冲区
+        # Create the ctypes buffer
         buffer = (ctypes.c_ubyte * file_size)()
 
-        # 将数据复制到缓冲区
+        # Copy the data into the buffer
         ctypes.memmove(buffer, data, file_size)
         c_pointer = ctypes.cast(buffer, ctypes.c_void_p)
 
@@ -174,9 +174,11 @@ class SubkernelResult(KernelResult):
     def workspaces_size(self) -> List[int]:
             return self._json_data["workspace"]["size"]
 
-    # 通过set_input和set_output设置输入输出名称，目的是为了在Superkernel时获取复用关系，
-    # 比如A->B，A的输出就是B的输入， 此时需要将A的输出名称设置为B的输入名称
-    # 对于workspace的复用而言，输入输出名称是没有意义的，不同算子的workspace可以根据相同stream时通过小的复用大的workspace来实现
+    # Set the input and output names through set_input and set_output so that the reuse relation
+    # can be obtained for SuperKernel. For example, for A->B the output of A is the input of B,
+    # so the output name of A must be set to the input name of B.
+    # For workspace reuse the input and output names are meaningless: the workspaces of different
+    # operators on the same stream can be reused by fitting a smaller workspace into a larger one.
     def set_input(self, input_name: List[str]):
         self._input = input_name
 
@@ -226,13 +228,13 @@ def _compile_sub_kernel(kernel_meta_dir, op_name, op_type, func, extend_op_info:
     current_build_config()[tbe_debug_level] = 0
     set_example_compile_soc_info()
 
-    # compile_op 函数一开始就会对 global_var_storage 做 reset，因此直接如下配置是无法生效的：
+    # compile_op resets global_var_storage at the beginning, so the following configuration has no effect:
     # global_var_storage.set_variable("ascendc_compile_debug_config", True)
-    # 这样配置才能生效
+    # Only this configuration takes effect
     current_build_config()[op_debug_config] = ["dump_cce", ]
 
-    # 必须配置 enable_deterministic_mode，否则在调用 C++ tiling 函数时，
-    # 会将 extra_params_c 中的 deterministic 设置为 null，导致 C++ 侧 core dump
+    # enable_deterministic_mode must be configured; otherwise, when the C++ tiling function is
+    # called, deterministic in extra_params_c is set to null and the C++ side core dumps
     current_build_config()['enable_deterministic_mode'] = 0
 
     current_build_config()[kernel_meta_parent_dir] = kernel_meta_dir
@@ -256,23 +258,23 @@ def _compile_sub_kernel(kernel_meta_dir, op_name, op_type, func, extend_op_info:
 
 def compile_subkernel(ctx: SkCompileContext):
     def make_subkernel(
-            impl_module_name,  # 实现模块名
-            func_name,  # 函数名
-            op_name,  # 算子名
-            op_type,  # 算子类型
-            input_count=1,  # 输入参数数量
-            output_count=1,  # 输出参数数量
-            extend_op_info=None  # 扩展配置
+            impl_module_name,  # Implementation module name
+            func_name,  # Function name
+            op_name,  # Operator name
+            op_type,  # Operator type
+            input_count=1,  # Number of input parameters
+            output_count=1,  # Number of output parameters
+            extend_op_info=None  # Extended configuration
     ):
         with nullcontext(ctx.tmp_dir) as tmp_dir:
-            # 1. 定义内核元数据目录
+            # 1. Define the kernel metadata directory
             kernel_meta_dir = Path(tmp_dir) / f"subkernel_{op_name}"
 
-            # 2. 动态导入实现模块和函数
+            # 2. Dynamically import the implementation module and function
             module = __import__(f"impl.ops_math.dynamic.{impl_module_name}", fromlist=[func_name])
             func = getattr(module, func_name)
 
-            # 3. 动态创建输入输出参数
+            # 3. Dynamically create the input and output parameters
             tensor_template = {
                 "shape": [256],
                 "ori_shape": [256],
@@ -281,25 +283,25 @@ def compile_subkernel(ctx: SkCompileContext):
                 "dtype": "float32"
             }
 
-            # 创建输入张量列表
+            # Create the input tensor list
             inputs = [tensor_template.copy() for _ in range(input_count)]
-            # 创建输出张量列表
+            # Create the output tensor list
             outputs = [tensor_template.copy() for _ in range(output_count)]
 
-            # 4. 编译子内核
+            # 4. Compile the sub-kernel
             with build_config():
                 _compile_sub_kernel(
                     str(kernel_meta_dir),
                     op_name,
                     op_type,
                     extend_op_info=extend_op_info,
-                    func=lambda: func(*inputs, *outputs)  # 动态调用函数
+                    func=lambda: func(*inputs, *outputs)  # Dynamically call the function
                 )
 
-            # 5. 返回路径管理对象
+            # 5. Return the path management object
             return SubkernelResult(kernel_meta_dir, impl_module_name)
 
-    # 使用统一的make_subkernel函数创建不同配置的算子
+    # Use the unified make_subkernel function to create operators with different configurations
     is_inf_op = make_subkernel(
         impl_module_name="is_inf",
         func_name="is_inf",

@@ -14,15 +14,33 @@ with torchair.scope.super_kernel("sk1"):
 ```
 For detailed function introduction, see [Mark SuperKernel Scope in Graph](https://www.hiascend.com/document/redirect/PytorchTorchairSuperKernel).
 
+## Environment Requirements
+
+This sample supports the following product models:
+
+- Atlas A3 training series products/Atlas A3 inference series products
+- Atlas A2 training series products/Atlas A2 inference series products
+
+Follow the [source build guide](../../../../docs/en/build.md) and install the officially released matching
+PyTorch and TorchNPU versions. See the
+[Ascend Extension for PyTorch user guide](https://www.hiascend.com/document/redirect/pytorchuserguide).
+Finally, install the sample's Python dependencies:
+
+```bash
+pip install -r super_kernel/examples/requirements.txt
+```
+
 ## Execution Command
+
+In the sample directory, run:
 
 ```bash
 python3 superkernel_compare.py
 ```
 
-## Expected Execution Result
+## Expected Result
 
-After execution, print shows success:
+On success, the sample prints the following key log:
 ```text
 execute sample success
 ```

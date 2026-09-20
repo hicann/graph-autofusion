@@ -10,7 +10,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------------------
 # fmt: off
-# 导包
+# Imports
 import torch.nn as nn
 import numpy as np
 import torch
@@ -64,7 +64,7 @@ def superkernel_scope():
     data2 = torch.from_numpy(np.random.uniform(-5, 5, size=(6, 64, 64))).to(torch.int8).npu()
     scale = torch.from_numpy(np.random.uniform(1, 1, size=(1, ))).to(torch.int64).npu()
 
-    #自定义Model
+    # Custom model
     class Network(nn.Module):
         def __init__(self):
             super().__init__()
@@ -94,7 +94,7 @@ def superkernel_scope():
     npu_backend = tng.get_npu_backend(compiler_config=config)
     model = Network().npu()
 
-    #在npu上执行有superkernel配置的模型
+    # Run the model configured with SuperKernel on the NPU
     model = torch.compile(model, fullgraph=True, backend=npu_backend, dynamic=False)
     _npu_output = model(gmm1_x, gmm1_weight, gmm1_bias, gmm2_weight, moe1_bias, dsq_input, data1, data2, scale)
     print("execute sample success")

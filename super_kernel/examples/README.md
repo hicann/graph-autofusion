@@ -11,37 +11,57 @@
 
 ```text
 examples/
-├── run_example.sh                                      # 样例统一运行入口
+├── run_example.sh                                   # 样例统一运行入口
 ├── jit/
 │   ├── example01_super_kernel_base/                 # SuperKernel 基础功能
 │   ├── example02_super_kernel_profiling/            # SuperKernel profiling 对比
 │   └── example03_super_kernel_runtime_ascendc_only/ # AscendC + Runtime 极简样例
 └── aot/
-    ├── scripts/                              # AOT 样例公共 Bash 函数
-    ├── example01_dual_stream/             # 双流与 NPU Event 控制边
-    ├── example02_sk_options/              # SuperKernel options
-    └── example03_kernel_pybind/           # Pybind 自定义算子融合
+    ├── scripts/                                     # AOT 样例公共 Bash 函数
+    ├── example01_dual_stream/                       # 双流与 NPU Event 控制边
+    ├── example02_sk_options/                        # SuperKernel options
+    └── example03_kernel_pybind/                     # Pybind 自定义算子融合
 ```
 
-## 前置说明
+## 环境依赖
 
-请先参考[源码构建指南](../../docs/zh/build.md)完成环境准备，并安装
-[requirements.txt](requirements.txt) 中的 Python 依赖。
+支持如下产品型号：
 
-## 运行样例
+- Ascend 950PR/Ascend 950DT
+- Atlas A3 训练系列产品/Atlas A3 推理系列产品
+- Atlas A2 训练系列产品/Atlas A2 推理系列产品
 
-`--npu-arch` 指定运行样例对应的 NPU 架构，当前支持 `dav-2201` 和 `dav-3510`。样例使用当前可见 NPU。
+请先参考[源码构建指南](../../docs/zh/build.md)完成环境准备，并按照官方发布的Pytorch与TorchNPU版本进行配套安装，
+参见《[Ascend Extension for PyTorch 用户指南](https://www.hiascend.com/document/redirect/pytorchuserguide)》，
+再安装对应的 Python 依赖：
 
 ```bash
-bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
+pip install -r super_kernel/examples/requirements.txt
+```
+
+## 运行说明
+
+`--npu-arch` 指定运行样例的 NPU 架构，应根据实际使用的产品型号选择：
+
+| `--npu-arch` 取值 | 对应产品 |
+| --- | --- |
+| `dav-3510` | Ascend 950 系列产品（如 Ascend 950PR、Ascend 950DT） |
+| `dav-2201` | Atlas A3 训练/推理系列产品、Atlas A2 训练/推理系列产品 |
+
+Ascend 950 系列产品，在仓库根目录执行：
+
+```bash
 bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
 ```
 
-`dav-2201` 会依次运行全部 JIT 和 AOT Python 样例；`dav-3510` 不支持这些 JIT 样例，因此会跳过 JIT，仅运行 AOT 样例。运行 SuperKernel 样例时必须显式传入 `--npu-arch`，用于选择适用的样例；样例内部的编译参数由各样例处理。
+Atlas A3 或 Atlas A2 系列产品，在仓库根目录执行：
 
-AOT 样例退出时由 TorchAir 清理静态 kernel；旧式安装的兜底卸载仅接受本次编译产物对应、位于当前 CANN 安装目录且通过路径校验的 `uninstall.sh`。日志中的其他路径不会执行，清理失败会输出告警。
+```bash
+bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
+```
+
+统一入口会根据 `--npu-arch` 自动运行当前产品型号支持的样例。各样例的支持范围和运行方法详见样例目录下的 `README.md`。
 
 ## 参考
 
 - SuperKernel option 参考 [TorchAir SuperKernel 使用说明](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md)。
-- [Ascend Extension for PyTorch 用户指南](https://www.hiascend.com/document/redirect/pytorchuserguide)
