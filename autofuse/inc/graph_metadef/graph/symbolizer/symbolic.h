@@ -208,6 +208,7 @@ class Expression {
   friend Expression sym::Max(const Expression &a, const Expression &b);
   friend Expression sym::Min(const Expression &a, const Expression &b);
   friend Expression sym::Pow(const Expression &base, const Expression &exp);
+  friend Expression sym::Exp(const Expression &a);
   friend Expression sym::Mod(const Expression &base, const Expression &exp);
   friend Expression sym::Abs(const Expression &a);
   friend Expression sym::Log(const Expression &a);  // 默认以E为底

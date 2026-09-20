@@ -777,4 +777,24 @@ TEST_F(CommonUtilsTest, Conv2DLegacyOptionalInputAttrParse) {
     EXPECT_TRUE(attr.has_offset_w);
   }
 }
+
+// cube 融合 tile 内轴的运行时占位符 align（CreateFusionCommonResult 中注入）经图属性拷贝
+// （AscGraph::CopyAttrFrom，内部走 SerializeAttr -> DeserializeAttr 序列化中转）后应保留。
+// 占位符名必须为合法标识符：带 "()" 的名字无法被表达式 scanner/parser 解析，
+// 克隆图 align 丢失并产生 "Parse expression str ... failed or incomplete" ERROR。
+TEST_F(CommonUtilsTest, TileInnerAxisRuntimeAlignPlaceholderSurvivesClone) {
+  af::AscGraph graph("tile_inner_runtime_align_graph");
+  af::Axis &axis = graph.CreateAxis("z1t", af::Axis::kAxisTypeTileInner, af::Symbol("s1"), {}, af::kIdNone);
+  axis.align = af::Symbol(kRuntimeAlignFuncName);
+
+  af::AscGraph cloned("tile_inner_runtime_align_graph");
+  ASSERT_TRUE(cloned.CopyAttrFrom(graph));
+
+  const auto cloned_axes = cloned.GetAllAxis();
+  ASSERT_EQ(cloned_axes.size(), 1UL);
+  EXPECT_TRUE(cloned_axes[0]->align.IsValid()) << "tile inner axis align lost after serialize-clone";
+  if (cloned_axes[0]->align.IsValid()) {
+    EXPECT_STREQ(cloned_axes[0]->align.Str().get(), kRuntimeAlignFuncName);
+  }
+}
 }  // namespace ascgen_utils

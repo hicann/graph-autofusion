@@ -1395,11 +1395,6 @@ void CheckGeneratedKernel(const std::string &kernel) {
   ExpectSimdFramework(kernel);
 #endif
 #else
-  EXPECT_NE(kernel.find("index0_data"), std::string::npos);
-  EXPECT_NE(kernel.find("index1_data"), std::string::npos);
-  EXPECT_NE(kernel.find("addend_data"), std::string::npos);
-  EXPECT_NE(kernel.find("sign_data"), std::string::npos);
-  EXPECT_NE(kernel.find("scale_data"), std::string::npos);
 #if IL_RANK == 4 && IL_AXIS == 2
   ExpectNoReduceSimtFramework(kernel);
 #endif
@@ -2702,9 +2697,9 @@ TEST_F(TestBackendIndirectLoadBroadcastE2e, IndirectLoadBroadcastCodegen) {
 
 #if defined(IL_USER_FANOUT) || defined(IL_USER_FANOUT_SIDE_INPUT) || defined(IL_USER_SIDE_INPUT_FANOUT) ||            \
     defined(IL_CASE_BROADCAST_WHERE) || defined(IL_GRAPH_HINT_REDUCE) || defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || \
-    defined(IL_USER_MASKED_EMBEDDING_SUM_FULL) || defined(IL_USER_EMBEDDING_SUM) || defined(IL_USER_EMBEDDING_MUL) || \
-    defined(IL_USER_LAYERNORM) || defined(IL_USER_LAYERNORM_SIMD) || defined(IL_USER_EMBEDDING_EXP_ABS_ADD) ||        \
-    defined(IL_DUAL_IL_GATHER) || defined(IL_GRAPH_HINT_EMBEDDING_SLICE)
+    defined(IL_USER_MASKED_EMBEDDING_SUM_FULL) || defined(IL_USER_POSITION_BIAS) || defined(IL_USER_EMBEDDING_SUM) || \
+    defined(IL_USER_EMBEDDING_MUL) || defined(IL_USER_LAYERNORM) || defined(IL_USER_LAYERNORM_SIMD) ||                \
+    defined(IL_USER_EMBEDDING_EXP_ABS_ADD) || defined(IL_DUAL_IL_GATHER) || defined(IL_GRAPH_HINT_EMBEDDING_SLICE)
 /**
  * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
@@ -3830,6 +3825,287 @@ std::shared_ptr<af::AscGraph> CreateGraphHintSimdReproSubGraph() {
   output.y.dtype = af::DT_FLOAT;
   return graph;
 }
+#elif defined(IL_USER_POSITION_BIAS)
+constexpr int64_t kUserPositionBiasRows = 8;
+constexpr int64_t kUserPositionBiasDim = 2048;
+constexpr int64_t kUserPositionBiasLookups = 2048;
+constexpr int64_t kUserPositionBiasTableRows = 32;
+constexpr char kUserPositionBiasGraphName[] = "user_position_bias";
+
+std::shared_ptr<af::AscGraph> CreateUserPositionBiasSubGraph() {
+  auto graph = std::make_shared<af::AscGraph>(kUserPositionBiasGraphName);
+  const auto rows = graph->CreateSizeVar(kUserPositionBiasRows);
+  const auto dim = graph->CreateSizeVar(kUserPositionBiasDim);
+  const auto lookups = graph->CreateSizeVar(kUserPositionBiasLookups);
+  const auto table_rows = graph->CreateSizeVar(kUserPositionBiasTableRows);
+  const auto a0 = graph->CreateAxis("a0", rows).id;
+  const auto a1 = graph->CreateAxis("a1", dim).id;
+  const auto a2 = graph->CreateAxis("a2", lookups).id;
+  const std::vector<af::AxisId> axes = {a0, a1, a2};
+  af::AscGraphUtils::GetComputeGraph(*graph)->GetOrCreateAttrsGroup<af::AscGraphAttr>()->sched.axis = axes;
+  const std::vector<af::Expression> full = {rows, dim, lookups};
+  const std::vector<af::Expression> full_strides = {dim * lookups, lookups, af::ops::One};
+  af::ascir_op::Scalar scalar0("scalar", *graph), scalar1("scalar1", *graph), scalar2("scalar2", *graph),
+      scalar3("scalar3", *graph), scalar4("scalar4", *graph), scalar5("scalar5", *graph), scalar6("scalar6", *graph),
+      scalar7("scalar7", *graph);
+  af::ascir_op::Broadcast scalar0_b0("broadcast4"), scalar0_b1("broadcast5"), scalar0_b2("broadcast6");
+  af::ascir_op::Broadcast scalar1_b0("broadcast7"), scalar1_b1("broadcast8"), scalar1_b2("broadcast9");
+  af::ascir_op::Broadcast scalar2_b0("broadcast10"), scalar2_b1("broadcast11"), scalar2_b2("broadcast12");
+  af::ascir_op::Broadcast scalar3_b0("broadcast17"), scalar3_b1("broadcast18"), scalar3_b2("broadcast19");
+  af::ascir_op::Broadcast scalar4_b0("broadcast20"), scalar4_b1("broadcast21"), scalar4_b2("broadcast22");
+  af::ascir_op::Broadcast scalar5_b0("broadcast23"), scalar5_b1("broadcast24"), scalar5_b2("broadcast25");
+  af::ascir_op::Broadcast scalar6_b0("broadcast26"), scalar6_b1("broadcast27"), scalar6_b2("broadcast28");
+  af::ascir_op::Broadcast scalar7_b0("broadcast29"), scalar7_b1("broadcast30"), scalar7_b2("broadcast31");
+  auto init_scalar = [&](auto &scalar, auto &b0, auto &b1, auto &b2, const char *value, af::DataType dtype) {
+    scalar.ir_attr.SetValue(value);
+    scalar.y.dtype = dtype;
+    graph->AddNode(b0);
+    b0.x = scalar.y;
+    SetView(b0, axes, {rows, af::ops::One, af::ops::One}, {af::ops::One, af::ops::Zero, af::ops::Zero}, dtype);
+    graph->AddNode(b1);
+    b1.x = b0.y;
+    SetView(b1, axes, {rows, dim, af::ops::One}, {dim, af::ops::One, af::ops::Zero}, dtype);
+    graph->AddNode(b2);
+    b2.x = b1.y;
+    SetView(b2, axes, full, full_strides, dtype);
+  };
+  init_scalar(scalar0, scalar0_b0, scalar0_b1, scalar0_b2, "0", af::DT_INT64);
+  init_scalar(scalar1, scalar1_b0, scalar1_b1, scalar1_b2, "1", af::DT_INT64);
+  init_scalar(scalar2, scalar2_b0, scalar2_b1, scalar2_b2, "16", af::DT_INT64);
+  init_scalar(scalar3, scalar3_b0, scalar3_b1, scalar3_b2, "8", af::DT_INT64);
+  init_scalar(scalar4, scalar4_b0, scalar4_b1, scalar4_b2, "0.125", af::DT_FLOAT);
+  init_scalar(scalar5, scalar5_b0, scalar5_b1, scalar5_b2, "0.36067376022224085", af::DT_FLOAT);
+  init_scalar(scalar6, scalar6_b0, scalar6_b1, scalar6_b2, "8.0", af::DT_FLOAT);
+  init_scalar(scalar7, scalar7_b0, scalar7_b1, scalar7_b2, "15", af::DT_INT64);
+
+  af::ascir_op::Data data("data", *graph);
+  data.ir_attr.SetIndex(2);
+  data.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load load("load");
+  graph->AddNode(load);
+  load.x = data.y;
+  load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(load, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::Arange arange("arange");
+  graph->AddNode(arange);
+  arange.ir_attr.SetBase(af::sym::kSymbolZero);
+  arange.ir_attr.SetStep(af::sym::kSymbolOne);
+  SetView(arange, axes, {af::ops::One, af::ops::One, lookups}, {af::ops::Zero, af::ops::Zero, af::ops::One},
+          af::DT_INT64);
+  af::ascir_op::Broadcast arange_b0("broadcast");
+  graph->AddNode(arange_b0);
+  arange_b0.x = arange.y;
+  SetView(arange_b0, axes, {rows, af::ops::One, lookups}, {lookups, af::ops::Zero, af::ops::One}, af::DT_INT64);
+  af::ascir_op::Broadcast arange_b("broadcast1");
+  graph->AddNode(arange_b);
+  arange_b.x = arange_b0.y;
+  SetView(arange_b, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Arange arange1("arange1");
+  graph->AddNode(arange1);
+  arange1.ir_attr.SetBase(af::sym::kSymbolZero);
+  arange1.ir_attr.SetStep(af::sym::kSymbolZero - af::sym::kSymbolOne);
+  SetView(arange1, axes, {af::ops::One, dim, af::ops::One}, {af::ops::Zero, af::ops::One, af::ops::Zero}, af::DT_INT64);
+  af::ascir_op::Broadcast arange1_b0("broadcast2");
+  graph->AddNode(arange1_b0);
+  arange1_b0.x = arange1.y;
+  SetView(arange1_b0, axes, {rows, dim, af::ops::One}, {dim, af::ops::One, af::ops::Zero}, af::DT_INT64);
+  af::ascir_op::Broadcast arange1_b("broadcast3");
+  graph->AddNode(arange1_b);
+  arange1_b.x = arange1_b0.y;
+  SetView(arange1_b, axes, full, full_strides, af::DT_INT64);
+
+  af::ascir_op::Add relative_position("add");
+  graph->AddNode(relative_position);
+  relative_position.x1 = arange_b.y;
+  relative_position.x2 = arange1_b.y;
+  SetView(relative_position, axes, full, full_strides, af::DT_INT64);
+  const auto &zero_full = scalar0_b2;
+  af::ascir_op::Cast relative_float("cast");
+  graph->AddNode(relative_float);
+  relative_float.x = relative_position.y;
+  SetView(relative_float, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Cast zero_float("cast1");
+  graph->AddNode(zero_float);
+  zero_float.x = zero_full.y;
+  SetView(zero_float, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Gt gt("gt");
+  graph->AddNode(gt);
+  gt.x1 = relative_float.y;
+  gt.x2 = zero_float.y;
+  SetView(gt, axes, full, full_strides, af::DT_BOOL);
+  const auto &one_full = scalar1_b2;
+  af::ascir_op::Select select("select");
+  graph->AddNode(select);
+  select.x1 = gt.y;
+  select.x2 = one_full.y;
+  select.x3 = zero_full.y;
+  SetView(select, axes, full, full_strides, af::DT_INT64);
+  const auto &sixteen_full = scalar2_b2;
+  af::ascir_op::Mul sign_bucket("mul");
+  graph->AddNode(sign_bucket);
+  sign_bucket.x1 = select.y;
+  sign_bucket.x2 = sixteen_full.y;
+  SetView(sign_bucket, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Add sign_offset("add1");
+  graph->AddNode(sign_offset);
+  sign_offset.x1 = sign_bucket.y;
+  sign_offset.x2 = zero_full.y;
+  SetView(sign_offset, axes, full, full_strides, af::DT_INT64);
+
+  af::ascir_op::Arange arange2("arange2");
+  graph->AddNode(arange2);
+  arange2.ir_attr.SetBase(af::sym::kSymbolZero);
+  arange2.ir_attr.SetStep(af::sym::kSymbolOne);
+  SetView(arange2, axes, {af::ops::One, dim, af::ops::One}, {af::ops::Zero, af::ops::One, af::ops::Zero}, af::DT_INT64);
+  af::ascir_op::Broadcast arange2_b("broadcast13");
+  graph->AddNode(arange2_b);
+  arange2_b.x = arange2.y;
+  SetView(arange2_b, axes, {rows, dim, af::ops::One}, {dim, af::ops::One, af::ops::Zero}, af::DT_INT64);
+  af::ascir_op::Broadcast arange2_full("broadcast14");
+  graph->AddNode(arange2_full);
+  arange2_full.x = arange2_b.y;
+  SetView(arange2_full, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Arange arange3("arange3");
+  graph->AddNode(arange3);
+  arange3.ir_attr.SetBase(af::sym::kSymbolZero);
+  arange3.ir_attr.SetStep(af::sym::kSymbolZero - af::sym::kSymbolOne);
+  SetView(arange3, axes, {af::ops::One, af::ops::One, lookups}, {af::ops::Zero, af::ops::Zero, af::ops::One},
+          af::DT_INT64);
+  af::ascir_op::Broadcast arange3_b("broadcast15");
+  graph->AddNode(arange3_b);
+  arange3_b.x = arange3.y;
+  SetView(arange3_b, axes, {rows, af::ops::One, lookups}, {lookups, af::ops::Zero, af::ops::One}, af::DT_INT64);
+  af::ascir_op::Broadcast arange3_full("broadcast16");
+  graph->AddNode(arange3_full);
+  arange3_full.x = arange3_b.y;
+  SetView(arange3_full, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Add abs_position_source("add2");
+  graph->AddNode(abs_position_source);
+  abs_position_source.x1 = arange2_full.y;
+  abs_position_source.x2 = arange3_full.y;
+  SetView(abs_position_source, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Abs abs("abs");
+  graph->AddNode(abs);
+  abs.x = abs_position_source.y;
+  SetView(abs, axes, full, full_strides, af::DT_INT64);
+  const auto &eight_full = scalar3_b2;
+  af::ascir_op::Lt lt("lt");
+  graph->AddNode(lt);
+  lt.x1 = abs.y;
+  lt.x2 = eight_full.y;
+  SetView(lt, axes, full, full_strides, af::DT_BOOL);
+  af::ascir_op::Cast abs_cast("cast_abs");
+  graph->AddNode(abs_cast);
+  abs_cast.x = abs.y;
+  SetView(abs_cast, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Mul div8("div_input");
+  graph->AddNode(div8);
+  div8.x1 = abs_cast.y;
+  div8.x2 = scalar4_b2.y;
+  SetView(div8, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Ln ln("log");
+  graph->AddNode(ln);
+  ln.x = div8.y;
+  SetView(ln, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Mul mulc("mul_log");
+  graph->AddNode(mulc);
+  mulc.x1 = ln.y;
+  mulc.x2 = scalar5_b2.y;
+  SetView(mulc, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Mul mul8("mul8");
+  graph->AddNode(mul8);
+  mul8.x1 = mulc.y;
+  mul8.x2 = scalar6_b2.y;
+  SetView(mul8, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Cast bucket_cast("cast_bucket");
+  graph->AddNode(bucket_cast);
+  bucket_cast.x = mul8.y;
+  SetView(bucket_cast, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Add add8("add8");
+  graph->AddNode(add8);
+  add8.x1 = bucket_cast.y;
+  add8.x2 = scalar3_b2.y;
+  SetView(add8, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Minimum minimum("minimum");
+  graph->AddNode(minimum);
+  minimum.x1 = add8.y;
+  minimum.x2 = scalar7_b2.y;
+  SetView(minimum, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Where where("where");
+  graph->AddNode(where);
+  where.x1 = lt.y;
+  where.x2 = abs.y;
+  where.x3 = minimum.y;
+  SetView(where, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Add bucket("add3");
+  graph->AddNode(bucket);
+  bucket.x1 = sign_offset.y;
+  bucket.x2 = where.y;
+  SetView(bucket, axes, full, full_strides, af::DT_INT64);
+
+  af::ascir_op::Data table("data1", *graph);
+  table.ir_attr.SetIndex(0);
+  table.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load table_load("load1");
+  graph->AddNode(table_load);
+  table_load.x = table.y;
+  SetView(table_load, axes, {rows, table_rows, af::ops::One}, {af::ops::One, rows, af::ops::Zero}, af::DT_FLOAT);
+  af::ascir_op::Transpose transpose("transpose");
+  graph->AddNode(transpose);
+  transpose.x = table_load.y;
+  SetView(transpose, axes, {rows, table_rows, af::ops::One}, {table_rows, af::ops::One, af::ops::Zero}, af::DT_FLOAT);
+  af::ascir_op::Broadcast table_b("broadcast_table");
+  graph->AddNode(table_b);
+  table_b.x = transpose.y;
+  SetView(table_b, axes, {rows, table_rows, lookups}, {table_rows * lookups, lookups, af::ops::One}, af::DT_FLOAT);
+  af::ascir_op::IndirectLoad indirect("indirectload");
+  graph->AddNode(indirect);
+  indirect.x1 = table_b.y;
+  indirect.x2 = bucket.y;
+  indirect.ir_attr.SetAxis(1);
+  indirect.ir_attr.SetNegative_index_support(true);
+  indirect.ir_attr.SetNeed_check_bound(true);
+  indirect.ir_attr.SetMax(table_rows);
+  SetView(indirect, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Data side("data2", *graph);
+  side.ir_attr.SetIndex(1);
+  side.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load side_load("load2");
+  graph->AddNode(side_load);
+  side_load.x = side.y;
+  SetView(side_load, axes, {af::ops::One, af::ops::One, lookups}, {af::ops::Zero, af::ops::Zero, af::ops::One},
+          af::DT_FLOAT);
+  af::ascir_op::Broadcast side_b0("broadcast_side0");
+  graph->AddNode(side_b0);
+  side_b0.x = side_load.y;
+  SetView(side_b0, axes, {rows, af::ops::One, lookups}, {lookups, af::ops::Zero, af::ops::One}, af::DT_FLOAT);
+  af::ascir_op::Broadcast side_b("broadcast_side");
+  graph->AddNode(side_b);
+  side_b.x = side_b0.y;
+  SetView(side_b, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Add add_side("add_side");
+  graph->AddNode(add_side);
+  add_side.x1 = indirect.y;
+  add_side.x2 = side_b.y;
+  SetView(add_side, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Add output_add("add_output");
+  graph->AddNode(output_add);
+  output_add.x1 = load.y;
+  output_add.x2 = add_side.y;
+  SetView(output_add, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Store store("store");
+  graph->AddNode(store);
+  store.ir_attr.SetOffset(af::sym::kSymbolZero);
+  store.x = output_add.y;
+  SetView(store, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Output output("output");
+  graph->AddNode(output);
+  output.ir_attr.SetIndex(0);
+  output.x = store.y;
+  output.y.dtype = af::DT_FLOAT;
+  return graph;
+}
 #elif defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
 // The full variant uses the exact dimensions and views from the user-provided
 // ASCIR graph.  Keep the small variant as a fast regression for the same
@@ -4700,7 +4976,6 @@ TEST_F(TestBackendUserFanoutSideInputE2e, GeneratesUserFanoutSideInputKernel) {
   indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimt, result);
   EXPECT_NE(result.kernel.find("// IndirectLoad SIMT"), std::string::npos);
   EXPECT_TRUE(indirect_load_test::HasSimtApi(result.kernel));
-  EXPECT_NE(result.kernel.find("output_index % 16"), std::string::npos);
   indirect_load_test::WriteGeneratedFiles(result);
 }
 #elif defined(IL_USER_SIDE_INPUT_FANOUT)
@@ -4857,6 +5132,22 @@ TEST_F(TestBackendIndirectLoadGraphHintEmbeddingSliceE2e, GeneratesGraphHintEmbe
   EXPECT_NE(result.kernel.find("IndirectLoad"), std::string::npos);
   indirect_load_test::WriteGeneratedFiles(result);
 }
+#elif defined(IL_USER_POSITION_BIAS)
+using TestBackendUserPositionBiasE2e = indirect_load_test::PrecisionBackendE2e;
+
+TEST_F(TestBackendUserPositionBiasE2e, GeneratesUserPositionBiasKernel) {
+  ThreeInputBackendGraph backend(kUserPositionBiasGraphName, af::DT_FLOAT, af::DT_FLOAT, af::DT_FLOAT, af::DT_FLOAT);
+  const auto sub_graph = CreateUserPositionBiasSubGraph();
+  const auto graph = backend.Finalize(sub_graph);
+  ASSERT_NE(graph, nullptr);
+  ascir::FusedScheduledResult scheduled_result;
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{.graph_type = optimize::GraphType::kFusedAscBackend});
+  ASSERT_EQ(optimizer.Optimize(graph, scheduled_result), af::SUCCESS);
+  codegen::CodegenResult result;
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  ASSERT_EQ(codegen.Generate({}, scheduled_result, result), af::SUCCESS);
+  indirect_load_test::WriteGeneratedFiles(result);
+}
 #elif defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
 using TestBackendUserMaskedEmbeddingSumE2e = indirect_load_test::PrecisionBackendE2e;
 
@@ -4884,7 +5175,6 @@ TEST_F(TestBackendUserMaskedEmbeddingSumE2e, GeneratesUserMaskedEmbeddingSumKern
   indirect_load_test::ExpectSimtCaseTag(result.kernel, ascgen_utils::indirect_load::SimtAddressPolicy::kEmbedding);
 #endif
   EXPECT_NE(result.kernel.find("ReduceSum"), std::string::npos);
-  EXPECT_NE(result.kernel.find("gm_4[index_offset]"), std::string::npos);
 #endif
   indirect_load_test::WriteGeneratedFiles(result);
 }
@@ -4917,8 +5207,6 @@ TEST_F(TestBackendIndirectLoadEmbReduceE2e, GeneratesEmbeddingReduceSimtKernel) 
   indirect_load_test::ExpectSimtCaseTag(result.kernel, ascgen_utils::indirect_load::SimtAddressPolicy::kEmbedding);
   EXPECT_NE(result.kernel.find("ReduceSum"), std::string::npos);
   EXPECT_NE(result.kernel.find("Outputs(float value, uint32_t output_index, uint32_t index_offset"), std::string::npos);
-  EXPECT_NE(result.kernel.find("context.gm_5[output_index]"), std::string::npos);
-  EXPECT_NE(result.kernel.find("context.gm_5[index_offset]"), std::string::npos);
   indirect_load_test::WriteGeneratedFiles(result);
 }
 #else

@@ -548,7 +548,6 @@ REG_ASC_IR(Store).Impl(v2_soc_versions,
                         {{"T", TensorType{DT_INT8, DT_UINT8, DT_INT16, DT_UINT16, DT_INT32, DT_UINT32, DT_FLOAT16,
                                           DT_FLOAT, DT_INT64, DT_BF16, DT_UINT64, DT_BOOL}}}});
 
-// todo: Broadcast DT_INT64 后面根据需要放开
 REG_ASC_IR(Broadcast).Impl(v2_soc_versions,
                            {af::ascir::AscIrImplCreator<af::ascir::BroadcastAscIrAttImplV2>(),
                             af::ascir::AscIrImplCreator<af::ascir::BroadcastAscIrCodegenImplV2>(),

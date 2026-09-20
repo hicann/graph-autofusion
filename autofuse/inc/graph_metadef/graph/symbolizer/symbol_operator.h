@@ -22,6 +22,7 @@ Expression Div(const Expression &a, const Expression &b);
 Expression Max(const Expression &a, const Expression &b);
 Expression Min(const Expression &a, const Expression &b);
 Expression Pow(const Expression &base, const Expression &exp);
+Expression Exp(const Expression &a);
 Expression Mod(const Expression &base, const Expression &exp);
 Expression Abs(const Expression &a);
 Expression Log(const Expression &a);  // 默认以E为底

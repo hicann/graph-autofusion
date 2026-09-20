@@ -12,6 +12,7 @@
 #define AUTOFUSE_TESTS_V35_ST_BACKEND_E2E_V2_INDIRECT_LOAD_STORE_TEST_INDIRECT_LOAD_KERNEL_TEST_COMMON_H_
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -1425,7 +1426,10 @@ TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
 extern "C" int64_t AutofuseTiling(AutofuseTilingData *, uint32_t *, uint32_t *, uint32_t, uint32_t);
 
 #ifndef IL_ADD_IL_REDUCE
-#if defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
+#if defined(IL_USER_POSITION_BIAS)
+extern "C" __global__ __aicore__ void user_position_bias(GM_ADDR input0, GM_ADDR input1, GM_ADDR input2, GM_ADDR output,
+                                                         GM_ADDR workspace, GM_ADDR tiling);
+#elif defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
 extern "C" __global__ __aicore__ void user_masked_embedding_sum(GM_ADDR input0, GM_ADDR input1, GM_ADDR input2,
                                                                 GM_ADDR output, GM_ADDR workspace, GM_ADDR tiling);
 #elif defined(IL_GRAPH_HINT_EMBEDDING_SLICE)
@@ -1456,7 +1460,55 @@ extern "C" __global__ __aicore__ void indirect_load_add_il_reduce_test(GM_ADDR i
 
 namespace {
 #ifndef IL_ADD_IL_REDUCE
-#if defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
+#if defined(IL_USER_POSITION_BIAS)
+constexpr int32_t kUserPositionBiasRows = 8;
+constexpr int32_t kUserPositionBiasDim = 2048;
+constexpr int32_t kUserPositionBiasLookups = 2048;
+constexpr int32_t kUserPositionBiasTableRows = 32;
+
+TEST(E2EUserPositionBias, GeneratedKernelMatchesReference) {
+  const int64_t output_count =
+      static_cast<int64_t>(kUserPositionBiasRows) * kUserPositionBiasDim * kUserPositionBiasLookups;
+  auto table = indirect_load_test::AllocGmBuffer<float>(static_cast<int64_t>(kUserPositionBiasTableRows) *
+                                                        kUserPositionBiasRows);
+  auto side = indirect_load_test::AllocGmBuffer<float>(kUserPositionBiasLookups);
+  auto input = indirect_load_test::AllocGmBuffer<float>(output_count);
+  auto output = indirect_load_test::AllocGmBuffer<float>(output_count);
+  ASSERT_TRUE(table && side && input && output);
+  for (int32_t b = 0; b < kUserPositionBiasTableRows; ++b) {
+    for (int32_t r = 0; r < kUserPositionBiasRows; ++r)
+      table.get()[b * kUserPositionBiasRows + r] = b * 0.1F + r * 0.01F;
+  }
+  for (int32_t p = 0; p < kUserPositionBiasLookups; ++p) side.get()[p] = p * 0.001F;
+  for (int64_t i = 0; i < output_count; ++i) input.get()[i] = static_cast<float>(i % 97) * 0.01F;
+  std::fill_n(output.get(), output_count, 0.0F);
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0U, block_dim = 48U;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(user_position_bias, block_dim, reinterpret_cast<uint8_t *>(table.get()),
+              reinterpret_cast<uint8_t *>(side.get()), reinterpret_cast<uint8_t *>(input.get()),
+              reinterpret_cast<uint8_t *>(output.get()), reinterpret_cast<uint8_t *>(workspace),
+              reinterpret_cast<uint8_t *>(&tiling_data));
+  for (int32_t r = 0; r < kUserPositionBiasRows; ++r) {
+    for (int32_t p1 = 0; p1 < kUserPositionBiasDim; ++p1) {
+      for (int32_t p2 = 0; p2 < kUserPositionBiasLookups; ++p2) {
+        const int64_t rel = static_cast<int64_t>(p2) - p1;
+        const int64_t ab = std::abs(rel);
+        int64_t where =
+            ab < 8 ? ab : std::min<int64_t>(static_cast<int64_t>(std::log(ab / 8.0) / 2.772588722239781 * 8) + 8, 15);
+        const int64_t bucket = (rel > 0 ? 16 : 0) + where;
+        const int64_t off = (static_cast<int64_t>(r) * kUserPositionBiasDim + p1) * kUserPositionBiasLookups + p2;
+        const float expected = input.get()[off] + table.get()[bucket * kUserPositionBiasRows + r] + side.get()[p2];
+        EXPECT_NEAR(output.get()[off], expected, 1e-4F) << "r=" << r << ", p1=" << p1 << ", p2=" << p2;
+      }
+    }
+  }
+  if (workspace != nullptr) AscendC::GmFree(workspace);
+}
+#elif defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
 #if defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
 constexpr int32_t kUserMaskedRows = 128;
 constexpr int32_t kUserMaskedDim = 128;
