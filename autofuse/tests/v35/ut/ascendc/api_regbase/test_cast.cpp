@@ -117,6 +117,10 @@ TEST_F(TestApiCast, Cast_Test_Float_BFloat16) {
   CastTest<float, bfloat16_t, 2>({1, 128}, {0, 1}, {0, 1});
 }
 
+TEST_F(TestApiCast, Cast_Test_Int64_BFloat16) {
+  CastTest<int64_t, bfloat16_t, 2>({1, 128}, {0, 1}, {0, 1});
+}
+
 TEST_F(TestApiCast, Cast_Test_Uint8_Float16) {
   CastTest<uint8_t, half, 2>({1, 128}, {0, 1}, {0, 1});
 }

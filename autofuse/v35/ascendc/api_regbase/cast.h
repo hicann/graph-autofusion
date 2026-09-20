@@ -689,7 +689,8 @@ __aicore__ inline void CastExtend(const AscendC::LocalTensor<OutT> &dst, const A
   constexpr bool b64Cast = SupportType<Tuple<OutT, InT>, Tuple<float, int64_t>, Tuple<int64_t, float>,
                                        Tuple<int32_t, int64_t>, Tuple<int64_t, int32_t>>();
 
-  constexpr bool b64CastWithTransfer = SupportType<Tuple<OutT, InT>, Tuple<half, int64_t>, Tuple<int64_t, half>>();
+  constexpr bool b64CastWithTransfer =
+      SupportType<Tuple<OutT, InT>, Tuple<half, int64_t>, Tuple<int64_t, half>, Tuple<bfloat16_t, int64_t>>();
 
   constexpr bool castWithSameBit =
       SupportType<Tuple<OutT, InT>, Tuple<uint8_t, int8_t>, Tuple<int8_t, uint8_t>, Tuple<uint16_t, int16_t>,
