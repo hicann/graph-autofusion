@@ -326,7 +326,9 @@ Status NddmaTemplate::AddTransposeNodeAfter(af::AscGraph &graph, const af::AscNo
 Status NddmaTemplate::MergeLoadAndTranspose(const af::AscNodePtr &load_node, af::AscGraph &new_case) {
   auto load_out_anchor = load_node->GetOutDataAnchor(0);
   GE_CHECK_NOTNULL(load_out_anchor);
-  auto peer_in_anchor = load_out_anchor->GetPeerInDataAnchors().at(0);
+  const auto &peer_in_anchors = load_out_anchor->GetPeerInDataAnchors();
+  GE_ASSERT_TRUE(!peer_in_anchors.empty(), "Input or output connection is abnormal, please check the graph structure.");
+  auto peer_in_anchor = peer_in_anchors.at(0);
   GE_CHECK_NOTNULL(peer_in_anchor);
   const auto &out_node = std::dynamic_pointer_cast<af::AscNode>(peer_in_anchor->GetOwnerNode());
   GE_CHECK_NOTNULL(out_node);
@@ -382,7 +384,9 @@ Status NddmaTemplate::TransposeToNddmaNode(const af::AscNodePtr &transpose_node,
     }
   }
   // 删除旧的transpose节点
-  auto in_node = std::dynamic_pointer_cast<af::AscNode>(transpose_node->GetInDataNodes().at(0));
+  const auto &in_data_nodes = transpose_node->GetInDataNodes();
+  GE_ASSERT_TRUE(!in_data_nodes.empty(), "Input or output connection is abnormal, please check the graph structure.");
+  auto in_node = std::dynamic_pointer_cast<af::AscNode>(in_data_nodes.at(0));
   if (in_node != nullptr) {
     GE_ASSERT_SUCCESS(ScheduleUtils::RemoveNode(new_case, transpose_node, in_node->GetOutDataAnchor(0)));
   }
@@ -461,7 +465,10 @@ af::Status NddmaTemplate::Generate([[maybe_unused]] const af::AscGraph &origin_g
     }
     auto load_out_anchor = node->GetOutDataAnchor(0);
     GE_CHECK_NOTNULL(load_out_anchor);
-    auto peer_in_anchor = load_out_anchor->GetPeerInDataAnchors().at(0);
+    const auto &peer_in_anchors = load_out_anchor->GetPeerInDataAnchors();
+    GE_ASSERT_TRUE(!peer_in_anchors.empty(),
+                   "Input or output connection is abnormal, please check the graph structure.");
+    auto peer_in_anchor = peer_in_anchors.at(0);
     GE_CHECK_NOTNULL(peer_in_anchor);
     const auto &out_node = std::dynamic_pointer_cast<af::AscNode>(peer_in_anchor->GetOwnerNode());
     GE_CHECK_NOTNULL(out_node);
@@ -573,7 +580,9 @@ af::Status NddmaTemplate::SwapCastBrcAndGenNddma(const af::AscNodePtr &node_cast
   // 判断是否为load-cast-brc场景
   auto cast_out_anchor = node_cast->GetOutDataAnchor(0);
   GE_CHECK_NOTNULL(cast_out_anchor);
-  auto next_in_anchor = cast_out_anchor->GetPeerInDataAnchors().at(0);
+  const auto &next_in_anchors = cast_out_anchor->GetPeerInDataAnchors();
+  GE_ASSERT_TRUE(!next_in_anchors.empty(), "Input or output connection is abnormal, please check the graph structure.");
+  auto next_in_anchor = next_in_anchors.at(0);
   GE_CHECK_NOTNULL(next_in_anchor);
   const auto &next_node = std::dynamic_pointer_cast<af::AscNode>(next_in_anchor->GetOwnerNode());
   GE_CHECK_NOTNULL(next_node);
@@ -583,7 +592,9 @@ af::Status NddmaTemplate::SwapCastBrcAndGenNddma(const af::AscNodePtr &node_cast
   }
   auto load_out_anchor = node_load->GetOutDataAnchor(0);
   GE_CHECK_NOTNULL(load_out_anchor);
-  auto cast_in_anchor = load_out_anchor->GetPeerInDataAnchors().at(0);
+  const auto &cast_in_anchors = load_out_anchor->GetPeerInDataAnchors();
+  GE_ASSERT_TRUE(!cast_in_anchors.empty(), "Input or output connection is abnormal, please check the graph structure.");
+  auto cast_in_anchor = cast_in_anchors.at(0);
   GE_CHECK_NOTNULL(cast_in_anchor);
   auto brc_out_anchor = next_node->GetOutDataAnchor(0);
   GE_CHECK_NOTNULL(brc_out_anchor);
