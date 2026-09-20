@@ -172,11 +172,11 @@ def main():
         actual = run_model(model, clone_inputs(data))
         validate_outputs(actual, expected)
     except AssertionError as err:
-        print("真值校验失败", file=sys.stderr)
+        print("Golden check failed", file=sys.stderr)
         print(err, file=sys.stderr)
         return 1
     except Exception as err:
-        print(f"测试运行失败: {err}", file=sys.stderr)
+        print(f"Test run failed: {err}", file=sys.stderr)
         import traceback
 
         traceback.print_exc()
@@ -184,8 +184,9 @@ def main():
 
     print_output_summary("eager", expected)
     print_output_summary("compiled", actual)
-    print("真值校验通过")
-    print("测试完成!")
+    print("Golden check passed")
+    print("Test completed!")
+    print("execute sample success")
     return 0
 
 

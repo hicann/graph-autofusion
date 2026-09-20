@@ -21,10 +21,9 @@ with torchair.scope.super_kernel("sk1"):
 - Atlas A3 训练系列产品/Atlas A3 推理系列产品
 - Atlas A2 训练系列产品/Atlas A2 推理系列产品
 
-请先参考[源码构建指南](../../../../docs/zh/build.md)完成环境准备，并按照官方发布的配套版本安装
-PyTorch 2.7.1 与 TorchNPU 2.7.1.post10（CANN 9.1.0 及以上、Python 3.9.x 及以上），
-版本配套与安装参见《[Ascend Extension for PyTorch 用户指南](https://www.hiascend.com/document/redirect/pytorchuserguide)》，
-再安装本样例的 [Python 依赖](../../requirements.txt)：
+请先参考[源码构建指南](../../../../docs/zh/build.md)完成环境准备，并按照官方发布的Pytorch与TorchNPU版本进行配套安装，
+参见《[Ascend Extension for PyTorch 用户指南](https://www.hiascend.com/document/redirect/pytorchuserguide)》，
+再安装对应的 Python 依赖：
 
 ```bash
 pip install -r super_kernel/examples/requirements.txt

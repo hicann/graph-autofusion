@@ -11,16 +11,16 @@
 # ----------------------------------------------------------------------------------------------------------
 
 """
-双流 + Super Kernel + NPU Event 手动控制边样例
+Dual-stream + SuperKernel + NPU event manual control-edge sample
 
-对比 super_kernel_optimize 开启(SK) 与关闭(Non-SK) 场景下的输出一致性，
-对比 dq_res_2 结果。
+Compares output consistency with super_kernel_optimize enabled (SK) and disabled (Non-SK),
+by comparing the dq_res_2 results.
 
-特性:
-1. Stream 1 中间算子完成后记录 NPU event
-2. Stream 2 等待 NPU event(建立控制边，而非数据依赖)
-3. 纯 aclnn 算子调用
-运行方式: 通过仓库根目录 build.sh 运行
+Features:
+1. Stream 1 records an NPU event after its intermediate operators finish
+2. Stream 2 waits for the NPU event (a control edge instead of a data dependency)
+3. Pure aclnn operator calls
+Usage: run it through build.sh in the repository root
 """
 
 import torch
@@ -33,13 +33,13 @@ import sys
 # ============================================================================
 class DualStreamModel(nn.Module):
     """
-    双流模型: 使用 NPU event 手动控制边
+    Dual-stream model: manual control edge with NPU events
 
-    Stream 1 (主流):
+    Stream 1 (primary):
         quant_matmul → grouped_matmul → [record event]
         → swiglu_quant → dynamic_quant
 
-    Stream 2 (从流):
+    Stream 2 (secondary):
         [wait event] → quant_matmul → add_rms_norm
         → dynamic_quant → [record event]
     """
@@ -70,7 +70,7 @@ class DualStreamModel(nn.Module):
         event1,
         event2,
     ):
-        # ========== Stream 1 (主流) ==========
+        # ========== Stream 1 (primary) ==========
         event1.record()
         with torch.npu.stream(stream1):
             # torch.npu.super_kernel_scope_begin("sk0")
@@ -94,7 +94,7 @@ class DualStreamModel(nn.Module):
                 group_type=-1,
                 output_dtype=torch.bfloat16,
             )
-            # 通知 stream2: stream1 中间算子已完成
+            # Notify stream2: the intermediate operators of stream1 have finished
             event1.record()
 
             swiglu_res_1 = torch_npu.npu_dequant_swiglu_quant(
@@ -107,7 +107,7 @@ class DualStreamModel(nn.Module):
             )
             # torch.npu.super_kernel_scope_end("sk0")
 
-        # ========== Stream 2 (从流) - 等待 stream1 事件 ==========
+        # ========== Stream 2 (secondary) - waits for the stream1 event ==========
         with torch.npu.stream(stream2):
             # torch.npu.super_kernel_scope_begin("sk1")
             event1.wait(stream2)
@@ -135,16 +135,16 @@ class DualStreamModel(nn.Module):
 
 
 # ============================================================================
-# 数据准备
+# Data preparation
 # ============================================================================
 
 
 def prepare_data(seed=1236):
-    """准备双流模型所需的所有输入数据"""
+    """Prepare all input data required by the dual-stream model."""
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    # Stream 1 参数
+    # Stream 1 parameters
     m1, k1, n1 = 864, 7168, 4096
     x1_1 = torch.randint(-10, 10, (m1, k1), dtype=torch.int8)
     x2_1 = (
@@ -160,7 +160,7 @@ def prepare_data(seed=1236):
     gmm1_weight_1 = [torch.rand(n1, 200, dtype=torch.bfloat16).npu()]
     gmm1_bias_1 = [torch.rand(200, dtype=torch.float32).npu()]
 
-    # Stream 2 参数
+    # Stream 2 parameters
     m2, k2, n2 = 864, 7168, 4096
     x1_2 = torch.randint(-10, 10, (m2, k2), dtype=torch.int8)
     x2_2 = (
@@ -209,12 +209,12 @@ def prepare_data(seed=1236):
 
 
 # ============================================================================
-# 编译 & 运行
+# Compile and run
 # ============================================================================
 
 
 def build_compile_options(enable_sk=True):
-    """构建 npugraph_ex 编译选项, enable_sk 控制 super kernel 开关"""
+    """Build npugraph_ex compile options; enable_sk toggles SuperKernel."""
     options = {}
     if enable_sk:
         options.update(
@@ -228,10 +228,10 @@ def build_compile_options(enable_sk=True):
 
 
 def run_model(enable_sk, data):
-    """运行模型并返回 dq_res_2, 异常时打印错误并退出"""
+    """Run the model and return dq_res_2; print the error and exit on exception."""
     tag = "SK" if enable_sk else "Non-SK"
     print(f"\n{'=' * 60}")
-    print(f"  运行 {tag} 版本 (super_kernel_optimize={enable_sk})")
+    print(f"  Running the {tag} version (super_kernel_optimize={enable_sk})")
     print(f"{'=' * 60}")
 
     try:
@@ -244,28 +244,28 @@ def run_model(enable_sk, data):
         _, dq_res_2, _ = model(**data)
         torch_npu.npu.synchronize()
     except Exception as e:
-        print(f"[ERROR] {tag} 版本运行失败: {e}", file=sys.stderr)
+        print(f"[ERROR] Failed to run the {tag} version: {e}", file=sys.stderr)
         import traceback
 
         traceback.print_exc()
         sys.exit(2)
-    print(f"{tag} 版本运行完成")
+    print(f"{tag} version finished")
     return dq_res_2
 
 
 # ============================================================================
-# 精度对比
+# Accuracy comparison
 # ============================================================================
 
 
 def compare_results(dq_res_2_non_sk, dq_res_2_sk, atol=1e-3, rtol=1e-3):
-    """对比 Non-SK 与 SK 版本的 dq_res_2 输出"""
+    """Compare the dq_res_2 outputs of the Non-SK and SK versions."""
     print(f"\n{'=' * 60}")
-    print("  精度对比 (dq_res_2)")
+    print("  Accuracy comparison (dq_res_2)")
     print(f"{'=' * 60}")
 
     if len(dq_res_2_non_sk) != len(dq_res_2_sk):
-        print(f"  输出数量不一致: Non-SK={len(dq_res_2_non_sk)}, SK={len(dq_res_2_sk)}")
+        print(f"  Output count mismatch: Non-SK={len(dq_res_2_non_sk)}, SK={len(dq_res_2_sk)}")
         return False
 
     all_outputs_close = True
@@ -278,8 +278,8 @@ def compare_results(dq_res_2_non_sk, dq_res_2_sk, atol=1e-3, rtol=1e-3):
         output_close = np.allclose(non_sk_np, sk_np, atol=atol, rtol=rtol)
         all_outputs_close = all_outputs_close and output_close
 
-        print(f"  output[{output_idx}] 最大绝对误差: {max_diff:.6e}")
-        print(f"  output[{output_idx}] 平均绝对误差: {mean_diff:.6e}")
+        print(f"  output[{output_idx}] max absolute difference: {max_diff:.6e}")
+        print(f"  output[{output_idx}] mean absolute difference: {mean_diff:.6e}")
         print(
             f"  output[{output_idx}] allclose(atol={atol}, rtol={rtol}): "
             f"{'PASS' if output_close else 'FAIL'}"
@@ -289,47 +289,48 @@ def compare_results(dq_res_2_non_sk, dq_res_2_sk, atol=1e-3, rtol=1e-3):
 
 
 # ============================================================================
-# 主入口
+# Main entry
 # ============================================================================
 
 if __name__ == "__main__":
     torch_npu.npu.set_op_timeout_ms(10000)
 
     print("=" * 60)
-    print("  双流 + Super Kernel + NPU Event 对比样例")
+    print("  Dual-stream + SuperKernel + NPU event comparison sample")
     print("=" * 60)
     print("Stream 1: quant_matmul → grouped_matmul → [record]")
     print("          → swiglu_quant → dynamic_quant")
     print("Stream 2: [wait] → quant_matmul → add_rms_norm")
     print("          → dynamic_quant → [record]")
-    print("对比项:   dq_res_2 (SK vs Non-SK)")
+    print("Compared item: dq_res_2 (SK vs Non-SK)")
     print("=" * 60)
 
     try:
-        # 准备数据
+        # Prepare data
         data = prepare_data()
 
-        # 运行 SK 版本
+        # Run the SK version
         dq_res_2_sk = run_model(enable_sk=True, data=data)
 
-        # 准备数据
+        # Prepare data
         data = prepare_data()
 
-        # 运行 Non-SK 基线版本
+        # Run the Non-SK baseline version
         dq_res_2_non_sk = run_model(enable_sk=False, data=data)
 
-        # 精度对比
+        # Accuracy comparison
         passed = compare_results(dq_res_2_non_sk, dq_res_2_sk)
     except Exception as e:
-        print(f"\n[ERROR] 测试异常退出: {e}", file=sys.stderr)
+        print(f"\n[ERROR] Sample exited with an exception: {e}", file=sys.stderr)
         import traceback
 
         traceback.print_exc()
         sys.exit(2)
 
     if passed:
-        print("\n测试通过: SK 与 Non-SK 输出一致!")
+        print("\nTest passed: SK and Non-SK outputs match!")
+        print("execute sample success")
         sys.exit(0)
 
-    print("\n测试失败: SK 与 Non-SK 输出存在差异!")
+    print("\nTest failed: SK and Non-SK outputs differ!")
     sys.exit(1)

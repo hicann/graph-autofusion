@@ -91,7 +91,7 @@ def run_sk_custom_add(x_cpu, y_cpu):
         log(f"{tag} end")
         return output
     except Exception as err:
-        log(f"执行 CustomAddModel ({tag}) 失败: {err}")
+        log(f"Failed to run CustomAddModel ({tag}): {err}")
         if os.getenv("ASCENDC_PRINT_PY_STACK", "1") == "1":
             traceback.print_exc()
         sys.exit(2)
@@ -111,10 +111,11 @@ def main():
 
     output_sk = run_sk_custom_add(x_cpu, y_cpu)
     if not torch.allclose(output_sk, golden, rtol=1e-3, atol=1e-3):
-        log("错误：with sk 输出与 golden 不一致")
+        log("Error: the with sk output differs from the golden result")
         sys.exit(1)
 
-    log("测试通过：with sk 输出与 golden 一致")
+    log("Test passed: the with sk output matches the golden result")
+    log("execute sample success")
     return 0
 
 
@@ -124,7 +125,7 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except Exception as err:
-        log(f"执行 custom add sk 样例失败: {err}")
+        log(f"Failed to run the custom add sk sample: {err}")
         if os.getenv("ASCENDC_PRINT_PY_STACK", "1") == "1":
             traceback.print_exc()
         sys.exit(2)

@@ -31,10 +31,9 @@ examples/
 - Atlas A3 训练系列产品/Atlas A3 推理系列产品
 - Atlas A2 训练系列产品/Atlas A2 推理系列产品
 
-请先参考[源码构建指南](../../docs/zh/build.md)完成环境准备，并按照官方发布的配套版本安装
-PyTorch 2.7.1 与 TorchNPU 2.7.1.post10（CANN 9.1.0 及以上、Python 3.9.x 及以上），
-版本配套与安装参见《[Ascend Extension for PyTorch 用户指南](https://www.hiascend.com/document/redirect/pytorchuserguide)》，
-再安装本样例的 Python 依赖：
+请先参考[源码构建指南](../../docs/zh/build.md)完成环境准备，并按照官方发布的Pytorch与TorchNPU版本进行配套安装，
+参见《[Ascend Extension for PyTorch 用户指南](https://www.hiascend.com/document/redirect/pytorchuserguide)》，
+再安装对应的 Python 依赖：
 
 ```bash
 pip install -r super_kernel/examples/requirements.txt
@@ -49,10 +48,16 @@ pip install -r super_kernel/examples/requirements.txt
 | `dav-2201` | Atlas A2 训练/推理系列产品、Atlas A3 训练/推理系列产品 |
 | `dav-3510` | Ascend 950 系列产品（如 Ascend 950PR、Ascend 950DT） |
 
-在仓库根目录执行：
+Atlas A2 或 Atlas A3 系列产品，在仓库根目录执行：
 
 ```bash
 bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
+```
+
+Ascend 950 系列产品，在仓库根目录执行：
+
+```bash
+bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
 ```
 
 统一入口会根据 `--npu-arch` 自动运行当前产品型号支持的样例。各样例的支持范围和运行方法详见样例目录下的 `README.md`。

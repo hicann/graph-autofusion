@@ -23,20 +23,20 @@ from third_party.acl.acl_wrapper import acl
 
 def print_float_array_ptr(float_array_ptr, count=20):
     """
-    打印float数组指针指向的数据
+    Print the data pointed to by a float array pointer.
 
     Args:
-        float_array_ptr: ctypes float数组指针
-        count: 要打印的元素数量，如果为None则打印全部
+        float_array_ptr: ctypes float array pointer
+        count: number of elements to print; print all of them if None
     """
     if float_array_ptr is None:
         print("The pointer is None")
         return
 
-    # 获取数组内容
+    # Get the array contents
     array_content = float_array_ptr.contents
 
-    # 确定要打印的元素数量
+    # Determine how many elements to print
     if count is None:
         count = len(array_content)
     else:

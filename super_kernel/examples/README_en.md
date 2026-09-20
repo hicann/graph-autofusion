@@ -31,9 +31,8 @@ The samples support the following product models:
 - Atlas A3 training series products/Atlas A3 inference series products
 - Atlas A2 training series products/Atlas A2 inference series products
 
-Follow the [source build guide](../../docs/en/build.md), then install PyTorch 2.7.1 and
-TorchNPU 2.7.1.post10 (CANN 9.1.0 or later, Python 3.9.x or later) as officially released
-matching versions. For version compatibility and installation, see the
+Follow the [source build guide](../../docs/en/build.md) and install the officially released matching
+PyTorch and TorchNPU versions. See the
 [Ascend Extension for PyTorch user guide](https://www.hiascend.com/document/redirect/pytorchuserguide).
 Finally, install the Python dependencies of these samples:
 
@@ -50,10 +49,16 @@ pip install -r super_kernel/examples/requirements.txt
 | `dav-2201` | Atlas A2 training/inference series products and Atlas A3 training/inference series products |
 | `dav-3510` | Ascend 950 series products, such as Ascend 950PR and Ascend 950DT |
 
-Run from the repository root:
+Run the following command from the repository root for Atlas A2 or Atlas A3 products:
 
 ```bash
 bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
+```
+
+For Ascend 950 series products:
+
+```bash
+bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
 ```
 
 The entry script automatically runs the samples supported by the product model specified by `--npu-arch`. The support scope and running instructions vary between samples; see the `README_en.md` in each sample directory for details.

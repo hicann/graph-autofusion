@@ -31,29 +31,29 @@ ScopeScope:
 """
 
 if __name__ == '__main__':
-    # 1. 初始化 ACL
+    # 1. Initialize ACL
     acl.acl_init()
     acl.aclrt_set_device(DEVICE_ID)
 
     stream = ctypes.c_void_p()
     acl.aclrt_create_stream(ctypes.byref(stream))
 
-    # 编译
-    # 2.0 编译subkernel
+    # Compile
+    # 2.0 Compile the sub-kernel
     with SkCompileContext(need_clean=True) as ctx:
         sub_kernels = compile_subkernel(ctx)
-        # 2.1 设置输入输出内存复用关系
+        # 2.1 Set the input/output memory reuse relation
         assert_true(len(sub_kernels) == 2, "sub_kernels should contain 2 subkernels")
         sub_kernels[0].set_input(["arg_in1", "arg_in2"])
         sub_kernels[0].set_output(["out1"])
         sub_kernels[1].set_input(["out1"])
         sub_kernels[1].set_output(["out2"])
-        # 2.2 编译superkernel
+        # 2.2 Compile the SuperKernel
         super_kernel_result = compile_superkernel(ctx, sub_kernels)
-        # 2.3 设置superkernel的输出为subkernel[1]的输出
+        # 2.3 Set the SuperKernel output to the output of subkernel[1]
         super_kernel_result.output = sub_kernels[1].output
 
-    # 3. 准备输入数据, 申请子kernel的输入输出内存
+    # 3. Prepare the input data and allocate the input/output memory of the sub-kernels
     size = 1024 * 4
     host_ptr = ctypes.c_void_p()
     acl.aclrt_malloc_host(ctypes.byref(host_ptr), size)
@@ -62,7 +62,7 @@ if __name__ == '__main__':
     for sub_kernel in sub_kernels:
         for inp in sub_kernel.input:
             addr = allocat_memory_with_reuse(size, inp)
-            if inp.startswith("arg_"): # 输入参数需要从host拷贝到device
+            if inp.startswith("arg_"):  # Input parameters must be copied from host to device
                 acl.aclrt_memcpy_async(addr, size, host_ptr, size, acl.aclrt_memcpy_kind.ACL_MEMCPY_HOST_TO_DEVICE, stream)
             sub_kernel.input_addr.append(addr)
 
@@ -76,13 +76,13 @@ if __name__ == '__main__':
                                      acl.aclrt_mem_malloc_policy.ACL_MEM_MALLOC_HUGE_FIRST)
             sub_kernel.workspaces_addr.append(dev_ptr.value)
 
-    # 4. 算子加载
+    # 4. Load the operator
     magic_value = super_kernel_result.magic_number()
     dev_op_binary = acl.aclrt_dev_binary(magic_value, 1, super_kernel_result.bin_data, super_kernel_result.bin_size)
 
-    # 创建句柄指针（二级指针）
-    hdl = ctypes.c_void_p()  # 一级指针
-    hdl_ptr = ctypes.pointer(hdl)  # 二级指针
+    # Create the handle pointer (double pointer)
+    hdl = ctypes.c_void_p()  # First-level pointer
+    hdl_ptr = ctypes.pointer(hdl)  # Second-level pointer
     acl.aclrt_dev_binary_register(ctypes.byref(dev_op_binary), hdl_ptr)
 
     stub_func = super_kernel_result.bin_file_name()
@@ -100,18 +100,18 @@ if __name__ == '__main__':
     acl.aclrt_function_register(hdl, stub_func_buf, stub_name_ptr, kernel_info_ext_ptr,
                                 acl.aclrt_func_mode_type.FUNC_MODE_NORMAL)
 
-    stub_func = ctypes.c_void_p()  # 一级指针
-    stub_func_ptr = ctypes.pointer(stub_func)  # 二级指针
+    stub_func = ctypes.c_void_p()  # First-level pointer
+    stub_func_ptr = ctypes.pointer(stub_func)  # Second-level pointer
     acl.aclrt_get_function_by_name(stub_name_ptr, stub_func_ptr)
 
-    # 5. 算子Launch下发
+    # 5. Launch the operator
     block_dim = super_kernel_result.block_dim()
 
-    c2c_ctrl_addr = ctypes.c_uint64()  # 对应 uint64_t*
-    c2c_ctrl_len = ctypes.c_uint32()  # 对应 uint32_t*
+    c2c_ctrl_addr = ctypes.c_uint64()  # Maps to uint64_t*
+    c2c_ctrl_len = ctypes.c_uint32()  # Maps to uint32_t*
     acl.aclrt_get_c2c_ctrl_addr(ctypes.byref(c2c_ctrl_addr), ctypes.byref(c2c_ctrl_len))
 
-    # ffts占位
+    # FFTS placeholder
     void_args = ctypes.c_void_p(c2c_ctrl_addr.value)
     args_list = [void_args]
     for sub_kernel in sub_kernels:
@@ -125,13 +125,13 @@ if __name__ == '__main__':
 
     acl.aclrt_kernel_launch(stub_func, block_dim, args, ctypes.sizeof(args_array), ctypes.byref(sm_desc), stream)
 
-    # 6. 算子结果获取
+    # 6. Get the operator result
     acl.aclrt_synchronize_stream(stream)
 
     host_out_ptr = ctypes.c_void_p()
     acl.aclrt_malloc_host(ctypes.byref(host_out_ptr), size)
 
-    # 获取superkernel的输出指针
+    # Get the SuperKernel output pointer
     sk_output = super_kernel_result.output
     assert_true(len(sk_output) == 1, f"superkernel should have 1 output, but got {len(sk_output)}")
     device_ptr_out = allocat_memory_with_reuse(size, sk_output[0])
@@ -140,7 +140,7 @@ if __name__ == '__main__':
 
     print_float_array_ptr(ctypes.cast(host_out_ptr, ctypes.POINTER(ctypes.c_float * (size // 4))))
 
-    # 7. 释放资源
+    # 7. Release resources
     free_all_memorys()
     acl.aclrt_free(host_out_ptr)
     acl.aclrt_free(host_ptr)

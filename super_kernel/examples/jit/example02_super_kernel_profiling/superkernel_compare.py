@@ -219,11 +219,11 @@ def superkernel_compare():
     config = CompilerConfig()
     npu_backend = tng.get_npu_backend(compiler_config=config)
 
-    #在npu上执行有superkernel配置的模型
+    # Run the model configured with SuperKernel on the NPU
     no_sk_model = Network(False).npu()
     sk_model = Network(True).npu()
 
-    #使能profiling
+    # Enable profiling
     experimental_config = torch_npu.profiler._ExperimentalConfig(
         export_type=[
             torch_npu.profiler.ExportType.Text
@@ -236,7 +236,7 @@ def superkernel_compare():
         data_simplification=False
     )
 
-    #执行未配置super_kernel的模型并通过profiling采第二次执行的数据
+    # Run the model without SuperKernel and collect the data of the second execution through profiling
     with torch_npu.profiler.profile(
         activities=[
             torch_npu.profiler.ProfilerActivity.CPU,
@@ -257,7 +257,7 @@ def superkernel_compare():
                         gmm2_x, data3, dsq1_activate_scale, dsq1_group_index, gmm3_weight)
             prof.step()
 
-    #执行配置super_kernel的模型并通过profiling采第二次执行的数据
+    # Run the model with SuperKernel and collect the data of the second execution through profiling
     with torch_npu.profiler.profile(
         activities=[
             torch_npu.profiler.ProfilerActivity.CPU,

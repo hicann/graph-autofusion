@@ -19,11 +19,10 @@ This sample supports the following product models:
 - Atlas A3 training series products/Atlas A3 inference series products
 - Atlas A2 training series products/Atlas A2 inference series products
 
-Follow the [source build guide](../../../../docs/en/build.md), then install PyTorch 2.7.1 and
-TorchNPU 2.7.1.post10 (CANN 9.1.0 or later, Python 3.9.x or later) as officially released matching
-versions. For version compatibility and installation, see the
+Follow the [source build guide](../../../../docs/en/build.md) and install the officially released matching
+PyTorch and TorchNPU versions. See the
 [Ascend Extension for PyTorch user guide](https://www.hiascend.com/document/redirect/pytorchuserguide).
-Finally, install the sample's [Python dependencies](../../requirements.txt):
+Finally, install the sample's Python dependencies:
 
 ```bash
 pip install -r super_kernel/examples/requirements.txt

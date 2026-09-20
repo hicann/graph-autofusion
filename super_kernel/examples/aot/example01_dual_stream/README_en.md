@@ -10,11 +10,10 @@ This sample supports the following product models:
 - Atlas A3 training series products/Atlas A3 inference series products
 - Atlas A2 training series products/Atlas A2 inference series products
 
-Follow the [source build guide](../../../../docs/en/build.md), then install PyTorch 2.7.1 and
-TorchNPU 2.7.1.post10 (CANN 9.1.0 or later, Python 3.9.x or later) as officially released matching
-versions. For version compatibility and installation, see the
+Follow the [source build guide](../../../../docs/en/build.md) and install the officially released matching
+PyTorch and TorchNPU versions. See the
 [Ascend Extension for PyTorch user guide](https://www.hiascend.com/document/redirect/pytorchuserguide).
-Finally, install the sample's [Python dependencies](../../requirements.txt):
+Finally, install the sample's Python dependencies:
 
 ```bash
 pip install -r super_kernel/examples/requirements.txt
@@ -47,15 +46,8 @@ For options, see the [TorchAir SuperKernel guide](https://gitcode.com/Ascend/tor
 
 ## Expected Result
 
-The sample runs the SK version with SuperKernel enabled and the Non-SK version without SuperKernel, then compares their `dq_res_2` outputs using `atol=1e-3` and `rtol=1e-3`. On success, every output reports `PASS` for the `allclose` check, and the log includes:
+On success, the sample prints the following key log:
 
 ```text
-SK 版本运行完成
-Non-SK 版本运行完成
-...
-output[<index>] allclose(atol=0.001, rtol=0.001): PASS
-...
-测试通过: SK 与 Non-SK 输出一致!
+execute sample success
 ```
-
-The maximum and mean absolute differences may vary with the hardware and software environment. The `run.sh` script also checks that a static Kernel `.run` package is generated under `static_kernel_compile_outputs`. The command succeeds only when both the accuracy comparison and artifact check pass.
