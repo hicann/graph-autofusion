@@ -46,19 +46,19 @@ pip install -r super_kernel/examples/requirements.txt
 
 | `--npu-arch` | Corresponding Products |
 | --- | --- |
-| `dav-2201` | Atlas A2 training/inference series products and Atlas A3 training/inference series products |
 | `dav-3510` | Ascend 950 series products, such as Ascend 950PR and Ascend 950DT |
+| `dav-2201` | Atlas A3 training/inference series products and Atlas A2 training/inference series products |
 
-Run the following command from the repository root for Atlas A2 or Atlas A3 products:
-
-```bash
-bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
-```
-
-For Ascend 950 series products:
+Run the following command from the repository root for Ascend 950 series products:
 
 ```bash
 bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
+```
+
+For Atlas A3 or Atlas A2 products:
+
+```bash
+bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
 ```
 
 The entry script automatically runs the samples supported by the product model specified by `--npu-arch`. The support scope and running instructions vary between samples; see the `README_en.md` in each sample directory for details.

@@ -26,19 +26,19 @@ pip install -r super_kernel/examples/requirements.txt
 
 | `--npu-arch` 取值 | 对应产品 |
 | --- | --- |
-| `dav-2201` | Atlas A2 训练/推理系列产品、Atlas A3 训练/推理系列产品 |
 | `dav-3510` | Ascend 950 系列产品（如 Ascend 950PR、Ascend 950DT） |
+| `dav-2201` | Atlas A3 训练/推理系列产品、Atlas A2 训练/推理系列产品 |
 
-在样例目录下，Atlas A2 或 Atlas A3 系列产品执行：
-
-```bash
-bash run.sh --npu-arch=dav-2201
-```
-
-Ascend 950 系列产品执行：
+在样例目录下，Ascend 950 系列产品执行：
 
 ```bash
 bash run.sh --npu-arch=dav-3510
+```
+
+Atlas A3 或 Atlas A2 系列产品执行：
+
+```bash
+bash run.sh --npu-arch=dav-2201
 ```
 
 说明：样例会将自定义算子扩展临时安装到样例目录，退出时自动清理。

@@ -25,19 +25,19 @@ pip install -r super_kernel/examples/requirements.txt
 
 | `--npu-arch` | Corresponding Products |
 | --- | --- |
-| `dav-2201` | Atlas A2 training/inference series products and Atlas A3 training/inference series products |
 | `dav-3510` | Ascend 950 series products, such as Ascend 950PR and Ascend 950DT |
+| `dav-2201` | Atlas A3 training/inference series products and Atlas A2 training/inference series products |
 
-In the sample directory, run the following command for Atlas A2 or Atlas A3 products:
-
-```bash
-bash run.sh --npu-arch=dav-2201
-```
-
-For Ascend 950 series products:
+In the sample directory, run the following command for Ascend 950 series products:
 
 ```bash
 bash run.sh --npu-arch=dav-3510
+```
+
+For Atlas A3 or Atlas A2 products:
+
+```bash
+bash run.sh --npu-arch=dav-2201
 ```
 
 Note: The sample temporarily installs the custom operator extension under the sample directory and cleans it up on exit.

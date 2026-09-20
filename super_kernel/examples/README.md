@@ -45,19 +45,19 @@ pip install -r super_kernel/examples/requirements.txt
 
 | `--npu-arch` 取值 | 对应产品 |
 | --- | --- |
-| `dav-2201` | Atlas A2 训练/推理系列产品、Atlas A3 训练/推理系列产品 |
 | `dav-3510` | Ascend 950 系列产品（如 Ascend 950PR、Ascend 950DT） |
-
-Atlas A2 或 Atlas A3 系列产品，在仓库根目录执行：
-
-```bash
-bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
-```
+| `dav-2201` | Atlas A3 训练/推理系列产品、Atlas A2 训练/推理系列产品 |
 
 Ascend 950 系列产品，在仓库根目录执行：
 
 ```bash
 bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
+```
+
+Atlas A3 或 Atlas A2 系列产品，在仓库根目录执行：
+
+```bash
+bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
 ```
 
 统一入口会根据 `--npu-arch` 自动运行当前产品型号支持的样例。各样例的支持范围和运行方法详见样例目录下的 `README.md`。
