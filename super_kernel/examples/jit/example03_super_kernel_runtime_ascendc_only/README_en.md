@@ -36,7 +36,7 @@ graph TB
 
 This use case demonstrates super_kernel basic functionality through compile-time dependency on ascendc and runtime dependency. Main steps:
 - 1. Initialization
-- 2. Compile sub_kernel, compile super_kernel, set sub-kernel topology relationship in super kernel for memory allocation
+- 2. Compile sub_kernel, compile SuperKernel, set sub-kernel topology relationship in SuperKernel for memory allocation
 - 3. Memory allocation, input data construction
 - 4. Kernel loading
 - 5. Launch execution, including args layout and so on

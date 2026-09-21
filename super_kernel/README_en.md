@@ -19,7 +19,7 @@ The original design intent of SuperKernel is to fuse multiple sub-operators into
    After SuperKernel fuses all operators, its binary size is large. When the system loads the operator, it typically only prefetches entry instructions, causing a large number of instructions inside SuperKernel not to be preloaded into the instruction cache (ICache), resulting in high ICache Miss. Therefore, we introduce the ICache Preload mechanism: preload the code segments of subsequent sub-operators before the current sub-operator starts execution, effectively reducing ICache Miss when subsequent operators execute.
 
    <div align="center">
-      <img src="../docs/en/super_kernel/figures/ICachePreload_ optimization.svg" alt="Editor" width="600">
+      <img src="../docs/en/super_kernel/figures/ICachePreload_optimization.svg" alt="Editor" width="600">
    </div>
 
 2. **Early-Start Optimization**

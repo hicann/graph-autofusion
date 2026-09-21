@@ -18,7 +18,7 @@
    SuperKernel 融合全部算子后，其二进制体积较大。系统在加载算子时通常仅预取入口处指令，导致 SuperKernel 内部大量指令未被预加载至指令缓存（ICache），从而引发较高的 ICache Miss。为此，我们引入 ICache Preload 机制：在当前子算子开始执行前，预加载其后续子算子的代码段，从而有效减少后续算子执行时的 ICache Miss。
 
    <div align="center">
-      <img src="../docs/zh/super_kernel/figures/ICachePreload_ optimization.svg" alt="Editor" width="600">
+      <img src="../docs/zh/super_kernel/figures/ICachePreload_optimization.svg" alt="Editor" width="600">
    </div>
 
 2. **Early-Start 优化**

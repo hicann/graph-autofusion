@@ -92,10 +92,10 @@ def compare_files(golden_path, codegen_path, encoding="utf-8"):
         codegen_lines = _drop_trailing_blank_lines(codegen_lines)
 
     except FileNotFoundError as e:
-        print(f"错误: 文件未找到 - {e.filename}", file=sys.stderr)
+        print(f"Error: file not found - {e.filename}", file=sys.stderr)
         return False
     except UnicodeDecodeError as e:
-        print(f"错误: 文件编码错误 - {e}", file=sys.stderr)
+        print(f"Error: file encoding error - {e}", file=sys.stderr)
         return False
 
     # 比较文件内容
@@ -106,7 +106,7 @@ def compare_files(golden_path, codegen_path, encoding="utf-8"):
     has_diff = any(line.startswith(("+", "-", "?")) for line in diff)
 
     if has_diff:
-        print(f"文件 {golden_path} 和 {codegen_path} 内容不同:")
+        print(f"File contents differ: {golden_path} and {codegen_path}")
         print("=" * 80)
 
         # 打印差异，使用颜色区分（如果终端支持）
@@ -126,7 +126,7 @@ def compare_files(golden_path, codegen_path, encoding="utf-8"):
 
         print("=" * 80)
     else:
-        print(f"文件 {golden_path} 和 {codegen_path} 内容相同")
+        print(f"File contents are identical: {golden_path} and {codegen_path}")
 
     return not has_diff
 
