@@ -254,13 +254,13 @@ void BroadcastScalar(const TPipe &tpipe, const std::vector<ascir::AxisId> &curre
        << in.ub_scalar_name << ", " << out.actual_size << int64_tmp_buf << ");" << std::endl;
   } else {
     if (in.position == af::Position::kPositionVecIn) {
-      std::string event_id = in.name + "_event_id";
+      std::string event_id = in.name + "_to_" + out.name + "_event_id";
       ss << "event_t " << event_id << " = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::MTE2_S));"
          << std::endl;
       ss << "SetFlag<HardEvent::MTE2_S>(" << event_id << ");" << std::endl;
       ss << "WaitFlag<HardEvent::MTE2_S>(" << event_id << ");" << std::endl;
     } else if (in.position == af::Position::kPositionVecCalc) {
-      std::string event_id = in.name + "_event_id";
+      std::string event_id = in.name + "_to_" + out.name + "_event_id";
       ss << "event_t " << event_id << " = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::V_S));"
          << std::endl;
       ss << "SetFlag<HardEvent::V_S>(" << event_id << ");" << std::endl;

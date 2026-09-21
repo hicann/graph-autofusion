@@ -150,7 +150,7 @@ std::vector<ge::Expression> GetVectorizedRepeats(const Tensor &tensor) {
 }
 
 std::vector<ge::Expression> GetOutputDims(const Tensor &tensor) {
-  return tensor.axis_size.empty() ? GetVectorizedRepeats(tensor) : tensor.axis_size;
+  return GetVectorizedRepeats(tensor);
 }
 
 codegen::ReducePattern GetCodegenReducePattern(const Tensor &output) {
