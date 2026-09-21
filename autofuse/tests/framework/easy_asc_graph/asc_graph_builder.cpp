@@ -121,6 +121,35 @@ AscGraphBuilder &AscGraphBuilder::ScalarData(const std::string &name, int64_t in
   impl_->nodes_[name] = node;
   return *this;
 }
+
+AscGraphBuilder &AscGraphBuilder::IndexExpr(const std::string &name, const std::string &expr, DataType dtype) {
+  ascir_op::IndexExpr index_expr_op(name.c_str(), impl_->graph_);
+  index_expr_op.ir_attr.SetExpr(Expression::Parse(expr.c_str()));
+  index_expr_op.y.dtype = dtype;
+  // 与真实前端一致：scalar-like 节点输出视图为空（不补 axis/repeats/strides），
+  // 区别于 Scalar/ScalarData 为测试便利自动补齐 repeats 的行为。
+  auto node = impl_->graph_.FindNode(name.c_str());
+  assert(node != nullptr);
+  impl_->nodes_[name] = node;
+  return *this;
+}
+
+AscGraphBuilder &AscGraphBuilder::Arange(const std::string &name, const std::vector<Expression> &shape,
+                                         const std::vector<Expression> &strides, int64_t base, int64_t step,
+                                         DataType dtype) {
+  ascir_op::Arange arange_op(name.c_str(), impl_->graph_);
+  arange_op.ir_attr.SetBase(Symbol(base));
+  arange_op.ir_attr.SetStep(Symbol(step));
+  arange_op.y.dtype = dtype;
+  arange_op.attr.sched.axis = impl_->axis_ids_;
+  *arange_op.y.axis = impl_->axis_ids_;
+  *arange_op.y.repeats = shape;
+  *arange_op.y.strides = strides;
+  auto node = impl_->graph_.FindNode(name.c_str());
+  assert(node != nullptr);
+  impl_->nodes_[name] = node;
+  return *this;
+}
 AscGraphBuilder &AscGraphBuilder::Output(const std::string &name, const std::string &input, int64_t index,
                                          DataType dtype) {
   ascir_op::Output output_op(name.c_str());

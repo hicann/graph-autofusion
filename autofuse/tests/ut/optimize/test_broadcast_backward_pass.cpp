@@ -237,6 +237,128 @@ TEST(BroadcastBackwardPass, SkipsScalarBroadcastSource) {
   EXPECT_TRUE(IsConnected(graph, "abs", "store"));
 }
 
+TEST(BroadcastBackwardPass, SkipsIndexExprBroadcastSource) {
+  // IndexExpr 是 scalar-like 生产者（输出视图为空）。浮点改写协议产出的
+  // IndexExpr -> Broadcast -> Cast 链曾触发 GetBroAxisesIndex 的轴数断言失败
+  // 并留下半改写图（测试环境 2026-09-14 plog）。期望：门控按 scalar 输入
+  // 支持性拒绝后移，图保持原状。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  auto graph = AscGraphBuilder("broadcast_backward_index_expr")
+                   .Loops({s0, s1})
+                   .IndexExpr("index_expr", "s0 + 2")
+                   .Broadcast("broadcast", "index_expr", {s0, s1})
+                   .Cast("cast", "broadcast", af::DT_FLOAT)
+                   .Store("store", "cast")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+  SetNodeDtype(graph, "store", af::DT_FLOAT);
+  // builder 的 Build() 会为空视图补 loop 形状（测试便利），而真实前端
+  // （pyautofuse）的 scalar-like 节点输出视图保持为空——缺陷触发条件。
+  const auto index_expr_node = FindNode(graph, "index_expr");
+  ASSERT_NE(index_expr_node, nullptr);
+  index_expr_node->outputs[0].attr.axis.clear();
+  index_expr_node->outputs[0].attr.repeats.clear();
+  index_expr_node->outputs[0].attr.strides.clear();
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  EXPECT_TRUE(IsConnected(graph, "index_expr", "broadcast"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast", "cast"));
+  EXPECT_TRUE(IsConnected(graph, "cast", "store"));
+  const auto broadcast_node = FindNode(graph, "broadcast");
+  ASSERT_NE(broadcast_node, nullptr);
+  EXPECT_EQ(broadcast_node->outputs[0].attr.dtype, af::DT_INT64);
+  EXPECT_TRUE(index_expr_node->outputs[0].attr.repeats.empty());
+}
+
+TEST(BroadcastBackwardPass, SkipsScalarDataBroadcastSource) {
+  // ScalarData 与 IndexExpr 同为 scalar-like 生产者（输出视图为空），门控
+  // 需同样覆盖；期望行为与 SkipsScalarBroadcastSource 一致。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  auto graph = AscGraphBuilder("broadcast_backward_scalar_data")
+                   .Loops({s0, s1})
+                   .ScalarData("scalar_data")
+                   .Broadcast("broadcast", "scalar_data", {s0, s1})
+                   .Cast("cast", "broadcast", af::DT_FLOAT)
+                   .Store("store", "cast")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+  SetNodeDtype(graph, "store", af::DT_FLOAT);
+  // 还原真实前端的 scalar-like 空视图形态（见 SkipsIndexExprBroadcastSource 注释）。
+  const auto scalar_data_node = FindNode(graph, "scalar_data");
+  ASSERT_NE(scalar_data_node, nullptr);
+  scalar_data_node->outputs[0].attr.axis.clear();
+  scalar_data_node->outputs[0].attr.repeats.clear();
+  scalar_data_node->outputs[0].attr.strides.clear();
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  EXPECT_TRUE(IsConnected(graph, "scalar_data", "broadcast"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast", "cast"));
+  EXPECT_TRUE(IsConnected(graph, "cast", "store"));
+}
+
+TEST(BroadcastBackwardPass, SkipsBroadcastWithMismatchedPreViewAxes) {
+  // 视图奇偶守卫独立兜底：非 scalar-like 生产者（Load）被手工置空输出视图后，
+  // 门控不适用，守卫必须在改写图边前整体拒绝，避免半改写状态。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  auto graph = AscGraphBuilder("broadcast_backward_mismatched_pre_view")
+                   .Loops({s0, s1})
+                   .Data("data", 0)
+                   .Load("load", "data", kCompactRepeats, kCompactStrides)
+                   .Broadcast("broadcast", "load", {s0, s1})
+                   .Cast("cast", "broadcast", af::DT_FLOAT16)
+                   .Store("store", "cast")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+  SetNodeDtype(graph, "store", af::DT_FLOAT16);
+  const auto load_node = FindNode(graph, "load");
+  ASSERT_NE(load_node, nullptr);
+  load_node->outputs[0].attr.repeats.clear();
+  load_node->outputs[0].attr.strides.clear();
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  EXPECT_TRUE(IsConnected(graph, "load", "broadcast"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast", "cast"));
+  EXPECT_TRUE(IsConnected(graph, "cast", "store"));
+}
+
+TEST(BroadcastBackwardPass, SkipsArangeBroadcastProducer) {
+  // Arange 生产者的广播后移尚未适配：退化轴视图（轴数一致但含 size=1/stride=0 轴）
+  // 在视图改写中丢失广播语义（triu/remainder_cast/degenerate_arange_add_3d 真机
+  // codegen 失败），partial backward 亦无法保持 tiling 融合性（multi_arange 真机
+  // tiling 失败）。门控应在 pass 入口对含 Arange 广播生产者的图整体跳过。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  auto graph = AscGraphBuilder("broadcast_backward_arange")
+                   .Loops({s0, s1})
+                   .Arange("arange", {af::sym::kSymbolOne, s1}, {af::sym::kSymbolZero, af::sym::kSymbolOne})
+                   .Broadcast("broadcast", "arange", {s0, s1})
+                   .Cast("cast", "broadcast", af::DT_FLOAT)
+                   .Store("store", "cast")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+  SetNodeDtype(graph, "store", af::DT_FLOAT);
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  EXPECT_TRUE(IsConnected(graph, "arange", "broadcast"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast", "cast"));
+  EXPECT_TRUE(IsConnected(graph, "cast", "store"));
+}
+
 TEST(BroadcastBackwardPass, MovesSupportedScalarBroadcastBranches) {
   // Not supported by the restored repository BRC implementation.
   GTEST_SKIP();

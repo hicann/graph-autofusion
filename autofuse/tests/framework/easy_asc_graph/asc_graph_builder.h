@@ -67,6 +67,14 @@ class AscGraphBuilder {
   AscGraphBuilder &Scalar(const std::string &name, const std::string &value, DataType dtype = af::DT_FLOAT);
 
   AscGraphBuilder &ScalarData(const std::string &name, int64_t index = 0, DataType dtype = af::DT_FLOAT);
+
+  // IndexExpr 保持真实前端形态：scalar-like 节点输出视图为空（不补 axis/repeats/strides）。
+  AscGraphBuilder &IndexExpr(const std::string &name, const std::string &expr, DataType dtype = af::DT_INT64);
+
+  // Arange 输出视图由调用方显式给定（支持退化轴视图，如 {1, s1}/{0, 1} 的前缀扩维形态）。
+  AscGraphBuilder &Arange(const std::string &name, const std::vector<Expression> &shape,
+                          const std::vector<Expression> &strides, int64_t base = 0, int64_t step = 1,
+                          DataType dtype = af::DT_INT64);
   AscGraphBuilder &Output(const std::string &name, const std::string &input, int64_t index = 0,
                           DataType dtype = af::DT_FLOAT);
 
