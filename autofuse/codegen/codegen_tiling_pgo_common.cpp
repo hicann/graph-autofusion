@@ -578,14 +578,17 @@ void TilingLib::GenPgoWrapperKernelLaunch(std::stringstream &ss) const {
   ss << "  auto ret_async = aclrtSynchronizeStream(g_stream);" << std::endl;
 }
 
-void TilingLib::GenPgoWrapperInit(std::stringstream &ss, bool direct_link) const {
+void TilingLib::GenPgoWrapperInit(const ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss,
+                                  bool direct_link) const {
   ss << "typedef uint64_t (*GetTilingKeyCountType)(void);" << std::endl;
   ss << "GetTilingKeyCountType get_tiling_key_count_fn = "
      << (direct_link ? "nullptr;" : "reinterpret_cast<GetTilingKeyCountType>(GetFunc(\"GetTilingKeyCount\"));")
      << std::endl;
   ss << "typedef int64_t (*FindBestTilingKeyType)(AutofuseTilingData &t);" << std::endl;
+  const bool should_load_find_best_tiling_key = !direct_link && CanUseTilingKey(fused_schedule_result);
   ss << "FindBestTilingKeyType find_best_tiling_key_fn = "
-     << (direct_link ? "nullptr;" : "reinterpret_cast<FindBestTilingKeyType>(GetFunc(\"FindBestTilingKey\"));")
+     << (should_load_find_best_tiling_key ? "reinterpret_cast<FindBestTilingKeyType>(GetFunc(\"FindBestTilingKey\"));"
+                                          : "nullptr;")
      << std::endl;
   if (direct_link) {
     ss << "static aclrtBinHandle g_pgo_bin_handle = nullptr;" << std::endl;
@@ -617,7 +620,7 @@ void TilingLib::GenPgoWrapperInit(std::stringstream &ss, bool direct_link) const
 
 void TilingLib::GenPgoWrapper(const ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss,
                               bool direct_link) const {
-  GenPgoWrapperInit(ss, direct_link);
+  GenPgoWrapperInit(fused_schedule_result, ss, direct_link);
 
   GenPgoWrapperParmCall(fused_schedule_result, ss);
   GenPgoLaunchKernelInit(ss, direct_link);
