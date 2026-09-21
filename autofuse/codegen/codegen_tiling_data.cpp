@@ -29,6 +29,7 @@ void AppendCVAutofuseCommonTilingFields(std::stringstream &ss) {
   ss << "    };\n";
   ss << "    uint32_t stage_size_name;\n";
   ss << "    uint32_t cube_ub_stage_size;\n";
+  ss << "    uint32_t cube_m_stage_size;\n";
 }
 }  // namespace
 
@@ -263,6 +264,7 @@ std::string codegen::TilingData::Generate(const ascir::FusedScheduledResult &fus
        << "    static constexpr size_t kMatmulTilingBytes = CV_TILING_ALIGN_UP(sizeof(MatmulTilingT), 8);\n"
        << "    uint32_t stage_size_name;\n"
        << "    uint32_t cube_ub_stage_size;\n"
+       << "    uint32_t cube_m_stage_size;\n"
        << "    alignas(8) uint8_t matmul_tiling_data[kMatmulTilingBytes];\n"
        << "};\n"
        << "template <typename MatmulTilingT>\n"
@@ -273,6 +275,7 @@ std::string codegen::TilingData::Generate(const ascir::FusedScheduledResult &fus
        << "    CVTilingData cv_tiling_data;\n"
        << "    uint32_t stage_size_name;\n"
        << "    uint32_t cube_ub_stage_size;\n"
+       << "    uint32_t cube_m_stage_size;\n"
        << "    alignas(8) uint8_t matmul_tiling_data[kMatmulTilingBytes];\n"
        << "};\n"
        << "struct CVAutofuseExternTilingData {\n"
@@ -284,6 +287,7 @@ std::string codegen::TilingData::Generate(const ascir::FusedScheduledResult &fus
 
     ss << "    uint32_t stage_size_name;\n";
     ss << "    uint32_t cube_ub_stage_size;\n";
+    ss << "    uint32_t cube_m_stage_size;\n";
     ss << "    alignas(8) uint8_t matmul_tiling_data[MATMUL_TILING_DATA_STORAGE_SIZE];\n";
 
     ss << "};\n"
@@ -707,7 +711,9 @@ std::string codegen::TilingData::GenCVConstReplace(const std::string &tiling_dat
   ss << "  k_const_tiling_data_ss << std::to_string((uint32_t)" << tiling_data_struct_name
      << ".stage_size_name) << \", \";" << std::endl;
   ss << "  k_const_tiling_data_ss << std::to_string((uint32_t)" << tiling_data_struct_name
-     << ".cube_ub_stage_size) << \", {\";" << std::endl;
+     << ".cube_ub_stage_size) << \", \";" << std::endl;
+  ss << "  k_const_tiling_data_ss << std::to_string((uint32_t)" << tiling_data_struct_name
+     << ".cube_m_stage_size) << \", {\";" << std::endl;
   ss << "  k_const_tiling_data_ss << matmul_bytes << \"}};\";" << std::endl;
   ss << "  replaceSubstring(tiling_data_const_gen_result, " << std::endl;
   ss << "    \"const CVAutofuseTilingData kConstTilingData = {};\", " << std::endl;

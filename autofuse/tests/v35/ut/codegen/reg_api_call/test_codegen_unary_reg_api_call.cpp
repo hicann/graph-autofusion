@@ -160,7 +160,12 @@ TEST(CodegenKernel, UnaryApicallIsNanCVStage) {
   std::string result;
   call_0.Generate(tpipe, vector<af::AxisId>{}, result);
   EXPECT_EQ(result, std::string{"LocalTensor<bool> local_1_cast = local_1.template ReinterpretCast<bool>();\n"
-                                "IsNan(local_1_cast[0], local_0[0], ((local_0_actual_size + 8 - 1) / 8 * 8));\n"});
+                                "local_1_actual_size = curAivM * ((curAivN + 16 - 1) / 16 * 16);\n"
+                                "for (uint32_t cv_row = 0; cv_row < ConvertToUint32(curAivM); cv_row++) {\n"
+                                "  IsNan(local_1_cast[cv_row * ConvertToUint32(((curAivN + 16 - 1) / 16 * 16))], "
+                                "local_0[cv_row * ConvertToUint32(((curAivN + 8 - 1) / 8 * 8))], "
+                                "ConvertToUint32(curAivN));\n"
+                                "}\n"});
 }
 
 TEST(CodegenKernel, UnaryApicallIsNanCvStageUsesInputDtypeAlignedCount) {
@@ -191,7 +196,12 @@ TEST(CodegenKernel, UnaryApicallIsNanCvStageUsesInputDtypeAlignedCount) {
   std::string result;
   EXPECT_EQ(call.Generate(tpipe, vector<af::AxisId>{}, result), 0);
   EXPECT_EQ(result, std::string{"LocalTensor<bool> local_1_cast = local_1.template ReinterpretCast<bool>();\n"
-                                "IsNan(local_1_cast[0], local_0[0], ((local_0_actual_size + 8 - 1) / 8 * 8));\n"});
+                                "local_1_actual_size = curAivM * ((curAivN + 32 - 1) / 32 * 32);\n"
+                                "for (uint32_t cv_row = 0; cv_row < ConvertToUint32(curAivM); cv_row++) {\n"
+                                "  IsNan(local_1_cast[cv_row * ConvertToUint32(((curAivN + 32 - 1) / 32 * 32))], "
+                                "local_0[cv_row * ConvertToUint32(((curAivN + 8 - 1) / 8 * 8))], "
+                                "ConvertToUint32(curAivN));\n"
+                                "}\n"});
 }
 
 TEST(CodegenKernel, UnaryApicallIsNanThrowingFor) {

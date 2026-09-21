@@ -2686,7 +2686,7 @@ TEST_F(TestCodegenTiling, GenFp32LargeKConditionShouldReturnRuntimeExprWhenDynam
   af::AscGraph graph("dynamic_k_matmul");
   CreateMatmulGraphForFp32LargeK(graph, 0, true, false, true, ge::DT_FLOAT);
   auto cube_info = EXTRACT_CUBE_INFO(graph);
-  EXPECT_EQ(this->GenFp32LargeKCondition(cube_info), "(static_cast<int64_t>(k_var) > 2048)");
+  EXPECT_EQ(this->GenFp32LargeKCondition(cube_info), "(static_cast<int64_t>(k_var) >= 2048)");
 }
 
 TEST_F(TestCodegenTiling, GenFp32LargeKConditionShouldReturnTrueWhenNoTransposeStaticKGT2048) {

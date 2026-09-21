@@ -40,8 +40,9 @@ Status RoundToIntApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::
 
   stringstream ss;
 
-  if (IsCVFusionStage(this->api_call_context)) {
+  if (IsCVFusionStage(this->api_call_context) || tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
     const auto cv_params = BuildCvApi2DParams(tpipe, x, y);
+    ss << y.actual_size << " = " << cv_params.output_compute_size << ";" << std::endl;
     ss << "AscendC::Cast(" << y << "[0], " << x << "[0], AscendC::RoundMode::CAST_RINT, " << GenCvUint32Dims(cv_params)
        << ", " << GenCvUint32Stride(cv_params.output_stride) << ", " << GenCvUint32Stride(cv_params.input_stride)
        << ");" << std::endl;

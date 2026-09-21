@@ -16,6 +16,7 @@
 #include "ascir_node_param/ascir_node_param.h"
 #include "api_call/utils/api_call_factory.h"
 #include "api_call/utils/api_call_utils.h"
+#include "reg_api_call_utils.h"
 
 namespace codegen {
 using namespace std;
@@ -155,6 +156,31 @@ Status WhereRegApiCall::GenerateNoLoopCase(const TPipe &tpipe, const std::vector
                                            std::stringstream &ss) const {
   const bool x2_is_scalar_scene = x2.IsAnyScalar();
   const bool x3_is_scalar_scene = x3.IsAnyScalar();
+
+  if (IsCVFusionStage(this->api_call_context) || tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
+    // CV UBFuse: mask/src/output have different dtype-aligned row strides, must use 2D API.
+    // For examples: (dst, mask, src0, src1, {curAivM, curAivN}, {out_stride,1}, {mask_stride,1}, {in_stride,1}).
+    const auto cv_params = BuildCvApi2DParams(tpipe, x2, y);
+    ss << y.actual_size << " = " << cv_params.output_compute_size << ";" << std::endl;
+    ss << this->api_name_ << "<" << (x2_is_scalar_scene ? "true" : "false") << ", "
+       << (x3_is_scalar_scene ? "true" : "false") << ", 2>(" << y << "["
+       << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x1 << "["
+       << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], ";
+    if (x2_is_scalar_scene) {
+      ss << (x2.IsConstScalar() ? "local_blk_tensor_of_" + x2.name : x2.Str()) << "[0], ";
+    } else {
+      ss << x2 << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, x2) << "], ";
+    }
+    if (x3_is_scalar_scene) {
+      ss << (x3.IsConstScalar() ? "local_blk_tensor_of_" + x3.name : x3.Str()) << "[0], ";
+    } else {
+      ss << x3 << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, x3) << "], ";
+    }
+    ss << GenCvUint16Dims(cv_params) << ", " << GenCvUint16Stride(cv_params.output_stride) << ", "
+       << GenCvUint16Stride(GenBlockAlignNExpr(x1, cv_params.last_dim)) << ", "
+       << GenCvUint16Stride(cv_params.input_stride) << ");" << std::endl;
+    return af::SUCCESS;
+  }
 
   ss << this->api_name_ << "(" << y << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], ";
   ss << x1 << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], ";

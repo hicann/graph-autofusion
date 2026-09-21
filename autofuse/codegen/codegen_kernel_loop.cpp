@@ -1032,6 +1032,7 @@ Status Loop::Generate(const Tiler &tiler, const TPipe &tpipe, std::string &resul
 
 Status Loop::ActualSizeDefine(const Tiler &tiler, const TPipe &tpipe, std::string dtype_name, std::string &result) {
   std::stringstream ss;
+  (void)dtype_name;
   if (this->axis_id == af::kIdNone) {
     for (const auto &body : this->bodys) {
       if (body.type == LoopType::LOOP) {
@@ -1045,7 +1046,7 @@ Status Loop::ActualSizeDefine(const Tiler &tiler, const TPipe &tpipe, std::strin
     const auto &tile_inner = tiler.GetAxis(axis.split_pair_other_id);
     af::Expression actual_size = af::Symbol(tile_inner.actual_size.name.c_str());
     tpipe.tiler.actual_sizes.emplace_back(std::make_pair(tile_inner.size_expr, actual_size));
-    ss << tile_inner.actual_size.AsArg() << " = stage_size / sizeof(" << dtype_name << ");" << std::endl;
+    ss << tile_inner.actual_size.AsArg() << " = stage_size;" << std::endl;
   }
   result = ss.str();
   return af::SUCCESS;

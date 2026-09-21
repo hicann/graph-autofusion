@@ -29,6 +29,9 @@ CvApi2DParams BuildCvApi2DParams(const TPipe &tpipe, const Tensor &input, const 
   const bool input_is_cube_output =
       tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse && input.id == tpipe.cube_output_tensor_id;
   params.input_stride = input_is_cube_output ? "curAlignN" : GenBlockAlignNExpr(input, params.last_dim);
+  params.valid_size = params.first_dim + " * " + params.last_dim;
+  params.output_compute_size = params.first_dim + " * " + params.output_stride;
+  params.input_compute_size = params.first_dim + " * " + params.input_stride;
   return params;
 }
 

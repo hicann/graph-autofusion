@@ -1144,9 +1144,9 @@ TEST(CodegenKernel, CvUbFuseTensorSizeAssignUsesTensorDtype) {
 
   std::string result;
   ASSERT_EQ(tpipe.TensorSizeAssign("float", result), af::SUCCESS);
-  EXPECT_NE(result.find("local_0_size = stage_size / sizeof(float);"), std::string::npos);
-  EXPECT_NE(result.find("local_1_size = stage_size / sizeof(float);"), std::string::npos);
-  EXPECT_NE(result.find("local_2_size = stage_size / sizeof(float);"), std::string::npos);
+  EXPECT_NE(result.find("local_0_size = stage_size;"), std::string::npos);
+  EXPECT_NE(result.find("local_1_size = stage_size;"), std::string::npos);
+  EXPECT_NE(result.find("local_2_size = stage_size;"), std::string::npos);
 }
 
 TEST(CodegenKernel, VfCall_TwoDimLoad_VFLoop) {

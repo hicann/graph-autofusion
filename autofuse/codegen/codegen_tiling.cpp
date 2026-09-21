@@ -48,7 +48,7 @@ using namespace ascgen_utils;
 namespace {
 constexpr uint64_t kMaxPgoTilingKeyCount = 10000U;
 constexpr uint64_t kInt64TilingKeyCapacity = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + 1U;
-// fp32且K轴大于该阈值且未启用hf32时, CV融合UB模板存在精度问题, 需走common兜底模板
+// fp32且K轴不小于该阈值且未启用hf32时, CV融合UB模板存在精度问题, 需走common兜底模板
 constexpr int64_t kFp32LargeKThreshold = 2048;
 
 std::string GenUint64Literal(uint64_t value) {
@@ -100,8 +100,14 @@ void GenInductorCvSafetyFallback(std::stringstream &ss, uint64_t count, const st
 }
 
 // 生成cv_tiling_data字段重置代码, ub_mode区分UB模板(1)与common模板(0)
+// 仅在求解器成功选出STAGE_SIZE_NAME(a0a1t)后调用: 此时行数按预算覆盖为
+// STAGE_SIZE_NAME / basen_align, kernel侧队列申请与vector计算长度均以此为准
 void GenCvTilingDataReset(std::stringstream &ss, const std::string &indent, uint32_t ub_mode) {
   ss << indent << "tiling->stage_size_name = tiling->tiling_data.STAGE_SIZE_NAME;" << std::endl;
+  ss << indent
+     << "tiling->cube_m_stage_size = (uint32_t)std::max(1, static_cast<int32_t>(tiling->stage_size_name / "
+        "basen_align));"
+     << std::endl;
   ss << indent << "tiling->cv_tiling_data.fusion_mode = 0;" << std::endl;
   ss << indent << "tiling->cv_tiling_data.ub_mode = " << ub_mode << ";" << std::endl;
   ss << indent << "tiling->cv_tiling_data.mix_mode = 0;" << std::endl;
@@ -1138,14 +1144,14 @@ std::string TilingLib::GenFp32LargeKCondition(const MatMulCubeInfo &cube_info) c
     std::string k_str = std::string(k_expr.Str().get());
     try {
       int64_t k_value = std::stoll(k_str);
-      return k_value > kFp32LargeKThreshold ? "true" : "false";
+      return k_value >= kFp32LargeKThreshold ? "true" : "false";
     } catch (...) {
       return "false";
     }
   }
   // K轴为动态变量: 生成运行时判断
   std::string k_var = std::string(k_expr.Str().get());
-  return "(static_cast<int64_t>(" + k_var + ") > " + std::to_string(kFp32LargeKThreshold) + ")";
+  return "(static_cast<int64_t>(" + k_var + ") >= " + std::to_string(kFp32LargeKThreshold) + ")";
 }
 
 std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedScheduledResult &fused_schedule_result,
@@ -1165,11 +1171,15 @@ std::string TilingLib::GenCubeFusionTilingBodyInductor(const ascir::FusedSchedul
      << std::endl;
   ss << "  tiling->cube_tiling_key = cube_tiling_key;" << std::endl;
   ss << "  int64_t cube_tiling_key_ub = cube_tiling_key & ~0xF0;" << std::endl;
-  ss << "  const int32_t ub_align_value = 32 / " << cube_info.type_size << ";" << std::endl;
+  // 32元素对齐: 最坏dtype(bool)的32B行对齐行宽也是basen_align, 保证按行宽申请的
+  // queue tensor在任何dtype下都不超过求解器按STAGE_SIZE_NAME给出的UB元素预算
+  ss << "  const int32_t ub_align_value = 32;" << std::endl;
   ss << "  const int32_t basen_align = (basen + ub_align_value - 1) / ub_align_value * ub_align_value;" << std::endl;
   ss << "  const int32_t basen_basem_align = (basem * basen_align) / 2 + basen_align;" << std::endl;
   ss << "  set_g_basen_basem_align(basen_basem_align);" << std::endl;
   ss << "  tiling->cube_ub_stage_size = (uint32_t)basen_basem_align;" << std::endl;
+  // 兜底默认值(容量行数); 求解成功后在GenCvTilingDataReset中按预算行数覆盖
+  ss << "  tiling->cube_m_stage_size = (uint32_t)(basen_basem_align / basen_align);" << std::endl;
   ss << "  tiling->tiling_data.set_block_dim(limit->aiv_num);" << std::endl;
   ss << "  tiling->tiling_data.set_ub_size(limit->ub_size - 256);" << std::endl;
 
@@ -1530,6 +1540,7 @@ static std::string GenLocalMemorySizeCode() {
 
 static void AppendCubeFusionInitCode(std::stringstream &ss, const std::string &shape_dim_param,
                                      const MatMulCubeInfo &cube_info) {
+  (void)cube_info;
   ss << "  auto tiling_data =  context->GetTilingData<CVAutofuseTilingData>();" << std::endl;
   ss << "  int64_t ws_size = 0;" << std::endl;
   ss << "  int64_t cube_tiling_key = 0;" << std::endl;
@@ -1542,10 +1553,11 @@ static void AppendCubeFusionInitCode(std::stringstream &ss, const std::string &s
   ss << "  ResLimit limit;" << std::endl << "  limit.aiv_num = parse->aiv_num;" << std::endl;
   ss << "  limit.ub_size = (uint32_t)parse->ub_size;" << std::endl;
   ss << "  auto ret = ge::GRAPH_SUCCESS;" << std::endl;
-  ss << "  const int32_t ub_align_value = 32 / " << cube_info.type_size << ";" << std::endl;
+  ss << "  const int32_t ub_align_value = 32;" << std::endl;
   ss << "  const int32_t basen_align = (basen + ub_align_value - 1) / ub_align_value * ub_align_value;" << std::endl;
   ss << "  const int32_t basen_basem_align = (basem * basen_align) / 2 + basen_align;" << std::endl;
   ss << "  tiling_data->cube_ub_stage_size = (uint32_t)basen_basem_align;" << std::endl;
+  ss << "  tiling_data->cube_m_stage_size = (uint32_t)(basen_basem_align / basen_align);" << std::endl;
 }
 
 static void AppendCubeFusionUbModeCode(std::stringstream &ss) {
@@ -1584,6 +1596,9 @@ static void AppendCubeFusionFallbackCode(std::stringstream &ss, const std::strin
   ss << "&(tiling_data->tiling_data), &workspace_size, &block_dim, &limit);" << std::endl;
   ss << "  if (ret == 0) {" << std::endl;
   ss << "  tiling_data->stage_size_name = tiling_data->tiling_data.STAGE_SIZE_NAME;" << std::endl;
+  ss << "  tiling_data->cube_m_stage_size = (uint32_t)std::max(1, static_cast<int32_t>(tiling_data->"
+        "stage_size_name / basen_align));"
+     << std::endl;
   ss << "  context->SetBlockDim(cube_block_dim);" << std::endl;
   ss << "  *context->GetWorkspaceSizes(1) = 16 * 1024 * 1024 + ws_size;" << std::endl;
   ss << "  tiling_data->cv_tiling_data.fusion_mode = 0;" << std::endl;
@@ -1599,6 +1614,9 @@ static void AppendCubeFusionFallbackCode(std::stringstream &ss, const std::strin
   ss << "      tiling_data->tiling_data.set_ub_size(limit.ub_size - 256);" << std::endl;
   ss << "      if (!optiling::GetTiling(tiling_data->tiling_data, 1)) {return ge::GRAPH_FAILED;}" << std::endl;
   ss << "      tiling_data->stage_size_name = tiling_data->tiling_data.STAGE_SIZE_NAME;" << std::endl;
+  ss << "      tiling_data->cube_m_stage_size = (uint32_t)std::max(1, static_cast<int32_t>(tiling_data->"
+        "stage_size_name / basen_align));"
+     << std::endl;
   ss << "      context->SetBlockDim(cube_block_dim);" << std::endl;
   ss << "      *context->GetWorkspaceSizes(1) = 16 * 1024 * 1024 + ws_size;" << std::endl;
   ss << "      tiling_data->cv_tiling_data.fusion_mode = 0;" << std::endl;

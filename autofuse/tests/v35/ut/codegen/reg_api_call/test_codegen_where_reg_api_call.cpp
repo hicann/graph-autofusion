@@ -308,8 +308,13 @@ TEST(WhereRegApiCallTest, WhereRegApiCall_Scalar_x2x3_CVStage) {
 
   std::string result;
   EXPECT_EQ(call.Generate(tpipe, current_axis, result), 0);
-  EXPECT_EQ(result, std::string{"Where(local_3[0], local_0[0], local_1, local_2, "
-                                "((local_0_actual_size + 16 - 1) / 16 * 16));\n"});
+  EXPECT_EQ(result, std::string{"local_3_actual_size = curAivM * ((curAivN + 16 - 1) / 16 * 16);\n"
+                                "Where<true, true, 2>(local_3[0], local_0[0], local_blk_tensor_of_local_1[0], "
+                                "local_blk_tensor_of_local_2[0], {static_cast<uint16_t>(curAivM), "
+                                "static_cast<uint16_t>(curAivN)}, {static_cast<uint16_t>(((curAivN + 16 - 1) / "
+                                "16 * 16)), static_cast<uint16_t>(1)}, {static_cast<uint16_t>(((curAivN + 8 - 1) "
+                                "/ 8 * 8)), static_cast<uint16_t>(1)}, {static_cast<uint16_t>(((curAivN + 8 - 1) "
+                                "/ 8 * 8)), static_cast<uint16_t>(1)});\n"});
 }
 
 TEST(WhereRegApiCallTest, WhereRegApiCall_x2_x3_is_ub_scalar) {

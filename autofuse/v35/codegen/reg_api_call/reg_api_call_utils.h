@@ -65,6 +65,9 @@ struct CvApi2DParams {
   std::string last_dim;
   std::string output_stride;
   std::string input_stride;
+  std::string valid_size;
+  std::string output_compute_size;
+  std::string input_compute_size;
 };
 
 CvApi2DParams BuildCvApi2DParams(const TPipe &tpipe, const Tensor &input, const Tensor &output);

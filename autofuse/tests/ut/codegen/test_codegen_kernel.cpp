@@ -1151,7 +1151,7 @@ TEST(CodegenKernel, TPipe_TensorSizeCalc_AllocFromQue) {
                   "const uint32_t local_1_que_buf_num = 4;\n"});
 }
 
-TEST(CodegenKernel, TPipe_TensorSizeAssignForCvUbFuseShouldUseCubeOutputElementCount) {
+TEST(CodegenKernel, TPipe_TensorSizeAssignForCvUbFuseShouldUseStageSizeElements) {
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
@@ -1182,8 +1182,8 @@ TEST(CodegenKernel, TPipe_TensorSizeAssignForCvUbFuseShouldUseCubeOutputElementC
 
   std::string result;
   ASSERT_EQ(tpipe.TensorSizeAssign("float", result), af::SUCCESS);
-  EXPECT_EQ(result, std::string{"local_1_size = stage_size / sizeof(float);\n"
-                                "local_2_size = stage_size / sizeof(float);\n"
+  EXPECT_EQ(result, std::string{"local_1_size = stage_size;\n"
+                                "local_2_size = stage_size;\n"
                                 "\n"});
 }
 

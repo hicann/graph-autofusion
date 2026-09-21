@@ -83,6 +83,20 @@ Status UnaryBitWidthChangeApiCallV2::Generate(const TPipe &tpipe, const std::vec
   GE_ASSERT_TRUE(status, "GenerateVectorizedAxisMergeStatus failed");
   SaveApiLoopAxisParams(merge_info, param);
   GE_ASSERT_SUCCESS(FillUnaryBitWidthChangeNodeParams(this->node, param, merge_info));
+  if (IsCVFusionStage(this->api_call_context) || tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
+    const auto cv_params = BuildCvApi2DParams(tpipe, x, y);
+    ss << y.actual_size << " = " << cv_params.output_compute_size << ";" << std::endl;
+    // 该类 API(如 IsFinite)输出与输入 dtype 的 32B 行对齐粒度不同(bool 为 32 元素, float 为
+    // 8 元素), 1D flat 调用会在行宽非输出对齐整数倍的尾块错位。CANN 仅有 1D 形式, 按
+    // per-dtype 物理行距逐行调用, 输出按输出 dtype 的行距落位, 与 stage 写出侧行距一致。
+    ss << "for (uint32_t cv_row = 0; cv_row < ConvertToUint32(" << cv_params.first_dim << "); cv_row++) {" << std::endl;
+    ss << "  " << this->api_name_ << "(" << y << "_cast[cv_row * ConvertToUint32(" << cv_params.output_stride << ")], "
+       << x << "[cv_row * ConvertToUint32(" << cv_params.input_stride << ")], ConvertToUint32(" << cv_params.last_dim
+       << "));" << std::endl;
+    ss << "}" << std::endl;
+    result = ss.str();
+    return af::SUCCESS;
+  }
   if (param.outer_repeats.size() == 0) {
     ss << this->api_name_ << "(" << y << "_cast[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x
        << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, x) << "], "
