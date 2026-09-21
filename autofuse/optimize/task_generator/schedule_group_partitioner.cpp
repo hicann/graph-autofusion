@@ -123,8 +123,8 @@ void ScheduleGroupGraphPartitioner::CheckDuplicateWorkspaceNodes(std::vector<::a
     if (!HasDuplicateWorkspaceNode(sub_optimize_graphs[i], dup_name)) {
       continue;
     }
-    GELOGE(af::FAILED, "Duplicate workspace node[%s] found in subgraph[%s], partition may be incorrect",
-           dup_name.c_str(), sub_optimize_graphs[i].GetName().c_str());
+    GELOGW("Duplicate workspace node[%s] found in subgraph[%s], partition may be incorrect", dup_name.c_str(),
+           sub_optimize_graphs[i].GetName().c_str());
     ::ascir::utils::DumpImplGraphs(sub_optimize_graphs, "Wrong_DuplicateWorkspace");
     sub_optimize_graphs.clear();
     return;
@@ -274,8 +274,10 @@ Status ScheduleGroupGraphPartitioner::SortSubGraphsByDependency(std::vector<::as
     }
   }
   if (sorted.size() != n) {
-    GELOGE(af::FAILED, "Cycle detected in subgraph dependency, sorted[%zu] != total[%zu]", sorted.size(), n);
-    return af::FAILED;
+    GELOGW("Cycle detected in subgraph dependency, sorted[%zu] != total[%zu]", sorted.size(), n);
+    ::ascir::utils::DumpImplGraphs(sub_optimize_graphs, "Wrong_CycleSubgraphWorkspace");
+    sub_optimize_graphs.clear();
+    return af::SUCCESS;
   }
   std::vector<::ascir::ImplGraph> reordered;
   reordered.reserve(n);
