@@ -60,6 +60,7 @@ class ReducePartitionCaseGenerator : public FusionCaseGenerator {
   static Status PartitionLoadNode(af::AscNodePtr &src_load_node, af::AscNodePtr &dst_node,
                                   ascir::ImplGraph &impl_graph);
   static Status PartitionScalarNode(af::AscNodePtr &src_node, af::AscNodePtr &dst_node, ascir::ImplGraph &impl_graph);
+  static Status PartitionDataNode(af::AscNodePtr &src_node, af::AscNodePtr &dst_node, ascir::ImplGraph &impl_graph);
   static bool HasReduce(const ascir::ImplGraph &impl_graph);
   static bool HasArgMaxReduce(const ScheduleTask &task);
   static bool IsOnlyHasOneOrLessReduce(const ascir::ImplGraph &impl_graph);
