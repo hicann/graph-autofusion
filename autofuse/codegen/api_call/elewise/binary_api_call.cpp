@@ -18,6 +18,7 @@
 #include "graph/symbolizer/symbolic_utils.h"
 #include "common/checker.h"
 #include "api_call/utils/api_call_factory.h"
+#include "api_call/utils/api_call_utils.h"
 #include "codegen/expression_convert_struct.h"
 
 namespace codegen {
@@ -95,6 +96,25 @@ Status BinaryApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::Axis
       ss << ");" << std::endl;
     }
   } else {  // 两个输入都不是Scalar
+    if (IsCVFusionStage(this->api_call_context) || tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
+      // CV UBFuse 下 flat 1D 调用的 count 取自 stage 尺寸, 无法覆盖按输出 dtype 对齐的二维布局
+      // (如 bool 输入 N=4: 行距32, 总量 M*32, stage 仅 M*8), 尾部行读到未初始化数据。
+      // 按 per-dtype 物理行距逐行调用, 与 UnaryApiCall/位宽类 API 的 CV 修复方式一致。
+      const std::string output_stride = GenBlockAlignNExpr(y, "curAivN");
+      const auto gen_input_stride = [&](const Tensor &t) {
+        return (tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse && t.id == tpipe.cube_output_tensor_id)
+                   ? std::string("curAlignN")
+                   : GenBlockAlignNExpr(t, "curAivN");
+      };
+      ss << y.actual_size << " = curAivM * " << output_stride << ";" << std::endl;
+      ss << "for (uint32_t cv_row = 0; cv_row < ConvertToUint32(curAivM); cv_row++) {" << std::endl;
+      ss << "  " << this->api_name_ << "(" << y << "[cv_row * ConvertToUint32(" << output_stride << ")], " << x1
+         << "[cv_row * ConvertToUint32(" << gen_input_stride(x1) << ")], " << x2 << "[cv_row * ConvertToUint32("
+         << gen_input_stride(x2) << ")], ConvertToUint32(curAivN));" << std::endl;
+      ss << "}" << std::endl;
+      result = ss.str();
+      return af::SUCCESS;
+    }
     ss << this->api_name_ << "(" << y << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x1
        << "[" << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], " << x2 << "["
        << tpipe.tiler.TensorVectorizedOffset(current_axis, x2) << "], " << x1.actual_size << ");" << std::endl;

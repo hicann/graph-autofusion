@@ -37,8 +37,9 @@ Status FloorToIntApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::
   GELOGI("FloorToInt x_dtype:%d, y_dtype:%d.", static_cast<int32_t>(x.dtype), static_cast<int32_t>(y.dtype));
   stringstream ss;
 
-  if (IsCVFusionStage(this->api_call_context)) {
+  if (IsCVFusionStage(this->api_call_context) || tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
     const auto cv_params = BuildCvApi2DParams(tpipe, x, y);
+    ss << y.actual_size << " = " << cv_params.output_compute_size << ";" << std::endl;
     ss << "AscendC::Cast(" << y << "[0], " << x << "[0], AscendC::RoundMode::CAST_FLOOR, " << GenCvUint32Dims(cv_params)
        << ", " << GenCvUint32Stride(cv_params.output_stride) << ", " << GenCvUint32Stride(cv_params.input_stride)
        << ");" << std::endl;

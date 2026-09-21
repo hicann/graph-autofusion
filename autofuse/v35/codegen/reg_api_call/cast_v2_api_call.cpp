@@ -105,10 +105,10 @@ Status CastV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::Axis
   }
   GE_ASSERT_SUCCESS(FillCastNodeParams(this->node, output_dims, output_strides, input_strides));
   stringstream ss;
-  if (IsCVFusionStage(this->api_call_context)) {
+  if (IsCVFusionStage(this->api_call_context) || tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
     const auto cv_params = BuildCvApi2DParams(tpipe, x, y);
     const std::string input_tensor = x.is_constant ? ("local_blk_tensor_of_" + x.name) : x.Str();
-    ss << y.actual_size << " = " << cv_params.first_dim << " * " << cv_params.last_dim << ";" << std::endl;
+    ss << y.actual_size << " = " << cv_params.output_compute_size << ";" << std::endl;
     ss << this->api_name_ << "(" << y << "[0], " << input_tensor << "[0], " << GenCvUint32Dims(cv_params) << ", "
        << GenCvUint32Stride(cv_params.output_stride) << ", " << GenCvUint32Stride(cv_params.input_stride) << ");"
        << std::endl;
