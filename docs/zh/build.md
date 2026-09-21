@@ -90,7 +90,7 @@ git clone https://gitcode.com/cann/graph-autofusion.git
 > [!NOTE] 注意
 > 如使用镜像方式进行项目体验，所有依赖已包含在[init_env.sh](../../scripts/init_env.sh)中，可跳过此安装依赖步骤。
 
-- Python3 >= 3.8.0 (建议使用Python虚拟环境)
+- Python3 >= 3.8.0 （建议使用Python虚拟环境）
   > [!NOTE] 说明
   > - python宣布3.8.x已经EOL，CANN将在10.0.0停止对该版本的支持，请升级到>=3.9.x的版本
 
@@ -115,7 +115,7 @@ git clone https://gitcode.com/cann/graph-autofusion.git
    sudo apt-get install patch
    ```
 
-- CMake >= 3.16.0  (建议使用3.20.0版本)
+- CMake >= 3.16.0  （建议使用3.20.0版本）
 
    ```shell
    # Ubuntu/Debian操作系统安装命令示例如下，其他操作系统请自行安装
@@ -286,7 +286,7 @@ bash build.sh --pkg
 > - --quiet         静默安装，跳过人机交互环节。
 > - --pylocal       安装 run 包时，是否将包内的 .whl 跟随 run 包安装路径来安装。
 >   - 若选择该参数，则 .whl 安装在`${ascend_install_path}/cann/python/site-packages`路径下。
->   - 若不选择该参数，则 .whl 安装在本地 python 路径下，例如`/usr/local/python3.7.5/lib/python3.7/site-packages`。
+>   - 若不选择该参数，则 .whl 安装在本地 python 路径下，例如`/usr/local/python3.x/lib/python3.x/site-packages`。
 > - 更多安装选项请使用 --help 选项查看。
 
 #### 卸载

@@ -130,3 +130,7 @@ for (int z0Tb = 0; z0Tb < z0Tb_loop_size; z0Tb++) {
 ```
 
 总体而言，Codegen 是依据 ImplGraph 生成 kernel 代码的，但要持续提升 kernel 代码的性能，仍需在 Codegen 框架优化和 API 内部优化两方面不断挖掘。
+
+## 相关链接
+
+- 返回 [AutoFuse 架构介绍](../../introduction/architecture.md)

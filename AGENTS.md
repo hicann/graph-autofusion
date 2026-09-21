@@ -21,9 +21,9 @@ Graph-autofusion 是面向昇腾（Ascend）芯片的融合加速组件集合，
 
 ### 编译构建
 
-**使用技能**: `af-build-runner`
+**使用技能**： `af-build-runner`
 
-**触发场景**: 编译、构建、build、cmake、make、打包、build.sh、构建失败、编译选项、第三方依赖。
+**触发场景**： 编译、构建、build、cmake、make、打包、build.sh、构建失败、编译选项、第三方依赖。
 
 关键要求：所有构建命令必须限制并行度，优先使用 `-j 8`，避免 Autofuse 编译 OOM。
 
@@ -35,9 +35,9 @@ cmake --build build --target <target> -j 8
 
 ### 测试开发与运行
 
-**使用技能**: `af-test-developer`
+**使用技能**： `af-test-developer`
 
-**触发场景**: 写测试、UT、ST、gtest、pytest、mock、coverage、测试失败、运行测试。
+**触发场景**： 写测试、UT、ST、gtest、pytest、mock、coverage、测试失败、运行测试。
 
 常用命令：
 
@@ -83,9 +83,9 @@ GitCode PR、Issue、流水线相关操作使用项目默认 skills：
 
 ### 代码检视
 
-**使用技能**: `af-code-reviewer`
+**使用技能**： `af-code-reviewer`
 
-**触发场景**: 代码审查、review、检视 PR、代码规范、贡献规范、clang-format、commit message、PR 模板、pre-commit、代码检查。
+**触发场景**： 代码审查、review、检视 PR、代码规范、贡献规范、clang-format、commit message、PR 模板、pre-commit、代码检查。
 
 代码检视前必须读取：
 

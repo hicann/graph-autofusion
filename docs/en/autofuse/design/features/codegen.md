@@ -73,4 +73,4 @@ The Device-side code is the core fusion kernel code written in AscendC, includin
 
 ## Related Links
 
-- Back to [AutoFuse Architecture Introduction](../architecture.md)
+- Back to [AutoFuse Architecture Introduction](../../introduction/architecture.md)

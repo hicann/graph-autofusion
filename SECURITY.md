@@ -22,8 +22,9 @@
 
 |      类型      |                                           开源代码地址                                           |                            文件名                             |             公网IP地址/公网URL地址/域名/邮箱地址/压缩文件地址             | 用途说明                        |
 | :------------: |:------------------------------------------------------------------------------------------:|:----------------------------------------------------------| :---------------------------------------------------------- |:----------------------------|
-|  依赖  | 不涉及  | cmake/third_party/makeself-fetch.cmake | https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz | 从gitcode下载makeself源码，作为编译依赖 |
+|  依赖  | 不涉及  | docs/zh/build.md、docs/en/build.md | https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz | 从gitcode下载makeself源码，作为编译依赖 |
 |  依赖  | 不涉及  | super_kernel/requirements-dev.txt | https://pypi.tuna.tsinghua.edu.cn/simple | 从pypi下载python whl包，作为编译运行依赖 |
+|  依赖  | 不涉及  | cmake/fetch_cann_cmake.cmake | https://gitcode.com/cann/cmake.git | CANN cmake 编译依赖 |
 
 
 ## 漏洞机制说明
@@ -36,12 +37,12 @@
 | 类型           | Linux权限参考最大值 |
 | -------------- | ---------------  |
 | 用户主目录                        |   750（rwxr-x---）            |
-| 程序文件(含脚本文件、库文件等)       |   550（r-xr-x---）             |
+| 程序文件（含脚本文件、库文件等）       |   550（r-xr-x---）             |
 | 程序文件目录                      |   550（r-xr-x---）            |
 | 配置文件                          |  640（rw-r-----）             |
 | 配置文件目录                      |   750（rwxr-x---）            |
-| 日志文件(记录完毕或者已经归档)        |  440（r--r-----）             |
-| 日志文件(正在记录)                |    640（rw-r-----）           |
+| 日志文件（记录完毕或者已经归档）        |  440（r--r-----）             |
+| 日志文件（正在记录）                |    640（rw-r-----）           |
 | 日志文件目录                      |   750（rwxr-x---）            |
 | Debug文件                         |  640（rw-r-----）         |
 | Debug文件目录                     |   750（rwxr-x---）  |

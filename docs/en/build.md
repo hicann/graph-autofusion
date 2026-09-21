@@ -286,7 +286,7 @@ After local verification completes, execute the following command to install the
 > - --quiet indicates silent installation. It skips human-computer interaction.
 > - --pylocal determines whether to install .whl files inside the package along the run package installation path.
 >   - If you select this parameter, .whl installs in the `${ascend_install_path}/cann/python/site-packages` path.
->   - If you do not select this parameter, .whl installs in the local python path, for example, `/usr/local/python3.7.5/lib/python3.7/site-packages`.
+>   - If you do not select this parameter, .whl installs in the local python path, for example, `/usr/local/python3.x/lib/python3.x/site-packages`.
 > - For more installation options, use the --help option to view.
 
 #### Uninstallation

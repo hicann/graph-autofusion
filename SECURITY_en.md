@@ -24,8 +24,9 @@ The public network addresses contained in this project code are as follows:
 
 |      Type      |                                           Open Source Code Address                                           |                            File Name                             |             Public Network IP Address/Public Network URL Address/Domain Name/Email Address/Compressed File Address             | Purpose Description                        |
 | :------------: |:------------------------------------------------------------------------------------------:|:----------------------------------------------------------| :---------------------------------------------------------- |:----------------------------|
-|  Dependency  | Not applicable  | cmake/third_party/makeself-fetch.cmake | https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz | Download makeself source code from gitcode as compilation dependency |
+|  Dependency  | Not applicable  | docs/zh/build.md、docs/en/build.md | https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz | Download makeself source code from gitcode as compilation dependency |
 |  Dependency  | Not applicable  | super_kernel/requirements-dev.txt | https://pypi.tuna.tsinghua.edu.cn/simple | Download python whl packages from pypi as compilation and runtime dependencies |
+|  Dependency  | Not applicable  | cmake/fetch_cann_cmake.cmake | https://gitcode.com/cann/cmake.git | Download CANN cmake as compilation dependency |
 
 
 ## Vulnerability Mechanism Description
