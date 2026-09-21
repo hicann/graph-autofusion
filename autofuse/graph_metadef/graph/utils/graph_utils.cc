@@ -3056,7 +3056,7 @@ graphStatus GraphUtils::HandleSubgraphInput(const NodePtr &node, SymbolToAnchors
   // Data in subgraph
   uint32_t index = 0U;
   if (!af::AttrUtils::GetInt(node->GetOpDesc(), ATTR_NAME_PARENT_NODE_INDEX, index)) {
-    REPORT_INNER_ERR_MSG("E18888", "Get  Attr ATTR_NAME_PARENT_NODE_INDEX failed, node:%s.", node->GetName().c_str());
+    REPORT_INNER_ERR_MSG("E18888", "Get Attr ATTR_NAME_PARENT_NODE_INDEX failed, node:%s.", node->GetName().c_str());
     GE_LOGE("[Get][Attr] ATTR_NAME_PARENT_NODE_INDEX failed, node:%s.", node->GetName().c_str());
     return af::GRAPH_FAILED;
   }

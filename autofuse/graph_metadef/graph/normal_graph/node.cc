@@ -139,7 +139,7 @@ bool Node::NodeImpl::NodeAnchorIsEqual(const AnchorPtr &left_anchor, const Ancho
   if (anchor_peer_size != right_anchor_peer_size) {
     REPORT_INNER_ERR_MSG("E18888",
                          "Size of anchor's peer anchors verify failed, node name: %s "
-                         "anchor_peer_size [%zu]  is different from [%zu] at index [%zu].",
+                         "anchor_peer_size [%zu] is different from [%zu] at index [%zu].",
                          this->GetName().c_str(), anchor_peer_size, right_anchor_peer_size, i);
     GELOGE(GRAPH_FAILED,
            "[Check][Param] Size of anchor's peer anchors verify failed, node name: %s "

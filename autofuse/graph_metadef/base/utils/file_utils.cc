@@ -306,8 +306,9 @@ graphStatus SaveBinToFile(const char *const data, size_t length, const std::stri
     GELOGE(GRAPH_FAILED, "Write data to file: %s failed.", real_path.c_str());
     ret = GRAPH_FAILED;
   }
-  if (mmClose(fd) != 0) {  // mmClose:0 success
-    GELOGE(GRAPH_FAILED, "Close file failed.");
+  const int32_t mm_close_ret = mmClose(fd);  // mmClose:0 success
+  if (mm_close_ret != 0) {
+    GELOGE(GRAPH_FAILED, "Close file: %s failed, ret: %d.", real_path.c_str(), mm_close_ret);
     return GRAPH_FAILED;
   }
   return ret;
