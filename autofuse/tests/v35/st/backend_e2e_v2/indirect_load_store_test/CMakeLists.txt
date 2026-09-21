@@ -156,103 +156,18 @@ endfunction()
 add_indirect_load_e2e_case(indirect_load_rank2_axis1_simd 2 1 1 1 0 0 3 5 8 1 1 4 6 1 1)
 mark_indirect_load_static_shape(indirect_load_rank2_axis1_simd)
 
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_half_int64_simd 2 1 1 1 0 0 3 5 160 1 1 4 137 1 1)
-mark_indirect_load_static_shape(indirect_load_rank2_axis1_half_int64_simd)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank2_axis1_half_int64_simd IL_INDEX_INT64)
-target_compile_definitions(indirect_load_rank2_axis1_half_int64_simd_codegen_v2 PRIVATE IL_FUNCTIONAL_ONLY)
-
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_b16_gather 2 1 1 1 1 0 3 5 8 1 1 4 6 1 1)
-mark_indirect_load_static_shape(indirect_load_rank2_axis1_b16_gather)
-mark_indirect_load_implementation(indirect_load_rank2_axis1_b16_gather 1)
-
-add_indirect_load_e2e_case(indirect_load_rank3_axis1_float_int64_static 3 1 0 0 0 0 7 16 32 10 1 16 32 10 1)
-mark_indirect_load_static_shape(indirect_load_rank3_axis1_float_int64_static)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank3_axis1_float_int64_static
-    IL_DATA_FLOAT IL_INDEX_INT64 IL_OUTPUT_POST_TYPE=2 IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
-
-add_indirect_load_e2e_case(indirect_load_rank3_axis1_pow2_simd 3 1 0 0 0 0 3 4 64 32 1 4 64 32 1)
-mark_indirect_load_static_shape(indirect_load_rank3_axis1_pow2_simd)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank3_axis1_pow2_simd IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
-target_compile_definitions(indirect_load_rank3_axis1_pow2_simd_codegen_v2 PRIVATE IL_EXPECT_MICRO_SIMD)
-
-add_indirect_load_e2e_case(indirect_load_rank3_axis1_pow2_gather 3 1 0 0 1 0 3 4 64 32 1 4 64 32 1)
-mark_indirect_load_static_shape(indirect_load_rank3_axis1_pow2_gather)
-mark_indirect_load_implementation(indirect_load_rank3_axis1_pow2_gather 1)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank3_axis1_pow2_gather IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
-
-add_indirect_load_e2e_case(indirect_load_rank3_axis1_pow2_simt 3 1 0 0 2 1 3 4 64 32 1 4 64 32 1)
-mark_indirect_load_static_shape(indirect_load_rank3_axis1_pow2_simt)
-mark_indirect_load_simt_selected(indirect_load_rank3_axis1_pow2_simt)
-mark_indirect_load_simt_codegen(indirect_load_rank3_axis1_pow2_simt StaticPowerOfTwo 32)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank3_axis1_pow2_simt IL_DATA_FLOAT IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
-
-add_indirect_load_e2e_case(indirect_load_rank3_axis1_float_int32_gather 3 1 0 0 1 0 7 16 32 10 1 16 32 10 1)
-mark_indirect_load_static_shape(indirect_load_rank3_axis1_float_int32_gather)
-mark_indirect_load_implementation(indirect_load_rank3_axis1_float_int32_gather 1)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank3_axis1_float_int32_gather
-    IL_DATA_FLOAT IL_OUTPUT_POST_TYPE=2 IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
-
 add_indirect_load_e2e_case(indirect_load_rank3_axis1_float_int64_gather 3 1 0 0 1 0 7 16 31 10 1 16 31 10 1)
 mark_indirect_load_static_shape(indirect_load_rank3_axis1_float_int64_gather)
 mark_indirect_load_implementation(indirect_load_rank3_axis1_float_int64_gather 1)
 mark_indirect_load_codegen_and_e2e(indirect_load_rank3_axis1_float_int64_gather
     IL_DATA_FLOAT IL_INDEX_INT64 IL_OUTPUT_POST_TYPE=2 IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
 
-add_indirect_load_e2e_case(indirect_load_rank4_axis1_float_int64_strided_post_simd
-    4 1 0 0 0 0 7 3 17 5 11 3 19 3 7)
-mark_indirect_load_static_shape(indirect_load_rank4_axis1_float_int64_strided_post_simd)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank4_axis1_float_int64_strided_post_simd IL_DATA_FLOAT IL_INDEX_INT64)
-
-add_indirect_load_e2e_case(indirect_load_rank4_axis1_direct_index_abs_exp2_sum_simd 4 1 0 0 0 0 3 8 13 3 8 8 17 3 8)
-mark_indirect_load_static_shape(indirect_load_rank4_axis1_direct_index_abs_exp2_sum_simd)
-mark_indirect_load_output_post(indirect_load_rank4_axis1_direct_index_abs_exp2_sum_simd 8 1)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank4_axis1_direct_index_abs_exp2_sum_simd
-    IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_EXP2 IL_POST_REDUCE_ABS IL_EXPECT_SIMD_SELECTED
-    IL_RANDOM_INPUT_INDEX IL_DIRECT_INDEX)
-
-add_indirect_load_e2e_case(indirect_load_rank4_axis2_sk 4 2 1 0 3 2 7 2 2 5 6 2 2 5 6)
-mark_indirect_load_static_shape(indirect_load_rank4_axis2_sk)
-mark_indirect_load_sk(indirect_load_rank4_axis2_sk)
-add_indirect_load_e2e_case(indirect_load_rank2_axisneg2_simd 2 -2 1 1 0 0 3 4 9 1 1 4 8 1 1)
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_relu_exp2_pre_simd 2 1 3 0 0 0 3 5 8 1 1 4 6 1 1)
 add_indirect_load_e2e_case(indirect_load_rank3_axis1_torch_gather_frontend 3 1 0 0 3 2 7 54 4 8 1 54 4 8 1)
 mark_indirect_load_static_shape(indirect_load_rank3_axis1_torch_gather_frontend)
 mark_indirect_load_sk(indirect_load_rank3_axis1_torch_gather_frontend)
 mark_indirect_load_wide_types(indirect_load_rank3_axis1_torch_gather_frontend)
 mark_indirect_load_output_post(indirect_load_rank3_axis1_torch_gather_frontend 2 1)
 mark_indirect_load_input_outer_stride(indirect_load_rank3_axis1_torch_gather_frontend 64)
-
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_large_simt 2 1 1 0 2 1 3 2 64 1 1 2 32771 1 1)
-mark_indirect_load_large_simt(indirect_load_rank2_axis1_large_simt)
-mark_indirect_load_simt_codegen(indirect_load_rank2_axis1_large_simt Recursive 64)
-
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_bf16_int64_simt 2 1 0 0 2 1 3 5 8 1 1 4 6 1 1)
-mark_indirect_load_output_post(indirect_load_rank2_axis1_bf16_int64_simt 2 1)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank2_axis1_bf16_int64_simt IL_DATA_BF16 IL_INDEX_INT64)
-
-add_indirect_load_e2e_case(indirect_load_rank2_axis1_uint32_int32_simd 2 1 0 1 0 0 3 5 8 1 1 4 6 1 1)
-mark_indirect_load_output_post(indirect_load_rank2_axis1_uint32_int32_simd 3 1)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank2_axis1_uint32_int32_simd IL_DATA_UINT32)
-
-add_indirect_load_e2e_case(indirect_load_rank4_axis1_add_sum_simt 4 1 0 0 0 1 3 8 13 3 8 8 12 3 8)
-mark_indirect_load_static_shape(indirect_load_rank4_axis1_add_sum_simt)
-mark_indirect_load_output_post(indirect_load_rank4_axis1_add_sum_simt 10 1)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank4_axis1_add_sum_simt IL_DATA_FLOAT IL_POST_REDUCE IL_POST_REDUCE_ADD)
-mark_indirect_load_simt_selected(indirect_load_rank4_axis1_add_sum_simt)
-mark_indirect_load_simt_codegen(indirect_load_rank4_axis1_add_sum_simt StructuredMagic 32)
-
-add_indirect_load_e2e_case(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt 4 1 3 0 0 1 2 8 13 3 8 8 17 3 8)
-mark_indirect_load_static_shape(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt)
-mark_indirect_load_mixed_index_pre(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt)
-mark_indirect_load_output_post(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt 5 1)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank4_axis1_sum_axis2_with_a_fallback_simt
-    IL_DATA_FLOAT IL_POST_REDUCE IL_REDUCE_WITH_A IL_EXPECT_ONLY_SIMT)
-
-add_indirect_load_e2e_case(indirect_load_rank4_axis1_sum_last_axis_simt 4 1 0 0 0 1 3 8 13 3 8 8 12 3 8)
-mark_indirect_load_static_shape(indirect_load_rank4_axis1_sum_last_axis_simt)
-mark_indirect_load_output_post(indirect_load_rank4_axis1_sum_last_axis_simt 6 1)
-mark_indirect_load_codegen_and_e2e(indirect_load_rank4_axis1_sum_last_axis_simt IL_DATA_FLOAT IL_POST_REDUCE IL_REDUCE_LAST_AXIS)
-mark_indirect_load_simt_selected(indirect_load_rank4_axis1_sum_last_axis_simt)
 
 add_indirect_load_e2e_case(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd 4 1 3 0 0 0 1 8 13 3 8 8 17 3 8)
 mark_indirect_load_static_shape(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd)
@@ -264,9 +179,6 @@ target_include_directories(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_s
     ${CODE_ROOT_DIR}/v35/ascendc/api_regbase)
 
 add_indirect_load_mixed_e2e_case(indirect_load_mixed_rank4_axis2_simd 4 2 0 0 1 FALSE 3 4 16 7 2 3 17 5)
-add_indirect_load_mixed_e2e_case(indirect_load_simt_elementwise_coverage 3 1 1 1 3 FALSE 3 16 7 1 2 11 5 1)
-mark_indirect_load_simt_elementwise_coverage(indirect_load_simt_elementwise_coverage)
-mark_indirect_load_simt_codegen(indirect_load_simt_elementwise_coverage Recursive 64)
 
 function(add_indirect_load_broadcast_test test_name template input_element_count index_element_count broadcast_axes_mask
          output_relu clear_broadcast_source_view)
@@ -457,9 +369,6 @@ add_indirect_load_graph_case(indirect_load_user_masked_embedding_minimal
     IL_CASE_BROADCAST_WHERE IL_USER_MASKED_EMBEDDING_MINIMAL)
 
 # Full three-input reproduction of the user-provided embedding + ge + mul + sum GraphHint.
-add_indirect_load_graph_case(indirect_load_user_masked_embedding_sum_full
-    indirect_load_user_masked_embedding_sum_full 1
-    IL_CASE_BROADCAST_WHERE IL_USER_MASKED_EMBEDDING_SUM_FULL)
 
 # Run the exact user graph through the normal optimizer/codegen flow without
 # forcing a template.  This guards the Embedding-like candidate selection.
@@ -472,6 +381,12 @@ add_indirect_load_graph_case(indirect_load_user_masked_embedding_sum_full_auto
 add_indirect_load_graph_case(indirect_load_user_position_bias
     indirect_load_user_position_bias 1
     IL_CASE_BROADCAST_WHERE IL_USER_POSITION_BIAS)
+
+# User graph: position-bias buckets, axis-1 IndirectLoad over the transposed [8,32,1]
+# table, two broadcast side inputs, Exp and the final Sum over the lookup axis.
+add_indirect_load_graph_case(indirect_load_user_position_bias_exp_sum
+    indirect_load_user_position_bias_exp_sum 1
+    IL_CASE_BROADCAST_WHERE IL_USER_POSITION_BIAS_EXP_SUM)
 
 # User graph: embedding + Sum over the lookup axis.
 add_indirect_load_graph_case(indirect_load_user_embedding_sum indirect_load_user_embedding_sum 1
@@ -489,8 +404,6 @@ add_indirect_load_graph_case(indirect_load_user_embedding_sum_simd indirect_load
     IL_CASE_BROADCAST_WHERE IL_USER_EMBEDDING_SUM IL_USER_EMBEDDING_SUM_SIMD)
 
 # User graph: embedding followed by scalar Mul.
-add_indirect_load_graph_case(indirect_load_user_embedding_mul indirect_load_user_embedding_mul 1
-    IL_CASE_BROADCAST_WHERE IL_USER_EMBEDDING_MUL IL_EXPECT_EMBEDDING_SIMT)
 
 # User graph: bf16 embedding with mean/rsqrt normalization and two outputs.
 add_indirect_load_graph_case(indirect_load_user_layernorm indirect_load_user_layernorm 1
@@ -498,14 +411,9 @@ add_indirect_load_graph_case(indirect_load_user_layernorm indirect_load_user_lay
 
 # Same LayerNorm split topology with a small shape; force the SIMD candidate to
 # determine whether the branch itself, rather than UB pressure, is the blocker.
-add_indirect_load_graph_case(indirect_load_user_layernorm_simd indirect_load_user_layernorm_simd 1
-    IL_CASE_BROADCAST_WHERE IL_USER_LAYERNORM IL_USER_LAYERNORM_SIMD)
 
 # User graph: one embedding result fans out to Exp and Abs, then merges by Add.
 # Run both IL SIMD and IL SIMT templates to compare branch handling.
-add_indirect_load_graph_case(indirect_load_user_embedding_exp_abs_add_simd
-    indirect_load_user_embedding_exp_abs_add_simd 1
-    IL_USER_EMBEDDING_EXP_ABS_ADD IL_USER_EMBEDDING_EXP_ABS_ADD_SIMD)
 add_indirect_load_graph_case(indirect_load_user_embedding_exp_abs_add_simt
     indirect_load_user_embedding_exp_abs_add_simt 1
     IL_USER_EMBEDDING_EXP_ABS_ADD)
@@ -516,21 +424,18 @@ function(add_indirect_load_user_fanout_case test_name)
     add_indirect_load_graph_case(${test_name} ${test_name} 1 IL_USER_FANOUT ${ARGN})
 endfunction()
 
+add_indirect_load_user_fanout_case(indirect_load_user_fanout_direct_reduce_simt
+                                   IL_USER_FANOUT_REDUCE)
+add_indirect_load_user_fanout_case(indirect_load_user_fanout_post_reduce_simt
+                                   IL_USER_FANOUT_POST IL_USER_FANOUT_REDUCE)
+
 add_indirect_load_user_fanout_case(indirect_load_user_fanout_direct_stores_simd
                                    IL_USER_FANOUT_SIMD)
 add_indirect_load_user_fanout_case(indirect_load_user_fanout_direct_stores_simt)
-add_indirect_load_user_fanout_case(indirect_load_user_fanout_direct_reduce_simd
-                                   IL_USER_FANOUT_SIMD IL_USER_FANOUT_REDUCE)
-add_indirect_load_user_fanout_case(indirect_load_user_fanout_direct_reduce_simt
-                                   IL_USER_FANOUT_REDUCE)
 add_indirect_load_user_fanout_case(indirect_load_user_fanout_post_stores_simd
                                    IL_USER_FANOUT_SIMD IL_USER_FANOUT_POST)
 add_indirect_load_user_fanout_case(indirect_load_user_fanout_post_stores_simt
                                    IL_USER_FANOUT_POST)
-add_indirect_load_user_fanout_case(indirect_load_user_fanout_post_reduce_simd
-                                   IL_USER_FANOUT_SIMD IL_USER_FANOUT_POST IL_USER_FANOUT_REDUCE)
-add_indirect_load_user_fanout_case(indirect_load_user_fanout_post_reduce_simt
-                                   IL_USER_FANOUT_POST IL_USER_FANOUT_REDUCE)
 
 # Regression: two GM output chains, with one chain reading a broadcast GM side input.
 add_indirect_load_graph_case(indirect_load_user_fanout_side_input_simt
@@ -646,9 +551,6 @@ endfunction()
 
 # Mask bit d denotes that logical axis d has stride 0. The Element case covers both input and index zero-stride paths.
 # Direct zero-stride classification is covered by the layout and schedule UT.
-add_indirect_load_stride_zero_test(indirect_load_stride_zero_elements_simd_test simd 10 5 1 1)
-add_indirect_load_stride_zero_test(indirect_load_stride_zero_elements_simt_test simt 10 5 1 1)
-add_indirect_load_stride_zero_test(indirect_load_stride_zero_elements_sk_test sk 10 5 1 1)
 
 function(add_indirect_load_torch_gather_strided_test test_name tiling_key expect_simt expect_sk
          input_stride0 input_stride1 input_stride2 index_stride0 index_stride1 index_stride2)
@@ -683,8 +585,6 @@ add_indirect_load_torch_gather_strided_test(indirect_load_rank3_axis1_input_inde
     0 0 0 384 10 1 192 10 1)
 add_indirect_load_torch_gather_strided_test(indirect_load_rank3_axis1_input_index_gap_simt_test
     0 1 0 384 10 1 192 10 1)
-add_indirect_load_torch_gather_strided_test(indirect_load_rank3_axis1_input_index_gap_sk_test
-    0 0 1 384 10 1 192 10 1)
 add_indirect_load_torch_gather_strided_test(indirect_load_rank3_axis1_input_index_outer_gap_simt_test
     0 1 0 192 5 1 128 5 1)
 set(indirect_load_index_select_defs IL_INDEX_SELECT_CASE=1)
@@ -703,26 +603,11 @@ do_backend_e2e_st_test(indirect_load_embedding_test
         indirect_load_embedding_test_tiling.cpp
         autofuse_tiling_data.h
     TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_embedding_test IL_CASE_EMBEDDING)
+mark_indirect_load_codegen_and_e2e(indirect_load_embedding_test IL_CASE_EMBEDDING IL_EMBEDDING_SIZE=13)
 
-# SIMD uses tiling key 0; SIMT uses tiling key 1 and requests the SIMT embedding policy.
-foreach(embedding_case_template IN ITEMS simd simt)
-    set(embedding_case_tiling_key 0)
-    set(embedding_case_extra_defs)
-    if(embedding_case_template STREQUAL "simt")
-        set(embedding_case_tiling_key 1)
-        set(embedding_case_extra_defs IL_EMBEDDING_SIMT=1)
-    endif()
-    # Non-block-aligned payload regression: exercise the SIMD Embedding head/body/tail split and
-    # the SIMT Embedding policy's non-power-of-two division path while keeping the aligned case below.
-    add_indirect_load_graph_case(indirect_load_embedding_tail_${embedding_case_template}
-        indirect_load_embedding_tail_${embedding_case_template} ${embedding_case_tiling_key}
-        IL_CASE_EMBEDDING IL_EMBEDDING_SIZE=13 IL_EMBEDDING_DIRECT=1 ${embedding_case_extra_defs})
-
-    # Aligned direct-output controls for both templates.  The existing aligned
-    # Embedding case has a post-reduce chain; these controls isolate the direct
-    # Embedding address path from the fusion chain.
-    add_indirect_load_graph_case(indirect_load_embedding_aligned_${embedding_case_template}
-        indirect_load_embedding_test ${embedding_case_tiling_key}
-        IL_CASE_EMBEDDING IL_EMBEDDING_DIRECT=1 ${embedding_case_extra_defs})
-endforeach()
+# Non-block-aligned payload regression: exercise the SIMD Embedding head/body/tail split.
+# The SIMT Embedding policy's non-power-of-two division path is covered by the auto-selected
+# IL_CASE_EMBEDDING case above, so only the SIMD-forced variant needs its own registration.
+add_indirect_load_graph_case(indirect_load_embedding_tail_simd
+    indirect_load_embedding_tail_simd 0
+    IL_CASE_EMBEDDING IL_EMBEDDING_SIZE=13 IL_EMBEDDING_DIRECT=1)

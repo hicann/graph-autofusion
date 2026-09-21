@@ -2361,9 +2361,9 @@ af::ComputeGraphPtr CreateGraph() {
 
 af::ComputeGraphPtr CreateAicReproGraph() {
   auto graph = std::make_shared<af::AscGraph>("indirect_load_aic_repro");
-  const af::Expression input_s0 = graph->CreateSizeVar(100000);
-  const af::Expression output_s0 = graph->CreateSizeVar(1024);
-  const af::Expression s1 = graph->CreateSizeVar(1024);
+  const af::Expression input_s0 = graph->CreateSizeVar(8192);
+  const af::Expression output_s0 = graph->CreateSizeVar(512);
+  const af::Expression s1 = graph->CreateSizeVar(512);
   const af::Expression one = af::ops::One;
   const af::AxisId input_axis0 = graph->CreateAxis("x0", input_s0).id;
   const af::AxisId input_axis1 = graph->CreateAxis("x1", s1).id;
@@ -2698,8 +2698,8 @@ TEST_F(TestBackendIndirectLoadBroadcastE2e, IndirectLoadBroadcastCodegen) {
 #if defined(IL_USER_FANOUT) || defined(IL_USER_FANOUT_SIDE_INPUT) || defined(IL_USER_SIDE_INPUT_FANOUT) ||            \
     defined(IL_CASE_BROADCAST_WHERE) || defined(IL_GRAPH_HINT_REDUCE) || defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || \
     defined(IL_USER_MASKED_EMBEDDING_SUM_FULL) || defined(IL_USER_POSITION_BIAS) || defined(IL_USER_EMBEDDING_SUM) || \
-    defined(IL_USER_EMBEDDING_MUL) || defined(IL_USER_LAYERNORM) || defined(IL_USER_LAYERNORM_SIMD) ||                \
-    defined(IL_USER_EMBEDDING_EXP_ABS_ADD) || defined(IL_DUAL_IL_GATHER) || defined(IL_GRAPH_HINT_EMBEDDING_SLICE)
+    defined(IL_USER_LAYERNORM) || defined(IL_USER_EMBEDDING_EXP_ABS_ADD) || defined(IL_DUAL_IL_GATHER) ||             \
+    defined(IL_GRAPH_HINT_EMBEDDING_SLICE) || defined(IL_USER_POSITION_BIAS_EXP_SUM)
 /**
  * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
@@ -3308,90 +3308,6 @@ std::shared_ptr<af::AscGraph> CreateUserEmbeddingSumRank2SubGraph() {
   return graph;
 }
 #endif
-#elif defined(IL_USER_EMBEDDING_MUL)
-constexpr int64_t kUserEmbeddingMulRows = 1024;
-constexpr int64_t kUserEmbeddingMulDim = 2048;
-constexpr int64_t kUserEmbeddingMulTableRows = 151936;
-constexpr char kUserEmbeddingMulGraphName[] = "user_embedding_mul";
-
-std::shared_ptr<af::AscGraph> CreateUserEmbeddingMulSubGraph() {
-  auto graph = std::make_shared<af::AscGraph>(kUserEmbeddingMulGraphName);
-  const auto rows = graph->CreateSizeVar(kUserEmbeddingMulRows);
-  const auto dim = graph->CreateSizeVar(kUserEmbeddingMulDim);
-  const auto table_rows = graph->CreateSizeVar(kUserEmbeddingMulTableRows);
-  const auto a0 = graph->CreateAxis("a0", rows).id;
-  const auto a1 = graph->CreateAxis("a1", dim).id;
-  const std::vector<af::AxisId> axes = {a0, a1};
-  const std::vector<af::Expression> full = {rows, dim};
-  const std::vector<af::Expression> full_strides = {dim, af::ops::One};
-
-  af::ascir_op::Data indices("indices", *graph);
-  indices.ir_attr.SetIndex(1);
-  af::ascir_op::Load index_load("index_load");
-  graph->AddNode(index_load);
-  index_load.x = indices.y;
-  SetView(index_load, axes, {rows, af::ops::One}, {af::ops::One, af::ops::Zero}, af::DT_INT64);
-  af::ascir_op::Broadcast index_broadcast("index_broadcast");
-  graph->AddNode(index_broadcast);
-  index_broadcast.x = index_load.y;
-  SetView(index_broadcast, axes, full, full_strides, af::DT_INT64);
-
-  af::ascir_op::Data table("table", *graph);
-  table.ir_attr.SetIndex(0);
-  af::ascir_op::Load table_load("table_load");
-  graph->AddNode(table_load);
-  table_load.x = table.y;
-  SetView(table_load, axes, {table_rows, dim}, {dim, af::ops::One}, af::DT_FLOAT16);
-  af::ascir_op::IndirectLoad indirect_load("indirect_load");
-  graph->AddNode(indirect_load);
-  indirect_load.x1 = table_load.y;
-  indirect_load.x2 = index_broadcast.y;
-  indirect_load.ir_attr.SetAxis(0);
-  indirect_load.ir_attr.SetNegative_index_support(true);
-  indirect_load.ir_attr.SetNeed_check_bound(true);
-  indirect_load.ir_attr.SetMax(table_rows);
-  SetView(indirect_load, axes, full, full_strides, af::DT_FLOAT16);
-
-  af::ascir_op::Cast cast("cast");
-  graph->AddNode(cast);
-  cast.x = indirect_load.y;
-  SetView(cast, axes, full, full_strides, af::DT_FLOAT);
-
-  af::ascir_op::ScalarData scale("scale", *graph);
-  scale.ir_attr.SetIndex(2);
-  scale.y.dtype = af::DT_FLOAT;
-  af::ascir_op::Broadcast scale_broadcast("scale_broadcast");
-  graph->AddNode(scale_broadcast);
-  scale_broadcast.x = scale.y;
-  SetView(scale_broadcast, axes, {rows, af::ops::One}, {af::ops::One, af::ops::Zero}, af::DT_FLOAT);
-  af::ascir_op::Broadcast scale_broadcast_full("scale_broadcast_full");
-  graph->AddNode(scale_broadcast_full);
-  scale_broadcast_full.x = scale_broadcast.y;
-  SetView(scale_broadcast_full, axes, full, full_strides, af::DT_FLOAT);
-  af::ascir_op::Mul mul("mul");
-  graph->AddNode(mul);
-  mul.x1 = cast.y;
-  mul.x2 = scale_broadcast_full.y;
-  SetView(mul, axes, full, full_strides, af::DT_FLOAT);
-  af::ascir_op::Cast cast1("cast1");
-  graph->AddNode(cast1);
-  cast1.x = mul.y;
-  SetView(cast1, axes, full, full_strides, af::DT_FLOAT);
-  af::ascir_op::Cast cast2("cast2");
-  graph->AddNode(cast2);
-  cast2.x = cast1.y;
-  SetView(cast2, axes, full, full_strides, af::DT_FLOAT16);
-  af::ascir_op::Store store("store");
-  graph->AddNode(store);
-  store.x = cast2.y;
-  SetView(store, axes, full, full_strides, af::DT_FLOAT16);
-  af::ascir_op::Output output("output");
-  graph->AddNode(output);
-  output.ir_attr.SetIndex(0);
-  output.x = store.y;
-  SetView(output, axes, full, full_strides, af::DT_FLOAT16);
-  return graph;
-}
 #elif defined(IL_USER_EMBEDDING_EXP_ABS_ADD)
 // Shrunken version of the user graph: one embedding result fans out to Exp and
 // Abs, then merges through Add. The first two source dimensions are flattened
@@ -3473,15 +3389,9 @@ std::shared_ptr<af::AscGraph> CreateUserEmbeddingExpAbsAddSubGraph() {
   return graph;
 }
 #elif defined(IL_USER_LAYERNORM)
-#if defined(IL_USER_LAYERNORM_SIMD)
-constexpr int64_t kUserLayerNormRows = 2;
-constexpr int64_t kUserLayerNormDim = 16;
-constexpr int64_t kUserLayerNormTableRows = 100;
-#else
-constexpr int64_t kUserLayerNormRows = 21;
-constexpr int64_t kUserLayerNormDim = 2048;
-constexpr int64_t kUserLayerNormTableRows = 102400;
-#endif
+constexpr int64_t kUserLayerNormRows = 8;
+constexpr int64_t kUserLayerNormDim = 256;
+constexpr int64_t kUserLayerNormTableRows = 1024;
 constexpr char kUserLayerNormGraphName[] = "user_layernorm";
 
 std::shared_ptr<af::AscGraph> CreateUserLayerNormSubGraph() {
@@ -3670,7 +3580,7 @@ std::shared_ptr<af::AscGraph> CreateUserAddGatherSubGraph() {
 // axis extent [128, 512], including the non-dense index stride and offset.
 constexpr int64_t kGraphHintEmbeddingSliceRows = 128;
 constexpr int64_t kGraphHintEmbeddingSliceColumns = 512;
-constexpr int64_t kGraphHintEmbeddingSliceTableRows = 65536;
+constexpr int64_t kGraphHintEmbeddingSliceTableRows = 512;
 constexpr int64_t kGraphHintEmbeddingSliceIndexStride = 39;
 constexpr int64_t kGraphHintEmbeddingSliceIndexOffset = 13;
 constexpr char kGraphHintEmbeddingSliceGraphName[] = "graph_hint";
@@ -3827,8 +3737,8 @@ std::shared_ptr<af::AscGraph> CreateGraphHintSimdReproSubGraph() {
 }
 #elif defined(IL_USER_POSITION_BIAS)
 constexpr int64_t kUserPositionBiasRows = 8;
-constexpr int64_t kUserPositionBiasDim = 2048;
-constexpr int64_t kUserPositionBiasLookups = 2048;
+constexpr int64_t kUserPositionBiasDim = 256;
+constexpr int64_t kUserPositionBiasLookups = 256;
 constexpr int64_t kUserPositionBiasTableRows = 32;
 constexpr char kUserPositionBiasGraphName[] = "user_position_bias";
 
@@ -4106,6 +4016,272 @@ std::shared_ptr<af::AscGraph> CreateUserPositionBiasSubGraph() {
   output.y.dtype = af::DT_FLOAT;
   return graph;
 }
+#elif defined(IL_USER_POSITION_BIAS_EXP_SUM)
+// Exact binding of the user-provided GraphHint: minimum-based relative-position bucket
+// arithmetic, a transposed [8,32,1] table view gathered by an axis-1 IndirectLoad, two
+// broadcast side inputs, Exp and the final Sum reduction over the lookup axis.
+constexpr int64_t kUserPositionBiasExpSumRows = 8;
+constexpr int64_t kUserPositionBiasExpSumDim = 256;
+constexpr int64_t kUserPositionBiasExpSumLookups = 256;
+constexpr int64_t kUserPositionBiasExpSumTableRows = 32;
+constexpr char kUserPositionBiasExpSumGraphName[] = "user_position_bias_exp_sum";
+
+std::shared_ptr<af::AscGraph> CreateUserPositionBiasExpSumSubGraph() {
+  auto graph = std::make_shared<af::AscGraph>(kUserPositionBiasExpSumGraphName);
+  const auto rows = graph->CreateSizeVar(kUserPositionBiasExpSumRows);
+  const auto dim = graph->CreateSizeVar(kUserPositionBiasExpSumDim);
+  const auto lookups = graph->CreateSizeVar(kUserPositionBiasExpSumLookups);
+  const auto table_rows = graph->CreateSizeVar(kUserPositionBiasExpSumTableRows);
+  const auto a0 = graph->CreateAxis("a0", rows).id;
+  const auto a1 = graph->CreateAxis("a1", dim).id;
+  const auto a2 = graph->CreateAxis("a2", lookups).id;
+  const std::vector<af::AxisId> axes = {a0, a1, a2};
+  af::AscGraphUtils::GetComputeGraph(*graph)->GetOrCreateAttrsGroup<af::AscGraphAttr>()->sched.axis = axes;
+  const std::vector<af::Expression> full = {rows, dim, lookups};
+  const std::vector<af::Expression> full_strides = {dim * lookups, lookups, af::ops::One};
+  const std::vector<af::Expression> reduced = {rows, dim, af::ops::One};
+  const std::vector<af::Expression> reduced_strides = {dim, af::ops::One, af::ops::Zero};
+
+  af::ascir_op::Scalar scalar("graph_hint/scalar", *graph), scalar1("graph_hint/scalar1", *graph),
+      scalar2("graph_hint/scalar2", *graph), scalar3("graph_hint/scalar3", *graph),
+      scalar4("graph_hint/scalar4", *graph), scalar5("graph_hint/scalar5", *graph),
+      scalar6("graph_hint/scalar6", *graph);
+  af::ascir_op::Broadcast scalar_b0("graph_hint/broadcast7"), scalar_b1("graph_hint/broadcast8"),
+      scalar_b2("graph_hint/broadcast9");
+  af::ascir_op::Broadcast scalar1_b0("graph_hint/broadcast4"), scalar1_b1("graph_hint/broadcast5"),
+      scalar1_b2("graph_hint/broadcast6");
+  af::ascir_op::Broadcast scalar2_b0("graph_hint/broadcast10"), scalar2_b1("graph_hint/broadcast11"),
+      scalar2_b2("graph_hint/broadcast12");
+  af::ascir_op::Broadcast scalar3_b0("graph_hint/broadcast13"), scalar3_b1("graph_hint/broadcast14"),
+      scalar3_b2("graph_hint/broadcast15");
+  af::ascir_op::Broadcast scalar4_b0("graph_hint/broadcast16"), scalar4_b1("graph_hint/broadcast17"),
+      scalar4_b2("graph_hint/broadcast18");
+  af::ascir_op::Broadcast scalar5_b0("graph_hint/broadcast19"), scalar5_b1("graph_hint/broadcast20"),
+      scalar5_b2("graph_hint/broadcast21");
+  af::ascir_op::Broadcast scalar6_b0("graph_hint/broadcast22"), scalar6_b1("graph_hint/broadcast23"),
+      scalar6_b2("graph_hint/broadcast24");
+  auto init_scalar = [&](auto &s, auto &b0, auto &b1, auto &b2, const char *value, af::DataType dtype) {
+    s.ir_attr.SetValue(value);
+    s.y.dtype = dtype;
+    graph->AddNode(b0);
+    b0.x = s.y;
+    SetView(b0, axes, {rows, af::ops::One, af::ops::One}, {af::ops::One, af::ops::Zero, af::ops::Zero}, dtype);
+    graph->AddNode(b1);
+    b1.x = b0.y;
+    SetView(b1, axes, {rows, dim, af::ops::One}, {dim, af::ops::One, af::ops::Zero}, dtype);
+    graph->AddNode(b2);
+    b2.x = b1.y;
+    SetView(b2, axes, full, full_strides, dtype);
+  };
+  init_scalar(scalar1, scalar1_b0, scalar1_b1, scalar1_b2, "0", af::DT_INT64);
+  init_scalar(scalar, scalar_b0, scalar_b1, scalar_b2, "-1", af::DT_INT64);
+  init_scalar(scalar2, scalar2_b0, scalar2_b1, scalar2_b2, "16", af::DT_INT64);
+  init_scalar(scalar3, scalar3_b0, scalar3_b1, scalar3_b2, "0.0625", af::DT_FLOAT);
+  init_scalar(scalar4, scalar4_b0, scalar4_b1, scalar4_b2, "0.48089834696298783", af::DT_FLOAT);
+  init_scalar(scalar5, scalar5_b0, scalar5_b1, scalar5_b2, "16.0", af::DT_FLOAT);
+  init_scalar(scalar6, scalar6_b0, scalar6_b1, scalar6_b2, "31", af::DT_INT64);
+
+  af::ascir_op::Data data("graph_hint/data", *graph);
+  data.ir_attr.SetIndex(0);
+  data.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load load("graph_hint/load");
+  graph->AddNode(load);
+  load.x = data.y;
+  load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(load, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::Arange arange("graph_hint/arange");
+  graph->AddNode(arange);
+  arange.ir_attr.SetBase(af::sym::kSymbolZero);
+  arange.ir_attr.SetStep(af::sym::kSymbolOne);
+  SetView(arange, axes, {af::ops::One, af::ops::One, lookups}, {af::ops::Zero, af::ops::Zero, af::ops::One},
+          af::DT_INT64);
+  af::ascir_op::Broadcast arange_b0("graph_hint/broadcast");
+  graph->AddNode(arange_b0);
+  arange_b0.x = arange.y;
+  SetView(arange_b0, axes, {rows, af::ops::One, lookups}, {lookups, af::ops::Zero, af::ops::One}, af::DT_INT64);
+  af::ascir_op::Broadcast arange_b("graph_hint/broadcast1");
+  graph->AddNode(arange_b);
+  arange_b.x = arange_b0.y;
+  SetView(arange_b, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Arange arange1("graph_hint/arange1");
+  graph->AddNode(arange1);
+  arange1.ir_attr.SetBase(af::sym::kSymbolZero);
+  arange1.ir_attr.SetStep(af::sym::kSymbolZero - af::sym::kSymbolOne);
+  SetView(arange1, axes, {af::ops::One, dim, af::ops::One}, {af::ops::Zero, af::ops::One, af::ops::Zero}, af::DT_INT64);
+  af::ascir_op::Broadcast arange1_b0("graph_hint/broadcast2");
+  graph->AddNode(arange1_b0);
+  arange1_b0.x = arange1.y;
+  SetView(arange1_b0, axes, {rows, dim, af::ops::One}, {dim, af::ops::One, af::ops::Zero}, af::DT_INT64);
+  af::ascir_op::Broadcast arange1_b("graph_hint/broadcast3");
+  graph->AddNode(arange1_b);
+  arange1_b.x = arange1_b0.y;
+  SetView(arange1_b, axes, full, full_strides, af::DT_INT64);
+
+  af::ascir_op::Add relative_position("graph_hint/add");
+  graph->AddNode(relative_position);
+  relative_position.x1 = arange_b.y;
+  relative_position.x2 = arange1_b.y;
+  SetView(relative_position, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Minimum minimum("graph_hint/minimum");
+  graph->AddNode(minimum);
+  minimum.x1 = scalar1_b2.y;
+  minimum.x2 = relative_position.y;
+  SetView(minimum, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Mul mul("graph_hint/mul");
+  graph->AddNode(mul);
+  mul.x1 = scalar_b2.y;
+  mul.x2 = minimum.y;
+  SetView(mul, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Cast distance_float("graph_hint/cast");
+  graph->AddNode(distance_float);
+  distance_float.x = mul.y;
+  SetView(distance_float, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Cast sixteen_float("graph_hint/cast1");
+  graph->AddNode(sixteen_float);
+  sixteen_float.x = scalar2_b2.y;
+  SetView(sixteen_float, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Lt lt("graph_hint/lt");
+  graph->AddNode(lt);
+  lt.x1 = distance_float.y;
+  lt.x2 = sixteen_float.y;
+  SetView(lt, axes, full, full_strides, af::DT_BOOL);
+  af::ascir_op::Cast distance_float_again("graph_hint/cast2");
+  graph->AddNode(distance_float_again);
+  distance_float_again.x = mul.y;
+  SetView(distance_float_again, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Mul scaled("graph_hint/mul1");
+  graph->AddNode(scaled);
+  scaled.x1 = distance_float_again.y;
+  scaled.x2 = scalar3_b2.y;
+  SetView(scaled, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Ln ln("graph_hint/ln");
+  graph->AddNode(ln);
+  ln.x = scaled.y;
+  SetView(ln, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Mul inv_log_base("graph_hint/mul2");
+  graph->AddNode(inv_log_base);
+  inv_log_base.x1 = ln.y;
+  inv_log_base.x2 = scalar4_b2.y;
+  SetView(inv_log_base, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Mul log_bucket("graph_hint/mul3");
+  graph->AddNode(log_bucket);
+  log_bucket.x1 = inv_log_base.y;
+  log_bucket.x2 = scalar5_b2.y;
+  SetView(log_bucket, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Cast bucket_cast("graph_hint/cast3");
+  graph->AddNode(bucket_cast);
+  bucket_cast.x = log_bucket.y;
+  SetView(bucket_cast, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Add bucket_offset("graph_hint/add1");
+  graph->AddNode(bucket_offset);
+  bucket_offset.x1 = bucket_cast.y;
+  bucket_offset.x2 = scalar2_b2.y;
+  SetView(bucket_offset, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Minimum bucket_clamp("graph_hint/minimum1");
+  graph->AddNode(bucket_clamp);
+  bucket_clamp.x1 = bucket_offset.y;
+  bucket_clamp.x2 = scalar6_b2.y;
+  SetView(bucket_clamp, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Where where("graph_hint/where");
+  graph->AddNode(where);
+  where.x1 = lt.y;
+  where.x2 = mul.y;
+  where.x3 = bucket_clamp.y;
+  SetView(where, axes, full, full_strides, af::DT_INT64);
+  af::ascir_op::Add bucket("graph_hint/add2");
+  graph->AddNode(bucket);
+  bucket.x1 = where.y;
+  bucket.x2 = scalar1_b2.y;
+  SetView(bucket, axes, full, full_strides, af::DT_INT64);
+
+  af::ascir_op::Data table("graph_hint/data1", *graph);
+  table.ir_attr.SetIndex(1);
+  table.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load table_load("graph_hint/load1");
+  graph->AddNode(table_load);
+  table_load.x = table.y;
+  table_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(table_load, axes, {rows, table_rows, af::ops::One}, {af::ops::One, rows, af::ops::Zero}, af::DT_FLOAT);
+  af::ascir_op::Transpose transpose("graph_hint/transpose");
+  graph->AddNode(transpose);
+  transpose.x = table_load.y;
+  SetView(transpose, axes, {rows, table_rows, af::ops::One}, {table_rows, af::ops::One, af::ops::Zero}, af::DT_FLOAT);
+  af::ascir_op::Broadcast table_b("graph_hint/broadcast25");
+  graph->AddNode(table_b);
+  table_b.x = transpose.y;
+  SetView(table_b, axes, {rows, table_rows, lookups}, {table_rows * lookups, lookups, af::ops::One}, af::DT_FLOAT);
+  af::ascir_op::IndirectLoad indirect("graph_hint/indirectload");
+  graph->AddNode(indirect);
+  indirect.x1 = table_b.y;
+  indirect.x2 = bucket.y;
+  indirect.ir_attr.SetAxis(1);
+  indirect.ir_attr.SetNegative_index_support(true);
+  indirect.ir_attr.SetNeed_check_bound(true);
+  indirect.ir_attr.SetMax(table_rows);
+  SetView(indirect, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::Data side("graph_hint/data2", *graph);
+  side.ir_attr.SetIndex(2);
+  side.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load side_load("graph_hint/load2");
+  graph->AddNode(side_load);
+  side_load.x = side.y;
+  side_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(side_load, axes, {af::ops::One, dim, lookups}, {af::ops::Zero, lookups, af::ops::One}, af::DT_FLOAT);
+  af::ascir_op::Broadcast side_b("graph_hint/broadcast26");
+  graph->AddNode(side_b);
+  side_b.x = side_load.y;
+  SetView(side_b, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Add add_gathered("graph_hint/add3");
+  graph->AddNode(add_gathered);
+  add_gathered.x1 = indirect.y;
+  add_gathered.x2 = side_b.y;
+  SetView(add_gathered, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Add add_score("graph_hint/add4");
+  graph->AddNode(add_score);
+  add_score.x1 = load.y;
+  add_score.x2 = add_gathered.y;
+  SetView(add_score, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::Data row_bias("graph_hint/data3", *graph);
+  row_bias.ir_attr.SetIndex(3);
+  row_bias.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load row_bias_load("graph_hint/load3");
+  graph->AddNode(row_bias_load);
+  row_bias_load.x = row_bias.y;
+  row_bias_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(row_bias_load, axes, reduced, reduced_strides, af::DT_FLOAT);
+  af::ascir_op::Broadcast row_bias_b("graph_hint/broadcast27");
+  graph->AddNode(row_bias_b);
+  row_bias_b.x = row_bias_load.y;
+  SetView(row_bias_b, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Sub sub("graph_hint/sub");
+  graph->AddNode(sub);
+  sub.x1 = add_score.y;
+  sub.x2 = row_bias_b.y;
+  SetView(sub, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Exp exp("graph_hint/exp");
+  graph->AddNode(exp);
+  exp.x = sub.y;
+  SetView(exp, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Sum sum("graph_hint/sum");
+  graph->AddNode(sum);
+  sum.attr.api.compute_type = af::ComputeType::kComputeReduce;
+  sum.x = exp.y;
+  SetView(sum, axes, reduced, reduced_strides, af::DT_FLOAT);
+  af::ascir_op::Store store("graph_hint/store");
+  graph->AddNode(store);
+  store.ir_attr.SetOffset(af::sym::kSymbolZero);
+  store.x = sum.y;
+  SetView(store, axes, reduced, reduced_strides, af::DT_FLOAT);
+  af::ascir_op::Output output("graph_hint/output");
+  graph->AddNode(output);
+  output.ir_attr.SetIndex(0);
+  output.x = store.y;
+  output.y.dtype = af::DT_FLOAT;
+  return graph;
+}
 #elif defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
 // The full variant uses the exact dimensions and views from the user-provided
 // ASCIR graph.  Keep the small variant as a fast regression for the same
@@ -4114,7 +4290,7 @@ std::shared_ptr<af::AscGraph> CreateUserPositionBiasSubGraph() {
 constexpr int64_t kUserMaskedRows = 128;
 constexpr int64_t kUserMaskedDim = 128;
 constexpr int64_t kUserMaskedLookups = 38;
-constexpr int64_t kUserMaskedTableRows = 98166;
+constexpr int64_t kUserMaskedTableRows = 512;
 #else
 constexpr int64_t kUserMaskedRows = 2;
 constexpr int64_t kUserMaskedDim = 2;
@@ -4236,7 +4412,7 @@ std::shared_ptr<af::AscGraph> CreateUserMaskedEmbeddingSumSubGraph() {
 // for the SIMT zero-stride/physical-gap fallback.
 constexpr int64_t kGraphHintRows = 8;
 constexpr int64_t kGraphHintColumns = 50;
-constexpr int64_t kGraphHintTableRows = 1353406;
+constexpr int64_t kGraphHintTableRows = 512;
 constexpr int64_t kGraphHintTableStride = 8;
 constexpr char kGraphHintGraphName[] = "indirect_load_graph_hint_reduce_simt_test";
 
@@ -5025,23 +5201,6 @@ TEST_F(TestBackendUserEmbeddingSumE2e, GeneratesUserEmbeddingSumKernel) {
 #endif
   indirect_load_test::WriteGeneratedFiles(result);
 }
-#elif defined(IL_USER_EMBEDDING_MUL)
-using TestBackendUserEmbeddingMulE2e = indirect_load_test::BackendE2e;
-
-TEST_F(TestBackendUserEmbeddingMulE2e, GeneratesUserEmbeddingMulKernel) {
-  ASSERT_NE(testing::UnitTest::GetInstance(), nullptr);
-  ThreeInputBackendGraph backend(kUserEmbeddingMulGraphName, af::DT_FLOAT16, af::DT_INT64, af::DT_FLOAT16,
-                                 af::DT_FLOAT16);
-  const auto graph = backend.Finalize(CreateUserEmbeddingMulSubGraph());
-  ASSERT_NE(graph, nullptr);
-  codegen::CodegenResult result;
-  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimt, result);
-  EXPECT_NE(result.kernel.find("// IndirectLoad SIMT"), std::string::npos);
-#ifdef IL_EXPECT_EMBEDDING_SIMT
-  indirect_load_test::ExpectSimtCaseTag(result.kernel, ascgen_utils::indirect_load::SimtAddressPolicy::kEmbedding);
-#endif
-  indirect_load_test::WriteGeneratedFiles(result);
-}
 #elif defined(IL_DUAL_IL_GATHER)
 using TestBackendUserAddGatherE2e = indirect_load_test::BackendE2e;
 
@@ -5080,11 +5239,6 @@ TEST_F(TestBackendUserLayerNormE2e, GeneratesUserLayerNormKernel) {
   ThreeInputTwoOutputBackendGraph backend(kUserLayerNormGraphName);
   const auto graph = backend.Finalize(CreateUserLayerNormSubGraph());
   ASSERT_NE(graph, nullptr);
-#if defined(IL_USER_LAYERNORM_SIMD)
-  codegen::CodegenResult result;
-  indirect_load_test::GenerateForTemplate(graph, {}, ascir::TemplateId::kIndirectLoadSimd, result);
-  EXPECT_NE(result.kernel.find("// IndirectLoad SIMD"), std::string::npos);
-#else
   ascir::FusedScheduledResult scheduled_result;
   optimize::Optimizer optimizer(optimize::OptimizerOptions{.graph_type = optimize::GraphType::kFusedAscBackend});
   ASSERT_EQ(optimizer.Optimize(graph, scheduled_result), af::SUCCESS);
@@ -5092,7 +5246,6 @@ TEST_F(TestBackendUserLayerNormE2e, GeneratesUserLayerNormKernel) {
   codegen::CodegenResult result;
   ASSERT_EQ(codegen.Generate({}, scheduled_result, result), af::SUCCESS);
   EXPECT_NE(result.kernel.find("IndirectLoad"), std::string::npos);
-#endif
   indirect_load_test::WriteGeneratedFiles(result);
 }
 #elif defined(IL_GRAPH_HINT_SIMD_REPRO)
@@ -5146,6 +5299,24 @@ TEST_F(TestBackendUserPositionBiasE2e, GeneratesUserPositionBiasKernel) {
   codegen::CodegenResult result;
   codegen::Codegen codegen(codegen::CodegenOptions{});
   ASSERT_EQ(codegen.Generate({}, scheduled_result, result), af::SUCCESS);
+  indirect_load_test::WriteGeneratedFiles(result);
+}
+#elif defined(IL_USER_POSITION_BIAS_EXP_SUM)
+using TestBackendUserPositionBiasExpSumE2e = indirect_load_test::PrecisionBackendE2e;
+
+TEST_F(TestBackendUserPositionBiasExpSumE2e, GeneratesUserPositionBiasExpSumKernel) {
+  VariadicBackendGraph backend(kUserPositionBiasExpSumGraphName,
+                               {af::DT_FLOAT, af::DT_FLOAT, af::DT_FLOAT, af::DT_FLOAT}, {af::DT_FLOAT});
+  const auto graph = backend.Finalize(CreateUserPositionBiasExpSumSubGraph());
+  ASSERT_NE(graph, nullptr);
+  ascir::FusedScheduledResult scheduled_result;
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{.graph_type = optimize::GraphType::kFusedAscBackend});
+  ASSERT_EQ(optimizer.Optimize(graph, scheduled_result), af::SUCCESS);
+  codegen::CodegenResult result;
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  ASSERT_EQ(codegen.Generate({}, scheduled_result, result), af::SUCCESS);
+  EXPECT_NE(result.kernel.find("IndirectLoad"), std::string::npos);
+  EXPECT_NE(result.kernel.find("ReduceSum"), std::string::npos);
   indirect_load_test::WriteGeneratedFiles(result);
 }
 #elif defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)

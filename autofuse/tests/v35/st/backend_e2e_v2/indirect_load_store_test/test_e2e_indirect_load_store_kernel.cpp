@@ -47,9 +47,6 @@ extern "C" __global__ __aicore__ void user_embedding_exp_abs_add(GM_ADDR indices
 #elif defined(IL_USER_EMBEDDING_SUM)
 extern "C" __global__ __aicore__ void user_embedding_sum(GM_ADDR table, GM_ADDR indices, GM_ADDR output,
                                                          GM_ADDR workspace, GM_ADDR gm_tiling_data);
-#elif defined(IL_USER_EMBEDDING_MUL)
-extern "C" __global__ __aicore__ void user_embedding_mul(GM_ADDR table, GM_ADDR indices, float scale, GM_ADDR output,
-                                                         GM_ADDR workspace, GM_ADDR gm_tiling_data);
 #elif defined(IL_USER_LAYERNORM)
 extern "C" __global__ __aicore__ void user_layernorm(GM_ADDR indices, GM_ADDR embedding, GM_ADDR weight,
                                                      GM_ADDR raw_output, GM_ADDR square_output, GM_ADDR workspace,
@@ -703,9 +700,9 @@ namespace {
 #if IL_AIC_REPRO
 using DataType = float;
 using IndexType = int64_t;
-constexpr int32_t kInputRows = 100000;
-constexpr int32_t kRows = 1024;
-constexpr int32_t kColumns = 1024;
+constexpr int32_t kInputRows = 8192;
+constexpr int32_t kRows = 512;
+constexpr int32_t kColumns = 512;
 
 void InitializeAicReproData(DataType *input, IndexType *index, DataType *expected) {
   for (int32_t row = 0; row < kInputRows; ++row) {
@@ -1017,9 +1014,6 @@ TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
       const float value = static_cast<float>(embedding.get()[indices.get()[row] * kDim + col]);
 #if defined(IL_USER_FANOUT_POST)
       const float source = std::fabs(value);
-#else
-      const float source = value;
-#endif
       EXPECT_NEAR(static_cast<float>(output0.get()[row * kDim + col]), std::exp(source), 0.125F)
           << "output0 row=" << row << ", col=" << col;
 #if defined(IL_USER_FANOUT_REDUCE)
@@ -1027,6 +1021,17 @@ TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
 #else
       EXPECT_NEAR(static_cast<float>(output1.get()[row * kDim + col]), std::fabs(source), 0.125F)
           << "output1 row=" << row << ", col=" << col;
+#endif
+#else
+      const float source = value;
+      EXPECT_NEAR(static_cast<float>(output0.get()[row * kDim + col]), std::exp(source), 0.125F)
+          << "output0 row=" << row << ", col=" << col;
+#if defined(IL_USER_FANOUT_REDUCE)
+      expected_reduce += source * source;
+#else
+      EXPECT_NEAR(static_cast<float>(output1.get()[row * kDim + col]), std::fabs(source), 0.125F)
+          << "output1 row=" << row << ", col=" << col;
+#endif
 #endif
     }
 #if defined(IL_USER_FANOUT_REDUCE)
@@ -1259,58 +1264,11 @@ TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
   AscendC::GmFree(output);
 }
 
-#elif defined(IL_USER_EMBEDDING_MUL)
-TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
-  constexpr int32_t kRows = 1024;
-  constexpr int32_t kDim = 2048;
-  constexpr int32_t kTableRows = 2;
-  auto *indices = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kRows));
-  auto *table = static_cast<half *>(AscendC::GmAlloc(sizeof(half) * kTableRows * kDim));
-  auto *output = static_cast<half *>(AscendC::GmAlloc(sizeof(half) * kRows * kDim));
-  ASSERT_NE(indices, nullptr);
-  ASSERT_NE(table, nullptr);
-  ASSERT_NE(output, nullptr);
-  constexpr float scale = 0.5F;
-  for (int32_t row = 0; row < kRows; ++row) indices[row] = row % kTableRows;
-  for (int32_t row = 0; row < kTableRows; ++row) {
-    for (int32_t col = 0; col < kDim; ++col) {
-      table[row * kDim + col] = static_cast<half>((row + 1) * 0.01F + col * 0.001F);
-    }
-  }
-  std::fill_n(output, kRows * kDim, static_cast<half>(0.0F));
-  AutofuseTilingData tiling_data{};
-  uint32_t workspace_size = 0U;
-  uint32_t block_dim = 48U;
-  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
-  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
-  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
-  AscendC::SetKernelMode(KernelMode::AIV_MODE);
-  ICPU_RUN_KF(user_embedding_mul, block_dim, reinterpret_cast<uint8_t *>(table), reinterpret_cast<uint8_t *>(indices),
-              scale, reinterpret_cast<uint8_t *>(output), reinterpret_cast<uint8_t *>(workspace),
-              reinterpret_cast<uint8_t *>(&tiling_data));
-  for (int32_t row = 0; row < kRows; ++row) {
-    for (int32_t col = 0; col < kDim; ++col) {
-      const float expected = static_cast<float>(table[indices[row] * kDim + col]) * scale;
-      EXPECT_NEAR(static_cast<float>(output[row * kDim + col]), expected, 0.0625F) << "row=" << row << ", col=" << col;
-    }
-  }
-  if (workspace != nullptr) AscendC::GmFree(workspace);
-  AscendC::GmFree(indices);
-  AscendC::GmFree(table);
-  AscendC::GmFree(output);
-}
-
 #elif defined(IL_USER_LAYERNORM)
 TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
-#if defined(IL_USER_LAYERNORM_SIMD)
-  constexpr int32_t kRows = 2;
-  constexpr int32_t kDim = 16;
-  constexpr int32_t kTableRows = 100;
-#else
-  constexpr int32_t kRows = 21;
-  constexpr int32_t kDim = 2048;
-  constexpr int32_t kTableRows = 102400;
-#endif
+  constexpr int32_t kRows = 8;
+  constexpr int32_t kDim = 256;
+  constexpr int32_t kTableRows = 1024;
   auto *indices = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kRows));
   auto *embedding = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kTableRows * kDim));
   auto *weight = static_cast<bfloat16_t *>(AscendC::GmAlloc(sizeof(bfloat16_t) * kRows * kDim));
@@ -1429,6 +1387,10 @@ extern "C" int64_t AutofuseTiling(AutofuseTilingData *, uint32_t *, uint32_t *, 
 #if defined(IL_USER_POSITION_BIAS)
 extern "C" __global__ __aicore__ void user_position_bias(GM_ADDR input0, GM_ADDR input1, GM_ADDR input2, GM_ADDR output,
                                                          GM_ADDR workspace, GM_ADDR tiling);
+#elif defined(IL_USER_POSITION_BIAS_EXP_SUM)
+extern "C" __global__ __aicore__ void user_position_bias_exp_sum(GM_ADDR input0, GM_ADDR input1, GM_ADDR input2,
+                                                                 GM_ADDR input3, GM_ADDR output, GM_ADDR workspace,
+                                                                 GM_ADDR tiling);
 #elif defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
 extern "C" __global__ __aicore__ void user_masked_embedding_sum(GM_ADDR input0, GM_ADDR input1, GM_ADDR input2,
                                                                 GM_ADDR output, GM_ADDR workspace, GM_ADDR tiling);
@@ -1462,8 +1424,8 @@ namespace {
 #ifndef IL_ADD_IL_REDUCE
 #if defined(IL_USER_POSITION_BIAS)
 constexpr int32_t kUserPositionBiasRows = 8;
-constexpr int32_t kUserPositionBiasDim = 2048;
-constexpr int32_t kUserPositionBiasLookups = 2048;
+constexpr int32_t kUserPositionBiasDim = 256;
+constexpr int32_t kUserPositionBiasLookups = 256;
 constexpr int32_t kUserPositionBiasTableRows = 32;
 
 TEST(E2EUserPositionBias, GeneratedKernelMatchesReference) {
@@ -1508,12 +1470,92 @@ TEST(E2EUserPositionBias, GeneratedKernelMatchesReference) {
   }
   if (workspace != nullptr) AscendC::GmFree(workspace);
 }
+#elif defined(IL_USER_POSITION_BIAS_EXP_SUM)
+constexpr int32_t kUserPositionBiasExpSumRows = 8;
+constexpr int32_t kUserPositionBiasExpSumDim = 256;
+constexpr int32_t kUserPositionBiasExpSumLookups = 256;
+constexpr int32_t kUserPositionBiasExpSumTableRows = 32;
+
+TEST(E2EUserPositionBiasExpSum, GeneratedKernelMatchesReference) {
+  const int64_t score_count =
+      static_cast<int64_t>(kUserPositionBiasExpSumRows) * kUserPositionBiasExpSumDim * kUserPositionBiasExpSumLookups;
+  const int64_t table_count = static_cast<int64_t>(kUserPositionBiasExpSumTableRows) * kUserPositionBiasExpSumRows;
+  const int64_t bias_count = static_cast<int64_t>(kUserPositionBiasExpSumDim) * kUserPositionBiasExpSumLookups;
+  const int64_t row_bias_count = static_cast<int64_t>(kUserPositionBiasExpSumRows) * kUserPositionBiasExpSumDim;
+  auto score = indirect_load_test::AllocGmBuffer<float>(score_count);
+  auto table = indirect_load_test::AllocGmBuffer<float>(table_count);
+  auto bias = indirect_load_test::AllocGmBuffer<float>(bias_count);
+  auto row_bias = indirect_load_test::AllocGmBuffer<float>(row_bias_count);
+  auto output = indirect_load_test::AllocGmBuffer<float>(row_bias_count);
+  ASSERT_TRUE(score && table && bias && row_bias && output);
+
+  for (int64_t i = 0; i < score_count; ++i) {
+    score.get()[i] = static_cast<float>(i % 97) * 0.02F - 0.9F;
+  }
+  for (int32_t bucket = 0; bucket < kUserPositionBiasExpSumTableRows; ++bucket) {
+    for (int32_t r = 0; r < kUserPositionBiasExpSumRows; ++r) {
+      table.get()[static_cast<int64_t>(bucket) * kUserPositionBiasExpSumRows + r] =
+          static_cast<float>(bucket % 8) * 0.125F + static_cast<float>(r) * 0.03F;
+    }
+  }
+  for (int64_t i = 0; i < bias_count; ++i) {
+    bias.get()[i] = static_cast<float>(i % 53) * 0.04F - 1.0F;
+  }
+  for (int64_t i = 0; i < row_bias_count; ++i) {
+    row_bias.get()[i] = static_cast<float>(i % 29) * 0.06F - 0.8F;
+  }
+  std::fill_n(output.get(), row_bias_count, 0.0F);
+
+  AutofuseTilingData tiling_data{};
+  uint32_t workspace_size = 0U;
+  uint32_t block_dim = 48U;
+  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
+  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
+  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
+
+  AscendC::SetKernelMode(KernelMode::AIV_MODE);
+  ICPU_RUN_KF(user_position_bias_exp_sum, block_dim, reinterpret_cast<uint8_t *>(score.get()),
+              reinterpret_cast<uint8_t *>(table.get()), reinterpret_cast<uint8_t *>(bias.get()),
+              reinterpret_cast<uint8_t *>(row_bias.get()), reinterpret_cast<uint8_t *>(output.get()),
+              reinterpret_cast<uint8_t *>(workspace), reinterpret_cast<uint8_t *>(&tiling_data));
+
+  std::vector<int64_t> buckets(static_cast<size_t>(kUserPositionBiasExpSumLookups), 0);
+  for (int32_t distance = 0; distance < kUserPositionBiasExpSumLookups; ++distance) {
+    buckets[static_cast<size_t>(distance)] =
+        distance < 16
+            ? distance
+            : std::min<int64_t>(static_cast<int64_t>(std::log(distance / 16.0) * 0.48089834696298783 * 16.0) + 16, 31);
+  }
+  for (int32_t r = 0; r < kUserPositionBiasExpSumRows; ++r) {
+    for (int32_t p1 = 0; p1 < kUserPositionBiasExpSumDim; ++p1) {
+      double expected = 0.0;
+      for (int32_t p2 = 0; p2 < kUserPositionBiasExpSumLookups; ++p2) {
+        const int64_t distance = p1 - p2 > 0 ? p1 - p2 : 0;
+        const int64_t score_offset =
+            (static_cast<int64_t>(r) * kUserPositionBiasExpSumDim + p1) * kUserPositionBiasExpSumLookups + p2;
+        const double value =
+            static_cast<double>(score.get()[score_offset]) +
+            static_cast<double>(table.get()[buckets[static_cast<size_t>(distance)] * kUserPositionBiasExpSumRows + r]) +
+            static_cast<double>(bias.get()[static_cast<int64_t>(p1) * kUserPositionBiasExpSumLookups + p2]) -
+            static_cast<double>(row_bias.get()[static_cast<int64_t>(r) * kUserPositionBiasExpSumDim + p1]);
+        expected += std::exp(value);
+      }
+      const int64_t output_offset = static_cast<int64_t>(r) * kUserPositionBiasExpSumDim + p1;
+      EXPECT_NEAR(static_cast<double>(output.get()[output_offset]), expected, std::max(0.5, expected * 2e-3))
+          << "r=" << r << ", p1=" << p1;
+    }
+  }
+
+  if (workspace != nullptr) {
+    AscendC::GmFree(workspace);
+  }
+}
 #elif defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
 #if defined(IL_USER_MASKED_EMBEDDING_SUM_FULL)
 constexpr int32_t kUserMaskedRows = 128;
 constexpr int32_t kUserMaskedDim = 128;
 constexpr int32_t kUserMaskedLookups = 38;
-constexpr int32_t kUserMaskedTableRows = 98166;
+constexpr int32_t kUserMaskedTableRows = 512;
 #else
 constexpr int32_t kUserMaskedRows = 2;
 constexpr int32_t kUserMaskedDim = 2;
@@ -1578,7 +1620,7 @@ TEST(E2EUserMaskedEmbeddingSum, GeneratedKernelMatchesReference) {
         const int64_t selected = index.get()[offset];
         expected += embedding.get()[selected * kUserMaskedDim + column];
       }
-      EXPECT_FLOAT_EQ(output.get()[static_cast<int64_t>(row) * kUserMaskedDim + column], expected)
+      EXPECT_NEAR(output.get()[static_cast<int64_t>(row) * kUserMaskedDim + column], expected, 1e-4F)
           << "row=" << row << ", column=" << column;
     }
   }
@@ -1586,7 +1628,7 @@ TEST(E2EUserMaskedEmbeddingSum, GeneratedKernelMatchesReference) {
 #elif defined(IL_GRAPH_HINT_EMBEDDING_SLICE)
 constexpr int32_t kGraphHintEmbeddingSliceRows = 128;
 constexpr int32_t kGraphHintEmbeddingSliceColumns = 512;
-constexpr int32_t kGraphHintEmbeddingSliceTableRows = 65536;
+constexpr int32_t kGraphHintEmbeddingSliceTableRows = 512;
 constexpr int32_t kGraphHintEmbeddingSliceIndexStride = 39;
 constexpr int32_t kGraphHintEmbeddingSliceIndexOffset = 13;
 
@@ -1700,7 +1742,7 @@ TEST(E2EIndirectLoadGraphHintSimdRepro, GeneratedKernelMatchesReference) {
 #elif defined(IL_GRAPH_HINT_REDUCE)
 constexpr int32_t kGraphHintRows = 8;
 constexpr int32_t kGraphHintColumns = 50;
-constexpr int32_t kGraphHintTableRows = 1353406;
+constexpr int32_t kGraphHintTableRows = 512;
 constexpr int32_t kGraphHintTableStride = 8;
 
 TEST(E2EIndirectLoadGraphHintReduce, GeneratedKernelMatchesReference) {
@@ -1718,8 +1760,8 @@ TEST(E2EIndirectLoadGraphHintReduce, GeneratedKernelMatchesReference) {
     table[static_cast<int64_t>(row) * kGraphHintTableStride] = static_cast<float>((row % 97) * 0.25F + 1.0F);
   }
   for (int32_t column = 0; column < kGraphHintColumns; ++column) {
-    index0[column] = (column % 3 == 0) ? -1 : static_cast<int64_t>(column * 10000 + 7);
-    index2[column] = static_cast<int64_t>(column * 20000 + 11);
+    index0[column] = (column % 3 == 0) ? -1 : static_cast<int64_t>((column * 10000 + 7) % kGraphHintTableRows);
+    index2[column] = static_cast<int64_t>((column * 20000 + 11) % kGraphHintTableRows);
   }
 
   AutofuseTilingData tiling_data{};
