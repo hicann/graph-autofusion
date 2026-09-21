@@ -141,7 +141,7 @@ else
 	esac
 fi
 
-
+/usr/local/ccache/bin/ccache -s
 if [ $ret -ne 200 ] && [ $ret -ne 0 ]; then
     echo "run ut fail"
     exit 1
