@@ -5,10 +5,8 @@
 AutoFuse 是 CANN 生态中面向昇腾系列芯片的自动算子融合组件。它接收 GE、Inductor 等图编译组件经图转换、Lowering 和融合范围判定后产出的融合子图及统一 IR，在已确定的融合范围内完成调度优化、Tiling 求解与代码生成，最终输出高性能的 AscendC 融合算子。通过将多个原本独立执行的算子融合为单一 Kernel，AutoFuse 有效减少了中间结果的 GM 读写、Kernel 启动次数以及 Host-Device 调度开销，从而显著提升昇腾 NPU 上的模型执行性能。
 
 整体逻辑结构如下图所示：
+![image.png](https://raw.gitcode.com/user-images/assets/9919791/0612a8e4-c3e8-4a13-9846-b2b2ab98844e/image.png 'image.png')
 
-<div style="text-align: center;">
-<img src="../figures/af_arch.png" alt="AutoFuse 逻辑结构图" style="width: 80%; max-width: 1200px;">
-</div>
 
 如图所示，自动融合方案基于昇腾 NPU 底层统一的 AscendLoopIR（面向 AscendC 编程语言建模的 IR）以及配套的 Schedule 和代码生成等能力，构建了两条融合实现路径：
 
