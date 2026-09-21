@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of 
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, 
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
@@ -25,28 +25,31 @@ def verify_result(output, golden, output_dtype):
     print("#################TEST RESULT#####################")
     print("output result:", output)
     print("golden result:", golden)
-    different_element_results = np.isclose(output,
-                                           golden,
-                                           rtol=relative_tol,
-                                           atol=absolute_tol,
-                                           equal_nan=True)
-    different_element_indexes = np.where(different_element_results == False)[0]
+    different_element_results = np.isclose(
+        output, golden, rtol=relative_tol, atol=absolute_tol, equal_nan=True
+    )
+    different_element_indexes = np.where(np.logical_not(different_element_results))[0]
     for index in range(len(different_element_indexes)):
         real_index = different_element_indexes[index]
         golden_data = golden[real_index]
         output_data = output[real_index]
         print(
-            "data index: %06d, expected: %-.9f, actual: %-.9f, rdiff: %-.6f" %
-            (real_index, golden_data, output_data,
-             abs(output_data - golden_data) / golden_data))
+            "data index: %06d, expected: %-.9f, actual: %-.9f, rdiff: %-.6f"
+            % (
+                real_index,
+                golden_data,
+                output_data,
+                abs(output_data - golden_data) / golden_data,
+            )
+        )
         if index == 100:
             break
     error_ratio = float(different_element_indexes.size) / golden.size
-    print("error ratio: %.4f, tolrence: %.4f" % (error_ratio, error_tol))
+    print("error ratio: %.4f, tolerance: %.4f" % (error_ratio, error_tol))
     return error_ratio <= error_tol
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         if sys.argv[4] == "float16":
             print("output dtype is float16")
@@ -64,7 +67,9 @@ if __name__ == '__main__':
             print("output dtype is float32")
             output_dtype = np.float32
         else:
-            raise ValueError("[ERROR]current output type(", sys.argv[4], ") not support")
+            raise ValueError(
+                "[ERROR]current output type(", sys.argv[4], ") is not supported"
+            )
         res = verify_result(sys.argv[1], sys.argv[2], output_dtype)
         if not res:
             raise ValueError("[ERROR] testcase: ", sys.argv[3], ", Result: ERROR")

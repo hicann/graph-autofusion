@@ -34,12 +34,12 @@ bool IsSupportInplace(const af::AscNodePtr &node) {
     return false;
   }
   // 2. 当前节点如果是多输出，不支持复用（白名单可保证没有多输出节点，但是还是加一个校验）
-  GE_WARN_ASSERT(node->GetAllOutDataAnchorsSize() == 1U, "%s[%s] not support output anchor size=%u.",  // 单输出
+  GE_WARN_ASSERT(node->GetAllOutDataAnchorsSize() == 1U, "%s[%s] does not support output anchor size=%u.",  // 单输出
                  node->GetTypePtr(), node->GetNamePtr(), node->GetAllOutDataAnchorsSize());
   GE_WARN_ASSERT(node->GetInDataNodesSize() > 0UL,  // 多输入
-                 "%s[%s] not support input size=0.", node->GetTypePtr(), node->GetNamePtr());
+                 "%s[%s] does not support input size=0.", node->GetTypePtr(), node->GetNamePtr());
   GE_WARN_ASSERT(node->GetOutDataNodesSize() > 0UL,  // 单输出，多引用
-                 "%s[%s] not support output size=0.", node->GetTypePtr(), node->GetNamePtr());
+                 "%s[%s] does not support output size=0.", node->GetTypePtr(), node->GetNamePtr());
 
   // 3. 若节点的任一输入是个单输出多引用，则不支持复用（存在优化空间，当前先不细化
   for (const auto &input_node : node->GetInDataNodes()) {

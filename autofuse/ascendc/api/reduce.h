@@ -73,7 +73,7 @@ inline __aicore__ void ReduceLast(const LocalTensor<T> &dst, const LocalTensor<T
       BinaryFunc(dst, dst, tmp_tensor, m);
     }
   } else {
-    ASSERT(false && "Reduce k size not support.");
+    ASSERT(false && "Reduce k size is not supported.");
   }
 }
 

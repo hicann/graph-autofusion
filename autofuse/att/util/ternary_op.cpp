@@ -247,7 +247,7 @@ std::vector<std::pair<Expr, Expr>> ConcursiveReplaceVars(const std::map<Expr, Te
         replace_var = CreateExpr(cur_ternary_op.GetTernaryOpStr().c_str());
         res[cur_var] = replace_var;
         replace_vars.emplace_back(std::make_pair(cur_var, replace_var));
-        GELOGD("Make concursive replace [%s] -> [%s].", Str(cur_var).c_str(), Str(replace_var).c_str());
+        GELOGD("Make recursive replace [%s] -> [%s].", Str(cur_var).c_str(), Str(replace_var).c_str());
         replace_stack.pop();
       }
     }
@@ -257,7 +257,7 @@ std::vector<std::pair<Expr, Expr>> ConcursiveReplaceVars(const std::map<Expr, Te
     replace_var = CreateExpr(cur_ternary_op.GetTernaryOpStr().c_str());
     res[cur_var] = replace_var;
     replace_vars.emplace_back(std::make_pair(cur_var, replace_var));
-    GELOGD("Make concursive replace [%s] -> [%s].", Str(cur_var).c_str(), Str(replace_var).c_str());
+    GELOGD("Make recursive replace [%s] -> [%s].", Str(cur_var).c_str(), Str(replace_var).c_str());
   }
   return replace_vars;
 }
@@ -273,7 +273,7 @@ std::map<Expr, std::vector<Expr>, ExprCmp> ConcursiveRelatedVars(
     AddRelatedVars(pair.first, pair.second, ternary_ops, res);
   }
   for (const auto &pair : res) {
-    GELOGD("Make concursive vars [%s]:{%s}.", Str(pair.first).c_str(), GetVecString(pair.second).c_str());
+    GELOGD("Make recursive vars [%s]:{%s}.", Str(pair.first).c_str(), GetVecString(pair.second).c_str());
   }
   return res;
 }

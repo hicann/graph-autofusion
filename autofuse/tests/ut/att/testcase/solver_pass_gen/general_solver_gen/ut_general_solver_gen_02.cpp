@@ -74,11 +74,11 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_gen_buffer_cost) {
   solver_->impl_codes_ = "";
   solver_->GenBuffFunc();
   expect_codes += "/*\n";
-  expect_codes += "函数名:Gethbm_sizeCost(重要函数)\n";
-  expect_codes += "功能描述:\n";
-  expect_codes += "  根据待求解变量值hbm_size缓存占用信息(occupy-buff)\n";
-  expect_codes += "输入参数:\n";
-  expect_codes += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+  expect_codes += "Function: Gethbm_sizeCost(important)\n";
+  expect_codes += "Description:\n";
+  expect_codes += "  Gets cache occupancy information (occupy-buff) from hbm_size\n";
+  expect_codes += "Input parameters:\n";
+  expect_codes += "  vars:an array of length num_var corresponding to the variables\n";
   expect_codes += "*/\n";
   expect_codes += "inline double GeneralSolverCase0::Gethbm_sizeCost(uint64_t* vars)\n";
   expect_codes += "{\n";
@@ -89,12 +89,12 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_gen_buffer_cost) {
   expect_codes += "\n";
 
   expect_codes += "/*\n";
-  expect_codes += "函数名:GetSmoothhbm_sizeCost(重要函数)\n";
-  expect_codes += "功能描述:\n";
-  expect_codes += "  根据待求解变量值hbm_size的平滑化缓存占用信息\n";
-  expect_codes += "  与Gethbm_sizeCost函数相比,整除运算被替换为浮点数的除法运算\n";
-  expect_codes += "输入参数:\n";
-  expect_codes += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+  expect_codes += "Function: GetSmoothhbm_sizeCost(important)\n";
+  expect_codes += "Description:\n";
+  expect_codes += "  Gets smoothed cache occupancy information from hbm_size\n";
+  expect_codes += "  Compared with Gethbm_sizeCost, integer division is replaced with floating-point division\n";
+  expect_codes += "Input parameters:\n";
+  expect_codes += "  vars:an array of length num_var corresponding to the variables\n";
   expect_codes += "*/\n";
   expect_codes += "inline double GeneralSolverCase0::GetSmoothhbm_sizeCost(uint64_t* vars)\n";
   expect_codes += "{\n";
@@ -113,11 +113,11 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_gen_get_func) {
   solver_->impl_codes_ = "";
   solver_->GenGetFunc(FuncType::OBJ);
   expect_codes = "/*\n";
-  expect_codes += "函数名:GetObj(重要函数)\n";
-  expect_codes += "功能描述:\n";
-  expect_codes += "  根据待求解变量值输出目标函数\n";
-  expect_codes += "输入参数:\n";
-  expect_codes += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+  expect_codes += "Function: GetObj(important)\n";
+  expect_codes += "Description:\n";
+  expect_codes += "  Outputs the objective function for the variable values\n";
+  expect_codes += "Input parameters:\n";
+  expect_codes += "  vars:an array of length num_var corresponding to the variables\n";
   expect_codes += "*/\n";
   expect_codes += "inline double GeneralSolverCase0::GetObj(uint64_t* vars)\n";
   expect_codes += "{\n";
@@ -134,12 +134,12 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_gen_get_func) {
   solver_->impl_codes_ = "";
   solver_->GenGetFunc(FuncType::BUFFER);
   expect_codes = "/*\n";
-  expect_codes += "函数名:GetBuffCost(重要函数)\n";
-  expect_codes += "功能描述:\n";
-  expect_codes += "  根据待求解变量值输出缓存占用信息的罚函数(sigma(min(0, occupy-buff)^2))\n";
-  expect_codes += "  该函数用于量化解在缓存占用方面的质量\n";
-  expect_codes += "输入参数:\n";
-  expect_codes += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+  expect_codes += "Function: GetBuffCost(important)\n";
+  expect_codes += "Description:\n";
+  expect_codes += "  Outputs the cache occupancy penalty function (sigma(min(0, occupy-buff)^2))\n";
+  expect_codes += "  Quantifies solution quality in terms of cache occupancy\n";
+  expect_codes += "Input parameters:\n";
+  expect_codes += "  vars:an array of length num_var corresponding to the variables\n";
   expect_codes += "*/\n";
   expect_codes += "inline double GeneralSolverCase0::GetBuffCost(uint64_t* vars)\n";
   expect_codes += "{\n";
@@ -262,15 +262,15 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_gen_get_result) {
 
 TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_create_input) {
   std::string expect_codes = "";
-  expect_codes += "    // 以下参数若未注明是可修改参数,则不建议修改\n";
-  expect_codes += "    // 由modelinfo传入的待求解变量个数\n";
+  expect_codes += "    // Do not modify parameters unless marked as configurable\n";
+  expect_codes += "    // Number of variables passed from modelinfo\n";
   expect_codes += "    int32_t num_var = 2;\n";
-  expect_codes += "    // 由modelinfo传入的不等式约束个数\n";
+  expect_codes += "    // Number of inequality constraints passed from modelinfo\n";
   expect_codes += "    int32_t num_leq = 2;\n";
   expect_codes +=
       "    OP_LOGD(OP_NAME, \"The number of variable is %d(x0, x1), the number of constraints is %d.\", num_var, "
       "num_leq);\n";
-  expect_codes += "    // 初始化解的个数为0\n";
+  expect_codes += "    // Initialize the number of solutions to 0\n";
   expect_codes += "    int32_t solution_num = 0;\n";
   expect_codes += "    size_t uint_size = 6 * static_cast<size_t>(num_var) * sizeof(uint64_t);\n";
   expect_codes += "    size_t double_size = 2 * static_cast<size_t>(num_leq + num_var) * sizeof(double);\n";
@@ -305,11 +305,13 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_create_input) {
   expect_codes += "    double* double_space = (double*)((char*)memory_pool + offset_double);\n";
   expect_codes += "    bool* bool_space = (bool*)((char*)memory_pool + offset_bool);\n";
   expect_codes +=
-      "    // 可修改参数:待求解变量的上界,过大的上界将导致搜索范围与耗时增加,过小的上界更有可能获得较差的局部最优解\n";
+      "    // Configurable:Variable upper bounds; overly large bounds increase search range and time, while overly "
+      "small bounds may produce a worse local optimum\n";
   expect_codes += "    uint_space[0] = static_cast<uint64_t>((2 * a));\n";
   expect_codes += "    uint_space[1] = static_cast<uint64_t>((2 * a));\n";
   expect_codes +=
-      "    // 可修改参数:待求解变量的下界,过小的下界将导致搜索范围与耗时增加,过大的下界更有可能获得较差的局部最优解\n";
+      "    // Configurable:Variable lower bounds; overly small bounds increase search range and time, while overly "
+      "large bounds may produce a worse local optimum\n";
   expect_codes += "    uint_space[2] = static_cast<uint64_t>(1);\n";
   expect_codes += "    if (static_cast<uint64_t>(1) > static_cast<uint64_t>((2 * a))) {\n";
   expect_codes += "        OP_LOGW(OP_NAME, \"Lower_bound[0] is larger than upper_bound[0].\");\n";
@@ -320,13 +322,15 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_create_input) {
   expect_codes += "        OP_LOGW(OP_NAME, \"Lower_bound[1] is larger than upper_bound[1].\");\n";
   expect_codes += "        return false;\n";
   expect_codes += "    }\n";
-  expect_codes += "    // 可修改参数:待求解变量的初始值,算法趋向于求初始值附近的局部最优解\n";
+  expect_codes +=
+      "    // Configurable:Initial variable values; the algorithm tends to find a local optimum near them\n";
   expect_codes += "    uint_space[8] = static_cast<uint64_t>((2 * a));\n";
   expect_codes += "    uint_space[9] = static_cast<uint64_t>((2 * a));\n";
   expect_codes += "    uint64_t* upper_bound = uint_space;\n";
   expect_codes += "    uint64_t* lower_bound = uint_space + 2;\n";
   expect_codes += "    uint64_t* init_vars = uint_space + 8;\n";
-  expect_codes += "    // 可修改参数:最后更新的待求解变量,设置为true的对应变量会更接近初始值\n";
+  expect_codes +=
+      "    // Configurable:Last updated variables; variables set to true stay closer to their initial values\n";
   expect_codes += "    bool_space[0] = true;\n";
   expect_codes += "    bool_space[1] = false;\n";
   expect_codes += "    VarInfo* var_info = (VarInfo*)((char*)memory_pool + offset_var_info);\n";
@@ -351,7 +355,7 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_create_input) {
       "    result->SetResult(cfg_top_num, num_var, (VarVal*)((char*)memory_pool + offset_varVal),((char*)memory_pool + "
       "offset_temp), ((char*)memory_pool + offset_solution));\n";
   expect_codes += "    visited_node->SetVisitedNode(num_var, visited_head);\n";
-  expect_codes += "    // 通用求解器的输入参数\n";
+  expect_codes += "    // Generic solver input parameters\n";
   expect_codes += "    SolverInput input;\n";
   expect_codes += "    input.corenum = corenum_;\n";
   expect_codes += "    input.var_info = var_info;\n";
@@ -377,10 +381,10 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_02, test_run_solver) {
   expect_codes +=
       "    std::shared_ptr<GeneralSolverCase0> solver = std::make_shared<GeneralSolverCase0>(cfg, tiling_data);\n";
   expect_codes += "    if (solver != nullptr) {\n";
-  expect_codes += "        // 导入通用求解器的输入参数并完成初始化\n";
+  expect_codes += "        // Import and initialize generic solver input parameters\n";
   expect_codes += "        OP_LOGD(OP_NAME, \"Start initializing the input.\");\n";
   expect_codes += "        if (solver -> Init(input)) {\n";
-  expect_codes += "            // 运行通用求解器并获取算法的解\n";
+  expect_codes += "            // Run the generic solver and obtain algorithm solutions\n";
   expect_codes += "            OP_LOGD(OP_NAME, \"Initialization finished, start running the solver.\");\n";
   expect_codes += "            if (solver -> Run(solution_num, solution)) {\n";
   expect_codes += "                solver -> GetResult(solution_num, solution, tiling_data);\n";

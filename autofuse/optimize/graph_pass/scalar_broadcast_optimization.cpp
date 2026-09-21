@@ -121,14 +121,15 @@ Status ScalarBroadcastOptimizationPass::IsNextNodeSupportScalarInput(const NodeV
       // step5: 若调换的输入已经是scalar，则不支持，结束
       const int32_t swap_input_index = kSecondInputIndex - static_cast<int32_t>(idx);  // 总共2个输入
       if (ascgen_utils::IsScalarInput(next_node->inputs[swap_input_index].attr.repeats)) {
-        GELOGD("The input index 1 of %s[%s] is already scalar, not support swap with %d.", next_node->GetTypePtr(),
-               next_node->GetNamePtr(), idx);
+        GELOGD("The input index 1 of %s[%s] is already scalar, so swapping it with %d is not supported.",
+               next_node->GetTypePtr(), next_node->GetNamePtr(), idx);
         return af::SUCCESS;  // 直接返回， is_supported 为 false
       }
 
       // step6: 可以交换顺序，但又不支持全部是Scalar，则不允许输入是相同节点（即输入都是Scalar），结束。
       if (ScheduleUtils::HasSameInput(next_node)) {
-        GELOGD("Node %s(%s) has same input, not support.", next_node->GetTypePtr(), next_node->GetNamePtr());
+        GELOGD("Node %s(%s) has the same input, so swapping is not supported.", next_node->GetTypePtr(),
+               next_node->GetNamePtr());
         return af::SUCCESS;
       }
 

@@ -33,7 +33,7 @@ def detect_scene(source_dir: str) -> str:
     if any("tiling_func" in f and f.endswith(".cpp") for f in files):
         return "tf"
     raise ValueError(
-        f"无法自动检测场景：{source_dir} 中未找到 *tiling_func*.cpp 或 output_code.py"
+        f"Unable to detect scene automatically: neither *tiling_func*.cpp nor output_code.py was found in {source_dir}"
     )
 
 
@@ -66,8 +66,8 @@ def print_input_config(input_params: Dict, source: str) -> None:
         f"dynamic_dims={input_params.get('dynamic_dims', [])}"
     )
     print(
-        "[verify-tiling] aiv_num 是传入 tiling 的配置值，请根据实际设备核数检查；"
-        "如不一致可使用 --aiv-num 或 --input-json 修改"
+        "[verify-tiling] aiv_num is the tiling configuration value; check it against the device core count;"
+        "use --aiv-num or --input-json to override it if they differ"
     )
 
 
@@ -139,7 +139,7 @@ def extract_inductor_artifacts(output_code_py: str) -> Tuple[str, str]:
         src = f.read()
     artifacts_match = re.search(r"(\w+_artifacts)\s*=\s*\{", src)
     if not artifacts_match:
-        raise ValueError("output_code.py 中未找到 *_artifacts 字典")
+        raise ValueError("*_artifacts dictionary not found in output_code.py")
     var_name = artifacts_match.group(1)
     tree = ast.parse(src, filename=output_code_py)
     artifacts = None
@@ -151,10 +151,12 @@ def extract_inductor_artifacts(output_code_py: str) -> Tuple[str, str]:
             try:
                 artifacts = ast.literal_eval(node.value)
             except (ValueError, TypeError, SyntaxError) as exc:
-                raise ValueError(f"{var_name} 必须是可解析的字面量字典") from exc
+                raise ValueError(
+                    f"{var_name} must be a parseable literal dictionary"
+                ) from exc
             break
     if not isinstance(artifacts, dict):
-        raise ValueError(f"{var_name} 不是字典")
+        raise ValueError(f"{var_name} is not a dictionary")
     return artifacts["tiling_def"], artifacts["host_impl"]
 
 
@@ -324,7 +326,7 @@ def execute_tiling(so_path: str, input_params: Dict, scene: str) -> Dict:
 def run(args):
     source_dir = os.path.abspath(args.source_dir)
     if not os.path.isdir(source_dir):
-        print(f"✗ 源目录不存在: {source_dir}")
+        print(f"✗ Source directory does not exist: {source_dir}")
         return 2
     try:
         scene = args.scene or detect_scene(source_dir)
@@ -334,7 +336,7 @@ def run(args):
     input_params = load_input_params(args)
     compile_cfg = load_compile_config(args)
     if args.log and not os.path.exists(args.log):
-        print(f"✗ 日志不存在: {args.log}")
+        print(f"✗ Log does not exist: {args.log}")
         return 2
 
     print(f"[verify-tiling] scene={scene}")
@@ -363,7 +365,7 @@ def run(args):
         print("\n=== Compile Check ===")
         ok, result = compile_tiling(build_dir, kernel_name)
         if not ok:
-            print(f"✗ 编译失败:\n{result}")
+            print(f"✗ Compilation failed:\n{result}")
             record.update(status="COMPILE_FAILED", error=result)
             return_code = 1
         else:

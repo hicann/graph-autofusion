@@ -41,7 +41,7 @@ af::Status FillCompareNodeParams(const af::AscNodePtr &node, bool is_scalar, con
     params->specific_params = ascir_param::CompareNodeParams{};
     compare_params = std::get_if<ascir_param::CompareNodeParams>(&params->specific_params);
   }
-  GE_ASSERT_NOTNULL(compare_params, "Compare specific params is null, node[%s].", node->GetNamePtr());
+  GE_ASSERT_NOTNULL(compare_params, "Compare specific params are null, node[%s].", node->GetNamePtr());
   params->api_name = node->GetType();
   params->status = ascir_param::ParamBuildStatus::kBuilt;
 

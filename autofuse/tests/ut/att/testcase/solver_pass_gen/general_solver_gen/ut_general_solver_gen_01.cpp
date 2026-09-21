@@ -261,23 +261,27 @@ TEST_F(UTTEST_GENERAL_SOLVER_GEN_01, test_gen_class_def) {
   solver->GenClassDef();
   std::string expect_codes = "";
   expect_codes += "/*\n";
-  expect_codes += "用户可以在派生类中重载Run函数,构造自定义的求解算法,即\n";
+  expect_codes += "Users can override the Run function in a derived class to construct a custom solving algorithm:\n";
   expect_codes += "  void bool Run(int32_t &solution_num, uint64_t *solutions) override;\n";
-  expect_codes += "其中:\n";
-  expect_codes += "  solution_num:int32_t类型的参数,用来输出实际得到的解的个数\n";
-  expect_codes += "  solutions:uint64_t类型的数组,指向一块num_var * top_num的内存,算法将可行解放入该空间\n";
-  expect_codes += "Run函数可以使用下述函数辅助求解:\n";
+  expect_codes += "where:\n";
+  expect_codes += "  solution_num: an int32_t parameter for the actual number of solutions found\n";
+  expect_codes +=
+      "  solutions: a uint64_t array pointing to num_var * top_num elements where the algorithm stores feasible "
+      "solutions\n";
+  expect_codes += "The Run function can use the following helper functions:\n";
   expect_codes += "  bool CheckValid()\n";
-  expect_codes += "    用于检测当前解是否为可行解\n";
+  expect_codes += "    Checks whether the current solution is feasible\n";
   expect_codes += "  bool UpdateCurVarVal(uint64_t value, int32_t idx)\n";
-  expect_codes += "    将下标为idx的待求解变量改为value,同时更新cons_info_->leqs中的值\n";
+  expect_codes += "    Sets the variable at index idx to value and updates cons_info_->leqs\n";
   expect_codes += "  bool RecordBestVarVal()\n";
-  expect_codes += "    待求解变量的当前值所对应的目标函数寻优\n";
-  expect_codes += "Run函数可以使用下述参数辅助求解:\n";
-  expect_codes += "  cons_info_->leqs, double类型的数组, 用于记录不等式约束的函数值, 其下标含义如下:\n";
-  expect_codes += "  var_info_->cur_vars, uint64_t类型的数组, 用于记录待求解变量的当前值, 其下标含义如下:\n";
-  expect_codes += "  var_info_->upper_bound, uint64_t类型的数组, 用于记录待求解变量的上界\n";
-  expect_codes += "  var_info_->lower_bound, uint64_t类型的数组, 用于记录待求解变量的下界\n";
+  expect_codes += "    Optimizes the objective function for the current variable values\n";
+  expect_codes += "The Run function can use the following parameters:\n";
+  expect_codes +=
+      "  cons_info_->leqs, a double array storing inequality constraint values; its indices are defined as follows:\n";
+  expect_codes +=
+      "  var_info_->cur_vars, a uint64_t array storing current variable values; its indices are defined as follows:\n";
+  expect_codes += "  var_info_->upper_bound, a uint64_t array storing upper bounds for the variables\n";
+  expect_codes += "  var_info_->lower_bound, a uint64_t array storing lower bounds for the variables\n";
   expect_codes += "*/\n";
   expect_codes += "class GeneralSolverCase0 : public GeneralSolver<GeneralSolverCase0>\n";
   expect_codes += "{\n";

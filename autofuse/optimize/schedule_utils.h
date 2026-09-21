@@ -160,7 +160,7 @@ class ScheduleUtils {
     GE_ASSERT_SUCCESS(ge::PlatformContext::GetInstance().GetCurrentPlatformString(npu_arch));
     std::vector exp_dtypes{data_type};
     if (T::InferDataType({data_type}, exp_dtypes, npu_arch) != af::SUCCESS) {
-      GELOGD("%s not support dtype=%s", T::Type, af::TypeUtils::DataTypeToSerialString(data_type).c_str());
+      GELOGD("%s does not support dtype=%s", T::Type, af::TypeUtils::DataTypeToSerialString(data_type).c_str());
       return false;
     }
     return true;

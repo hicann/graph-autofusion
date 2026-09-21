@@ -181,8 +181,9 @@ Status IsDataTypeSupported(const ascir::ImplGraph &graph) {
     std::string npu_arch;
     GE_ASSERT_SUCCESS(ge::PlatformContext::GetInstance().GetCurrentPlatformString(npu_arch));
     if (af::ascir::CommonInferDtype(node->GetType(), input_dtypes, output_dtypes, npu_arch) != af::SUCCESS) {
-      GELOGE(af::FAILED, "ASCIR(%s) not support dtypes(input dtype:%s, output dtype:%s), node:%s", node->GetTypePtr(),
-             VectorToStr(input_dtypes).c_str(), VectorToStr(output_dtypes).c_str(), node->GetNamePtr());
+      GELOGE(af::FAILED, "ASCIR(%s) does not support dtypes(input dtype:%s, output dtype:%s), node:%s",
+             node->GetTypePtr(), VectorToStr(input_dtypes).c_str(), VectorToStr(output_dtypes).c_str(),
+             node->GetNamePtr());
       return af::FAILED;
     }
   }

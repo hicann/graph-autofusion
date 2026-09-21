@@ -145,7 +145,7 @@ af::graphStatus ValidateIrInputOutputOrderCompatibility(const af::OpDescPtr &des
   // 验证输入顺序兼容性
   GE_ASSERT_TRUE(ValidateIrOrderCompatibility(ir_inputs_in_node, ir_def.inputs),
                  "Compatibility failed: operator[%s][%s] input order or type has changed. "
-                 "ir_inputs_in_node is [%s], ir_def.inputs is [%s]",
+                 "ir_inputs_in_node are [%s], ir_def.inputs are [%s]",
                  desc->GetName().c_str(), desc->GetType().c_str(),
                  IrDefsToString<af::RecoverIrUtils::InputIrDefs>(ir_inputs_in_node).c_str(),
                  IrDefsToString<af::RecoverIrUtils::InputIrDefs>(ir_def.inputs).c_str());

@@ -15,9 +15,9 @@
 
 
 def test_regex_pattern():
-    """测试正则表达式是否正确排除AIV_MTE2/AIV_MTE3"""
+    """Test that the regular expression correctly excludes AIV_MTE2/AIV_MTE3"""
 
-    # 模拟tiling_values
+    # Mock tiling_values
     tiling_values = {
         "s0t_size": 256,
         "s1Ts0Tb_size": 4096,
@@ -36,23 +36,23 @@ def test_regex_pattern():
         all_tiling_keys - set(fixed_tiling_keys) - set(performance_keys)
     )
 
-    print("验证AIV_MTE2/AIV_MTE3不重复显示")
+    print("Verify that AIV_MTE2/AIV_MTE3 are not duplicated")
     print("=" * 80)
-    print(f"所有切分键: {sorted(all_tiling_keys)}")
-    print(f"固定切分键: {fixed_tiling_keys}")
-    print(f"性能指标键: {performance_keys}")
-    print(f"动态切分键（排除性能指标）: {dynamic_tiling_keys}")
+    print(f"All tiling keys: {sorted(all_tiling_keys)}")
+    print(f"Fixed tiling keys: {fixed_tiling_keys}")
+    print(f"Performance metric keys: {performance_keys}")
+    print(f"Dynamic tiling keys (excluding performance metrics): {dynamic_tiling_keys}")
     print()
 
     # 验证
     if "AIV_MTE2" in dynamic_tiling_keys:
-        print("❌ 错误：AIV_MTE2在动态切分键中重复显示")
+        print("❌ Error: AIV_MTE2 is duplicated in dynamic tiling keys")
         return False
     if "AIV_MTE3" in dynamic_tiling_keys:
-        print("❌ 错误：AIV_MTE3在动态切分键中重复显示")
+        print("❌ Error: AIV_MTE3 is duplicated in dynamic tiling keys")
         return False
 
-    print("✅ 正确：AIV_MTE2和AIV_MTE3没有在动态切分键中重复显示")
+    print("✅ Correct: AIV_MTE2 and AIV_MTE3 are not duplicated in dynamic tiling keys")
     print()
 
     # 显示最终列顺序
@@ -70,7 +70,7 @@ def test_regex_pattern():
     all_columns.extend(dynamic_tiling_keys)
     all_columns.extend(fixed_tiling_keys)
 
-    print("最终列顺序:")
+    print("Final column order:")
     for i, col in enumerate(all_columns, 1):
         print(f"  {i}. {col}")
 
@@ -80,6 +80,6 @@ def test_regex_pattern():
 if __name__ == "__main__":
     success = test_regex_pattern()
     if success:
-        print("\n✅ 验证通过！")
+        print("\n✅ Verification passed!")
     else:
-        print("\n❌ 验证失败！")
+        print("\n❌ Verification failed!")

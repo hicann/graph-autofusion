@@ -177,13 +177,13 @@ def asc_codegen_compile_module():
 
 
 class TestBuildConvArgs:
-    """测试 _build_conv_args 函数"""
+    """Test _build_conv_args"""
 
     @staticmethod
     def test_build_conv_args_basic(asc_codegen_compile_module):
-        """测试基本的 Conv2D 参数构建 - 验证格式转换功能"""
-        # 重要：当列表长度为3时，args_list[1] == args_list[-2]，会导致引用共享
-        # 需要至少4个元素才能避免 args_list[1] 和 args_list[-2] 指向同一对象
+        """Test basic Conv2D argument construction - verify format conversion"""
+        # Important: when the list length is 3, args_list[1] == args_list[-2], causing shared references
+        # At least 4 elements are required to avoid args_list[1] and args_list[-2] referring to the same object
         args_list = [
             {
                 "shape": [1, 64, 224, 224],
@@ -232,7 +232,7 @@ class TestBuildConvArgs:
 
     @staticmethod
     def test_build_conv_args_nhwc_to_nchw(asc_codegen_compile_module):
-        """测试 x 槽位被强制写成 NCHW"""
+        """Test that the x slot is forced to NCHW"""
         origin_inputs, origin_outputs = _build_nchw_conv_args(
             asc_codegen_compile_module, [1, 224, 224, 64], "NHWC"
         )
@@ -243,7 +243,7 @@ class TestBuildConvArgs:
 
     @staticmethod
     def test_build_conv_args_same_format_no_conversion(asc_codegen_compile_module):
-        """测试格式相同时 shape 保持原值"""
+        """Test that shape remains unchanged when formats match"""
         origin_inputs, origin_outputs = _build_nchw_conv_args(
             asc_codegen_compile_module, [1, 64, 224, 224], "NCHW"
         )
@@ -253,7 +253,7 @@ class TestBuildConvArgs:
 
     @staticmethod
     def test_build_conv_args_extend_conv2d_slots(asc_codegen_compile_module):
-        """ExtendConv2D 固定 10 个逻辑输入槽，并补第二输出占位"""
+        """ExtendConv2D Has 10 fixed logical input slots and adds a placeholder for the second output"""
         args_list = [
             {"shape": [1, 64, 56, 56], "format": "NCHW", "dtype": "float16"},
             {"shape": [64, 64, 3, 3], "format": "NCHW", "dtype": "float16"},
@@ -290,7 +290,7 @@ class TestBuildConvArgs:
 
     @staticmethod
     def test_build_conv_args_extend_conv2d_empty_optional(asc_codegen_compile_module):
-        """ExtendConv2D 无 bias/scale0 时对应槽位为空"""
+        """ExtendConv2D Corresponding slots are empty without bias/scale0"""
         args_list = [
             {"shape": [1, 64, 56, 56], "format": "NCHW", "dtype": "float16"},
             {"shape": [64, 64, 3, 3], "format": "NCHW", "dtype": "float16"},
@@ -315,13 +315,13 @@ class TestBuildConvArgs:
 
 
 class TestGetGraphBasicInfo:
-    """测试 get_graph_basic_info 函数新增的 is_conv 返回值"""
+    """Test the new is_conv return value of get_graph_basic_info"""
 
     @staticmethod
     def test_get_graph_basic_info_returns_is_conv_for_conv2d(
         asc_codegen_compile_module,
     ):
-        """测试 Conv2D 场景返回 is_conv=True"""
+        """Test that the Conv2D case returns is_conv=True"""
         params = {"vector_core_num": 8}
 
         class MockScheduleResults:
@@ -368,7 +368,7 @@ class TestGetGraphBasicInfo:
     def test_get_graph_basic_info_returns_is_conv_false_for_matmul(
         asc_codegen_compile_module,
     ):
-        """测试 MatMul 场景返回 is_conv=False"""
+        """Test that the MatMul case returns is_conv=False"""
         params = {"vector_core_num": 8}
 
         class MockScheduleResults:
@@ -412,13 +412,13 @@ class TestGetGraphBasicInfo:
 
 
 class TestGenerateCmakeLists:
-    """测试 generate_cmake_lists 函数包含 Conv2D 编译路径"""
+    """Test that generate_cmake_lists includes Conv2D compile paths"""
 
     @staticmethod
     def test_generate_cmake_lists_includes_conv2d_paths(
         asc_codegen_compile_module, tmpdir
     ):
-        """测试生成的 CMakeLists.txt 包含 Conv2D 头文件路径"""
+        """Test that generated CMakeLists.txt includes Conv2D header paths"""
         host_build_dir = str(tmpdir)
 
         asc_codegen_compile_module.generate_cmake_lists(
@@ -444,7 +444,7 @@ class TestGenerateCmakeLists:
     def test_generate_cmake_lists_includes_matmul_paths(
         asc_codegen_compile_module, tmpdir
     ):
-        """测试生成的 CMakeLists.txt 包含 MatMul 头文件路径"""
+        """Test that generated CMakeLists.txt includes MatMul header paths"""
         host_build_dir = str(tmpdir)
 
         asc_codegen_compile_module.generate_cmake_lists(
@@ -465,13 +465,13 @@ class TestGenerateCmakeLists:
 
 
 class TestStaticShapeCompileHasattrCheck:
-    """测试 static_shape_compile 函数的 hasattr 检查"""
+    """Test the hasattr check in static_shape_compile"""
 
     @staticmethod
     def test_static_shape_compile_related_api_keeps_argument_count(
         asc_codegen_compile_module,
     ):
-        """新增上下文参数后，相关 API 入参不超过代码检查阈值"""
+        """After adding the context parameter, related API argument counts stay within the code-check threshold"""
         function_names = [
             "template_decider",
             "create_matmul_tiling_data",
@@ -488,7 +488,7 @@ class TestStaticShapeCompileHasattrCheck:
     def test_static_shape_compile_keeps_soc_vector_core_num_by_default(
         asc_codegen_compile_module, tmpdir, monkeypatch
     ):
-        """未传 vector_core_num 时保持原有 get_soc_spec 行为"""
+        """Preserve existing get_soc_spec behavior when vector_core_num is not passed"""
         temp_dir = str(tmpdir)
         fake_lib = SimpleNamespace(GenConstTilingData=FakeCFunc(b"new tiling"))
         TestStaticShapeCompileHasattrCheck._prepare_tiling_file(temp_dir)
@@ -506,7 +506,7 @@ class TestStaticShapeCompileHasattrCheck:
     def test_static_shape_compile_uses_vector_core_num_when_provided(
         asc_codegen_compile_module, tmpdir, monkeypatch
     ):
-        """传入 vector_core_num 时静态化 tiling 使用同源核数"""
+        """Static tiling uses the same core count when vector_core_num is passed"""
         temp_dir = str(tmpdir)
         fake_lib = SimpleNamespace(GenConstTilingData=FakeCFunc(b"new tiling"))
         TestStaticShapeCompileHasattrCheck._prepare_tiling_file(temp_dir)
@@ -543,7 +543,7 @@ class TestStaticShapeCompileHasattrCheck:
     def test_static_shape_cv_compile_uses_vector_core_num_when_provided(
         asc_codegen_compile_module, tmpdir, monkeypatch
     ):
-        """CV 模板选择使用传入的 vector_core_num"""
+        """CV Template selection uses the passed vector_core_num"""
         fake_lib = SimpleNamespace(GenCVFusionTilingKey=FakeCFunc(0))
         TestStaticShapeCompileHasattrCheck._mock_static_compile_dependencies(
             asc_codegen_compile_module, monkeypatch, fake_lib
@@ -562,7 +562,7 @@ class TestStaticShapeCompileHasattrCheck:
     def test_static_shape_cv_common_compile_uses_vector_core_num_when_provided(
         asc_codegen_compile_module, tmpdir, monkeypatch
     ):
-        """CV common block dim/wss 计算使用传入的 vector_core_num"""
+        """CV common block dim/wss Calculation uses the passed vector_core_num"""
 
         def fill_outputs(config_path, aiv_num, ub_size, workspace_size, block_dim):
             ctypes.cast(
@@ -594,7 +594,7 @@ class TestStaticShapeCompileHasattrCheck:
     def test_template_decider_passes_vector_core_num_to_cv_static_compile(
         asc_codegen_compile_module, tmpdir, monkeypatch
     ):
-        """CV 模板决策继续向底层静态编译透传 vector_core_num"""
+        """CV Template decisions continue to pass vector_core_num to static compilation"""
         calls = []
         monkeypatch.setattr(
             asc_codegen_compile_module,
@@ -626,7 +626,7 @@ class TestStaticShapeCompileHasattrCheck:
     def test_asc_codegen_compile_logs_core_limits(
         asc_codegen_compile_module, tmpdir, monkeypatch
     ):
-        """入口保留控核日志，并将 vector_core_num 继续透传"""
+        """Keep core-count logging at the entry point and pass vector_core_num through"""
         log_messages = []
         set_platform_calls = []
         compile_calls = []
@@ -694,7 +694,7 @@ class TestStaticShapeCompileHasattrCheck:
     def test_static_shape_compile_uses_hasattr_for_gen_const_tiling_data(
         asc_codegen_compile_module, tmpdir
     ):
-        """验证 static_shape_compile 使用 hasattr 检查 GenConstTilingData"""
+        """Verify that static_shape_compile uses hasattr to check GenConstTilingData"""
         temp_dir = str(tmpdir)
 
         # 创建必要的目录结构
@@ -784,16 +784,16 @@ class TestStaticShapeCompileHasattrCheck:
 
 
 class TestDynamicShapeCompile:
-    """测试新增的 dynamic_shape_compile 函数"""
+    """Test the new dynamic_shape_compile function"""
 
     @staticmethod
     def test_dynamic_shape_compile_exists(asc_codegen_compile_module):
-        """验证 dynamic_shape_compile 函数存在"""
+        """Verify that dynamic_shape_compile exists"""
         assert hasattr(asc_codegen_compile_module, "dynamic_shape_compile")
 
     @staticmethod
     def test_dynamic_shape_compile_signature(asc_codegen_compile_module):
-        """验证 dynamic_shape_compile 函数签名"""
+        """Verify the dynamic_shape_compile function signature"""
         sig = inspect.signature(asc_codegen_compile_module.dynamic_shape_compile)
         params = list(sig.parameters.keys())
 
@@ -805,16 +805,16 @@ class TestDynamicShapeCompile:
 
 
 class TestAscbcConvKernelTilingPro:
-    """测试新增的 ascbc_conv_kernel_tiling_pro 函数"""
+    """Test the new ascbc_conv_kernel_tiling_pro function"""
 
     @staticmethod
     def test_ascbc_conv_kernel_tiling_pro_exists(asc_codegen_compile_module):
-        """验证 ascbc_conv_kernel_tiling_pro 函数存在"""
+        """Verify that ascbc_conv_kernel_tiling_pro exists"""
         assert hasattr(asc_codegen_compile_module, "ascbc_conv_kernel_tiling_pro")
 
     @staticmethod
     def test_ascbc_conv_kernel_tiling_pro_signature(asc_codegen_compile_module):
-        """验证函数签名"""
+        """Verify the function signature"""
         sig = inspect.signature(asc_codegen_compile_module.ascbc_conv_kernel_tiling_pro)
         params = list(sig.parameters.keys())
 
@@ -827,11 +827,11 @@ class TestAscbcConvKernelTilingPro:
 
 
 class TestAscbcMatmulKernelDynamicTilingPro:
-    """测试新增的 ascbc_matmul_kernel_dynamic_tiling_pro 函数"""
+    """Test the new ascbc_matmul_kernel_dynamic_tiling_pro function"""
 
     @staticmethod
     def test_ascbc_matmul_kernel_dynamic_tiling_pro_exists(asc_codegen_compile_module):
-        """验证函数存在"""
+        """Verify that the function exists"""
         assert hasattr(
             asc_codegen_compile_module, "ascbc_matmul_kernel_dynamic_tiling_pro"
         )
@@ -840,7 +840,7 @@ class TestAscbcMatmulKernelDynamicTilingPro:
     def test_ascbc_matmul_kernel_dynamic_tiling_pro_signature(
         asc_codegen_compile_module,
     ):
-        """验证函数签名"""
+        """Verify the function signature"""
         sig = inspect.signature(
             asc_codegen_compile_module.ascbc_matmul_kernel_dynamic_tiling_pro
         )

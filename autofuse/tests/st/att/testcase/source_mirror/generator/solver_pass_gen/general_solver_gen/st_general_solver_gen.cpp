@@ -83,26 +83,30 @@ class ST_GENERAL_SOLVER_GEN : public ::testing::Test {
 namespace {
 void AppendSolverImplPart0(std::string &codes) {
   codes += "/*\n";
-  codes += "用户可以在派生类中重载Run函数,构造自定义的求解算法,即\n";
+  codes += "Users can override the Run function in a derived class to construct a custom solving algorithm:\n";
   codes += "  void bool Run(int32_t &solution_num, uint64_t *solutions) override;\n";
-  codes += "其中:\n";
-  codes += "  solution_num:int32_t类型的参数,用来输出实际得到的解的个数\n";
-  codes += "  solutions:uint64_t类型的数组,指向一块num_var * top_num的内存,算法将可行解放入该空间\n";
-  codes += "Run函数可以使用下述函数辅助求解:\n";
+  codes += "where:\n";
+  codes += "  solution_num: an int32_t parameter for the actual number of solutions found\n";
+  codes +=
+      "  solutions: a uint64_t array pointing to num_var * top_num elements where the algorithm stores feasible "
+      "solutions\n";
+  codes += "The Run function can use the following helper functions:\n";
   codes += "  bool CheckValid()\n";
-  codes += "    用于检测当前解是否为可行解\n";
+  codes += "    Checks whether the current solution is feasible\n";
   codes += "  bool UpdateCurVarVal(uint64_t value, int32_t idx)\n";
-  codes += "    将下标为idx的待求解变量改为value,同时更新cons_info_->leqs中的值\n";
+  codes += "    Sets the variable at index idx to value and updates cons_info_->leqs\n";
   codes += "  bool RecordBestVarVal()\n";
-  codes += "    待求解变量的当前值所对应的目标函数寻优\n";
-  codes += "Run函数可以使用下述参数辅助求解:\n";
-  codes += "  cons_info_->leqs, double类型的数组, 用于记录不等式约束的函数值, 其下标含义如下:\n";
+  codes += "    Optimizes the objective function for the current variable values\n";
+  codes += "The Run function can use the following parameters:\n";
+  codes +=
+      "  cons_info_->leqs, a double array storing inequality constraint values; its indices are defined as follows:\n";
   codes += "    cons_info_->leqs[0] = (x0 + x1 - hbm_size)\n";
   codes += "    cons_info_->leqs[1] = (x0 + x1 - a)\n";
-  codes += "  var_info_->cur_vars, uint64_t类型的数组, 用于记录待求解变量的当前值, 其下标含义如下:\n";
+  codes +=
+      "  var_info_->cur_vars, a uint64_t array storing current variable values; its indices are defined as follows:\n";
   codes += "    var_info_->cur_vars[0] = x3\n";
-  codes += "  var_info_->upper_bound, uint64_t类型的数组, 用于记录待求解变量的上界\n";
-  codes += "  var_info_->lower_bound, uint64_t类型的数组, 用于记录待求解变量的下界\n";
+  codes += "  var_info_->upper_bound, a uint64_t array storing upper bounds for the variables\n";
+  codes += "  var_info_->lower_bound, a uint64_t array storing lower bounds for the variables\n";
   codes += "*/\n";
   codes += "class GeneralSolverCase0 : public GeneralSolver<GeneralSolverCase0>\n";
   codes += "{\n";
@@ -137,11 +141,11 @@ void AppendSolverImplPart1(std::string &codes) {
   codes += "};\n";
 
   codes += "/*\n";
-  codes += "函数名:Gethbm_sizeCost(重要函数)\n";
-  codes += "功能描述:\n";
-  codes += "  根据待求解变量值hbm_size缓存占用信息(occupy-buff)\n";
-  codes += "输入参数:\n";
-  codes += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+  codes += "Function: Gethbm_sizeCost(important)\n";
+  codes += "Description:\n";
+  codes += "  Gets cache occupancy information (occupy-buff) from hbm_size\n";
+  codes += "Input parameters:\n";
+  codes += "  vars:an array of length num_var corresponding to the variables\n";
   codes += "*/\n";
   codes += "inline double GeneralSolverCase0::Gethbm_sizeCost(uint64_t* vars)\n";
   codes += "{\n";
@@ -152,12 +156,12 @@ void AppendSolverImplPart1(std::string &codes) {
   codes += "\n";
 
   codes += "/*\n";
-  codes += "函数名:GetSmoothhbm_sizeCost(重要函数)\n";
-  codes += "功能描述:\n";
-  codes += "  根据待求解变量值hbm_size的平滑化缓存占用信息\n";
-  codes += "  与Gethbm_sizeCost函数相比,整除运算被替换为浮点数的除法运算\n";
-  codes += "输入参数:\n";
-  codes += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+  codes += "Function: GetSmoothhbm_sizeCost(important)\n";
+  codes += "Description:\n";
+  codes += "  Gets smoothed cache occupancy information from hbm_size\n";
+  codes += "  Compared with Gethbm_sizeCost, integer division is replaced with floating-point division\n";
+  codes += "Input parameters:\n";
+  codes += "  vars:an array of length num_var corresponding to the variables\n";
   codes += "*/\n";
   codes += "inline double GeneralSolverCase0::GetSmoothhbm_sizeCost(uint64_t* vars)\n";
   codes += "{\n";
@@ -168,14 +172,14 @@ void AppendSolverImplPart1(std::string &codes) {
   codes += "\n";
 
   codes += "/*\n";
-  codes += "函数名:GetObj(重要函数)\n";
-  codes += "功能描述:\n";
-  codes += "  根据待求解变量值输出目标函数\n";
+  codes += "Function: GetObj(important)\n";
+  codes += "Description:\n";
+  codes += "  Outputs the objective function for the variable values\n";
 }
 
 void AppendSolverImplPart2(std::string &codes) {
-  codes += "输入参数:\n";
-  codes += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+  codes += "Input parameters:\n";
+  codes += "  vars:an array of length num_var corresponding to the variables\n";
   codes += "*/\n";
   codes += "inline double GeneralSolverCase0::GetObj(uint64_t* vars)\n";
   codes += "{\n";
@@ -187,10 +191,10 @@ void AppendSolverImplPart2(std::string &codes) {
   codes += "}\n";
 
   codes += "/*\n";
-  codes += "函数名:GetSmoothObj(重要函数)\n";
-  codes += "功能描述:\n";
-  codes += "  根据待求解变量值输出平滑化目标函数\n";
-  codes += "  与GetObj函数相比,整除运算被替换为浮点数的除法运算\n";
+  codes += "Function: GetSmoothObj(important)\n";
+  codes += "Description:\n";
+  codes += "  Outputs the smoothed objective function for the variable values\n";
+  codes += "  Compared with GetObj, integer division is replaced with floating-point division\n";
   codes += "*/\n";
   codes += "inline double GeneralSolverCase0::GetSmoothObj(uint64_t* vars)\n";
   codes += "{\n";
@@ -201,12 +205,12 @@ void AppendSolverImplPart2(std::string &codes) {
   codes += "}\n";
 
   codes += "/*\n";
-  codes += "函数名:GetBuffCost(重要函数)\n";
-  codes += "功能描述:\n";
-  codes += "  根据待求解变量值输出缓存占用信息的罚函数(sigma(min(0, occupy-buff)^2))\n";
-  codes += "  该函数用于量化解在缓存占用方面的质量\n";
-  codes += "输入参数:\n";
-  codes += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
+  codes += "Function: GetBuffCost(important)\n";
+  codes += "Description:\n";
+  codes += "  Outputs the cache occupancy penalty function (sigma(min(0, occupy-buff)^2))\n";
+  codes += "  Quantifies solution quality in terms of cache occupancy\n";
+  codes += "Input parameters:\n";
+  codes += "  vars:an array of length num_var corresponding to the variables\n";
   codes += "*/\n";
   codes += "inline double GeneralSolverCase0::GetBuffCost(uint64_t* vars)\n";
   codes += "{\n";
@@ -215,18 +219,20 @@ void AppendSolverImplPart2(std::string &codes) {
   codes += "}\n";
 
   codes += "/*\n";
-  codes += "函数名:GetBuffDiff(重要函数)\n";
-  codes += "功能描述:\n";
-  codes += "  获取缓冲占用加权差分值,计算平滑缓冲占用的差分\n";
-  codes += "  输出的计算公式为sigma_j(delta_{var_i}(g_j(var))) * g_j(var))\n";
+  codes += "Function: GetBuffDiff(important)\n";
+  codes += "Description:\n";
+  codes += "  Gets the weighted cache occupancy difference for smooth cache occupancy\n";
+  codes += "  The formula is sigma_j(delta_{var_i}(g_j(var))) * g_j(var))\n";
 }
 
 void AppendSolverImplPart3(std::string &codes) {
-  codes += "  其中g_j为第j个缓冲占用不等式,delta_{var_i}(g_j(var))为g_j(var)沿var_i方向更新一个单位后的变化值\n";
-  codes += "  该函数用于确定变量沿缓冲占用增大的更新方向\n";
-  codes += "输入参数:\n";
-  codes += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
-  codes += "  weight:一个长度为num_leq的数组,代表了每个缓冲占用的权值\n";
+  codes +=
+      "  where g_j is the j-th cache occupancy inequality, and delta_{var_i}(g_j(var)) is the change in g_j(var) when "
+      "var_i increases by one unit\n";
+  codes += "  Determines the update direction that increases cache occupancy\n";
+  codes += "Input parameters:\n";
+  codes += "  vars:an array of length num_var corresponding to the variables\n";
+  codes += "  weight:an array of length num_leq representing the weight of each cache occupancy\n";
   codes += "*/\n";
   codes += "inline double GeneralSolverCase0::GetBuffDiff(uint64_t* vars, double* weight)\n";
   codes += "{\n";
@@ -236,15 +242,18 @@ void AppendSolverImplPart3(std::string &codes) {
   codes += "}\n";
 
   codes += "/*\n";
-  codes += "函数名:GetLeqDiff(重要函数)\n";
-  codes += "功能描述:\n";
-  codes += "  获取不等式约束的加权差分值,计算平滑的不等式函数的差分,权值为实际不等式函数值\n";
-  codes += "  输出的计算公式为sigma_j(delta_{var_i}(f_j(var))) * f_j(var))\n";
-  codes += "  其中f_j为第j个不等式约束式,delta_{var_i}(f_j(var))为f_j(var)沿var_i方向更新一个单位后的变化值\n";
-  codes += "  该函数用于确定变量从可行域外侧沿不等式边界方向移动的更新方向\n";
-  codes += "输入参数:\n";
-  codes += "  vars:一个长度为num_var的数组,对应了待求解变量\n";
-  codes += "  weight:一个长度为num_leq的数组,代表了每个缓冲占用的权值\n";
+  codes += "Function: GetLeqDiff(important)\n";
+  codes += "Description:\n";
+  codes +=
+      "  Gets the weighted difference of inequality constraints; the weight is the actual inequality function value\n";
+  codes += "  The formula is sigma_j(delta_{var_i}(f_j(var))) * f_j(var))\n";
+  codes +=
+      "  where f_j is the j-th inequality constraint, and delta_{var_i}(f_j(var)) is the change in f_j(var) when var_i "
+      "increases by one unit\n";
+  codes += "  Determines the update direction from outside the feasible region toward the inequality boundary\n";
+  codes += "Input parameters:\n";
+  codes += "  vars:an array of length num_var corresponding to the variables\n";
+  codes += "  weight:an array of length num_leq representing the weight of each cache occupancy\n";
   codes += "*/\n";
   codes += "inline double GeneralSolverCase0::GetLeqDiff(uint64_t* vars, double* weight)\n";
   codes += "{\n";
@@ -343,39 +352,41 @@ void AppendSolverImplPart5(std::string &codes) {
   codes += "    OP_LOGD(OP_NAME, \"The momentum factor is %f.\", cfg.momentum_factor);\n";
   codes += "\n";
 
-  codes += "    // 以下参数若未注明是可修改参数,则不建议修改\n";
-  codes += "    // 由modelinfo传入的待求解变量个数\n";
+  codes += "    // Do not modify parameters unless marked as configurable\n";
+  codes += "    // Number of variables passed from modelinfo\n";
   codes += "    int32_t num_var = 2;\n";
-  codes += "    // 由modelinfo传入的不等式约束个数\n";
+  codes += "    // Number of inequality constraints passed from modelinfo\n";
   codes += "    int32_t num_leq = 2;\n";
   codes +=
       "    OP_LOGD(OP_NAME, \"The number of variable is %d(x0, x1), the number of constraints is %d.\", num_var, "
       "num_leq);\n";
-  codes += "    // (可修改参数) 待求解变量的初始值,算法趋向于求初始值附近的局部最优解\n";
+  codes += "    // (Configurable) Initial variable values; the algorithm tends to find a local optimum near them\n";
   codes += "    uint64_t init_vars[num_var] = {static_cast<uint64_t>(5), static_cast<uint64_t>((2 * a))};\n";
   codes +=
-      "    // (可修改参数) "
-      "待求解变量的上界,过大的上界将导致搜索范围与耗时增加,过小的上界更有可能获得较差的局部最优解\n";
+      "    // (Configurable) "
+      "Variable upper bounds; overly large bounds increase search range and time, while overly small bounds may "
+      "produce a worse local optimum\n";
   codes += "    uint64_t upper_bound[num_var] = {static_cast<uint64_t>(5), static_cast<uint64_t>((2 * a))};\n";
   codes +=
-      "    // (可修改参数) "
-      "待求解变量的下界,过小的下界将导致搜索范围与耗时增加,过大的下界更有可能获得较差的局部最优解\n";
+      "    // (Configurable) "
+      "Variable lower bounds; overly small bounds increase search range and time, while overly large bounds may "
+      "produce a worse local optimum\n";
   codes += "    uint64_t lower_bound[num_var] = {static_cast<uint64_t>(1), static_cast<uint64_t>(1)};\n";
-  codes += "    // (可修改参数) 最后更新的待求解变量,设置为true的对应变量会更接近初始值\n";
+  codes += "    // (Configurable) Last updated variables; variables set to true stay closer to their initial values\n";
   codes += "    bool update_last[num_var] = {true, false};\n";
-  codes += "    // 初始化解的个数为0\n";
+  codes += "    // Initialize the number of solutions to 0\n";
 }
 
 void AppendSolverImplPart6(std::string &codes) {
   codes += "    int32_t solution_num = 0;\n";
-  codes += "    // 为求解器的输出分配内存\n";
+  codes += "    // Allocate memory for solver output\n";
   codes += "    uint64_t* solution = new(std::nothrow) uint64_t[num_var * cfg.top_num];\n";
   codes += "    if (solution == nullptr)\n";
   codes += "    {\n";
   codes += "        OP_LOGW(OP_NAME, \"Create solution failed.\");\n";
   codes += "        return false;\n";
   codes += "    }\n";
-  codes += "    // 通用求解器的输入参数\n";
+  codes += "    // Generic solver input parameters\n";
   codes += "    SolverInput input;\n";
   codes += "    input.var_num = num_var;\n";
   codes += "    input.leq_num = num_leq;\n";
@@ -393,10 +404,10 @@ void AppendSolverImplPart6(std::string &codes) {
 
   codes += "    GeneralSolverCase0* solver = new(std::nothrow) GeneralSolverCase0(cfg, tiling_data);\n";
   codes += "    if (solver != nullptr) {\n";
-  codes += "        // 导入通用求解器的输入参数并完成初始化\n";
+  codes += "        // Import and initialize generic solver input parameters\n";
   codes += "        OP_LOGD(OP_NAME, \"Start initializing the input.\");\n";
   codes += "        if (solver -> Init(input)) {\n";
-  codes += "            // 运行通用求解器并获取算法的解\n";
+  codes += "            // Run the generic solver and obtain algorithm solutions\n";
   codes += "            OP_LOGD(OP_NAME, \"Initialization finished, start running the solver.\");\n";
   codes += "            if (solver -> Run(solution_num, solution)) {\n";
   codes += "                solver -> GetResult(solution_num, solution, tiling_data);\n";
@@ -459,39 +470,41 @@ void AppendSolverInvokePart0(std::string &codes) {
   codes += "    OP_LOGD(OP_NAME, \"The momentum factor is %f.\", cfg.momentum_factor);\n";
   codes += "\n";
 
-  codes += "    // 以下参数若未注明是可修改参数,则不建议修改\n";
-  codes += "    // 由modelinfo传入的待求解变量个数\n";
+  codes += "    // Do not modify parameters unless marked as configurable\n";
+  codes += "    // Number of variables passed from modelinfo\n";
   codes += "    int32_t num_var = 2;\n";
-  codes += "    // 由modelinfo传入的不等式约束个数\n";
+  codes += "    // Number of inequality constraints passed from modelinfo\n";
   codes += "    int32_t num_leq = 2;\n";
   codes +=
       "    OP_LOGD(OP_NAME, \"The number of variable is %d(x0, x1), the number of constraints is %d.\", num_var, "
       "num_leq);\n";
-  codes += "    // (可修改参数) 待求解变量的初始值,算法趋向于求初始值附近的局部最优解\n";
+  codes += "    // (Configurable) Initial variable values; the algorithm tends to find a local optimum near them\n";
   codes += "    uint64_t init_vars[num_var] = {static_cast<uint64_t>(5), static_cast<uint64_t>((2 * a))};\n";
   codes +=
-      "    // (可修改参数) "
-      "待求解变量的上界,过大的上界将导致搜索范围与耗时增加,过小的上界更有可能获得较差的局部最优解\n";
+      "    // (Configurable) "
+      "Variable upper bounds; overly large bounds increase search range and time, while overly small bounds may "
+      "produce a worse local optimum\n";
   codes += "    uint64_t upper_bound[num_var] = {static_cast<uint64_t>(5), static_cast<uint64_t>((2 * a))};\n";
   codes +=
-      "    // (可修改参数) "
-      "待求解变量的下界,过小的下界将导致搜索范围与耗时增加,过大的下界更有可能获得较差的局部最优解\n";
+      "    // (Configurable) "
+      "Variable lower bounds; overly small bounds increase search range and time, while overly large bounds may "
+      "produce a worse local optimum\n";
   codes += "    uint64_t lower_bound[num_var] = {static_cast<uint64_t>(1), static_cast<uint64_t>(1)};\n";
-  codes += "    // (可修改参数) 最后更新的待求解变量,设置为true的对应变量会更接近初始值\n";
+  codes += "    // (Configurable) Last updated variables; variables set to true stay closer to their initial values\n";
   codes += "    bool update_last[num_var] = {true, false};\n";
-  codes += "    // 初始化解的个数为0\n";
+  codes += "    // Initialize the number of solutions to 0\n";
   codes += "    int32_t solution_num = 0;\n";
 }
 
 void AppendSolverInvokePart1(std::string &codes) {
-  codes += "    // 为求解器的输出分配内存\n";
+  codes += "    // Allocate memory for solver output\n";
   codes += "    uint64_t* solution = new(std::nothrow) uint64_t[num_var * cfg.top_num];\n";
   codes += "    if (solution == nullptr)\n";
   codes += "    {\n";
   codes += "        OP_LOGW(OP_NAME, \"Create solution failed.\");\n";
   codes += "        return false;\n";
   codes += "    }\n";
-  codes += "    // 通用求解器的输入参数\n";
+  codes += "    // Generic solver input parameters\n";
   codes += "    SolverInput input;\n";
   codes += "    input.var_num = num_var;\n";
   codes += "    input.leq_num = num_leq;\n";
@@ -509,10 +522,10 @@ void AppendSolverInvokePart1(std::string &codes) {
 
   codes += "    GeneralSolverCase0* solver = new(std::nothrow) GeneralSolverCase0(cfg, tiling_data);\n";
   codes += "    if (solver != nullptr) {\n";
-  codes += "        // 导入通用求解器的输入参数并完成初始化\n";
+  codes += "        // Import and initialize generic solver input parameters\n";
   codes += "        OP_LOGD(OP_NAME, \"Start initializing the input.\");\n";
   codes += "        if (solver -> Init(input)) {\n";
-  codes += "            // 运行通用求解器并获取算法的解\n";
+  codes += "            // Run the generic solver and obtain algorithm solutions\n";
   codes += "            OP_LOGD(OP_NAME, \"Initialization finished, start running the solver.\");\n";
   codes += "            if (solver -> Run(solution_num, solution)) {\n";
   codes += "                solver -> GetResult(solution_num, solution, tiling_data);\n";

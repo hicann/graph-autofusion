@@ -436,7 +436,7 @@ af::Status AscendGraphParser::ParseTensorMemInfo(const af::AscTensorAttr &ascir_
     combined_tensors_[container][ascir_tensor_info.mem.reuse_id].emplace_back(tensor);
   }
   if (container == nullptr) {
-    GELOGW("Tensor [%s] container not get.", tensor->name.c_str());
+    GELOGW("Tensor [%s] container was not found.", tensor->name.c_str());
   } else {
     GELOGD("Get tensor [%s] container [%s][%d] success.", tensor->name.c_str(), container->name.c_str(),
            container->container_id);

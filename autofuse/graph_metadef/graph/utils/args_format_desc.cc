@@ -389,7 +389,7 @@ static graphStatus OutputParser(const OpDescPtr &op_desc, const std::string &pat
 static graphStatus InputDescCalcSize(const OpDescPtr &op_desc, const ArgDesc &arg_desc, size_t &size) {
   const auto &ir_inputs = op_desc->GetIrInputs();
   GE_ASSERT((arg_desc.ir_idx >= 0 && static_cast<size_t>(arg_desc.ir_idx) < ir_inputs.size()),
-            "ir_index is out of range");
+            "ir_index [%d] is out of range [0, %zu)", arg_desc.ir_idx, ir_inputs.size());
   auto ir_name = ir_inputs[static_cast<size_t>(arg_desc.ir_idx)].first;
   if (arg_desc.folded) {
     size += sizeof(uintptr_t);  // pointer to desc

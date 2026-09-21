@@ -273,7 +273,7 @@ __aicore__ inline U GetScalarValueByBitCode(T bit_code) {
 
 template <typename T>
 constexpr __aicore__ static inline T AfInfinity() {
-  static_assert(SupportType<T, half, float>(), "current data type is not support inf");
+  static_assert(SupportType<T, half, float>(), "current data type does not support inf");
   if constexpr (std::is_same_v<T, half>) {
     return GetScalarValueByBitCode<uint16_t, T>(0x7C00U);
   } else if constexpr (std::is_same_v<T, float>) {

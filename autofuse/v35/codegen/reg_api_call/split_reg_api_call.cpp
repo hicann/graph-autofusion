@@ -47,7 +47,7 @@ Status SplitRegApiCall::ParseSplitDim(const Tensor &x, const Tensor &y0, size_t 
       break;
     }
   }
-  GE_ASSERT_TRUE(find_split_dim, "not find split dim in vectorized_axis");
+  GE_ASSERT_TRUE(find_split_dim, "split dim was not found in vectorized_axis");
   return af::SUCCESS;
 }
 

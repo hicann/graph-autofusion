@@ -62,7 +62,7 @@ def load_graph(json_path):
 def get_ops(graph_data):
     graphs = graph_data.get("graph", [])
     if not graphs:
-        print("WARNING: 图 JSON 中没有找到 graph 数组")
+        print("WARNING: graph array not found in graph JSON")
         return []
     return graphs[0].get("op", [])
 
@@ -100,8 +100,8 @@ def extract_output_mappings(op, fused_op_name):
         fused_format = desc.get("layout")
         if origin_name is None or origin_output_index is None:
             print(
-                f"WARNING: 融合算子 {fused_op_name} 输出 {idx} 缺少 "
-                "_datadump_origin_name 或 _datadump_origin_output_index，跳过"
+                f"WARNING: Fused operator {fused_op_name} output {idx} is missing "
+                "_datadump_origin_name or _datadump_origin_output_index; skipping"
             )
             mappings.append(
                 {
@@ -134,7 +134,7 @@ def extract_input_mappings(op, fused_op_name):
     for idx, ref in enumerate(input_refs):
         if ":" not in ref:
             print(
-                f"WARNING: 融合算子 {fused_op_name} 输入 {idx} 引用格式无法解析: {ref}，跳过"
+                f"WARNING: Reference format cannot be parsed for fused operator {fused_op_name} input {idx}: {ref}; skipping"
             )
             mappings.append(
                 {
@@ -229,7 +229,7 @@ def find_npy(data_dir, op_name, kind, index):
     if not matches:
         return None
     if len(matches) > 1:
-        print(f"WARNING: 匹配到多个 NPY 文件，使用第一个: {matches}")
+        print(f"WARNING: Multiple NPY files matched; using the first: {matches}")
     return matches[0]
 
 
@@ -301,17 +301,17 @@ class NpySource:
 
 def compare_data(fused_src: NpySource, origin_src: NpySource):
     if fused_src.npy_path is None:
-        print(f"WARNING: 未找到融合侧 NPY: {fused_src.label}")
+        print(f"WARNING: Fused-side NPY not found: {fused_src.label}")
         return None, None, None, "FILE_NOT_FOUND"
     if origin_src.npy_path is None:
-        print(f"WARNING: 未找到原算子侧 NPY: {origin_src.label}")
+        print(f"WARNING: Original-side NPY not found: {origin_src.label}")
         return None, None, None, "FILE_NOT_FOUND"
 
     try:
         fused_data = load_npy(fused_src.npy_path)
         origin_data = load_npy(origin_src.npy_path)
     except Exception as e:
-        print(f"WARNING: NPY 加载失败 - {fused_src.label} / {origin_src.label}: {e}")
+        print(f"WARNING: NPY Load failed - {fused_src.label} / {origin_src.label}: {e}")
         return None, None, None, "NPY_LOAD_ERROR"
 
     status_parts = []
@@ -321,7 +321,7 @@ def compare_data(fused_src: NpySource, origin_src: NpySource):
     )
     if fmt_parts is None:
         print(
-            f"WARNING: 不支持的 format 转换 - {fused_src.label}: {fused_src.fmt}"
+            f"WARNING: Unsupported format conversion - {fused_src.label}: {fused_src.fmt}"
             f" vs {origin_src.label}: {origin_src.fmt}"
         )
         return None, None, None, "FORMAT_UNSUPPORTED"
@@ -338,7 +338,7 @@ def compare_data(fused_src: NpySource, origin_src: NpySource):
             status_parts.append("SHAPE_FLATTENED")
         else:
             print(
-                f"WARNING: shape 不一致且元素数不同 - {fused_src.label}: {fused_data.shape}"
+                f"WARNING: Shape mismatch with different element counts - {fused_src.label}: {fused_data.shape}"
                 f" vs {origin_src.label}: {origin_data.shape}"
             )
             return None, None, None, "SHAPE_MISMATCH"
@@ -346,7 +346,9 @@ def compare_data(fused_src: NpySource, origin_src: NpySource):
     try:
         cosine, max_abs, max_rel = compute_metrics(fused_data, origin_data)
     except Exception as e:
-        print(f"WARNING: 指标计算失败 - {fused_src.label} / {origin_src.label}: {e}")
+        print(
+            f"WARNING: Metric calculation failed - {fused_src.label} / {origin_src.label}: {e}"
+        )
         return None, None, None, "COMPUTE_ERROR"
 
     return cosine, max_abs, max_rel, "_".join(status_parts) if status_parts else "OK"
@@ -540,14 +542,14 @@ def validate_mode1_args(args):
 def run_mode1(args):
     validate_mode1_args(args)
 
-    print(f"解析开启融合 dump 图: {args.af_open_graph}")
+    print(f"Parsing fusion-enabled dump graph: {args.af_open_graph}")
     graph_data = load_graph(args.af_open_graph)
     ops = get_ops(graph_data)
     node_types, _ = build_node_lookup(ops)
     output_mappings, input_mappings = extract_fusion_mappings(graph_data)
     fused_output_resolver = build_fused_output_resolver(output_mappings)
 
-    print(f"解析关闭融合 dump 图: {args.af_close_graph}")
+    print(f"Parsing fusion-disabled dump graph: {args.af_close_graph}")
     af_close_graph_data = load_graph(args.af_close_graph)
     af_close_ops = get_ops(af_close_graph_data)
     _, af_close_node_formats = build_node_lookup(af_close_ops)
@@ -560,11 +562,11 @@ def run_mode1(args):
                 continue
             resolve_source(m, fused_output_resolver, node_types)
         print(
-            f"找到 {len(output_mappings)} 个融合算子输出映射, "
-            f"{len(input_mappings)} 个融合算子输入映射\n"
+            f"Found {len(output_mappings)} fused operator output mappings, "
+            f"{len(input_mappings)} fused operator input mappings\n"
         )
     else:
-        print(f"找到 {len(output_mappings)} 个融合算子输出映射\n")
+        print(f"Found {len(output_mappings)} fused operator output mappings\n")
 
     results = []
     for mapping in output_mappings:

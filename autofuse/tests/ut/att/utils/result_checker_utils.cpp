@@ -63,7 +63,7 @@ bool ResultCheckerUtils::IsFileContainsString(const std::string &filename, const
 
 bool ResultCheckerUtils::ReadFileLines(const std::string &filename, std::vector<std::string> &lines) {
   if (!fs::exists(filename)) {
-    std::cerr << "Error: filename " << filename << " is not exist!" << std::endl;
+    std::cerr << "Error: filename " << filename << " does not exist!" << std::endl;
     return false;
   }
 

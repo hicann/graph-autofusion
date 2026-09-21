@@ -356,7 +356,7 @@ class LoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -377,7 +377,7 @@ class NddmaAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -625,7 +625,7 @@ class AbsAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node, {true, {0}}),
                       "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
@@ -671,7 +671,7 @@ class ExpAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -714,7 +714,7 @@ class Exp2AscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -762,7 +762,7 @@ class FloorAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -788,7 +788,7 @@ class ModifiedBesselI0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImpl
     return {"modified_bessel_utils_reg_base.h", "modified_bessel_i0_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -814,7 +814,7 @@ class ModifiedBesselI1AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImpl
     return {"modified_bessel_utils_reg_base.h", "modified_bessel_i1_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -837,7 +837,7 @@ class ModifiedBesselK0AscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"modified_bessel_utils_reg_base.h", "modified_bessel_i0_reg_base.h", "modified_bessel_k0_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -860,7 +860,7 @@ class ModifiedBesselK1AscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"modified_bessel_utils_reg_base.h", "modified_bessel_i1_reg_base.h", "modified_bessel_k1_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -891,7 +891,7 @@ class I0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -922,7 +922,7 @@ class I0eAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -953,7 +953,7 @@ class I1eAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -979,7 +979,7 @@ class BesselJ0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return {"bessel_j_utils_reg_base.h", "trigonometric_function_utils_reg_base.h", "bessel_j0_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1005,7 +1005,7 @@ class BesselJ1AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return {"bessel_j_utils_reg_base.h", "trigonometric_function_utils_reg_base.h", "bessel_j1_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1032,7 +1032,7 @@ class BesselY0AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
             "bessel_y0_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1059,7 +1059,7 @@ class BesselY1AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
             "bessel_y1_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1083,7 +1083,7 @@ class ScaledModifiedBesselK0AscIrCodegenImplV2 : public AscIrCodegenV2 {
             "scaled_modified_bessel_k0_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1107,7 +1107,7 @@ class ScaledModifiedBesselK1AscIrCodegenImplV2 : public AscIrCodegenV2 {
             "scaled_modified_bessel_k1_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1130,7 +1130,7 @@ class SphericalBesselJ0AscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"bessel_j_utils_reg_base.h", "trigonometric_function_utils_reg_base.h", "spherical_bessel_j0_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1156,7 +1156,7 @@ class NdtrAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return {"ndtr_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1179,7 +1179,7 @@ class NdtriAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"ndtri_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1210,7 +1210,7 @@ class LogNdtrAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1238,7 +1238,7 @@ class NextAfterAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1268,7 +1268,7 @@ class PolyGammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1291,7 +1291,7 @@ class SignBitAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"signbit_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1314,7 +1314,7 @@ class FrexpAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"utils_reg_base.h", "frexp_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     AscNodeOutputs node_outputs = node.outputs;
     GE_ASSERT_TRUE(node_outputs().size() == 2U, "Node %s[%s] output tensor size is not equal with 2", node.GetTypePtr(),
@@ -1356,7 +1356,7 @@ class IgammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1390,7 +1390,7 @@ class IgammacAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1418,7 +1418,7 @@ class ZetaAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1441,7 +1441,7 @@ class ShiftedChebyshevPolynomialTAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"shifted_chebyshev_polynomial_utils_reg_base.h", "shifted_chebyshev_polynomial_t_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1464,7 +1464,7 @@ class ShiftedChebyshevPolynomialUAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"shifted_chebyshev_polynomial_utils_reg_base.h", "shifted_chebyshev_polynomial_u_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1487,7 +1487,7 @@ class ShiftedChebyshevPolynomialVAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"shifted_chebyshev_polynomial_utils_reg_base.h", "shifted_chebyshev_polynomial_v_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1510,7 +1510,7 @@ class ShiftedChebyshevPolynomialWAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"shifted_chebyshev_polynomial_utils_reg_base.h", "shifted_chebyshev_polynomial_w_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1538,7 +1538,7 @@ class ChebyshevPolynomialTAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1566,7 +1566,7 @@ class ChebyshevPolynomialUAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1594,7 +1594,7 @@ class ChebyshevPolynomialVAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1622,7 +1622,7 @@ class ChebyshevPolynomialWAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1645,7 +1645,7 @@ class HermitePolynomialHAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"hermite_polynomial_h_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node, {true, {0}}),
                       "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
@@ -1668,7 +1668,7 @@ class HermitePolynomialHeAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"hermite_polynomial_he_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node, {true, {0}}),
                       "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
@@ -1688,7 +1688,7 @@ class LaguerrePolynomialLAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"laguerre_polynomial_l_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node, {true, {0}}),
                       "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
@@ -1708,7 +1708,7 @@ class LegendrePolynomialPAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"legendre_polynomial_p_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node, {true, {0}}),
                       "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
@@ -1731,7 +1731,7 @@ class AiryAiAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"trigonometric_function_utils_reg_base.h", "airy_ai_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1754,7 +1754,7 @@ class ErfinvAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return {"erfinv_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1785,7 +1785,7 @@ class FmaAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1810,7 +1810,7 @@ class RemovePadAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -1836,7 +1836,7 @@ class PadAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -1868,7 +1868,7 @@ class RoundAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1915,7 +1915,7 @@ class LnAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -1965,7 +1965,7 @@ class Expm1AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2000,7 +2000,7 @@ class Log2AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2022,7 +2022,7 @@ class LShiftAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2055,7 +2055,7 @@ class ModAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"fmod_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2105,7 +2105,7 @@ class SqrtAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2171,7 +2171,7 @@ class RsqrtAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2243,7 +2243,7 @@ class NegAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2304,7 +2304,7 @@ class ReluAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2344,7 +2344,7 @@ class ReciprocalAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2394,7 +2394,7 @@ class SignAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2430,7 +2430,7 @@ class IsnanAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2466,7 +2466,7 @@ class IsFiniteAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2502,7 +2502,7 @@ class IsInfAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2543,7 +2543,7 @@ class LogicalNotAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -2579,7 +2579,7 @@ class MaxAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -2616,7 +2616,7 @@ class SumAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -2650,7 +2650,7 @@ class MinAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -2679,7 +2679,7 @@ class MeanAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -2708,7 +2708,7 @@ class ProdAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -2737,7 +2737,7 @@ class AnyAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -2766,7 +2766,7 @@ class AllAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -2821,7 +2821,7 @@ class CompareAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeFirstInputScalar(node), "Node %s[%s] not support first input scalar", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeFirstInputScalar(node), "Node %s[%s] does not support first input scalar", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node, {false, {1}}),
                       "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
@@ -2981,7 +2981,7 @@ class SigmoidAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -3001,7 +3001,7 @@ class Ub2ubAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -3498,7 +3498,7 @@ class WhereAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeFirstInputScalar(node), "Node %s[%s] not support first input scalar", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeFirstInputScalar(node), "Node %s[%s] does not support first input scalar", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node, {false, {1, 2}}),
                       "Node %s[%s] check shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
@@ -3555,7 +3555,7 @@ class LeakyReluAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -3628,7 +3628,7 @@ class StoreAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "Store";
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -3658,7 +3658,7 @@ class ConcatAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"basic_api/reg_compute/kernel_reg_compute_intf.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -3683,7 +3683,7 @@ class SplitAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"basic_api/reg_compute/kernel_reg_compute_intf.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -3713,7 +3713,7 @@ class GatherAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -3810,7 +3810,7 @@ class IndirectLoadAscIrCodegenImplV2 : public AscIrCodegenV2 {
             "simt_api/cpp/kernel_simt_intf.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -3836,7 +3836,7 @@ class TransposeAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -3873,7 +3873,7 @@ class ErfAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return {"adv_api/math/erf.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -3909,7 +3909,7 @@ class CeilAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -3951,7 +3951,7 @@ class CosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -3993,7 +3993,7 @@ class AcosAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4029,7 +4029,7 @@ class AcoshAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4064,7 +4064,7 @@ class CoshAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4105,7 +4105,7 @@ class AsinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4143,7 +4143,7 @@ class AsinhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4179,7 +4179,7 @@ class AtanAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4220,7 +4220,7 @@ class AtanhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4250,7 +4250,7 @@ class DigammaAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4283,7 +4283,7 @@ class ErfcAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4320,7 +4320,7 @@ class ErfcxAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4354,7 +4354,7 @@ class Atan2AscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"atan2_reg_base.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4389,7 +4389,7 @@ class CopySignAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4421,7 +4421,7 @@ class Ceil2IntAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4459,7 +4459,7 @@ class TanhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return {"adv_api/math/tanh.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4483,7 +4483,7 @@ class GeluAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"adv_api/activation/gelu.h"};
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4610,7 +4610,7 @@ class BitwiseAndAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4646,7 +4646,7 @@ class BitwiseNotAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4684,7 +4684,7 @@ class BitwiseOrAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4706,7 +4706,7 @@ class BitwiseXorAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4737,7 +4737,7 @@ class FloorDivAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4886,7 +4886,7 @@ class Log10AscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4911,7 +4911,7 @@ class LogicalXorAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -4946,7 +4946,7 @@ class Log1pAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -5015,7 +5015,7 @@ class AxpyAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -5048,7 +5048,7 @@ class MatMulAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -5080,7 +5080,7 @@ class BatchMatMulAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     return true;
   }
@@ -5104,9 +5104,9 @@ class Conv2DAscIrCodegenImplV2 : public AscIrCodegenV2 {
     std::string node_type = node.GetType();
     const auto &inputs = node.GetInDataNodes();
     GE_ASSERT_TRUE(!(inputs.size() > 0 && inputs.at(0)->GetType() == "Scalar"),
-                   "Node %s[%s] not support scalar input at index 0", node.GetTypePtr(), node.GetNamePtr());
+                   "Node %s[%s] does not support scalar input at index 0", node.GetTypePtr(), node.GetNamePtr());
     GE_ASSERT_TRUE(!(inputs.size() > 1 && inputs.at(1)->GetType() == "Scalar"),
-                   "Node %s[%s] not support scalar input at index 1", node.GetTypePtr(), node.GetNamePtr());
+                   "Node %s[%s] does not support scalar input at index 1", node.GetTypePtr(), node.GetNamePtr());
     return true;
   }
 };
@@ -5144,7 +5144,7 @@ class SinAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -5166,7 +5166,7 @@ class RShiftAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -5333,7 +5333,7 @@ class TanAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -5363,7 +5363,7 @@ class XorAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return CalcXorTmpSizeV2(node);
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -5395,7 +5395,7 @@ class TruncDivAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
@@ -5501,7 +5501,7 @@ class SoftmaxAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
-    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] not support scalar input", node.GetTypePtr(),
+    GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());

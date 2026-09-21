@@ -84,7 +84,7 @@ def _infer_or_set_view(view_holder: ascir.OpsOperatorOutput, axis, size, stride)
     elif size is not None and stride is None:
         view_holder.strides = _derive_strides(size)
     elif size is None and stride is not None:
-        raise ValueError("when stride is given，size must be also given")
+        raise ValueError("when stride is given, size must also be given")
 
 
 def _generate_op_name(graph: ascir.HintGraph, op_type: str) -> str:

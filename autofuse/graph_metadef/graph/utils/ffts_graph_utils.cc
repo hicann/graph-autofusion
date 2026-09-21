@@ -335,8 +335,14 @@ graphStatus FftsGraphUtils::GraphPartition(ComputeGraph &graph, const CalcFunc &
   GE_CHK_STATUS_RET(Calculate(ffts_plus_graph, calc_func, node_value, graph_value),
                     "[Calculate][Value] failed for graph %s", ffts_plus_graph->GetName().c_str());
   if (!IsValueValid(ffts_plus_graph, upper_limit, node_value, graph_value)) {
-    REPORT_INNER_ERR_MSG("E18888", "Check value invalid");
-    GELOGE(GRAPH_FAILED, "[Check][Value] invalid");
+    REPORT_INNER_ERR_MSG(
+        "E18888",
+        "Check value is invalid for graph[%s], node_value size[%zu], graph_value size[%zu], upper_limit size[%zu].",
+        ffts_plus_graph->GetName().c_str(), node_value.size(), graph_value.size(), upper_limit.size());
+    GELOGE(GRAPH_FAILED,
+           "[Check][Value] Value is invalid for graph[%s], node_value size[%zu], graph_value size[%zu], upper_limit "
+           "size[%zu].",
+           ffts_plus_graph->GetName().c_str(), node_value.size(), graph_value.size(), upper_limit.size());
     return GRAPH_FAILED;
   }
 
@@ -400,12 +406,12 @@ graphStatus FftsGraphUtils::Calculate(const ComputeGraphPtr &graph, const CalcFu
       cur_graph_value = cur_node_value;
     } else if (cur_graph_value.size() != cur_node_value.size()) {
       REPORT_INNER_ERR_MSG("E18888",
-                           "Value size not match, value size of graph %s is %zu, "
+                           "Value size does not match, value size of graph %s is %zu, "
                            "value size of node %s is %zu",
                            graph->GetName().c_str(), cur_graph_value.size(), node->GetName().c_str(),
                            cur_node_value.size());
       GELOGE(GRAPH_FAILED,
-             "[Check][Param] Value size not match, value size of graph %s is %zu, "
+             "[Check][Param] Value size does not match, value size of graph %s is %zu, "
              "value size of node %s is %zu",
              graph->GetName().c_str(), cur_graph_value.size(), node->GetName().c_str(), cur_node_value.size());
       return GRAPH_FAILED;
@@ -449,12 +455,12 @@ std::vector<uint32_t> FftsGraphUtils::Calculate(const NodePtr &node, const CalcF
       cur_node_value = subgraph_value;
     } else if (cur_node_value.size() != subgraph_value.size()) {
       REPORT_INNER_ERR_MSG("E18888",
-                           "Value size not match, value size of node %s is %zu, value size of subgraph %s "
+                           "Value size does not match, value size of node %s is %zu, value size of subgraph %s "
                            "is %zu",
                            node->GetName().c_str(), cur_node_value.size(), subgraph->GetName().c_str(),
                            subgraph_value.size());
       GELOGE(GRAPH_FAILED,
-             "[Check][Param] Value size not match, value size of node %s is %zu, "
+             "[Check][Param] Value size does not match, value size of node %s is %zu, "
              "value size of subgraph %s is %zu",
              node->GetName().c_str(), cur_node_value.size(), subgraph->GetName().c_str(), subgraph_value.size());
       return {};
@@ -497,8 +503,8 @@ bool FftsGraphUtils::IsValueValid(const ComputeGraphPtr &graph, const std::vecto
     return pair_item.second.size() != upper_limit.size();
   };
   if (std::find_if(node_value.begin(), node_value.end(), is_node_value_match) != node_value.end()) {
-    REPORT_INNER_ERR_MSG("E18888", "Node value size not match");
-    GELOGE(GRAPH_FAILED, "[Check][Param] Node value size not match");
+    REPORT_INNER_ERR_MSG("E18888", "Node value size does not match");
+    GELOGE(GRAPH_FAILED, "[Check][Param] Node value size does not match");
     return false;
   }
 
@@ -506,8 +512,8 @@ bool FftsGraphUtils::IsValueValid(const ComputeGraphPtr &graph, const std::vecto
     return pair_item.second.size() != upper_limit.size();
   };
   if (std::find_if(graph_value.begin(), graph_value.end(), is_graph_value_match) != graph_value.end()) {
-    REPORT_INNER_ERR_MSG("E18888", "Graph value size not match");
-    GELOGE(GRAPH_FAILED, "[Check][Param] Graph value size not match");
+    REPORT_INNER_ERR_MSG("E18888", "Graph value size does not match");
+    GELOGE(GRAPH_FAILED, "[Check][Param] Graph value size does not match");
     return false;
   }
 

@@ -579,7 +579,7 @@ Status CubeFusionCaseGenerator::GeneratorUbTask(const std::vector<::ascir::ImplG
     }
     tmp_grouped_graphs.emplace_back(optimize_graph);
     if (HasBroadCastNode(optimize_graph)) {
-      GELOGW("The graph %s still contains broadcast nodes and not support generating ub task.",
+      GELOGW("The graph %s still contains broadcast nodes and does not support generating ub task.",
              grouped_graph.GetName().c_str());
       return af::GRAPH_SUCCESS;
     }

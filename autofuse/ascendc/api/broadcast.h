@@ -328,7 +328,7 @@ inline __aicore__ void BroadcastCommon(const LocalTensor<T> &dst, const LocalTen
     const uint32_t src_shape[2]{src_m, src_k};
     AscendC::Broadcast<T, 2, 1>(dst, src, dst_shape, src_shape, tmp_buf);
   } else {
-    ASSERT(false && "Broadcast size not support.");
+    ASSERT(false && "Broadcast size is not supported.");
   }
 }
 
@@ -368,7 +368,7 @@ inline __aicore__ void BroadcastWithCast(const LocalTensor<T> &dst, const LocalT
     const uint32_t dst_shape[2]{dst_m, dst_k};
     AscendC::Broadcast<T, 2, 1>(dst, src, dst_shape, src_shape, tmp_buf);
   } else {
-    ASSERT(false && "Broadcast size not support.");
+    ASSERT(false && "Broadcast size is not supported.");
   }
 }
 
@@ -504,7 +504,7 @@ inline __aicore__ void BroadcastInt64(const LocalTensor<T> &dst, const LocalTens
     AscendC::WaitFlag<HardEvent::S_V>(event_id);
     Duplicate(dst, scalarVlue, dst_m * dst_k, tmp_buf);
   } else {
-    ASSERT(false && "Broadcast size not support.");
+    ASSERT(false && "Broadcast size is not supported.");
   }
 }
 
@@ -520,7 +520,7 @@ inline __aicore__ void Broadcast(const LocalTensor<T> &dst, const LocalTensor<T>
   } else if constexpr (AscendC::SupportType<T, int16_t, uint16_t, half, float, int32_t, uint32_t>()) {
     BroadcastCommon(dst, src, src_m, src_k, src_z, dst_m, dst_k, dst_z, tmp_buf, last_dim_stride);
   } else {
-    ASSERT(false && "Broadcast type not support.");
+    ASSERT(false && "Broadcast type is not supported.");
   }
 }
 
@@ -546,7 +546,7 @@ inline __aicore__ void Broadcast(const LocalTensor<T> &dst, const LocalTensor<T>
     // (A, 1, AB) -> (A, B, AB)
     Broadcast(dst, inter_buf, src_m, 1, dst_k * dst_z, dst_m, dst_n, dst_k * dst_z, left_buf);
   } else {
-    ASSERT(false && "Broadcast type not support.");
+    ASSERT(false && "Broadcast type is not supported.");
   }
 }
 
