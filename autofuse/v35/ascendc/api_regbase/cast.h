@@ -689,7 +689,8 @@ __aicore__ inline void CastExtend(const AscendC::LocalTensor<OutT> &dst, const A
   constexpr bool b64Cast = SupportType<Tuple<OutT, InT>, Tuple<float, int64_t>, Tuple<int64_t, float>,
                                        Tuple<int32_t, int64_t>, Tuple<int64_t, int32_t>>();
 
-  constexpr bool b64CastWithTransfer = SupportType<Tuple<OutT, InT>, Tuple<half, int64_t>, Tuple<int64_t, half>>();
+  constexpr bool b64CastWithTransfer =
+      SupportType<Tuple<OutT, InT>, Tuple<half, int64_t>, Tuple<int64_t, half>, Tuple<bfloat16_t, int64_t>>();
 
   constexpr bool castWithSameBit =
       SupportType<Tuple<OutT, InT>, Tuple<uint8_t, int8_t>, Tuple<int8_t, uint8_t>, Tuple<uint16_t, int16_t>,
@@ -765,7 +766,8 @@ __aicore__ inline void CastExtend(const AscendC::LocalTensor<OutT> &dst, const A
     CastExtendImpl<func, InT, OutT, roundMode, dim>(dstUb, srcUb, count, repeatTimes, innerLoopStride, output_dims,
                                                     output_stride, input_stride);
   } else if constexpr (SupportType<Tuple<OutT, InT>, Tuple<uint8_t, int16_t>>()) {
-#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510) || (__NPU_ARCH__ == 5102) || (__NPU_ARCH__ == 9202))
+#if defined(__NPU_ARCH__) && \
+    ((__NPU_ARCH__ == 3510) || (__NPU_ARCH__ == 5102) || (__NPU_ARCH__ == 9201) || (__NPU_ARCH__ == 9202))
     AscendC::SetCtrlSpr<60, 60>(0);
 #endif
     constexpr auto func = CastExtendInt16ToUint8<InT, OutT, roundMode>;
@@ -776,7 +778,8 @@ __aicore__ inline void CastExtend(const AscendC::LocalTensor<OutT> &dst, const A
     CastExtendImpl<func, InT, OutT, roundMode, dim>(dstUb, srcUb, count, repeatTimes, innerLoopStride, output_dims,
                                                     output_stride, input_stride);
   } else {
-#if defined(__NPU_ARCH__) && ((__NPU_ARCH__ == 3510) || (__NPU_ARCH__ == 5102) || (__NPU_ARCH__ == 9202))
+#if defined(__NPU_ARCH__) && \
+    ((__NPU_ARCH__ == 3510) || (__NPU_ARCH__ == 5102) || (__NPU_ARCH__ == 9201) || (__NPU_ARCH__ == 9202))
     AscendC::SetCtrlSpr<60, 60>(0);
 #endif
     constexpr auto func = CastExtendCommon<InT, OutT, roundMode>;

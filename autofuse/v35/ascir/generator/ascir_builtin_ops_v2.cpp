@@ -50,7 +50,7 @@ class AscIrAttStubV2 : public af::ascir::AscIrAtt {
   }
 };
 
-const std::vector<std::string> v2_soc_versions{"3510", "5102", "9202"};
+const std::vector<std::string> v2_soc_versions{"3510", "5102", "9201", "9202"};
 
 REG_ASC_IR(Square)
     .Input("x", "T")
@@ -593,8 +593,8 @@ constexpr std::pair<ge::DataType, ge::DataType> kCastTypePairs[] = {
     {DT_INT16, DT_UINT16},  {DT_INT16, DT_INT8},    {DT_INT16, DT_UINT8},   {DT_INT32, DT_FLOAT},
     {DT_INT32, DT_INT64},   {DT_INT32, DT_INT16},   {DT_INT32, DT_FLOAT16}, {DT_INT32, DT_UINT32},
     {DT_INT32, DT_BOOL},    {DT_INT64, DT_INT32},   {DT_INT64, DT_FLOAT},   {DT_INT64, DT_UINT8},
-    {DT_INT64, DT_UINT64},  {DT_INT64, DT_FLOAT16}, {DT_INT64, DT_BOOL},    {DT_BF16, DT_FLOAT},
-    {DT_BF16, DT_INT32},    {DT_FLOAT, DT_BOOL}};
+    {DT_INT64, DT_UINT64},  {DT_INT64, DT_FLOAT16}, {DT_INT64, DT_BF16},    {DT_INT64, DT_BOOL},
+    {DT_BF16, DT_FLOAT},    {DT_BF16, DT_INT32},    {DT_FLOAT, DT_BOOL}};
 REG_ASC_IR(Cast).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::CastAscIrAttImplV2>(),
                                         af::ascir::AscIrImplCreator<af::ascir::CastAscIrCodegenImplV2>(),
                                         {{"T1", MakeT1List(kCastTypePairs)}, {"T2", MakeT2List(kCastTypePairs)}}});

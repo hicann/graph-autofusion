@@ -1188,10 +1188,11 @@ af::Status BuildSimtLoweringMetadata(const af::AscNodePtr &indirect_load, Indire
          SimtLoadUsesZeroOffset(node) ? SimtLoadAddressSource::kZeroOffset : SimtLoadAddressSource::kOutputOffset,
          mixed_index_views, GetNodeOutputView(node)});
   }
-  const bool use_output_logical_offset = !simt.has_post_reduce;
+  // Every GM side load inside the SIMT region is addressed with the full logical output_index,
+  // including post-Reduce regions, so its physical view must always provide the coordinate
+  // folding; a raw output_index is only valid for dense-matching views.
   for (const auto &node : output_load_nodes) {
-    simt.output_loads.push_back(
-        {node->GetName(), output_sources.at(node->GetName()), use_output_logical_offset, GetNodeOutputView(node)});
+    simt.output_loads.push_back({node->GetName(), output_sources.at(node->GetName()), true, GetNodeOutputView(node)});
   }
   return af::SUCCESS;
 }

@@ -328,12 +328,11 @@ TEST(CodegenKernel, BroadcastApiCallScalar) {
 
   std::string result;
   call.Generate(tpipe, vector<af::AxisId>{}, result);
-  EXPECT_EQ(
-      result,
-      std::string{"event_t local_0_event_id = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::MTE2_S));\n"
-                  "SetFlag<HardEvent::MTE2_S>(local_0_event_id);\n"
-                  "WaitFlag<HardEvent::MTE2_S>(local_0_event_id);\n"
-                  "Duplicate(local_1[0], local_0.GetValue(0), local_1_actual_size, tmp_buf_0);\n"});
+  EXPECT_EQ(result, std::string{"event_t local_0_to_local_1_event_id = "
+                                "static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::MTE2_S));\n"
+                                "SetFlag<HardEvent::MTE2_S>(local_0_to_local_1_event_id);\n"
+                                "WaitFlag<HardEvent::MTE2_S>(local_0_to_local_1_event_id);\n"
+                                "Duplicate(local_1[0], local_0.GetValue(0), local_1_actual_size, tmp_buf_0);\n"});
 }
 
 TEST(CodegenKernel, BroadcastApiCallVectorizedSizeInvalid) {
@@ -764,8 +763,9 @@ TEST(CodegenKernel, BroadcastApiCallScalarAfterVectorNode) {
   call.Generate(tpipe, vector<af::AxisId>{}, result);
   EXPECT_EQ(
       result,
-      std::string{"event_t local_1_event_id = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::V_S));\n"
-                  "SetFlag<HardEvent::V_S>(local_1_event_id);\n"
-                  "WaitFlag<HardEvent::V_S>(local_1_event_id);\n"
-                  "Duplicate(local_2[0], local_1.GetValue(0), local_2_actual_size);\n"});
+      std::string{
+          "event_t local_1_to_local_2_event_id = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::V_S));\n"
+          "SetFlag<HardEvent::V_S>(local_1_to_local_2_event_id);\n"
+          "WaitFlag<HardEvent::V_S>(local_1_to_local_2_event_id);\n"
+          "Duplicate(local_2[0], local_1.GetValue(0), local_2_actual_size);\n"});
 }

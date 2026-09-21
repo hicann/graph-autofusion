@@ -8,21 +8,25 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include "default_reg_func_v2.h"
+#include "reg_func/defalut_reg_func.h"
 
 namespace af {
 namespace ascir {
 std::vector<std::unique_ptr<TmpBufDesc>> CalcLgammaTmpSizeV2(const AscNode &node) {
-  constexpr uint32_t LGAMMA_ONE_REPEAT_BYTE_SIZE = 256;
-  constexpr uint32_t HALF_CALC_FAC = 13U;
-  constexpr uint32_t FLOAT_CALC_PROC = 8U;
-  constexpr uint32_t NUM_TWO = 2U;
+  constexpr uint32_t LGAMMA_FLOAT_SIZE = 4U;
   auto node_inputs = node.inputs;
   GE_ASSERT_TRUE(node_inputs.Size() > 0, "Node %s[%s] inputs size is 0.", node.GetTypePtr(), node.GetNamePtr());
-  uint32_t calcTmpBuf = (node_inputs[0].attr.dtype == ge::DT_FLOAT)
-                            ? FLOAT_CALC_PROC * LGAMMA_ONE_REPEAT_BYTE_SIZE
-                            : HALF_CALC_FAC * LGAMMA_ONE_REPEAT_BYTE_SIZE * NUM_TWO;
-  GELOGD("Node %s[%s] temp buffer size: %u", node.GetTypePtr(), node.GetNamePtr(), calcTmpBuf);
-  Expression TmpSize = Symbol(calcTmpBuf);
+  const auto input_size = GetInputSize(node_inputs);
+  uint32_t input_id = GetNonScalarAxisId(node_inputs);
+  if (input_id == UINT32_MAX) {
+    input_id = node_inputs.Size() - 1U;
+  }
+
+  const auto data_type = node_inputs[input_id].attr.dtype;
+  const auto data_type_size = GetSizeByDataType(data_type);
+
+  Expression TmpSize = Symbol(data_type_size) * input_size * Symbol(LGAMMA_FLOAT_SIZE);
+  GELOGD("Node %s[%s] temp buffer size: %s", node.GetTypePtr(), node.GetNamePtr(), TmpSize.Str().get());
   TmpBufDesc desc = {TmpSize, -1};
   std::vector<std::unique_ptr<TmpBufDesc>> tmpBufDescs;
   tmpBufDescs.emplace_back(std::make_unique<TmpBufDesc>(desc));

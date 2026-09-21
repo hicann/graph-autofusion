@@ -174,7 +174,8 @@ bool IsB64Cast(const NodeDetail &node_info) {
 }
 
 bool IsB64TransferCast(const NodeDetail &node_info) {
-  return IsCastPair(node_info, kInt64, kFloat16) || IsCastPair(node_info, kFloat16, kInt64);
+  return IsCastPair(node_info, kInt64, kFloat16) || IsCastPair(node_info, kFloat16, kInt64) ||
+         IsCastPair(node_info, kInt64, kBfloat16);
 }
 
 Expr GetUnaryBitWidthChangeCallCount(const NodeDetail &node_info, Expr &cal_count) {

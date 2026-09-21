@@ -497,8 +497,7 @@ af::Status BuildReduceInput(const AscirParamBuildContext &ctx, codegen::ReduceSp
   input.reduce_type = ctx.api_name;
   input.input_repeats = ctx.inputs[0].vectorized_repeats;
   input.input_strides = ctx.inputs[0].vectorized_strides;
-  input.output_dims =
-      ctx.outputs[0].tensor_repeats.empty() ? ctx.outputs[0].vectorized_repeats : ctx.outputs[0].tensor_repeats;
+  input.output_dims = ctx.outputs[0].vectorized_repeats;
   input.output_strides = ctx.outputs[0].vectorized_strides;
   input.dtype_size = ctx.inputs[0].dtype_size;
   input.pattern = GetReducePattern(ctx);

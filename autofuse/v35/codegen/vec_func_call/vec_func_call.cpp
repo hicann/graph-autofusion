@@ -499,7 +499,8 @@ void GenerateVfCallFuncHeader(const TPipe &tpipe, const std::string &vf_call_nam
                               const VectorizedAxisLoopMergeStatus &merge_info,
                               const std::vector<ArangeParam> &arange_params, std::stringstream &ss) {
   ss << "#if defined(__DAV_C310__) || "
-        "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))"
+        "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || "
+        "__NPU_ARCH__ == 9202))"
      << std::endl;
   ss << "\ninline __simd_vf__ void " << vf_call_name << "(";
   CreateVFCallDimAndStrideParmas(tpipe, inputs, scalar_inputs, outputs, merge_info, ss);
@@ -707,7 +708,8 @@ Status VfCall::Generate(const TPipe &tpipe, [[maybe_unused]] const std::vector<a
     param.offset = offset.str();
   }
   ss << "#if defined(__DAV_C310__) || "
-        "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9202))"
+        "(defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102 || __NPU_ARCH__ == 3510 || __NPU_ARCH__ == 9201 || "
+        "__NPU_ARCH__ == 9202))"
      << std::endl;
   ss << "AscendC::SetCtrlSpr<60, 60>(0);" << std::endl;
   if (loop_num <= kVFMaxLoop) {
