@@ -127,7 +127,7 @@ git clone https://gitcode.com/cann/graph-autofusion.git
   > [!NOTE] 说明
   > - 默认使用当前环境已安装的 gcc/g++，不会修改系统默认编译器。
   > - 如需切换到 gcc15/gcc16，请在编译前显式设置 `CC/CXX`，例如 `export CC=gcc-15 CXX=g++-15`。
-  > - 也可以设置 `GCC_VERSION=15` 或 `GCC_VERSION=16`，由脚本生成对应的编译器命令。
+  > - 也可以设置 `GCC_VERSION=15` 或 `GCC_VERSION=16`，由脚本生成对应的编译器命令。注意：`GCC_VERSION` 仅对测试脚本（如 `scripts/test/run_autofuse_test.sh`）和 CI 构建生效，`build.sh --pkg` 主构建不读取该变量，主构建切换编译器请显式设置 `CC/CXX`。
   > - 切换编译器后请清理 `build/` 再重新配置，避免 CMake 缓存沿用旧编译器。
 
 #### 4.2.2 检查编译环境
