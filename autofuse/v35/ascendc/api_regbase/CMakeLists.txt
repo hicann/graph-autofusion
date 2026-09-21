@@ -38,6 +38,7 @@ set(ascendc_api_regbase_extend_src
         exp2.h
         log1p.h
         tanh.h
+        reciprocal.h
         sub.h
         div.h
         sign.h
