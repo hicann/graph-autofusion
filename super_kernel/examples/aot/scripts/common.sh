@@ -53,6 +53,72 @@ sk_parse_npu_arch() {
     sk_validate_npu_arch "${NPU_ARCH}"
 }
 
+sk_check_driver_version_for_aot() {
+    local driver_root="/usr/local/Ascend/driver"
+    local version_file="${driver_root}/version.info"
+    local raw_version
+    local driver_version
+    local major
+    local minor
+    local download_url="https://www.hiascend.com/hardware/firmware-drivers/old/community"
+
+    if [ ! -d "${driver_root}" ]; then
+        echo "[WARNING][AOT-SKIP] driver directory not found: ${driver_root}"
+        echo "[WARNING][AOT-SKIP] install or mount an Ascend driver (>= 25.5) before running AOT examples."
+        echo "[WARNING][AOT-SKIP] download: ${download_url}"
+        return 1
+    fi
+
+    if [ ! -f "${version_file}" ] || [ ! -r "${version_file}" ]; then
+        echo "[WARNING][AOT-SKIP] driver version is unavailable: ${version_file} is missing or unreadable."
+        echo "[WARNING][AOT-SKIP] mount the host version.info into the container before running AOT examples."
+        echo "[WARNING][AOT-SKIP] download: ${download_url}"
+        return 1
+    fi
+
+    raw_version=$(awk -F= '
+        tolower($1) ~ /^[[:space:]]*version[[:space:]]*$/ {
+            value = $2
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            print value
+            exit
+        }
+    ' "${version_file}" 2>/dev/null || true)
+    driver_version=$(printf '%s\n' "${raw_version}" | sed -nE \
+        's/^[^0-9]*([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/p')
+
+    if [ -z "${driver_version}" ]; then
+        echo "[WARNING][AOT-SKIP] unable to parse driver version from ${version_file}."
+        echo "[WARNING][AOT-SKIP] required driver version: >= 25.5"
+        echo "[WARNING][AOT-SKIP] download: ${download_url}"
+        return 1
+    fi
+
+    major="${driver_version%%.*}"
+    minor="${driver_version#*.}"
+    minor="${minor%%.*}"
+    if [[ ! "${major}" =~ ^[0-9]+$ || ! "${minor}" =~ ^[0-9]+$ ]]; then
+        echo "[WARNING][AOT-SKIP] unable to parse driver version: ${driver_version}"
+        echo "[WARNING][AOT-SKIP] required driver version: >= 25.5"
+        echo "[WARNING][AOT-SKIP] download: ${download_url}"
+        return 1
+    fi
+    major=$((10#${major}))
+    minor=$((10#${minor}))
+
+    echo "[INFO][AOT-GATE] driver version: ${driver_version} (${version_file})"
+    echo "[INFO][AOT-GATE] required driver version: >= 25.5"
+    if ((major > 25 || (major == 25 && minor >= 5))); then
+        echo "[INFO][AOT-GATE] driver requirement satisfied; running AOT examples."
+        return 0
+    fi
+
+    echo "[WARNING][AOT-SKIP] driver version ${driver_version} is below the required >= 25.5."
+    echo "[WARNING][AOT-SKIP] download: ${download_url}"
+    return 1
+}
+
 sk_cleanup_local() {
     local output
     for output in log tmp sk_meta kernel_meta profiling static_kernel_compile_outputs \

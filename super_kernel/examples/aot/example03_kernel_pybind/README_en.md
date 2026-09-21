@@ -42,8 +42,6 @@ bash run.sh --npu-arch=dav-2201
 
 Note: The sample temporarily installs the custom operator extension under the sample directory and cleans it up on exit.
 
-For options, see the [TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md).
-
 ## Expected Result
 
 On success, the sample prints the following key log:

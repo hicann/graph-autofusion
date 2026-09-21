@@ -2,7 +2,7 @@
 
 ## 功能描述
 
-本目录提供两类 SuperKernel Python 样例：
+本目录提供两类 SuperKernel Python 样例。各样例的支持范围和运行方法详见样例目录下的 `README.md`。
 
 - `jit/`：通过 SuperKernel JIT 接口完成融合、编译和运行。
 - `aot/`：通过 TorchAir `npugraph_ex` 静态编译并启用 SuperKernel 优化。
@@ -11,7 +11,7 @@
 
 ```text
 examples/
-├── run_example.sh                                   # 样例统一运行入口
+├── run_example.sh                                   # 工程测试批量执行脚本
 ├── jit/
 │   ├── example01_super_kernel_base/                 # SuperKernel 基础功能
 │   ├── example02_super_kernel_profiling/            # SuperKernel profiling 对比
@@ -39,29 +39,15 @@ examples/
 pip install -r super_kernel/examples/requirements.txt
 ```
 
-## 运行说明
+## 样例汇总
 
-`--npu-arch` 指定运行样例的 NPU 架构，应根据实际使用的产品型号选择：
+下表用于快速定位样例。支持范围和运行方法请以对应样例目录下的 README 为准。
 
-| `--npu-arch` 取值 | 对应产品 |
-| --- | --- |
-| `dav-3510` | Ascend 950 系列产品（如 Ascend 950PR、Ascend 950DT） |
-| `dav-2201` | Atlas A3 训练/推理系列产品、Atlas A2 训练/推理系列产品 |
-
-Ascend 950 系列产品，在仓库根目录执行：
-
-```bash
-bash super_kernel/examples/run_example.sh --npu-arch=dav-3510
-```
-
-Atlas A3 或 Atlas A2 系列产品，在仓库根目录执行：
-
-```bash
-bash super_kernel/examples/run_example.sh --npu-arch=dav-2201
-```
-
-统一入口会根据 `--npu-arch` 自动运行当前产品型号支持的样例。各样例的支持范围和运行方法详见样例目录下的 `README.md`。
-
-## 参考
-
-- SuperKernel option 参考 [TorchAir SuperKernel 使用说明](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md)。
+| 类型 | 样例 | 文档与运行方法 |
+| --- | --- | --- |
+| JIT | [example01_super_kernel_base](./jit/example01_super_kernel_base/README.md) | [中文 README](./jit/example01_super_kernel_base/README.md) / [English README](./jit/example01_super_kernel_base/README_en.md) |
+| JIT | [example02_super_kernel_profiling](./jit/example02_super_kernel_profiling/README.md) | [中文 README](./jit/example02_super_kernel_profiling/README.md) / [English README](./jit/example02_super_kernel_profiling/README_en.md) |
+| JIT | [example03_super_kernel_runtime_ascendc_only](./jit/example03_super_kernel_runtime_ascendc_only/README.md) | [中文 README](./jit/example03_super_kernel_runtime_ascendc_only/README.md) / [English README](./jit/example03_super_kernel_runtime_ascendc_only/README_en.md) |
+| AOT | [example01_dual_stream](./aot/example01_dual_stream/README.md) | [中文 README](./aot/example01_dual_stream/README.md) / [English README](./aot/example01_dual_stream/README_en.md) |
+| AOT | [example02_sk_options](./aot/example02_sk_options/README.md) | [中文 README](./aot/example02_sk_options/README.md) / [English README](./aot/example02_sk_options/README_en.md) |
+| AOT | [example03_kernel_pybind](./aot/example03_kernel_pybind/README.md) | [中文 README](./aot/example03_kernel_pybind/README.md) / [English README](./aot/example03_kernel_pybind/README_en.md) |

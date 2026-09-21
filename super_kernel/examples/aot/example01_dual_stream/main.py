@@ -295,6 +295,7 @@ def compare_results(dq_res_2_non_sk, dq_res_2_sk, atol=1e-3, rtol=1e-3):
 # ============================================================================
 
 if __name__ == "__main__":
+    torch_npu.npu.set_device(0)
     torch_npu.npu.set_op_timeout_ms(10000)
 
     print("=" * 60)

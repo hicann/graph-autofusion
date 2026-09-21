@@ -2,7 +2,7 @@
 
 ## 用例功能
 
-该样例使用 `bisheng` 编译带 `SK_BIND` 的 AscendC custom add kernel，通过 pybind 注册为 PyTorch 算子，再由 `npugraph_ex` 静态编译并启用 SuperKernel。
+该样例使用 `bisheng` 编译带 `SK_BIND` 的 AscendC 自定义 add kernel，通过 pybind 将其注册为 PyTorch 算子，再由 `npugraph_ex` 静态编译并启用 SuperKernel。
 
 ## 环境依赖
 
@@ -12,7 +12,7 @@
 - Atlas A3 训练系列产品/Atlas A3 推理系列产品
 - Atlas A2 训练系列产品/Atlas A2 推理系列产品
 
-请先参考[源码构建指南](../../../../docs/zh/build.md)完成环境准备，并按照官方发布的Pytorch与TorchNPU版本进行配套安装，
+请先参考[源码构建指南](../../../../docs/zh/build.md)完成环境准备，并按照官方发布的 PyTorch 与 TorchNPU 版本进行配套安装，
 参见《[Ascend Extension for PyTorch 用户指南](https://www.hiascend.com/document/redirect/pytorchuserguide)》，
 再安装对应的 Python 依赖：
 
