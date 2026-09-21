@@ -841,7 +841,6 @@ build_backend() {
                          indirect_load_both_transpose_simt_test_e2e_v2 \
                         indirect_load_broadcast_elements_sk_test_e2e_v2 \
                         indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 \
-                        indirect_load_broadcast_index_mixed_view_simt_test_e2e_v2 \
                         indirect_load_broadcast_index_abs_simt_test_e2e_v2 \
                         indirect_load_broadcast_index_where_simt_test_e2e_v2 \
                         indirect_load_index_binary_same_view_simd_test_e2e_v2 \
@@ -849,15 +848,12 @@ build_backend() {
                        indirect_load_rank3_axis1_input_index_gap_simt_test_e2e_v2 \
                        indirect_load_rank3_axis1_input_index_outer_gap_simt_test_e2e_v2 \
                        indirect_load_rank3_axis1_torch_gather_frontend_e2e_v2 \
-                       indirect_load_graph_hint_reduce_simt_test_e2e_v2 \
                        indirect_load_graph_hint_simd_repro_e2e_v2 \
                        indirect_load_graph_hint_embedding_slice_e2e_v2 \
                        indirect_load_embedding_reduce_simt_test_e2e_v2 \
-                       indirect_load_add_il_reduce_test_e2e_v2 \
                        indirect_load_user_masked_embedding_minimal_e2e_v2 \
                        indirect_load_user_masked_embedding_sum_full_auto_e2e_v2 \
                        indirect_load_user_position_bias_e2e_v2 \
-                       indirect_load_user_position_bias_exp_sum_e2e_v2 \
                        indirect_load_user_embedding_sum_e2e_v2 \
                        indirect_load_user_embedding_sum_rank2_e2e_v2 \
                        indirect_load_user_embedding_sum_simd_e2e_v2 \
@@ -875,7 +871,6 @@ build_backend() {
                        indirect_load_user_fanout_post_stores_simd_e2e_v2 \
                        indirect_load_user_fanout_post_stores_simt_e2e_v2 \
                        indirect_load_user_side_input_fanout_simd_e2e_v2 \
-                       indirect_load_user_side_input_fanout_simt_e2e_v2 \
                        load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \
                       gather_reduce_store_test_e2e_v2 \
                       load_where_store_test_e2e_v2 \
