@@ -1,6 +1,6 @@
-# AutoFuse Usage Guide with TensorFlow
+# Enable AutoFuse on the GE Path
 
-This document describes how to enable AutoFuse automatic operator fusion based on the TensorFlow 1.x framework (GE path), and uses `Abs + ReLU + Exp` operator fusion as an example to demonstrate how to configure and run a fusion example and verify the fusion result.
+This document describes how to enable AutoFuse automatic operator fusion based on the GE path (TensorFlow 1.x framework), and uses `Abs + ReLU + Exp` operator fusion as an example to demonstrate how to configure and run a fusion example and verify the fusion result.
 
 ## Environment Preparation
 
@@ -25,7 +25,7 @@ source /usr/local/Ascend/cann/set_env.sh
 
 ## Enable AutoFuse
 
-Enable AutoFuse in TensorFlow graph mode through an environment variable:
+On the GE path, enable AutoFuse through an environment variable:
 
 ```bash
 export AUTOFUSE_FLAGS="--enable_autofuse=true"

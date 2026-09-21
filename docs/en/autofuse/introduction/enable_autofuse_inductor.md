@@ -1,6 +1,8 @@
-# AutoFuse Usage Guide with PyTorch
+# Enable AutoFuse on the Inductor Path
 
-This document describes how to enable AutoFuse automatic operator fusion based on the PyTorch framework (Inductor path), and uses `add + ge` operator fusion as an example to demonstrate how to configure and run a fusion example and verify the fusion result.
+This document describes how to enable AutoFuse automatic operator fusion based on the Inductor path (PyTorch framework), and uses `add + ge` operator fusion as an example to demonstrate how to configure and run a fusion example and verify the fusion result.
+
+> **Constraints**: The Inductor path currently supports static shapes only; dynamic shapes are not supported. For dynamic-shape scenarios, use the GE path instead. See [Enable AutoFuse on the GE Path](./enable_autofuse_ge.md).
 
 ## Environment Preparation
 
@@ -25,7 +27,7 @@ source /usr/local/Ascend/cann/set_env.sh
 
 ## Enable AutoFuse
 
-Specify the AscendC backend in `torch.compile` to enable AutoFuse:
+On the Inductor path, specify the AscendC backend in `torch.compile` to enable AutoFuse:
 
 ```python
 model = torch.compile(

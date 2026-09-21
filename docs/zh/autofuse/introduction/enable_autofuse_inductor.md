@@ -1,6 +1,8 @@
-# PyTorch 框架下的 AutoFuse 使用指南
+# Inductor 路径下使能 AutoFuse
 
-本文介绍基于 PyTorch 框架（Inductor 路径）启用 AutoFuse 自动算子融合功能的方法，并以 `add + ge` 算子融合为例，演示如何配置和运行融合用例，以及如何验证融合结果。
+本文介绍基于 Inductor 路径（PyTorch 框架）启用 AutoFuse 自动算子融合功能的方法，并以 `add + ge` 算子融合为例，演示如何配置和运行融合用例，以及如何验证融合结果。
+
+> **约束限制**：Inductor 路径当前仅支持静态 Shape，不支持动态 Shape。动态 Shape 场景请改用 GE 路径，参见 [GE 路径下使能 AutoFuse](./enable_autofuse_ge.md)。
 
 ## 环境准备
 
@@ -25,7 +27,7 @@ source /usr/local/Ascend/cann/set_env.sh
 
 ## 启用 AutoFuse
 
-在 `torch.compile` 中指定 AscendC 后端即可启用 AutoFuse：
+Inductor 路径下，在 `torch.compile` 中指定 AscendC 后端即可启用 AutoFuse：
 
 ```python
 model = torch.compile(

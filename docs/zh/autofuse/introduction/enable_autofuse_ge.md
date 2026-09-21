@@ -1,6 +1,6 @@
-# TensorFlow 框架下的 AutoFuse 使用指南
+# GE 路径下使能 AutoFuse
 
-本文介绍基于 TensorFlow 1.x 框架（GE 路径）启用 AutoFuse 自动算子融合功能的方法，并以 `Abs + ReLU + Exp` 算子融合为例，演示如何配置和运行融合用例，以及如何验证融合结果。
+本文介绍基于 GE 路径（TensorFlow 1.x 框架）启用 AutoFuse 自动算子融合功能的方法，并以 `Abs + ReLU + Exp` 算子融合为例，演示如何配置和运行融合用例，以及如何验证融合结果。
 
 ## 环境准备
 
@@ -25,7 +25,7 @@ source /usr/local/Ascend/cann/set_env.sh
 
 ## 启用 AutoFuse
 
-TensorFlow 图模式通过环境变量启用 AutoFuse：
+GE 路径下，通过环境变量启用 AutoFuse：
 
 ```bash
 export AUTOFUSE_FLAGS="--enable_autofuse=true"
