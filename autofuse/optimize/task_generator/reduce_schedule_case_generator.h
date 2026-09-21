@@ -65,6 +65,9 @@ class ReducePartitionCaseGenerator : public FusionCaseGenerator {
   static bool IsOnlyHasOneOrLessReduce(const ascir::ImplGraph &impl_graph);
   static bool CanFullLoadReduceFuse(const ascir::ImplGraph &impl_graph);
   Status ReducePartitionMultipleCitations(ascir::ImplGraph &impl_graph);
+  // 公共动作: 合并 PostFusion/PartitionNorm/多引用切分对同一份数据重复建立的
+  // workspace 链(store->ws->load)与 copy_from_* 数据副本, 在三个切分步骤完成后统一执行
+  Status MergeDuplicatedWorkspaceChainsAndCopyFromData(ascir::ImplGraph &impl_graph);
   Status CollectCitationGroups(ascir::ImplGraph &impl_graph, CitationGroups &citation_groups);
   void BuildCitationGroupAnchors(const CitationGroups &citation_groups, std::vector<size_t> &parent,
                                  std::map<size_t, af::AscNodePtr> &group_anchors);
