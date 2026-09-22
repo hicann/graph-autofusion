@@ -31,9 +31,11 @@ add_library(test_regbase_ascendc OBJECT
     ./test_sin.cpp
     ./test_pow.cpp
     ./test_reciprocal.cpp
+    ./test_reciprocal_extend.cpp
     ./test_relu.cpp
     ./test_round.cpp
     ./test_sinh.cpp
+    ./test_tanh.cpp
     ./test_tan.cpp
     ./test_square.cpp
     ./test_signbit.cpp
