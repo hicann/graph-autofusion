@@ -133,8 +133,9 @@ Status CompareV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::A
     std::string scalar_local_blk_tensor_name_x2 = x2.IsConstScalar() ? "local_blk_tensor_of_" + x2.name : x2.name;
     size_t outer_repeats_size = param.outer_repeats.size();
     if (outer_repeats_size == 0U) {
-      if (IsCVFusionStage(this->api_call_context)) {
+      if (IsCVFusionStage(this->api_call_context) || tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
         const auto cv_params = BuildCvApi2DParams(tpipe, x1, y);
+        ss << y.actual_size << " = " << cv_params.output_compute_size << ";" << std::endl;
         ss << "CompareScalarExtend<" << dtype_name << ", 2, CMPMODE::" << this->api_name_ << ">(" << y << "["
            << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x1 << "["
            << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], " << x2_scalar << ", "
@@ -187,8 +188,9 @@ Status CompareV2ApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::A
         FillCompareNodeParams(this->node, false, outer_call_count, output_dims, output_strides, input_strides));
     size_t outer_repeats_size = param.outer_repeats.size();
     if (outer_repeats_size == 0U) {
-      if (IsCVFusionStage(this->api_call_context)) {
+      if (IsCVFusionStage(this->api_call_context) || tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
         const auto cv_params = BuildCvApi2DParams(tpipe, x1, y);
+        ss << y.actual_size << " = " << cv_params.output_compute_size << ";" << std::endl;
         ss << "CompareExtend<" << dtype_name << ", 2, CMPMODE::" << this->api_name_ << ">(" << y << "["
            << tpipe.tiler.TensorVectorizedOffset(current_axis, y) << "], " << x1 << "["
            << tpipe.tiler.TensorVectorizedOffset(current_axis, x1) << "], " << x2 << "["

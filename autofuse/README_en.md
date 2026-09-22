@@ -80,7 +80,7 @@ export CC=gcc-15
 export CXX=g++-15
 ```
 
-You can also set `GCC_VERSION=15` or `GCC_VERSION=16` and let the scripts generate the matching compiler commands. Do not use `update-alternatives` to change the system default gcc.
+You can also set `GCC_VERSION=15` or `GCC_VERSION=16` and let the scripts generate the matching compiler commands. This variable only takes effect for test scripts (e.g. `scripts/test/run_autofuse_test.sh`) and CI builds. The `--pkg` main build does not read this variable; set `CC/CXX` explicitly to switch compilers for the main build. Do not use `update-alternatives` to change the system default gcc.
 
 After switching compilers, clean `build/` before reconfiguring so CMake does not reuse the old compiler cache.
 

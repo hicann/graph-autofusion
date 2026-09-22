@@ -316,7 +316,8 @@ class TilingLib {
                           bool direct_link = false) const;
   void GenPgoDeinit(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss) const;
   void GenPgoWrapperParmCall(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss) const;
-  void GenPgoWrapperInit(std::stringstream &ss, bool direct_link) const;
+  void GenPgoWrapperInit(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss,
+                         bool direct_link) const;
   void GenPgoWrapperKernelLaunch(std::stringstream &ss) const;
   void GenPgoWrapper(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss,
                      bool direct_link = false) const;

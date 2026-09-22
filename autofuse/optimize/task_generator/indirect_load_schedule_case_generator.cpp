@@ -17,6 +17,9 @@
 #include "graph_utils.h"
 #include "graph/symbolizer/symbolic.h"
 #include "indirect_load_utils.h"
+#include "norm_utils.h"
+#include "optimize/graph_pass/pass_utils.h"
+#include "optimize/graph_pass/softmax_pattern_fusion_utils.h"
 #include "schedule_utils.h"
 #include "schedule_result.h"
 
@@ -61,6 +64,8 @@ struct RewrittenGraphAnalysis {
   af::AscNodePtr index_root;
   af::AscNodePtr output_store;
   af::AscNodePtr post_reduce;
+  // 多 Reduce 复合区域：全部已配对同轴 Broadcast 的统计 Reduce（≥2 时非空）。
+  std::vector<af::AscNodePtr> composite_reduces;
   bool align_input_path = false;
   bool align_index_path = false;
   bool simd_index_uses_output_inner_axis = false;
@@ -90,6 +95,53 @@ struct PostReduceLayout {
 
 bool IsInputDataSource(const af::AscNodePtr &node) {
   return ScheduleUtils::IsDataInput(node) || af::ops::IsOps<af::ascir_op::Scalar>(node);
+}
+
+bool IsSimtTemplateRole(const ascgen_utils::indirect_load::TemplateRole role) {
+  return role == ascgen_utils::indirect_load::TemplateRole::kSimtInputBoundary ||
+         role == ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary ||
+         role == ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform ||
+         role == ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch ||
+         role == ascgen_utils::indirect_load::TemplateRole::kSimtOp;
+}
+
+af::Status ClearSimtTemplateRoles(af::AscGraph &graph) {
+  size_t cleared_count = 0UL;
+  for (const auto &node : graph.GetAllNodes()) {
+    if (!IsSimtTemplateRole(ascgen_utils::indirect_load::GetTemplateRole(node))) {
+      continue;
+    }
+    GE_ASSERT_SUCCESS(
+        ascgen_utils::indirect_load::SetTemplateRole(node, ascgen_utils::indirect_load::TemplateRole::kNone));
+    ++cleared_count;
+  }
+  // 普通调度节点必须保留自己的 API call；清理候选图拷贝中可能残留的 SIMT 角色，
+  // 防止节点虽未被本轮重新标注，仍因 skips_api_emit 被父图静默跳过。
+  GELOGD("[IndirectLoad] Cleared %zu stale SIMT roles before candidate annotation.", cleared_count);
+  return af::SUCCESS;
+}
+
+af::Status ClearNormalScheduleSimtRoles(af::AscGraph &graph, const NodeSet &normal_schedule_nodes,
+                                        const NodeSet &exempt_nodes) {
+  size_t cleared_count = 0UL;
+  for (const auto &node : graph.GetAllNodes()) {
+    if (normal_schedule_nodes.count(node.get()) == 0UL || exempt_nodes.count(node.get()) != 0UL ||
+        !IsSimtTemplateRole(ascgen_utils::indirect_load::GetTemplateRole(node))) {
+      continue;
+    }
+    GE_ASSERT_SUCCESS(
+        ascgen_utils::indirect_load::SetTemplateRole(node, ascgen_utils::indirect_load::TemplateRole::kNone));
+    ++cleared_count;
+  }
+  // 普通调度区域的角色标注必须在所有 SIMT 分支标注完成后兜底清理，
+  // 防止后续分支遍历再次给跨 VectorFunc 输入节点写入 skips_api_emit。
+  // 豁免集即 lowering 侧 BuildSimtLoweringMetadata 会校验的 index_region：
+  // 与 IndirectLoad 输出直连又汇入 post Reduce 输入的共享节点同时落在
+  // normal_schedule 依赖闭包内，但 lowering 侧仍按 SIMT 区域消费并要求角色，
+  // 不能被清理，否则 no scalar evaluator role。
+  GELOGD("[IndirectLoad] Cleared %zu SIMT roles from normal schedule nodes, %zu exempt lowering nodes kept.",
+         cleared_count, exempt_nodes.size());
+  return af::SUCCESS;
 }
 
 // A retained Transpose separates two physical coordinate systems. Do not overwrite its source GM view.
@@ -231,12 +283,21 @@ af::Status ApplyPhysicalView(const NodePath &path,
     if (IsInputRegionBoundary(node)) {
       continue;
     }
+    // Gather-Norm 路径可能包含保留原始 GM View 的 Load。改写的前提是调度轴与执行
+    // 布局同构（下方断言）；仅 tensor 视图 rank 与布局不一致时必须强写 layout 视图
+    // 加以统一，否则节点视图停留在中间态，跨边界 Broadcast/Reduce 的 in/out 视图
+    // 分叉并触发 NodeCacheMarker/IsTailBroadcastNode 断言（历史回归：Preserve 条件
+    // 误用 tensor rank 导致 embedding 等场景全量失败）。因此 Preserve 仅保留
+    // sched rank 不匹配的防御场景（完全移除会使 layernorm 等复合场景在
+    // BuildReduceContext 阶段失败）。
+    if (node->attr.sched.axis.size() != layout.axis_ids.size()) {
+      GELOGD("[IndirectLoad] Preserve node[%s] view: sched rank does not match physical layout.", node->GetNamePtr());
+      continue;
+    }
     GE_ASSERT_EQ(node->attr.sched.axis.size(), layout.axis_ids.size());
     node->attr.sched.axis = layout.axis_ids;
     for (const auto &output : node->outputs()) {
       GE_ASSERT_NOTNULL(output);
-      GE_ASSERT_EQ(output->attr.repeats.size(), layout.physical_repeats.size());
-      GE_ASSERT_EQ(output->attr.strides.size(), layout.strides.size());
       output->attr.axis = layout.axis_ids;
       output->attr.repeats = layout.physical_repeats;
       output->attr.strides = layout.strides;
@@ -608,6 +669,292 @@ af::Status ValidateSimdPostReduceLayout(const af::AscNodePtr &indirect_load, con
   return af::SUCCESS;
 }
 
+// 归约轴推导：复用 Reduce 布局分析的真实 zero 转变规则，不能以任意
+// stride 差作为归约依据；保留轴在重排 View 下也可能改变 stride。
+std::vector<af::AxisId> CalcReduceAxesFromNode(const af::AscNodePtr &reduce) {
+  std::vector<af::AxisId> reduced_axes;
+  const auto inputs = reduce->inputs();
+  const auto outputs = reduce->outputs();
+  if (inputs.empty() || outputs.empty() || inputs.size() != 1UL || outputs.size() != 1UL) {
+    return reduced_axes;
+  }
+  const auto &input_attr = inputs[0]->attr;
+  const auto &output_attr = outputs[0]->attr;
+  if (input_attr.axis.size() != output_attr.axis.size() || input_attr.strides.size() != output_attr.strides.size() ||
+      input_attr.axis.size() != input_attr.strides.size()) {
+    return reduced_axes;
+  }
+  const auto axes = ScheduleUtils::CalcReduceAxes(input_attr.strides, output_attr.strides, output_attr.axis);
+  for (const auto axis : axes) {
+    reduced_axes.emplace_back(axis);
+  }
+  return reduced_axes;
+}
+
+// 广播恢复轴推导：Broadcast 输入 stride 为 0 的轴即广播恢复轴。
+std::vector<af::AxisId> CalcBroadcastAxesFromNode(const af::AscNodePtr &broadcast) {
+  std::vector<af::AxisId> broadcast_axes;
+  const auto inputs = broadcast->inputs();
+  const auto outputs = broadcast->outputs();
+  if (inputs.empty() || outputs.empty() || inputs.size() != 1UL || outputs.size() != 1UL) {
+    return broadcast_axes;
+  }
+  const auto &input_attr = inputs[0]->attr;
+  const auto &output_attr = outputs[0]->attr;
+  if (input_attr.axis.size() != output_attr.axis.size() || input_attr.strides.size() != output_attr.strides.size() ||
+      input_attr.axis.size() != input_attr.strides.size()) {
+    return broadcast_axes;
+  }
+  for (size_t i = 0UL; i < input_attr.axis.size(); ++i) {
+    const bool zero_stride =
+        af::SymbolicUtils::StaticCheckEq(input_attr.strides[i], af::sym::kSymbolZero) == af::TriBool::kTrue;
+    if (zero_stride) {
+      broadcast_axes.emplace_back(output_attr.axis[i]);
+    }
+  }
+  return broadcast_axes;
+}
+
+// Reduce → Broadcast 同轴判定：广播恢复轴集合与归约轴集合完全一致（按轴 ID 集合比较）。
+bool IsReduceBroadcastCoaxial(const std::vector<af::AxisId> &reduced_axes,
+                              const std::vector<af::AxisId> &broadcast_axes) {
+  if (reduced_axes.size() != broadcast_axes.size() || reduced_axes.empty()) {
+    return false;
+  }
+  std::set<af::AxisId> reduced_set(reduced_axes.begin(), reduced_axes.end());
+  std::set<af::AxisId> broadcast_set(broadcast_axes.begin(), broadcast_axes.end());
+  return reduced_set == broadcast_set;
+}
+
+// 从 Reduce 出发沿唯一输出链查找对应 Broadcast：Reduce 输出直接接
+// Broadcast，或经 Cast 后接 Broadcast。返回空表示无对应 Broadcast。
+af::AscNodePtr FindPairedBroadcast(const af::AscNodePtr &reduce) {
+  if (reduce == nullptr) {
+    GELOGI("[IndirectLoad] Reduce/Broadcast pairing skipped: Reduce is null.");
+    return nullptr;
+  }
+  NodePath pending{reduce};
+  NodeSet visited;
+  af::AscNodePtr matched;
+  for (size_t cursor = 0UL; cursor < pending.size() && cursor < 64UL; ++cursor) {
+    const auto current = pending[cursor];
+    if (current == nullptr || !visited.emplace(current.get()).second || current->GetOutDataNodesSize() == 0UL) {
+      continue;
+    }
+    for (const auto &out_node : current->GetOutDataNodes()) {
+      const auto successor = std::dynamic_pointer_cast<af::AscNode>(out_node);
+      if (successor == nullptr || HasControlEdge(successor) || ScheduleUtils::IsReduce(successor)) {
+        continue;
+      }
+      if (IsBroadcastNode(successor)) {
+        if (matched != nullptr && matched != successor) {
+          GELOGD("[IndirectLoad] Reduce[%s] pairing is ambiguous.", reduce->GetNamePtr());
+          return nullptr;
+        }
+        matched = successor;
+        continue;
+      }
+      // 图优化可能将 Broadcast 融入二元 Elementwise 的输入关系，允许继续
+      // 遍历其消费者，但不跨越其他 Reduce 或控制边。
+      if (ScheduleUtils::IsElewise(successor)) {
+        pending.emplace_back(successor);
+      }
+    }
+  }
+  if (matched != nullptr) {
+    GELOGD("[IndirectLoad] Reduce[%s] paired with Broadcast[%s].", reduce->GetNamePtr(), matched->GetNamePtr());
+  }
+  return matched;
+}
+
+// 检查 Reduce 的广播配对：每个统计 Reduce 必须有唯一 Broadcast 恢复归约轴且二者同轴。
+bool HasPairedBroadcastForReduce(const af::AscNodePtr &reduce) {
+  const auto broadcast = FindPairedBroadcast(reduce);
+  if (broadcast == nullptr) {
+    return false;
+  }
+  return IsReduceBroadcastCoaxial(CalcReduceAxesFromNode(reduce), CalcBroadcastAxesFromNode(broadcast));
+}
+
+bool IsFinalReduce(const af::AscNodePtr &reduce, const af::AscNodePtr &output_store) {
+  // 只有 Reduce 直接收敛到最终 Store，或经单个 Cast 收敛到 Store，才允许省略 Broadcast。
+  if (reduce == nullptr || output_store == nullptr || reduce->GetOutDataNodesSize() != 1UL) {
+    return false;
+  }
+  const auto successor = std::dynamic_pointer_cast<af::AscNode>(*reduce->GetOutDataNodes().begin());
+  return successor == output_store ||
+         (af::ops::IsOps<af::ascir_op::Cast>(successor) && successor->GetOutDataNodesSize() == 1UL &&
+          *successor->GetOutDataNodes().begin() == output_store);
+}
+
+bool HasSameLogicalAxisView(const af::AscTensorAttr &lhs, const af::AscTensorAttr &rhs) {
+  return lhs.axis == rhs.axis && PassUtils::IsExprVectorEqual(lhs.repeats, rhs.repeats);
+}
+
+bool ValidateCompositeRegionOutputView(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis) {
+  const auto input_outputs = indirect_load->outputs();
+  if (input_outputs.empty() || input_outputs[0] == nullptr) {
+    return false;
+  }
+  const auto &entry_attr = input_outputs[0]->attr;
+  const af::AscNodePtr exit_node = analysis.output_store == nullptr ? nullptr : analysis.output_store;
+  if (exit_node == nullptr || exit_node->inputs.Size() == 0UL) {
+    return false;
+  }
+  if (analysis.composite_reduces.empty()) {
+    return HasSameLogicalAxisView(entry_attr, exit_node->inputs[0].attr);
+  }
+  return HasSameLogicalAxisView(entry_attr, exit_node->inputs[0].attr);
+}
+
+// Softmax 专用路径的 IO 形态校验：单输入单输出且输入输出 View 与
+// IndirectLoad 输出一致，保证 Gather 输出可直接作为 Softmax 的 A/R View。
+// 校验通过时通过出参返回输入输出属性，供后续元数据构造使用。
+bool TryValidateSoftmaxDedicatedIo(const af::AscNodePtr &indirect_load, const af::AscNodePtr &softmax,
+                                   af::AscTensorAttr &input_attr, af::AscTensorAttr &output_attr) {
+  const auto softmax_inputs = softmax->inputs();
+  const auto softmax_outputs = softmax->outputs();
+  const auto indirect_outputs = indirect_load->outputs();
+  if (softmax_inputs.empty() || softmax_outputs.empty() || indirect_outputs.empty() || softmax_inputs.size() != 1UL ||
+      softmax_outputs.size() != 1UL) {
+    GELOGI("[IndirectLoad] Softmax dedicated path rejected: invalid IO, node[%s].", softmax->GetNamePtr());
+    return false;
+  }
+  input_attr = softmax_inputs[0]->attr;
+  output_attr = softmax_outputs[0]->attr;
+  const auto &indirect_output_attr = indirect_outputs[0]->attr;
+  const bool view_consistent = input_attr.axis == indirect_output_attr.axis &&
+                               output_attr.axis == indirect_output_attr.axis &&
+                               PassUtils::IsExprVectorEqual(input_attr.repeats, indirect_output_attr.repeats) &&
+                               PassUtils::IsExprVectorEqual(output_attr.repeats, indirect_output_attr.repeats);
+  if (!view_consistent) {
+    GELOGI("[IndirectLoad] Softmax dedicated path rejected: view mismatch, node[%s].", softmax->GetNamePtr());
+    return false;
+  }
+  return true;
+}
+
+// G ≥ R 布局判定（SIMD 直接融合必要条件）：Softmax 归约轴是输入尾轴，
+// 尾轴位置必须在 Gather G 轴位置或内侧；否则由 SIMT/SK 衔接式候选接管。
+bool IsSoftmaxReduceInsideOrAtGatherAxis(const af::AscNodePtr &indirect_load, const af::AscTensorAttr &input_attr,
+                                         ascir::TemplateId template_id) {
+  // 非尾轴 gather（axis < rank-1）时 SIMD 输出 tile 的物理布局带行对齐空洞（行
+  // stride 按 2x inner 对齐），SoftmaxARFullLoadExtend 的 {a, r} 隐含 src/dst 稠密
+  // 布局假设——读 src 错位、dst 按 a*align32(r) 组织会超出 buffer 分配（生产
+  // gather+layernorm 用例的 AIC 341 UB 越界即此组合）。因此仅 SIMD 模板要求 gather
+  // 轴为输出尾轴；SIMT 逐元素发射、输出稠密无空洞，非尾轴 gather 同样安全（生产
+  // softmax_abs_gather 图 axis=0 的 SIMT 候选不应被拒）。
+  const size_t axis_index = GetIndirectLoadAxisIndex(indirect_load);
+  if (axis_index == kIndirectLoadInvalidAxisIndex || input_attr.axis.empty()) {
+    return false;
+  }
+  if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
+    return axis_index == input_attr.axis.size() - 1UL;
+  }
+  return axis_index <= input_attr.axis.size() - 1UL;
+}
+
+// 保存 Softmax 专用路径 NormInfo：归约轴为输入尾轴（尾轴约束已在分流时验证）。
+af::Status SaveSoftmaxDedicatedNormInfo(const af::AscNodePtr &indirect_load, const af::AscNodePtr &softmax,
+                                        const af::AscTensorAttr &input_attr) {
+  ascgen_utils::norm::NormInfo info;
+  info.kind = ascgen_utils::norm::NormInfo::Kind::kSoftmaxDedicated;
+  info.entry_node_name = softmax->GetName();
+  info.exit_node_name = softmax->GetName();
+  info.region_node_names = {softmax->GetName()};
+  info.entry_axes = input_attr.axis;
+  info.softmax_reduce_axis = input_attr.axis.empty() ? af::kIdNone : input_attr.axis.back();
+  GE_ASSERT_SUCCESS(ascgen_utils::norm::SetNormInfo(indirect_load, info));
+  GELOGI("[IndirectLoad] NormInfo saved: Softmax dedicated path, node[%s].", softmax->GetNamePtr());
+  return af::SUCCESS;
+}
+
+// 保存多 stage 复合区域 NormInfo：每个 Reduce 与配对 Broadcast、归约轴
+// 共同写入；出口必须存在且 View 与入口一致，否则淘汰当前候选。
+af::Status SaveCompositeNormInfo(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis,
+                                 bool &is_candidate_legal) {
+  is_candidate_legal = false;
+  if (analysis.output_store == nullptr || !ValidateCompositeRegionOutputView(indirect_load, analysis)) {
+    GELOGI("[IndirectLoad] Composite Norm rejected: entry and final output views differ, node[%s].",
+           indirect_load->GetNamePtr());
+    return af::SUCCESS;
+  }
+  ascgen_utils::norm::NormInfo info;
+  info.kind = ascgen_utils::norm::NormInfo::Kind::kGenericComposite;
+  const auto indirect_outputs = indirect_load->outputs();
+  if (!indirect_outputs.empty() && indirect_outputs[0] != nullptr) {
+    info.entry_axes = indirect_outputs[0]->attr.axis;
+  }
+  for (const auto &reduce : analysis.composite_reduces) {
+    const auto broadcast = FindPairedBroadcast(reduce);
+    ascgen_utils::norm::NormStage stage;
+    stage.reduce_node_name = reduce->GetName();
+    stage.broadcast_node_name = broadcast == nullptr ? "" : broadcast->GetName();
+    stage.reduced_axes = CalcReduceAxesFromNode(reduce);
+    info.stages.emplace_back(std::move(stage));
+    info.region_node_names.emplace_back(reduce->GetName());
+    if (broadcast != nullptr) {
+      info.region_node_names.emplace_back(broadcast->GetName());
+    }
+  }
+  info.entry_node_name = analysis.post_reduce->GetName();
+  info.exit_node_name = analysis.output_store->GetName();
+  GE_ASSERT_SUCCESS(ascgen_utils::norm::SetNormInfo(indirect_load, info));
+  GELOGI("[IndirectLoad] NormInfo saved: composite region with %zu stages.", info.stages.size());
+  is_candidate_legal = true;
+  return af::SUCCESS;
+}
+
+// 保存单 Reduce NormInfo：归约轴由布局分析推导，作为区域元数据的最小记录。
+af::Status SaveSingleReduceNormInfo(const af::AscNodePtr &indirect_load, const af::AscNodePtr &reduce) {
+  ascgen_utils::norm::NormInfo info;
+  info.kind = ascgen_utils::norm::NormInfo::Kind::kGenericComposite;
+  info.entry_node_name = reduce->GetName();
+  info.exit_node_name = reduce->GetName();
+  info.region_node_names = {reduce->GetName()};
+  PostReduceLayout layout;
+  bool layout_legal = false;
+  GE_ASSERT_SUCCESS(BuildPostReduceLayout(reduce, layout, layout_legal));
+  if (layout_legal) {
+    info.entry_axes = layout.axes;
+    for (size_t i = 0UL; i < layout.kinds.size(); ++i) {
+      if (layout.kinds[i] == ReduceAxisKind::kReduced) {
+        info.stages.push_back({reduce->GetName(), "", {layout.axes[i]}});
+      }
+    }
+  }
+  GE_ASSERT_SUCCESS(ascgen_utils::norm::SetNormInfo(indirect_load, info));
+  return af::SUCCESS;
+}
+
+// 识别 Gather 后置链中的 Norm 区域并保存元数据：
+// - 专用 Softmax：尾轴约束 + IO View + G≥R 校验；
+// - 多 Reduce 复合区域：配对同轴校验（收集阶段）+ 出口 View 校验；
+// - 单 Reduce：布局推导记录。
+af::Status CollectGatherNormInfo(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis,
+                                 bool &is_candidate_legal, ascir::TemplateId template_id) {
+  is_candidate_legal = true;
+  if (indirect_load == nullptr || analysis.post_reduce == nullptr) {
+    return af::SUCCESS;
+  }
+
+  if (af::ops::IsOps<af::ascir_op::Softmax>(analysis.post_reduce)) {
+    af::AscTensorAttr softmax_input_attr;
+    af::AscTensorAttr softmax_output_attr;
+    if (!TryValidateSoftmaxDedicatedIo(indirect_load, analysis.post_reduce, softmax_input_attr, softmax_output_attr) ||
+        !IsSoftmaxReduceInsideOrAtGatherAxis(indirect_load, softmax_input_attr, template_id)) {
+      is_candidate_legal = false;
+      return af::SUCCESS;
+    }
+    return SaveSoftmaxDedicatedNormInfo(indirect_load, analysis.post_reduce, softmax_input_attr);
+  }
+
+  if (!analysis.composite_reduces.empty()) {
+    return SaveCompositeNormInfo(indirect_load, analysis, is_candidate_legal);
+  }
+  return SaveSingleReduceNormInfo(indirect_load, analysis.post_reduce);
+}
+
 bool HasBroadcastMultiInputNode(const af::AscNodePtr &node, NodeSet &visited) {
   if (node == nullptr || !visited.emplace(node.get()).second) {
     return false;
@@ -629,18 +976,23 @@ bool HasBroadcastMultiInputNode(const af::AscNodePtr &node, NodeSet &visited) {
 }
 
 bool IsSkTemplateCandidateLegal(const af::AscNodePtr &indirect_load) {
+  // SK 仅支持单输出消费者：多消费者分区（为多 Reduce 复合区域引入）
+  // 已随 LayerNorm SK 支持一同回退，待后续补齐后再放开。
   if (indirect_load == nullptr || indirect_load->GetOutDataNodesSize() != 1UL) {
+    GELOGI("[IndirectLoad] Reject SK: IndirectLoad output consumer count is not 1.");
     return false;
   }
   for (size_t input_idx = 0UL; input_idx < kIndirectLoadInputCount; ++input_idx) {
     const auto input_anchor = indirect_load->GetInDataAnchor(input_idx);
     if (input_anchor == nullptr || input_anchor->GetPeerOutAnchor() == nullptr) {
+      GELOGI("[IndirectLoad] Reject SK: input[%zu] has no connected producer.", input_idx);
       return false;
     }
   }
   NodeSet visited;
   for (size_t input_idx = 0UL; input_idx < kIndirectLoadInputCount; ++input_idx) {
     if (HasBroadcastMultiInputNode(ascgen_utils::indirect_load::GetInputProducer(indirect_load, input_idx), visited)) {
+      GELOGI("[IndirectLoad] Reject SK: input[%zu] contains multi-input Broadcast dependency.", input_idx);
       return false;
     }
   }
@@ -895,7 +1247,7 @@ af::Status BuildAxisViewByBoundary(af::AscGraph &graph, const std::vector<af::Ax
 
 af::Status NormalizeAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &indirect_load, size_t boundary,
                                     ascir::AxisId input_inner_axis, ascir::AxisId index_inner_axis,
-                                    bool simd_index_uses_output_inner_axis = false) {
+                                    bool simd_index_uses_output_inner_axis = false, bool solve_tile_size = false) {
   const auto output_axes = indirect_load->outputs()[0]->attr.axis;
   GE_ASSERT_TRUE(!output_axes.empty(), "IndirectLoad output axis is empty.");
   ascir::AxisId outer_axis = af::kIdNone;
@@ -911,7 +1263,13 @@ af::Status NormalizeAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &i
                                        outer_axis) == indirect_load->attr.sched.axis.end();
   af::AxisId tile_outer_axis = af::kIdNone;
   af::AxisId tile_inner_axis = af::kIdNone;
-  GE_ASSERT_SUCCESS(CreateFixedTileSplit(graph, outer_axis, tile_outer_axis, tile_inner_axis));
+  if (solve_tile_size) {
+    // tile 行数不在图改写期固定：TemplateAxes 不注解 tile 轴，调度期 TileTiling 发现
+    // prebuilt pair 为空后走通用 TileSplit，按 UB 容量求解 tile 内行数。
+    GE_ASSERT_TRUE(inner_axis != af::kIdNone, "IndirectLoad solvable tile split requires a non-empty inner view.");
+  } else {
+    GE_ASSERT_SUCCESS(CreateFixedTileSplit(graph, outer_axis, tile_outer_axis, tile_inner_axis));
+  }
   std::vector<af::AxisId> vectorized_axes;
   if (inner_axis != af::kIdNone) {
     const auto *inner = graph.FindAxis(inner_axis);
@@ -1030,12 +1388,21 @@ af::Status NormalizeSimdAxesForTemplate(af::AscGraph &graph, const af::AscNodePt
                                   analysis.simd_index_uses_output_inner_axis);
 }
 
-af::Status NormalizeSimtAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &indirect_load, size_t boundary) {
+af::Status NormalizeSimtAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &indirect_load, size_t boundary,
+                                        bool solve_tile_size) {
   const auto output_axes = indirect_load->outputs()[0]->attr.axis;
   GE_ASSERT_TRUE(!output_axes.empty(), "IndirectLoad SIMT output axis is empty.");
   GE_ASSERT_TRUE(boundary <= output_axes.size(), "IndirectLoad SIMT boundary %zu is out of range [0, %zu].", boundary,
                  output_axes.size());
-  GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, boundary, af::kIdNone, af::kIdNone));
+  // post-Reduce SIMT（boundary 被 Reduce 布局覆写为 first_reduce，小于输出 rank）不预建
+  // 固定 tile 轴：tile 行数交由调度期 TileTiling 走通用 TileSplit 按 UB 容量求解，使单个
+  // tile 覆盖多行，消除逐行 SIMT/向量交替（VF_CALL 启动与 PipeBarrier 次数随行数下降）。
+  // 无 post-Reduce 的 SIMT boundary 保持输出 rank，维持固定单行 tile 语义不变。
+  // solve_tile_size 仅由 gather+norm 复合形态（Softmax 专用或多 Reduce 配对）启用：
+  // 通用单 Reduce 后置（如 IL→Sum）保持固定 tile 的主线行为，可求解 tile 的批量
+  // kernel 形态在单 Reduce 图上存在数值回归（e2e 输出与参考不符）。
+  GE_ASSERT_SUCCESS(
+      NormalizeAxesForTemplate(graph, indirect_load, boundary, af::kIdNone, af::kIdNone, false, solve_tile_size));
   return af::SUCCESS;
 }
 
@@ -1103,31 +1470,40 @@ af::Status BuildLoadTransposeSourceView(const af::AscNodePtr &transpose, const a
   return af::SUCCESS;
 }
 
-af::Status ValidateReduceOutput(const af::AscNodePtr &reduce) {
+// 单 Reduce 输出终止校验（候选级）：Store 或 Cast→Store 均合法，
+// 其他形态由调用方淘汰当前候选而非断言失败。
+af::Status ValidateReduceOutputCandidate(const af::AscNodePtr &reduce, bool &is_valid) {
+  is_valid = false;
   const auto reduce_outputs = reduce->GetOutDataNodes();
-  GE_ASSERT_TRUE(reduce_outputs.size() == 1UL, "[IndirectLoad] Reduce[%s] must have one Store output, got %zu.",
-                 reduce->GetNamePtr(), reduce_outputs.size());
-  const auto successor = std::dynamic_pointer_cast<af::AscNode>(*reduce_outputs.begin());
-  GE_ASSERT_NOTNULL(successor, "IndirectLoad Reduce output node is invalid.");
-  if (ScheduleUtils::IsStore(successor)) {
+  if (reduce_outputs.size() != 1UL) {
+    GELOGI("[IndirectLoad] Reduce[%s] output count %zu is not 1.", reduce->GetNamePtr(), reduce_outputs.size());
     return af::SUCCESS;
   }
-  GE_ASSERT_TRUE(af::ops::IsOps<af::ascir_op::Cast>(successor),
-                 "[IndirectLoad] Reduce[%s] output must be Store or Cast, got node[%s] type[%s].", reduce->GetNamePtr(),
-                 successor->GetNamePtr(), successor->GetTypePtr());
-  const auto cast_outputs = successor->GetOutDataNodes();
-  GE_ASSERT_TRUE(cast_outputs.size() == 1UL, "[IndirectLoad] Reduce[%s] Cast must have one Store output, got %zu.",
-                 reduce->GetNamePtr(), cast_outputs.size());
-  const auto cast_successor = std::dynamic_pointer_cast<af::AscNode>(*cast_outputs.begin());
-  GE_ASSERT_NOTNULL(cast_successor, "IndirectLoad Reduce Cast output node is invalid.");
-  GE_ASSERT_TRUE(ScheduleUtils::IsStore(cast_successor),
-                 "[IndirectLoad] Reduce[%s] Cast output must be Store, got node[%s] type[%s].", reduce->GetNamePtr(),
-                 cast_successor->GetNamePtr(), cast_successor->GetTypePtr());
+  auto successor = std::dynamic_pointer_cast<af::AscNode>(*reduce_outputs.begin());
+  if (successor == nullptr) {
+    return af::SUCCESS;
+  }
+  if (ScheduleUtils::IsStore(successor)) {
+    is_valid = true;
+    return af::SUCCESS;
+  }
+  if (af::ops::IsOps<af::ascir_op::Cast>(successor)) {
+    const auto cast_outputs = successor->GetOutDataNodes();
+    if (cast_outputs.size() != 1UL) {
+      GELOGI("[IndirectLoad] Reduce[%s] Cast output count %zu is not 1.", reduce->GetNamePtr(), cast_outputs.size());
+      return af::SUCCESS;
+    }
+    const auto cast_successor = std::dynamic_pointer_cast<af::AscNode>(*cast_outputs.begin());
+    if (cast_successor != nullptr && ScheduleUtils::IsStore(cast_successor)) {
+      is_valid = true;
+    }
+  }
   return af::SUCCESS;
 }
 
 // Traverse all output branches once, collecting Store/Reduce boundaries and validating each Reduce successor.
-af::Status CollectOutputBoundaries(const af::AscNodePtr &indirect_load, RewrittenGraphAnalysis &analysis) {
+af::Status CollectOutputBoundaries(const af::AscNodePtr &indirect_load, RewrittenGraphAnalysis &analysis,
+                                   bool &is_candidate_legal) {
   NodeSet visited{indirect_load.get()};
   NodePath roots;
   for (const auto &out_node : indirect_load->GetOutDataNodes()) {
@@ -1135,7 +1511,8 @@ af::Status CollectOutputBoundaries(const af::AscNodePtr &indirect_load, Rewritte
     GE_ASSERT_NOTNULL(out_asc_node, "IndirectLoad output successor is invalid.");
     roots.emplace_back(out_asc_node);
   }
-  const auto visit = [&analysis](const af::AscNodePtr &current, bool &stop) -> af::Status {
+  std::vector<af::AscNodePtr> reduce_nodes;
+  const auto visit = [&analysis, &reduce_nodes](const af::AscNodePtr &current, bool &stop) -> af::Status {
     if (ScheduleUtils::IsStore(current)) {
       if (analysis.output_store == nullptr) {
         analysis.output_store = current;
@@ -1144,18 +1521,49 @@ af::Status CollectOutputBoundaries(const af::AscNodePtr &indirect_load, Rewritte
       return af::SUCCESS;
     }
     if (ScheduleUtils::IsReduce(current)) {
-      GE_ASSERT_SUCCESS(ValidateReduceOutput(current));
-      GE_ASSERT_TRUE(analysis.post_reduce == nullptr);
-      analysis.post_reduce = current;
-      stop = true;
+      // 收集全部 Reduce，并继续遍历后续链路，以识别复合区域和最终 Store。
+      reduce_nodes.emplace_back(current);
+      if (analysis.post_reduce == nullptr) {
+        analysis.post_reduce = current;
+      }
       return af::SUCCESS;
     }
     return af::SUCCESS;
   };
-  return TraverseOutputConsumers(roots, visited, visit);
+  GE_ASSERT_SUCCESS(TraverseOutputConsumers(roots, visited, visit));
+
+  if (reduce_nodes.size() <= 1UL) {
+    // 单 Reduce：沿用原终止校验语义（Store 或 Cast→Store），不符合则候选级淘汰。
+    if (analysis.post_reduce != nullptr) {
+      bool output_valid = false;
+      GE_ASSERT_SUCCESS(ValidateReduceOutputCandidate(analysis.post_reduce, output_valid));
+      if (!output_valid) {
+        is_candidate_legal = false;
+      }
+    }
+    return af::SUCCESS;
+  }
+
+  // 中间 Reduce 必须与 Broadcast 同轴；最终直接收敛到 Store 的 Reduce 可无 Broadcast。
+  for (size_t index = 0UL; index < reduce_nodes.size(); ++index) {
+    const auto &reduce = reduce_nodes[index];
+    // 末尾 Reduce 的无 Broadcast 例外仅适用于整个后置区域的最终计算节点。
+    const bool final_reduce = index + 1UL == reduce_nodes.size() && IsFinalReduce(reduce, analysis.output_store);
+    if (!HasPairedBroadcastForReduce(reduce) && !final_reduce) {
+      is_candidate_legal = false;
+      GELOGI("[IndirectLoad] Composite region rejected: Reduce[%s] has no coaxial Broadcast pair.",
+             reduce->GetNamePtr());
+      return af::SUCCESS;
+    }
+  }
+  analysis.composite_reduces = std::move(reduce_nodes);
+  GELOGI("[IndirectLoad] Composite region detected with %zu paired Reduce/Broadcast stages.",
+         analysis.composite_reduces.size());
+  return af::SUCCESS;
 }
 
-af::Status CollectRewrittenBoundaries(const af::AscNodePtr &indirect_load, RewrittenGraphAnalysis &analysis) {
+af::Status CollectRewrittenBoundaries(const af::AscNodePtr &indirect_load, RewrittenGraphAnalysis &analysis,
+                                      bool &is_candidate_legal) {
   analysis.input_root =
       ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kInputTensorIndex);
   analysis.input_boundary = GetLoadTransposeSource(analysis.input_root);
@@ -1164,7 +1572,7 @@ af::Status CollectRewrittenBoundaries(const af::AscNodePtr &indirect_load, Rewri
   }
   analysis.index_root =
       ascgen_utils::indirect_load::GetInputProducer(indirect_load, ascgen_utils::indirect_load::kIndexTensorIndex);
-  GE_ASSERT_SUCCESS(CollectOutputBoundaries(indirect_load, analysis));
+  GE_ASSERT_SUCCESS(CollectOutputBoundaries(indirect_load, analysis, is_candidate_legal));
   return af::SUCCESS;
 }
 
@@ -1554,8 +1962,17 @@ af::Status ApplyTemplatePathLayouts(const af::AscNodePtr &indirect_load, ascir::
   const NodePath &index_path = is_simd ? analysis.index_region : analysis.index_path;
   const auto &input_layout = preparation.input.layout;
   const auto &index_layout = preparation.index.layout;
-  GE_ASSERT_SUCCESS(ApplyIndirectLoadPathLayout(input_path, input_layout, analysis.align_input_path));
-  GE_ASSERT_SUCCESS(ApplyIndirectLoadPathLayout(index_path, index_layout, analysis.align_index_path));
+  // [post-Reduce 稠密视图] IL 输出链到达 Reduce（含经 elementwise 中间链，如
+  // gather+ele+sum / gather+norm）时不做 kStridedUbPath 对齐标注：该标注会经
+  // SetVectorizedStridesForTensor(kAligned) 把视图尾轴按对齐块描述（如 4→8），
+  // 而 SIMD 实际写出为稠密布局（only_gather 同形态实证），视图与实现不符导致
+  // 下游 Abs/Reduce/DataCopy 按 stride8 错位访问（AIC 341）。无 post-Reduce 的
+  // 纯 gather 输出直连 Store 场景维持原标注语义不变。
+  const bool has_post_reduce = analysis.post_reduce != nullptr;
+  GE_ASSERT_SUCCESS(
+      ApplyIndirectLoadPathLayout(input_path, input_layout, analysis.align_input_path && !has_post_reduce));
+  GE_ASSERT_SUCCESS(
+      ApplyIndirectLoadPathLayout(index_path, index_layout, analysis.align_index_path && !has_post_reduce));
   return af::SUCCESS;
 }
 
@@ -1583,9 +2000,13 @@ af::Status AnalyzeRewrittenGraph(af::AscGraph &graph, const af::AscNodePtr &indi
   if (!is_candidate_legal) {
     return af::SUCCESS;
   }
+  // 收集阶段：一次遍历收集全部输出边界；SK 也必须知道 Norm 后置区域，
+  // 但 SK 的输入/索引分区仍由其专用路径处理。
+  GE_ASSERT_SUCCESS(CollectRewrittenBoundaries(indirect_load, analysis, is_candidate_legal));
+  if (!is_candidate_legal) {
+    return af::SUCCESS;
+  }
   if (template_id != ascir::TemplateId::kIndirectLoadSK) {
-    // 收集阶段：一次遍历收集全部状态（改写定稿后无需重收）
-    GE_ASSERT_SUCCESS(CollectRewrittenBoundaries(indirect_load, analysis));
     GE_ASSERT_SUCCESS(CollectRewrittenRegion(graph, indirect_load, template_id, analysis));
   }
 
@@ -1645,6 +2066,38 @@ af::Status ValidateSimtTemplateRegion(const RewrittenGraphAnalysis &analysis, bo
   return af::SUCCESS;
 }
 
+af::Status CollectSimtNormalScheduleNodes(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis,
+                                          NodeSet &normal_schedule_nodes) {
+  normal_schedule_nodes.clear();
+  if (analysis.post_reduce == nullptr) {
+    return af::SUCCESS;
+  }
+
+  NodePath normal_schedule_path;
+  const auto collect = [&normal_schedule_nodes, &normal_schedule_path](const af::AscNodePtr &node,
+                                                                       bool &stop) -> af::Status {
+    normal_schedule_nodes.emplace(node.get());
+    normal_schedule_path.emplace_back(node);
+    if (ScheduleUtils::IsStore(node)) {
+      stop = true;
+    }
+    return af::SUCCESS;
+  };
+  GE_ASSERT_SUCCESS(TraverseOutputConsumers({analysis.post_reduce}, normal_schedule_nodes, collect));
+
+  NodeSet normal_schedule_dependencies;
+  const auto collect_dependency = [indirect_load](const af::AscNodePtr &node) {
+    if (node == indirect_load) {
+      return false;
+    }
+    return true;
+  };
+  TraverseInputProducers(normal_schedule_path, normal_schedule_dependencies, collect_dependency);
+  normal_schedule_dependencies.erase(indirect_load.get());
+  normal_schedule_nodes.insert(normal_schedule_dependencies.begin(), normal_schedule_dependencies.end());
+  return af::SUCCESS;
+}
+
 af::Status AnnotateSimtTemplateRoles(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis) {
   GE_ASSERT_NOTNULL(analysis.input_boundary, "IndirectLoad SIMT input boundary is missing.");
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
@@ -1655,24 +2108,34 @@ af::Status AnnotateSimtTemplateRoles(const af::AscNodePtr &indirect_load, const 
   }
   GE_ASSERT_SUCCESS(
       ascgen_utils::indirect_load::SetTemplateRole(indirect_load, ascgen_utils::indirect_load::TemplateRole::kSimtOp));
+  size_t annotated_count = 0UL;
   for (const af::AscNodePtr &node : analysis.index_region) {
+    // 注意：index_region 即 lowering 侧 BuildSimtLoweringMetadata 会校验的集合
+    // （index_root 与 post Reduce 输入链 backward）。其中同时落在 normal schedule
+    // 依赖闭包内的节点（如与 IndirectLoad 输出直连、又汇入 post Reduce 输入的
+    // Broadcast），lowering 侧仍按 SIMT 区域消费并要求 scalar evaluator 角色；
+    // 不能被 normal_schedule 排除，否则出现 no scalar evaluator role 断言。
+    // normal schedule 排除仅作用于 fanout 标注（AnnotateSimtFanoutBranches）。
     // Every node in the fused index/output backward region is emitted by the
     // SIMT scalar evaluator, including nodes that fan out to multiple
-    // consumers inside that same region (for example the shared Broadcast in
-    // the relative-position bucket calculation).  A fan-out role is reserved
-    // for branches outside the selected scalar path and is assigned by
+    // consumers inside that same region.  A fan-out role is reserved for
+    // branches outside the selected scalar path and is assigned by
     // AnnotateSimtFanoutBranches below; marking an internal fan-out here would
     // make ValidateSimtRegionNode reject it as not inline-transformable.
     const auto role = (af::ops::IsOps<af::ascir_op::Load>(node) || af::ops::IsOps<af::ascir_op::Store>(node))
                           ? ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary
                           : ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform;
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(node, role));
+    GELOGD("[IndirectLoad] SIMT region node[%s] annotated role[%ld].", node->GetNamePtr(), static_cast<int64_t>(role));
+    ++annotated_count;
   }
+  GELOGD("[IndirectLoad] SIMT index_region annotated %zu nodes (region size %zu), post reduce[%s].", annotated_count,
+         analysis.index_region.size(), analysis.post_reduce == nullptr ? "none" : analysis.post_reduce->GetNamePtr());
   return af::SUCCESS;
 }
 
 af::Status AnnotateSimtMainOutputPath(const af::AscNodePtr &indirect_load, const af::AscNodePtr &selected_root,
-                                      const NodeSet &selected) {
+                                      const NodeSet &selected, const NodeSet &normal_schedule_nodes) {
   // Nodes on the selected output path are emitted by the SIMT scalar evaluator.
   // With a user fan-out this path can contain ordinary elementwise transforms
   // that are not part of the index region handled by AnnotateSimtTemplateRoles.
@@ -1683,7 +2146,8 @@ af::Status AnnotateSimtMainOutputPath(const af::AscNodePtr &indirect_load, const
     if (node == nullptr || node == indirect_load || !visited.emplace(node.get()).second) {
       continue;
     }
-    if (!IsInputDataSource(node) && !ScheduleUtils::IsReduce(node) && !ScheduleUtils::IsStore(node)) {
+    if (normal_schedule_nodes.count(node.get()) == 0UL && !IsInputDataSource(node) && !ScheduleUtils::IsReduce(node) &&
+        !ScheduleUtils::IsStore(node)) {
       GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
           node, ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform));
     }
@@ -1698,7 +2162,8 @@ af::Status AnnotateSimtMainOutputPath(const af::AscNodePtr &indirect_load, const
 }
 
 af::Status AnnotateSimtSideInputClosure(const af::AscNodePtr &branch_node, const af::AscNodePtr &indirect_load,
-                                        const NodeSet &selected, NodeSet &visited) {
+                                        const NodeSet &selected, const NodeSet &normal_schedule_nodes,
+                                        NodeSet &visited) {
   NodePath pending;
   for (const auto &producer_node : branch_node->GetInDataNodes()) {
     const auto producer = std::dynamic_pointer_cast<af::AscNode>(producer_node);
@@ -1709,7 +2174,8 @@ af::Status AnnotateSimtSideInputClosure(const af::AscNodePtr &branch_node, const
   for (size_t cursor = 0UL; cursor < pending.size(); ++cursor) {
     const auto &producer = pending[cursor];
     if (producer == nullptr || producer == indirect_load || selected.count(producer.get()) != 0UL ||
-        ScheduleUtils::IsReduce(producer) || !visited.emplace(producer.get()).second) {
+        normal_schedule_nodes.count(producer.get()) != 0UL || ScheduleUtils::IsReduce(producer) ||
+        !visited.emplace(producer.get()).second) {
       continue;
     }
     if (IsInputDataSource(producer) && !af::ops::IsOps<af::ascir_op::Load>(producer)) {
@@ -1733,7 +2199,8 @@ af::Status AnnotateSimtSideInputClosure(const af::AscNodePtr &branch_node, const
   return af::SUCCESS;
 }
 
-af::Status AnnotateSimtFanoutBranches(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis) {
+af::Status AnnotateSimtFanoutBranches(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis,
+                                      NodeSet &normal_schedule_nodes) {
   const af::AscNodePtr selected_root = analysis.post_reduce == nullptr
                                            ? analysis.output_store
                                            : ascgen_utils::indirect_load::GetInputProducer(analysis.post_reduce, 0UL);
@@ -1746,7 +2213,20 @@ af::Status AnnotateSimtFanoutBranches(const af::AscNodePtr &indirect_load, const
            selected_root->GetNamePtr());
     return af::SUCCESS;
   }
-  GE_ASSERT_SUCCESS(AnnotateSimtMainOutputPath(indirect_load, selected_root, selected));
+
+  // 复合 Norm 场景：首个 Reduce 之后的后置链路（含汇入该链路的分支）由普通调度
+  // 执行，与 lowering 侧 keep_chain 的取舍保持一致；该区域不能标注 SIMT 角色，
+  // 否则会跳过主 tiling 而保持原始 rank，与参与 tiling 的 Reduce 输出 view 不一致。
+  // 普通调度区域及其外部输入必须统一排除 SIMT 角色；否则父图不发射 Load，
+  // VectorFunc 仍把该 Tensor 作为跨子图输入，最终出现 no API call found。
+  GE_ASSERT_SUCCESS(CollectSimtNormalScheduleNodes(indirect_load, analysis, normal_schedule_nodes));
+  GE_ASSERT_SUCCESS(AnnotateSimtMainOutputPath(indirect_load, selected_root, selected, normal_schedule_nodes));
+  if (analysis.post_reduce != nullptr) {
+    GELOGD("[IndirectLoad] SIMT post Reduce[%s] keeps %zu nodes on the normal schedule chain.",
+           analysis.post_reduce->GetNamePtr(), normal_schedule_nodes.size());
+  }
+  GELOGD("[IndirectLoad] Normal schedule dependencies keep %zu nodes out of SIMT fanout annotation.",
+         normal_schedule_nodes.size());
 
   NodeSet visited{indirect_load.get()};
   NodeSet side_visited;
@@ -1757,12 +2237,15 @@ af::Status AnnotateSimtFanoutBranches(const af::AscNodePtr &indirect_load, const
     roots.emplace_back(consumer);
   }
   const auto visit = [&](const af::AscNodePtr &node, bool &stop) -> af::Status {
-    const bool is_fanout_branch =
-        selected.count(node.get()) == 0UL && !IsInputDataSource(node) && !ScheduleUtils::IsReduce(node);
+    const bool is_fanout_branch = selected.count(node.get()) == 0UL && !IsInputDataSource(node) &&
+                                  !ScheduleUtils::IsReduce(node) && normal_schedule_nodes.count(node.get()) == 0UL;
     if (is_fanout_branch) {
+      GELOGD("[IndirectLoad] SIMT fanout branch node[%s] annotated role[%ld].", node->GetNamePtr(),
+             static_cast<int64_t>(ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch));
       GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::SetTemplateRole(
           node, ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch));
-      GE_ASSERT_SUCCESS(AnnotateSimtSideInputClosure(node, indirect_load, selected, side_visited));
+      GE_ASSERT_SUCCESS(
+          AnnotateSimtSideInputClosure(node, indirect_load, selected, normal_schedule_nodes, side_visited));
     }
     if (ScheduleUtils::IsStore(node) || ScheduleUtils::IsReduce(node)) {
       stop = true;
@@ -1773,15 +2256,72 @@ af::Status AnnotateSimtFanoutBranches(const af::AscNodePtr &indirect_load, const
   return TraverseOutputConsumers(roots, visited, visit);
 }
 
+// SIMD 多阶段布局校验：区域内每个统计 Reduce 独立通过
+// ValidateSimdPostReduceLayout（G≥R + 后缀连续），首个失败即淘汰候选。
+af::Status ValidateSimdCompositeLayouts(const af::AscNodePtr &indirect_load,
+                                        const std::vector<af::AscNodePtr> &composite_reduces,
+                                        bool &is_candidate_legal) {
+  is_candidate_legal = true;
+  for (const auto &reduce : composite_reduces) {
+    bool reduce_legal = true;
+    GE_ASSERT_SUCCESS(ValidateSimdPostReduceLayout(indirect_load, reduce, reduce_legal));
+    if (!reduce_legal) {
+      is_candidate_legal = false;
+      GELOGI("[IndirectLoad] Reject SIMD composite candidate: Reduce[%s] layout is invalid.", reduce->GetNamePtr());
+      return af::SUCCESS;
+    }
+  }
+  return af::SUCCESS;
+}
+
 af::Status ValidateTemplate(const af::AscNodePtr &indirect_load, ascir::TemplateId template_id,
                             const RewrittenGraphAnalysis &analysis, size_t &boundary, bool &is_candidate_legal) {
+  // Softmax 专用节点保持完整输入输出形状，普通 Reduce 的 stride 推导（BuildPostReduceLayout）
+  // 无法识别其内部归约轴，必须先分流再做布局校验：
+  // - 尾轴约束满足 → 走专用 API，仅校验 View 与 IndirectLoad 输出一致；
+  // - 尾轴约束不满足 → Pattern 已在主图替换、无法回退原始结构，淘汰候选。
+  const bool is_softmax_post =
+      analysis.post_reduce != nullptr && af::ops::IsOps<af::ascir_op::Softmax>(analysis.post_reduce);
+  if (is_softmax_post) {
+    GE_ASSERT_SUCCESS(CollectGatherNormInfo(indirect_load, analysis, is_candidate_legal, template_id));
+    if (is_candidate_legal) {
+      // Softmax 专用路径：R 轴是 Softmax 输入的尾轴，必须完整保留在 tile 内。
+      // 将 boundary 覆写为尾轴前一位（与 composite 路径的 first_reduce 语义对齐）：
+      // outer=[保留轴]（可切、tile 行数可求解），inner=[尾轴]（SoftmaxAR 的 R 参数，
+      // 由 vectorized 视图最后一个轴推导）。否则 boundary 保持输出 rank，outer 会
+      // merge 全部轴，vectorized 退化为 size=1 的 tile 轴，SoftmaxAR 的 R 恒为 1。
+      const auto softmax_inputs = analysis.post_reduce->inputs();
+      GE_ASSERT_TRUE(!softmax_inputs.empty() && softmax_inputs[0] != nullptr,
+                     "IndirectLoad Softmax node[%s] has no input.", analysis.post_reduce->GetNamePtr());
+      const size_t softmax_input_rank = softmax_inputs[0]->attr.axis.size();
+      GE_ASSERT_TRUE(softmax_input_rank > 0UL, "IndirectLoad Softmax input rank is invalid, node[%s].",
+                     analysis.post_reduce->GetNamePtr());
+      boundary = softmax_input_rank - 1UL;
+    }
+    return af::SUCCESS;
+  }
+  // SIMD 多阶段：区域内每个 Reduce 独立布局校验后，整链保留在候选图中，
+  // 由连通性分区保持同组并复用既有 Reduce/Broadcast/Elementwise Codegen。
   if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
-    return ValidateSimdPostReduceLayout(indirect_load, analysis.post_reduce, is_candidate_legal);
+    if (!analysis.composite_reduces.empty()) {
+      GE_ASSERT_SUCCESS(ValidateSimdCompositeLayouts(indirect_load, analysis.composite_reduces, is_candidate_legal));
+    } else {
+      GE_ASSERT_SUCCESS(ValidateSimdPostReduceLayout(indirect_load, analysis.post_reduce, is_candidate_legal));
+    }
+  } else {
+    // FindPostReduceChain 保留首个 Reduce 作为 SIMT local target 锚点，并继续
+    // 遍历其后的 Broadcast/Elementwise/Reduce；后续统计阶段由普通调度链执行，
+    // 因而串行和共享输入两类复合区域均可复用现有 Codegen。
+    GE_ASSERT_SUCCESS(ValidateSimtPostReduceLayout(indirect_load, analysis.post_reduce, boundary, is_candidate_legal));
+    if (is_candidate_legal) {
+      GE_ASSERT_SUCCESS(ValidateSimtTemplateRegion(analysis, is_candidate_legal));
+    }
   }
-  GE_ASSERT_SUCCESS(ValidateSimtPostReduceLayout(indirect_load, analysis.post_reduce, boundary, is_candidate_legal));
-  if (is_candidate_legal) {
-    GE_ASSERT_SUCCESS(ValidateSimtTemplateRegion(analysis, is_candidate_legal));
+  if (!is_candidate_legal) {
+    return af::SUCCESS;
   }
+  // 通用路径：保存 NormInfo 供后续多阶段扩展使用。
+  GE_ASSERT_SUCCESS(CollectGatherNormInfo(indirect_load, analysis, is_candidate_legal, template_id));
   return af::SUCCESS;
 }
 
@@ -1796,14 +2336,38 @@ af::Status AnnotateTemplate(const af::AscNodePtr &indirect_load, ascir::Template
   GE_ASSERT_TRUE(false, "IndirectLoad template id %d is invalid.", static_cast<int32_t>(template_id));
 }
 
+// 为区域内全部统计 Reduce 种输入向量化视图：SIMD 多阶段链中每个 Reduce
+// 都按模板向量化轴消费数据，缺失种子会导致 Codegen 无法组织 A/R 参数。
+af::Status SeedCompositeReduceInputViews(const af::AscNodePtr &indirect_load,
+                                         const std::vector<af::AscNodePtr> &composite_reduces) {
+  for (const auto &reduce : composite_reduces) {
+    GE_ASSERT_SUCCESS(SeedPostReduceInputVectorizedView(indirect_load, reduce));
+  }
+  return af::SUCCESS;
+}
+
 af::Status NormalizeTemplateAxes(af::AscGraph &graph, const af::AscNodePtr &indirect_load,
                                  ascir::TemplateId template_id, const RewrittenGraphAnalysis &analysis,
                                  size_t boundary) {
+  const bool is_softmax_post =
+      analysis.post_reduce != nullptr && af::ops::IsOps<af::ascir_op::Softmax>(analysis.post_reduce);
   if (template_id == ascir::TemplateId::kIndirectLoadSimd) {
     GE_ASSERT_SUCCESS(NormalizeSimdAxesForTemplate(graph, indirect_load, analysis));
+    if (is_softmax_post) return af::SUCCESS;
+    // 多阶段：全部 Reduce 各自种向量化视图；单 Reduce/无 Reduce 保持原行为。
+    if (!analysis.composite_reduces.empty()) {
+      return SeedCompositeReduceInputViews(indirect_load, analysis.composite_reduces);
+    }
   } else {
-    GE_ASSERT_SUCCESS(NormalizeSimtAxesForTemplate(graph, indirect_load, boundary));
+    // SIMT tile 全部回退主线固定形态（CreateFixedTileSplit 预建固定行数轴，
+    // 逐行发射）：多行批量发射（solve_tile 求解行数 + 一次发射整 tile）要求
+    // StridedPolicy/index 寻址/下游 api 全链按多行物理布局适配，主线从未有过该形态，
+    // 生产实证存在 SIMT GM 访问越界（AIC 334/341）与数值错误且适配面大。逐行发射下
+    // 每行 count=inner、index 与行一一对应，全部回到主线已验证语义。
+    const bool solve_tile = false;
+    GE_ASSERT_SUCCESS(NormalizeSimtAxesForTemplate(graph, indirect_load, boundary, solve_tile));
   }
+  if (is_softmax_post) return af::SUCCESS;
   return SeedPostReduceInputVectorizedView(indirect_load, analysis.post_reduce);
 }
 
@@ -1830,6 +2394,25 @@ af::Status ApplySkGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_
   GE_ASSERT_SUCCESS(
       AnalyzeRewrittenGraph(graph, indirect_load, ascir::TemplateId::kIndirectLoadSK, is_candidate_legal, analysis));
   if (!is_candidate_legal) {
+    GELOGI("[IndirectLoad] Reject SK: rewritten graph analysis is illegal.");
+    return af::SUCCESS;
+  }
+  // SK 分区后消费子图走通用调度，多 Reduce 复合区域（如 LayerNorm 的
+  // mean/sum 链）在通用路径会生成 R 轴切分模板，产生跨循环变量引用等
+  // 未支持形态；暂时限制 SK 仅支持单 Reduce 场景，复合区域由
+  // SIMD/SIMT/VectorFunc 路径处理，待 SK 消费子图调度完善后再放开。
+  if (!analysis.composite_reduces.empty()) {
+    is_candidate_legal = false;  // AnalyzeRewrittenGraph 已置 true，拒绝时必须显式复位
+    GELOGI("[IndirectLoad] Reject SK: composite Norm region with %zu Reduce stages is not supported yet.",
+           analysis.composite_reduces.size());
+    return af::SUCCESS;
+  }
+  // SK 虽然采用 workspace 分区，但 Norm 区域的 Reduce/Broadcast 对应关系和
+  // 轴保持证明仍必须与 SIMD/SIMT 共用，不能因模板不同而跳过语义校验。
+  GE_ASSERT_SUCCESS(
+      CollectGatherNormInfo(indirect_load, analysis, is_candidate_legal, ascir::TemplateId::kIndirectLoadSK));
+  if (!is_candidate_legal) {
+    GELOGI("[IndirectLoad] Reject SK: composite Norm validation is illegal.");
     return af::SUCCESS;
   }
   is_candidate_legal = false;
@@ -1863,6 +2446,9 @@ af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_lo
   if (template_id == ascir::TemplateId::kIndirectLoadSK) {
     return ApplySkGraphPass(graph, indirect_load, is_candidate_legal);
   }
+  if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
+    GE_ASSERT_SUCCESS(ClearSimtTemplateRoles(graph));
+  }
   RewrittenGraphAnalysis analysis;
   GE_ASSERT_SUCCESS(AnalyzeRewrittenGraph(graph, indirect_load, template_id, is_candidate_legal, analysis));
   if (!is_candidate_legal) {
@@ -1881,7 +2467,15 @@ af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_lo
   }
   GE_ASSERT_SUCCESS(AnnotateTemplate(indirect_load, template_id, analysis));
   if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
-    GE_ASSERT_SUCCESS(AnnotateSimtFanoutBranches(indirect_load, analysis));
+    NodeSet normal_schedule_nodes;
+    GE_ASSERT_SUCCESS(AnnotateSimtFanoutBranches(indirect_load, analysis, normal_schedule_nodes));
+    // 豁免集即 lowering 侧 BuildSimtLoweringMetadata 会校验的 index_region，
+    // 其中与 normal_schedule 闭包重叠的共享节点不能被兜底清理掉角色。
+    NodeSet lowering_exempt;
+    for (const auto &region_node : analysis.index_region) {
+      lowering_exempt.emplace(region_node.get());
+    }
+    GE_ASSERT_SUCCESS(ClearNormalScheduleSimtRoles(graph, normal_schedule_nodes, lowering_exempt));
   }
   GE_ASSERT_SUCCESS(NormalizeTemplateAxes(graph, indirect_load, template_id, analysis, boundary));
   GE_ASSERT_SUCCESS(CompletePreservedVectorizedViews(graph, indirect_load));
@@ -1909,7 +2503,8 @@ bool IsEmbeddingFastPathCapable(const TemplateCase &template_case,
 }
 
 std::string GenerateScoreFunc(const TemplateCase &template_case,
-                              const ascgen_utils::indirect_load::IndirectLoadAccessInfo &access_info) {
+                              const ascgen_utils::indirect_load::IndirectLoadAccessInfo &access_info,
+                              const af::AscNodePtr &candidate_node) {
   int32_t score = 0;
   if (IsEmbeddingFastPathCapable(template_case, access_info)) {
     int64_t input_slice_bytes = 0L;
@@ -1929,6 +2524,16 @@ std::string GenerateScoreFunc(const TemplateCase &template_case,
       } else {
         score = simd_preferred ? kEmbeddingAlternateFastPathScore : kEmbeddingFastPathScore;
       }
+    }
+  }
+  // Norm 区域候选：Softmax 专用路径复用既有专用 API 与 tmp，给予小幅偏好，
+  // 使同分场景下优先选择可直接融合的形态；通用复合区域不加分，
+  // 待完整多阶段执行协议落地后再纳入评分模型。
+  if (candidate_node != nullptr) {
+    ascgen_utils::norm::NormInfo norm_info;
+    GE_ASSERT_SUCCESS(ascgen_utils::norm::TryGetNormInfo(candidate_node, norm_info));
+    if (norm_info.kind == ascgen_utils::norm::NormInfo::Kind::kSoftmaxDedicated) {
+      score += 1;
     }
   }
   return "int32_t CalcScore(const AutofuseTilingData &tiling_data) {\n"
@@ -1987,8 +2592,27 @@ af::Status FinalizeGroupedGraphLoweringMetadata(std::vector<ascir::ImplGraph> &g
       continue;
     }
     const auto template_id = ascir::GetTemplateIdOrDefault(*indirect_load);
+    // FinalizeLoweringMetadata 仅支持 SIMD/SIMT：SK 的分区图不含该 lowering
+    // 元数据，不进入本循环的元数据检查。
     if (template_id != ascir::TemplateId::kIndirectLoadSimd && template_id != ascir::TemplateId::kIndirectLoadSimt) {
       continue;
+    }
+    // Norm 区域完整性：区域节点必须与 IndirectLoad 同组，否则统计分支与
+    // 原始输入回流被拆到不同 Kernel。SK 除外：SK 的 workspace 分区本身就是
+    // 把 Gather 与后续计算合法拆到不同 grouped graph，区域节点位于其他分区
+    // 属预期形态，仅记录日志不阻断。
+    ascgen_utils::norm::NormInfo norm_info;
+    GE_ASSERT_SUCCESS(ascgen_utils::norm::TryGetNormInfo(indirect_load, norm_info));
+    if (norm_info.kind != ascgen_utils::norm::NormInfo::Kind::kNone && !norm_info.region_node_names.empty()) {
+      const bool is_sk_split = template_id == ascir::TemplateId::kIndirectLoadSK;
+      for (const auto &node_name : norm_info.region_node_names) {
+        if (graph.FindNode(node_name.c_str()) == nullptr) {
+          GE_ASSERT_TRUE(!is_sk_split, "Norm region node[%s] is split out of grouped graph[%s], IndirectLoad[%s].",
+                         node_name.c_str(), graph.GetName().c_str(), indirect_load->GetNamePtr());
+          GELOGI("[IndirectLoad] Norm region node[%s] resides in another SK workspace partition of graph[%s].",
+                 node_name.c_str(), graph.GetName().c_str());
+        }
+      }
     }
     bool metadata_supported = false;
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::FinalizeLoweringMetadata(indirect_load, metadata_supported));
@@ -2024,6 +2648,20 @@ Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std:
                       indirect_load_name.c_str());
     GE_ASSERT_SUCCESS(
         ascgen_utils::indirect_load::SetImplementation(candidate_indirect_load, template_case.implementation));
+    // 候选图副本内规范化直接后置稳定 Softmax Pattern：主图因 Reduce Generator
+    // 遇 IndirectLoad 提前返回而不会执行 Softmax 替换，必须在副本内完成，
+    // 使 CollectOutputBoundaries 看到的是专用 Softmax 节点而非 Max/Sum 双 Reduce。
+    // 仅替换原始输入直接来自本 IndirectLoad 输出的 Pattern；Pattern 未命中或
+    // 中间有 Elementwise 时保持原图形态，由通用复合区域路径处理。
+    bool softmax_normalized = false;
+    GE_ASSERT_SUCCESS(
+        softmax_pattern::NormalizeDirectPostSoftmax(candidate_graph, candidate_indirect_load, softmax_normalized));
+    if (softmax_normalized) {
+      // 替换后候选图中节点名不变（Softmax 以原 TrueDiv 名+"_softmax"重建），
+      // 后续 ApplyGraphPass 按模板重新执行改图与校验。
+      GELOGI("[IndirectLoad] Candidate[%d] normalized direct post Softmax for node[%s].",
+             static_cast<int32_t>(template_id), candidate_indirect_load->GetNamePtr());
+    }
     bool is_candidate_legal = false;
     GE_ASSERT_SUCCESS(ApplyGraphPass(candidate_graph, candidate_indirect_load, template_id, is_candidate_legal));
     if (!is_candidate_legal) {
@@ -2034,7 +2672,7 @@ Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std:
     ascgen_utils::indirect_load::IndirectLoadAccessInfo access_info;
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetIndirectLoadAccessInfo(candidate_indirect_load, access_info));
     graphs.emplace_back(std::move(candidate_graph));
-    score_functions.emplace_back(GenerateScoreFunc(template_case, access_info));
+    score_functions.emplace_back(GenerateScoreFunc(template_case, access_info, candidate_indirect_load));
     GELOGI("[IndirectLoad] Add schedule candidate[%d, %d] for node[%s].", static_cast<int32_t>(template_id),
            static_cast<int32_t>(template_case.implementation), candidate_indirect_load->GetNamePtr());
   }

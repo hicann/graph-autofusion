@@ -119,10 +119,13 @@ void ExpectToIntCvStageUsesDtypeAwareStrides(const std::string &api_name, const 
 
   std::string result;
   EXPECT_EQ(call.Generate(tpipe, std::vector<af::AxisId>{z0.id}, result), 0);
-  EXPECT_EQ(result, "AscendC::Cast(local_1[0], local_0[0], " + round_mode +
-                        ", {ConvertToUint32(curAivM), ConvertToUint32(curAivN)}, "
-                        "{ConvertToUint32(((curAivN + 8 - 1) / 8 * 8)), ConvertToUint32(1)}, "
-                        "{ConvertToUint32(((curAivN + 16 - 1) / 16 * 16)), ConvertToUint32(1)});\n");
+  EXPECT_EQ(result,
+            "local_1_actual_size = curAivM * ((curAivN + 8 - 1) / 8 * 8);\n"
+            "AscendC::Cast(local_1[0], local_0[0], " +
+                round_mode +
+                ", {ConvertToUint32(curAivM), ConvertToUint32(curAivN)}, "
+                "{ConvertToUint32(((curAivN + 8 - 1) / 8 * 8)), ConvertToUint32(1)}, "
+                "{ConvertToUint32(((curAivN + 16 - 1) / 16 * 16)), ConvertToUint32(1)});\n");
 }
 }  // namespace
 
@@ -408,7 +411,7 @@ TEST(CastV2ApiCallTest, CastV2ApiCallCvUbFuseUsesDtypeAlignedStrides) {
 
   std::string result;
   call.Generate(tpipe, std::vector<af::AxisId>{z0.id}, result);
-  EXPECT_EQ(result, std::string{"local_1_actual_size = curAivM * curAivN;\n"
+  EXPECT_EQ(result, std::string{"local_1_actual_size = curAivM * ((curAivN + 8 - 1) / 8 * 8);\n"
                                 "CastExtend(local_1[0], local_0[0], {ConvertToUint32(curAivM), "
                                 "ConvertToUint32(curAivN)}, {ConvertToUint32(((curAivN + 8 - 1) / 8 * 8)), "
                                 "ConvertToUint32(1)}, {ConvertToUint32(((curAivN + 16 - 1) / 16 * 16)), "

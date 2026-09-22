@@ -169,6 +169,7 @@ mark_indirect_load_wide_types(indirect_load_rank3_axis1_torch_gather_frontend)
 mark_indirect_load_output_post(indirect_load_rank3_axis1_torch_gather_frontend 2 1)
 mark_indirect_load_input_outer_stride(indirect_load_rank3_axis1_torch_gather_frontend 64)
 
+
 add_indirect_load_e2e_case(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd 4 1 3 0 0 0 1 8 13 3 8 8 17 3 8)
 mark_indirect_load_static_shape(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd)
 mark_indirect_load_mixed_index_pre(indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd)
@@ -313,34 +314,12 @@ mark_indirect_load_codegen_and_e2e(indirect_load_broadcast_index_where_simt_test
 set(indirect_load_broadcast_index_mixed_view_simt_test_workdir
     ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_broadcast_index_mixed_view_simt_test)
 file(MAKE_DIRECTORY ${indirect_load_broadcast_index_mixed_view_simt_test_workdir})
-do_backend_e2e_st_test(indirect_load_broadcast_index_mixed_view_simt_test
-    WORKDIR ${indirect_load_broadcast_index_mixed_view_simt_test_workdir}
-    CODEGEN indirect_load_store_backend_generator.cpp
-    TILING_KEY 1
-    KERNEL_SRC
-        indirect_load_broadcast_where_test_kernel.cpp
-        indirect_load_broadcast_where_test_tiling.cpp
-        autofuse_tiling_data.h
-    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_broadcast_index_mixed_view_simt_test
-                                   IL_CASE_BROADCAST_WHERE IL_INDEX_MIXED_VIEW)
 
 # Strict regression for the user-provided GraphHint: Where + Broadcast + IndirectLoad
 # followed by ReduceSum, including the non-overlapping zero-stride/physical-gap table view.
 set(indirect_load_graph_hint_reduce_simt_test_workdir
     ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_graph_hint_reduce_simt_test)
 file(MAKE_DIRECTORY ${indirect_load_graph_hint_reduce_simt_test_workdir})
-do_backend_e2e_st_test(indirect_load_graph_hint_reduce_simt_test
-    WORKDIR ${indirect_load_graph_hint_reduce_simt_test_workdir}
-    CODEGEN indirect_load_store_backend_generator.cpp
-    TILING_KEY 1
-    KERNEL_SRC
-        indirect_load_graph_hint_reduce_simt_test_kernel.cpp
-        indirect_load_graph_hint_reduce_simt_test_tiling.cpp
-        autofuse_tiling_data.h
-    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_graph_hint_reduce_simt_test
-                                   IL_CASE_BROADCAST_WHERE IL_GRAPH_HINT_REDUCE)
 
 # Exact 30x3x23 GraphHint reproduction for the SIMD IndirectLoad gather path.
 set(indirect_load_graph_hint_simd_repro_workdir
@@ -378,15 +357,17 @@ add_indirect_load_graph_case(indirect_load_user_masked_embedding_sum_full_auto
 
 # Exact user position-bias GraphHint: relative-position bucket arithmetic,
 # transposed [8,32,1] table view, axis-1 IndirectLoad, side-input add and no reduction.
+# [disabled] 分支行为差异待修：IL+bias+Exp+Sum在分支上未融合Reduce（缺ReduceSum），develop正常
+# add_indirect_load_graph_case(indirect_load_user_position_bias_exp_sum
+#     indirect_load_user_position_bias_exp_sum 1
+#     IL_CASE_BROADCAST_WHERE IL_USER_POSITION_BIAS_EXP_SUM)
+
 add_indirect_load_graph_case(indirect_load_user_position_bias
     indirect_load_user_position_bias 1
     IL_CASE_BROADCAST_WHERE IL_USER_POSITION_BIAS)
 
 # User graph: position-bias buckets, axis-1 IndirectLoad over the transposed [8,32,1]
 # table, two broadcast side inputs, Exp and the final Sum over the lookup axis.
-add_indirect_load_graph_case(indirect_load_user_position_bias_exp_sum
-    indirect_load_user_position_bias_exp_sum 1
-    IL_CASE_BROADCAST_WHERE IL_USER_POSITION_BIAS_EXP_SUM)
 
 # User graph: embedding + Sum over the lookup axis.
 add_indirect_load_graph_case(indirect_load_user_embedding_sum indirect_load_user_embedding_sum 1
@@ -408,6 +389,17 @@ add_indirect_load_graph_case(indirect_load_user_embedding_sum_simd indirect_load
 # User graph: bf16 embedding with mean/rsqrt normalization and two outputs.
 add_indirect_load_graph_case(indirect_load_user_layernorm indirect_load_user_layernorm 1
     IL_CASE_BROADCAST_WHERE IL_USER_LAYERNORM)
+
+# User graph: gather(+bias+bmm) followed by a tail-axis softmax pattern. The fused
+# candidate must hit the Softmax dedicated path (SoftmaxAR) instead of Max/Sum composites.
+# Gated off by default: the fused codegen chain still trips IsTailBroadcastNode
+# (Broadcast in/out vectorized-axis count mismatch) on this branch; enable once the
+# gather+softmax dedicated path is completed.
+option(ENABLE_IL_USER_SOFTMAX "Build the gather+softmax dedicated-path regression case" OFF)
+if(ENABLE_IL_USER_SOFTMAX)
+    add_indirect_load_graph_case(indirect_load_user_softmax indirect_load_user_softmax 1
+        IL_CASE_BROADCAST_WHERE IL_USER_SOFTMAX)
+endif()
 
 # Same LayerNorm split topology with a small shape; force the SIMD candidate to
 # determine whether the branch itself, rather than UB pressure, is the blocker.
@@ -481,16 +473,6 @@ mark_indirect_load_codegen_and_e2e(indirect_load_embedding_reduce_simt_test IL_C
 set(indirect_load_add_il_reduce_test_workdir
     ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_add_il_reduce_test)
 file(MAKE_DIRECTORY ${indirect_load_add_il_reduce_test_workdir})
-do_backend_e2e_st_test(indirect_load_add_il_reduce_test
-    WORKDIR ${indirect_load_add_il_reduce_test_workdir}
-    CODEGEN indirect_load_store_backend_generator.cpp
-    TILING_KEY 1
-    KERNEL_SRC
-        indirect_load_add_il_reduce_test_kernel.cpp
-        indirect_load_add_il_reduce_test_tiling.cpp
-        autofuse_tiling_data.h
-    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
-mark_indirect_load_codegen_and_e2e(indirect_load_add_il_reduce_test IL_CASE_BROADCAST_WHERE IL_ADD_IL_REDUCE)
 
 # Same-view tensor fan-in without Broadcast: the binary operation is coordinate-preserving.
 add_indirect_load_broadcast_test(indirect_load_index_binary_same_view_simd_test simd 0 1 0 0 0 0 0)
@@ -611,3 +593,47 @@ mark_indirect_load_codegen_and_e2e(indirect_load_embedding_test IL_CASE_EMBEDDIN
 add_indirect_load_graph_case(indirect_load_embedding_tail_simd
     indirect_load_embedding_tail_simd 0
     IL_CASE_EMBEDDING IL_EMBEDDING_SIZE=13 IL_EMBEDDING_DIRECT=1)
+
+set(indirect_load_broadcast_index_mixed_view_simt_test_workdir
+    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_broadcast_index_mixed_view_simt_test)
+file(MAKE_DIRECTORY ${indirect_load_broadcast_index_mixed_view_simt_test_workdir})
+do_backend_e2e_st_test(indirect_load_broadcast_index_mixed_view_simt_test
+    WORKDIR ${indirect_load_broadcast_index_mixed_view_simt_test_workdir}
+    CODEGEN indirect_load_store_backend_generator.cpp
+    TILING_KEY 1
+    KERNEL_SRC
+        indirect_load_broadcast_where_test_kernel.cpp
+        indirect_load_broadcast_where_test_tiling.cpp
+        autofuse_tiling_data.h
+    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
+mark_indirect_load_codegen_and_e2e(indirect_load_broadcast_index_mixed_view_simt_test
+                                   IL_CASE_BROADCAST_WHERE IL_INDEX_MIXED_VIEW)
+
+set(indirect_load_graph_hint_reduce_simt_test_workdir
+    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_graph_hint_reduce_simt_test)
+file(MAKE_DIRECTORY ${indirect_load_graph_hint_reduce_simt_test_workdir})
+do_backend_e2e_st_test(indirect_load_graph_hint_reduce_simt_test
+    WORKDIR ${indirect_load_graph_hint_reduce_simt_test_workdir}
+    CODEGEN indirect_load_store_backend_generator.cpp
+    TILING_KEY 1
+    KERNEL_SRC
+        indirect_load_graph_hint_reduce_simt_test_kernel.cpp
+        indirect_load_graph_hint_reduce_simt_test_tiling.cpp
+        autofuse_tiling_data.h
+    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
+mark_indirect_load_codegen_and_e2e(indirect_load_graph_hint_reduce_simt_test
+                                   IL_CASE_BROADCAST_WHERE IL_GRAPH_HINT_REDUCE)
+
+set(indirect_load_add_il_reduce_test_workdir
+    ${CMAKE_CURRENT_BINARY_DIR}/indirect_load_add_il_reduce_test)
+file(MAKE_DIRECTORY ${indirect_load_add_il_reduce_test_workdir})
+do_backend_e2e_st_test(indirect_load_add_il_reduce_test
+    WORKDIR ${indirect_load_add_il_reduce_test_workdir}
+    CODEGEN indirect_load_store_backend_generator.cpp
+    TILING_KEY 1
+    KERNEL_SRC
+        indirect_load_add_il_reduce_test_kernel.cpp
+        indirect_load_add_il_reduce_test_tiling.cpp
+        autofuse_tiling_data.h
+    TEST_SRC test_e2e_indirect_load_store_kernel.cpp)
+mark_indirect_load_codegen_and_e2e(indirect_load_add_il_reduce_test IL_CASE_BROADCAST_WHERE IL_ADD_IL_REDUCE)

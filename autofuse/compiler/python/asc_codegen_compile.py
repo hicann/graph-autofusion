@@ -1759,7 +1759,7 @@ def is_matmul_relu_fixpip(tiling_info, cube_info):
 
 
 def _is_fp32_large_k(a_trans, a_shape, cube_output_type_size, enable_hf32):
-    """fp32类型且K轴>2048且未启用hf32时, CV融合不能选择UB模板(精度问题), 需走common兜底"""
+    """fp32类型且K轴>=2048且未启用hf32时, CV融合不能选择UB模板(精度问题), 需走common兜底"""
     if cube_output_type_size != 4:  # 非fp32
         return False
     if enable_hf32:  # 启用hf32时不走common兜底
@@ -1770,7 +1770,7 @@ def _is_fp32_large_k(a_trans, a_shape, cube_output_type_size, enable_hf32):
     logger.info(
         "CV fusion op, fp32 large K check, a_trans=%s, k_value=%s", a_trans, k_value
     )
-    return k_value > 2048
+    return k_value >= 2048
 
 
 def is_fp32_large_k_matmul(tiling_info, cube_info, enable_hf32=False):
@@ -2024,7 +2024,9 @@ GET_TILING_DATA_PTR_WITH_STRUCT({struct_name}, tmpTilingData, tmpTilingGM);
 """
 
     # 构建class_body，使用data_prefix处理不同的数据访问路径
-    class_body = "const int32_t ub_align_value = 32 / cube_output_type_size;\n"
+    # ub_align_value固定32元素: 与kernel侧de445b95的上确界行宽对齐(basen_align
+    # 为所有dtype的32B对齐行宽上确界), 保证host侧basen_basem_align与kernel一致
+    class_body = "const int32_t ub_align_value = 32;\n"
     class_body += (
         f"const int32_t basen_align = ({data_prefix}.baseN + ub_align_value - 1) "
         f"/ ub_align_value * ub_align_value;\n"

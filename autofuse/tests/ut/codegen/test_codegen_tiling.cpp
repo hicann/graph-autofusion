@@ -2687,7 +2687,7 @@ TEST_F(TestCodegenTiling, GenFp32LargeKConditionShouldReturnRuntimeExprWhenDynam
   af::AscGraph graph("dynamic_k_matmul");
   CreateMatmulGraphForFp32LargeK(graph, 0, true, false, true, ge::DT_FLOAT);
   auto cube_info = EXTRACT_CUBE_INFO(graph);
-  EXPECT_EQ(this->GenFp32LargeKCondition(cube_info), "(static_cast<int64_t>(k_var) > 2048)");
+  EXPECT_EQ(this->GenFp32LargeKCondition(cube_info), "(static_cast<int64_t>(k_var) >= 2048)");
 }
 
 TEST_F(TestCodegenTiling, GenFp32LargeKConditionShouldReturnTrueWhenNoTransposeStaticKGT2048) {
@@ -5116,6 +5116,21 @@ void AssertCommonPgoLoaderLifetime(const std::string &source) {
 TEST_F(TestCodegenTiling, GenerateForPgoShouldProtectDsoLifetime) {
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
   AssertCommonPgoLoaderLifetime(GenerateForPgo(fused_schedule_result, "/tmp"));
+}
+
+TEST_F(TestCodegenTiling, GenerateForPgoShouldLoadFindBestTilingKeyOnlyWhenSupported) {
+  auto supported_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  auto unsupported_result = supported_result;
+  unsupported_result.node_idx_to_scheduled_results[0][0].enable_group_parallel = true;
+
+  const auto supported_source = GenerateForPgo(supported_result, "/tmp");
+  EXPECT_NE(supported_source.find("GetFunc(\"FindBestTilingKey\")"), std::string::npos);
+  EXPECT_NE(supported_source.find("find_best_tiling_key_fn(*tiling_data)"), std::string::npos);
+
+  const auto unsupported_source = GenerateForPgo(unsupported_result, "/tmp");
+  EXPECT_EQ(unsupported_source.find("GetFunc(\"FindBestTilingKey\")"), std::string::npos);
+  EXPECT_EQ(unsupported_source.find("find_best_tiling_key_fn(*tiling_data)"), std::string::npos);
+  EXPECT_NE(unsupported_source.find("GetFunc(\"GetTilingKeyCount\")"), std::string::npos);
 }
 
 void AssertDlopenRunnerProfiling(const std::string &runner) {

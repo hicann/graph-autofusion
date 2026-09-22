@@ -824,7 +824,7 @@ ge::graphStatus ShapeInferenceRule::CompileJsonString(const std::string &json_st
   CppJitCompiler compiler;
   binary = compiler.Compile(code_ss.str());
   if (binary.empty()) {
-    GELOGE(af::FAILED, "Failed to compile C++ code to shared object:%s,\nError:%s", code_ss.str().c_str(),
+    GELOGE(af::FAILED, "Failed to compile C++ code to shared object:%s, Error:%s", code_ss.str().c_str(),
            compiler.Error().c_str());
     return ge::GRAPH_FAILED;
   }

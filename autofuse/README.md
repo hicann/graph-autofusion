@@ -80,7 +80,7 @@ export CC=gcc-15
 export CXX=g++-15
 ```
 
-也可以设置 `GCC_VERSION=15` 或 `GCC_VERSION=16` 交给脚本生成对应编译器命令。请不要使用 `update-alternatives` 修改系统默认 gcc。
+也可以设置 `GCC_VERSION=15` 或 `GCC_VERSION=16` 交给脚本生成对应编译器命令。该变量仅对测试脚本（如 `scripts/test/run_autofuse_test.sh`）和 CI 构建生效，`--pkg` 主构建不读取该变量，主构建切换编译器请显式设置 `CC/CXX`。请不要使用 `update-alternatives` 修改系统默认 gcc。
 
 切换编译器后请先清理 `build/`，避免 CMake 缓存继续使用旧的编译器配置。
 在 openEuler 系统上，您可以通过以下命令安装：

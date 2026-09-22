@@ -195,6 +195,14 @@ std::string GetVectorGroupWorkspaceOutputName(const ascir::ScheduleGroup &schedu
     if (GetSingleWorkspaceName(impl_graph) != workspace_name) {
       return "";
     }
+
+    // vector读取外部输入时, 输出buffer可能与该输入复用, 复用会覆盖输入, 故禁用
+    for (const auto &node : impl_graph.GetAllNodes()) {
+      if (IsOps<Data>(node)) {
+        return "";
+      }
+    }
+
     const auto current_output_name = GetWorkspacePathOutputName(impl_graph, workspace_name);
     if (current_output_name.empty() || (!output_name.empty() && output_name != current_output_name)) {
       return "";
@@ -2165,6 +2173,33 @@ Status Kernel::ParseWorkspaceTensor(const ascir::TensorAttr *tensor,
   return af::SUCCESS;
 }
 
+namespace {
+// GetTmpBuffer 会为 tmp 公式套上 v1 repeat cap 壳: Min(size, 65312)。CV UBFuse 的 tmp
+// 内联公式不走 tiling 求解, stage 尺寸由 cube tiling 决定, 需求无法缩到 cap 以内, 因此
+// 在 CV 收集点剥掉该壳取原始需求。数值须与 GetTmpBuffer 的 cap(255 * 256 + 32)保持一致。
+// 非 cap 形态(无壳或常量非该值)原样返回; VV 路径不经此处理, 继续使用 capped size 参与
+// host tiling 求解。
+constexpr int64_t kMaxV1RepeatTmpBytes = 255LL * 256LL + 32LL;
+
+// GetArgs 为非 const 接口, 此处按值传递以便调用。
+af::Expression StripV1RepeatCap(af::Expression size) {
+  if (!size.IsValid()) {
+    return size;
+  }
+  auto args = size.GetArgs();
+  if (args.size() != 2UL) {
+    return size;
+  }
+  for (size_t i = 0UL; i < args.size(); i++) {
+    int64_t cap_value = 0;
+    if (args[i].IsConstExpr() && args[i].GetConstValue(cap_value) && cap_value == kMaxV1RepeatTmpBytes) {
+      return args[1UL - i];
+    }
+  }
+  return size;
+}
+}  // namespace
+
 Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedScheduledResult &fused_schedule_result,
                           Kernel &kernel) {
   // Parse kernel input output
@@ -2359,16 +2394,24 @@ Status Kernel::ParseGraph(const ascir::ImplGraph &graph, const ascir::FusedSched
       }
       auto it = kernel.tpipe.bufs.find(tmp_buffer.id);
       GELOGD("reuse tmp buffer id is %ld.", tmp_buffer.id);
+      // CV UBFuse 使用无 v1 repeat cap 的原始 tmp 需求; 其余路径(含 VV 的 host tiling
+      // 求解)保持 capped size 原样, 不引入额外拷贝。
+      af::Expression stripped;
+      const af::Expression *tmp_size = &tmp_buffer.buf_desc.size;
+      if (kernel.tpipe.cv_fusion_type == ascir::CubeTemplateType::kUBFuse) {
+        stripped = StripV1RepeatCap(tmp_buffer.buf_desc.size);
+        tmp_size = &stripped;
+      }
       if (it == kernel.tpipe.bufs.end()) {
         std::string position = "TPosition::VECCALC";
         ascir::Position tensor_position = af::Position::kPositionVecCalc;
         auto [new_buf, is_insert5] =
             kernel.tpipe.bufs.emplace(tmp_buffer.id, TBuf{tmp_buffer.id, tensor_position, position});
         GE_CHK_BOOL_RET_STATUS(is_insert5, af::FAILED, "Codegen emplace tbuf [%ld] failed", tmp_buffer.id);
-        new_buf->second.tmp_buf_size_list.emplace_back(tmp_buffer.buf_desc.size);
+        new_buf->second.tmp_buf_size_list.emplace_back(*tmp_size);
         new_buf->second.tmp_buf_reuse = true;
       } else {
-        it->second.tmp_buf_size_list.emplace_back(tmp_buffer.buf_desc.size);
+        it->second.tmp_buf_size_list.emplace_back(*tmp_size);
         it->second.tmp_buf_reuse = true;
       }
     }
@@ -3945,6 +3988,7 @@ std::string TPipe::TensorSizeDefine() const {
 
 Status TPipe::TensorSizeAssign(std::string dtype_name, std::string &result) const {
   stringstream ss;
+  (void)dtype_name;
 
   for (auto &pair : this->tensors) {
     auto &t = pair.second;
@@ -3955,7 +3999,10 @@ Status TPipe::TensorSizeAssign(std::string dtype_name, std::string &result) cons
                           static_cast<int32_t>(t.dtype));
         ss << t.size.Str() << " = KernelUtils::BlkAlign<" << tensor_dtype_name << ">(1);" << std::endl;
       } else {
-        ss << t.size.Str() << " = stage_size / sizeof(" << dtype_name << ");" << std::endl;
+        // stage_size(元素个数)已归一: 主路径 = 求解器预算a0a1t(=行数*basen_align, 任意dtype的32B行对齐
+        // 行宽均<=basen_align, 按此元素数分配即覆盖compute size且不超求解器预算);
+        // 小a0a1t兜底时 = cube_ub元素数(容量, 更保守). CV与非CV统一使用stage_size.
+        ss << t.size.Str() << " = stage_size;" << std::endl;
       }
     }
   }
@@ -4102,6 +4149,7 @@ class AutoFusionVector {
     if (is_inductor) {
       result << "     uint32_t stage_size_name{0};" << std::endl;
       result << "     uint32_t cube_ub_stage_size{0};" << std::endl;
+      result << "     uint32_t cube_m_stage_size{0};" << std::endl;
     } else {
       result << "     const CVAutofuseTilingData *cv_tiling_data{nullptr};" << std::endl;
     }
@@ -4120,6 +4168,7 @@ class AutoFusionVector {
     if (is_inductor) {
       result << "     uint32_t stage_size_name{0};" << std::endl;
       result << "     uint32_t cube_ub_stage_size{0};" << std::endl;
+      result << "     uint32_t cube_m_stage_size{0};" << std::endl;
     } else {
       result << "     const CVAutofuseTilingData *cv_tiling_data{nullptr};" << std::endl;
     }
@@ -4136,6 +4185,7 @@ class AutoFusionVector {
     if (is_inductor) {
       result << "     uint32_t stage_size_name{0};" << std::endl;
       result << "     uint32_t cube_ub_stage_size{0};" << std::endl;
+      result << "     uint32_t cube_m_stage_size{0};" << std::endl;
     } else {
       result << "     const CVAutofuseTilingData *cv_tiling_data{nullptr};" << std::endl;
     }
@@ -4220,7 +4270,7 @@ class AutoFusionVector {
       result << "const uint32_t stage_size_name = autofuse_tiling_size.STAGE_SIZE_NAME;" << std::endl;
     }
     result << "const int32_t compute_size = stage_size_name > 144 ? stage_size_name : 144;" << std::endl;
-    result << "int32_t stage_size = compute_size * sizeof(" << dtype_name << ");" << std::endl;
+    result << "int32_t stage_size = compute_size;" << std::endl;
     result << "stage_size2 = compute_size;" << std::endl;
   } else {
     result << "__aicore__ inline void Init(Params const& params, AscendC::LocalTensor<" << dtype_name
@@ -4232,27 +4282,42 @@ class AutoFusionVector {
       result << "const uint32_t stage_size_name = autofuse_tiling_size.STAGE_SIZE_NAME;" << std::endl;
       result << "const int32_t basen_basem_align = kConstTilingData.cube_ub_stage_size * sizeof(" << dtype_name << ");"
              << std::endl;
+      result << "stage_size_type = static_cast<int64_t>(kConstTilingData.cube_m_stage_size);" << std::endl;
       result << "#else" << std::endl;
       result << "const uint32_t stage_size_name = params.stage_size_name;" << std::endl;
       result << "const int32_t basen_basem_align = params.cube_ub_stage_size * sizeof(" << dtype_name << ");"
              << std::endl;
+      result << "stage_size_type = static_cast<int64_t>(params.cube_m_stage_size);" << std::endl;
       result << "#endif" << std::endl;
     } else {
       result << "GET_TILING_DATA_WITH_STRUCT(MatMulV3BasicTilingData, tmpTilingData, tmpTilingGM);" << std::endl;
-      result << "AutofuseTilingData autofuse_tiling_size;" << std::endl;
-      result << "const int32_t ub_align_value = 32 / sizeof(" << dtype_name << ");" << std::endl;
+      result << "const int32_t ub_align_value = 32;" << std::endl;
       result
           << "const int32_t basen_align = (tmpTilingData.baseN + ub_align_value - 1) / ub_align_value * ub_align_value;"
           << std::endl;
       result << "const int32_t basen_basem_align = (tmpTilingData.baseM * basen_align * sizeof(" << dtype_name
              << ")) / 2 + basen_align * sizeof(" << dtype_name << ");" << std::endl;
-      result << "const uint32_t stage_size_name = autofuse_tiling_size.STAGE_SIZE_NAME;" << std::endl;
+      // 非inductor: ascbc静态流程在device头烧录kConstTilingData(求解器完整结果);
+      // 动态shape时params携带cv_tiling_data指针读GM tiling; TF等前端在线GE编译的
+      // 静态图两者皆无, 回退到autofuse_tiling_data.h中烧录的求解器结果
+      // (z0z1t预算), 行数按 预算/上确界行宽 就地推导, 与conv2d分支同一模式
+      result << "#ifdef INDUCTOR_CONST_TILING_DATA" << std::endl;
+      result << "stage_size_type = static_cast<int64_t>(kConstTilingData.cube_m_stage_size);" << std::endl;
+      result << "const uint32_t stage_size_name = kConstTilingData.stage_size_name;" << std::endl;
+      result << "#else" << std::endl;
+      if (is_dynamic) {
+        result << "stage_size_type = static_cast<int64_t>(params.cv_tiling_data->cube_m_stage_size);" << std::endl;
+        result << "const uint32_t stage_size_name = params.cv_tiling_data->stage_size_name;" << std::endl;
+      } else {
+        result << "AutofuseTilingData autofuse_tiling_size;" << std::endl;
+        result << "const uint32_t stage_size_name = autofuse_tiling_size.STAGE_SIZE_NAME;" << std::endl;
+        result << "stage_size_type = static_cast<int64_t>(stage_size_name / basen_align);" << std::endl;
+      }
+      result << "#endif" << std::endl;
     }
-    // 下面的144为16*16/2+16，按照cube tiling最小块16*16计算得到
-    result << "int32_t stage_size = stage_size_name > 144 ? " << std::endl;
-    result << "stage_size_name * sizeof(" << dtype_name << ") : basen_basem_align;" << std::endl;
-    result << "stage_size_type = static_cast<int64_t>(stage_size_name > 144 ? " << std::endl;
-    result << "stage_size_name : basen_basem_align / sizeof(" << dtype_name << "));" << std::endl;
+    // stage_size 统一为元素个数: 求解器预算 a0a1t, 过小时兜底到 C fragment 容量(cube_ub元素数)
+    result << "int32_t stage_size = stage_size_name > 144 ? stage_size_name : " << std::endl;
+    result << "static_cast<int32_t>(basen_basem_align / sizeof(" << dtype_name << "));" << std::endl;
   }
   GE_CHK_STATUS_RET(this->root_loop.ActualSizeDefine(this->tiler, this->tpipe, dtype_name, tmp),
                     "actual size define failed");
@@ -4260,7 +4325,7 @@ class AutoFusionVector {
   if (is_conv2d) {
     result << ub_tensor->Str() << "_actual_size =  stage_size2;" << std::endl << std::endl;
   } else {
-    result << ub_tensor->Str() << "_actual_size =  stage_size_type;" << std::endl << std::endl;
+    result << ub_tensor->Str() << "_actual_size = stage_size;" << std::endl << std::endl;
   }
   GE_CHK_STATUS_RET(this->tpipe.TensorSizeAssign(dtype_name, tmp), "Tensor size assign failed");
   result << tmp;
@@ -4276,9 +4341,9 @@ class AutoFusionVector {
   if (is_conv2d) {
     result << "GetTPipePtr()->InitBuffer(buf_cube, stage_size1 *  sizeof(" << dtype_name << "));" << std::endl;
   } else {
-    result << "const uint32_t cv_ub_vector_queue_size = KernelUtils::BlkAlign<uint8_t>(stage_size);" << std::endl;
-    result << "tpipe.InitBuffer(buf_cube, KernelUtils::Max(static_cast<uint32_t>(basen_basem_align), "
-           << "cv_ub_vector_queue_size));" << std::endl;
+    // 行语义下 epilogue 读取 cLocal_ 上界 stageOffset+stageSize <= inputSize <= cube_ub,
+    // buf_cube 只需 C fragment 容量 basen_basem_align, 不再按 stage_size 撑大
+    result << "tpipe.InitBuffer(buf_cube, static_cast<uint32_t>(basen_basem_align));" << std::endl;
   }
   result << ub_tensor->name << " = buf_cube.Get<" << dtype_name << ">();" << std::endl;
   result << "cLocal = " << ub_tensor->name << ";" << std::endl << std::endl;
@@ -4438,9 +4503,11 @@ Status Kernel::InitCVFusionAddr(std::stringstream &result, bool vector_no_db_fla
         result << "#ifdef INDUCTOR_CONST_TILING_DATA" << std::endl;
         result << "    CV_FUSION_ADDR.stage_size_name = kConstTilingData.stage_size_name;" << std::endl;
         result << "    CV_FUSION_ADDR.cube_ub_stage_size = kConstTilingData.cube_ub_stage_size;" << std::endl;
+        result << "    CV_FUSION_ADDR.cube_m_stage_size = kConstTilingData.cube_m_stage_size;" << std::endl;
         result << "#else" << std::endl;
         result << "    CV_FUSION_ADDR.stage_size_name = t.stage_size_name;" << std::endl;
         result << "    CV_FUSION_ADDR.cube_ub_stage_size = t.cube_ub_stage_size;" << std::endl;
+        result << "    CV_FUSION_ADDR.cube_m_stage_size = t.cube_m_stage_size;" << std::endl;
         result << "#endif" << std::endl;
         result << "  }" << std::endl;
       } else {
@@ -4465,9 +4532,11 @@ Status Kernel::InitCVFusionAddr(std::stringstream &result, bool vector_no_db_fla
         result << "#ifdef INDUCTOR_CONST_TILING_DATA" << std::endl;
         result << "    CV_FUSION_ADDR_DB.stage_size_name = kConstTilingData.stage_size_name;" << std::endl;
         result << "    CV_FUSION_ADDR_DB.cube_ub_stage_size = kConstTilingData.cube_ub_stage_size;" << std::endl;
+        result << "    CV_FUSION_ADDR_DB.cube_m_stage_size = kConstTilingData.cube_m_stage_size;" << std::endl;
         result << "#else" << std::endl;
         result << "    CV_FUSION_ADDR_DB.stage_size_name = t.stage_size_name;" << std::endl;
         result << "    CV_FUSION_ADDR_DB.cube_ub_stage_size = t.cube_ub_stage_size;" << std::endl;
+        result << "    CV_FUSION_ADDR_DB.cube_m_stage_size = t.cube_m_stage_size;" << std::endl;
         result << "#endif" << std::endl;
         result << "  }" << std::endl;
       } else {
