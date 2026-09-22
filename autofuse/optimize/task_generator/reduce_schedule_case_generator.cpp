@@ -768,8 +768,7 @@ Status ReducePartitionCaseGenerator::MergeDuplicatedWorkspaceChainsAndCopyFromDa
 Status ReducePartitionCaseGenerator::CollectCitationGroups(ascir::ImplGraph &impl_graph,
                                                            CitationGroups &citation_groups) {
   for (auto node : impl_graph.GetAllNodes()) {
-    if (!ScheduleUtils::IsLoad(node) && !ScheduleUtils::IsStore(node) &&
-        !af::ops::IsOps<af::ascir_op::Workspace>(node) && node->GetOutDataNodes().size() > 1UL) {
+    if (node->GetOutDataNodes().size() > 1UL) {
       std::vector<Citation> citations;
       for (const auto &output_node : node->GetOutDataNodes()) {
         auto citation = std::dynamic_pointer_cast<af::AscNode>(output_node);
@@ -1007,6 +1006,31 @@ Status ReducePartitionCaseGenerator::PartitionScalarNode(af::AscNodePtr &src_nod
   return ge::GRAPH_SUCCESS;
 }
 
+Status ReducePartitionCaseGenerator::PartitionDataNode(af::AscNodePtr &src_node, af::AscNodePtr &dst_node,
+                                                       ascir::ImplGraph &impl_graph) {
+  // Data 是 GM 输入占位符（kAPITypeBuffer），值直接来自 kernel 输入参数，不能走通用路径用 Store 物化
+  // （Data 直连 Store 会生成 DataCopyPadExtend(GlobalTensor, ...) 无匹配重载的非法调用）。
+  // 复制 Data 节点让 citation 侧子图重读同一 GM 输入，ir_attr 携带的输入参数 index 随属性克隆保留。
+  af::ascir_op::Data data(("copy_from_" + src_node->GetName()).c_str());
+  auto data_node = impl_graph.AddNode(data);
+  GE_CHK_STATUS_RET(DoCopyAscNodeTensorAttr(src_node, data_node));
+  // dst_node 的多个输入可能来自同一个 src_node，需要遍历所有 peer 边逐一断开并替换，不能找到第一条就 return。
+  for (const auto &out_anchor : src_node->GetAllOutDataAnchors()) {
+    GE_CHECK_NOTNULL(out_anchor, "Out data anchor is null, node:%s.", src_node->GetNamePtr());
+    for (const auto &peer_in_anchor : out_anchor->GetPeerInDataAnchors()) {
+      GE_CHECK_NOTNULL(peer_in_anchor);
+      GE_CHECK_NOTNULL(peer_in_anchor->GetOwnerNodeBarePtr(), "Peer in node:%s is null", src_node->GetNamePtr());
+      if (peer_in_anchor->GetOwnerNodeBarePtr() == dst_node.get()) {
+        GE_CHK_STATUS_RET(af::GraphUtils::RemoveEdge(src_node->GetOutAnchor(out_anchor->GetIdx()),
+                                                     dst_node->GetInAnchor(peer_in_anchor->GetIdx())));
+        GE_CHK_STATUS_RET(
+            af::GraphUtils::AddEdge(data_node->GetOutAnchor(0UL), dst_node->GetInAnchor(peer_in_anchor->GetIdx())));
+      }
+    }
+  }
+  return ge::GRAPH_SUCCESS;
+}
+
 Status ReducePartitionCaseGenerator::PartitionByNode(af::AscNodePtr &src_node, af::AscNodePtr &dst_node,
                                                      ascir::ImplGraph &impl_graph) {
   partition_ = true;
@@ -1017,6 +1041,9 @@ Status ReducePartitionCaseGenerator::PartitionByNode(af::AscNodePtr &src_node, a
   if (ScheduleUtils::IsScalarLikeNode(src_node)) {
     return PartitionScalarNode(src_node, dst_node, impl_graph);
   };
+  if (af::ops::IsOps<af::ascir_op::Data>(src_node)) {
+    return PartitionDataNode(src_node, dst_node, impl_graph);
+  }
 
   for (const auto &out_anchor : src_node->GetAllOutDataAnchors()) {
     GE_CHECK_NOTNULL(out_anchor, "Out data anchor is null, node:%s.", src_node->GetNamePtr());

@@ -650,6 +650,56 @@ TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_Multi_Cita_SameReduce_NoDupli
   EXPECT_EQ(shared_workspace_count, 2UL);
 }
 
+TEST_F(ReduceScheduleCaseGeneratorTest, TestReduce_Multi_Cita_Data_Source) {
+  // 单 Data 多引用：data 同时被 load0/load1 引用，两路分别到达 sum0/sum1 两个不同 reduce，
+  // 非锚点 citation（load1→sum1）触发对 Data 源的切分。Data 是 GM 输入占位符（kAPITypeBuffer），
+  // 不能走通用路径物化（Data 直连 Store 会生成非法的 DataCopyPadExtend(GlobalTensor, ...)），
+  // 应复制 copy_from_ Data 并重定向 citation 边，两个子图各自重读同一 GM 输入。
+  auto graph = AscGraphBuilder("reduce_multi_citation_data_source")
+                   .Loops({Sym(128), Sym(64)})
+                   .Data("data", 0)
+                   .Load("load0", "data")
+                   .Load("load1", "data")
+                   .Sum("sum0", "load0", {0, 1})
+                   .Sum("sum1", "load1", {0, 1})
+                   .Store("store0", "sum0")
+                   .Output("output0", "store0", 0)
+                   .Store("store1", "sum1")
+                   .Output("output1", "store1", 1)
+                   .Build();
+  std::vector<ScheduleTask> tasks;
+  ReducePartitionCaseGenerator generator;
+  OptimizerOptions options;
+
+  EXPECT_EQ(generator.GeneratorTask(graph, tasks, options), af::SUCCESS);
+
+  bool has_copy_from_data = false;
+  bool has_data_to_store = false;
+  bool load1_redirected = false;
+  for (const auto &task : tasks) {
+    for (const auto &grouped_graph : task.grouped_graphs) {
+      for (const auto &node : grouped_graph.GetAllNodes()) {
+        if (af::ops::IsOps<af::ascir_op::Data>(node) && node->GetName() == "copy_from_data") {
+          has_copy_from_data = true;
+        }
+        if (af::ops::IsOps<af::ascir_op::Store>(node)) {
+          for (const auto &in_node : node->GetInDataNodes()) {
+            has_data_to_store = has_data_to_store || af::ops::IsOps<af::ascir_op::Data>(in_node);
+          }
+        }
+      }
+      auto load1_node = grouped_graph.FindNode("load1");
+      if (load1_node != nullptr && load1_node->GetInDataNodesSize() == 1UL &&
+          std::string(load1_node->GetInDataNodes().at(0UL)->GetName()) == "copy_from_data") {
+        load1_redirected = true;
+      }
+    }
+  }
+  EXPECT_TRUE(has_copy_from_data);
+  EXPECT_FALSE(has_data_to_store);
+  EXPECT_TRUE(load1_redirected);
+}
+
 void ConstructReduceWithScalarData(AscGraph &graph) {
   auto s0 = graph.CreateSizeVar(128);
   auto s1 = graph.CreateSizeVar(64);
