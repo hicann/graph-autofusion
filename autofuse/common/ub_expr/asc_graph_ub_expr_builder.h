@@ -18,7 +18,7 @@ namespace ascir {
 
 class AscGraphUbExprBuilder {
  public:
-  af::Status Build(const af::AscGraph &graph, UbExprContext &context) const;
+  af::Status Build(const af::AscGraph &graph, UbExprContext &context, bool use_raw_tmp_size = false) const;
 };
 
 }  // namespace ascir

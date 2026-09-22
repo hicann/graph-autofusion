@@ -24,6 +24,27 @@ namespace ascir {
 namespace {
 constexpr int64_t kMinTmpBufferSize = 8 * 1024;
 constexpr int64_t kBlockAlignBytes = 32;
+// GetTmpBuffer 会为 tmp 公式套上 v1 repeat cap 壳: Min(size, 255 * 256 + 32)。
+// CV UBFuse 的 epilogue 内联公式按原始需求分配 tmp, host UB 约束须与之一致, 否则
+// 求解器会选出使 tmp 越界的 stage 尺寸。数值须与 default_reg_func.cpp 的 cap 保持一致。
+constexpr int64_t kMaxV1RepeatTmpBytes = 255LL * 256LL + 32LL;
+
+UbExpr StripV1RepeatCap(UbExpr size) {
+  if (!size.IsValid()) {
+    return size;
+  }
+  auto args = size.GetArgs();
+  if (args.size() != 2UL) {
+    return size;
+  }
+  for (size_t i = 0UL; i < args.size(); i++) {
+    int64_t cap_value = 0;
+    if (args[i].IsConstExpr() && args[i].GetConstValue(cap_value) && cap_value == kMaxV1RepeatTmpBytes) {
+      return args[1UL - i];
+    }
+  }
+  return size;
+}
 
 std::string MakeQueueName(int64_t id) {
   return "q" + std::to_string(id) + "_size";
@@ -266,11 +287,13 @@ void FillTileVars(const af::AscGraph &graph, UbExprContext &context) {
   }
 }
 
-void AddTmpBuffer(const af::TmpBuffer &tmp_buffer, std::map<int64_t, UbExpr> &node_tmp_buffer_bytes) {
+void AddTmpBuffer(const af::TmpBuffer &tmp_buffer, bool use_raw_tmp_size,
+                  std::map<int64_t, UbExpr> &node_tmp_buffer_bytes) {
   if (!IsUbTmpBuffer(tmp_buffer) || !HasPrintableExpr(tmp_buffer.buf_desc.size)) {
     return;
   }
-  AppendAdd(node_tmp_buffer_bytes[tmp_buffer.id], tmp_buffer.buf_desc.size);
+  const UbExpr size = use_raw_tmp_size ? StripV1RepeatCap(tmp_buffer.buf_desc.size) : tmp_buffer.buf_desc.size;
+  AppendAdd(node_tmp_buffer_bytes[tmp_buffer.id], size);
 }
 
 void MergeNodeTmpBuffers(const std::map<int64_t, UbExpr> &node_tmp_buffer_bytes,
@@ -296,10 +319,12 @@ void AddTensor(const af::AscGraph &graph, const af::AscTensorAttr &attr, std::ma
 
 }  // namespace
 
-af::Status AscGraphUbExprBuilder::Build(const af::AscGraph &graph, UbExprContext &context) const {
+af::Status AscGraphUbExprBuilder::Build(const af::AscGraph &graph, UbExprContext &context,
+                                        bool use_raw_tmp_size) const {
   context = UbExprContext{};
   context.graph_name = graph.GetName();
   context.tiling_case_id = graph.GetTilingKey();
+  context.use_raw_tmp_size = use_raw_tmp_size;
   FillSizeVars(graph, context);
   FillTileVars(graph, context);
 
@@ -315,7 +340,7 @@ af::Status AscGraphUbExprBuilder::Build(const af::AscGraph &graph, UbExprContext
     }
     std::map<int64_t, UbExpr> node_tmp_buffer_bytes;
     for (const auto &tmp_buffer : node->attr.tmp_buffers) {
-      AddTmpBuffer(tmp_buffer, node_tmp_buffer_bytes);
+      AddTmpBuffer(tmp_buffer, use_raw_tmp_size, node_tmp_buffer_bytes);
     }
     MergeNodeTmpBuffers(node_tmp_buffer_bytes, buffer_bytes);
   }
