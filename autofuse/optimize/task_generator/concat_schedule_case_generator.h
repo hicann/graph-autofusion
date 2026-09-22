@@ -58,14 +58,16 @@ class ConcatFusionCaseGenerator : public FusionCaseGenerator {
   static Status SplitDataForDifferentConcatDim(ascir::ImplGraph &owner_graph);
   static af::Status SetConcatOpAttr(af::ascir_op::Concat &concat_op, const af::AscNodePtr &concat_node,
                                     size_t concat_dim, size_t start, size_t end);
-  static Status CollectBackwardNodes(const af::NodePtr &concat_node, std::vector<af::AscNodePtr> &nodes);
-  static Status CollectReachableLoadNodes(const af::NodePtr &concat_node, std::set<af::AscNodePtr> &nodes);
+  Status CollectBackwardNodes(const af::NodePtr &concat_node, bool collect_all,
+                              std::vector<af::AscNodePtr> &nodes) const;
   Status CloneNonConcatNodes(const af::Axis &new_axis, ascir::AxisId old_axis_id, size_t index,
                              std::vector<af::InDataAnchorPtr> &in_anchors,
                              std::unordered_map<std::string, af::NodePtr> &name_to_new_node);
-  static af::Status ReplaceAxis(const af::AscNodePtr &node, ascir::AxisId old_axis_id, const af::Axis &to_axis);
+  Status UpdateOffsetAttr(const af::AscNodePtr &dst_new_node, size_t index);
+  static af::Status ReplaceAxis(const af::AscNodePtr &node, ascir::AxisId old_axis_id, const af::Axis &to_axis,
+                                bool update_axis_size);
   static af::Status UpdateOutputAttr(const af::AscNodePtr &node, ascir::AxisId old_axis_id, const af::Axis &to_axis,
-                                     af::AscTensorAttr &tensor_attr);
+                                     af::AscTensorAttr &tensor_attr, bool update_axis_size);
   static Status InsertAxis(const ascir::ImplGraph &optimized_graph);
   static Status AddTemplateIfCanFitInOneKernel(const af::AscNodePtr &concat_node, ascir::HintGraph &graph,
                                                std::vector<ascir::ImplGraph> &graphs);
@@ -79,8 +81,7 @@ class ConcatFusionCaseGenerator : public FusionCaseGenerator {
   static Status RunCastOptimizationPass(std::vector<ascir::ImplGraph> &graphs);
 
   std::vector<af::AscNodePtr> post_concat_nodes_;
-  std::set<af::AscNodePtr> reachable_load_nodes_;
-  ;
+  std::set<const af::AscNode *> nodes_need_update_axis_size_;
   std::map<std::string, std::vector<int32_t>> out_node_name_to_indices_;
   std::vector<af::Expression> concat_dim_offsets_;
   ascir::AxisId concat_axis_id_ = -1;
