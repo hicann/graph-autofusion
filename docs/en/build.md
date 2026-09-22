@@ -127,7 +127,7 @@ The following lists dependencies used for source code compilation. Pay attention
   > [!NOTE] Note
   > - The default build uses the gcc/g++ already installed in the environment and does not change the system default compiler.
   > - To switch to gcc15/gcc16, explicitly set `CC/CXX` before building, for example `export CC=gcc-15 CXX=g++-15`.
-  > - You can also set `GCC_VERSION=15` or `GCC_VERSION=16`; the scripts will generate the matching compiler commands.
+  > - You can also set `GCC_VERSION=15` or `GCC_VERSION=16`; the scripts will generate the matching compiler commands. Note: `GCC_VERSION` only takes effect for test scripts (e.g. `scripts/test/run_autofuse_test.sh`) and CI builds. The `build.sh --pkg` main build does not read this variable; set `CC/CXX` explicitly to switch compilers for the main build.
   > - After switching compilers, clean `build/` before reconfiguring so CMake does not reuse the old compiler cache.
 
 #### 4.2.2 Check Compilation Environment

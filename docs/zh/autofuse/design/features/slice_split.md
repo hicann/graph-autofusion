@@ -742,7 +742,7 @@ REG_OP(SplitV)
 | Codegen | `autofuse/v35/codegen/reg_api_call/split_reg_api_call.{h,cpp}` | `SplitRegApiCall`, `SplitTiling`, `SplitTilingAllAligned<N>`, `SplitAllAligned`（对齐）, `GenerateDefault` → `SplitExtend`（未对齐）, `IsAllAligned`, `NeedB8ToB16` |
 | Split+Concat 优化 | `autofuse/v35/optimize/graph_pass/split_concat_optimization_pass.{h,cpp}` | `SplitConcatOptimizationPass` — `RunPass`, `OptimizeOutSplit`, `OptimizeOutConcat` |
 | Split 分组 | `autofuse/optimize/task_generator/split_group_partitioner.h` | `SplitGroupPartitioner`, `SplitGroup` |
-| Split 打分 | `autofuse/optimize/task_generator/split_score_function_generator.{h,cpp}` | `SplitScoreFunctionGenerator` — `Generate`, `ParseStride`, `TryGetScoreByConstExpr`, `GenerateForUnaligned`（`kMaxUnalignedRate=0.1`, `kAlignment_=32`） |
+| Split 打分 | `autofuse/optimize/task_generator/split_score_function_generator.{h,cpp}` | `SplitScoreFunctionGenerator` — `Generate`，`ParseStride`，`TryGetScoreByConstExpr`，`GenerateForUnaligned`（`kMaxUnalignedRate=0.1`, `kAlignment_=32`） |
 | Split 注册 | `autofuse/ascir/reg_func/split.cpp` | Tiling 常量、对齐辅助 |
 | Split API | `autofuse/v35/ascendc/api_regbase/split.h` | Split API 注册，`SplitExtend`/`SplitExtendInner`（未对齐）, `SplitAllAligned`（对齐）, `SplitCopy`, `DataCopyGatherVf` |
 | GE 算子注册 | `ge-master/tests/framework/ge_running_env/include/ge_running_env/op_reg.h:304-452` | `REG_OP(Slice/SliceD/StridedSlice/Split/SplitV)` |

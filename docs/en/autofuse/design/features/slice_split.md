@@ -296,7 +296,7 @@ This test verifies the complete lowering flow of StridedSlice and confirms the i
 
 | Stage | Node State |
 |------|---------|
-| **BeforeAutofuse** | `x0` (Data, axis `[z0, z1=s1+s2]`) → `load0` (Load, `SetOffset(s1)` skips s1 elements, strides `{s1+s2, One}` implement the stride) → `store` (Store) → `y` (Output) |
+| **BeforeAutofuse** | `x0` (Data, axis `[z0, z1=s1+s2]`) → `load0` (Load, `SetOffset(s1)` skips the first s1 elements, strides `{s1+s2, One}` implement the stride pattern) → `store` (Store) → `y` (Output) |
 | **AfterInferOutput** | compute_type assignment: Load→`kComputeLoad`, Store→`kComputeStore` |
 | **AfterGetApiInfo** | API type: Load/Store→`kAPITypeCompute`; compute unit→`kUnitMTE2` (data movement engine) |
 | **AfterScheduler** | Axis splitting (`TileSplit`/`BlockSplit`/`ApplySplit`), vectorization axis/stride settings, aligned to 8 elements (32B/sizeof(float)) |
