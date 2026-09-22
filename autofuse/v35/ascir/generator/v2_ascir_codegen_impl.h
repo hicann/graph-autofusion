@@ -518,7 +518,8 @@ class CastAscIrCodegenImplV2 : public AscIrCodegenV2 {
         {DT_INT16, DT_UINT16},  {DT_INT16, DT_INT8},    {DT_INT16, DT_UINT8},   {DT_INT32, DT_FLOAT},
         {DT_INT32, DT_INT64},   {DT_INT32, DT_INT16},   {DT_INT32, DT_FLOAT16}, {DT_INT32, DT_UINT32},
         {DT_INT64, DT_INT32},   {DT_INT64, DT_FLOAT},   {DT_INT64, DT_UINT8},   {DT_INT64, DT_UINT64},
-        {DT_INT64, DT_FLOAT16}, {DT_BF16, DT_FLOAT},    {DT_BF16, DT_INT32},    {DT_FLOAT, DT_BOOL},
+        {DT_INT64, DT_FLOAT16}, {DT_INT64, DT_BF16},    {DT_BF16, DT_FLOAT},    {DT_BF16, DT_INT32},
+        {DT_FLOAT, DT_BOOL},
     };
     const std::pair<ge::DataType, ge::DataType> pair{GetSimtInputDtype(node), GetSimtOutputDtype(node)};
     return std::find(std::begin(kSupportedPairs), std::end(kSupportedPairs), pair) != std::end(kSupportedPairs);
@@ -536,7 +537,9 @@ class CastAscIrCodegenImplV2 : public AscIrCodegenV2 {
     const bool integer_output = output_dtype_value == DT_INT8 || output_dtype_value == DT_UINT8 ||
                                 output_dtype_value == DT_INT16 || output_dtype_value == DT_UINT16 ||
                                 output_dtype_value == DT_INT32 || output_dtype_value == DT_INT64;
-    if (IsSimtFloatDtype(input_dtype) && integer_output) {
+    if (!IsSimtFloatDtype(input_dtype) && output_dtype_value == DT_BF16) {
+      expr = "static_cast<bfloat16_t>(static_cast<float>(" + inputs[0] + "))";
+    } else if (IsSimtFloatDtype(input_dtype) && integer_output) {
       const char *intermediate_type = output_dtype_value == DT_INT64 ? "int64_t" : "int32_t";
       const std::string intermediate_expr = std::string("AscendC::Simt::Cast<") + intermediate_type +
                                             ", float, AscendC::RoundMode::CAST_ZERO>(static_cast<float>(" + inputs[0] +
