@@ -4506,28 +4506,6 @@ class LogicalOrAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return {"logical_reg_base.h"};
   }
 
-  [[nodiscard]] std::string GetMicroApiCallName() const override {
-    return "MicroApiCall";
-  }
-
-  [[nodiscard]] std::string GetMicroApiName() const override {
-    return "Or";
-  }
-
-  [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
-    AscNodeInputs node_inputs = node.inputs;
-    AscNodeOutputs node_outputs = node.outputs;
-    // MicroApi "or" 输入输出的数据类型需要相同
-    for (size_t i = 0; i < node_inputs().size(); i++) {
-      for (size_t j = 0; j < node_outputs().size(); j++) {
-        if (node_inputs[i].attr.dtype != node_outputs[j].attr.dtype) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
     return HasSameSimtBinaryDtype(node) &&
            (GetSimtOutputDtype(node) == DT_BOOL || GetSimtOutputDtype(node) == DT_UINT8);
