@@ -1,4 +1,4 @@
-# Enable AutoFuse on the GE Path
+# Enable AutoFuse on the GE Path (TensorFlow)
 
 This document describes how to enable AutoFuse automatic operator fusion based on the GE path (TensorFlow 1.x framework), and uses `Abs + ReLU + Exp` operator fusion as an example to demonstrate how to configure and run a fusion example and verify the fusion result.
 
@@ -108,14 +108,16 @@ profiling/
         └── op_summary_timestamp.csv
 ```
 
-Open the `op_summary_*.csv` file for the current run and inspect the operator list. If a fused Kernel whose name starts with `autofused_` appears, the corresponding operators have been fused. Kernel names may vary across versions; determine the result together with the operator types and execution records.
+Open the `op_summary_*.csv` file for the current run and inspect the operator list. If a fused Kernel whose name starts with `autofuse_` appears, the corresponding operators have been fused. In this example, the fused Kernel is named `autofuse_pointwise_0_Abs_Relu_Exp`. Kernel names may vary across versions; determine the result together with the operator types and execution records.
 
 ## Performance Comparison Before and After Fusion
 
 To evaluate the performance benefits of AutoFuse, collect Profiling data in the following two scenarios:
 
 1. **AutoFuse enabled**: Set the environment variable `AUTOFUSE_FLAGS="--enable_autofuse=true"` and run the example in TensorFlow graph mode.
-2. **AutoFuse disabled**: Set the environment variable `AUTOFUSE_FLAGS="--enable_autofuse=false"` and run the model in TensorFlow graph mode without fusion as the baseline.
+2. **AutoFuse disabled**: Set the environment variable `AUTOFUSE_FLAGS="--enable_autofuse=false"` and run the model in TensorFlow graph mode as the baseline.
+
+Note that when AutoFuse is disabled, GE's own graph optimizations may still fuse some operators, so standalone `Abs`, `Relu`, and `Exp` kernels do not necessarily appear in the baseline scenario. Use the presence of fused Kernels with the `autofuse_` prefix as the criterion for whether AutoFuse takes effect.
 
 The two scenarios should use the same input data, execution count, and Profiling configuration, and compare execution time over the same computation range while distinguishing the initial graph compilation overhead from the steady-state execution time after warm-up. For operators with significant input/output data movement, also examine `aiv_mte2_time` and `aiv_mte3_time` in the Profiling data.
 

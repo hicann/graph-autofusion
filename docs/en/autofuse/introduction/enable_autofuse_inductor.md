@@ -2,7 +2,7 @@
 
 This document describes how to enable AutoFuse automatic operator fusion based on the Inductor path (PyTorch framework), and uses `add + ge` operator fusion as an example to demonstrate how to configure and run a fusion example and verify the fusion result.
 
-> **Constraints**: The Inductor path currently supports static shapes only; dynamic shapes are not supported. For dynamic-shape scenarios, use the GE path instead. See [Enable AutoFuse on the GE Path](./enable_autofuse_ge.md).
+> **Constraints**: The Inductor path currently supports static shapes only; dynamic shapes are not supported. For dynamic-shape scenarios, use the GE path instead. See [Enable AutoFuse on the GE Path (PyTorch)](./enable_autofuse_ge_pytorch.md).
 
 ## Environment Preparation
 
