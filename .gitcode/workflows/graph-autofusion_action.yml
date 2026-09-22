@@ -291,7 +291,7 @@ stages:
               artifact-path: |
                 ${{ steps.process_checkout.outputs.path }}/ut_cov_*.tar.gz
               object-prefix: ${{ env.obs_path }}/
-        if: env.TARGET_BRANCH == 'master'
+        if: env.TARGET_BRANCH == 'master' || env.TARGET_BRANCH == 'develop'
         runs-on: ['self-hosted', 'arch=x64', 'spec=large']
         container:
           image: swr.cn-north-4.myhuaweicloud.com/ci_cann/${{ jobs.JOB_image.outputs.UT_Test_report }}
@@ -339,7 +339,7 @@ stages:
               artifact-path: |
                 ${{ steps.process_checkout.outputs.path }}/ut_cov_*.tar.gz
               object-prefix: ${{ env.obs_path }}/
-        if: env.TARGET_BRANCH == 'master'
+        if: env.TARGET_BRANCH == 'master' || env.TARGET_BRANCH == 'develop'
         runs-on: ['self-hosted', 'arch=x64', 'spec=large']
         container:
           image: swr.cn-north-4.myhuaweicloud.com/ci_cann/${{ jobs.JOB_image.outputs.ST_Test_report }}
