@@ -77,7 +77,7 @@ class IndirectLoadRegApiCall final : public ApiCall {
   ascir::TemplateId template_id_{ascir::TemplateId::kDefault};
   ascgen_utils::indirect_load::TemplateLogicalView logical_view_;
   ascgen_utils::indirect_load::IndirectLoadAccessInfo access_info_;
-  mutable ascgen_utils::indirect_load::SimdLoweringMetadata simd_metadata_;
+  ascgen_utils::indirect_load::SimdLoweringMetadata simd_metadata_;
   bool has_post_reduce_{false};
   std::vector<af::AscNodePtr> index_nodes_;
   std::vector<af::AscNodePtr> output_nodes_;

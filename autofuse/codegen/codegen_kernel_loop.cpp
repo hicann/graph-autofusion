@@ -480,19 +480,8 @@ Status Loop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const Tiler &
     GE_CHK_STATUS_RET(call->Init(node), "ApiCall Init failed, ascir type:%s", node->GetTypePtr());
     call->exec_condition = node->attr.sched.exec_condition;
     // Reduce 图必须通过整条 Broadcast 输入链的 split-B 检查，非 Reduce 图使用 AutoSchedule 缓存标记。
-    bool is_fixed_indirect_load_parameter = false;
-    if (this->is_graph_has_reduce_node && node->attr.api.compute_type == af::ComputeType::kComputeLoad &&
-        node->attr.sched.exec_condition == af::ExecuteCondition::kCacheBlockSplitFusedBroadcastAxis &&
-        !node->outputs().empty()) {
-      const auto &load_output = node->outputs()[0]->attr;
-      is_fixed_indirect_load_parameter =
-          std::any_of(load_output.strides.begin(), load_output.strides.end(), [](const auto &stride) {
-            return af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) == af::TriBool::kTrue;
-          });
-    }
     call->enable_cache = this->is_graph_has_reduce_node
-                             ? (is_fixed_indirect_load_parameter ||
-                                IsNodeSplitB(node, tiler, call->enable_cache_with_condition, current_loop->is_ar))
+                             ? IsNodeSplitB(node, tiler, call->enable_cache_with_condition, current_loop->is_ar)
                              : IsValidCacheCondition(call->exec_condition);
     GELOGI(
         "Node[%s][%s] cache eligibility: has_reduce[%d], enable_cache[%d], exec_condition[%u], "

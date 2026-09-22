@@ -119,22 +119,6 @@ Status ValidateInputTensorLoopAxis(const AscNode &node, size_t input_id, size_t 
   auto output_attr = node_outputs[output_id].attr;
 
   auto it = std::find(output_attr.axis.begin(), output_attr.axis.end(), input_attr.axis[input_axis_id]);
-  if (it == output_attr.axis.end()) {
-    // 诊断日志：打印完整 input/output view，便于定位生产者与消费者 view 不一致的来源
-    std::string input_axis_str;
-    for (const auto &axis_id : input_attr.axis) {
-      input_axis_str += std::to_string(axis_id) + ",";
-    }
-    std::string output_axis_str;
-    for (const auto &axis_id : output_attr.axis) {
-      output_axis_str += std::to_string(axis_id) + ",";
-    }
-    GELOGD(
-        "ValidateInputTensorLoopAxis:[Diag] Node %s[%s] input tensor[%zu] axis[%s] mismatch with "
-        "output tensor[%zu] axis[%s], input vec axis size=%zu.",
-        node.GetTypePtr(), node.GetNamePtr(), input_id, input_axis_str.c_str(), output_id, output_axis_str.c_str(),
-        input_attr.vectorized_axis.size());
-  }
   GE_ASSERT_TRUE(it != output_attr.axis.end(),
                  "Node %s[%s]: input tensor %zu loop axis %zu is not in output tensor "
                  "axis",
