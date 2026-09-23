@@ -112,6 +112,8 @@ set(ascendc_api_regbase_extend_src
         acos.h
         tan.h
         atanh.h
+        silu.h
+        rsqrt.h
 )
 
 set(generated_regbase_files)
