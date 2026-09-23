@@ -10,6 +10,8 @@
 #include "micro_api_call_factory.h"
 
 #include "micro_rsqrt_api_call.h"
+#include "ascir_ops.h"
+#include "optimize/pre_process/pre_process_config.h"
 
 namespace codegen {
 Status MicroRsqrtApiCall::Generate(const TensorManager &tensor_mng, [[maybe_unused]] const TPipe &tpipe,
@@ -37,8 +39,15 @@ Status MicroRsqrtApiCall::Generate(const TensorManager &tensor_mng, [[maybe_unus
   ss << "AscendC::MicroAPI::Duplicate(" << one_name << ", static_cast<" << dtype_name << ">(1.0), " << param.p_reg
      << ");" << std::endl;
   ss << "AscendC::MicroAPI::Sqrt(" << output_name << ", " << input_name << ", " << param.p_reg << ");" << std::endl;
-  ss << "AscendC::MicroAPI::Div(" << output_name << ", " << one_name << ", " << output_name << ", " << param.p_reg
-     << ");" << std::endl;
+  ss << "AscendC::MicroAPI::Div";
+  if (input_tensor->dtype_ == ge::DT_FLOAT) {
+    ss << "<" << dtype_name;
+    if (!af::pre_process::PreProcessConfig::Instance().IsInImprovePrecisionBlacklist(af::ascir_op::Div::Type)) {
+      ss << ", &high_precision_div_mode";
+    }
+    ss << ">";
+  }
+  ss << "(" << output_name << ", " << one_name << ", " << output_name << ", " << param.p_reg << ");" << std::endl;
   result = ss.str();
   return af::SUCCESS;
 }

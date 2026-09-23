@@ -98,7 +98,7 @@ TEST_F(MicroRsqrtApiCallTest, GeneratesFloatRsqrtInstructionSequence) {
             "AscendC::MicroAPI::RegTensor<float> vreg_1_rsqrt_one;\n"
             "AscendC::MicroAPI::Duplicate(vreg_1_rsqrt_one, static_cast<float>(1.0), p_reg);\n"
             "AscendC::MicroAPI::Sqrt(vreg_1, vreg_0, p_reg);\n"
-            "AscendC::MicroAPI::Div(vreg_1, vreg_1_rsqrt_one, vreg_1, p_reg);\n");
+            "AscendC::MicroAPI::Div<float, &high_precision_div_mode>(vreg_1, vreg_1_rsqrt_one, vreg_1, p_reg);\n");
   EXPECT_EQ(result.find("Sqrt(vreg_0,"), std::string::npos);
 }
 
