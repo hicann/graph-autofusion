@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <limits>
 #include <memory>
 #include <vector>
 
@@ -52,9 +51,6 @@ extern "C" __global__ __aicore__ void user_embedding_sum(GM_ADDR table, GM_ADDR 
 extern "C" __global__ __aicore__ void user_layernorm(GM_ADDR indices, GM_ADDR embedding, GM_ADDR weight,
                                                      GM_ADDR raw_output, GM_ADDR square_output, GM_ADDR workspace,
                                                      GM_ADDR gm_tiling_data);
-#elif defined(IL_USER_SOFTMAX)
-extern "C" __global__ __aicore__ void user_softmax(GM_ADDR indices, GM_ADDR embedding, GM_ADDR bias, GM_ADDR bmm,
-                                                   GM_ADDR output, GM_ADDR workspace, GM_ADDR gm_tiling_data);
 #elif defined(IL_DUAL_IL_GATHER)
 extern "C" __global__ __aicore__ void user_add_gather(GM_ADDR input0, GM_ADDR input1, GM_ADDR indices, GM_ADDR output,
                                                       GM_ADDR workspace, GM_ADDR gm_tiling_data);
@@ -1322,70 +1318,6 @@ TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
   AscendC::GmFree(square_output);
 }
 
-#elif defined(IL_USER_SOFTMAX)
-// gather(+bias+bmm) 后接尾轴 softmax 的融合 kernel：与 CPU 参考实现逐元素对比。
-TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
-  constexpr int32_t kRows = 16;
-  constexpr int32_t kDim = 64;
-  constexpr int32_t kTableRows = 64;
-  auto *indices = static_cast<int64_t *>(AscendC::GmAlloc(sizeof(int64_t) * kRows));
-  auto *embedding = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kTableRows * kDim));
-  auto *bias = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kRows * kDim));
-  auto *bmm = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kRows * kDim));
-  auto *output = static_cast<float *>(AscendC::GmAlloc(sizeof(float) * kRows * kDim));
-  ASSERT_NE(indices, nullptr);
-  ASSERT_NE(embedding, nullptr);
-  ASSERT_NE(bias, nullptr);
-  ASSERT_NE(bmm, nullptr);
-  ASSERT_NE(output, nullptr);
-  for (int32_t row = 0; row < kRows; ++row) indices[row] = (row * 7L) % kTableRows;
-  for (int32_t row = 0; row < kTableRows; ++row) {
-    for (int32_t col = 0; col < kDim; ++col) {
-      embedding[row * kDim + col] = (row + 1) * 0.01F + col * 0.001F;
-    }
-  }
-  for (int32_t row = 0; row < kRows; ++row) {
-    for (int32_t col = 0; col < kDim; ++col) {
-      bias[row * kDim + col] = row * 0.002F + col * 0.0001F;
-      bmm[row * kDim + col] = (row + col) * 0.003F - 0.5F;
-    }
-  }
-  std::fill_n(output, kRows * kDim, 0.0F);
-  AutofuseTilingData tiling_data{};
-  uint32_t workspace_size = 0U;
-  uint32_t block_dim = 48U;
-  ASSERT_EQ(AutofuseTiling(&tiling_data, &workspace_size, &block_dim, 48U, 192U * 1024U), 0);
-  void *workspace = workspace_size == 0U ? nullptr : AscendC::GmAlloc(workspace_size);
-  ASSERT_TRUE(workspace_size == 0U || workspace != nullptr);
-  AscendC::SetKernelMode(KernelMode::AIV_MODE);
-  ICPU_RUN_KF(user_softmax, block_dim, reinterpret_cast<uint8_t *>(indices), reinterpret_cast<uint8_t *>(embedding),
-              reinterpret_cast<uint8_t *>(bias), reinterpret_cast<uint8_t *>(bmm), reinterpret_cast<uint8_t *>(output),
-              reinterpret_cast<uint8_t *>(workspace), reinterpret_cast<uint8_t *>(&tiling_data));
-  for (int32_t row = 0; row < kRows; ++row) {
-    float expected_max = -std::numeric_limits<float>::infinity();
-    float expected_sum = 0.0F;
-    for (int32_t col = 0; col < kDim; ++col) {
-      const float value = embedding[indices[row] * kDim + col] + bias[row * kDim + col] + bmm[row * kDim + col];
-      expected_max = std::max(expected_max, value);
-    }
-    for (int32_t col = 0; col < kDim; ++col) {
-      const float value = embedding[indices[row] * kDim + col] + bias[row * kDim + col] + bmm[row * kDim + col];
-      expected_sum += std::exp(value - expected_max);
-    }
-    for (int32_t col = 0; col < kDim; ++col) {
-      const float value = embedding[indices[row] * kDim + col] + bias[row * kDim + col] + bmm[row * kDim + col];
-      const float expected = std::exp(value - expected_max) / expected_sum;
-      EXPECT_NEAR(output[row * kDim + col], expected, 1e-4F) << "row=" << row << ", col=" << col;
-    }
-  }
-  if (workspace != nullptr) AscendC::GmFree(workspace);
-  AscendC::GmFree(indices);
-  AscendC::GmFree(embedding);
-  AscendC::GmFree(bias);
-  AscendC::GmFree(bmm);
-  AscendC::GmFree(output);
-}
-
 #elif defined(IL_DUAL_IL_GATHER)
 TEST(UserGraphConstruction, GeneratedKernelMatchesReference) {
   constexpr int32_t kRows = 1024 * 1025;
@@ -1632,14 +1564,6 @@ constexpr int32_t kUserMaskedTableRows = 2;
 #endif
 
 TEST(E2EUserMaskedEmbeddingSum, GeneratedKernelMatchesReference) {
-#if defined(IL_USER_MASKED_EMBEDDING_AUTO_SELECT)
-  // AUTO 变体只做 codegen 断言（候选选择/policy 由 codegen_v2 target 的
-  // GeneratesUserMaskedEmbeddingSumKernel 覆盖）：FULL 规模（128*128*38=622592 输出）
-  // 的 rank3 Embedding policy 在 ICPU 仿真退化为元素级 async_invoke 线程调度，
-  // 串行模式耗时超出 CI 时间预算（表现为卡住），真机 SIMT 执行无此问题。
-  GTEST_SKIP() << "AUTO variant is codegen-only; ICPU sim of rank-3 embedding policy "
-                  "exceeds CI time budget";
-#else
   constexpr int64_t mask_count = static_cast<int64_t>(kUserMaskedRows) * kUserMaskedLookups;
   constexpr int64_t index_count = mask_count;
   constexpr int64_t embedding_count = static_cast<int64_t>(kUserMaskedTableRows) * kUserMaskedDim;
@@ -1700,7 +1624,6 @@ TEST(E2EUserMaskedEmbeddingSum, GeneratedKernelMatchesReference) {
           << "row=" << row << ", column=" << column;
     }
   }
-#endif
 }
 #elif defined(IL_GRAPH_HINT_EMBEDDING_SLICE)
 constexpr int32_t kGraphHintEmbeddingSliceRows = 128;

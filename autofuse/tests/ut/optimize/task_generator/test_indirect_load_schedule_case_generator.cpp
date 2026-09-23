@@ -22,7 +22,6 @@
 #include "graph/ascendc_ir/utils/asc_graph_utils.h"
 #include "graph/utils/graph_utils.h"
 #include "indirect_load_utils.h"
-#include "norm_utils.h"
 #include "schedule_result.h"
 #include "task_generator/indirect_load_schedule_case_generator.h"
 
@@ -1179,16 +1178,14 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, BroadcastAfterTransposePreservesSour
     EXPECT_EQ(view.input.strides, (std::vector<af::Expression>{af::ops::One, af::ops::Zero, af::Symbol(2)}));
     if (ascir::GetTemplateIdOrDefault(*il) == ascir::TemplateId::kIndirectLoadSimd) {
       EXPECT_EQ(transpose, nullptr);
-      // 折叠输入侧 Broadcast/Transpose 后，Load 节点视图被重写为中间形态（bf5d926c）；
-      // 最终 GM 地址 strides 由 TemplateLogicalView 统一发布（上方 view.input 断言）。
+      EXPECT_EQ(load->outputs[0].attr.strides, view.input.strides);
       continue;
     }
     ASSERT_NE(transpose, nullptr);
     EXPECT_EQ(load->outputs[0].attr.axis.front(), transpose->outputs[0].attr.axis.back());
     EXPECT_EQ(load->outputs[0].attr.axis.back(), transpose->outputs[0].attr.axis.front());
     EXPECT_EQ(load->outputs[0].attr.repeats, source.repeats);
-    // SIMT 保留 Transpose 表达 permutation；Load 视图同样被重写为中间形态，
-    // 最终 GM 地址 strides 由 TemplateLogicalView 的 {1,0,2} 提供（上方断言）。
+    EXPECT_EQ(load->outputs[0].attr.strides, source.strides);
   }
 }
 
@@ -1694,9 +1691,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceMetadataCoversReduceAxisLa
     ExpectAxisOrigins(simt_graph, simt_axes.outer_axis, simt_outer);
     ExpectAxisOrigins(simt_graph, simt_axes.inner_axis, simt_inner);
     EXPECT_EQ(simt_axes.input_inner_axis, af::kIdNone);
-    // 单 Reduce 后置保持主线固定 tile：可求解 tile 仅限 gather+norm 复合形态。
-    EXPECT_NE(simt_axes.tile_outer_axis, af::kIdNone);
-    EXPECT_NE(simt_axes.tile_inner_axis, af::kIdNone);
+    ExpectFixedTileSplit(simt_graph, simt_axes.outer_axis);
     EXPECT_EQ(simt_view.input.axis_ids, input_axes);
     EXPECT_EQ(simt_view.index.axis_ids, output_axes);
     EXPECT_EQ(simt_view.output.axis_ids, output_axes);
@@ -1772,9 +1767,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceRejectsNonCastSuccessor) {
   optimize::IndirectLoadScheduleCaseGenerator generator;
   std::vector<af::AscGraph> graphs;
   std::vector<std::string> score_functions;
-  // 非法 Reduce 后继属于候选级缺陷：四个候选（SIMD×2/SIMT/SK）全部被淘汰，
-  // Generate 本身成功返回（bf5d926c 起不再以断言失败终止）。
-  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  EXPECT_NE(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
   EXPECT_TRUE(graphs.empty());
   EXPECT_TRUE(score_functions.empty());
 }
@@ -2163,175 +2156,6 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, GenerateFailsWhenUnsupportedTopology
   EXPECT_NE(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
   EXPECT_TRUE(graphs.empty());
   EXPECT_TRUE(score_functions.empty());
-}
-
-// gather 输出经 +bias / +bmm 双输入 Add 链后进入尾轴归约 softmax pattern 的融合图。
-af::AscGraph BuildIndirectLoadSoftmaxPostGraph() {
-  af::AscGraph graph("indirect_load_softmax_post_ut_graph");
-  const af::Expression s0 = graph.CreateSizeVar(2);
-  const af::Expression s1 = graph.CreateSizeVar(3);
-  const af::Expression s2 = graph.CreateSizeVar(5);
-  const af::Expression in0 = graph.CreateSizeVar(2);
-  const af::Expression in1 = graph.CreateSizeVar(4);
-  const af::Expression in2 = graph.CreateSizeVar(5);
-  const auto y0 = graph.CreateAxis("y0", s0);
-  const auto y1 = graph.CreateAxis("y1", s1);
-  const auto y2 = graph.CreateAxis("y2", s2);
-  const auto x0 = graph.CreateAxis("x0", in0);
-  const auto x1 = graph.CreateAxis("x1", in1);
-  const auto x2 = graph.CreateAxis("x2", in2);
-  const std::vector<af::AxisId> output_axes = {y0.id, y1.id, y2.id};
-  const std::vector<af::Expression> output_repeats = {s0, s1, s2};
-  const std::vector<af::Expression> output_strides = {s1 * s2, s2, af::sym::kSymbolOne};
-  const std::vector<af::AxisId> input_axes = {x0.id, x1.id, x2.id};
-  const std::vector<af::Expression> input_repeats = {in0, in1, in2};
-  const std::vector<af::Expression> input_strides = {in1 * in2, in2, af::sym::kSymbolOne};
-  const std::vector<af::Expression> reduce_repeats = {s0, s1, af::sym::kSymbolOne};
-  const std::vector<af::Expression> reduce_strides = {s1 * s2, s2, af::sym::kSymbolZero};
-
-  af::ascir_op::Data input_data("input_data", graph);
-  input_data.ir_attr.SetIndex(0);
-  SetNodeView(input_data, af::DT_FLOAT16, input_axes, input_repeats, input_strides);
-  af::ascir_op::Load input_load("input_load");
-  input_load.x = input_data.y;
-  SetNodeView(input_load, af::DT_FLOAT16, input_axes, input_repeats, input_strides);
-  af::ascir_op::Data index_data("index_data", graph);
-  index_data.ir_attr.SetIndex(1);
-  SetNodeView(index_data, af::DT_INT32, output_axes, output_repeats, output_strides);
-  af::ascir_op::Load index_load("index_load");
-  index_load.x = index_data.y;
-  SetNodeView(index_load, af::DT_INT32, output_axes, output_repeats, output_strides);
-  af::ascir_op::IndirectLoad indirect_load("indirect_load");
-  indirect_load.x1 = input_load.y;
-  indirect_load.x2 = index_load.y;
-  indirect_load.ir_attr.SetAxis(2);  // 尾轴gather：Softmax专用路径要求（非尾轴gather的SIMD输出物理布局有行对齐空洞）
-  SetNodeView(indirect_load, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-
-  af::ascir_op::Data bias_data("bias_data", graph);
-  bias_data.ir_attr.SetIndex(2);
-  SetNodeView(bias_data, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::Load bias_load("bias_load");
-  bias_load.x = bias_data.y;
-  SetNodeView(bias_load, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::Data bmm_data("bmm_data", graph);
-  bmm_data.ir_attr.SetIndex(3);
-  SetNodeView(bmm_data, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::Load bmm_load("bmm_load");
-  bmm_load.x = bmm_data.y;
-  SetNodeView(bmm_load, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::Add bias_add("bias_add");
-  bias_add.x1 = indirect_load.y;
-  bias_add.x2 = bias_load.y;
-  SetVectorApi(bias_add);
-  SetNodeView(bias_add, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::Add bmm_add("bmm_add");
-  bmm_add.x1 = bias_add.y;
-  bmm_add.x2 = bmm_load.y;
-  SetVectorApi(bmm_add);
-  SetNodeView(bmm_add, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-
-  af::ascir_op::Max max_op("max");
-  max_op.x = bmm_add.y;
-  max_op.attr.api.compute_type = af::ComputeType::kComputeReduce;
-  SetNodeView(max_op, af::DT_FLOAT16, output_axes, reduce_repeats, reduce_strides);
-  af::ascir_op::Broadcast max_broadcast("max_broadcast");
-  max_broadcast.x = max_op.y;
-  SetNodeView(max_broadcast, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::Sub sub_op("sub");
-  sub_op.x1 = bmm_add.y;
-  sub_op.x2 = max_broadcast.y;
-  SetVectorApi(sub_op);
-  SetNodeView(sub_op, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::Exp exp_op("exp");
-  exp_op.x = sub_op.y;
-  SetVectorApi(exp_op);
-  SetNodeView(exp_op, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::Sum sum_op("sum");
-  sum_op.x = exp_op.y;
-  sum_op.attr.api.compute_type = af::ComputeType::kComputeReduce;
-  SetNodeView(sum_op, af::DT_FLOAT16, output_axes, reduce_repeats, reduce_strides);
-  af::ascir_op::Broadcast sum_broadcast("sum_broadcast");
-  sum_broadcast.x = sum_op.y;
-  SetNodeView(sum_broadcast, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::TrueDiv true_div("true_div");
-  true_div.x1 = exp_op.y;
-  true_div.x2 = sum_broadcast.y;
-  SetVectorApi(true_div);
-  SetNodeView(true_div, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::Store store("store");
-  store.x = true_div.y;
-  SetNodeView(store, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  af::ascir_op::Output output("output");
-  output.x = store.y;
-  output.ir_attr.SetIndex(0);
-  SetNodeView(output, af::DT_FLOAT16, output_axes, output_repeats, output_strides);
-  return graph;
-}
-
-// gather+softmax 专用路径：候选图内替换为 Softmax 节点，SIMT 候选的 boundary 覆写为
-// 尾轴前一位（outer=[保留轴]，inner=[尾轴]），tile 行数不再预建固定轴（可求解）。
-TEST(IndirectLoadScheduleCaseGeneratorTest, SoftmaxDedicatedCandidateSolvesTileSize) {
-  auto graph = BuildIndirectLoadSoftmaxPostGraph();
-  optimize::IndirectLoadScheduleCaseGenerator generator;
-  std::vector<af::AscGraph> graphs;
-  std::vector<std::string> score_functions;
-  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
-  const auto simt_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
-  ASSERT_NE(simt_iter, graphs.end());
-  auto &simt_graph = *simt_iter;
-
-  // softmax 替换命中：多输入 Add 链保留在 Softmax 之前。
-  EXPECT_NE(simt_graph.FindNode("true_div_softmax"), nullptr);
-  EXPECT_EQ(simt_graph.FindNode("true_div"), nullptr);
-  EXPECT_NE(simt_graph.FindNode("bmm_add"), nullptr);
-  EXPECT_NE(simt_graph.FindNode("bias_add"), nullptr);
-
-  const auto simt_indirect_load = simt_graph.FindNode("indirect_load");
-  ASSERT_NE(simt_indirect_load, nullptr);
-  ascgen_utils::norm::NormInfo norm_info;
-  ASSERT_EQ(ascgen_utils::norm::TryGetNormInfo(simt_indirect_load, norm_info), af::SUCCESS);
-  EXPECT_EQ(norm_info.kind, ascgen_utils::norm::NormInfo::Kind::kSoftmaxDedicated);
-  const auto tail_axis = simt_graph.FindNode("true_div_softmax")->inputs()[0]->attr.axis.back();
-  EXPECT_EQ(norm_info.softmax_reduce_axis, tail_axis);
-
-  ascgen_utils::indirect_load::TemplateAxes axes;
-  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(simt_indirect_load, axes), af::SUCCESS);
-  // [方案A] tile 回退主线固定形态：固定 tile 轴恢复注解（逐行发射）。
-  EXPECT_NE(axes.tile_outer_axis, af::kIdNone);
-  EXPECT_NE(axes.tile_inner_axis, af::kIdNone);
-  // outer=[y0,y1]（保留轴），inner=[y2]（Softmax 的 R 轴），向量化只沿尾轴。
-  ExpectAxisNames(simt_graph, {axes.inner_axis}, {"y2"});
-  EXPECT_EQ(axes.vectorized_axes, std::vector<af::AxisId>{tail_axis});
-  const auto output_axes = simt_indirect_load->outputs()[0]->attr.axis;
-  const std::vector<af::AxisId> expected_outer(output_axes.begin(), output_axes.begin() + 2);
-  ExpectAxisOrigins(simt_graph, axes.outer_axis, expected_outer);
-}
-
-// post-Reduce SIMT（普通单 Reduce）保持主线固定 tile：可求解 tile 仅限 gather+norm
-// 复合形态（Softmax 专用/多 Reduce 配对），单 Reduce 批量形态存在数值回归。
-TEST(IndirectLoadScheduleCaseGeneratorTest, SimtPostReduceCandidateKeepsFixedTile) {
-  auto graph = BuildPostReduceGraph("ARR");
-  const auto output_axes = graph.FindNode("indirect_load")->outputs()[0]->attr.axis;
-  optimize::IndirectLoadScheduleCaseGenerator generator;
-  std::vector<af::AscGraph> graphs;
-  std::vector<std::string> score_functions;
-  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
-  const auto simt_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
-  ASSERT_NE(simt_iter, graphs.end());
-  const auto simt_indirect_load = simt_iter->FindNode("indirect_load");
-  ASSERT_NE(simt_indirect_load, nullptr);
-
-  ascgen_utils::indirect_load::TemplateAxes axes;
-  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(simt_indirect_load, axes), af::SUCCESS);
-  // 单 Reduce 不启用可求解 tile：固定 tile 轴照常注解（主线行为）。
-  EXPECT_NE(axes.tile_outer_axis, af::kIdNone);
-  EXPECT_NE(axes.tile_inner_axis, af::kIdNone);
-  // ARR 布局：first_reduce 在第 2 轴，outer=[y0,y1]，inner=[y2,y3]。
-  const size_t first_reduce = 2UL;
-  const std::vector<af::AxisId> expected_outer(output_axes.begin(), output_axes.begin() + first_reduce);
-  const std::vector<af::AxisId> expected_inner(output_axes.begin() + first_reduce, output_axes.end());
-  ExpectAxisOrigins(*simt_iter, axes.outer_axis, expected_outer);
-  ExpectAxisOrigins(*simt_iter, axes.inner_axis, expected_inner);
 }
 
 }  // namespace

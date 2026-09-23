@@ -103,6 +103,42 @@ class TestApiCast : public testing::Test {
     AscendC::GmFree(param.exp);
     AscendC::GmFree(param.src0);
   }
+
+  // 使用自定义输入值，覆盖随机小值无法触发的位宽错配场景（高位非零、低位为零被判成0）
+  template <typename InT, typename OutT, uint8_t dim>
+  static void CastTestWithValues(const InT *values, uint32_t value_count, const uint32_t (&output_dims)[dim],
+                                 const uint32_t (&output_stride)[dim], const uint32_t (&input_stride)[dim]) {
+    TensorCastInputParam<InT, OutT, dim> param{};
+    static_assert(dim == 2, "dim must be 2, if dim < 2, set stride as {0, 1}");
+    param.size = value_count;
+    for (int i = 0; i < 2; ++i) {
+      param.output_dims[i] = output_dims[i];
+      param.output_stride[i] = output_stride[i];
+      param.input_stride[i] = input_stride[i];
+    }
+
+    param.y = static_cast<OutT *>(AscendC::GmAlloc(sizeof(InT) * param.size));
+    param.exp = static_cast<OutT *>(AscendC::GmAlloc(sizeof(InT) * param.size));
+    param.src0 = static_cast<InT *>(AscendC::GmAlloc(sizeof(InT) * param.size));
+    for (uint32_t i = 0; i < param.size; i++) {
+      param.src0[i] = values[i];
+      param.exp[i] = static_cast<OutT>(param.src0[i]);
+    }
+
+    // 构造Api调用函数
+    auto kernel = [&param] { InvokeKernelWithTwoTensorInput(param); };
+
+    // 调用kernel
+    AscendC::SetKernelMode(KernelMode::AIV_MODE);
+    ICPU_RUN_KF(kernel, 1);
+
+    // 验证结果
+    uint32_t diff_count = Valid<InT, OutT, dim>(param.y, param.exp, param.size, output_dims);
+    EXPECT_EQ(diff_count, 0);
+    AscendC::GmFree(param.y);
+    AscendC::GmFree(param.exp);
+    AscendC::GmFree(param.src0);
+  }
 };
 
 TEST_F(TestApiCast, Cast_Test_Float_Int32) {
@@ -143,4 +179,73 @@ TEST_F(TestApiCast, Cast_Test_Int16_Int8) {
 
 TEST_F(TestApiCast, Cast_Test_Int16_Uint8) {
   CastTest<int16_t, uint8_t, 2>({1, 128}, {0, 1}, {0, 1});
+}
+
+TEST_F(TestApiCast, Cast_Test_Int8_Bool) {
+  CastTest<int8_t, bool, 2>({1, 128}, {0, 1}, {0, 1});
+}
+
+TEST_F(TestApiCast, Cast_Test_Int16_Bool) {
+  CastTest<int16_t, bool, 2>({1, 128}, {0, 1}, {0, 1});
+}
+
+// int64转bool必须按8字节元素粒度判空：低位为零、高位非零的值若被按小位宽reinterpret会误判为0
+TEST_F(TestApiCast, Cast_Test_Int64_Bool_HighBits) {
+  const int64_t patterns[] = {0,
+                              1,
+                              -1,
+                              static_cast<int64_t>(1) << 8,
+                              static_cast<int64_t>(1) << 16,
+                              static_cast<int64_t>(1) << 32,
+                              static_cast<int64_t>(1) << 40,
+                              static_cast<int64_t>(0x7FFFFFFFFFFFFFFFLL)};
+  int64_t inputs[32];
+  for (uint32_t i = 0; i < 32; i++) {
+    inputs[i] = patterns[i % 8];
+  }
+  CastTestWithValues<int64_t, bool, 2>(inputs, 32U, {1, 32}, {0, 1}, {0, 1});
+}
+
+// int32转bool同理按4字节元素粒度判空
+TEST_F(TestApiCast, Cast_Test_Int32_Bool_HighBits) {
+  const int32_t patterns[] = {0, 1, -1, 1 << 8, 1 << 16, 1 << 24, 0x7FFFFFFF, -256};
+  int32_t inputs[32];
+  for (uint32_t i = 0; i < 32; i++) {
+    inputs[i] = patterns[i % 8];
+  }
+  CastTestWithValues<int32_t, bool, 2>(inputs, 32U, {1, 32}, {0, 1}, {0, 1});
+}
+
+// count非寄存器容量整数倍，验证部分掩码下store只写出count个有效bool、垃圾lane不外泄
+TEST_F(TestApiCast, Cast_Test_Int64_Bool_TailCount) {
+  const int64_t patterns[] = {0,
+                              1,
+                              -1,
+                              static_cast<int64_t>(1) << 8,
+                              static_cast<int64_t>(1) << 16,
+                              static_cast<int64_t>(1) << 32,
+                              static_cast<int64_t>(1) << 40,
+                              static_cast<int64_t>(0x7FFFFFFFFFFFFFFFLL)};
+  int64_t inputs[30];
+  for (uint32_t i = 0; i < 30; i++) {
+    inputs[i] = patterns[i % 8];
+  }
+  CastTestWithValues<int64_t, bool, 2>(inputs, 30U, {1, 30}, {0, 1}, {0, 1});
+}
+
+// count跨多个repeat(每迭代32个int64)：store掩码若复用被UpdateMask递减过的计数器，会在若干迭代后归零导致后半段输出恒0
+TEST_F(TestApiCast, Cast_Test_Int64_Bool_MultiRepeat) {
+  const int64_t patterns[] = {0,
+                              1,
+                              -1,
+                              static_cast<int64_t>(1) << 8,
+                              static_cast<int64_t>(1) << 16,
+                              static_cast<int64_t>(1) << 32,
+                              static_cast<int64_t>(1) << 40,
+                              static_cast<int64_t>(0x7FFFFFFFFFFFFFFFLL)};
+  int64_t inputs[128];
+  for (uint32_t i = 0; i < 128; i++) {
+    inputs[i] = patterns[i % 8];
+  }
+  CastTestWithValues<int64_t, bool, 2>(inputs, 128U, {1, 128}, {0, 1}, {0, 1});
 }

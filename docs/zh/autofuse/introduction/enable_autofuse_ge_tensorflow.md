@@ -1,4 +1,4 @@
-# GE 路径下使能 AutoFuse
+# GE 路径下使能 AutoFuse（TensorFlow）
 
 本文介绍基于 GE 路径（TensorFlow 1.x 框架）启用 AutoFuse 自动算子融合功能的方法，并以 `Abs + ReLU + Exp` 算子融合为例，演示如何配置和运行融合用例，以及如何验证融合结果。
 
@@ -6,12 +6,12 @@
 
 ### 运行环境要求
 
-| 依赖项                        | 要求                                                                                                                                                                                                                                               |
-| :---------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 依赖项                        | 要求                                                                                                                                                                                                                                                 |
+| :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 硬件与基础软件                | 准备搭载昇腾 AI 处理器的硬件环境，并安装匹配的驱动固件和 CANN 软件包。安装步骤请参见 [CANN 软件安装](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/920beta1/softwareinst/instg/instg_0000.html?OS=openEuler&InstallType=netyum)。 |
 | TensorFlow 和 TF Adapter 插件 | 按照官方发布的配套版本选择，具体版本信息请参见 [官方文档](https://www.hiascend.com/document/detail/zh/TensorFlowCommunity/latest/releasenote/releasenote_01.html)。                                                                                  |
-| GCC                           | 9.5.0 及以上，建议 9.5.0。                                                                                                                                                                                                                         |
-| CMake                         | 3.20.0 及以上，建议 3.20.0。                                                                                                                                                                                                                       |
+| GCC                           | 9.5.0 及以上，建议 9.5.0。                                                                                                                                                                                                                           |
+| CMake                         | 3.20.0 及以上，建议 3.20.0。                                                                                                                                                                                                                         |
 
 ### 设置环境变量
 
@@ -108,14 +108,16 @@ profiling/
         └── op_summary_时间戳.csv
 ```
 
-打开本次运行对应的 `op_summary_*.csv`，查看其中的算子列表。如果出现名称以 `autofused_` 开头的融合 Kernel，则表示相关算子已完成融合。具体 Kernel 名称可能随版本变化，应结合算子类型和执行记录进行判断。
+打开本次运行对应的 `op_summary_*.csv`，查看其中的算子列表。如果出现名称以 `autofuse_` 开头的融合 Kernel，则表示相关算子已完成融合，本示例中融合 Kernel 名称为 `autofuse_pointwise_0_Abs_Relu_Exp`。具体 Kernel 名称可能随版本变化，应结合算子类型和执行记录进行判断。
 
 ## 融合前后性能对比
 
 如需评估 AutoFuse 的性能收益，可以采集以下两种场景的 Profiling 数据：
 
 1. **启用 AutoFuse**：配置环境变量 `AUTOFUSE_FLAGS="--enable_autofuse=true"`。
-2. **未启用 AutoFuse**：配置环境变量 `AUTOFUSE_FLAGS="--enable_autofuse=false"`，作为未融合场景的对照组。
+2. **未启用 AutoFuse**：配置环境变量 `AUTOFUSE_FLAGS="--enable_autofuse=false"`，作为对照场景。
+
+需要注意的是，未启用 AutoFuse 时，GE 自身的图优化仍可能融合部分算子，对照场景中不一定出现独立的 `Abs`、`Relu`、`Exp` 算子，应以是否出现 `autofuse_` 前缀的融合 Kernel 作为 AutoFuse 是否生效的判断依据。
 
 两种场景应使用相同的输入数据、执行次数和 Profiling 配置，并比较相同计算范围内的执行时间，同时区分首次图编译开销和预热后的稳定执行时间。对于输入、输出搬运占比较高的算子，还可以进一步关注 Profiling 中的 `aiv_mte2_time` 和 `aiv_mte3_time`。
 

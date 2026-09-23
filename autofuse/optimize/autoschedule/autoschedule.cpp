@@ -31,23 +31,6 @@ constexpr int64_t kDefaultAxisId = -1;
 constexpr int64_t kMaxBroadcastAxisSize = 16LL;
 constexpr int64_t kMinNonBroadcastAxisSize = 256LL * 1024LL;
 
-// 判断节点输出在该轴上是否仍有数据流动（stride 非零）：真正的归约塌缩轴在
-// Reduce 输出上 stride 必为 0；而元素算子直接消费标量参数 Load（空间轴全退化）
-// 时，输出在空间轴上 stride 非零，该轴对本节点不是归约轴。
-bool IsAxisStreamingOnAnyOutput(const ascir::NodeView &node, const int64_t axis_id) {
-  for (auto output : node->outputs()) {
-    for (size_t i = 0UL; i < output->attr.axis.size(); ++i) {
-      if (output->attr.axis[i] != axis_id) {
-        continue;
-      }
-      if (af::SymbolicUtils::StaticCheckEq(output->attr.strides[i], af::sym::kSymbolZero) != af::TriBool::kTrue) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 void FindNotLoopAxis(const ascir::NodeView &node, ascir::ImplGraph &impl_graph,
                      std::unordered_set<int64_t> &not_loop_axis_set, bool has_reduce, bool is_reduce_first_stage) {
   for (auto output : node->outputs()) {
@@ -83,18 +66,6 @@ void FindNotLoopAxis(const ascir::NodeView &node, ascir::ImplGraph &impl_graph,
         if (r->type == ascir::Axis::Type::kAxisTypeBlockOuter || r->type == ascir::Axis::Type::kAxisTypeBlockInner) {
           continue;
         }
-      }
-      // Gather(IndirectLoad)+Norm：Norm 尾部元素算子直接消费标量参数 Load
-      // （原 Broadcast 已被冗余消除），其退化轴不是归约轴；若据此抬升消费
-      // 节点的循环层级，Norm 尾部 Cluster 会因 loop_axis 不一致被拆分，
-      // 参数 Load 沦为跨 VF 外部输入并缺失父图 API call。
-      // 仅 IndirectLoad 候选图启用该豁免，不改变普通图的循环轴推断语义；
-      // 先做廉价的输出 stride 检查，绝大多数真归约轴在此短路，不触发全图扫描。
-      if (IsAxisStreamingOnAnyOutput(node, r->id) &&
-          ascgen_utils::indirect_load::FindIndirectLoadNode(impl_graph) != nullptr) {
-        GELOGD("Axis[%ld] still streams on output of node[%s], keep it as loop axis candidate.", r->id,
-               node->GetNamePtr());
-        continue;
       }
       not_loop_axis_set.insert(input->attr.axis[i]);
     }
@@ -219,12 +190,12 @@ bool TryGenIndirectLoadTilingCase(ascir::ImplGraph &graph,
                                                            tiling_case.ub_tiling_y)) {
     return false;
   }
-  // post-Reduce SIMT 候选不预建固定 tile 轴（pair 为空），TileTiling 阶段走通用 TileSplit
-  // 按 UB 容量求解 tile 行数；其余模板 pair 非空，维持固定 tile 语义。
-  tiling_case.block_tiling_id = 0;
-  tiling_cases.push_back(tiling_case);
-  GELOGD("[IndirectLoad] Graph[%s] generate prebuilt outer tiling case for axis[%ld]%s.", graph.GetName().c_str(),
-         tiling_case.ub_tiling_id_y, tiling_case.ub_tiling_y.first == nullptr ? " with solved tile size" : "");
+  if (tiling_case.ub_tiling_y.first != nullptr && tiling_case.ub_tiling_y.second != nullptr) {
+    tiling_case.block_tiling_id = 0;
+    tiling_cases.push_back(tiling_case);
+    GELOGD("[IndirectLoad] Graph[%s] generate prebuilt outer tiling case for axis[%ld].", graph.GetName().c_str(),
+           tiling_case.ub_tiling_id_y);
+  }
   return true;
 }
 }  // namespace

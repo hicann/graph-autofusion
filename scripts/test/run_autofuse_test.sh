@@ -659,6 +659,97 @@ codegen_e2e_st() {
                       load_switch_scalar_sub_store_expect_code_e2e_v2 \
                       load_nan_out_for_store_expect_code_e2e_v2"
   fi
+  # 从 build_backend 移入的 >10s 长尾用例（含 inductor/pgo split_compile 链），与 ascendc_api 门禁并行。
+  # ctest 仍按 build_backend_test1/2 标签 + 用例名正则选择（见下方 moved 两次 ctest 调用）。
+  BACKEND_MOVED_TARGET_LIST="add_rsqrt_test_e2e \
+                      compare_x2_tensor_int64_eq_test_e2e \
+                      compare_x2_tensor_int64_gt_test_e2e \
+                      inductor_tail_brc_tail_reduce_test_e2e \
+                      inductor_topn_test_e2e \
+                      load_logical_not_store_test_e2e \
+                      pgo_add_abs_inductor_concat_test_e2e \
+                      pgo_add_abs_inductor_test_e2e"
+  BACKEND_MOVED_TARGET_LIST_V35=""
+  if [[ "X$RUN_V35_TESTS" = "Xon" ]]; then
+    BACKEND_MOVED_TARGET_LIST_V35="acos_bf16_test_e2e_v2 \
+                        add_abs_test_e2e_v2 \
+                        add_exp2_test_e2e_v2 \
+                        add_exp_bf16_test_e2e_v2 \
+                        add_floor_bf16_test_e2e_v2 \
+                        add_floor_test_e2e_v2 \
+                        atanh_bf16_test_e2e_v2 \
+                        bessel_j0_store_test_e2e_v2 \
+                        bessel_j1_store_test_e2e_v2 \
+                        bessel_y0_store_test_e2e_v2 \
+                        bessel_y1_store_test_e2e_v2 \
+                        bf16_add_test_e2e_v2 \
+                        bf16_nddma_add_test_e2e_v2 \
+                        cast_abs_float16_float_test_e2e_v2 \
+                        cast_abs_test_e2e_v2 \
+                        cast_nan_test_e2e_v2 \
+                        chebyshev_polynomial_t_store_test_e2e_v2 \
+                        chebyshev_polynomial_u_store_test_e2e_v2 \
+                        chebyshev_polynomial_v_store_test_e2e_v2 \
+                        chebyshev_polynomial_w_store_test_e2e_v2 \
+                        continues_brc_test_e2e_v2 \
+                        digamma_bf16_test_e2e_v2 \
+                        div_abs_test_e2e_v2 \
+                        erfc_bf16_test_e2e_v2 \
+                        floor_div_int32_store_test_e2e_v2 \
+                        floordiv_abs_test_e2e_v2 \
+                        frexp_store_test_e2e_v2 \
+                        hermite_polynomial_h_store_test_e2e_v2 \
+                        hermite_polynomial_he_store_test_e2e_v2 \
+                        i0_store_test_e2e_v2 \
+                        i0e_store_test_e2e_v2 \
+                        i1e_store_test_e2e_v2 \
+                        indirect_load_broadcast_elements_sk_test_e2e_v2 \
+                        indirect_load_broadcast_index_where_simt_test_e2e_v2 \
+                        indirect_load_graph_hint_embedding_slice_e2e_v2 \
+                        indirect_load_rank3_axis1_torch_gather_frontend_e2e_v2 \
+                        indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd_e2e_v2 \
+                        indirect_load_user_position_bias_e2e_v2 \
+                        laguerre_polynomial_l_store_test_e2e_v2 \
+                        legendre_polynomial_p_store_test_e2e_v2 \
+                        load_airy_ai_store_test_e2e_v2 \
+                        load_bitwise_and_store_test_e2e_v2 \
+                        load_bitwise_not_store_test_e2e_v2 \
+                        load_bitwise_or_store_test_e2e_v2 \
+                        load_bitwise_xor_store_test_e2e_v2 \
+                        load_erfinv_store_test_e2e_v2 \
+                        load_leaky_relu_store_test_e2e_v2 \
+                        load_log2_store_test_e2e_v2 \
+                        load_logicaland_store_test_e2e_v2 \
+                        load_logicalor_store_test_e2e_v2 \
+                        load_lshift_store_test_e2e_v2 \
+                        load_modified_bessel_i0_store_test_e2e_v2 \
+                        load_modified_bessel_i1_store_test_e2e_v2 \
+                        load_modified_bessel_k0_store_test_e2e_v2 \
+                        load_modified_bessel_k1_store_test_e2e_v2 \
+                        load_tanh_store_test_e2e_v2 \
+                        log_ndtr_store_test_e2e_v2 \
+                        logicalxor_float_test_e2e_v2 \
+                        mod_test_e2e_v2 \
+                        ndtr_store_test_e2e_v2 \
+                        ndtri_store_test_e2e_v2 \
+                        next_after_store_test_e2e_v2 \
+                        poly_gamma_store_test_e2e_v2 \
+                        remainder_int32_store_test_e2e_v2 \
+                        scalar_div_inf_test_e2e_v2 \
+                        scaled_modified_bessel_k0_store_test_e2e_v2 \
+                        scaled_modified_bessel_k1_store_test_e2e_v2 \
+                        shifted_chebyshev_polynomial_t_store_test_e2e_v2 \
+                        shifted_chebyshev_polynomial_u_store_test_e2e_v2 \
+                        shifted_chebyshev_polynomial_v_store_test_e2e_v2 \
+                        shifted_chebyshev_polynomial_w_store_test_e2e_v2 \
+                        signbit_store_test_e2e_v2 \
+                        spherical_bessel_j0_store_test_e2e_v2 \
+                        zeta_store_test_e2e_v2"
+  fi
+  MAKE_TARGET_LIST="${MAKE_TARGET_LIST} ${BACKEND_MOVED_TARGET_LIST} ${BACKEND_MOVED_TARGET_LIST_V35}"
+  BACKEND_MOVED_CODEGEN_LIST=$(echo "${BACKEND_MOVED_TARGET_LIST} ${BACKEND_MOVED_TARGET_LIST_V35}" | sed 's/e2e/codegen/g')
+  BACKEND_MOVED_TEST1_REGEX=$(build_backend_test_regex ${BACKEND_MOVED_CODEGEN_LIST})
+  BACKEND_MOVED_TEST2_REGEX=$(build_backend_test_regex ${BACKEND_MOVED_TARGET_LIST} ${BACKEND_MOVED_TARGET_LIST_V35})
   MAKE_TARGET_LIST_CODEGEN=$(echo "${MAKE_TARGET_LIST}" | sed 's/e2e/codegen/g')
   echo "MAKE_TARGET_LIST_CODEGEN"
   echo $MAKE_TARGET_LIST_CODEGEN
@@ -678,6 +769,14 @@ codegen_e2e_st() {
     return 1
   fi
 
+  (cd "${AUTOFUSE_BUILD_PATH}/tests" && \
+    ctest --output-on-failure -j${THREAD_NUM} -L st -L build_backend_test1 -R "${BACKEND_MOVED_TEST1_REGEX}" --no-tests=error \
+          -O ${BUILD_PATH}/ctest_codegen_e2e_st_moved_test1.log)
+  if [ $? -ne 0 ]; then
+    echo "execute command: run moved backend codegen_e2e_st_test1 failed."
+    return 1
+  fi
+
   make -j${THREAD_NUM} $MAKE_TARGET_LIST
   if [ $? -ne 0 ]
   then
@@ -691,6 +790,14 @@ codegen_e2e_st() {
           -O ${BUILD_PATH}/ctest_codegen_e2e_st_test2.log)
   if [ $? -ne 0 ]; then
     echo "execute command: run codegen_e2e_st_test2 failed."
+    return 1
+  fi
+
+  (cd "${AUTOFUSE_BUILD_PATH}/tests" && \
+    ctest --output-on-failure -j${THREAD_NUM} -L st -L build_backend_test2 -R "${BACKEND_MOVED_TEST2_REGEX}" --no-tests=error \
+          -O ${BUILD_PATH}/ctest_codegen_e2e_st_moved_test2.log)
+  if [ $? -ne 0 ]; then
+    echo "execute command: run moved backend codegen_e2e_st_test2 failed."
     return 1
   fi
   echo "$(date '+%F %T') codegen_e2e_st execute success!"
@@ -732,7 +839,8 @@ build_backend() {
 
   cmake $CMAKE_ARGS ../
 
-  # st用例可执行文件的列表，inductor split_compile 仅保留 presubmit 代表用例，其余放 nightly。
+  # st用例可执行文件的列表。耗时>10s的长尾用例（含 inductor/pgo split_compile 代表用例）已移至
+  # e2e 模块（codegen_e2e_st，对应 ST_Test_autofuse_e2e 任务）并行执行；其余 inductor split_compile 放 nightly。
   MAKE_TARGET_LIST="add_abs_test_e2e \
                     axpy_abs_test_e2e \
                     sub_abs_test_e2e \
@@ -742,10 +850,8 @@ build_backend() {
                     compare_test_e2e \
                     compare_x2_tensor_test_e2e \
                     compare_x2_tensor_int32_test_e2e \
-                    compare_x2_tensor_int64_eq_test_e2e \
-                    compare_x2_tensor_int64_gt_test_e2e \
                     load_to_store_and_abs_test_e2e \
-                    scalar_cast_add_test_e2e  \
+                    scalar_cast_add_test_e2e \
                     concat_all_aligned_test_e2e \
                     concat_to_stores_test_e2e \
                     load_unalign_pad_test_e2e \
@@ -757,24 +863,15 @@ build_backend() {
                     load_where_x2_is_ubscalar_store_test_e2e \
                     load_where_x3_is_ubscalar_store_test_e2e \
                     truediv_abs_test_e2e \
-                    add_rsqrt_test_e2e \
                     load_pow_all_input_is_scalar_store_test_e2e \
                     axpy_abs_half_test_e2e \
                     pgo_add_abs_test_e2e \
                     matmul_elemwise_test_e2e \
-                    axpy_abs_test_e2e \
-                    load_logical_not_store_test_e2e \
-                    inductor_topn_test_e2e \
-                    inductor_matmul_elemwise_test_e2e \
-                    inductor_tail_brc_tail_reduce_test_e2e \
-                    pgo_add_abs_inductor_test_e2e \
-                    pgo_add_abs_inductor_concat_test_e2e"
+                    inductor_matmul_elemwise_test_e2e"
   if [[ "X$RUN_V35_TESTS" = "Xon" ]]; then
     MAKE_TARGET_LIST="${MAKE_TARGET_LIST} \
-                      load_loop_mode_test_e2e_v2\
-                      add_abs_test_e2e_v2 \
+                      load_loop_mode_test_e2e_v2 \
                       concat_test_e2e_v2 \
-                      continues_brc_test_e2e_v2 \
                       scalar_brc_test_e2e_v2 \
                       brc_reduce_test_e2e_v2 \
                       log1p_bfloat16_test_e2e_v2 \
@@ -782,13 +879,8 @@ build_backend() {
                       fmod_float_test_e2e_v2 \
                       hypot_float_test_e2e_v2 \
                       lgamma_float_test_e2e_v2 \
-                      logicalxor_float_test_e2e_v2 \
                       log10_float_test_e2e_v2 \
                       load_brc_test_e2e_v2 \
-                      cast_abs_test_e2e_v2 \
-                      cast_nan_test_e2e_v2 \
-                      load_leaky_relu_store_test_e2e_v2 \
-                      cast_abs_float16_float_test_e2e_v2 \
                       add_abs_int8_scalar_test_e2e_v2 \
                       add_abs_half_scalar_test_e2e_v2 \
                       add_abs_float_scalar_test_e2e_v2 \
@@ -796,13 +888,7 @@ build_backend() {
                       ub_scalar_brc_abs_add_test_e2e_v2 \
                       abs_fma_bf16_test_e2e_v2 \
                       abs_fma_test_e2e_v2 \
-                      add_exp_bf16_test_e2e_v2 \
-                      add_exp2_test_e2e_v2 \
-                      add_floor_bf16_test_e2e_v2 \
-                      add_floor_test_e2e_v2 \
-                      floordiv_abs_test_e2e_v2 \
                       floordiv_mul_le_select_test_e2e_v2 \
-                      load_bitwise_and_store_test_e2e_v2 \
                       tail_brc_tail_reduce_test_e2e_v2 \
                       int32_logical_not_test_e2e_v2 \
                       int16_logical_not_test_e2e_v2 \
@@ -810,102 +896,72 @@ build_backend() {
                       half_logical_not_test_e2e_v2 \
                       uint8_logical_not_test_e2e_v2 \
                       abs_clip_by_value_test_e2e_v2 \
-                      acos_bf16_test_e2e_v2 \
-                      load_logicalor_store_test_e2e_v2 \
-                      load_logicaland_store_test_e2e_v2 \
                       load_gather_split_b_t_abs_store_test_e2e_v2 \
                       load_gather_tail_split_b_t_abs_store_test_e2e_v2 \
-                       load_gather_one_axis_split_b_t_abs_store_test_e2e_v2 \
-                         indirect_load_rank2_axis1_simd_e2e_v2 \
-                       indirect_load_rank3_axis1_float_int64_gather_e2e_v2 \
-                       indirect_load_rank4_axis1_full_prefix_bessel_k0_sum_simd_e2e_v2 \
-                       indirect_load_mixed_rank4_axis2_simd_e2e_v2 \
-                          indirect_load_broadcast_cross_boundary_simt_fallback_test_e2e_v2 \
-                          indirect_load_broadcast_axis_simd_test_e2e_v2 \
-                          indirect_load_broadcast_inner_adjacent_simd_test_e2e_v2 \
-                          indirect_load_broadcast_continuous_simd_test_e2e_v2 \
-                          indirect_load_broadcast_continuous_index_simt_test_e2e_v2 \
-                          indirect_load_embedding_test_e2e_v2 \
-                          indirect_load_embedding_tail_simd_e2e_v2 \
-                           indirect_load_broadcast_retained_simd_test_e2e_v2 \
-                          indirect_load_complex_broadcast_simd_test_e2e_v2 \
-                          indirect_load_complex_broadcast_simt_test_e2e_v2 \
-                          indirect_load_complex_input_broadcast_simd_test_e2e_v2 \
-                          indirect_load_broadcast_cross_boundary_simt_test_e2e_v2 \
-                         indirect_load_broadcast_axis_simt_test_e2e_v2 \
-                         indirect_load_broadcast_reduce_simt_fallback_test_e2e_v2 \
-                         indirect_load_broadcast_retained_simt_test_e2e_v2 \
-                         indirect_load_both_transpose_simd_test_e2e_v2 \
-                         indirect_load_both_transpose_simd_fallback_test_e2e_v2 \
-                         indirect_load_both_transpose_simd_nddma_test_e2e_v2 \
-                         indirect_load_both_transpose_simt_test_e2e_v2 \
-                        indirect_load_broadcast_elements_sk_test_e2e_v2 \
-                        indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 \
-                        indirect_load_broadcast_index_abs_simt_test_e2e_v2 \
-                        indirect_load_broadcast_index_where_simt_test_e2e_v2 \
-                        indirect_load_index_binary_same_view_simd_test_e2e_v2 \
-                       indirect_load_rank3_axis1_input_index_gap_simd_test_e2e_v2 \
-                       indirect_load_rank3_axis1_input_index_gap_simt_test_e2e_v2 \
-                       indirect_load_rank3_axis1_input_index_outer_gap_simt_test_e2e_v2 \
-                       indirect_load_rank3_axis1_torch_gather_frontend_e2e_v2 \
-                       indirect_load_graph_hint_simd_repro_e2e_v2 \
-                       indirect_load_graph_hint_embedding_slice_e2e_v2 \
-                       indirect_load_embedding_reduce_simt_test_e2e_v2 \
-                       indirect_load_user_masked_embedding_minimal_e2e_v2 \
-                       indirect_load_user_masked_embedding_sum_full_auto_e2e_v2 \
-                       indirect_load_user_position_bias_e2e_v2 \
-                       indirect_load_user_embedding_sum_e2e_v2 \
-                       indirect_load_user_embedding_sum_rank2_e2e_v2 \
-                       indirect_load_user_embedding_sum_simd_e2e_v2 \
-                       indirect_load_user_layernorm_e2e_v2 \
-                       indirect_load_user_embedding_exp_abs_add_simt_e2e_v2 \
-                       indirect_load_user_fanout_direct_reduce_simt_e2e_v2 \
-                       indirect_load_user_fanout_post_reduce_simt_e2e_v2 \
-                       indirect_load_user_fanout_side_input_simt_e2e_v2 \
-                       indirect_load_user_fanout_direct_stores_simd_e2e_v2 \
-                       indirect_load_user_fanout_direct_stores_simt_e2e_v2 \
-                       indirect_load_user_fanout_post_stores_simd_e2e_v2 \
-                       indirect_load_user_fanout_post_stores_simt_e2e_v2 \
-                       indirect_load_user_fanout_direct_stores_simd_e2e_v2 \
-                       indirect_load_user_fanout_direct_stores_simt_e2e_v2 \
-                       indirect_load_user_fanout_post_stores_simd_e2e_v2 \
-                       indirect_load_user_fanout_post_stores_simt_e2e_v2 \
-                       indirect_load_user_side_input_fanout_simd_e2e_v2 \
-                       load_where_x2_x3_is_ubscalar_store_test_e2e_v2  \
+                      load_gather_one_axis_split_b_t_abs_store_test_e2e_v2 \
+                      indirect_load_rank2_axis1_simd_e2e_v2 \
+                      indirect_load_rank3_axis1_float_int64_gather_e2e_v2 \
+                      indirect_load_mixed_rank4_axis2_simd_e2e_v2 \
+                      indirect_load_broadcast_cross_boundary_simt_fallback_test_e2e_v2 \
+                      indirect_load_broadcast_axis_simd_test_e2e_v2 \
+                      indirect_load_broadcast_inner_adjacent_simd_test_e2e_v2 \
+                      indirect_load_broadcast_continuous_simd_test_e2e_v2 \
+                      indirect_load_broadcast_continuous_index_simt_test_e2e_v2 \
+                      indirect_load_embedding_test_e2e_v2 \
+                      indirect_load_embedding_tail_simd_e2e_v2 \
+                      indirect_load_broadcast_retained_simd_test_e2e_v2 \
+                      indirect_load_complex_broadcast_simd_test_e2e_v2 \
+                      indirect_load_complex_broadcast_simt_test_e2e_v2 \
+                      indirect_load_complex_input_broadcast_simd_test_e2e_v2 \
+                      indirect_load_broadcast_cross_boundary_simt_test_e2e_v2 \
+                      indirect_load_broadcast_axis_simt_test_e2e_v2 \
+                      indirect_load_broadcast_reduce_simt_fallback_test_e2e_v2 \
+                      indirect_load_broadcast_retained_simt_test_e2e_v2 \
+                      indirect_load_both_transpose_simd_test_e2e_v2 \
+                      indirect_load_both_transpose_simd_fallback_test_e2e_v2 \
+                      indirect_load_both_transpose_simd_nddma_test_e2e_v2 \
+                      indirect_load_both_transpose_simt_test_e2e_v2 \
+                      indirect_load_broadcast_index_physical_view_simt_test_e2e_v2 \
+                      indirect_load_broadcast_index_abs_simt_test_e2e_v2 \
+                      indirect_load_index_binary_same_view_simd_test_e2e_v2 \
+                      indirect_load_rank3_axis1_input_index_gap_simd_test_e2e_v2 \
+                      indirect_load_rank3_axis1_input_index_gap_simt_test_e2e_v2 \
+                      indirect_load_rank3_axis1_input_index_outer_gap_simt_test_e2e_v2 \
+                      indirect_load_graph_hint_simd_repro_e2e_v2 \
+                      indirect_load_embedding_reduce_simt_test_e2e_v2 \
+                      indirect_load_user_masked_embedding_minimal_e2e_v2 \
+                      indirect_load_user_masked_embedding_sum_full_auto_e2e_v2 \
+                      indirect_load_user_embedding_sum_e2e_v2 \
+                      indirect_load_user_embedding_sum_rank2_e2e_v2 \
+                      indirect_load_user_embedding_sum_simd_e2e_v2 \
+                      indirect_load_user_layernorm_e2e_v2 \
+                      indirect_load_user_embedding_exp_abs_add_simt_e2e_v2 \
+                      indirect_load_user_fanout_direct_reduce_simt_e2e_v2 \
+                      indirect_load_user_fanout_post_reduce_simt_e2e_v2 \
+                      indirect_load_user_fanout_side_input_simt_e2e_v2 \
+                      indirect_load_user_fanout_direct_stores_simd_e2e_v2 \
+                      indirect_load_user_fanout_direct_stores_simt_e2e_v2 \
+                      indirect_load_user_fanout_post_stores_simd_e2e_v2 \
+                      indirect_load_user_fanout_post_stores_simt_e2e_v2 \
+                      indirect_load_user_fanout_direct_stores_simd_e2e_v2 \
+                      indirect_load_user_fanout_direct_stores_simt_e2e_v2 \
+                      indirect_load_user_fanout_post_stores_simd_e2e_v2 \
+                      indirect_load_user_fanout_post_stores_simt_e2e_v2 \
+                      indirect_load_user_side_input_fanout_simd_e2e_v2 \
+                      load_where_x2_x3_is_ubscalar_store_test_e2e_v2 \
                       gather_reduce_store_test_e2e_v2 \
                       load_where_store_test_e2e_v2 \
                       load_where_x2_is_ubscalar_store_test_e2e_v2 \
                       load_where_x3_is_ubscalar_store_test_e2e_v2 \
-                      load_tanh_store_test_e2e_v2 \
-                      load_modified_bessel_i0_store_test_e2e_v2 \
-                      load_modified_bessel_i1_store_test_e2e_v2 \
-                      load_modified_bessel_k0_store_test_e2e_v2 \
-                      load_modified_bessel_k1_store_test_e2e_v2 \
-                      laguerre_polynomial_l_store_test_e2e_v2 \
-                      legendre_polynomial_p_store_test_e2e_v2 \
-                      load_airy_ai_store_test_e2e_v2 \
-                      load_erfinv_store_test_e2e_v2 \
-                      remainder_int32_store_test_e2e_v2 \
-                      floor_div_int32_store_test_e2e_v2 \
                       load_compare_store_test_e2e_v2 \
                       le_bool_store_test_e2e_v2 \
                       bitwise_bool_store_test_e2e_v2 \
                       load_compare_cast_sum_store_test_e2e_v2 \
-                      scalar_div_inf_test_e2e_v2 \
                       matmul_elemwise_brc_test_e2e_v2 \
                       matmul_compare_scalar_test_e2e_v2 \
-                      div_abs_test_e2e_v2 \
-                      load_log2_store_test_e2e_v2 \
-                      mod_test_e2e_v2 \
-                      load_lshift_store_test_e2e_v2 \
-                      bf16_add_test_e2e_v2 \
-                      bf16_nddma_add_test_e2e_v2 \
                       abs_bf16_test_e2e_v2 \
                       abs_uint8_test_e2e_v2 \
                       erf_bf16_test_e2e_v2 \
-                      load_bitwise_not_store_test_e2e_v2 \
-                      load_bitwise_or_store_test_e2e_v2 \
-                      load_bitwise_xor_store_test_e2e_v2 \
                       ceil_bf16_test_e2e_v2 \
                       cos_bf16_test_e2e_v2 \
                       load_compare_scalar_where_store_test_e2e_v2 \
@@ -915,11 +971,8 @@ build_backend() {
                       asin_bf16_test_e2e_v2 \
                       asinh_bf16_test_e2e_v2 \
                       atan_bf16_test_e2e_v2 \
-                      atanh_bf16_test_e2e_v2 \
                       scalar_cast_add_test_e2e_v2 \
                       cosh_bf16_test_e2e_v2 \
-                      digamma_bf16_test_e2e_v2 \
-                      erfc_bf16_test_e2e_v2 \
                       pow_bf16_test_e2e_v2 \
                       reciprocal_bf16_test_e2e_v2 \
                       relu_uint8_test_e2e_v2 \
@@ -935,35 +988,7 @@ build_backend() {
                       select_bool_test_e2e_v2 \
                       copysign_bf16_test_e2e_v2 \
                       erfcx_test_e2e_v2 \
-                      i0_store_test_e2e_v2 \
-                      i0e_store_test_e2e_v2 \
-                      i1e_store_test_e2e_v2 \
                       expm1_test_e2e_v2 \
-                      bessel_j0_store_test_e2e_v2 \
-                      bessel_j1_store_test_e2e_v2 \
-                      bessel_y0_store_test_e2e_v2 \
-                      bessel_y1_store_test_e2e_v2 \
-                      scaled_modified_bessel_k0_store_test_e2e_v2 \
-                      scaled_modified_bessel_k1_store_test_e2e_v2 \
-                      spherical_bessel_j0_store_test_e2e_v2 \
-                      ndtr_store_test_e2e_v2 \
-                      ndtri_store_test_e2e_v2 \
-                      log_ndtr_store_test_e2e_v2 \
-                      next_after_store_test_e2e_v2 \
-                      poly_gamma_store_test_e2e_v2 \
-                      zeta_store_test_e2e_v2 \
-                      signbit_store_test_e2e_v2 \
-                      frexp_store_test_e2e_v2 \
-                      shifted_chebyshev_polynomial_t_store_test_e2e_v2 \
-                      shifted_chebyshev_polynomial_u_store_test_e2e_v2 \
-                      shifted_chebyshev_polynomial_v_store_test_e2e_v2 \
-                      shifted_chebyshev_polynomial_w_store_test_e2e_v2 \
-                      chebyshev_polynomial_t_store_test_e2e_v2 \
-                      chebyshev_polynomial_u_store_test_e2e_v2 \
-                      chebyshev_polynomial_v_store_test_e2e_v2 \
-                      chebyshev_polynomial_w_store_test_e2e_v2 \
-                      hermite_polynomial_h_store_test_e2e_v2 \
-                      hermite_polynomial_he_store_test_e2e_v2 \
                       rand_store_test_e2e_v2 \
                       randn_store_test_e2e_v2"
   fi

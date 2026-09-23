@@ -97,7 +97,7 @@ AutoFuse 生成的 Host 和 Device 源码由 **BiSheng 编译器**进一步编�
 
 按照两条融合实现路径启用：
 
-- **GE 路径**：[GE 路径下使能 AutoFuse](./enable_autofuse_ge.md)。该文档以 TensorFlow 为例，介绍依赖版本、`AUTOFUSE_FLAGS` 配置、环境变量和运行用例。
+- **GE 路径**：[GE 路径下使能 AutoFuse（TensorFlow）](./enable_autofuse_ge_tensorflow.md)。该文档以 TensorFlow 为例，介绍依赖版本、`AUTOFUSE_FLAGS` 配置、环境变量和运行用例。PyTorch 框架经 TorchAir 接入 GE 路径的方法，参见 [GE 路径下使能 AutoFuse（PyTorch）](./enable_autofuse_ge_pytorch.md)，该文档同时演示了动态 Shape 场景。
 - **Inductor 路径**：[Inductor 路径下使能 AutoFuse](./enable_autofuse_inductor.md)。该文档以 PyTorch 为例，介绍依赖版本、`torch.compile` 配置、环境变量和运行用例。
 
 ## 项目结构
