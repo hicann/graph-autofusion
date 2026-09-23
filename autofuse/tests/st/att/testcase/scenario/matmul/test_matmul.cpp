@@ -63,7 +63,8 @@ TEST_F(TestGenMatmulModelInfoE2E, case1) {
   ret = autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
   EXPECT_EQ(ret, 0);
 
-  ret = std::system("g++ tiling_func_matmul_main.cpp Matmul_*tiling_func.cpp -I ./ -o tiling_func_main -Werror");
+  ret = std::system(
+      "g++ -std=c++17 tiling_func_matmul_main.cpp Matmul_*tiling_func.cpp -I ./ -o tiling_func_main -Werror");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main");
@@ -91,7 +92,8 @@ TEST_F(TestGenMatmulModelInfoE2E, axes_reorder) {
   EXPECT_EQ(ret, 0);
 
   ret = std::system(
-      "g++ tiling_func_matmul_main.cpp Matmul_*tiling_func.cpp -I ./ -o tiling_func_main -Werror -DSTUB_LOG");
+      "g++ -std=c++17 tiling_func_matmul_main.cpp Matmul_*tiling_func.cpp -I ./ -o tiling_func_main -Werror "
+      "-DSTUB_LOG");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main");

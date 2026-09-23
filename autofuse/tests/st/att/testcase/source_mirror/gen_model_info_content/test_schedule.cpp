@@ -230,7 +230,8 @@ TEST_F(TestSchedule, case0) {
   ret = autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
   EXPECT_EQ(ret, 0);
 
-  ret = std::system("g++ tiling_func_main_special.cpp OpTest5_*tiling_func.cpp -I ./ -o tiling_func_main_special -g");
+  ret = std::system(
+      "g++ -std=c++17 tiling_func_main_special.cpp OpTest5_*tiling_func.cpp -I ./ -o tiling_func_main_special -g");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main_special");
