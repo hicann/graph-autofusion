@@ -1,9 +1,12 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # Licensed under the CANN Open Software License Agreement Version 2.0.
 
+add_cann_third_party(boost)
+
 add_library(model_specialization SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/feature_manager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_compile_features.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/acl_spec_optimizer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../super_kernel/src/aot/common/pattern_common.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../super_kernel/src/aot/sk_log.cpp
 )
@@ -38,8 +41,14 @@ target_include_directories(model_specialization
 )
 
 target_link_libraries(model_specialization
+    PRIVATE
+        Boost::filesystem
+        c_sec_headers
+        runtime_headers
     PUBLIC
         acl_rt
+        acl_rtc
+        runtime
         error_manager
         c_sec
         unified_dlog
