@@ -10,15 +10,24 @@
 #ifndef __ASCENDC_API_REGBASE_FMOD_H__
 #define __ASCENDC_API_REGBASE_FMOD_H__
 
+constexpr uint32_t FMOD_THREAD_NUM = 1024;
+
+// fmod 为截断语义余数，fmodf 为位分解精确算法（大商场景仍精确），对齐单算子参考实现
 template <typename T>
-__aicore__ inline void FmodExtend(const AscendC::LocalTensor<T> &dst, const AscendC::LocalTensor<T> &src1,
-                                  const AscendC::LocalTensor<T> &src2, AscendC::LocalTensor<uint8_t> &tmp_buf,
-                                  const uint32_t size) {
-  LocalTensor<T> tmp_src1 = src1;
-  LocalTensor<T> tmp_src2 = src2;
-  tmp_src1.SetSize(size);
-  tmp_src2.SetSize(size);
-  AscendC::Fmod(dst, tmp_src1, tmp_src2, tmp_buf, size);
+__simt_vf__ __aicore__ LAUNCH_BOUND(FMOD_THREAD_NUM) inline void FmodSimtCompute(__ubuf__ T *dst, __ubuf__ T *src1,
+                                                                                 __ubuf__ T *src2,
+                                                                                 const int64_t total_num) {
+  for (int64_t i = threadIdx.x; i < total_num; i += blockDim.x) {
+    dst[i] = fmodf(src1[i], src2[i]);
+  }
 }
 
-#endif
+template <typename T>
+__aicore__ inline void FmodExtend(const AscendC::LocalTensor<T> &dst, const AscendC::LocalTensor<T> &src1,
+                                  const AscendC::LocalTensor<T> &src2, const LocalTensor<uint8_t> &tmp_buf,
+                                  const uint32_t size) {
+  AscendC::Simt::VF_CALL<FmodSimtCompute<T>>(AscendC::Simt::Dim3(FMOD_THREAD_NUM), (__ubuf__ T *)dst.GetPhyAddr(),
+                                             (__ubuf__ T *)src1.GetPhyAddr(), (__ubuf__ T *)src2.GetPhyAddr(), size);
+}
+
+#endif  // __ASCENDC_API_REGBASE_FMOD_H__

@@ -96,7 +96,7 @@ void CompleteElewiseApiInfo(af::AscNodePtr &node) {
       af::ops::IsOps<Atanh>(node)) {
     (void)::ascir::SetDcacheSize(node, kSimtDcacheSize);
   }
-  if (af::ops::IsOps<Remainder>(node) && node->inputs[0].attr.dtype == ge::DT_INT32) {
+  if (af::ops::IsOps<Remainder>(node) || af::ops::IsOps<Fmod>(node) || af::ops::IsOps<Mod>(node)) {
     (void)::ascir::SetDcacheSize(node, kSimtDcacheSize);
   }
 }

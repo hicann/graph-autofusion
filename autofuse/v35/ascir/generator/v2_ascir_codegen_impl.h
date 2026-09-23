@@ -2036,7 +2036,7 @@ class LShiftAscIrCodegenImplV2 : public AscIrCodegenV2 {
 class ModAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
-    return CalcModTmpSizeV2(node);
+    return CalcVoidTmpSizeV2(node);
   }
   [[nodiscard]] std::string GetApiCallName() const override {
     return "BinaryApiTmpCall";
@@ -2046,13 +2046,16 @@ class ModAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) {
-    // 与CalcModTmpSizeV2中的dtype_conversion_map表格同步维护
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {
         {DT_BF16, DT_FLOAT}, {DT_INT16, DT_FLOAT}, {DT_INT8, DT_FLOAT16}, {DT_UINT8, DT_FLOAT16}};
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
-    return {"adv_api/math/fmod.h"};
+    return {
+        "adv_api/math/fmod.h",
+        "simt_api/cpp/kernel_simt_utils.h",
+        "simt_api/math_functions.h",
+    };
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
     return {"fmod_reg_base.h"};
@@ -2133,11 +2136,14 @@ class SqrtAscIrCodegenImplV2 : public AscIrCodegenV2 {
 
 class RsqrtAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
   [[nodiscard]] std::string GetApiCallName() const override {
-    return "UnaryApiCall";
+    return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Rsqrt";
+    return "RsqrtExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Rsqrt";
@@ -2166,6 +2172,9 @@ class RsqrtAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
         {DT_BF16, DT_FLOAT},
     };
     return GetConversionFromDtypeMap(rsqrt_node, dtype_conversion_map);
+  }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"rsqrt_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
@@ -2317,11 +2326,14 @@ class ReluAscIrCodegenImplV2 : public AscIrCodegenV2 {
 
 class ReciprocalAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    return CalcVoidTmpSizeV2(node);
+  }
   [[nodiscard]] std::string GetApiCallName() const override {
-    return "UnaryApiCall";
+    return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Reciprocal";
+    return "ReciprocalExtend";
   }
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
     return IsSimtFloatDtype(GetSimtInputDtype(node)) && GetSimtInputDtype(node) == GetSimtOutputDtype(node);
@@ -2341,9 +2353,13 @@ class ReciprocalAscIrCodegenImplV2 : public AscIrCodegenV2 {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {{DT_BF16, DT_FLOAT}};
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"reciprocal_reg_base.h"};
+  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "basic_api/kernel_operator_vec_unary_intf.h",
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -3898,7 +3914,7 @@ class CeilAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Ceil";
+    return "CeilExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Ceil";
@@ -3911,9 +3927,13 @@ class CeilAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"ceil_reg_base.h"};
+  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/ceil.h",
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -4018,7 +4038,7 @@ class AcoshAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Acosh";
+    return "AcoshExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Acosh";
@@ -4031,9 +4051,13 @@ class AcoshAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"acosh_reg_base.h"};
+  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/acosh.h",
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -4054,7 +4078,7 @@ class CoshAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Cosh";
+    return "CoshExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Cosh";
@@ -4066,9 +4090,13 @@ class CoshAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     };
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"cosh_reg_base.h"};
+  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/cosh.h",
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -4464,7 +4492,10 @@ class TanhAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
-    return {"adv_api/math/tanh.h"};
+    return {
+        "adv_api/math/tanh.h",
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
+    };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
@@ -4801,6 +4832,8 @@ class FmodAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/fmod.h",
+        "simt_api/cpp/kernel_simt_utils.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
@@ -5472,6 +5505,7 @@ class RemainderAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "simt_api/cpp/kernel_simt_intf.h",
+        "simt_api/math_functions.h",
     };
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
