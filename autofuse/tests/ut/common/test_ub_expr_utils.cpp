@@ -123,6 +123,34 @@ TEST(AscGraphUbExprBuilderTest, BuildAggregatesQueueBufferAndTmpBuffer) {
   EXPECT_EQ(context.graph_name, "ub_alloc");
 }
 
+TEST(AscGraphUbExprBuilderTest, BuildStripsV1RepeatCapForRawTmpSize) {
+  af::AscGraph graph("raw_tmp");
+  auto node = BuildLoadNode(graph, "load");
+  ASSERT_NE(node, nullptr);
+
+  const auto raw_tmp_size = af::Symbol("raw_tmp_size");
+  af::TmpBuffer tmp_buffer;
+  tmp_buffer.id = 1;
+  tmp_buffer.buf_desc.size = af::sym::Min(raw_tmp_size, af::Symbol(255 * 256 + 32));
+  tmp_buffer.mem.alloc_type = af::AllocType::kAllocTypeBuffer;
+  tmp_buffer.mem.hardware = af::MemHardware::kMemHardwareUB;
+  node->attr.tmp_buffers.emplace_back(tmp_buffer);
+
+  ascir::UbExprContext capped_context;
+  EXPECT_EQ(ascir::AscGraphUbExprBuilder().Build(graph, capped_context), af::SUCCESS);
+  auto capped_expr = ReplaceContainers(capped_context).Replace({{raw_tmp_size, af::Symbol(80000)}}).Simplify();
+  int64_t capped_usage = 0;
+  EXPECT_TRUE(capped_expr.GetConstValue(capped_usage)) << capped_expr.Str().get();
+  EXPECT_EQ(capped_usage, 65312);
+
+  ascir::UbExprContext raw_context;
+  EXPECT_EQ(ascir::AscGraphUbExprBuilder().Build(graph, raw_context, true), af::SUCCESS);
+  auto raw_expr = ReplaceContainers(raw_context).Replace({{raw_tmp_size, af::Symbol(80000)}}).Simplify();
+  int64_t raw_usage = 0;
+  EXPECT_TRUE(raw_expr.GetConstValue(raw_usage)) << raw_expr.Str().get();
+  EXPECT_EQ(raw_usage, 80000);
+}
+
 TEST(AscGraphUbExprBuilderTest, BuildAlignsTensorBytesAfterDtypeSize) {
   af::AscGraph graph("fp16_align");
   auto &axis = graph.CreateAxis("s0", af::Symbol(33));

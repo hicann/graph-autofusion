@@ -175,10 +175,10 @@ void ApplyCommonUbExprContext(const ascir::UbExprContext &context, ModelInfo &mo
   }
 }
 
-af::Status RefreshCommonUbExprContext(const af::AscGraph &graph, ModelInfo &model_info) {
+af::Status RefreshCommonUbExprContext(const af::AscGraph &graph, ModelInfo &model_info, bool is_cv_ub_fusion) {
   ascir::UbExprContext context;
-  GE_ASSERT_SUCCESS(ascir::AscGraphUbExprBuilder().Build(graph, context), "Build common UB expr failed, graph:[%s].",
-                    graph.GetName().c_str());
+  GE_ASSERT_SUCCESS(ascir::AscGraphUbExprBuilder().Build(graph, context, is_cv_ub_fusion),
+                    "Build common UB expr failed, graph:[%s].", graph.GetName().c_str());
   ApplyCommonUbExprContext(context, model_info);
   return af::SUCCESS;
 }
@@ -201,7 +201,7 @@ static af::Status GenerateSingleModelInfoWithContext(const af::AscGraph &graph, 
   // step2: get basic expr constraint
   att::GenerateTilingExpr tiling_expr(tuning_space);
   GE_ASSERT_SUCCESS(tiling_expr.Generate(model_info), "Get basic expr constraint failed.");
-  GE_ASSERT_SUCCESS(RefreshCommonUbExprContext(graph, model_info), "Refresh common UB expr failed.");
+  GE_ASSERT_SUCCESS(RefreshCommonUbExprContext(graph, model_info, is_cv_ub_fusion), "Refresh common UB expr failed.");
   GELOGI("[DFX]End to generate model info for graph %s of tiling case id %u", graph.GetName().c_str(), tiling_case_id);
   return af::SUCCESS;
 }

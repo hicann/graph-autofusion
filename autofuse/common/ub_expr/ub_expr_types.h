@@ -50,6 +50,9 @@ struct UbExprContext {
   std::string graph_name;
   std::string template_name;
   int64_t tiling_case_id = 0;
+  // CV UBFuse 的 epilogue 内联公式不走 tiling 求解, tmp 需求按原始公式分配(无 v1 repeat cap),
+  // UB 约束须与 device 侧分配保持一致, 否则求解器会选出使 tmp 越界的 stage 尺寸。
+  bool use_raw_tmp_size = false;
 };
 
 struct UbExprBuildResult {
