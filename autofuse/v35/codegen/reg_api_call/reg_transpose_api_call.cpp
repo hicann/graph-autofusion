@@ -21,6 +21,10 @@
 #include "api_call/utils/api_call_utils.h"
 #include "ascir_node_param/ascir_node_param.h"
 
+namespace {
+constexpr uint64_t kMaxDiscontinuousAxisNum = 2U;
+}
+
 namespace codegen {
 using namespace std;
 using namespace af::ops;
@@ -51,13 +55,47 @@ uint32_t GetContinuousInnerAxisNum(const Tensor &y, std::vector<ascir::SizeExpr>
   return transpose_inner_axis_num;
 }
 
-Status ReorderInputStrideByOutputAxisOrder(const Tensor &x, const Tensor &y,
+Status ReorderInputStrideByOutputAxisOrder(const Tensor &x, const Tensor &y, std::vector<uint64_t> &origin_axis_pos,
                                            std::vector<ascir::SizeExpr> &reordered_input_stride) {
   for (size_t i = 0; i < y.vectorized_axis.size(); i++) {
     auto it = std::find(x.vectorized_axis.begin(), x.vectorized_axis.end(), y.vectorized_axis[i]);
     GE_ASSERT_TRUE(it != x.vectorized_axis.end(), "InValid axis ID in input vectorized_axis: %zu", i);
     auto axis_pos = static_cast<uint64_t>(std::distance(x.vectorized_axis.begin(), it));
+    origin_axis_pos.emplace_back(axis_pos);
     reordered_input_stride.emplace_back(x.vectorized_strides[axis_pos]);
+  }
+  return af::SUCCESS;
+}
+
+struct VecStrideActualSizeFlag {
+  std::vector<bool> input_stride_use_actual_size;
+  std::vector<bool> output_stride_use_actual_size;
+};
+
+Status GetVectorizedStrideActualSizeFlag(af::AscNodePtr node, const Tensor &tensor,
+                                         std::vector<bool> &stride_actual_size_flag) {
+  af::Expression inner_repeat = af::sym::kSymbolOne;
+  af::Expression inner_stride = af::sym::kSymbolOne;
+  stride_actual_size_flag.assign(tensor.vectorized_axis.size(), false);
+  for (int32_t i = tensor.vectorized_axis.size() - 1; i >= 0; i--) {
+    const auto axis = tensor.vectorized_axis[i];
+    auto axis_tensor_iter = std::find(tensor.axis.begin(), tensor.axis.end(), axis);
+    GE_ASSERT_TRUE(axis_tensor_iter != tensor.axis.end(), "Cannot find vectorized axis [%ld] in [%s]'s tensor.", axis,
+                   node->GetNamePtr());
+
+    const int64_t axis_index = std::distance(tensor.axis.begin(), axis_tensor_iter);
+    const auto &repeat = tensor.axis_size[axis_index];
+    const auto &stride = tensor.vectorized_strides[i];
+    if (af::SymbolicUtils::StaticCheckEq(stride, inner_repeat * inner_stride) == af::TriBool::kTrue) {
+      stride_actual_size_flag[i] = true;
+      inner_repeat = repeat;
+      inner_stride = stride;
+    } else if (af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      // 向量化轴的stride为0继续合轴，不更新inner_repeat和inner_stride
+      stride_actual_size_flag[i] = true;
+    } else {
+      break;
+    }
   }
   return af::SUCCESS;
 }
@@ -65,14 +103,30 @@ Status ReorderInputStrideByOutputAxisOrder(const Tensor &x, const Tensor &y,
 void BuildTransposeLoopParams(TransposeSpecificParams &transpose_specific_params,
                               std::vector<ascir::SizeExpr> &out_vectorized_repeats,
                               std::vector<ascir::SizeExpr> &reordered_in_vectorized_strides,
-                              std::vector<ascir::SizeExpr> &out_vectorized_strides, uint32_t transpose_total_axis_num) {
+                              std::vector<ascir::SizeExpr> &out_vectorized_strides, uint32_t transpose_total_axis_num,
+                              std::vector<uint64_t> &origin_axis_pos,
+                              VecStrideActualSizeFlag &stride_actual_size_flag) {
   for (size_t i = out_vectorized_repeats.size() - transpose_total_axis_num; i < out_vectorized_repeats.size(); i++) {
     transpose_specific_params.output_dims.emplace_back(
         CombinedExpression(ExprItemFactory::ActualSize(out_vectorized_repeats[i])));
-    transpose_specific_params.input_strides.emplace_back(
-        CombinedExpression(ExprItemFactory::Size(reordered_in_vectorized_strides[i])));
-    transpose_specific_params.output_strides.emplace_back(
-        CombinedExpression(ExprItemFactory::Size(out_vectorized_strides[i])));
+    // Transpose融合的ub-Transpose模板，如果最后两根向量化轴不连续，统一走Compact模式，
+    // 此时后两根轴的内存排布是紧凑的，因此对应的stride应该使用ActualSize。
+    // 如果最后两根向量化轴连续，此时最后一根轴一定不是切分内轴，最后两根轴使用ActualSize或Size没有区别。
+    // 除此之外，其他的轴在Load/Store使用的stride默认是Size，因此Transpose的时候也使用Size即可。
+    if (stride_actual_size_flag.input_stride_use_actual_size[origin_axis_pos[i]]) {
+      transpose_specific_params.input_strides.emplace_back(
+          CombinedExpression(ExprItemFactory::ActualSize(reordered_in_vectorized_strides[i])));
+    } else {
+      transpose_specific_params.input_strides.emplace_back(
+          CombinedExpression(ExprItemFactory::Size(reordered_in_vectorized_strides[i])));
+    }
+    if (stride_actual_size_flag.output_stride_use_actual_size[i]) {
+      transpose_specific_params.output_strides.emplace_back(
+          CombinedExpression(ExprItemFactory::ActualSize(out_vectorized_strides[i])));
+    } else {
+      transpose_specific_params.output_strides.emplace_back(
+          CombinedExpression(ExprItemFactory::Size(out_vectorized_strides[i])));
+    }
   }
 }
 
@@ -109,15 +163,6 @@ af::Status FillTransposeNodeParams(const af::AscNodePtr &node,
   return af::SUCCESS;
 }
 
-// 构建带循环偏移的 inner_offset 表达式（简化表达式合并操作）
-CombinedExpression BuildInnerOffsetWithLoopOffset(const std::string &base_offset,
-                                                  const std::vector<ascir::SizeExpr> &loop_strides) {
-  CombinedExpression inner_offset = CombinedExpression(ExprItemFactory::Direct(ge::Symbol(base_offset.c_str())));
-  CombinedExpression loop_offset = CalcInnerOffsetExpr(loop_strides);
-  inner_offset.AddExpression(loop_offset, "+");
-  return inner_offset;
-}
-
 Status TransposeRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<ascir::AxisId> &current_axis,
                                           const std::vector<std::reference_wrapper<const Tensor>> &inputs,
                                           const std::vector<std::reference_wrapper<const Tensor>> &outputs) const {
@@ -133,7 +178,11 @@ Status TransposeRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<
   api_param->template_params.emplace_back(std::to_string(transpose_inner_axis_num));
   api_param->template_params.emplace_back(std::to_string(transpose_total_axis_num));
   std::vector<ascir::SizeExpr> reordered_in_vectorized_strides;
-  GE_CHK_STATUS_RET(ReorderInputStrideByOutputAxisOrder(x, y, reordered_in_vectorized_strides));
+  std::vector<uint64_t> origin_axis_pos;
+  GE_CHK_STATUS_RET(ReorderInputStrideByOutputAxisOrder(x, y, origin_axis_pos, reordered_in_vectorized_strides));
+  VecStrideActualSizeFlag stride_actual_size_flag;
+  GetVectorizedStrideActualSizeFlag(this->node, x, stride_actual_size_flag.input_stride_use_actual_size);
+  GetVectorizedStrideActualSizeFlag(this->node, y, stride_actual_size_flag.output_stride_use_actual_size);
   // 构建 inner_offset 表达式
   CombinedExpression input_inner_offset = CombinedExpression(
       ExprItemFactory::Direct(ge::Symbol(tpipe.tiler.TensorVectorizedOffset(current_axis, x).c_str())));
@@ -165,7 +214,7 @@ Status TransposeRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<
 
   TransposeSpecificParams transpose_specific_params;
   BuildTransposeLoopParams(transpose_specific_params, out_vectorized_repeats, reordered_in_vectorized_strides,
-                           y.vectorized_strides, transpose_total_axis_num);
+                           y.vectorized_strides, transpose_total_axis_num, origin_axis_pos, stride_actual_size_flag);
   api_param->specific_params = transpose_specific_params;
   GE_ASSERT_SUCCESS(FillTransposeNodeParams(this->node, out_vectorized_repeats, reordered_in_vectorized_strides,
                                             y.vectorized_strides, transpose_inner_axis_num, transpose_total_axis_num));

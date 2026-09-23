@@ -11,6 +11,7 @@
 #include "reg_api_call_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
 #include "tensor_layout_utils.h"
+#include "ascir_ops.h"
 
 namespace {
 constexpr size_t kDmaMaxLen = 2U;
@@ -102,7 +103,7 @@ void SetLoopModeParamsExpr(const DataCopyParams &data_copy_param, LoopModeParams
   }
 }
 
-std::string GetPaddingMode(const Tensor &ub_tensor, const DataCopyParams &data_copy_param) {
+std::string GetPaddingMode(const Tensor &ub_tensor, const DataCopyParams &data_copy_param, bool has_transpose) {
   af::AscTensorAttr attr;
   attr.axis = ub_tensor.axis;
   attr.repeats = ub_tensor.axis_size;
@@ -121,7 +122,7 @@ std::string GetPaddingMode(const Tensor &ub_tensor, const DataCopyParams &data_c
   auto no_multiple_discontinuities = !info.has_multiple_discontinuities;
   GELOGD("GetPaddingMode conditions: analyze_success=%d, no_multiple_discontinuities=%d", analyze_success,
          no_multiple_discontinuities);
-  if (analyze_success && no_multiple_discontinuities && status) {
+  if (((analyze_success && no_multiple_discontinuities) || has_transpose) && status) {
     return kCompactPddingMode;
   }
   return kNormalPddingMode;
@@ -172,7 +173,7 @@ void CreateBaseEnhanceDmaCall(const Tensor &input, const Tensor &output, const D
 
 void CreateEnhanceDmaCall(const TPipe &tpipe, const Tensor &input, const Tensor &output, const string &gm_offset,
                           const DataCopyParams &data_copy_param, const ascir::SizeExpr &offset, std::stringstream &ss,
-                          bool copy_in) {
+                          bool copy_in, bool has_transpose) {
   size_t total_len = data_copy_param.repeats.size();
   DmaParams dma_param;
   SetDmaParams(tpipe, data_copy_param, dma_param, copy_in);
@@ -180,7 +181,7 @@ void CreateEnhanceDmaCall(const TPipe &tpipe, const Tensor &input, const Tensor 
   LoopModeParams loop_mode_param;
   SetLoopModeParams(tpipe, data_copy_param, loop_mode_param, copy_in);
   const Tensor &ub_tensor = copy_in ? output : input;
-  std::string padding_mode = GetPaddingMode(ub_tensor, data_copy_param);
+  std::string padding_mode = GetPaddingMode(ub_tensor, data_copy_param, has_transpose);
   if (total_len <= kDmaMaxLen) {
     CreateBaseDmaCall(input, output, dma_param, padding_mode, ss, copy_in);
     return;
@@ -207,7 +208,8 @@ void CreateEnhanceDmaCall(const TPipe &tpipe, const Tensor &input, const Tensor 
 }
 
 void SetNddmaParams(const TPipe &tpipe, const DataCopyParams &data_copy_param, NddmaParams &nddma_param,
-                    const int64_t &tensor_id, std::stringstream &ss) {
+                    const int64_t &tensor_id, std::string padding_mode, std::stringstream &ss) {
+  bool is_compact_mode = (padding_mode == kCompactPddingMode);
   nddma_param.ss_output_dims << "const int64_t output_dims_" << tensor_id << "[5] = {";
   nddma_param.ss_output_stride << "const int64_t output_stride_" << tensor_id << "[5] = {";
   nddma_param.ss_input_stride << "const int64_t input_stride_" << tensor_id << "[5] = {";
@@ -228,12 +230,15 @@ void SetNddmaParams(const TPipe &tpipe, const DataCopyParams &data_copy_param, N
   while (j > 0UL) {
     if (j == 1UL) {
       nddma_param.ss_output_dims << tpipe.tiler.ActualSize(data_copy_param.repeats[i]);
-      nddma_param.ss_output_stride << tpipe.tiler.Size(data_copy_param.ub_strides[i]);
+      nddma_param.ss_output_stride << (is_compact_mode ? tpipe.tiler.ActualSize(data_copy_param.ub_strides[i])
+                                                       : tpipe.tiler.Size(data_copy_param.ub_strides[i]));
       nddma_param.ss_input_stride << tpipe.tiler.Size(data_copy_param.gm_strides[i]);
       break;
     }
     nddma_param.ss_output_dims << tpipe.tiler.ActualSize(data_copy_param.repeats[i]) << ", ";
-    nddma_param.ss_output_stride << tpipe.tiler.Size(data_copy_param.ub_strides[i]) << ", ";
+    nddma_param.ss_output_stride << (is_compact_mode ? tpipe.tiler.ActualSize(data_copy_param.ub_strides[i])
+                                                     : tpipe.tiler.Size(data_copy_param.ub_strides[i]))
+                                 << ", ";
     nddma_param.ss_input_stride << tpipe.tiler.Size(data_copy_param.gm_strides[i]) << ", ";
     i++;
     j--;
@@ -256,7 +261,8 @@ void CreateNddmaCall(const TPipe &tpipe, const Tensor &input, const Tensor &outp
   const std::string ub_inner_offset = CalcInnerOffset(tpipe, ub_stride);
   std::stringstream ss1;
   NddmaParams nddma_param;
-  SetNddmaParams(tpipe, data_copy_param, nddma_param, output.id, ss);
+  std::string padding_mode = GetPaddingMode(output, data_copy_param, false);
+  SetNddmaParams(tpipe, data_copy_param, nddma_param, output.id, padding_mode, ss);
   ss1 << "DataCopyNddma(" << output << "[" << ub_inner_offset << "], " << input << "[" << gm_offset << " + "
       << tpipe.tiler.Size(offset) << " + " << gm_inner_offset << "], "
       << "output_dims_" << output.id << ", " << "output_stride_" << output.id << ", " << "input_stride_" << output.id
@@ -354,12 +360,12 @@ void BuildDataCopyLoopModeParams(DataCopyParams &data_copy_param, DmaSpecificPar
 
 Status BuildDataCopyApiParamInNormal(const TPipe &tpipe, CodegenApiParam &api_param,
                                      DmaSpecificParams &dma_specific_params, const Tensor &src, const Tensor &dst,
-                                     std::string &gm_offset, bool copy_in) {
+                                     std::string &gm_offset, bool copy_in, bool has_transpose) {
   DataCopyParams data_copy_param;
   GE_ASSERT_TRUE(CalculateDmaParams(tpipe, dst, copy_in ? dst : src, data_copy_param), "CalculateDmaParams failed");
   size_t total_len = data_copy_param.repeats.size();
   const Tensor &ub_tensor = copy_in ? dst : src;
-  std::string padding_mode = GetPaddingMode(ub_tensor, data_copy_param);
+  std::string padding_mode = GetPaddingMode(ub_tensor, data_copy_param, has_transpose);
   api_param.template_params.emplace_back(padding_mode);
 
   BuildDataCopyBaseParams(tpipe, data_copy_param, dma_specific_params, copy_in);
@@ -433,6 +439,16 @@ Status GenDataCopyDimParam(const CodegenApiParam &api_param, const Tiler &tiler,
   }
   ss << ");" << std::endl;
   return af::SUCCESS;
+}
+
+bool IsGraphHasTransposeNode(const af::AscNodePtr &node) {
+  const auto owner_graph = node->GetOwnerComputeGraph();
+  for (const auto &graph_node : owner_graph->GetAllNodes()) {
+    if (af::ops::IsOps<af::ascir_op::Transpose>(graph_node)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace codegen

@@ -46,7 +46,8 @@ Status LoadRegApiCall::BuildApiParam(const TPipe &tpipe, const std::vector<ascir
   } else {
     std::string gm_offset = ub.is_ub_scalar ? "0" : tpipe.tiler.Offset(current_axis, ub.axis, ub.axis_strides);
     gm_offset = gm_offset + " + " + tpipe.tiler.Size(offset_);
-    BuildDataCopyApiParamInNormal(tpipe, *api_param, dma_specific_params, gm, ub, gm_offset, true);
+    auto has_transpose = IsGraphHasTransposeNode(this->node);
+    BuildDataCopyApiParamInNormal(tpipe, *api_param, dma_specific_params, gm, ub, gm_offset, true, has_transpose);
   }
   api_param->specific_params = dma_specific_params;
 

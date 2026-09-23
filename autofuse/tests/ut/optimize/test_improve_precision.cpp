@@ -121,3 +121,120 @@ TEST_F(TestImprovePrecisionUT, NonFloatSourceCastChain_FallbackDeletesIdentity) 
 
   EXPECT_FALSE(HasNodeWithName(graph, "cast_fp32_identity"));
 }
+
+TEST_F(TestImprovePrecisionUT, LoadTransposeKeepsTransposeInLowPrecision) {
+  auto graph = AscGraphBuilder("ut_load_transpose_low_precision")
+                   .Loops({Sym("s0"), Sym("s1")})
+                   .Data("data0", 0, ge::DT_FLOAT16)
+                   .Load("load0", "data0")
+                   .Transpose("transpose0", "load0", {1, 0})
+                   .Abs("abs0", "transpose0")
+                   .Store("store0", "abs0")
+                   .Output("output0", "store0", 0, ge::DT_FLOAT16)
+                   .Build();
+
+  ASSERT_EQ(ImprovePrecisionForAscGraph(graph), af::SUCCESS);
+
+  const auto load = graph.FindNode("load0");
+  const auto transpose = graph.FindNode("transpose0");
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(transpose, nullptr);
+  ASSERT_EQ(load->GetOutDataNodes().size(), 1U);
+  EXPECT_EQ(load->GetOutDataNodes().at(0)->GetName(), "transpose0");
+  EXPECT_EQ(transpose->GetOpDesc()->GetOutputDesc(0).GetDataType(), ge::DT_FLOAT16);
+  EXPECT_EQ(transpose->outputs[0].attr.dtype, ge::DT_FLOAT16);
+  ASSERT_EQ(transpose->GetOutDataNodes().size(), 1U);
+  EXPECT_EQ(transpose->GetOutDataNodes().at(0)->GetType(), Cast::Type);
+  EXPECT_TRUE(HasCastOutputDtype(graph, ge::DT_FLOAT));
+}
+
+TEST_F(TestImprovePrecisionUT, TransposeStoreMovesDowncastBeforeTranspose) {
+  auto graph = AscGraphBuilder("ut_transpose_store_low_precision")
+                   .Loops({Sym("s0"), Sym("s1")})
+                   .Data("data0", 0, ge::DT_FLOAT16)
+                   .Load("load0", "data0")
+                   .Abs("abs0", "load0")
+                   .Transpose("transpose0", "abs0", {1, 0})
+                   .Store("store0", "transpose0")
+                   .Output("output0", "store0", 0, ge::DT_FLOAT16)
+                   .Build();
+
+  ASSERT_EQ(ImprovePrecisionForAscGraph(graph), af::SUCCESS);
+
+  const auto transpose = graph.FindNode("transpose0");
+  const auto store = graph.FindNode("store0");
+  ASSERT_NE(transpose, nullptr);
+  ASSERT_NE(store, nullptr);
+  ASSERT_EQ(transpose->GetInDataNodes().size(), 1U);
+  EXPECT_EQ(transpose->GetInDataNodes().at(0)->GetType(), Cast::Type);
+  ASSERT_EQ(transpose->GetInDataNodes().at(0)->GetInDataNodes().size(), 1U);
+  EXPECT_EQ(transpose->GetInDataNodes().at(0)->GetInDataNodes().at(0)->GetOpDesc()->GetOutputDesc(0).GetDataType(),
+            ge::DT_FLOAT);
+  EXPECT_EQ(transpose->GetInDataNodes().at(0)->GetOpDesc()->GetOutputDesc(0).GetDataType(), ge::DT_FLOAT16);
+  EXPECT_EQ(transpose->GetOpDesc()->GetOutputDesc(0).GetDataType(), ge::DT_FLOAT16);
+  EXPECT_EQ(transpose->outputs[0].attr.dtype, ge::DT_FLOAT16);
+  ASSERT_EQ(store->GetInDataNodes().size(), 1U);
+  EXPECT_EQ(store->GetInDataNodes().at(0)->GetName(), "transpose0");
+}
+
+TEST_F(TestImprovePrecisionUT, SharedTransposeKeepsStoreLocalDowncast) {
+  auto graph = AscGraphBuilder("ut_shared_transpose_store")
+                   .Loops({Sym("s0"), Sym("s1")})
+                   .Data("data0", 0, ge::DT_FLOAT)
+                   .Load("load0", "data0")
+                   .Transpose("transpose0", "load0", {1, 0})
+                   .Store("store0", "transpose0")
+                   .Output("output0", "store0", 0, ge::DT_FLOAT16)
+                   .Abs("abs0", "transpose0")
+                   .Store("store1", "abs0")
+                   .Output("output1", "store1", 1, ge::DT_FLOAT)
+                   .Build();
+
+  const auto store = graph.FindNode("store0");
+  ASSERT_NE(store, nullptr);
+  store->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  ASSERT_EQ(ImprovePrecisionForAscGraph(graph), af::SUCCESS);
+
+  const auto transpose = graph.FindNode("transpose0");
+  const auto abs = graph.FindNode("abs0");
+  ASSERT_NE(transpose, nullptr);
+  ASSERT_NE(abs, nullptr);
+  EXPECT_EQ(transpose->outputs[0].attr.dtype, ge::DT_FLOAT);
+  ASSERT_EQ(store->GetInDataNodes().size(), 1U);
+  EXPECT_EQ(store->GetInDataNodes().at(0)->GetType(), Cast::Type);
+  EXPECT_EQ(store->GetInDataNodes().at(0)->GetOpDesc()->GetOutputDesc(0).GetDataType(), ge::DT_FLOAT16);
+  ASSERT_EQ(abs->GetInDataNodes().size(), 1U);
+  EXPECT_EQ(abs->GetInDataNodes().at(0)->GetName(), "transpose0");
+}
+
+TEST_F(TestImprovePrecisionUT, SharedTransposeMovesDowncastWhenAllStoresUseSameLowPrecision) {
+  auto graph = AscGraphBuilder("ut_shared_transpose_low_precision_stores")
+                   .Loops({Sym("s0"), Sym("s1")})
+                   .Data("data0", 0, ge::DT_FLOAT)
+                   .Load("load0", "data0")
+                   .Abs("compute0", "load0")
+                   .Transpose("transpose0", "compute0", {1, 0})
+                   .Store("store0", "transpose0")
+                   .Output("output0", "store0", 0, ge::DT_FLOAT16)
+                   .Store("store1", "transpose0")
+                   .Output("output1", "store1", 1, ge::DT_FLOAT16)
+                   .Build();
+
+  const auto store0 = graph.FindNode("store0");
+  const auto store1 = graph.FindNode("store1");
+  ASSERT_NE(store0, nullptr);
+  ASSERT_NE(store1, nullptr);
+  store0->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  store1->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  ASSERT_EQ(ImprovePrecisionForAscGraph(graph), af::SUCCESS);
+
+  const auto transpose = graph.FindNode("transpose0");
+  ASSERT_NE(transpose, nullptr);
+  ASSERT_EQ(transpose->GetInDataNodes().size(), 1U);
+  EXPECT_EQ(transpose->GetInDataNodes().at(0)->GetType(), Cast::Type);
+  EXPECT_EQ(transpose->GetInDataNodes().at(0)->GetOpDesc()->GetOutputDesc(0).GetDataType(), ge::DT_FLOAT16);
+  EXPECT_EQ(transpose->outputs[0].attr.dtype, ge::DT_FLOAT16);
+  EXPECT_EQ(store0->GetInDataNodes().at(0)->GetName(), "transpose0");
+  EXPECT_EQ(store1->GetInDataNodes().at(0)->GetName(), "transpose0");
+  EXPECT_EQ(CountNodesByType(graph, Cast::Type), 1U);
+}
