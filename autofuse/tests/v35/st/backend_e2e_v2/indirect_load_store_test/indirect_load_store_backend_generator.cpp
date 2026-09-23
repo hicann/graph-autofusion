@@ -12,6 +12,7 @@
 #define AUTOFUSE_TESTS_V35_ST_BACKEND_E2E_V2_INDIRECT_LOAD_STORE_TEST_INDIRECT_LOAD_BACKEND_GENERATOR_COMMON_H_
 
 #include <algorithm>
+#include <cstdio>
 #include <array>
 #include <cstdlib>
 #include <fstream>
@@ -253,6 +254,52 @@ inline void KeepOnlyTemplate(ascir::FusedScheduledResult &result, ascir::Templat
                        [template_id](const auto &candidate) { return !ContainsTemplate(candidate, template_id); }),
         candidates.end());
   }
+  // input_nodes/output_nodes 中的代表指针指向被过滤候选图的 IO 节点；erase 析构候选图后
+  // 这些指针悬空，codegen/att 解引用会访问已释放内存。将代表重绑到首个保留候选图内
+  // 同 index 的 Data/Output 节点，保持 IO 顺序（index 升序）与名字语义不变。
+  // note: io_nodes 内的代表指针可能悬空，禁止解引用；index 读取失败时保持原指针不动。
+  const auto rebind = [&result](std::vector<af::AscNodePtr> &io_nodes, bool for_output) {
+    if (result.node_idx_to_scheduled_results.empty()) {
+      return;
+    }
+    std::multimap<int64_t, af::AscNodePtr> alive_by_index;
+    for (const auto &candidates : result.node_idx_to_scheduled_results) {
+      for (const auto &candidate : candidates) {
+        for (const auto &group : candidate.schedule_groups) {
+          for (const auto &impl_graph : group.impl_graphs) {
+            for (const auto &raw_node : impl_graph.GetAllNodes()) {
+              const auto node = std::dynamic_pointer_cast<af::AscNode>(raw_node);
+              if (node == nullptr || node->attr.ir_attr == nullptr) {
+                continue;
+              }
+              const bool matches = for_output ? af::ops::IsOps<af::ascir_op::Output>(node)
+                                              : (af::ops::IsOps<af::ascir_op::Data>(node) ||
+                                                 af::ops::IsOps<af::ascir_op::ScalarData>(node));
+              if (!matches) {
+                continue;
+              }
+              int64_t index = -1;
+              if (node->attr.ir_attr->GetAttrValue("index", index) == af::SUCCESS && index >= 0) {
+                alive_by_index.emplace(index, node);
+              }
+            }
+          }
+        }
+      }
+    }
+    if (alive_by_index.empty()) {
+      return;
+    }
+    std::vector<af::AscNodePtr> rebound;
+    rebound.reserve(io_nodes.size());
+    for (size_t position = 0UL; position < io_nodes.size(); ++position) {
+      const auto found = alive_by_index.find(static_cast<int64_t>(position));
+      rebound.emplace_back(found != alive_by_index.cend() ? found->second : io_nodes[position]);
+    }
+    io_nodes = std::move(rebound);
+  };
+  rebind(result.input_nodes, false);
+  rebind(result.output_nodes, true);
 }
 
 inline ascir::TemplateId GetExpectedTemplate(bool expect_simt, bool expect_sk) {
@@ -319,6 +366,29 @@ inline void GenerateForTemplate(const af::ComputeGraphPtr &graph, const std::map
                                 ascir::TemplateId expected_template, codegen::CodegenResult &result) {
   ascir::FusedScheduledResult scheduled_result;
   ASSERT_TRUE(SelectTemplate(graph, expected_template, scheduled_result));
+  {
+    // 诊断:output_nodes 的代表 Output 的 owner graph vs 存活 impl_graph
+    for (const auto &out_node : scheduled_result.output_nodes) {
+      const auto owner = out_node == nullptr ? nullptr : out_node->GetOwnerComputeGraph();
+      std::string alive;
+      for (auto &per_node : scheduled_result.node_idx_to_scheduled_results) {
+        for (auto &sr : per_node) {
+          for (auto &sg : sr.schedule_groups) {
+            for (auto &ig : sg.impl_graphs) {
+              for (const auto &n : ig.GetAllNodes()) {
+                if (n.get() == out_node.get()) {
+                  alive = ig.GetName();
+                }
+              }
+            }
+          }
+        }
+      }
+      fprintf(stderr, "[REP-DIAG] output_nodes rep[%s] owner[%s] alive_in[%s]\n",
+              out_node == nullptr ? "<null>" : out_node->GetNamePtr(),
+              owner == nullptr ? "<null>" : owner->GetName().c_str(), alive.empty() ? "<DEAD>" : alive.c_str());
+    }
+  }
   codegen::Codegen codegen(codegen::CodegenOptions{});
   ASSERT_EQ(codegen.Generate(shape_info, scheduled_result, result), af::SUCCESS);
 }
@@ -640,9 +710,16 @@ void ExpectPostReduceSimtFramework(const std::string &kernel) {
   ASSERT_GT(arguments.size(), 5UL);
   EXPECT_EQ(arguments[3UL], actual_size);
   EXPECT_TRUE(ContainsInOrder(arguments[4UL], {"block_dim_offset", "indirect_load_outerTb", offset_scale.c_str()}));
-  EXPECT_TRUE(ContainsInOrder(
-      function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert", "// IndirectLoad SIMT", simt_api,
-                 actual_size.c_str(), "PipeBarrier<PIPE_V>", "ReduceSum", "DataCopyPadExtend"}));
+  if (function.find("for (int indirect_load_outert") == std::string::npos) {
+    // solve_tile_size 新形态（post-Reduce）：tile 内多行由 solved tile-inner axis 交给
+    // SIMT API 一次批量处理，不再生成逐行 outert 循环。
+    EXPECT_TRUE(ContainsInOrder(
+        function, {"// IndirectLoad SIMT", simt_api, "PipeBarrier<PIPE_V>", "ReduceSum", "DataCopyPadExtend"}));
+  } else {
+    EXPECT_TRUE(ContainsInOrder(
+        function, {"for (int indirect_load_outerTb", "for (int indirect_load_outert", "// IndirectLoad SIMT", simt_api,
+                   actual_size.c_str(), "PipeBarrier<PIPE_V>", "ReduceSum", "DataCopyPadExtend"}));
+  }
 }
 
 void ExpectNoReduceSimtFramework(const std::string &kernel) {
@@ -2698,7 +2775,8 @@ TEST_F(TestBackendIndirectLoadBroadcastE2e, IndirectLoadBroadcastCodegen) {
 #if defined(IL_USER_FANOUT) || defined(IL_USER_FANOUT_SIDE_INPUT) || defined(IL_USER_SIDE_INPUT_FANOUT) ||            \
     defined(IL_CASE_BROADCAST_WHERE) || defined(IL_GRAPH_HINT_REDUCE) || defined(IL_USER_MASKED_EMBEDDING_MINIMAL) || \
     defined(IL_USER_MASKED_EMBEDDING_SUM_FULL) || defined(IL_USER_POSITION_BIAS) || defined(IL_USER_EMBEDDING_SUM) || \
-    defined(IL_USER_LAYERNORM) || defined(IL_USER_EMBEDDING_EXP_ABS_ADD) || defined(IL_DUAL_IL_GATHER) ||             \
+    defined(IL_USER_EMBEDDING_MUL) || defined(IL_USER_LAYERNORM) || defined(IL_USER_LAYERNORM_SIMD) ||                \
+    defined(IL_USER_EMBEDDING_EXP_ABS_ADD) || defined(IL_USER_SOFTMAX) || defined(IL_DUAL_IL_GATHER) ||               \
     defined(IL_GRAPH_HINT_EMBEDDING_SLICE) || defined(IL_USER_POSITION_BIAS_EXP_SUM)
 /**
  * Copyright (c) 2026 Huawei Technologies Co., Ltd.
@@ -3645,6 +3723,130 @@ std::shared_ptr<af::AscGraph> CreateGraphHintEmbeddingSliceSubGraph() {
   SetView(store, axes, {rows, columns}, {columns, af::ops::One}, af::DT_FLOAT);
 
   af::ascir_op::Output output("graph_hint/output");
+  graph->AddNode(output);
+  output.ir_attr.SetIndex(0);
+  output.x = store.y;
+  output.y.dtype = af::DT_FLOAT;
+  return graph;
+}
+
+#elif defined(IL_USER_SOFTMAX)
+// gather(axis=0) -> +bias -> +bmm -> 尾轴归约 softmax pattern -> store。
+// 验证 gather+softmax 融合候选在副本内完成 Softmax 替换并发射专用 SoftmaxAR 接口。
+constexpr int64_t kUserSoftmaxRows = 16;
+constexpr int64_t kUserSoftmaxDim = 64;
+constexpr int64_t kUserSoftmaxTableRows = 64;
+constexpr char kUserSoftmaxGraphName[] = "user_softmax";
+
+std::shared_ptr<af::AscGraph> CreateUserSoftmaxSubGraph() {
+  auto graph = std::make_shared<af::AscGraph>(kUserSoftmaxGraphName);
+  const auto rows = graph->CreateSizeVar(kUserSoftmaxRows);
+  const auto dim = graph->CreateSizeVar(kUserSoftmaxDim);
+  const auto table_rows = graph->CreateSizeVar(kUserSoftmaxTableRows);
+  const auto a0 = graph->CreateAxis("a0", rows).id;
+  const auto a1 = graph->CreateAxis("a1", dim).id;
+  const std::vector<af::AxisId> axes = {a0, a1};
+  const std::vector<af::Expression> full = {rows, dim};
+  const std::vector<af::Expression> full_strides = {dim, af::ops::One};
+  const std::vector<af::Expression> row = {rows, af::ops::One};
+  const std::vector<af::Expression> row_strides = {af::ops::One, af::ops::Zero};
+  const std::vector<af::Expression> reduce = {rows, af::ops::One};
+  const std::vector<af::Expression> reduce_strides = {af::ops::One, af::ops::Zero};
+
+  af::ascir_op::Data indices("indices", *graph);
+  indices.ir_attr.SetIndex(0);
+  indices.y.dtype = af::DT_INT64;
+  af::ascir_op::Load index_load("index_load");
+  graph->AddNode(index_load);
+  index_load.x = indices.y;
+  index_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(index_load, axes, row, row_strides, af::DT_INT64);
+  af::ascir_op::Broadcast index_broadcast("index_broadcast");
+  graph->AddNode(index_broadcast);
+  index_broadcast.x = index_load.y;
+  SetView(index_broadcast, axes, full, full_strides, af::DT_INT64);
+
+  af::ascir_op::Data embedding("embedding", *graph);
+  embedding.ir_attr.SetIndex(1);
+  embedding.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load embedding_load("embedding_load");
+  graph->AddNode(embedding_load);
+  embedding_load.x = embedding.y;
+  embedding_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(embedding_load, axes, {table_rows, dim}, full_strides, af::DT_FLOAT);
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  graph->AddNode(indirect_load);
+  indirect_load.x1 = embedding_load.y;
+  indirect_load.x2 = index_broadcast.y;
+  indirect_load.ir_attr.SetAxis(0);
+  indirect_load.ir_attr.SetNegative_index_support(true);
+  indirect_load.ir_attr.SetNeed_check_bound(true);
+  indirect_load.ir_attr.SetMax(table_rows);
+  SetView(indirect_load, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::Data bias("bias", *graph);
+  bias.ir_attr.SetIndex(2);
+  bias.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load bias_load("bias_load");
+  graph->AddNode(bias_load);
+  bias_load.x = bias.y;
+  bias_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(bias_load, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Add bias_add("bias_add");
+  graph->AddNode(bias_add);
+  bias_add.x1 = indirect_load.y;
+  bias_add.x2 = bias_load.y;
+  SetView(bias_add, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::Data bmm("bmm", *graph);
+  bmm.ir_attr.SetIndex(3);
+  bmm.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load bmm_load("bmm_load");
+  graph->AddNode(bmm_load);
+  bmm_load.x = bmm.y;
+  bmm_load.ir_attr.SetOffset(af::sym::kSymbolZero);
+  SetView(bmm_load, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Add bmm_add("bmm_add");
+  graph->AddNode(bmm_add);
+  bmm_add.x1 = bias_add.y;
+  bmm_add.x2 = bmm_load.y;
+  SetView(bmm_add, axes, full, full_strides, af::DT_FLOAT);
+
+  af::ascir_op::Max max_op("max");
+  graph->AddNode(max_op);
+  max_op.x = bmm_add.y;
+  SetView(max_op, axes, reduce, reduce_strides, af::DT_FLOAT);
+  af::ascir_op::Broadcast max_broadcast("max_broadcast");
+  graph->AddNode(max_broadcast);
+  max_broadcast.x = max_op.y;
+  SetView(max_broadcast, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Sub sub_op("sub");
+  graph->AddNode(sub_op);
+  sub_op.x1 = bmm_add.y;
+  sub_op.x2 = max_broadcast.y;
+  SetView(sub_op, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Exp exp_op("exp");
+  graph->AddNode(exp_op);
+  exp_op.x = sub_op.y;
+  SetView(exp_op, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Sum sum_op("sum");
+  graph->AddNode(sum_op);
+  sum_op.x = exp_op.y;
+  SetView(sum_op, axes, reduce, reduce_strides, af::DT_FLOAT);
+  af::ascir_op::Broadcast sum_broadcast("sum_broadcast");
+  graph->AddNode(sum_broadcast);
+  sum_broadcast.x = sum_op.y;
+  SetView(sum_broadcast, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::TrueDiv true_div("true_div");
+  graph->AddNode(true_div);
+  true_div.x1 = exp_op.y;
+  true_div.x2 = sum_broadcast.y;
+  SetView(true_div, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Store store("store");
+  graph->AddNode(store);
+  store.x = true_div.y;
+  SetView(store, axes, full, full_strides, af::DT_FLOAT);
+  af::ascir_op::Output output("output");
   graph->AddNode(output);
   output.ir_attr.SetIndex(0);
   output.x = store.y;
@@ -5246,6 +5448,29 @@ TEST_F(TestBackendUserLayerNormE2e, GeneratesUserLayerNormKernel) {
   codegen::CodegenResult result;
   ASSERT_EQ(codegen.Generate({}, scheduled_result, result), af::SUCCESS);
   EXPECT_NE(result.kernel.find("IndirectLoad"), std::string::npos);
+  indirect_load_test::WriteGeneratedFiles(result);
+}
+#elif defined(IL_USER_SOFTMAX)
+using TestBackendUserSoftmaxE2e = indirect_load_test::BackendE2e;
+
+// gather 输出经 +bias / +bmm 双输入 Add 链后接尾轴归约 softmax pattern 的融合场景：
+// 候选图内应替换为 Softmax 专用节点并发射 SoftmaxAR 接口（与分开执行的 softmax kernel
+// 相同的专用路径），而非 Max/Sum 双 Reduce 的通用复合形态。
+TEST_F(TestBackendUserSoftmaxE2e, GeneratesUserSoftmaxKernel) {
+  indirect_load_test::VariadicBackendGraph backend(
+      kUserSoftmaxGraphName, {af::DT_INT64, af::DT_FLOAT, af::DT_FLOAT, af::DT_FLOAT}, {af::DT_FLOAT});
+  const auto graph = backend.Finalize(CreateUserSoftmaxSubGraph());
+  ASSERT_NE(graph, nullptr);
+  ascir::FusedScheduledResult scheduled_result;
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{.graph_type = optimize::GraphType::kFusedAscBackend});
+  ASSERT_EQ(optimizer.Optimize(graph, scheduled_result), af::SUCCESS);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+  ASSERT_EQ(codegen.Generate({}, scheduled_result, result), af::SUCCESS);
+  EXPECT_NE(result.kernel.find("IndirectLoadSimt"), std::string::npos);
+  EXPECT_NE(result.kernel.find("SoftmaxAR"), std::string::npos);
+  EXPECT_NE(result.kernel.find("bias_add"), std::string::npos);
+  EXPECT_NE(result.kernel.find("bmm_add"), std::string::npos);
   indirect_load_test::WriteGeneratedFiles(result);
 }
 #elif defined(IL_GRAPH_HINT_SIMD_REPRO)

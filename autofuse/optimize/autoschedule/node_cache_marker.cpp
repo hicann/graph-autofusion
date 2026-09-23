@@ -13,7 +13,7 @@
 #include <queue>
 #include "schedule_utils.h"
 #include "common_utils.h"
-#include "axis_type_info.h"
+#include "indirect_load_utils.h"
 
 namespace optimize::autoschedule {
 // 获取对端节点的输出attr，作为当前节点的输入attr
@@ -276,6 +276,32 @@ af::Status NodeCacheMarker::MarkIfNodeNeedsCache() {
   }
   visited_nodes_.clear();
   cache_start_nodes_.clear();
+
+  // Gather+Norm 中 weight/bias 的 Broadcast 可能在调度前被判定为冗余并删除。
+  // 此时参数 Load 仍是固定地址的跨循环输入，但已失去 Broadcast 反向遍历
+  // 建立的缓存起点；显式恢复该缓存起点，保证参数只在缓存边界搬运一次。
+  if (ascgen_utils::indirect_load::FindIndirectLoadNode(graph_) != nullptr) {
+    for (const auto &node : graph_.GetAllNodes()) {
+      if (!ScheduleUtils::IsLoad(node) || node->outputs().empty() || node->GetOutDataNodesSize() == 0UL) {
+        continue;
+      }
+      const auto &output = node->outputs()[0]->attr;
+      const bool is_broadcast_load = std::any_of(output.strides.begin(), output.strides.end(), [](const auto &stride) {
+        return af::SymbolicUtils::StaticCheckEq(stride, af::sym::kSymbolZero) == af::TriBool::kTrue;
+      });
+      if (!is_broadcast_load) {
+        continue;
+      }
+      const auto consumer = std::dynamic_pointer_cast<af::AscNode>(*node->GetOutDataNodes().begin());
+      if (consumer == nullptr || !ScheduleUtils::IsElewise(consumer)) {
+        continue;
+      }
+      MarkNodeCacheable(node);
+      AddToCacheStartSet(node);
+      GELOGD("[IndirectLoad] Mark fixed-parameter Load[%s] as cache start for consumer[%s].", node->GetNamePtr(),
+             consumer->GetNamePtr());
+    }
+  }
   for (const auto &node : store_nodes) {
     GE_WARN_ASSERT(ReverseDfsCacheNode(node) == af::SUCCESS);
   }

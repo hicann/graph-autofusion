@@ -17,6 +17,7 @@
 #include "platform/common/base_alignment_strategy.h"
 #include "schedule_utils.h"
 #include "node_cache_marker.h"
+#include "task_generator/simt_boundary_sync.h"
 
 namespace {
 bool CompareByOrderInTensorAxis(const int64_t &lhs, const int64_t &rhs, const std::vector<int64_t> &tensor_axes) {
@@ -528,6 +529,7 @@ Status ApplyIndirectLoadTemplateMerge(ascir::ImplGraph &graph, const af::AscNode
   }
   const auto axis = graph.FindAxis(axis_id);
   GE_ASSERT_NOTNULL(axis, "IndirectLoad template axis[%ld] is not found.", axis_id);
+  const std::vector<int64_t> merged_from = axis->from;
   if (axis->type == ascir::Axis::Type::kAxisTypeMerged) {
     GELOGD("[IndirectLoad] Graph[%s] apply template merge axis[%ld] for node[%s].", graph.GetName().c_str(), axis_id,
            node->GetNamePtr());
@@ -545,6 +547,41 @@ Status ApplyIndirectLoadTemplateMerge(ascir::ImplGraph &graph, const af::AscNode
     if (merge_tensor_axis) {
       GE_ASSERT_TRUE(graph.ApplyTensorAxisMerge(node, axis_id, {axis_id}),
                      "Failed to merge tensor axis[%ld] for node[%s].", axis_id, node->GetNamePtr());
+    }
+  }
+  if (merge_tensor_axis) {
+    // [vectorized_axis 一致性] tensor merge 只折叠 axis/repeats/strides，不处理
+    // vectorized_axis——merge 后旧轴失效使 vectorized_axis ⊄ axis，中间窗口
+    // （merge → 调度末尾 SyncSimtBoundaryViews 的 remap）内公共检查（如
+    // GetVectorRepeats/InitTensorMemInfo）会打出误导性 ERROR（实际为容错路径）。
+    // merge 后立即把失效旧轴替换为 merged 轴：向量化身份由 merged 轴承载，后续
+    // RemapOutputVectorizedAxes 的 direct_ancestor（IsAxisAncestorOf 自反）路径
+    // 将其映射到 split 后的 inner 轴，两级映射无缝衔接。多个旧轴折叠到同一
+    // merged 轴时去重。
+    for (const auto &output : node->outputs()) {
+      if (output == nullptr) {
+        continue;
+      }
+      std::vector<ascir::AxisId> remapped_vec;
+      remapped_vec.reserve(output->attr.vectorized_axis.size());
+      bool vec_remapped = false;
+      for (const auto vec_axis : output->attr.vectorized_axis) {
+        const bool stale =
+            std::find(output->attr.axis.begin(), output->attr.axis.end(), vec_axis) == output->attr.axis.end() &&
+            std::find(merged_from.begin(), merged_from.end(), vec_axis) != merged_from.end();
+        const ascir::AxisId mapped = stale ? axis_id : vec_axis;
+        if (stale) {
+          vec_remapped = true;
+        }
+        if (std::find(remapped_vec.begin(), remapped_vec.end(), mapped) == remapped_vec.end()) {
+          remapped_vec.emplace_back(mapped);
+        }
+      }
+      if (vec_remapped) {
+        GELOGI("[IndirectLoad] Graph[%s] node[%s] vectorized axis remapped to merged axis[%ld] after tensor merge.",
+               graph.GetName().c_str(), node->GetNamePtr(), axis_id);
+      }
+      output->attr.vectorized_axis = std::move(remapped_vec);
     }
   }
   return af::SUCCESS;
@@ -629,7 +666,10 @@ Status Scheduler::InitIndirectLoadScheduleCase() {
     return af::SUCCESS;
   }
 
-  GE_ASSERT_NOTNULL(tiling_case_.ub_tiling_y.first);
+  // post-Reduce SIMT 候选的 prebuilt tile pair 为空，延迟到 TileTiling 走通用 TileSplit
+  // 按 UB 容量求解 tile 行数；此处仅要求 prebuilt y 轴存在（固定 pair 场景该轴同样有效）。
+  GE_ASSERT_TRUE(tiling_case_.ub_tiling_id_y != kDefaultAxisId,
+                 "IndirectLoad graph[%s] has no prebuilt outer tiling axis.", graph_.GetName().c_str());
   GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetTemplateAxes(indirect_load, indirect_load_info_.axes));
   indirect_load_info_.active = true;
   return af::SUCCESS;
@@ -651,6 +691,54 @@ Status Scheduler::ApplyIndirectLoadNodeAxes(const af::AscNodePtr &node, bool &sk
   }
   skip_main_tiling = ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_main_schedule_tiling;
   if (skip_main_tiling) {
+    const auto role = ascgen_utils::indirect_load::GetTemplateRole(node);
+    const bool is_simt_role = role == ascgen_utils::indirect_load::TemplateRole::kSimtInlineTransform ||
+                              role == ascgen_utils::indirect_load::TemplateRole::kSimtFanoutBranch;
+    // SIMT 角色节点虽由 scalar evaluator 发射、跳过主 tiling 切分，但其输出可能同时
+    // 被 normal schedule 的 VF 子图消费（如 IndirectLoad 输出直连链汇入 post Reduce）。
+    // VF 分区的边界 Load 会拷贝此处 view，必须与消费者经模板 merge 改写后的 view 一致，
+    // 否则 ValidateInputTensorLoopAxis 报 input axis not in output axis。
+    // 因此 SIMT 角色节点仍需执行 tensor 轴 merge（merge_tensor_axis=true），仅跳过 tiling。
+    // 同理，kSimtInputBoundary/kSimtDirectGmBoundary/kSkInputBoundary 等边界节点也跳过主
+    // tiling，若不补 tensor 轴 merge，其 view 停留在旧轴空间（如 [0,1]），而模板 merge 已
+    // 将调度轴合并改写（[0,1] -> [2] -> [5,6,4]），BufQueAllocator::InitTensorMemInfo 遍历
+    // vectorized_axis 时会因 axis 已不存在而失败（Cannot find vectorized axis）。
+    const bool is_simt_boundary_role = role == ascgen_utils::indirect_load::TemplateRole::kSimtInputBoundary ||
+                                       role == ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary ||
+                                       role == ascgen_utils::indirect_load::TemplateRole::kSkInputBoundary;
+    if (is_simt_role || is_simt_boundary_role) {
+      GELOGD("[IndirectLoad] SIMT role node[%s] role[%d] keeps tensor axis merge before skipping main tiling.",
+             node->GetNamePtr(), static_cast<int32_t>(role));
+      // merge 前置校验：节点的调度轴需包含 outer/inner 全部成员轴才能折叠；index 广播源
+      // 等节点可能持有独立副本轴（如 z*_index，仅与输出轴同形不同 id），部分匹配时
+      // ApplySchedAxisMerge 的连续性断言会失败。此时保持节点原视图（与主线路径行为
+      // 一致：这些节点不参与模板轴折叠，由消费者侧 BroadcastBackward 等统一处理）。
+      const auto sched_has_all_members = [&graph = this->graph_](const af::AscNodePtr &n,
+                                                                 const ascir::AxisId merged_axis_id) {
+        if (merged_axis_id == af::kIdNone) {
+          return true;
+        }
+        const auto merged_axis = graph.FindAxis(merged_axis_id);
+        if (merged_axis == nullptr || merged_axis->from.empty()) {
+          return true;
+        }
+        for (const auto member : merged_axis->from) {
+          if (std::find(n->attr.sched.axis.begin(), n->attr.sched.axis.end(), member) == n->attr.sched.axis.end()) {
+            return false;
+          }
+        }
+        return true;
+      };
+      if (sched_has_all_members(node, indirect_load_info_.axes.outer_axis)) {
+        GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_info_.axes.outer_axis, true));
+      }
+      if (sched_has_all_members(node, indirect_load_info_.axes.inner_axis)) {
+        GE_ASSERT_SUCCESS(ApplyIndirectLoadTemplateMerge(graph_, node, indirect_load_info_.axes.inner_axis, false));
+      }
+      // SIMT 节点跳过主 tiling，其 tensor view 的 split 同步与 vectorized_axis 重映射
+      // 统一由 DoScheduler 末尾的 SyncSimtBoundaryViews 完成（收敛在需求自有文件
+      // simt_boundary_sync.cpp），此处不再嵌入补丁逻辑。
+    }
     return af::SUCCESS;
   }
   GE_ASSERT_SUCCESS(AddIndirectLoadSyntheticOuterAxis(node, indirect_load_info_.axes.outer_axis,
@@ -690,6 +778,19 @@ Status Scheduler::TileSplit() {
   TileTiling(tiling_case_.ub_tiling_id_x, tiling_case_.ub_tiling_x);
   TileTiling(tiling_case_.ub_tiling_id_y, tiling_case_.ub_tiling_y);
   TileTiling(tiling_case_.ub_tiling_id_r, tiling_case_.ub_tiling_r);
+
+  if (indirect_load_info_.active && indirect_load_info_.axes.tile_inner_axis == af::kIdNone &&
+      tiling_case_.ub_tiling_y.second != nullptr) {
+    // post-Reduce SIMT 可求解 tile（通用 TileSplit 产物）：TileInner（tile 内行数）加入
+    // 向量化视图前部，使其成为 API 一次处理的窗口维度而非内层循环——SIMT VF_CALL、
+    // SoftmaxAR（A=行数, R=尾轴）、Reduce 均按 tile 内多行批量执行；同时
+    // SetOuterRepeatsToOne 仅折叠外层循环轴，Reduce 输出保留行数维，避免多行
+    // 共用首行统计值的数值错误。固定 tile（SIMD/SK/无 post-Reduce SIMT）不经过此处。
+    indirect_load_info_.axes.vectorized_axes.insert(indirect_load_info_.axes.vectorized_axes.begin(),
+                                                    tiling_case_.ub_tiling_y.second->id);
+    GELOGD("[IndirectLoad] Graph[%s] prepend solved tile-inner axis[%ld] to vectorized view.", graph_.GetName().c_str(),
+           tiling_case_.ub_tiling_y.second->id);
+  }
 
   auto sorted_node_vectorized_axes = GetSortedNodeVectorizedAxes(*this);
 
@@ -759,6 +860,16 @@ Status Scheduler::DoScheduler() {
   }
   GE_CHK_STATUS_RET(SynchronizeTransposeInputSchedAxis());
   GE_CHK_STATUS_RET(RemoveRedundantBroadcastNode(graph_));
+  // IndirectLoad SIMT 边界适配（收敛在需求自有文件）：调度全部 split 完成后，
+  // 一次性将 SIMT 角色节点 tensor view 对齐到与普通节点等价的状态。普通图
+  // （无 IndirectLoad）在函数内部直接返回，零影响。
+  if (indirect_load_info_.active) {
+    const std::vector<std::pair<af::AxisPtr, af::AxisPtr>> tiled_axes_list = {
+        tiling_case_.ub_tiling_x, tiling_case_.ub_tiling_y, tiling_case_.ub_tiling_r, tiling_case_.block_tiling,
+        tiling_case_.reduce_block_tiling};
+    GE_CHK_STATUS_RET(optimize::task_generator::SyncSimtBoundaryViews(graph_, tiled_axes_list),
+                      "Failed to sync SIMT boundary views for graph[%s].", graph_.GetName().c_str());
+  }
   auto align_ret = AlignmentHandler::AlignVectorizedStrides(graph_);
   if (align_ret != af::SUCCESS) {
     return align_ret;  // 返回 UNSUPPORTED 让上层跳过这个模板

@@ -145,6 +145,48 @@ std::string JoinSizeExprs(const std::vector<ascir::SizeExpr> &exprs, const TPipe
   return ss.str();
 }
 
+// 判断 load 的物理视图是否与输出逻辑视图覆盖同一 dense 连续区域（语义等价）：
+// 1) load 视图各有效轴（size!=1 且 stride!=0）的 stride 满足后缀乘积连续性；
+// 2) 所有有效轴 sizes 的乘积与输出视图 sizes 乘积符号相等。
+// 满足时 load 的线性偏移与 output_index 相同，可直接使用 output_index，无需坐标
+// 重建。调度会把普通节点视图 merge/split 到模板轴空间（如 outer 被拆为
+// [s3*s4*s5/Tb, Tb]），符号级全等比较会漏判这类等价视图，导致在 SIMT 静态成员
+// 函数（无 tiling data 参数）内生成非法 t-> 求解变量引用。
+bool IsDenseEquivalentView(const ascgen_utils::indirect_load::LogicalTensorView &load_view,
+                           const ascgen_utils::indirect_load::LogicalTensorView &output_view) {
+  if (load_view.sizes.size() != load_view.strides.size() || output_view.sizes.size() != output_view.strides.size()) {
+    return false;
+  }
+  af::Expression load_total = af::sym::kSymbolOne;
+  af::Expression expected_stride = af::sym::kSymbolOne;
+  bool has_dense_tail = false;
+  for (size_t rev = 0UL; rev < load_view.sizes.size(); ++rev) {
+    const size_t dim = load_view.sizes.size() - 1UL - rev;
+    const bool unit_size = af::SymbolicUtils::StaticCheckEq(load_view.sizes[dim], af::ops::One) == af::TriBool::kTrue;
+    const bool zero_stride =
+        af::SymbolicUtils::StaticCheckEq(load_view.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue;
+    if (unit_size || zero_stride) {
+      continue;  // 退化轴不参与连续性与计数
+    }
+    if (!has_dense_tail) {
+      // 最右侧有效轴必须 stride==1
+      if (af::SymbolicUtils::StaticCheckEq(load_view.strides[dim], af::ops::One) != af::TriBool::kTrue) {
+        return false;
+      }
+      has_dense_tail = true;
+    } else if (af::SymbolicUtils::StaticCheckEq(load_view.strides[dim], expected_stride) != af::TriBool::kTrue) {
+      return false;
+    }
+    expected_stride = af::sym::Mul(load_view.sizes[dim], expected_stride);
+    load_total = af::sym::Mul(load_view.sizes[dim], load_total);
+  }
+  af::Expression output_total = af::sym::kSymbolOne;
+  for (const auto &size : output_view.sizes) {
+    output_total = af::sym::Mul(size, output_total);
+  }
+  return af::SymbolicUtils::StaticCheckEq(load_total, output_total) == af::TriBool::kTrue;
+}
+
 af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
                                                   const std::vector<af::AscNodePtr> &nodes,
                                                   const SimtLoadMetadataMap &load_metadata, const TPipe &tpipe,
@@ -191,11 +233,75 @@ af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_l
       continue;
     }
     const auto &view = load->second.physical_view;
-    GE_ASSERT_TRUE(view.sizes.size() == rank && view.strides.size() == rank,
-                   "SIMT index Load[%s] physical view rank mismatch.", node->GetNamePtr());
-    // Dense matching views need no coordinate reconstruction or host tiling expressions in the scalar body.
-    if (view.sizes == logical_view.output.sizes && view.strides == logical_view.output.strides) {
+    // 调度会把普通节点的 tensor view merge/split 到模板轴空间（如 a0 拆为
+    // [64/a0Tb, a0Tb]），视图 rank 可与输出逻辑视图不同但语义 dense 同构：等价时
+    // 直接使用 output_index，避免在 SIMT 静态成员函数（无 tiling data 参数）内生成
+    // 引用 t-> 求解变量的坐标表达式。dense 判定不要求 rank 相等，置于 rank 断言之前。
+    if (IsDenseEquivalentView(view, logical_view.output)) {
       expressions[node->GetName()] = append_load_offset(output_index_expr);
+      continue;
+    }
+    if (view.sizes.size() != rank || view.strides.size() != rank) {
+      // gather+norm 复合图的 side-input Load 可能是退化视图（全部轴 size==1，任意
+      // 位置读同一元素）：偏移恒为 0，无需坐标重建。
+      const bool degenerate = view.sizes.size() == view.strides.size() &&
+                              std::all_of(view.sizes.begin(), view.sizes.end(), [](const af::Expression &size) {
+                                return af::SymbolicUtils::StaticCheckEq(size, af::ops::One) == af::TriBool::kTrue;
+                              });
+      if (degenerate) {
+        expressions[node->GetName()] = append_load_offset("0");
+        continue;
+      }
+      // 归约为『零贡献前缀（stride==0 或 size==1）+ 常量尺寸的稠密尾段』的广播
+      // side-input（如生产 softmax 图 load4 的 [1,1,1,2048]）：正确寻址是对尾段
+      // 尺寸取模（每 tail_size 个输出元素重复一轮）。尾段尺寸必须为编译期常量：
+      // SIMT body 是静态成员函数，无 tiling data 参数，不能引用 t-> 运行时变量。
+      // （该形态源于 SIMT 角色节点视图 split 产生的 rank 差与 develop ea563ac0
+      // 强制 GM load 坐标重建的交互，与 tile 形态无关，固定 tile 同样触发。）
+      int64_t dense_tail_size = 1;
+      bool has_dense_tail = true;
+      for (size_t dim = 0UL; dim < view.sizes.size(); ++dim) {
+        const bool zero_contribution =
+            (af::SymbolicUtils::StaticCheckEq(view.strides[dim], af::ops::Zero) == af::TriBool::kTrue) ||
+            (af::SymbolicUtils::StaticCheckEq(view.sizes[dim], af::ops::One) == af::TriBool::kTrue);
+        if (zero_contribution) {
+          continue;
+        }
+        const bool unit_stride =
+            af::SymbolicUtils::StaticCheckEq(view.strides[dim], af::ops::One) == af::TriBool::kTrue;
+        int64_t tail_const = 0;
+        if (!unit_stride || !view.sizes[dim].GetConstValue(tail_const)) {
+          has_dense_tail = false;
+          break;
+        }
+        dense_tail_size *= tail_const;
+      }
+      if (has_dense_tail && dense_tail_size > 1) {
+        expressions[node->GetName()] = append_load_offset(output_index_expr + " % " + std::to_string(dense_tail_size));
+        continue;
+      }
+      // [行级广播 side-input] 尾轴零贡献（stride==0 且 size==1、其余轴稠密）的广播
+      // 形态（如生产 gather+softmax 图 load3 [8,2048,1]/[2048,1,0]）：每行读一个
+      // 值，正确寻址=行号×行宽。调度期 SIMT 边界的轴 split 会把视图改写为 rank
+      // 不匹配且尺寸符号化（tiling 变量）形态——稠密尾段取模兜底要求编译期常量而
+      // 失效（历史回归：带 arange/matmul 的图 e46cedb6）。行号定位不依赖被 split
+      // 改写的尺寸：行宽=logical 输出除首轴外的元素积（logical_view 与 split 无关）。
+      {
+        const auto load_it = load_metadata.find(node->GetName());
+        if (load_it != load_metadata.end() && load_it->second.is_row_broadcast && !logical_view.output.sizes.empty()) {
+          // 语义：读 [行,列] 的值沿尾轴广播（原始视图 [行,列,1]/strides=[行宽,1,0]）。
+          // 正确寻址 = output_index 去掉零贡献尾维：/ 尾轴宽（logical 输出尾轴，与
+          // split 改写无关）。行首×行宽的折叠是错误语义（会把列方向也折叠）。
+          const auto &tail_size = logical_view.output.sizes.back();
+          int64_t tail_const = 0;
+          if (tail_size.GetConstValue(tail_const) && tail_const > 0) {
+            expressions[node->GetName()] =
+                append_load_offset("(" + output_index_expr + ") / " + std::to_string(tail_const));
+            continue;
+          }
+        }
+      }
+      GE_ASSERT_TRUE(false, "SIMT index Load[%s] physical view rank mismatch.", node->GetNamePtr());
       continue;
     }
 
@@ -1192,6 +1298,51 @@ Status IndirectLoadRegApiCall::GenerateSimd(const TPipe &tpipe, const std::vecto
   const auto tmp_iter = tmp_buf_id.find(-1L);
   if (simd_metadata_.fallback == ascgen_utils::indirect_load::SimdFallback::kStrided) {
     GE_ASSERT_TRUE(tmp_iter != tmp_buf_id.end(), "IndirectLoad SIMD requires an API-level tmp buffer.");
+  }
+  // [padded 视图兜底降级] codegen 期为最终视图（通用对齐已完成），不依赖 lowering
+  // metadata 序列化时的视图时机：输出 tensor 的向量化跨度（与 Tiler::TensorActualSize
+  // 同源）大于逻辑元素积（Π尾轴前有效宽）即视图被 pad——dense facade（RegGather
+  // RunReuse）线性稠密写出与 padded 视图布局冲突（index 按窗口线性读越过真实数据
+  // → 越界读表 AIC 341；strided 解释稠密数据 → 数值错乱），强制降级 strided facade
+  // （按视图 strides 逐行写，行内 pad 由 ReduceInit OptImpl 清中性值）。SIMD 模板
+  // 的 tmp 恒分配（CalcTmpBufSize 只判模板），降级无 tmp 缺口。
+  {
+    // codegen::Tensor 直接持有 axis/axis_size/axis_strides 与向量化视图字段，
+    // axis_size 即视图轴宽（Tiler::TensorActualSize 同源）。
+    af::Expression y_span = af::sym::kSymbolOne;
+    af::Expression y_product = af::sym::kSymbolOne;
+    bool y_view_ok = output.vectorized_axis.size() == output.vectorized_strides.size() &&
+                     !output.vectorized_axis.empty() && output.axis.size() == output.axis_size.size();
+    if (y_view_ok) {
+      for (size_t dim = 0UL; dim < output.vectorized_axis.size(); ++dim) {
+        const auto axis_it = std::find(output.axis.begin(), output.axis.end(), output.vectorized_axis[dim]);
+        if (axis_it == output.axis.end()) {
+          y_view_ok = false;
+          break;
+        }
+        const size_t axis_pos_y = static_cast<size_t>(std::distance(output.axis.begin(), axis_it));
+        const auto &y_stride = output.vectorized_strides[dim];
+        if (af::SymbolicUtils::StaticCheckEq(y_stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
+          continue;
+        }
+        y_span = y_span + (output.axis_size[axis_pos_y] - af::sym::kSymbolOne) * y_stride;
+        y_product = y_product * output.axis_size[axis_pos_y];
+      }
+    }
+    const bool y_padded = y_view_ok && output.vectorized_axis.size() > 1UL &&
+                          af::SymbolicUtils::StaticCheckGt(y_span, y_product) == af::TriBool::kTrue;
+    GELOGI("[IndirectLoad] SIMD fallback check: node[%s] span[%s] product[%s] padded[%d] fallback[%d].",
+           node_name.c_str(), y_span.Str().get(), y_product.Str().get(), static_cast<int>(y_padded),
+           static_cast<int>(simd_metadata_.fallback));
+    if (y_padded && simd_metadata_.fallback != ascgen_utils::indirect_load::SimdFallback::kStrided) {
+      GELOGW("[IndirectLoad] SIMD dense fallback downgraded to strided: node[%s] padded view span[%s] > product[%s].",
+             node_name.c_str(), y_span.Str().get(), y_product.Str().get());
+      simd_metadata_.fallback = ascgen_utils::indirect_load::SimdFallback::kStrided;
+      if (tmp_iter == tmp_buf_id.end()) {
+        GE_ASSERT_TRUE(false, "IndirectLoad SIMD strided downgrade requires an API-level tmp buffer, node[%s].",
+                       node_name.c_str());
+      }
+    }
   }
 
   std::string input_dtype;

@@ -159,6 +159,13 @@ struct SimtLoadMetadata {
   SimtLoadAddressSource address_source = SimtLoadAddressSource::kOutputOffset;
   bool use_logical_offset = false;
   LogicalTensorView physical_view;
+  // [行级广播 side-input] 尾轴 stride==0 且 size==1 的广播 side-input（每行读一个
+  // 标量，如生产 gather+softmax 图的 load3 [8,2048,1]/strides=[2048,1,0]）：调度期
+  // SIMT 边界的轴 split/merge 会把其视图改写为 rank 不匹配且尾段尺寸符号化的形态，
+  // codegen 的兜底（稠密尾段取模）要求编译期常量而失效。此处保留改写前的原始
+  // 视图，兜底时按原始语义重建坐标（行号定位，与 split 无关）。
+  LogicalTensorView original_view;
+  bool is_row_broadcast = false;
 };
 
 struct SimtOutputChainMetadata {
