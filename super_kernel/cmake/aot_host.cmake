@@ -8,7 +8,10 @@
 
 include_guard(GLOBAL)
 get_filename_component(ASCENDSK_ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
-file(GLOB ASCENDSK_HOST_SOURCES CONFIGURE_DEPENDS "${ASCENDSK_ROOT_DIR}/src/aot/*.cpp")
+file(GLOB ASCENDSK_HOST_SOURCES CONFIGURE_DEPENDS
+    "${ASCENDSK_ROOT_DIR}/src/aot/*.cpp"
+    "${ASCENDSK_ROOT_DIR}/src/aot/common/*.cpp"
+)
 
 function(configure_ascendsk_host target)
     target_compile_options(${target} PRIVATE
@@ -31,6 +34,7 @@ function(configure_ascendsk_host target)
     target_include_directories(${target}
         PUBLIC ${ASCENDSK_ROOT_DIR}/include/super_kernel
         PRIVATE ${ASCENDSK_ROOT_DIR} ${ASCENDSK_ROOT_DIR}/src/aot
+                ${ASCENDSK_ROOT_DIR}/src/aot/common
     )
     target_link_options(${target} PRIVATE
         -Wl,-z,relro
