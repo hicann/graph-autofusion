@@ -194,6 +194,44 @@ bool ChainReachesIndirectLoad(const NodePtr &start_node) {
   return false;
 }
 
+bool IsNextViewOp(const NodePtr &next_node);
+
+// 广播后移会把 Broadcast 搬到 compute 链的输出侧；若下游存在 view 算子，跨该 view 的统一 broadcast 展开会
+// 破坏其轴语义（Concat 沿轴逐输入拼接、Slice 裁剪、Split 切分、Gather 索引、Reduce 归约、Transpose 重排等），
+// 因此该场景必须禁止后移；Broadcast 本身可合并除外。从 start_node 出发（含自身）沿后继 BFS，命中非 Broadcast
+// 的 view 算子时返回 true。
+bool DownstreamViewOpBlocksBackward(const NodePtr &start_node) {
+  if (start_node == nullptr) {
+    return false;
+  }
+  std::unordered_set<NodePtr> visited;
+  std::vector<NodePtr> pending = {start_node};
+  while (!pending.empty()) {
+    NodePtr cur_node = pending.back();
+    pending.pop_back();
+    if (cur_node == nullptr || !visited.insert(cur_node).second) {
+      continue;
+    }
+    if (cur_node->GetType() != kBroadcastType && IsNextViewOp(cur_node)) {
+      GELOGE(af::FAILED, "Downstream view op[%s](%s) blocks broadcast backward.", cur_node->GetName().c_str(),
+             cur_node->GetType().c_str());
+      return true;
+    }
+    const auto out_anchor_size = cur_node->GetAllOutDataAnchorsSize();
+    for (uint32_t i = 0U; i < out_anchor_size; ++i) {
+      std::vector<NodePtr> peer_in_nodes;
+      if (GetPeerInNodes(cur_node, peer_in_nodes, static_cast<int32_t>(i)) == SUCCESS) {
+        for (const auto &peer_in_node : peer_in_nodes) {
+          if (peer_in_node != nullptr) {
+            pending.push_back(peer_in_node);
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
 void RemoveDuplicates(std::vector<NodePtr> &vec) {
   std::unordered_set<NodePtr> seen;
   seen.reserve(vec.size());
@@ -1053,6 +1091,9 @@ bool CheckAllBranchesCanBackward(const NodePtr &multi_ref_node, NodePtr &merge_n
   }
 
   merge_node = first_merge_node;
+  if (merge_node != nullptr && merge_node->GetInDataNodesSize() > all_branch_nodes.size()) {
+    return false;
+  }
   return true;
 }
 
@@ -1190,6 +1231,16 @@ Status ProcessMultiRefBroadcastBackward(AscGraph &graph, bool &is_changed) {
       continue;
     }
     if (!CheckAllBranchesSupportBackward(all_branch_nodes, candidate_node)) {
+      continue;
+    }
+    // 守卫④：multi-ref 广播将整体后移到 merge 节点之后；若 merge 节点（含自身）或其下游存在 view 算子，
+    // 跨 view 的统一 broadcast 展开会破坏其轴语义，必须 fail-closed 在真正改写（BackwardMultiRefBroadcast）
+    // 之前整体拒绝。
+    if (DownstreamViewOpBlocksBackward(merge_node)) {
+      GELOGE(af::FAILED,
+             "Skip multi-ref broadcast backward at node[%s]: downstream of merge[%s] has view op blocking "
+             "backward.",
+             candidate_node->GetName().c_str(), merge_node->GetName().c_str());
       continue;
     }
     GELOGI("Move shared broadcast from node[%s] to merge[%s], broadcasts=%zu, branches=%zu.",

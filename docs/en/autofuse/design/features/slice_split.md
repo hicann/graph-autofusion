@@ -736,7 +736,7 @@ The file names and class names in early A3 design materials differ from those in
 ### 7.2 Key Files Actually Present in the Codebase
 
 | Module | File Path | Core Classes/Functions |
-|------|---------|------------|
+|-------|----------|-------------|
 | Fusion decision base class | `autofuse/inc/fusion/fusion_decider.h` | `FusionDecider`, `FusionPriority` |
 | Scheduler | `autofuse/optimize/task_generator/split_schedule_case_generator.{h,cpp}` | `SplitFusionCaseGenerator` — `FindSplitNodes`, `ResolveSplitDim`, `ConvertSplitToLoads`, `SplitSplits`, `Prepare` |
 | Codegen | `autofuse/v35/codegen/reg_api_call/split_reg_api_call.{h,cpp}` | `SplitRegApiCall`, `SplitTiling`, `SplitTilingAllAligned<N>`, `SplitAllAligned` (aligned), `GenerateDefault` → `SplitExtend` (unaligned), `IsAllAligned`, `NeedB8ToB16` |
