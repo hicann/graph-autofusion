@@ -349,6 +349,14 @@ Status GetBroAxisFromNode(const NodePtr &bro_node, int64_t &bro_axis) {
   GE_ASSERT_TRUE(bro_repeats.size() == bro_attr_axis.size());
   GE_ASSERT_TRUE(bro_strides.size() == bro_attr_axis.size());
   GE_ASSERT_TRUE(pre_bro_repeats.size() == pre_bro_axis.size());
+  const auto all_repeats_one =
+      std::all_of(bro_repeats.begin(), bro_repeats.end(), [](const Expression &repeat) { return IsEqOne(repeat); });
+  if (all_repeats_one) {
+    bro_axis = -1;
+    GELOGI("No-op broadcast node %s(%s) with all-one output repeats, treat as no broadcast axis.",
+           bro_node->GetName().c_str(), bro_node->GetType().c_str());
+    return SUCCESS;
+  }
   for (size_t index = 0U; index < bro_attr_axis.size(); index++) {
     if (IsEqOne(bro_repeats[index])) {
       continue;
