@@ -516,16 +516,18 @@ superkernel_py_ut() {
   echo "---------------- Start UT ----------------"
   cd ${BASEPATH}/super_kernel &&
   ${PYTHON_CMD} -m pip install --upgrade pip -q &&
-  ${PYTHON_CMD} -m pip install -e .[dev] --force-reinstall -q &&
+  ${PYTHON_CMD} -m pip install -r requirements-dev.txt -q &&
   if [ "X$ENABLE_COVERAGE" == "Xon" ]; then
-    ${PYTHON_CMD} -m pytest tests/ut -m ut -n auto \
+    PYTHONPATH="${BASEPATH}/super_kernel/src/jit${PYTHONPATH:+:${PYTHONPATH}}" \
+      ${PYTHON_CMD} -m pytest tests/ut -m ut -n auto \
                                      --cov-config=scripts/sk_ut_cfg.toml \
                                      --cov=superkernel \
                                      --cov-report=term-missing \
                                      --cov-report=html \
                                      --cov-report=xml
   else
-    ${PYTHON_CMD} -m pytest tests/ut -m ut -n auto
+    PYTHONPATH="${BASEPATH}/super_kernel/src/jit${PYTHONPATH:+:${PYTHONPATH}}" \
+      ${PYTHON_CMD} -m pytest tests/ut -m ut -n auto
   fi
 }
 
@@ -533,15 +535,17 @@ superkernel_py_st() {
   echo "---------------- Start ST ----------------"
   cd ${BASEPATH}/super_kernel &&
   ${PYTHON_CMD} -m pip install --upgrade pip -q &&
-  ${PYTHON_CMD} -m pip install -e .[dev] --force-reinstall -q &&
+  ${PYTHON_CMD} -m pip install -r requirements-dev.txt -q &&
   if [ "X$ENABLE_COVERAGE" == "Xon" ]; then
-    ${PYTHON_CMD} -m pytest tests/st -m st -n auto --cov-config=scripts/sk_st_cfg.toml \
+    PYTHONPATH="${BASEPATH}/super_kernel/src/jit${PYTHONPATH:+:${PYTHONPATH}}" \
+      ${PYTHON_CMD} -m pytest tests/st -m st -n auto --cov-config=scripts/sk_st_cfg.toml \
                                      --cov=superkernel \
                                      --cov-report=term-missing \
                                      --cov-report=html \
                                      --cov-report=xml
   else
-    ${PYTHON_CMD} -m pytest tests/st -m st -n auto
+    PYTHONPATH="${BASEPATH}/super_kernel/src/jit${PYTHONPATH:+:${PYTHONPATH}}" \
+      ${PYTHON_CMD} -m pytest tests/st -m st -n auto
   fi
 }
 
