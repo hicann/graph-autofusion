@@ -13,7 +13,15 @@
  * \brief Host unit tests for model specialization and task rollback.
  */
 
+#include <sstream>
+
+// Opens the optimizer internals to the tests, replacing a production friend declaration that
+// existed only for them. Must precede the header it applies to.
+#define private public
+#define protected public
 #include "acl_spec_optimizer.h"
+#undef private
+#undef protected
 #include "feature_manager.h"
 #include "runtime/rt_external_kernel.h"
 #include "aclmodel_specialization.h"
@@ -32,8 +40,7 @@
 #include <sys/stat.h>
 #include <vector>
 
-using sk::static_compile::Feature;
-using sk::static_compile::FeatureManager;
+namespace model_spec {
 
 class AclSpecOptimizerTestAccess {
  public:
@@ -50,8 +57,8 @@ class AclSpecOptimizerTestAccess {
                    std::vector<std::unique_ptr<KernelSpecRequest>> &requests) {
     return AclSpecOptimizer().Collect(model, manager, directory, requests);
   }
-  aclError Apply(aclmdlRI model, const std::vector<std::unique_ptr<KernelSpecRequest>> &requests) {
-    return AclSpecOptimizer().Apply(model, requests);
+  aclError UpdateTasks(aclmdlRI model, const std::vector<std::unique_ptr<KernelSpecRequest>> &requests) {
+    return AclSpecOptimizer().UpdateTasks(model, requests);
   }
 };
 
@@ -116,7 +123,7 @@ class AclSpecOptimizerUpdateTest : public testing::Test {
       auto request = std::make_unique<KernelSpecRequest>();
       request->task = &tasks[index];
       request->originalParams = params;
-      request->specializedFunction = reinterpret_cast<aclrtFuncHandle>(0x300 + index);
+      request->specFuncHandle = reinterpret_cast<aclrtFuncHandle>(0x300 + index);
       rewrites.push_back(std::move(request));
     }
   }
@@ -134,78 +141,53 @@ class AclSpecOptimizerUpdateTest : public testing::Test {
 };
 }  // namespace
 
-TEST_F(AclSpecOptimizerUpdateTest, EmptyListDoesNotUpdate) {
-  const auto result = updater.Apply(model, {});
+TEST_F(AclSpecOptimizerUpdateTest, EmptyListCommitsWithoutTouchingAnyTask) {
+  const auto result = updater.UpdateTasks(model, {});
   EXPECT_EQ(result, ACL_SUCCESS);
   EXPECT_TRUE(touched.empty());
-  EXPECT_EQ(updateCount, 0U);
+  // An empty list no longer turns the commit away: staging nothing and committing it leaves the
+  // model as it was, so the screening the caller used to do here earns nothing.
+  EXPECT_EQ(updateCount, 1U);
 }
 
 TEST_F(AclSpecOptimizerUpdateTest, SuccessPreservesAllOtherFieldsAndUpdatesOnce) {
-  const auto result = updater.Apply(model, rewrites);
+  const auto result = updater.UpdateTasks(model, rewrites);
   EXPECT_EQ(result, ACL_SUCCESS);
   ASSERT_EQ(touched.size(), tasks.size());
   EXPECT_EQ(updateCount, 1U);
   for (size_t index = 0; index < tasks.size(); ++index) {
     EXPECT_EQ(touched[index], &tasks[index]);
-    EXPECT_EQ(tasks[index].params.kernelTaskParams.funcHandle, rewrites[index]->specializedFunction);
+    EXPECT_EQ(tasks[index].params.kernelTaskParams.funcHandle, rewrites[index]->specFuncHandle);
     auto restored = tasks[index].params;
     restored.kernelTaskParams.funcHandle = rewrites[index]->originalParams.kernelTaskParams.funcHandle;
     EXPECT_EQ(std::memcmp(&restored, &rewrites[index]->originalParams, sizeof(restored)), 0);
   }
 }
 
-TEST_F(AclSpecOptimizerUpdateTest, FailedSetRestoresCurrentTaskEvenIfRuntimeMutatedIt) {
+TEST_F(AclSpecOptimizerUpdateTest, FailedSetStopsWithoutTouchingTheRest) {
   setResults = {ACL_SUCCESS, ACL_ERROR_FAILURE};
-  const auto result = updater.Apply(model, rewrites);
+  const auto result = updater.UpdateTasks(model, rewrites);
   EXPECT_EQ(result, ACL_ERROR_FAILURE);
-  EXPECT_EQ(touched, (std::vector<aclmdlRITask>{&tasks[0], &tasks[1], &tasks[0], &tasks[1]}));
+  // Nothing is written back, so the task that was already rewritten keeps its specialized handle.
+  EXPECT_EQ(touched, (std::vector<aclmdlRITask>{&tasks[0], &tasks[1]}));
   EXPECT_EQ(updateCount, 0U);
-  for (size_t index = 0; index < tasks.size(); ++index) {
-    EXPECT_EQ(std::memcmp(&tasks[index].params, &rewrites[index]->originalParams, sizeof(aclmdlRITaskParams)), 0);
-  }
+  EXPECT_EQ(tasks[0].params.kernelTaskParams.funcHandle, rewrites[0]->specFuncHandle);
 }
 
-TEST_F(AclSpecOptimizerUpdateTest, FailedUpdateRestoresEveryWrittenTask) {
-  updateResults = {ACL_ERROR_FAILURE, ACL_SUCCESS};
-  const auto result = updater.Apply(model, rewrites);
-  EXPECT_EQ(result, ACL_ERROR_FAILURE);
-  EXPECT_EQ(touched.size(), tasks.size() * 2);
-  EXPECT_EQ(updateCount, 2U);
-  for (size_t index = 0; index < tasks.size(); ++index) {
-    EXPECT_EQ(std::memcmp(&tasks[index].params, &rewrites[index]->originalParams, sizeof(aclmdlRITaskParams)), 0);
-  }
-}
-
-TEST_F(AclSpecOptimizerUpdateTest, RestoreFailureDoesNotStopOtherRestoresOrGetHiddenByUpdate) {
-  setResults = {ACL_SUCCESS, ACL_ERROR_FAILURE, ACL_ERROR_INTERNAL_ERROR, ACL_SUCCESS};
-  const auto result = updater.Apply(model, rewrites);
-  EXPECT_EQ(result, ACL_ERROR_INTERNAL_ERROR);
-  EXPECT_EQ(touched.size(), 4U);
-  EXPECT_EQ(updateCount, 0U);
-}
-
-TEST_F(AclSpecOptimizerUpdateTest, FailedRestoreUpdateIsDistinguishable) {
-  updateResults = {ACL_ERROR_FAILURE, ACL_ERROR_INTERNAL_ERROR};
-  const auto result = updater.Apply(model, rewrites);
-  EXPECT_EQ(result, ACL_ERROR_INTERNAL_ERROR);
-  EXPECT_EQ(updateCount, 2U);
-}
-
-TEST_F(AclSpecOptimizerUpdateTest, FirstFailedSetIsStillRestored) {
+TEST_F(AclSpecOptimizerUpdateTest, FirstFailedSetStopsBeforeTheRest) {
   setResults = {ACL_ERROR_FAILURE};
-  const auto result = updater.Apply(model, rewrites);
+  const auto result = updater.UpdateTasks(model, rewrites);
   EXPECT_EQ(result, ACL_ERROR_FAILURE);
-  EXPECT_EQ(touched, (std::vector<aclmdlRITask>{&tasks[0], &tasks[0]}));
+  EXPECT_EQ(touched, (std::vector<aclmdlRITask>{&tasks[0]}));
   EXPECT_EQ(updateCount, 0U);
 }
 
-TEST_F(AclSpecOptimizerUpdateTest, FirstRestoreErrorIsPreservedWhenRestoreUpdateAlsoFails) {
-  setResults = {ACL_SUCCESS, ACL_SUCCESS, ACL_SUCCESS, ACL_ERROR_BAD_ALLOC};
-  updateResults = {ACL_ERROR_FAILURE, ACL_ERROR_INTERNAL_ERROR};
-  const auto result = updater.Apply(model, rewrites);
-  EXPECT_EQ(result, ACL_ERROR_INTERNAL_ERROR);
-  EXPECT_EQ(updateCount, 2U);
+TEST_F(AclSpecOptimizerUpdateTest, FailedUpdateIsReportedOnce) {
+  updateResults = {ACL_ERROR_FAILURE};
+  const auto result = updater.UpdateTasks(model, rewrites);
+  EXPECT_EQ(result, ACL_ERROR_FAILURE);
+  EXPECT_EQ(touched.size(), tasks.size());
+  EXPECT_EQ(updateCount, 1U);
 }
 
 TEST(SpecOutputDirectoryTest, SameModelGetsUniqueDirectoriesAndRestrictedPermissions) {
@@ -326,7 +308,7 @@ std::vector<uint8_t> MakeElfWithMetaSections(const std::vector<std::vector<uint8
   sections[1].sh_size = sizeof(names);
   for (size_t index = 0; index < metaSections.size(); ++index) {
     sections[2 + index].sh_name = 11;
-    sections[2 + index].sh_type = SHT_PROGBITS;
+    sections[2 + index].sh_type = SHT_NOTE;
     sections[2 + index].sh_offset = metaOffsets[index];
     sections[2 + index].sh_size = metaSections[index].size();
   }
@@ -709,7 +691,9 @@ TEST_F(AclSpecOptimizerCollectionTest, UsesFeatureQueriesAndPassesRuntimeSizeWit
   ASSERT_TRUE(manager.Init(&options));
   ASSERT_EQ(Collect(), ACL_SUCCESS);
   ASSERT_EQ(requests.size(), 1U);
-  const auto &request = *requests.front();
+  auto &request = *requests.front();
+  // Collection leaves the API request unbound; SpecializeKernels binds it right before use.
+  request.BindApiRequest();
   EXPECT_EQ(request.task, &task);
   EXPECT_EQ(request.kernelEntry, kernel.name);
   EXPECT_EQ(request.resourceId, std::string(64, 'b'));
@@ -760,7 +744,9 @@ TEST_F(AclSpecOptimizerCollectionTest, OptimizerCompilesInOrderAndCommitsOnlySuc
   EXPECT_EQ(secondTask.params.kernelTaskParams.numBlocks, original.kernelTaskParams.numBlocks);
 }
 
-TEST_F(AclSpecOptimizerCollectionTest, OptimizerSkipsCompileLoadAndLookupFailuresWithoutUpdating) {
+// A kernel ACLRTC declines to specialize is skipped and reported as success; a binary that cannot
+// be loaded, or whose entry is missing, aborts the whole model.
+TEST_F(AclSpecOptimizerCollectionTest, SkipsCompileFailureButReportsLoadAndLookupFailures) {
   for (size_t stage = 0; stage < 3; ++stage) {
     specializationResults = {stage == 0 ? ACL_ERROR_FAILURE : ACL_SUCCESS};
     specializationPaths.clear();
@@ -768,9 +754,13 @@ TEST_F(AclSpecOptimizerCollectionTest, OptimizerSkipsCompileLoadAndLookupFailure
     loadResult = stage == 1 ? ACL_ERROR_FAILURE : ACL_SUCCESS;
     functionResult = stage == 2 ? ACL_ERROR_FAILURE : ACL_SUCCESS;
     const auto result = collector.Optimize(&model, manager);
-    EXPECT_EQ(result, ACL_SUCCESS);
+    EXPECT_EQ(result, stage == 0 ? ACL_SUCCESS : ACL_ERROR_FAILURE);
+    // No task is touched either way: loading happens before the model is modified.
     EXPECT_TRUE(touched.empty());
-    EXPECT_EQ(updateCount, 0U);
+    // Stage 0 specializes nothing, so it reaches the commit with an empty list and spends one
+    // no-op update on it. Stages 1 and 2 fail while loading and never get that far, so this
+    // running count stays where stage 0 left it.
+    EXPECT_EQ(updateCount, 1U);
     EXPECT_EQ(loadCalls, stage == 0 ? 0U : 1U);
     EXPECT_EQ(functionCalls, stage == 2 ? 1U : 0U);
     EXPECT_EQ(unloadCalls, stage == 2 ? 1U : 0U);
@@ -780,11 +770,11 @@ TEST_F(AclSpecOptimizerCollectionTest, OptimizerSkipsCompileLoadAndLookupFailure
   }
 }
 
-TEST_F(AclSpecOptimizerCollectionTest, OptimizerPropagatesRestoreFailures) {
-  setResults = {ACL_ERROR_FAILURE, ACL_ERROR_INVALID_PARAM};
+TEST_F(AclSpecOptimizerCollectionTest, OptimizerPropagatesCommitFailure) {
+  setResults = {ACL_ERROR_FAILURE};
   const auto result = collector.Optimize(&model, manager);
-  EXPECT_EQ(result, ACL_ERROR_INTERNAL_ERROR);
-  EXPECT_EQ(touched.size(), 2U);
+  EXPECT_EQ(result, ACL_ERROR_FAILURE);
+  EXPECT_EQ(touched.size(), 1U);
   EXPECT_EQ(updateCount, 0U);
 }
 
@@ -812,30 +802,38 @@ TEST_F(AclSpecOptimizerCollectionTest, PublicEntryRejectsInvalidConfigurationBef
   EXPECT_TRUE(touched.empty());
 }
 
-TEST_F(AclSpecOptimizerCollectionTest, PublicEntryDistinguishesRestoredFailureFromUncertainState) {
-  setResults = {ACL_ERROR_INTERNAL_ERROR, ACL_SUCCESS};
+TEST_F(AclSpecOptimizerCollectionTest, PublicEntryPropagatesCommitFailureAndKeepsBinariesWithTheModel) {
+  setResults = {ACL_ERROR_FAILURE};
   EXPECT_EQ(aclmdlRISpecOptimize(&model, nullptr), ACL_ERROR_FAILURE);
-  EXPECT_EQ(task.params.kernelTaskParams.funcHandle, &kernel);
-  EXPECT_EQ(touched.size(), 2U);
+  EXPECT_EQ(touched.size(), 1U);
   EXPECT_EQ(updateCount, 0U);
-  EXPECT_EQ(unloadCalls, 1U);
-  touched.clear();
-  setResults = {ACL_ERROR_FAILURE, ACL_ERROR_INVALID_PARAM};
-  EXPECT_EQ(aclmdlRISpecOptimize(&model, nullptr), ACL_ERROR_INTERNAL_ERROR);
-  EXPECT_EQ(touched.size(), 2U);
-  EXPECT_EQ(updateCount, 0U);
-  EXPECT_EQ(unloadCalls, 1U);
+  // A failed commit is not rolled back, so the binary stays loaded until the model is destroyed.
+  EXPECT_EQ(unloadCalls, 0U);
   EXPECT_EQ(SkUtGetModelDestroyCallbackCount(), 1U);
   EXPECT_EQ(SkUtInvokeModelDestroyCallback(&model), ACL_SUCCESS);
-  EXPECT_EQ(unloadCalls, 2U);
+  EXPECT_EQ(unloadCalls, 1U);
 }
 
-TEST_F(AclSpecOptimizerCollectionTest, CallbackRegistrationFailureUnloadsWithoutModifyingModel) {
+TEST_F(AclSpecOptimizerCollectionTest, FailedUpdateKeepsBinariesWithTheModel) {
+  updateResults = {ACL_ERROR_FAILURE};
+  EXPECT_EQ(collector.Optimize(&model, manager), ACL_ERROR_FAILURE);
+  EXPECT_EQ(task.params.kernelTaskParams.funcHandle, &staticFunctionToken);
+  EXPECT_EQ(updateCount, 1U);
+  EXPECT_EQ(unloadCalls, 0U);
+  EXPECT_EQ(SkUtGetModelDestroyCallbackCount(), 1U);
+  EXPECT_EQ(SkUtInvokeModelDestroyCallback(&model), ACL_SUCCESS);
+  EXPECT_EQ(unloadCalls, 1U);
+}
+
+TEST_F(AclSpecOptimizerCollectionTest, CallbackRegistrationFailureLeaksInsteadOfDanglingTheModel) {
   SkUtSetAclmdlRIDestroyRegisterCallbackRet(ACL_ERROR_FAILURE);
   EXPECT_EQ(collector.Optimize(&model, manager), ACL_ERROR_FAILURE);
-  EXPECT_EQ(unloadCalls, 1U);
-  EXPECT_TRUE(touched.empty());
-  EXPECT_EQ(updateCount, 0U);
+  // The commit already switched the task over, so the binary has to stay loaded even though
+  // nothing will ever release it.
+  EXPECT_EQ(task.params.kernelTaskParams.funcHandle, &staticFunctionToken);
+  EXPECT_EQ(touched.size(), 1U);
+  EXPECT_EQ(updateCount, 1U);
+  EXPECT_EQ(unloadCalls, 0U);
   EXPECT_EQ(SkUtGetModelDestroyCallbackCount(), 0U);
 }
 
@@ -1002,3 +1000,5 @@ TEST_F(AclSpecOptimizerCollectionTest, ZeroSizeNullArgsAndParameterQueryFailureA
   EXPECT_EQ(Collect(), ACL_SUCCESS);
   EXPECT_TRUE(requests.empty());
 }
+
+}  // namespace model_spec

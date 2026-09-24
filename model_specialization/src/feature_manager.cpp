@@ -11,8 +11,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace sk {
-namespace static_compile {
+namespace model_spec {
 namespace {
 void InitModelLevelOptions(const aclmdlRISpecOptions *options, uint64_t &compileJobs, bool &enableSk) {
   compileJobs = options == nullptr || options->jobs == 0 ? 1 : options->jobs;
@@ -41,5 +40,4 @@ void FeatureManager::Swap(FeatureManager &other) noexcept {
   swap(initialized_, other.initialized_);
 }
 
-}  // namespace static_compile
-}  // namespace sk
+}  // namespace model_spec

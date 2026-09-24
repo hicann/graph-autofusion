@@ -10,7 +10,8 @@
 
 /*!
  * \file acl_spec_optimizer.h
- * \brief Internal request collection, kernel specialization, and task update interfaces.
+ * \brief Internal interfaces for request collection, kernel specialization, task update, and
+ *        ownership of the specialized binaries.
  */
 
 #ifndef ACL_SPEC_OPTIMIZER_H
@@ -27,12 +28,9 @@
 
 #include "acl/acl.h"
 #include "acl/acl_rt_compile.h"
+#include "feature_manager.h"
 
-namespace sk {
-namespace static_compile {
-class FeatureManager;
-}
-}  // namespace sk
+namespace model_spec {
 
 class KernelSpecRequest {
  public:
@@ -56,7 +54,7 @@ class KernelSpecRequest {
   std::vector<const char *> skOptionPointers;
   aclrtcKernelSpecRequest apiRequest{};
   Binary binary{nullptr, UnloadBinary};
-  aclrtFuncHandle specializedFunction = nullptr;
+  aclrtFuncHandle specFuncHandle = nullptr;
 };
 
 class SpecOutputDirectory final {
@@ -79,20 +77,17 @@ class SpecOutputDirectory final {
 class AclSpecOptimizer final {
  public:
   aclError Init(aclmdlRI model);
-  aclError Optimize(aclmdlRI model, const sk::static_compile::FeatureManager &featureManager) const;
+  aclError Optimize(aclmdlRI model, const model_spec::FeatureManager &featureManager) const;
 
  private:
-  friend class AclSpecOptimizerTestAccess;
-
-  aclError Collect(aclmdlRI model, const sk::static_compile::FeatureManager &featureManager,
-                   std::string_view outputDirectory, std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const;
+  aclError Collect(aclmdlRI model, const model_spec::FeatureManager &featureManager, std::string_view outputDirectory,
+                   std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const;
   bool TryBuildRequest(aclmdlRITask task, uint32_t streamIndex, uint32_t taskIndex,
-                       const sk::static_compile::FeatureManager &featureManager, std::string_view outputDirectory,
+                       const model_spec::FeatureManager &featureManager, std::string_view outputDirectory,
                        KernelSpecRequest &request) const;
-  bool SpecializeRequest(KernelSpecRequest &request) const;
-  aclError Apply(aclmdlRI model, const std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const;
-  aclError Restore(aclmdlRI model, const std::vector<std::unique_ptr<KernelSpecRequest>> &requests, size_t changedCount,
-                   bool updateAttempted) const;
+  void SpecializeKernels(std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const;
+  aclError LoadKernels(std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const;
+  aclError UpdateTasks(aclmdlRI model, const std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const;
 
   SpecOutputDirectory outputDirectory_;
 };
@@ -101,8 +96,7 @@ class ModelSpecResourceManager final {
  public:
   static ModelSpecResourceManager &GetInstance();
 
-  aclError RegisterModel(aclmdlRI model, size_t binaryCount);
-  void RetainBinary(aclmdlRI model, KernelSpecRequest::Binary &binary);
+  aclError RetainBinariesForModel(aclmdlRI model, const std::vector<std::unique_ptr<KernelSpecRequest>> &requests);
 
   ModelSpecResourceManager(const ModelSpecResourceManager &) = delete;
   ModelSpecResourceManager &operator=(const ModelSpecResourceManager &) = delete;
@@ -111,6 +105,7 @@ class ModelSpecResourceManager final {
   ModelSpecResourceManager() = default;
   ~ModelSpecResourceManager() = default;
 
+  aclError TryTakeOwnership(aclmdlRI model, const std::vector<std::unique_ptr<KernelSpecRequest>> &requests);
   static void OnModelDestroy(void *userData);
 
   std::mutex mutex_;
@@ -121,6 +116,8 @@ inline constexpr std::string_view SPEC_RESOURCE_ID_SECTION_NAME = ".ascend.meta"
 inline constexpr uint16_t SPEC_RESOURCE_ID_TLV_TYPE = 6;
 inline constexpr uint16_t SPEC_RESOURCE_ID_TLV_LENGTH = 64;
 
-bool ReadSpecResourceId(const void *binary, size_t binarySize, std::string &resourceId);
+bool ReadSpecResourceId(const void *elfBytes, size_t elfSize, std::string &resourceId);
+
+}  // namespace model_spec
 
 #endif

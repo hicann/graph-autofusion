@@ -13,8 +13,7 @@
 #include <vector>
 #include "gtest/gtest.h"
 
-namespace sk {
-namespace static_compile {
+namespace model_spec {
 namespace {
 using Arguments = std::vector<std::string>;
 
@@ -134,5 +133,4 @@ TEST_F(FeatureManagerSt, FailedReinitializationPreservesAllPreviousFeatures) {
 }
 
 }  // namespace
-}  // namespace static_compile
-}  // namespace sk
+}  // namespace model_spec

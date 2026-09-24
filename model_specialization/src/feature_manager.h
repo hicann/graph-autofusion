@@ -15,8 +15,7 @@
 #include "kernel_compile_features.h"
 #include "sk_log.h"
 
-namespace sk {
-namespace static_compile {
+namespace model_spec {
 
 enum class Feature : uint32_t { COMPILE_JOBS = 0, ENABLE_SK = 1, BASIC_COMPILE_OPTIONS = 2, SK_COMPILE_OPTIONS = 3 };
 
@@ -81,6 +80,5 @@ auto FeatureManager::Get(std::string_view kernelEntry) const {
   }
 }
 
-}  // namespace static_compile
-}  // namespace sk
+}  // namespace model_spec
 #endif

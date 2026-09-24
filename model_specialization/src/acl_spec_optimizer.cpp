@@ -10,7 +10,8 @@
 
 /*!
  * \file acl_spec_optimizer.cpp
- * \brief Model kernel specialization, resource ID extraction, and task replacement with rollback.
+ * \brief Model kernel specialization: task collection, resource ID extraction, function replacement
+ *        and binary ownership. A failed replacement is reported, not undone.
  */
 
 #include "acl_spec_optimizer.h"
@@ -34,14 +35,14 @@
 #include "feature_manager.h"
 #include "runtime/rt_external_kernel.h"
 #include "securec.h"
-#include "sk_common.h"
 #include "sk_log.h"
 
-using sk::static_compile::Feature;
-using sk::static_compile::FeatureManager;
+namespace model_spec {
 
 namespace {
 namespace fs = boost::filesystem;
+
+constexpr size_t MAX_KERNEL_ENTRY_LEN = 256;
 
 void BindOptionPointers(const std::vector<std::string> &storage, std::vector<const char *> &pointers) {
   pointers.clear();
@@ -51,41 +52,15 @@ void BindOptionPointers(const std::vector<std::string> &storage, std::vector<con
   }
 }
 
-}  // namespace
-
-aclError aclmdlRISpecOptimize(aclmdlRI modelRI, aclmdlRISpecOptions *options) {
-  try {
-    FeatureManager featureManager;
-    if (!featureManager.Init(options)) {
-      SK_DLOGE("aclmdlRISpecOptimize invalid configuration: model=%p", modelRI);
-      return ACL_ERROR_INVALID_PARAM;
-    }
-    AclSpecOptimizer optimizer;
-    const aclError result = optimizer.Init(modelRI);
-    if (result != ACL_SUCCESS) {
-      return result;
-    }
-    return optimizer.Optimize(modelRI, featureManager);
-  } catch (const std::bad_alloc &) {
-    SK_DLOGE("aclmdlRISpecOptimize allocation exception: model=%p", modelRI);
-    return ACL_ERROR_BAD_ALLOC;
-  } catch (const std::length_error &) {
-    SK_DLOGE("aclmdlRISpecOptimize length exception: model=%p", modelRI);
-    return ACL_ERROR_BAD_ALLOC;
-  } catch (const std::invalid_argument &) {
-    SK_DLOGE("aclmdlRISpecOptimize invalid argument exception: model=%p", modelRI);
-    return ACL_ERROR_INVALID_PARAM;
-  } catch (const std::exception &error) {
-    SK_DLOGE("aclmdlRISpecOptimize exception: model=%p reason=%s", modelRI, error.what());
-    return ACL_ERROR_FAILURE;
-  } catch (...) {
-    SK_DLOGE("aclmdlRISpecOptimize unknown exception: model=%p", modelRI);
-    return ACL_ERROR_FAILURE;
-  }
+inline aclError RetainBinaries(aclmdlRI model, const std::vector<std::unique_ptr<KernelSpecRequest>> &requests) {
+  return ModelSpecResourceManager::GetInstance().RetainBinariesForModel(model, requests);
 }
+
+}  // namespace
 
 aclError AclSpecOptimizer::Init(aclmdlRI model) {
   if (model == nullptr) {
+    SK_DLOGE("aclmdlRISpecOptimize init rejected: model is null");
     return ACL_ERROR_INVALID_PARAM;
   }
   uint32_t modelId = 0;
@@ -108,55 +83,56 @@ aclError AclSpecOptimizer::Optimize(aclmdlRI model, const FeatureManager &featur
     SK_DLOGE("aclmdlRISpecOptimize collection failed: model=%p ret=%d", model, result);
     return result;
   }
-  requests.erase(
-      std::remove_if(requests.begin(), requests.end(), [this](auto &request) { return !SpecializeRequest(*request); }),
-      requests.end());
   if (requests.empty()) {
+    SK_DLOGW("aclmdlRISpecOptimize finished with nothing to specialize: model=%p", model);
     return ACL_SUCCESS;
   }
-  auto &resourceManager = ModelSpecResourceManager::GetInstance();
-  result = resourceManager.RegisterModel(model, requests.size());
+  SpecializeKernels(requests);
+  result = LoadKernels(requests);
   if (result != ACL_SUCCESS) {
+    SK_DLOGE("aclmdlRISpecOptimize load failed: model=%p ret=%d", model, result);
     return result;
   }
-  result = Apply(model, requests);
-  if (result == ACL_SUCCESS || result == ACL_ERROR_INTERNAL_ERROR) {
-    for (auto &request : requests) {
-      resourceManager.RetainBinary(model, request->binary);
-    }
-  }
-  return result;
+  result = UpdateTasks(model, requests);
+  const aclError retained = RetainBinaries(model, requests);
+  SK_DLOGI("aclmdlRISpecOptimize finished: model=%p commit=%d retain=%d", model, result, retained);
+  return result != ACL_SUCCESS ? result : retained;
 }
 
 aclError AclSpecOptimizer::Collect(aclmdlRI model, const FeatureManager &featureManager,
                                    std::string_view outputDirectory,
                                    std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const {
   if (model == nullptr || outputDirectory.empty()) {
+    SK_DLOGE("aclmdlRISpecOptimize collect rejected: model=%p outputDirectoryEmpty=%d", model,
+             static_cast<int>(outputDirectory.empty()));
     return ACL_ERROR_INVALID_PARAM;
   }
   uint32_t streamCount = 0;
   aclError result = aclmdlRIGetStreams(model, nullptr, &streamCount);
   if (result != ACL_SUCCESS) {
+    SK_DLOGE("aclmdlRISpecOptimize stream count unavailable: model=%p ret=%d", model, result);
     return result;
   }
+  if (streamCount == 0) {
+    SK_DLOGW("aclmdlRISpecOptimize model has no stream: model=%p", model);
+    return ACL_SUCCESS;
+  }
   std::vector<aclrtStream> streams(streamCount);
-  if (streamCount != 0) {
-    result = aclmdlRIGetStreams(model, streams.data(), &streamCount);
-    if (result != ACL_SUCCESS) {
-      return result;
-    }
-    if (streamCount > streams.size()) {
-      return ACL_ERROR_FAILURE;
-    }
+  result = aclmdlRIGetStreams(model, streams.data(), &streamCount);
+  if (result != ACL_SUCCESS) {
+    SK_DLOGE("aclmdlRISpecOptimize streams unavailable: model=%p count=%u ret=%d", model, streamCount, result);
+    return result;
   }
   std::vector<std::unique_ptr<KernelSpecRequest>> collected;
   for (uint32_t streamIndex = 0; streamIndex < streamCount; ++streamIndex) {
     if (streams[streamIndex] == nullptr) {
+      SK_DLOGE("aclmdlRISpecOptimize null stream: model=%p stream=%u of %u", model, streamIndex, streamCount);
       return ACL_ERROR_FAILURE;
     }
     uint32_t taskCount = 0;
     result = aclmdlRIGetTasksByStream(streams[streamIndex], nullptr, &taskCount);
     if (result != ACL_SUCCESS) {
+      SK_DLOGE("aclmdlRISpecOptimize task count unavailable: model=%p stream=%u ret=%d", model, streamIndex, result);
       return result;
     }
     if (taskCount == 0) {
@@ -165,10 +141,9 @@ aclError AclSpecOptimizer::Collect(aclmdlRI model, const FeatureManager &feature
     std::vector<aclmdlRITask> tasks(taskCount);
     result = aclmdlRIGetTasksByStream(streams[streamIndex], tasks.data(), &taskCount);
     if (result != ACL_SUCCESS) {
+      SK_DLOGE("aclmdlRISpecOptimize tasks unavailable: model=%p stream=%u count=%u ret=%d", model, streamIndex,
+               taskCount, result);
       return result;
-    }
-    if (taskCount > tasks.size()) {
-      return ACL_ERROR_FAILURE;
     }
     for (uint32_t taskIndex = 0; taskIndex < taskCount; ++taskIndex) {
       aclmdlRITaskType type = ACL_MODEL_RI_TASK_DEFAULT;
@@ -184,9 +159,6 @@ aclError AclSpecOptimizer::Collect(aclmdlRI model, const FeatureManager &feature
         collected.push_back(std::move(request));
       }
     }
-  }
-  for (auto &request : collected) {
-    request->BindApiRequest();
   }
   requests.swap(collected);
   return ACL_SUCCESS;
@@ -209,7 +181,7 @@ bool AclSpecOptimizer::TryBuildRequest(aclmdlRITask task, uint32_t streamIndex, 
              taskIndex);
     return false;
   }
-  std::array<char, MAX_SCOPE_NAME_LEN> name{};
+  std::array<char, MAX_KERNEL_ENTRY_LEN> name{};
   if (aclrtGetFunctionName(params.funcHandle, name.size(), name.data()) != ACL_SUCCESS || name[0] == '\0' ||
       std::memchr(name.data(), '\0', name.size()) == nullptr) {
     SK_DLOGI("aclmdlRISpecOptimize keep dynamic task: stream=%u task=%u reason=kernel entry unavailable", streamIndex,
@@ -217,16 +189,18 @@ bool AclSpecOptimizer::TryBuildRequest(aclmdlRITask task, uint32_t streamIndex, 
     return false;
   }
   request.kernelEntry = name.data();
-  aclrtBinHandle binary = nullptr;
-  void *binaryData = nullptr;
-  uint32_t binarySize = 0;
-  if (aclrtFunctionGetBinary(params.funcHandle, &binary) != ACL_SUCCESS || binary == nullptr ||
-      rtGetBinBuffer(binary, RT_BIN_HOST_ADDR, &binaryData, &binarySize) != RT_ERROR_NONE) {
+  // Borrowed from the runtime: this is the binary the original kernel came from, so it is only read
+  // here and never unloaded.
+  aclrtBinHandle originalBinary = nullptr;
+  void *elfBytes = nullptr;
+  uint32_t elfSize = 0;
+  if (aclrtFunctionGetBinary(params.funcHandle, &originalBinary) != ACL_SUCCESS || originalBinary == nullptr ||
+      rtGetBinBuffer(originalBinary, RT_BIN_HOST_ADDR, &elfBytes, &elfSize) != RT_ERROR_NONE) {
     SK_DLOGI("aclmdlRISpecOptimize keep dynamic task: stream=%u task=%u reason=kernel binary unavailable", streamIndex,
              taskIndex);
     return false;
   }
-  if (!ReadSpecResourceId(binaryData, binarySize, request.resourceId)) {
+  if (!ReadSpecResourceId(elfBytes, elfSize, request.resourceId)) {
     SK_DLOGI("aclmdlRISpecOptimize keep dynamic task: stream=%u task=%u reason=no usable resource id", streamIndex,
              taskIndex);
     return false;
@@ -237,8 +211,9 @@ bool AclSpecOptimizer::TryBuildRequest(aclmdlRITask task, uint32_t streamIndex, 
     SK_DLOGI("aclmdlRISpecOptimize invalid arguments: stream=%u task=%u", streamIndex, taskIndex);
     return false;
   }
-  // ACLRTC reads the argument values itself, so it needs host addresses; a captured kernel task
-  // carries them on the device.
+  // ACLRTC reads the argument values itself, so it needs host addresses. A captured kernel task
+  // carries them on the device, so the copy is always D2H; a task holding host args would fail here
+  // and simply keep its original function.
   request.hostArgs.resize(params.argsSize);
   if (aclrtMemcpy(request.hostArgs.data(), request.hostArgs.size(), params.args, params.argsSize,
                   ACL_MEMCPY_DEVICE_TO_HOST) != ACL_SUCCESS) {
@@ -268,89 +243,65 @@ bool AclSpecOptimizer::TryBuildRequest(aclmdlRITask task, uint32_t streamIndex, 
   return true;
 }
 
-bool AclSpecOptimizer::SpecializeRequest(KernelSpecRequest &request) const {
-  request.BindApiRequest();
-  aclError result = aclrtcKernelSpecialization(&request.apiRequest, request.outputElfPath.c_str());
-  if (result != ACL_SUCCESS) {
-    SK_DLOGW("aclmdlRISpecOptimize specialization failed: stream=%u task=%u ret=%d", request.streamIndex,
-             request.taskIndex, result);
-    return false;
+void AclSpecOptimizer::SpecializeKernels(std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const {
+  std::vector<std::unique_ptr<KernelSpecRequest>> specialized;
+  specialized.reserve(requests.size());
+  for (auto &request : requests) {
+    request->BindApiRequest();
+    const aclError result = aclrtcKernelSpecialization(&request->apiRequest, request->outputElfPath.c_str());
+    if (result != ACL_SUCCESS) {
+      SK_DLOGW("aclmdlRISpecOptimize specialization failed: stream=%u task=%u ret=%d", request->streamIndex,
+               request->taskIndex, result);
+      continue;
+    }
+    specialized.push_back(std::move(request));
   }
-  aclrtBinHandle binary = nullptr;
-  result = aclrtBinaryLoadFromFile(request.outputElfPath.c_str(), nullptr, &binary);
-  request.binary.reset(binary);
-  if (result != ACL_SUCCESS || binary == nullptr) {
-    SK_DLOGW("aclmdlRISpecOptimize binary load failed: stream=%u task=%u ret=%d", request.streamIndex,
-             request.taskIndex, result);
-    return false;
+  if (specialized.empty()) {
+    SK_DLOGW("aclmdlRISpecOptimize specialized none of its %zu candidate kernels", requests.size());
   }
-  result = aclrtBinaryGetFunction(binary, request.kernelEntry.c_str(), &request.specializedFunction);
-  if (result != ACL_SUCCESS || request.specializedFunction == nullptr) {
-    SK_DLOGW("aclmdlRISpecOptimize function lookup failed: stream=%u task=%u ret=%d", request.streamIndex,
-             request.taskIndex, result);
-    return false;
-  }
-  return true;
+  requests.swap(specialized);
 }
 
-aclError AclSpecOptimizer::Apply(aclmdlRI model,
-                                 const std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const {
-  if (requests.empty()) {
-    return ACL_SUCCESS;
+aclError AclSpecOptimizer::LoadKernels(std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const {
+  for (auto &request : requests) {
+    aclrtBinHandle loadedBinary = nullptr;
+    aclError result = aclrtBinaryLoadFromFile(request->outputElfPath.c_str(), nullptr, &loadedBinary);
+    // Take ownership before checking, so a handle produced alongside an error is still released.
+    request->binary.reset(loadedBinary);
+    if (result != ACL_SUCCESS || loadedBinary == nullptr) {
+      SK_DLOGE("aclmdlRISpecOptimize binary load failed: stream=%u task=%u ret=%d", request->streamIndex,
+               request->taskIndex, result);
+      return result != ACL_SUCCESS ? result : ACL_ERROR_FAILURE;
+    }
+    result = aclrtBinaryGetFunction(loadedBinary, request->kernelEntry.c_str(), &request->specFuncHandle);
+    if (result != ACL_SUCCESS || request->specFuncHandle == nullptr) {
+      SK_DLOGE("aclmdlRISpecOptimize function lookup failed: stream=%u task=%u ret=%d", request->streamIndex,
+               request->taskIndex, result);
+      return result != ACL_SUCCESS ? result : ACL_ERROR_FAILURE;
+    }
   }
-  size_t changedCount = 0;
-  aclError result = ACL_SUCCESS;
+  return ACL_SUCCESS;
+}
+
+aclError AclSpecOptimizer::UpdateTasks(aclmdlRI model,
+                                       const std::vector<std::unique_ptr<KernelSpecRequest>> &requests) const {
   for (const auto &request : requests) {
     auto params = request->originalParams;
-    params.kernelTaskParams.funcHandle = request->specializedFunction;
-    ++changedCount;
-    result = aclmdlRITaskSetParams(request->task, &params);
+    params.kernelTaskParams.funcHandle = request->specFuncHandle;
+    const aclError result = aclmdlRITaskSetParams(request->task, &params);
     if (result != ACL_SUCCESS) {
+      // Stop at the first failure without undoing the earlier tasks: they keep their specialized
+      // functions, and the caller decides what to do with the model. Their binaries must therefore
+      // stay loaded, which is why the caller retains them either way.
       SK_DLOGE("aclmdlRISpecOptimize SetParams failed: model=%p task=%p ret=%d", model, request->task, result);
-      break;
+      return result;
     }
   }
-  const bool updateAttempted = result == ACL_SUCCESS;
-  if (updateAttempted) {
-    result = aclmdlRIUpdate(model);
+  const aclError result = aclmdlRIUpdate(model);
+  if (result != ACL_SUCCESS) {
+    SK_DLOGE("aclmdlRISpecOptimize commit failed: model=%p ret=%d", model, result);
   }
-  if (result == ACL_SUCCESS) {
-    return ACL_SUCCESS;
-  }
-  const aclError restoreError = Restore(model, requests, changedCount, updateAttempted);
-  SK_DLOGE("aclmdlRISpecOptimize commit failed: model=%p ret=%d restoreRet=%d", model, result, restoreError);
-  if (restoreError != ACL_SUCCESS) {
-    SK_DLOGE("aclmdlRISpecOptimize model state uncertain; do not execute or optimize: model=%p", model);
-    return ACL_ERROR_INTERNAL_ERROR;
-  }
-  return result == ACL_ERROR_INTERNAL_ERROR ? ACL_ERROR_FAILURE : result;
-}
-
-aclError AclSpecOptimizer::Restore(aclmdlRI model, const std::vector<std::unique_ptr<KernelSpecRequest>> &requests,
-                                   size_t changedCount, bool updateAttempted) const {
-  aclError restoreError = ACL_SUCCESS;
-  for (size_t index = 0; index < changedCount; ++index) {
-    auto params = requests[index]->originalParams;
-    const aclError result = aclmdlRITaskSetParams(requests[index]->task, &params);
-    if (result != ACL_SUCCESS) {
-      SK_DLOGE("aclmdlRISpecOptimize restore task failed: model=%p task=%p ret=%d", model, requests[index]->task,
-               result);
-      if (restoreError == ACL_SUCCESS) {
-        restoreError = result;
-      }
-    }
-  }
-  if (!updateAttempted) {
-    return restoreError;
-  }
-  const aclError updateError = aclmdlRIUpdate(model);
-  if (updateError != ACL_SUCCESS) {
-    SK_DLOGE("aclmdlRISpecOptimize restore Update failed: model=%p ret=%d", model, updateError);
-    if (restoreError == ACL_SUCCESS) {
-      restoreError = updateError;
-    }
-  }
-  return restoreError;
+  return result;
 }
 
 void KernelSpecRequest::BindApiRequest() {
@@ -368,6 +319,9 @@ void KernelSpecRequest::BindApiRequest() {
 }
 
 void KernelSpecRequest::UnloadBinary(aclrtBinHandle binary) {
+  if (binary == nullptr) {
+    return;
+  }
   const aclError result = aclrtBinaryUnLoad(binary);
   if (result != ACL_SUCCESS) {
     SK_DLOGE("aclmdlRISpecOptimize unload binary failed: binary=%p ret=%d", binary, result);
@@ -379,36 +333,62 @@ ModelSpecResourceManager &ModelSpecResourceManager::GetInstance() {
   return instance;
 }
 
-aclError ModelSpecResourceManager::RegisterModel(aclmdlRI model, size_t binaryCount) {
-  if (model == nullptr || binaryCount == 0) {
+aclError ModelSpecResourceManager::RetainBinariesForModel(
+    aclmdlRI model, const std::vector<std::unique_ptr<KernelSpecRequest>> &requests) {
+  if (model == nullptr) {
+    SK_DLOGE("aclmdlRISpecOptimize retain rejected: model is null");
     return ACL_ERROR_INVALID_PARAM;
   }
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto entry = modelBinaries_.find(model);
-  if (entry != modelBinaries_.end()) {
-    auto &binaries = entry->second;
-    if (binaryCount > binaries.max_size() - binaries.size()) {
-      SK_DLOGE("aclmdlRISpecOptimize binary storage exhausted: model=%p", model);
-      return ACL_ERROR_BAD_ALLOC;
-    }
-    binaries.reserve(binaries.size() + binaryCount);
+  if (requests.empty()) {
+    // With no binary to own there is nothing to release later, and the destroy callback exists
+    // only to do that releasing. Registering one here would saddle the model with a callback
+    // over an empty list.
     return ACL_SUCCESS;
   }
-  std::vector<aclrtBinHandle> binaries;
-  binaries.reserve(binaryCount);
-  entry = modelBinaries_.emplace(model, std::move(binaries)).first;
-  const aclError result = aclmdlRIDestroyRegisterCallback(model, OnModelDestroy, model);
+  aclError result = ACL_ERROR_BAD_ALLOC;
+  try {
+    result = TryTakeOwnership(model, requests);
+  } catch (const std::bad_alloc &) {
+    SK_DLOGE("aclmdlRISpecOptimize binary storage allocation failed: model=%p", model);
+  }
   if (result != ACL_SUCCESS) {
-    modelBinaries_.erase(entry);
-    SK_DLOGE("aclmdlRISpecOptimize register destroy callback failed: model=%p ret=%d", model, result);
+    SK_DLOGE("aclmdlRISpecOptimize binaries leak until the process exits: model=%p ret=%d", model, result);
+    for (const auto &request : requests) {
+      request->binary.release();
+    }
   }
   return result;
 }
 
-void ModelSpecResourceManager::RetainBinary(aclmdlRI model, KernelSpecRequest::Binary &binary) {
+aclError ModelSpecResourceManager::TryTakeOwnership(aclmdlRI model,
+                                                    const std::vector<std::unique_ptr<KernelSpecRequest>> &requests) {
   std::lock_guard<std::mutex> lock(mutex_);
-  modelBinaries_.at(model).push_back(binary.get());
-  binary.release();
+  auto entry = modelBinaries_.find(model);
+  if (entry == modelBinaries_.end()) {
+    std::vector<aclrtBinHandle> reserved;
+    reserved.reserve(requests.size());
+    entry = modelBinaries_.emplace(model, std::move(reserved)).first;
+    const aclError result = aclmdlRIDestroyRegisterCallback(model, OnModelDestroy, model);
+    if (result != ACL_SUCCESS) {
+      modelBinaries_.erase(entry);
+      SK_DLOGE("aclmdlRISpecOptimize register destroy callback failed: model=%p ret=%d", model, result);
+      return result;
+    }
+  } else {
+    // This model was optimized before, so only grow the list it already has.
+    auto &binaries = entry->second;
+    if (requests.size() > binaries.max_size() - binaries.size()) {
+      SK_DLOGE("aclmdlRISpecOptimize binary storage exhausted: model=%p", model);
+      return ACL_ERROR_BAD_ALLOC;
+    }
+    binaries.reserve(binaries.size() + requests.size());
+  }
+  // The capacity is in place, so moving the handles across can no longer fail.
+  for (const auto &request : requests) {
+    entry->second.push_back(request->binary.get());
+    request->binary.release();
+  }
+  return ACL_SUCCESS;
 }
 
 void ModelSpecResourceManager::OnModelDestroy(void *userData) {
@@ -423,6 +403,7 @@ void ModelSpecResourceManager::OnModelDestroy(void *userData) {
     std::lock_guard<std::mutex> lock(manager.mutex_);
     const auto entry = manager.modelBinaries_.find(model);
     if (entry == manager.modelBinaries_.end()) {
+      SK_DLOGE("aclmdlRISpecOptimize destroy callback found no tracked binaries: model=%p", model);
       return;
     }
     binaries.swap(entry->second);
@@ -435,6 +416,7 @@ void ModelSpecResourceManager::OnModelDestroy(void *userData) {
 
 aclError SpecOutputDirectory::Create(uint32_t modelId) {
   if (created_) {
+    SK_DLOGE("aclmdlRISpecOptimize output directory already created: path=%s", path_.c_str());
     return ACL_ERROR_INVALID_PARAM;
   }
   boost::system::error_code error;
@@ -445,13 +427,16 @@ aclError SpecOutputDirectory::Create(uint32_t modelId) {
     SK_DLOGE("aclmdlRISpecOptimize temporary root unavailable: modelId=%u ret=%d", modelId, error.value());
     return ACL_ERROR_FAILURE;
   }
-  root = fs::absolute(root, error);
+  // Resolve symlinks as well, so the directory we later remove is the one we created.
+  root = fs::canonical(root, error);
   if (error) {
+    SK_DLOGE("aclmdlRISpecOptimize temporary root is not resolvable: modelId=%u ret=%d", modelId, error.value());
     return ACL_ERROR_FAILURE;
   }
   path_ = (root / ("acl_spec_optimize_" + std::to_string(getpid()) + "_" + std::to_string(syscall(SYS_gettid)) + "_" +
                    std::to_string(modelId) + "_XXXXXX"))
               .string();
+  // mkdtemp rewrites the trailing XXXXXX in place, so it edits the string's own buffer.
   if (mkdtemp(path_.data()) == nullptr) {
     SK_DLOGE("aclmdlRISpecOptimize directory creation failed: modelId=%u errno=%d", modelId, errno);
     path_.clear();
@@ -476,14 +461,14 @@ SpecOutputDirectory::~SpecOutputDirectory() {
   }
 }
 
-bool ReadSpecResourceId(const void *binary, size_t binarySize, std::string &resourceId) {
-  if (binary == nullptr || binarySize < sizeof(Elf64_Ehdr)) {
-    SK_DLOGW("aclmdlRISpecOptimize cannot read resource id: binary is null or smaller than an ELF64 header");
+bool ReadSpecResourceId(const void *elfBytes, size_t elfSize, std::string &resourceId) {
+  if (elfBytes == nullptr || elfSize < sizeof(Elf64_Ehdr)) {
+    SK_DLOGW("aclmdlRISpecOptimize cannot read resource id: image is null or smaller than an ELF64 header");
     return false;
   }
-  const auto *bytes = static_cast<const unsigned char *>(binary);
-  const auto containsRange = [binarySize](uint64_t offset, uint64_t length) {
-    return offset <= binarySize && length <= binarySize - offset;
+  const auto *bytes = static_cast<const unsigned char *>(elfBytes);
+  const auto containsRange = [elfSize](uint64_t offset, uint64_t length) {
+    return offset <= elfSize && length <= elfSize - offset;
   };
   Elf64_Ehdr header{};
   if (memcpy_s(&header, sizeof(header), bytes, sizeof(header)) != EOK) {
@@ -529,8 +514,9 @@ bool ReadSpecResourceId(const void *binary, size_t binarySize, std::string &reso
     if (end == nullptr || std::string_view(name, end - name) != SPEC_RESOURCE_ID_SECTION_NAME) {
       continue;
     }
-    if (section.sh_type != SHT_PROGBITS || !containsRange(section.sh_offset, section.sh_size)) {
-      SK_DLOGW("aclmdlRISpecOptimize cannot read resource id: section .ascend.meta is not readable progbits");
+    if ((section.sh_type != SHT_NOTE && section.sh_type != SHT_PROGBITS) ||
+        !containsRange(section.sh_offset, section.sh_size)) {
+      SK_DLOGW("aclmdlRISpecOptimize cannot read resource id: section .ascend.meta is not readable metadata");
       return false;
     }
     const auto *data = bytes + section.sh_offset;
@@ -574,8 +560,12 @@ bool ReadSpecResourceId(const void *binary, size_t binarySize, std::string &reso
     }
   }
   if (found.empty()) {
+    SK_DLOGI("aclmdlRISpecOptimize no specialization resource id: section=%s type=%u",
+             std::string(SPEC_RESOURCE_ID_SECTION_NAME).c_str(), SPEC_RESOURCE_ID_TLV_TYPE);
     return false;
   }
   resourceId.assign(found);
   return true;
 }
+
+}  // namespace model_spec
