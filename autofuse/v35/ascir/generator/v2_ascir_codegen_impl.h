@@ -2326,14 +2326,11 @@ class ReluAscIrCodegenImplV2 : public AscIrCodegenV2 {
 
 class ReciprocalAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
-  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
-    return CalcVoidTmpSizeV2(node);
-  }
   [[nodiscard]] std::string GetApiCallName() const override {
-    return "UnaryApiTmpCall";
+    return "UnaryApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "ReciprocalExtend";
+    return "Reciprocal";
   }
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
     return IsSimtFloatDtype(GetSimtInputDtype(node)) && GetSimtInputDtype(node) == GetSimtOutputDtype(node);
@@ -2353,13 +2350,9 @@ class ReciprocalAscIrCodegenImplV2 : public AscIrCodegenV2 {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {{DT_BF16, DT_FLOAT}};
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
-  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"reciprocal_reg_base.h"};
-  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "basic_api/kernel_operator_vec_unary_intf.h",
-        "basic_api/reg_compute/kernel_reg_compute_intf.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
