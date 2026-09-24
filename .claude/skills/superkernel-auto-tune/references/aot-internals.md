@@ -11,7 +11,7 @@ Official references:
 Bundled offline summaries:
 
 - [TorchAir behavior and diagnostics](torchair-superkernel-reference.md)
-- [Ascend C operator adaptation](ascend-c-superkernel-auto-tune.md)
+- [Ascend C operator adaptation](ascend-c-superkernel-adaptation.md)
 
 ## Source Facts
 
