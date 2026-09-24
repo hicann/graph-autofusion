@@ -222,6 +222,35 @@ af::Status IsSliceLoadNeedNddma(const af::AscNodePtr &node_load, af::AscGraph &g
   GE_ASSERT_SUCCESS(JudgeByHeadBlockSize(output_attr.vectorized_axis, vector_repeats, tail_len, graph, need_nddma));
   return af::SUCCESS;
 }
+
+// brc输出仅有单根向量化轴时,该轴的vectorized_stride就是swap后cast逐次迭代的stride。
+// swap后nddma输出dtype变为cast输入dtype,cast输出dtype不变,两侧向量访问均要求stride*dtype_size
+// 为32B整数倍;dtype宽度均为2的幂,取较窄一侧判定即等价于双侧判定。
+// stride为0(纯广播,地址不变)或1(连续轴,codegen会并入cal_count整段处理)时无对齐约束;
+// stride为非常量表达式时无法静态判定,保守视为未对齐。
+bool IsSingleVecAxisStrideUnaligned(const af::AscNodePtr &node_brc, const af::AscNodePtr &node_load,
+                                    const af::AscNodePtr &node_cast) {
+  const auto &vec_strides = node_brc->outputs[0].attr.vectorized_strides;
+  if (vec_strides.size() != 1UL) {
+    return false;
+  }
+  const auto &tail_stride = vec_strides.back();
+  if (af::SymbolicUtils::StaticCheckEq(tail_stride, af::sym::kSymbolZero) == af::TriBool::kTrue ||
+      af::SymbolicUtils::StaticCheckEq(tail_stride, af::sym::kSymbolOne) == af::TriBool::kTrue) {
+    return false;
+  }
+  int64_t stride_val = 0;
+  if (!tail_stride.IsConstExpr() || !tail_stride.GetConstValue(stride_val)) {
+    return true;
+  }
+  const auto pre_dtype_size = GetSizeByDataType(node_load->outputs[0].attr.dtype);
+  const auto post_dtype_size = GetSizeByDataType(node_cast->outputs[0].attr.dtype);
+  const auto min_dtype_size = std::min(pre_dtype_size, post_dtype_size);
+  if (min_dtype_size <= 0) {
+    return true;
+  }
+  return (stride_val * static_cast<int64_t>(min_dtype_size)) % static_cast<int64_t>(kAlignBytes) != 0;
+}
 }  // namespace
 
 std::string NddmaTemplate::GenName(const std::string &general_case_name) {
@@ -252,7 +281,8 @@ af::Status NddmaTemplate::ReAlignVectorizedStrides(const af::AscNodePtr &node) {
     const int64_t axis_index = std::distance(output_attr.axis.begin(), axis_tensor_iter);
     const auto &repeat = output_attr.repeats.at(axis_index);
     // 对次尾轴做对齐
-    if (vec_axis_id == static_cast<int64_t>(output_vec_axis.size() - 2)) {  // 2 表示次尾轴偏移量
+    if (vec_axis_id == static_cast<int64_t>(output_vec_axis.size() - 2) ||  // 2 表示次尾轴偏移量
+        output_vec_axis.size() == 1UL) {
       vectorized_stride = af::sym::Align(vectorized_stride, kAlignBytes / dtype_size);
       size_product = af::sym::Mul(repeat, vectorized_stride);
       continue;
@@ -613,7 +643,8 @@ af::Status NddmaTemplate::SwapCastBrcAndGenNddma(const af::AscNodePtr &node_cast
   }
   // 判断原brc次尾轴是否按cast之后的dtype对齐，若是则后续nddma的向量化轴需要按cast之前的dtype对齐
   // 当前针对reduce场景仅判断brc次尾轴是否对齐，针对中间轴对齐场景待后续补充
-  const bool is_need_realignment = IsSecondaryTailAxisAligned(next_node);
+  const bool is_need_realignment =
+      IsSecondaryTailAxisAligned(next_node) || IsSingleVecAxisStrideUnaligned(next_node, node_load, node_cast);
   next_node->outputs[0].attr.dtype = node_load->outputs[0].attr.dtype;
   node_cast->outputs[0].attr.repeats = next_node->outputs[0].attr.repeats;
   node_cast->outputs[0].attr.strides = next_node->outputs[0].attr.strides;
