@@ -57,7 +57,7 @@ TEST_F(TestGenModelInfo, case0)
   ret = autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
   EXPECT_EQ(ret, 0);
 
-  ret = std::system("g++ tiling_func_main_fa.cpp FA_tiling_func.cpp -I ./ -o tiling_func_main_fa");
+  ret = std::system("g++ -std=c++17 tiling_func_main_fa.cpp FA_tiling_func.cpp -I ./ -o tiling_func_main_fa");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main_fa");
@@ -85,7 +85,7 @@ TEST_F(TestGenModelInfo, case0_gen_tiling_impl)
   ret = autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
   EXPECT_EQ(ret, 0);
 
-  ret = std::system("g++ tiling_func_main_fa.cpp FA_tiling_func.cpp -I ./ -o tiling_func_main_fa");
+  ret = std::system("g++ -std=c++17 tiling_func_main_fa.cpp FA_tiling_func.cpp -I ./ -o tiling_func_main_fa");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main_fa");
@@ -133,7 +133,7 @@ TEST_F(TestGenModelInfo, case2_axes_tiling_data_gen)
   auto ret = std::system(std::string("cp ").append(TILING_DATA_DIR).append("/tiling_func_main_fa.cpp ./ -f").c_str());
   ret = std::system(std::string("cp ").append(ST_DIR).append("/testcase/stub/op_log.h ./ -f").c_str());
   EXPECT_EQ(ret, 0);
-  ret = std::system("g++ tiling_func_main_fa.cpp FA_tiling_func.cpp -I ./ -o tiling_func_main_fa");
+  ret = std::system("g++ -std=c++17 tiling_func_main_fa.cpp FA_tiling_func.cpp -I ./ -o tiling_func_main_fa");
   EXPECT_EQ(ret, 0);
   ret = std::system("./tiling_func_main_fa");
 }
@@ -505,7 +505,7 @@ TEST_F(TestGenModelInfo, OptionTest05)
   ret = autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
   EXPECT_EQ(ret, 0);
 
-  ret = std::system("g++ tiling_func_main_fa.cpp FA_tiling_func.cpp -I ./ -o tiling_func_main_fa");
+  ret = std::system("g++ -std=c++17 tiling_func_main_fa.cpp FA_tiling_func.cpp -I ./ -o tiling_func_main_fa");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main_fa");
@@ -605,7 +605,7 @@ TEST_F(TestGenModelInfo, case_axes_reorder)
   ret = autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
   EXPECT_EQ(ret, 0);
 
-  ret = std::system("g++ tiling_func_main_fa.cpp FA_tiling_func.cpp -I ./ -o tiling_func_main_fa");
+  ret = std::system("g++ -std=c++17 tiling_func_main_fa.cpp FA_tiling_func.cpp -I ./ -o tiling_func_main_fa");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main_fa");

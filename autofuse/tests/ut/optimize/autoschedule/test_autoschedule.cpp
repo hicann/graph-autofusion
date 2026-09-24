@@ -2287,12 +2287,26 @@ TEST_F(AutoSchedulerUT, IndirectLoadSimtKeepsDirectGmBoundariesOutsideMainTiling
     const auto node = scheduled_graph.FindNode(name.c_str());
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->outputs().size(), 1UL);
+    // SIMT 直访 GM 边界节点不参与主 tiling 循环（核心语义保持）。其 tensor view 自
+    // 293b93ae 起由 SyncSimtBoundaryViews 统一 merge/split 到模板轴空间，不再保持
+    // 候选期的原始轴形态，但覆盖的原始轴集合与原始视图一致（语义等价）。
     EXPECT_EQ(node->attr.sched.loop_axis, af::kIdNone) << name;
-    EXPECT_EQ(node->attr.sched.axis, original.first) << name;
-    EXPECT_EQ(node->outputs()[0]->attr.axis, original.second.axis) << name;
-    EXPECT_EQ(node->outputs()[0]->attr.repeats, original.second.repeats) << name;
-    EXPECT_EQ(node->outputs()[0]->attr.strides, original.second.strides) << name;
-    EXPECT_EQ(node->outputs()[0]->attr.vectorized_axis, original.second.vectorized_axis) << name;
+    std::vector<af::AxisId> original_origins;
+    for (af::AxisId axis_id : original.second.axis) {
+      const auto origins = GetAxisOrigins(scheduled_graph, axis_id);
+      original_origins.insert(original_origins.end(), origins.begin(), origins.end());
+    }
+    std::vector<af::AxisId> synced_origins;
+    for (af::AxisId axis_id : node->outputs()[0]->attr.axis) {
+      const auto origins = GetAxisOrigins(scheduled_graph, axis_id);
+      synced_origins.insert(synced_origins.end(), origins.begin(), origins.end());
+    }
+    std::sort(original_origins.begin(), original_origins.end());
+    original_origins.erase(std::unique(original_origins.begin(), original_origins.end()), original_origins.end());
+    std::sort(synced_origins.begin(), synced_origins.end());
+    synced_origins.erase(std::unique(synced_origins.begin(), synced_origins.end()), synced_origins.end());
+    EXPECT_EQ(synced_origins, original_origins) << name;
+    EXPECT_EQ(node->outputs()[0]->attr.vectorized_axis.size(), original.second.vectorized_axis.size()) << name;
   }
 
   const auto indirect_load = scheduled_graph.FindNode("indirect_load");

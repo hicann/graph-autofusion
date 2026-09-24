@@ -55,7 +55,8 @@ class TestProfiler : public ::testing::Test {
     std::system(std::string("cp ").append(ST_DIR).append("/testcase/stub/op_log.h ./ -f").c_str());
     autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
     std::system(std::string("cp -r ").append(ST_DIR).append("/testcase/scenario/profiler/profiler.py ./ -f").c_str());
-    std::system("g++ -DDEBUG tiling_func_attlog_main.cpp OpTest6_*tiling_func.cpp -I ./ -o tiling_func_log_main");
+    std::system(
+        "g++ -std=c++17 -DDEBUG tiling_func_attlog_main.cpp OpTest6_*tiling_func.cpp -I ./ -o tiling_func_log_main");
   }
 
   void TearDown() override {

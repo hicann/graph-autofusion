@@ -17,6 +17,11 @@
 namespace {
 constexpr char kTemplateIdAttr[] = "af.internal.template.id";
 constexpr char kTemplateRoleAttr[] = "af.internal.indirect_load.role";
+// [行级广播 GM Load] 视图尾轴零贡献（stride==0 且 size==1）、其余轴稠密的广播
+// side-input Load：语义为『读 [行,列] 的值沿尾轴广播』（如 gather+norm 图 load3
+// [8,2048,1]/[2048,1,0]）。在视图被调度期 split 改写前（generator 的视图补全阶段）
+// 判定记录，供 codegen 坐标重建兜底使用——改写后视图 rank/尺寸失配无法再判定。
+constexpr char kRowBroadcastLoadAttr[] = "af.internal.indirect_load.row_broadcast_load";
 constexpr char kDcacheSizeAttr[] = "af.internal.template.dcache_size";
 }  // namespace
 
@@ -84,6 +89,22 @@ inline af::Status SetTemplateId(const af::AscNodePtr &node, TemplateId template_
   GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateIdAttr, static_cast<int64_t>(template_id)),
                  "Set internal template id failed, node = %s", node->GetNamePtr());
   return af::SUCCESS;
+}
+
+inline af::Status SetRowBroadcastLoad(const af::AscNodePtr &node, bool enabled) {
+  GE_ASSERT_NOTNULL(node);
+  auto op_desc = node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kRowBroadcastLoadAttr, static_cast<int64_t>(enabled ? 1 : 0)),
+                 "Set row broadcast load flag failed, node = %s", node->GetNamePtr());
+  return af::SUCCESS;
+}
+
+inline bool IsRowBroadcastLoad(const af::AscNode &node) {
+  if (node.GetOpDesc() == nullptr) {
+    return false;
+  }
+  return node.GetOpDesc()->TryGetExtAttr(kRowBroadcastLoadAttr, static_cast<int64_t>(0)) != 0;
 }
 
 inline af::Status SetTemplateRole(const af::AscNodePtr &node, int64_t role) {

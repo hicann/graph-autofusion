@@ -65,7 +65,7 @@ TEST_F(TestGenFFNModelInfoE2E, case1) {
   ret = std::system(std::string("cp ").append(ST_DIR).append("/testcase/stub/op_log.h ./ -f").c_str());
   ret = autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
   EXPECT_EQ(ret, 0);
-  ret = std::system("g++ tiling_func_ffn_main.cpp FFN_*tiling_func.cpp -I ./ -o tiling_func_main -Werror");
+  ret = std::system("g++ -std=c++17 tiling_func_ffn_main.cpp FFN_*tiling_func.cpp -I ./ -o tiling_func_main -Werror");
   EXPECT_EQ(ret, 0);
   ret = std::system("./tiling_func_main");
   EXPECT_EQ(ret, 0);
@@ -90,7 +90,8 @@ TEST_F(TestGenFFNModelInfoE2E, axes_reorder) {
   ret = std::system(std::string("cp ").append(ST_DIR).append("/testcase/stub/op_log.h ./ -f").c_str());
   ret = autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
   EXPECT_EQ(ret, 0);
-  ret = std::system("g++ tiling_func_ffn_main.cpp FFN_*tiling_func.cpp -I ./ -o tiling_func_main -Werror -DSTUB_LOG");
+  ret = std::system(
+      "g++ -std=c++17 tiling_func_ffn_main.cpp FFN_*tiling_func.cpp -I ./ -o tiling_func_main -Werror -DSTUB_LOG");
   EXPECT_EQ(ret, 0);
   ret = std::system("./tiling_func_main");
   EXPECT_EQ(ret, 0);

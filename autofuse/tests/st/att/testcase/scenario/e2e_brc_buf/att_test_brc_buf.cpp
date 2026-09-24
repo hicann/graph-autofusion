@@ -312,7 +312,8 @@ TEST_F(TestBrcBuf, case_01) {
   ret = autofuse::test::CopyStubFiles(TOP_DIR, "autofuse/tests/st/att/testcase/stub/");
   EXPECT_EQ(ret, 0);
 
-  ret = std::system("g++ tiling_func_main_brc.cpp BrcBuf_*_tiling_func.cpp -o tiling_func_main_brc -I ./ -DSTUB_LOG");
+  ret = std::system(
+      "g++ -std=c++17 tiling_func_main_brc.cpp BrcBuf_*_tiling_func.cpp -o tiling_func_main_brc -I ./ -DSTUB_LOG");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main_brc");

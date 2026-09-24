@@ -67,7 +67,7 @@ TEST_F(TestAtt, test_generator) {
   ret = autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
   EXPECT_EQ(ret, 0);
 
-  ret = std::system("g++ tiling_func_main.cpp OpTest0_*_tiling_func.cpp -I ./ -o tiling_func_main -Werror");
+  ret = std::system("g++ -std=c++17 tiling_func_main.cpp OpTest0_*_tiling_func.cpp -I ./ -o tiling_func_main -Werror");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main");
@@ -94,7 +94,8 @@ TEST_F(TestAtt, test_ceiling_generator) {
   ret = autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
   EXPECT_EQ(ret, 0);
 
-  ret = std::system("g++ tiling_func_ceiling.cpp OpTest2_*_tiling_func.cpp  -I ./ -o tiling_func_main -Werror");
+  ret =
+      std::system("g++ -std=c++17 tiling_func_ceiling.cpp OpTest2_*_tiling_func.cpp -I ./ -o tiling_func_main -Werror");
   EXPECT_EQ(ret, 0);
 
   ret = std::system("./tiling_func_main");

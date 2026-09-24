@@ -76,7 +76,8 @@ TEST_F(SelectModelST, st_test_select_model) {
   std::system("cp ../test/st/testcase/tiling_func_select_main_fa.cpp ./ -f");
   std::system(std::string("cp ").append(ST_DIR).append("/testcase/stub/op_log.h ./ -f").c_str());
   autofuse::test::CopyStubFiles(ST_DIR, "testcase/stub/");
-  std::system("g++ -DDEBUG tiling_func_select_main_fa.cpp OpTest_tiling_func.cpp -I ./ -o tiling_func_select_main_fa");
+  std::system("g++ -std=c++17 -DDEBUG tiling_func_select_main_fa.cpp OpTest_tiling_func.cpp -I ./ "
+              "-o tiling_func_select_main_fa");
   auto ret = std::system("./tiling_func_select_main_fa > ./info.log");
   EXPECT_EQ(ret, 0);
 
