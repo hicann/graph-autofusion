@@ -334,10 +334,9 @@ TEST(BroadcastBackwardPass, SkipsBroadcastWithMismatchedPreViewAxes) {
 }
 
 TEST(BroadcastBackwardPass, SkipsArangeBroadcastProducer) {
-  // Arange 生产者的广播后移尚未适配：退化轴视图（轴数一致但含 size=1/stride=0 轴）
-  // 在视图改写中丢失广播语义（triu/remainder_cast/degenerate_arange_add_3d 真机
-  // codegen 失败），partial backward 亦无法保持 tiling 融合性（multi_arange 真机
-  // tiling 失败）。门控应在 pass 入口对含 Arange 广播生产者的图整体跳过。
+  // Arange 生产者的单链整链后移未适配：整链后移把 compute 链输出改写为
+  // Arange 退化视图，视图代数尚未覆盖（triu/remainder_cast 类图 codegen 失败）。
+  // 门控在链级拒绝（图级门控移除后由本链级判定保持行为），图保持原状。
   ScopedTestPlatform platform("3510");
   const auto s0 = Sym("s0");
   const auto s1 = Sym("s1");
@@ -357,6 +356,105 @@ TEST(BroadcastBackwardPass, SkipsArangeBroadcastProducer) {
   EXPECT_TRUE(IsConnected(graph, "arange", "broadcast"));
   EXPECT_TRUE(IsConnected(graph, "broadcast", "cast"));
   EXPECT_TRUE(IsConnected(graph, "cast", "store"));
+}
+
+TEST(BroadcastBackwardPass, MovesDegenerateArangeCommonAxisPartialGroup) {
+  // 真实前端退化轴形态（triu 类）：index_expr 降级为两个多轴退化视图 Arange，
+  // 单节点 Broadcast 一步扩到全上下文（[1,1,s2]→[s0,s1,s2]）。两分支扩维轴集
+  // 不同（{s0,s1} vs {s0,s2}），公共轴 s0 在两个生产者视图中均已退化（repeat=1）。
+  // 期望：partial backward 只后移公共轴 s0——多轴广播保留节点（非公共轴扩维
+  // 留在计算之前，外积语义不变），分支广播与计算链输出视图 s0 塌缩为 1，
+  // 计算链后插入 backward_broadcast 恢复 s0 扩维。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  const auto s2 = Sym("s2");
+  auto graph = AscGraphBuilder("broadcast_backward_arange_partial")
+                   .Loops({s0, s1, s2})
+                   .Arange("arange_col", {af::sym::kSymbolOne, af::sym::kSymbolOne, s2},
+                           {af::sym::kSymbolZero, af::sym::kSymbolZero, af::sym::kSymbolOne})
+                   .Arange("arange_row", {af::sym::kSymbolOne, s1, af::sym::kSymbolOne},
+                           {af::sym::kSymbolZero, af::sym::kSymbolOne, af::sym::kSymbolZero})
+                   .Broadcast("brc_col", "arange_col", {s0, s1, s2})
+                   .Broadcast("brc_row", "arange_row", {s0, s1, s2})
+                   .Add("add", "brc_col", "brc_row")
+                   .Cast("cast", "add", af::DT_FLOAT)
+                   .Store("store", "cast")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+  SetNodeDtype(graph, "store", af::DT_FLOAT);
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  // 多轴扩维广播不被整节点删除，Add 输入仍来自两条广播分支。
+  EXPECT_TRUE(IsConnected(graph, "arange_col", "brc_col"));
+  EXPECT_TRUE(IsConnected(graph, "arange_row", "brc_row"));
+  EXPECT_TRUE(IsConnected(graph, "brc_col", "add"));
+  EXPECT_TRUE(IsConnected(graph, "brc_row", "add"));
+  EXPECT_TRUE(IsConnected(graph, "add", "cast"));
+  // 计算链之后插入公共轴广播，恢复 s0 扩维。
+  EXPECT_TRUE(IsConnected(graph, "cast", "backward_broadcast_cast_0"));
+  EXPECT_TRUE(IsConnected(graph, "backward_broadcast_cast_0", "store"));
+  // 公共轴 s0 塌缩：分支广播与计算链输出视图 s0 repeat 变为 1，其余轴保持。
+  const auto brc_col_node = FindNode(graph, "brc_col");
+  const auto brc_row_node = FindNode(graph, "brc_row");
+  const auto add_node = FindNode(graph, "add");
+  const auto cast_node = FindNode(graph, "cast");
+  const auto inserted_node = FindNode(graph, "backward_broadcast_cast_0");
+  ASSERT_NE(brc_col_node, nullptr);
+  ASSERT_NE(brc_row_node, nullptr);
+  ASSERT_NE(add_node, nullptr);
+  ASSERT_NE(cast_node, nullptr);
+  ASSERT_NE(inserted_node, nullptr);
+  ExpectStaticEq(brc_col_node->outputs[0].attr.repeats, {af::sym::kSymbolOne, s1, s2});
+  ExpectStaticEq(brc_row_node->outputs[0].attr.repeats, {af::sym::kSymbolOne, s1, s2});
+  ExpectStaticEq(add_node->outputs[0].attr.repeats, {af::sym::kSymbolOne, s1, s2});
+  ExpectStaticEq(cast_node->outputs[0].attr.repeats, {af::sym::kSymbolOne, s1, s2});
+  ExpectStaticEq(inserted_node->outputs[0].attr.repeats, {s0, s1, s2});
+}
+
+TEST(BroadcastBackwardPass, SkipsArangePrefixExpansionPartialGroup) {
+  // 1D Arange 前缀扩维形态（multi_arange/remainder_cast 类）：生产者视图 [s1]
+  // 不含公共轴 s0。公共轴后移会删除两分支广播并让生产者直连 Add，留下
+  // 生产者/消费者轴集不一致的边（tiling 不可融合）。期望：组级
+  // 守卫在改写前拒绝，图保持原状（含不删除同轴重复广播）。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  auto graph = AscGraphBuilder("broadcast_backward_arange_prefix")
+                   .Loops({s0, s1})
+                   .Arange("arange_a", {af::sym::kSymbolOne, s1}, {af::sym::kSymbolZero, af::sym::kSymbolOne})
+                   .Arange("arange_b", {af::sym::kSymbolOne, s1}, {af::sym::kSymbolZero, af::sym::kSymbolOne})
+                   .Broadcast("brc_a", "arange_a", {s0, s1})
+                   .Broadcast("brc_b", "arange_b", {s0, s1})
+                   .Add("add", "brc_a", "brc_b")
+                   .Store("store", "add")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+  SetNodeDtype(graph, "store", af::DT_INT64);
+  // builder 会把 Arange 输出 axis 补成全部 loop 轴；真实前端（pyautofuse）的
+  // 1D Arange 只持有单轴视图（axis/size/stride 同长）。
+  // 手工收缩为单轴视图，还原缺陷触发形态。
+  for (const char *name : {"arange_a", "arange_b"}) {
+    const auto arange_node = FindNode(graph, name);
+    ASSERT_NE(arange_node, nullptr);
+    arange_node->outputs[0].attr.axis.erase(arange_node->outputs[0].attr.axis.begin());
+    arange_node->outputs[0].attr.repeats = {s1};
+    arange_node->outputs[0].attr.strides = {af::sym::kSymbolOne};
+  }
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  EXPECT_TRUE(IsConnected(graph, "arange_a", "brc_a"));
+  EXPECT_TRUE(IsConnected(graph, "arange_b", "brc_b"));
+  EXPECT_TRUE(IsConnected(graph, "brc_a", "add"));
+  EXPECT_TRUE(IsConnected(graph, "brc_b", "add"));
+  EXPECT_TRUE(IsConnected(graph, "add", "store"));
+  const auto add_node = FindNode(graph, "add");
+  ASSERT_NE(add_node, nullptr);
+  ExpectStaticEq(add_node->outputs[0].attr.repeats, {s0, s1});
 }
 
 TEST(BroadcastBackwardPass, MovesSupportedScalarBroadcastBranches) {
@@ -2208,4 +2306,226 @@ TEST(BroadcastBackwardPass, MultiReferenceBackwardSkipsSameConsumerWithAnotherSo
   EXPECT_TRUE(IsConnected(graph, "broadcast", "other"));
   EXPECT_TRUE(IsConnected(graph, "broadcast", "consumer"));
   EXPECT_FALSE(IsConnected(graph, "consumer", "broadcast"));
+}
+
+namespace {
+// 无 Arange 的多级广播链（每节点单轴扩维）等价性验证：本修改的
+// IsSameBroNodes 全轴集比较 / RemoveBroadcasts 全轴集删除条件 / 生产者公共轴
+// 守卫对正常多级形态必须与旧代码逐分支等价。以下两个用例的图边断言已在
+// 修改前（upstream/develop 基线）与修改后分别跑探针 dump 比对，逐边一致。
+}  // namespace
+
+TEST(BroadcastBackwardPass, MovesIdenticalMultiLevelChainsNoArange) {
+  // 同构双链（load→B00(s1)→B01(s2) 与 load→B10(s1)→B11(s2)）喂多输入 Add：
+  // 期望保持既有"删重复链 + 整链后移"行为——B10/B11 删除、load1 直连 merge，
+  // B00/B01 整链移到计算链尾。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  const auto s2 = Sym("s2");
+  const std::vector<af::Expression> compact_repeats = {s0, af::sym::kSymbolOne, af::sym::kSymbolOne};
+  const std::vector<af::Expression> compact_strides = {af::sym::kSymbolOne, af::sym::kSymbolZero, af::sym::kSymbolZero};
+  auto graph = AscGraphBuilder("broadcast_backward_multilevel_same_no_arange")
+                   .Loops({s0, s1, s2})
+                   .Data("data0", 0)
+                   .Data("data1", 1)
+                   .Load("load0", "data0", compact_repeats, compact_strides)
+                   .Load("load1", "data1", compact_repeats, compact_strides)
+                   .Broadcast("broadcast00", "load0", {s0, s1, af::sym::kSymbolOne})
+                   .Broadcast("broadcast01", "broadcast00", {s0, s1, s2})
+                   .Broadcast("broadcast10", "load1", {s0, s1, af::sym::kSymbolOne})
+                   .Broadcast("broadcast11", "broadcast10", {s0, s1, s2})
+                   .Add("merge", "broadcast01", "broadcast11")
+                   .Abs("abs", "merge")
+                   .Relu("relu", "abs")
+                   .Store("store", "relu")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  // 同构重复链 B10/B11 删除，两个 load 直连 merge。
+  EXPECT_TRUE(IsConnected(graph, "load0", "merge"));
+  EXPECT_TRUE(IsConnected(graph, "load1", "merge"));
+  EXPECT_FALSE(HasNode(graph, "broadcast10"));
+  EXPECT_FALSE(HasNode(graph, "broadcast11"));
+  // 保留链 B00/B01 整链后移到计算链尾。
+  EXPECT_TRUE(IsConnected(graph, "merge", "abs"));
+  EXPECT_TRUE(IsConnected(graph, "abs", "relu"));
+  EXPECT_TRUE(IsConnected(graph, "relu", "broadcast00"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast00", "broadcast01"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast01", "store"));
+}
+
+TEST(BroadcastBackwardPass, MovesMultiLevelCommonAxisNoArange) {
+  // 不同构双链（{s0,s1} vs {s0,s2} 扩维轴集）喂多输入 Add：期望保持既有
+  // partial backward 公共轴行为——公共轴 s0 的 B00/B10 删除、load 直连，
+  // 非公共轴的 B01/B11 保留并塌缩，计算链后插入 backward_broadcast 恢复 s0。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  const auto s2 = Sym("s2");
+  const std::vector<af::Expression> row_repeats = {af::sym::kSymbolOne, af::sym::kSymbolOne, s2};
+  const std::vector<af::Expression> row_strides = {af::sym::kSymbolZero, af::sym::kSymbolZero, af::sym::kSymbolOne};
+  const std::vector<af::Expression> col_repeats = {af::sym::kSymbolOne, s1, af::sym::kSymbolOne};
+  const std::vector<af::Expression> col_strides = {af::sym::kSymbolZero, af::sym::kSymbolOne, af::sym::kSymbolZero};
+  auto graph = AscGraphBuilder("broadcast_backward_multilevel_common_no_arange")
+                   .Loops({s0, s1, s2})
+                   .Data("data0", 0)
+                   .Data("data1", 1)
+                   .Load("load0", "data0", row_repeats, row_strides)
+                   .Load("load1", "data1", col_repeats, col_strides)
+                   .Broadcast("broadcast00", "load0", {s0, af::sym::kSymbolOne, s2})
+                   .Broadcast("broadcast01", "broadcast00", {s0, s1, s2})
+                   .Broadcast("broadcast10", "load1", {s0, s1, af::sym::kSymbolOne})
+                   .Broadcast("broadcast11", "broadcast10", {s0, s1, s2})
+                   .Add("merge", "broadcast01", "broadcast11")
+                   .Cast("cast", "merge", af::DT_FLOAT)
+                   .Store("store", "cast")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+  SetNodeDtype(graph, "store", af::DT_FLOAT);
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  // 公共轴 s0 的广播删除，load 直连保留的非公共轴广播。
+  EXPECT_FALSE(HasNode(graph, "broadcast00"));
+  EXPECT_FALSE(HasNode(graph, "broadcast10"));
+  EXPECT_TRUE(IsConnected(graph, "load0", "broadcast01"));
+  EXPECT_TRUE(IsConnected(graph, "load1", "broadcast11"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast01", "merge"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast11", "merge"));
+  // 计算链后插入公共轴广播恢复 s0 扩维。
+  EXPECT_TRUE(IsConnected(graph, "merge", "cast"));
+  EXPECT_TRUE(IsConnected(graph, "cast", "backward_broadcast_cast_0"));
+  EXPECT_TRUE(IsConnected(graph, "backward_broadcast_cast_0", "store"));
+}
+
+namespace {
+// 标量链级联后移回归用例：scalar-like 生产者
+// 视图恒为空，公共轴守卫必须对其免检放行，否则 Sub 组之后整条级联
+// （Cast→Le/And/Where…）被误拒，只后移一小段。断言为 develop 基线
+// （图级门控合入前的 partial backward）逐边比对的真值。
+}  // namespace
+
+TEST(BroadcastBackwardPass, MovesScalarChainCascadePartialGroups) {
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  const auto s2 = Sym("s2");
+  const std::vector<af::Expression> row_repeats = {af::sym::kSymbolOne, af::sym::kSymbolOne, s2};
+  const std::vector<af::Expression> row_strides = {af::sym::kSymbolZero, af::sym::kSymbolZero, af::sym::kSymbolOne};
+  const std::vector<af::Expression> col_repeats = {af::sym::kSymbolOne, s1, af::sym::kSymbolOne};
+  const std::vector<af::Expression> col_strides = {af::sym::kSymbolZero, af::sym::kSymbolOne, af::sym::kSymbolZero};
+  auto graph = AscGraphBuilder("broadcast_backward_scalar_chain_cascade")
+                   .Loops({s0, s1, s2})
+                   .Data("data0", 0)
+                   .Data("data1", 1)
+                   .Load("load0", "data0", row_repeats, row_strides)
+                   .Load("load1", "data1", col_repeats, col_strides)
+                   .Broadcast("b00", "load0", {s0, af::sym::kSymbolOne, s2})
+                   .Broadcast("b01", "b00", {s0, s1, s2})
+                   .Broadcast("b10", "load1", {s0, s1, af::sym::kSymbolOne})
+                   .Broadcast("b11", "b10", {s0, s1, s2})
+                   .Sub("sub", "b01", "b11")
+                   .Cast("cast", "sub", af::DT_FLOAT)
+                   .Scalar("scalar0", "0", af::DT_INT64)
+                   .Broadcast("b4", "scalar0", {s0, af::sym::kSymbolOne, af::sym::kSymbolOne})
+                   .Broadcast("b5", "b4", {s0, s1, af::sym::kSymbolOne})
+                   .Broadcast("b6", "b5", {s0, s1, s2})
+                   .Cast("cast1", "b6", af::DT_FLOAT)
+                   .Add("le", "cast", "cast1")
+                   .Store("store", "le")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+  SetNodeDtype(graph, "store", af::DT_FLOAT);
+  // 还原真实前端的 scalar-like 空视图形态（构图协议）。
+  const auto scalar_node = FindNode(graph, "scalar0");
+  ASSERT_NE(scalar_node, nullptr);
+  scalar_node->outputs[0].attr.axis.clear();
+  scalar_node->outputs[0].attr.repeats.clear();
+  scalar_node->outputs[0].attr.strides.clear();
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  // Sub 组：公共轴 s0 的 b00/b10 删除，load 直连非公共轴广播。
+  EXPECT_FALSE(HasNode(graph, "b00"));
+  EXPECT_FALSE(HasNode(graph, "b10"));
+  EXPECT_TRUE(IsConnected(graph, "load0", "b01"));
+  EXPECT_TRUE(IsConnected(graph, "load1", "b11"));
+  EXPECT_TRUE(IsConnected(graph, "b01", "sub"));
+  EXPECT_TRUE(IsConnected(graph, "b11", "sub"));
+  // Le 组级联（scalar-like 生产者免检）：b4 与 Sub 组插入的 s0 广播一并删除，
+  // cast 直连 le，标量直连 b5，le 之后统一恢复 s0 扩维。
+  EXPECT_FALSE(HasNode(graph, "b4"));
+  EXPECT_FALSE(HasNode(graph, "backward_broadcast_cast_0"));
+  EXPECT_TRUE(IsConnected(graph, "sub", "cast"));
+  EXPECT_TRUE(IsConnected(graph, "cast", "le"));
+  EXPECT_TRUE(IsConnected(graph, "scalar0", "b5"));
+  EXPECT_TRUE(IsConnected(graph, "b5", "b6"));
+  EXPECT_TRUE(IsConnected(graph, "b6", "cast1"));
+  EXPECT_TRUE(IsConnected(graph, "cast1", "le"));
+  EXPECT_TRUE(IsConnected(graph, "le", "backward_broadcast_le_0"));
+  EXPECT_TRUE(IsConnected(graph, "backward_broadcast_le_0", "store"));
+}
+
+TEST(BroadcastBackwardPass, MovesArangeChainCascadePartialGroups) {
+  // Arange 退化视图生产者 + 标量链级联组合：Sub 组走 Arange 公共轴放行
+  // （生产者 [1,1,s2]/[1,s1,1] 含公共轴 s0 且退化），标量链走 scalar-like
+  // 免检——两级改写叠加后级联推到底，与 Load 生产者版本（见
+  // MovesScalarChainCascadePartialGroups）逐边同构。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  const auto s2 = Sym("s2");
+  auto graph = AscGraphBuilder("broadcast_backward_arange_chain_cascade")
+                   .Loops({s0, s1, s2})
+                   .Arange("arange_col", {af::sym::kSymbolOne, af::sym::kSymbolOne, s2},
+                           {af::sym::kSymbolZero, af::sym::kSymbolZero, af::sym::kSymbolOne})
+                   .Arange("arange_row", {af::sym::kSymbolOne, s1, af::sym::kSymbolOne},
+                           {af::sym::kSymbolZero, af::sym::kSymbolOne, af::sym::kSymbolZero})
+                   .Broadcast("b00", "arange_col", {s0, af::sym::kSymbolOne, s2})
+                   .Broadcast("b01", "b00", {s0, s1, s2})
+                   .Broadcast("b10", "arange_row", {s0, s1, af::sym::kSymbolOne})
+                   .Broadcast("b11", "b10", {s0, s1, s2})
+                   .Sub("sub", "b01", "b11")
+                   .Cast("cast", "sub", af::DT_FLOAT)
+                   .Scalar("scalar0", "0", af::DT_INT64)
+                   .Broadcast("b4", "scalar0", {s0, af::sym::kSymbolOne, af::sym::kSymbolOne})
+                   .Broadcast("b5", "b4", {s0, s1, af::sym::kSymbolOne})
+                   .Broadcast("b6", "b5", {s0, s1, s2})
+                   .Cast("cast1", "b6", af::DT_FLOAT)
+                   .Add("le", "cast", "cast1")
+                   .Store("store", "le")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+  SetNodeDtype(graph, "store", af::DT_FLOAT);
+  const auto scalar_node = FindNode(graph, "scalar0");
+  ASSERT_NE(scalar_node, nullptr);
+  scalar_node->outputs[0].attr.axis.clear();
+  scalar_node->outputs[0].attr.repeats.clear();
+  scalar_node->outputs[0].attr.strides.clear();
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  EXPECT_FALSE(HasNode(graph, "b00"));
+  EXPECT_FALSE(HasNode(graph, "b10"));
+  EXPECT_FALSE(HasNode(graph, "b4"));
+  EXPECT_FALSE(HasNode(graph, "backward_broadcast_cast_0"));
+  EXPECT_TRUE(IsConnected(graph, "arange_col", "b01"));
+  EXPECT_TRUE(IsConnected(graph, "arange_row", "b11"));
+  EXPECT_TRUE(IsConnected(graph, "b01", "sub"));
+  EXPECT_TRUE(IsConnected(graph, "b11", "sub"));
+  EXPECT_TRUE(IsConnected(graph, "sub", "cast"));
+  EXPECT_TRUE(IsConnected(graph, "cast", "le"));
+  EXPECT_TRUE(IsConnected(graph, "scalar0", "b5"));
+  EXPECT_TRUE(IsConnected(graph, "b5", "b6"));
+  EXPECT_TRUE(IsConnected(graph, "b6", "cast1"));
+  EXPECT_TRUE(IsConnected(graph, "cast1", "le"));
+  EXPECT_TRUE(IsConnected(graph, "le", "backward_broadcast_le_0"));
+  EXPECT_TRUE(IsConnected(graph, "backward_broadcast_le_0", "store"));
 }

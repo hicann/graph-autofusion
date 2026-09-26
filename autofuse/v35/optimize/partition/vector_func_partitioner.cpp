@@ -38,6 +38,63 @@ af::Status ValidateUniqueNodeNames(const af::AscGraph &graph) {
   return af::SUCCESS;
 }
 
+// Arange 沿 VF 向量化轴是否恒定（全部 vectorized_strides 为 0，即取值轴与 lane 轴
+// 不一致，值沿 lane 不变）。
+// 此类 Arange 融合进多节点 VF 后走"常量分量"折叠模板，该模板的块偏移/lane 步长
+// 参数推导未覆盖 lane 恒定输入（折叠后 mask 序列错位、结果错误）。取值轴与
+// 向量化轴一致的 Arange 融合路径不受影响，保持融合。
+bool ArangeConstantAlongVectorizedAxes(const af::AscNodePtr &node) {
+  for (const auto &output : node->outputs()) {
+    const auto &attr = output->attr;
+    if (attr.vectorized_axis.empty() || attr.vectorized_strides.empty() ||
+        attr.vectorized_axis.size() != attr.vectorized_strides.size()) {
+      continue;
+    }
+    // 找非退化取值轴：stride≠0 且 repeat 不明确为 1（即产出多个不同值）。
+    // 全退化或单元素 Arange（如 [1,1]）不产出多个不同值，无 inter-VF 广播
+    // 风险，不视为 lane 恒定。
+    bool has_multi_value_axis = false;
+    for (size_t i = 0; i < attr.axis.size(); ++i) {
+      const bool is_zero_stride =
+          af::SymbolicUtils::StaticCheckEq(attr.strides[i], af::sym::kSymbolZero) == af::TriBool::kTrue;
+      if (is_zero_stride) {
+        continue;
+      }
+      const bool is_size_one =
+          af::SymbolicUtils::StaticCheckEq(attr.repeats[i], af::sym::kSymbolOne) == af::TriBool::kTrue;
+      if (!is_size_one) {
+        has_multi_value_axis = true;
+        break;
+      }
+    }
+    if (!has_multi_value_axis) {
+      continue;
+    }
+    // 取值轴存在且沿向量化轴 stride 全为 0 → 值沿 lane 不变。
+    bool all_vec_zero = true;
+    for (const auto &vec_stride : attr.vectorized_strides) {
+      if (af::SymbolicUtils::StaticCheckNe(vec_stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
+        all_vec_zero = false;
+        break;
+      }
+    }
+    if (all_vec_zero) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// 簇内是否包含"沿向量化轴恒定"的 Arange（此类 Arange 禁止融合，见上）。
+bool ClusterContainsLaneConstantArange(const optimize::Cluster &cluster) {
+  for (const auto &node : cluster.Nodes()) {
+    if (af::ops::IsOps<af::ascir_op::Arange>(node) && ArangeConstantAlongVectorizedAxes(node)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Arange 广播外轴检测: 逻辑 strides 中最后一个非零 stride 为取值轴(lane 轴),
 // 其之前或之后尺寸大于 1 的轴若存在零 stride, 表示 Arange 的取值沿该轴广播(值重复),
 // 轴合并/flatten 后无法用线性等差序列表达。尺寸为 1 的退化轴 stride 为 0 时不影响取值语义。
@@ -655,6 +712,10 @@ af::Status VectorFuncPartitioner::Partition() {
   // 2.TryMergeClusters
   GE_ASSERT_GRAPH_SUCCESS(MergeClusters(), "Failed to merge clusters for graph[%s]", impl_graph_.GetName().c_str());
 
+  // 3. lane 恒定 Arange 的 VF 消费者检查：消除单元素 buffer → LoadAlign 垃圾
+  //    的 inter-VF 数据通路（详见 DisableLaneConstantArangeVFForVFConsumers 注释）。
+  GE_ASSERT_SUCCESS(DisableLaneConstantArangeVFForVFConsumers());
+
   // 4.SortClusters
   GE_ASSERT_GRAPH_SUCCESS(SortClustersForBuildSubgraph(), "Failed to sort clusters for graph[%s]",
                           impl_graph_.GetName().c_str());
@@ -727,6 +788,12 @@ void VectorFuncPartitioner::RefineEnableVFFlag(const af::AscNodePtr &node, bool 
         return;
       }
     }
+    // 沿向量化轴恒定的 Arange（取值轴与 lane 轴不一致，如 row 型 [1,M,1]）：
+    // 单节点 VF 只产出 1 个有效元素（preg_vl1 单 lane 存储），消费侧 VfNode 以
+    // LoadAlign 向量加载后 Duplicate 向量拷贝（非标量广播），lane 1+ 读到未初始化
+    // 垃圾数据。此类 Arange
+    // 保留在根图走 ArangeApiCall（按逻辑 stride 物化全序列 + 广播轴帧展开），
+    // 与基线行为一致。
     if (has_broadcast_outer_axis || disable_arange_vf_ || node->GetInControlNodesSize() != 0UL ||
         node->GetOutControlNodesSize() != 0UL) {
       GELOGD("Node [%s] is Arange with broadcast outer axis or control edge or in UBFuse context, disable VF support.",
@@ -943,6 +1010,14 @@ bool VectorFuncPartitioner::CanMergeClusters(const Cluster &from, const Cluster 
   if (!from_meta.enable_vf || !to_meta.enable_vf) {
     return false;
   }
+  // 沿向量化轴恒定的 Arange（取值轴与 lane 轴不一致）禁止融入多节点 VF：其折叠
+  // 模板参数推导存在缺陷（见 ClusterContainsLaneConstantArange 注释），回退为
+  // "单 Arange VfNode + 根图 BroadcastExtend"的安全模式。
+  if (ClusterContainsLaneConstantArange(from) || ClusterContainsLaneConstantArange(to)) {
+    GELOGD("Cluster contains lane-constant Arange, keep it as single-node VF, skip fuse [%zu] to [%zu].", from.Id(),
+           to.Id());
+    return false;
+  }
   // 需要在同一个循环内
   if (from_meta.loop_axis != to_meta.loop_axis) {
     return false;
@@ -1026,6 +1101,45 @@ af::Status VectorFuncPartitioner::MergeClusters() {
         cluster_dict_.SetNodeClusterPair(node, cluster);
       }
       GELOGD("Merge cluster from %zu to %zu.", in_cluster->Id(), cluster->Id());
+    }
+  }
+  return af::SUCCESS;
+}
+
+// lane 恒定 Arange 的 VF 消费者检查（MergeClusters 后、BuildSubgraphs 前执行）。
+// CanMergeClusters 已阻止 lane 恒定 Arange 融入多节点 VF（消除折叠 VfNode 参数
+// 推导错误）。但拆分后仍可作为单节点 VF 存在——VfNode 用 preg_vl1（单 lane）
+// 只写 1 个元素到 buffer，消费侧 VfNode 以 LoadAlign 加载整个向量后 Duplicate
+// 向量拷贝（非标量广播），lane 1+ 读到未初始化垃圾（折叠与分离形态均如此）。
+// 输出被 VF 簇消费的 lane 恒定 Arange 留在根图走 ArangeApiCall；被根图节点
+// （如 Store）消费的保持 VF 不变。
+af::Status VectorFuncPartitioner::DisableLaneConstantArangeVFForVFConsumers() {
+  for (const auto &cluster : cluster_dict_.GetAllClusters()) {
+    if (!cluster->meta_data_.enable_vf || cluster->Nodes().size() != 1UL) {
+      continue;
+    }
+    const auto &node = cluster->Nodes().front();
+    if (!af::ops::IsOps<af::ascir_op::Arange>(node) || !ArangeConstantAlongVectorizedAxes(node)) {
+      continue;
+    }
+    bool has_vf_consumer = false;
+    for (const auto &out_node : node->GetOutDataNodes()) {
+      // Broadcast 视图融合（BroadcastExtend 路径）内联处理 lane 恒定 Arange 输入（退化前缀/尾轴
+      // Arange→Broadcast 的 degenerate 形态），不算 VF 消费者；仅计算类 VF 簇消费才需要留根图。
+      if (af::ops::IsOps<af::ascir_op::Broadcast>(out_node)) {
+        continue;
+      }
+      const auto &consumer_cluster = cluster_dict_.GetNodeCluster(out_node);
+      if (consumer_cluster != nullptr && consumer_cluster->Id() != cluster->Id() &&
+          consumer_cluster->meta_data_.enable_vf) {
+        has_vf_consumer = true;
+        break;
+      }
+    }
+    if (has_vf_consumer) {
+      cluster->meta_data_.enable_vf = false;
+      GELOGI("Lane-constant Arange [%s] has VF consumer, keep it in root graph for ArangeApiCall.",
+             node->GetName().c_str());
     }
   }
   return af::SUCCESS;
