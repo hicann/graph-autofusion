@@ -6,7 +6,7 @@ AutoFuse is an automatic operator fusion component for Ascend chips in the CANN 
 
 The overall logic structure is shown in the figure below:
 
-![image.png](https://raw.gitcode.com/user-images/assets/9919791/780fe1d9-5764-4fa5-99dd-ad34c46075aa/image.png 'image.png')
+![image.png](https://raw.gitcode.com/user-images/assets/9919791/49b11a34-91e6-4496-9ff6-f5137ea8b1b0/image.png 'image.png')
 
 As shown in the figure, based on the unified AscendLoopIR (IR modeled for the AscendC programming language) and supporting Schedule and code generation capabilities, the automatic fusion solution constructs two fusion implementation paths:
 

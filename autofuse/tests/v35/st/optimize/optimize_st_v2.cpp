@@ -1061,6 +1061,59 @@ TEST_F(OptimizerStV2, LoadCastAndTailAxisBrcCase) {
 }
 
 /**
+ * 单轴场景: load(uint8)-cast(fp16)-brc(尾轴广播)调序生成nddma。
+ * store尾轴GM stride=16(非连续), 反向传播使brc尾轴向量化stride按fp16对齐为Align(1,16)=16;
+ * swap后nddma输出dtype变为cast输入dtype(uint8, 1B), 16*1B=16B不是32B整数倍,
+ * 需按cast之前的dtype重新对齐到Align(16, 32)=32。
+ */
+TEST_F(OptimizerStV2, LoadCastBrcSingleVecAxisStrideUnalignedRealign) {
+  const Expression s0 = af::Symbol(50);
+  const Expression s1 = af::Symbol(4096);
+
+  // data0在GM中按尾轴stride=16稀疏排布, load每行仅加载1个元素, brc将尾轴扩展到s1
+  std::vector<Expression> load0_shape = {s0, af::sym::kSymbolOne};
+  std::vector<Expression> load0_strides = {s1 * af::Symbol(16), af::sym::kSymbolZero};
+  std::vector<Expression> store_shape = {s0, s1};
+  std::vector<Expression> store_strides = {s1 * af::Symbol(16), af::Symbol(16)};
+
+  auto graph = AscGraphBuilder("load_cast_brc_realign")
+                   .Loops({s0, s1})
+                   .Data("data0", 0, af::DT_UINT8)
+                   .Load("load0", "data0", load0_shape, load0_strides)
+                   .Cast("cast1", "load0", af::DT_FLOAT16)
+                   .Broadcast("broadcast1", "cast1", {1})  // broadcast on axis 1
+                   .Store("store", "broadcast1", store_shape, store_strides)
+                   .Output("output", "store", 8, af::DT_FLOAT16)
+                   .Build();
+
+  ::ascir::FusedScheduledResult fused_scheduled_result;
+  ASSERT_EQ(optimizer.Optimize(graph, fused_scheduled_result), 0);
+  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results.empty());
+  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results[0].empty());
+  ASSERT_FALSE(fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups.empty());
+  const auto &impl_graphs = fused_scheduled_result.node_idx_to_scheduled_results[0][0].schedule_groups[0].impl_graphs;
+
+  const af::AscNodePtr nddma_node = [&impl_graphs]() {
+    for (const auto &impl_graph : impl_graphs) {
+      if (impl_graph.GetName().find("_nddma") == std::string::npos) {
+        continue;
+      }
+      for (const auto &node : impl_graph.GetAllNodes()) {
+        if (node->GetType() == "Nddma") {
+          return node;
+        }
+      }
+    }
+    return static_cast<af::AscNodePtr>(nullptr);
+  }();
+  ASSERT_NE(nddma_node, nullptr);
+  // swap后nddma输出dtype为cast输入dtype(uint8, 1B), 对齐单位kAlignBytes/dtype_size=32
+  const auto &vec_strides = nddma_node->outputs[0].attr.vectorized_strides;
+  ASSERT_EQ(vec_strides.size(), 1UL);
+  EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(vec_strides[0], af::sym::Align(af::Symbol(16), 32U)), af::TriBool::kTrue);
+}
+
+/**
  *           data0         data1
  *             |             |
  *           load0         load1
