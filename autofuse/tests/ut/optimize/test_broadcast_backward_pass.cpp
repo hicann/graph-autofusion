@@ -918,6 +918,140 @@ TEST(BroadcastBackwardPass, MovesPartialBackwardWithoutIndirectLoadDownstream) {
   EXPECT_FALSE(IsConnected(graph, "broadcast1", "sub"));
 }
 
+TEST(BroadcastBackwardPass, MovesCoaxialSiblingBroadcastPastPeerBroadcastGuard) {
+  // 复现：add 的两路输入来自同轴 broadcast0/broadcast1（broadcast0 接 in-0），add 的下游 add1 的另一路
+  // 来自异轴 scalar 广播链 broadcast2。修复前：探测期当场删除 broadcast1 后，提交守卫把本链广播
+  // broadcast0（经 add 的 in-0）误计入"broadcast behind"（count=2）而拒绝提交，图停留在半改写状态
+  // （broadcast1 已删、broadcast0 未动、add 两路输入视图不一致）。修复后：守卫排除本链广播、兄弟删除
+  // 延迟到提交期，广播正确后移到 add 之后，add 两路输入均为紧凑视图。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  auto graph = AscGraphBuilder("broadcast_backward_coaxial_sibling_guard")
+                   .Loops({s0, s1})
+                   .Data("data0", 0)
+                   .Data("data1", 1)
+                   .Load("load0", "data0", kCompactRepeats, kCompactStrides)
+                   .Load("load1", "data1", kCompactRepeats, kCompactStrides)
+                   .Scalar("scalar", "1.0")
+                   .Broadcast("broadcast0", "load0", {s0, s1})
+                   .Broadcast("broadcast1", "load1", {s0, s1})
+                   .Broadcast("broadcast2", "scalar", {s0, s1})
+                   .Add("add", "broadcast0", "broadcast1")
+                   .Add("add1", "add", "broadcast2")
+                   .Store("store", "add1")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  EXPECT_TRUE(IsConnected(graph, "load0", "add"));
+  EXPECT_TRUE(IsConnected(graph, "load1", "add"));
+  EXPECT_TRUE(IsConnected(graph, "add", "broadcast0"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast0", "add1"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast2", "add1"));
+  EXPECT_FALSE(HasNode(graph, "broadcast1"));
+  EXPECT_TRUE(IsEdgeAttrConsistent(graph, "load0", "add"));
+  EXPECT_TRUE(IsEdgeAttrConsistent(graph, "load1", "add"));
+  const auto add = FindNode(graph, "add");
+  const auto load0 = FindNode(graph, "load0");
+  const auto load1 = FindNode(graph, "load1");
+  ASSERT_NE(add, nullptr);
+  ASSERT_NE(load0, nullptr);
+  ASSERT_NE(load1, nullptr);
+  // add 输出改写为紧凑视图（广播轴 repeat=1），与两路输入的紧凑视图匹配，不再出现
+  // "一路展开、一路紧凑"的半改写属性。
+  ExpectStaticEq(add->outputs[0].attr.repeats, kCompactRepeats);
+  EXPECT_TRUE(AreExpressionVectorsEqual(load0->outputs[0].attr.repeats, load1->outputs[0].attr.repeats));
+}
+
+TEST(BroadcastBackwardPass, SkipsCoaxialSiblingBroadcastRemovalReachingIndirectLoad) {
+  // fail-closed 对照：同图但 add1 下游到达 IndirectLoad。IsMulInputsCanBackward 的 IndirectLoad 熔断
+  // 先于兄弟删除登记触发，且修复后兄弟删除已延迟到提交期，整条链干净放弃，broadcast0/broadcast1
+  // 均保留原位（不产生"兄弟已删、链未后移"的半改写）。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  auto graph = AscGraphBuilder("broadcast_backward_coaxial_sibling_indirect_load")
+                   .Loops({s0, s1})
+                   .Data("data0", 0)
+                   .Data("data1", 1)
+                   .Data("data3", 3)
+                   .Load("load0", "data0", kCompactRepeats, kCompactStrides)
+                   .Load("load1", "data1", kCompactRepeats, kCompactStrides)
+                   .Load("load3", "data3")
+                   .Scalar("scalar", "1.0")
+                   .Broadcast("broadcast0", "load0", {s0, s1})
+                   .Broadcast("broadcast1", "load1", {s0, s1})
+                   .Broadcast("broadcast2", "scalar", {s0, s1})
+                   .Add("add", "broadcast0", "broadcast1")
+                   .Add("add1", "add", "broadcast2")
+                   .Op<af::ascir_op::IndirectLoad>("indirectload", {"load3", "add1"})
+                   .Store("store", "indirectload")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  EXPECT_TRUE(IsConnected(graph, "load0", "broadcast0"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast0", "add"));
+  EXPECT_TRUE(IsConnected(graph, "load1", "broadcast1"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast1", "add"));
+  EXPECT_TRUE(IsConnected(graph, "add", "add1"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast2", "add1"));
+  EXPECT_TRUE(HasNode(graph, "broadcast0"));
+  EXPECT_TRUE(HasNode(graph, "broadcast1"));
+}
+
+TEST(BroadcastBackwardPass, MovesCoaxialSiblingBroadcastOnFirstInputPastComputePeerGuard) {
+  // 复现 ST RemoveRedundantBroadcast 回归：broadcast1 链（exp0→broadcast1→add.in-1）探测 add 时，同轴
+  // 兄弟 broadcast0 垫在 add 的 in-0 上被登记为待删；链尾 mul0 的另一路是 compute peer exp1，其 in-0 由
+  // 外源广播 broadcast2 支撑。修复前：提交守卫只排除本链广播（bro_nodes），待删兄弟 broadcast0 探测期
+  // 仍垫在链内节点 add 的 in-0 上，被守卫经 peer 的 in-0 生产者检查误计为外源广播，与 broadcast2 凑满
+  // count=2 拒绝提交，broadcast0/broadcast1 全部原样保留。修复后：守卫排除集扩展为本事务广播全集
+  // （bro_nodes + pending_remove_bros），count=1 放行提交：broadcast0 提交期删除、broadcast1 后移到
+  // add 与 mul0 之间；abs0 的首消费者为 compute（exp0），其链被前置门控，外源 broadcast2 保持原位。
+  ScopedTestPlatform platform("3510");
+  const auto s0 = Sym("s0");
+  const auto s1 = Sym("s1");
+  auto graph = AscGraphBuilder("broadcast_backward_coaxial_sibling_on_first_input")
+                   .Loops({s0, s1})
+                   .Data("data0", 0)
+                   .Load("load0", "data0", kCompactRepeats, kCompactStrides)
+                   .Abs("abs0", "load0")
+                   .Exp("exp0", "abs0")
+                   .Broadcast("broadcast0", "abs0", {s0, s1})
+                   .Broadcast("broadcast1", "exp0", {s0, s1})
+                   .Broadcast("broadcast2", "abs0", {s0, s1})
+                   .Add("add", "broadcast0", "broadcast1")
+                   .Exp("exp1", "broadcast2")
+                   .Mul("mul0", "add", "exp1")
+                   .Store("store", "mul0")
+                   .Output("output", "store")
+                   .Build();
+  CompleteApiInfo(graph);
+
+  optimize::BroadcastBackwardPass pass;
+  ASSERT_EQ(pass.RunPass(graph), af::SUCCESS);
+  EXPECT_TRUE(IsConnected(graph, "abs0", "add"));
+  EXPECT_TRUE(IsConnected(graph, "exp0", "add"));
+  EXPECT_TRUE(IsConnected(graph, "add", "broadcast1"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast1", "mul0"));
+  EXPECT_FALSE(HasNode(graph, "broadcast0"));
+  EXPECT_TRUE(IsConnected(graph, "abs0", "broadcast2"));
+  EXPECT_TRUE(IsConnected(graph, "broadcast2", "exp1"));
+  EXPECT_TRUE(IsConnected(graph, "exp1", "mul0"));
+  EXPECT_TRUE(IsEdgeAttrConsistent(graph, "abs0", "add"));
+  EXPECT_TRUE(IsEdgeAttrConsistent(graph, "exp0", "add"));
+  const auto add = FindNode(graph, "add");
+  ASSERT_NE(add, nullptr);
+  // add 输出改写为紧凑视图（广播轴 repeat=1），与两路输入的紧凑视图匹配，不再出现
+  // "一路展开、一路紧凑"的半改写属性。
+  ExpectStaticEq(add->outputs[0].attr.repeats, kCompactRepeats);
+}
+
 // ===== Dtype-aware backward tests for Cast and dtype-changing operators =====
 
 TEST(BroadcastBackwardPass, MovesCastAcrossBroadcast) {

@@ -19,6 +19,7 @@
 
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
+#include "ascir_utils.h"
 #include "ascgraph_info_complete.h"
 #include "common_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
@@ -597,7 +598,13 @@ Status GetNodeScalarInputList(const af::AscNodePtr &asc_node, std::vector<bool> 
 Status ProcessOtherInputBranches(const NodePtr &next_comp_op, size_t current_idx, const std::vector<int64_t> &bro_axes,
                                  std::vector<bool> &is_scalar_list);
 
-bool HasMultipleInputsBroadcastBehind(const NodePtr &node) {
+// 统计 node 的输入中由"非本事务"broadcast 支撑的路数：peer 是 Broadcast 时直接判定，peer 是 compute 时看其
+// in-0 生产者（本链广播后移后将停靠在 peer 与 node 之间，属于本链而非外源）。excluded_bro_nodes 为本次
+// 后移事务涉及的广播全集：链内广播（bro_nodes，提交期后移到链尾 compute 与 node 之间）与同轴兄弟广播
+// （pending_remove_bros，提交期统一删除，但探测期仍垫在链内多输入节点的输入上，会被 in-0 生产者检查看到）。
+// 二者提交后都不会以"peer 背后的外源广播"形态存在，排除后语义变为"≥2 路外源广播才拒绝"，
+// 避免本事务自己的广播反过来否决自己的后移。
+bool HasMultipleInputsBroadcastBehind(const NodePtr &node, const std::vector<NodePtr> &excluded_bro_nodes) {
   if (node->GetAllInDataAnchorsSize() <= 1U) {
     return false;
   }
@@ -612,12 +619,14 @@ bool HasMultipleInputsBroadcastBehind(const NodePtr &node) {
     }
     bool has_broadcast = false;
     if (peer->GetType() == kBroadcastType) {
-      has_broadcast = true;
+      has_broadcast = std::find(excluded_bro_nodes.begin(), excluded_bro_nodes.end(), peer) == excluded_bro_nodes.end();
     } else {
       NodePtr pre_node;
       if (GetPeerOutNodeSafe(peer, pre_node, 0) == SUCCESS && pre_node != nullptr &&
           pre_node->GetType() == kBroadcastType) {
-        has_broadcast = true;
+        // peer 背后的广播属于本事务（链内广播将移到 peer 与 node 之间、待删兄弟提交期删除）时不算"别人"。
+        has_broadcast =
+            std::find(excluded_bro_nodes.begin(), excluded_bro_nodes.end(), pre_node) == excluded_bro_nodes.end();
       }
     }
     if (has_broadcast) {
@@ -729,14 +738,15 @@ bool CheckScalarInputSupport(const NodePtr &next_node, const std::vector<NodePtr
   return true;
 }
 
-bool IsMulInputsCanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePtr> &bro_nodes, AscGraph &graph,
-                            std::set<NodePtr> &mul_input_nodes) {
+bool IsMulInputsCanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePtr> &bro_nodes,
+                            std::set<NodePtr> &mul_input_nodes,
+                            std::vector<std::vector<NodePtr>> &pending_remove_bros) {
   auto in_data_anchor_size = next_node->GetAllInDataAnchorsSize();
   if (in_data_anchor_size == 1U) {
     return false;
   }
 
-  // 多输入节点的同轴兄弟 broadcast 删除与部分后移登记都发生在本函数内；若该节点下游到达
+  // 多输入节点的同轴兄弟 broadcast 删除登记与部分后移注册都发生在本函数内；若该节点下游到达
   // IndirectLoad，任何改写都会破坏索引链视图，必须在此整体拒绝。
   if (ChainReachesIndirectLoad(next_node)) {
     GELOGD("Skip multi-input backward at node[%s]: downstream reaches IndirectLoad.", next_node->GetName().c_str());
@@ -791,20 +801,23 @@ bool IsMulInputsCanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<N
   }
 
   for (std::vector<NodePtr> &remove_nodes : remove_bro_nodes_list) {
-    RemoveBroadcasts(remove_nodes, graph);
+    // 探测期只登记、提交期统一删除：链收集后的守卫（外源广播/IndirectLoad 下游/视图轴数）拒绝提交时
+    // 图保持原状，避免"兄弟已删、链未后移"的半改写状态。
+    pending_remove_bros.push_back(std::move(remove_nodes));
   }
   return true;
 }
 
-bool CanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePtr> &bro_nodes, AscGraph &graph,
-                 std::set<NodePtr> &mul_input_nodes) {
+bool CanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePtr> &bro_nodes,
+                 std::set<NodePtr> &mul_input_nodes, std::vector<std::vector<NodePtr>> &pending_remove_bros) {
   if (!CheckBackwardCommon(next_node)) {
     return false;
   }
   if (!IsSingleOutNode(next_node)) {
     return false;
   }
-  if (!IsSingleInNode(next_node) && !IsMulInputsCanBackward(cur_node, next_node, bro_nodes, graph, mul_input_nodes)) {
+  if (!IsSingleInNode(next_node) &&
+      !IsMulInputsCanBackward(cur_node, next_node, bro_nodes, mul_input_nodes, pending_remove_bros)) {
     return false;
   }
   return true;
@@ -829,8 +842,9 @@ Status CollectBroNodes(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePt
 }
 
 Status CollectCmpNodes(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePtr> &nodes,
-                       std::vector<NodePtr> &bro_nodes, AscGraph &graph, std::set<NodePtr> &mul_input_nodes) {
-  while (CanBackward(cur_node, next_node, bro_nodes, graph, mul_input_nodes)) {
+                       std::vector<NodePtr> &bro_nodes, std::set<NodePtr> &mul_input_nodes,
+                       std::vector<std::vector<NodePtr>> &pending_remove_bros) {
+  while (CanBackward(cur_node, next_node, bro_nodes, mul_input_nodes, pending_remove_bros)) {
     nodes.push_back(next_node);
     cur_node = next_node;
     GE_ASSERT_SUCCESS(GetSingleNextNode(cur_node, next_node));
@@ -1610,12 +1624,18 @@ Status JudgePartBackward(std::set<NodePtr> &mul_input_nodes, bool &is_changed, A
     auto next_node = mul_input_node;
     GE_ASSERT_SUCCESS(GetSingleNextNode(cur_node, next_node));
     compute_nodes.push_back(mul_input_node);
-    GE_ASSERT_SUCCESS(
-        CollectCmpNodes(cur_node, next_node, compute_nodes, origin_bro_nodes, graph, next_mul_input_nodes));
+    std::vector<std::vector<NodePtr>> pending_remove_bros;
+    GE_ASSERT_SUCCESS(CollectCmpNodes(cur_node, next_node, compute_nodes, origin_bro_nodes, next_mul_input_nodes,
+                                      pending_remove_bros));
     GELOGD("Move partial broadcast at node[%s]: common_axes=%zu, compute_nodes=%zu, broadcasts=%zu.",
            mul_input_node->GetName().c_str(), common_axises.size(), compute_nodes.size(), origin_bro_nodes.size());
 
     is_changed = true;
+    // 部分后移的分支链删除与链内同轴兄弟删除操作的是不相交节点集，先应用 pending 与原"探测期删除"
+    // 行为终态等价，同时保证失败路径上图未被改写。
+    for (std::vector<NodePtr> &remove_nodes : pending_remove_bros) {
+      GE_ASSERT_SUCCESS(RemoveBroadcasts(remove_nodes, graph));
+    }
     GE_ASSERT_SUCCESS(RemoveBroadcasts(graph, bro_nodes_list, common_axises));
     GE_ASSERT_SUCCESS(InsertBroadcastNode(compute_nodes.back(), graph, common_axises, expanded_tensor_info));
 
@@ -1647,9 +1667,11 @@ Status ProcessOriginalBackwardLogic(AscGraph &graph, bool &is_changed, std::set<
 
       std::vector<NodePtr> bro_nodes;
       std::vector<NodePtr> compute_nodes;
+      std::vector<std::vector<NodePtr>> pending_remove_bros;
       NodePtr pre_bro_node = start_node;
       GE_ASSERT_SUCCESS(CollectBroNodes(cur_node, next_node, bro_nodes));
-      GE_ASSERT_SUCCESS(CollectCmpNodes(cur_node, next_node, compute_nodes, bro_nodes, graph, mul_input_nodes));
+      GE_ASSERT_SUCCESS(
+          CollectCmpNodes(cur_node, next_node, compute_nodes, bro_nodes, mul_input_nodes, pending_remove_bros));
 
       GELOGI("Move broadcast backward from node[%s]: broadcasts=%zu, computes=%zu.", peer_in_node->GetName().c_str(),
              bro_nodes.size(), compute_nodes.size());
@@ -1657,7 +1679,16 @@ Status ProcessOriginalBackwardLogic(AscGraph &graph, bool &is_changed, std::set<
       if (!bro_nodes.empty() && !compute_nodes.empty()) {
         // 后移会把 compute 链输出改写为后移视图；若链尾下游到达 IndirectLoad，
         // 索引链视图被标量化会导致 IndirectLoad 索引解析错误，必须整体拒绝。
-        if (HasMultipleInputsBroadcastBehind(next_node) || ChainReachesIndirectLoad(next_node)) {
+        // 守卫只统计外源广播：本事务广播——链内广播（bro_nodes，后移后停靠在链尾 compute 与 next_node
+        // 之间）与已登记待删的同轴兄弟广播（pending_remove_bros，提交期统一删除）——都不构成拒绝理由。
+        // 待删兄弟探测期仍垫在链内多输入节点的输入上，若不排除会被守卫经 peer 的 in-0 生产者检查
+        // 误计为外源广播、与真正的外源广播凑满 count≥2 而误拒提交；兄弟删除已延迟到提交期，
+        // 图未被改写，拒绝时可干净放弃。
+        std::vector<NodePtr> transaction_bro_nodes = bro_nodes;
+        for (const std::vector<NodePtr> &remove_nodes : pending_remove_bros) {
+          transaction_bro_nodes.insert(transaction_bro_nodes.end(), remove_nodes.begin(), remove_nodes.end());
+        }
+        if (HasMultipleInputsBroadcastBehind(next_node, transaction_bro_nodes) || ChainReachesIndirectLoad(next_node)) {
           GELOGI(
               "Skip broadcast backward at node[%s]: next node[%s] has peer inputs with broadcast behind or "
               "downstream reaches IndirectLoad.",
@@ -1687,6 +1718,11 @@ Status ProcessOriginalBackwardLogic(AscGraph &graph, bool &is_changed, std::set<
           continue;
         }
         is_changed = true;
+        // 提交期统一执行链上多输入节点的同轴兄弟广播删除：守卫与轴数检查全部通过才动手，
+        // 保证"删除 + 移动"原子化，杜绝"兄弟已删、链未后移"的半改写状态。
+        for (std::vector<NodePtr> &remove_nodes : pending_remove_bros) {
+          GE_ASSERT_SUCCESS(RemoveBroadcasts(remove_nodes, graph));
+        }
         GE_ASSERT_SUCCESS(BroadcastBackwardReally(compute_nodes, bro_nodes, pre_bro_node));
       }
     }
@@ -1715,7 +1751,6 @@ Status BroadcastBackward(AscGraph &graph) {
 
     std::set<NodePtr> mul_input_nodes;
     GE_ASSERT_SUCCESS(ProcessOriginalBackwardLogic(graph, is_changed, mul_input_nodes));
-
     if (!mul_input_nodes.empty()) {
       GE_ASSERT_SUCCESS(JudgePartBackward(mul_input_nodes, is_changed, graph));
     }
