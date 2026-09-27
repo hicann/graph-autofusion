@@ -116,10 +116,30 @@ Status ArangeApiCall::Generate(const TPipe &tpipe, const std::vector<ascir::Axis
        << std::endl;
     write_addr += " + " + var + " * " + broadcast_frames[frame].second;
   }
-  ss << "for (int64_t arange_i = 0; arange_i < " << count << "; ++arange_i) {" << std::endl;
-  ss << "  " << output << ".SetValue(static_cast<uint32_t>(" << write_addr << " + arange_i), static_cast<" << dtype_name
-     << ">((" << base << ") + (" << logical_offset << " + arange_i) * (" << step << ")));" << std::endl;
-  ss << "}" << std::endl;
+  // lane 恒定 Arange（沿全部向量化轴 stride 为 0，取值轴在外层循环）：每轮外层
+  // 循环只物化 1 个元素，消费侧 VfNode 以 LoadAlign 向量加载该 buffer 时 lane 1+
+  // 读到未初始化垃圾（折叠、单节点 VF、根图三种形态均存在此问题）。
+  // 补写 BlkAlign<dtype>(1) 个相同值（32B 对齐块按 dtype 折算的元素数，int64 为 4、
+  // int32 为 8），覆盖 LoadAlign 的对齐读取宽度，与 dtype 解耦。
+  bool all_vec_strides_zero = !output.vectorized_strides.empty();
+  for (const auto &vec_stride : output.vectorized_strides) {
+    if (af::SymbolicUtils::StaticCheckNe(vec_stride, af::sym::kSymbolZero) == af::TriBool::kTrue) {
+      all_vec_strides_zero = false;
+      break;
+    }
+  }
+  if (all_vec_strides_zero) {
+    ss << "  for (int64_t arange_bcast = 0; arange_bcast < KernelUtils::BlkAlign<" << dtype_name
+       << ">(1); ++arange_bcast) {" << std::endl;
+    ss << "    " << output << ".SetValue(static_cast<uint32_t>(" << write_addr << " + arange_bcast), static_cast<"
+       << dtype_name << ">((" << base << ") + (" << logical_offset << ") * (" << step << ")));" << std::endl;
+    ss << "  }" << std::endl;
+  } else {
+    ss << "for (int64_t arange_i = 0; arange_i < " << count << "; ++arange_i) {" << std::endl;
+    ss << "  " << output << ".SetValue(static_cast<uint32_t>(" << write_addr << " + arange_i), static_cast<"
+       << dtype_name << ">((" << base << ") + (" << logical_offset << " + arange_i) * (" << step << ")));" << std::endl;
+    ss << "}" << std::endl;
+  }
   for (size_t frame = 0UL; frame < broadcast_frames.size(); ++frame) {
     ss << "}" << std::endl;
   }

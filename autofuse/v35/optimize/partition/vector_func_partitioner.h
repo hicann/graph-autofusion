@@ -47,6 +47,7 @@ class VectorFuncPartitioner {
   static af::Status InitClusterAttr(const std::unique_ptr<af::ascir::AscIrCodegen> &codegen_impl,
                                     const af::AscNodePtr &node, ClusterPtr &cluster);
   af::Status MergeClusters();
+  af::Status DisableLaneConstantArangeVFForVFConsumers();
   static bool CanMergeClusters(const Cluster &from, const Cluster &to);
   af::Status SortClustersForBuildSubgraph();
   af::Status BuildSubgraphs();

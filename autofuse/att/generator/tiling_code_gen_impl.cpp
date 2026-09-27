@@ -72,6 +72,18 @@ std::set<int64_t> GetWorkspaceTensorIds(const TensorIdSet &workspace_tensor_id_s
   return workspace_ids;
 }
 
+std::set<int64_t> GetAscGraphWorkspaceTensorIds(const TensorIdSet &workspace_tensor_id_set, const size_t asc_graph_id) {
+  std::set<int64_t> workspace_ids;
+  const auto asc_graph_iter = workspace_tensor_id_set.find(asc_graph_id);
+  if (asc_graph_iter != workspace_tensor_id_set.end()) {
+    for (const auto &[impl_graph_id, tensor_ids] : asc_graph_iter->second) {
+      (void)impl_graph_id;
+      workspace_ids.insert(tensor_ids.begin(), tensor_ids.end());
+    }
+  }
+  return workspace_ids;
+}
+
 template <typename T>
 af::Status IsUpperBoundValid(const Expr &min_expr, const Expr &max_expr) {
   T min_value{};
@@ -3562,12 +3574,19 @@ void TilingCodeGenImpl::GenWorkspaceOffsetFinalize(const std::string &tiling_dat
 }
 
 void TilingCodeGenImpl::GenUpdateWorkspace(const size_t asc_graph_id, const size_t impl_graph_id) {
+  // 选中新 best 候选时，先清空本子图全部 workspace id 的占用，再写入当前候选的 size。
+  // workspace 当前不存在复用，每个 id 仅由一个候选持有，直接赋值即可：
+  // 落选候选独有的 id 会被清零，字段值始终等于选中候选各 id 的 size，
+  // FinalizeWorkspaceOffsets 计算出的偏移与 GetWorkspaceSize 按选中分支计算的总大小严格一致。
+  for (const auto &tensor_id : GetAscGraphWorkspaceTensorIds(workspace_tensor_id_set_, asc_graph_id)) {
+    tiling_func_.AddLine("      tiling_data.set_workspace" + std::to_string(tensor_id) + "(0U);");
+  }
   for (const auto &tensor_id : workspace_tensor_id_set_[asc_graph_id][impl_graph_id]) {
     auto tensor_id_str = to_string(tensor_id);
     tiling_func_.AddLine("      auto it" + tensor_id_str + " = workspace_map.find(" + tensor_id_str + ");");
     tiling_func_.AddLine("      if (it" + tensor_id_str + " != workspace_map.end()) {");
-    tiling_func_.AddLine("        tiling_data.set_workspace" + tensor_id_str + "(std::max(tiling_data.get_workspace" +
-                         tensor_id_str + "(), static_cast<uint32_t>(it" + tensor_id_str + "->second)));");
+    tiling_func_.AddLine("        tiling_data.set_workspace" + tensor_id_str + "(static_cast<uint32_t>(it" +
+                         tensor_id_str + "->second));");
     tiling_func_.AddLine("      }");
   }
 }
