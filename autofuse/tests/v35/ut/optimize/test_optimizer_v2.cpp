@@ -3776,6 +3776,98 @@ TEST_F(TestOptimizerV2, TestNddmaReAlignVectorizedStrides) {
     EXPECT_EQ(optimize::NddmaTemplate::ReAlignVectorizedStrides(node), af::SUCCESS);
   }
 }
+
+// 单根向量化轴：修复前会落入"其他轴"分支将stride置为1，修复后按 dtype 对齐（uint8 -> 32B/1B = 32）。
+TEST_F(TestOptimizerV2, NddmaReAlignVectorizedStridesSingleVectorizedAxis) {
+  af::AscGraph graph("test_single_axis");
+  auto s0 = graph.CreateSizeVar(128);
+  auto z0 = graph.CreateAxis("z0", s0);
+
+  Data data0("data0", graph);
+  data0.y.dtype = af::DT_UINT8;
+  data0.ir_attr.SetIndex(0);
+
+  Load load0("load0");
+  load0.attr.sched.axis = {z0.id};
+  load0.x = data0.y;
+  *load0.y.axis = {z0.id};
+  load0.y.dtype = af::DT_UINT8;
+  *load0.y.repeats = {s0};
+  *load0.y.strides = {One};
+  *load0.y.vectorized_axis = {z0.id};
+  *load0.y.vectorized_strides = {af::Symbol(16)};
+
+  auto load_node = graph.FindNode("load0");
+  ASSERT_NE(load_node, nullptr);
+  EXPECT_EQ(optimize::NddmaTemplate::ReAlignVectorizedStrides(load_node), af::SUCCESS);
+  EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(load_node->outputs[0].attr.vectorized_strides[0],
+                                             af::sym::Align(af::Symbol(16), 32)),
+            af::TriBool::kTrue);
+}
+
+// load(uint8)-cast(uint8->fp16)-brc 调序生成 nddma，brc 输出仅单根向量化轴且 stride=16
+// 未按 cast 之前的 dtype(uint8) 对齐，需在 swap 后重新对齐到 32。
+TEST_F(TestOptimizerV2, LoadCastBrcSingleVecAxisUnalignedRealign) {
+  af::AscGraph graph("load_cast_brc_realign");
+  auto s0 = graph.CreateSizeVar(50);
+  auto z0 = graph.CreateAxis("z0", s0);
+
+  Data data0("data0", graph);
+  data0.y.dtype = af::DT_UINT8;
+  data0.ir_attr.SetIndex(0);
+
+  Load load0("load0");
+  load0.attr.sched.axis = {z0.id};
+  load0.x = data0.y;
+  *load0.y.axis = {z0.id};
+  load0.y.dtype = af::DT_UINT8;
+  *load0.y.repeats = {s0};
+  *load0.y.strides = {One};
+  *load0.y.vectorized_axis = {z0.id};
+
+  Cast cast1("cast1");
+  cast1.x = load0.y;
+  cast1.attr.sched.axis = {z0.id};
+  *cast1.y.axis = {z0.id};
+  cast1.y.dtype = af::DT_FLOAT16;
+  *cast1.y.repeats = {s0};
+  *cast1.y.strides = {One};
+
+  Broadcast brc("brc");
+  brc.x = cast1.y;
+  brc.attr.sched.axis = {z0.id};
+  *brc.y.axis = {z0.id};
+  brc.y.dtype = af::DT_FLOAT16;
+  *brc.y.repeats = {s0};
+  *brc.y.strides = {One};
+  *brc.y.vectorized_axis = {z0.id};
+  *brc.y.vectorized_strides = {af::Symbol(16)};
+
+  Store store_op("store");
+  store_op.attr.sched.axis = {z0.id};
+  store_op.x = brc.y;
+  *store_op.y.axis = {z0.id};
+  store_op.y.dtype = af::DT_FLOAT16;
+  *store_op.y.repeats = {s0};
+  *store_op.y.strides = {One};
+
+  Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = af::DT_FLOAT16;
+  output_op.ir_attr.SetIndex(8);
+
+  auto load_node = graph.FindNode("load0");
+  auto cast_node = graph.FindNode("cast1");
+  ASSERT_NE(load_node, nullptr);
+  ASSERT_NE(cast_node, nullptr);
+
+  EXPECT_EQ(optimize::NddmaTemplate::SwapCastBrcAndGenNddma(cast_node, load_node, graph), af::SUCCESS);
+  EXPECT_EQ(load_node->GetType(), "Nddma");
+  EXPECT_EQ(af::SymbolicUtils::StaticCheckEq(load_node->outputs[0].attr.vectorized_strides[0],
+                                             af::sym::Align(af::Symbol(16), 32)),
+            af::TriBool::kTrue);
+}
+
 TEST_F(TestOptimizerV2, SliceConcat) {
   af::AscGraph graph("slice_concat");
   auto s0 = graph.CreateSizeVar(256);
