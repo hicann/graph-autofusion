@@ -4907,61 +4907,61 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
             "BATCH_ITER_MODEL == 0) {"
          << std::endl;
       ss << "    _DISPATCH_BATCH_MATMUL(0, 0, 0, 0, 0, BatchMatMulV3TilingData);" << std::endl;
-      // 分支2: HIGH_LEVEL, BASIC, NO_FULL_LOAD, ON_THE_FLY, ITER_BATCH_SINGLE_BIAS
-      ss << "  } else if (BATCH_API_LEVEL == 0 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
-            "BATCH_ITER_MODEL == 1) {"
-         << std::endl;
-      ss << "    _DISPATCH_BATCH_MATMUL(0, 0, 0, 0, 1, BatchMatMulV3TilingData);" << std::endl;
-      // 分支3: BASIC_LEVEL, BASIC, NO_FULL_LOAD, ON_THE_FLY, ITER_BATCH_SINGLE_BIAS
-      ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
-            "BATCH_ITER_MODEL == 1) {"
-         << std::endl;
-      ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 0, 0, 1, BatchMatMulV3IterBatchBasicTilingData);" << std::endl;
-      // 分支4: BASIC_LEVEL, BASIC, NO_FULL_LOAD, 1V2_ND_ALIG_FIXPIPE, ITER_BATCH_SINGLE_BIAS
-      ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 2 && "
-            "BATCH_ITER_MODEL == 1) {"
-         << std::endl;
-      ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 0, 2, 1, BatchMatMulV3IterBatchBasicTilingData);" << std::endl;
-      // 分支5: BASIC_LEVEL, BASIC, NO_FULL_LOAD, ON_THE_FLY, BATCH_MATMUL_TO_MUL
-      ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
-            "BATCH_ITER_MODEL == 2) {"
-         << std::endl;
-      ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 0, 0, 2, BatchMatMulToMulBasicTilingData);" << std::endl;
-      // 分支6: BASIC_LEVEL, BASIC, NO_FULL_LOAD, ON_THE_FLY, MERGE_BATCH
-      ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
-            "BATCH_ITER_MODEL == 3) {"
-         << std::endl;
-      ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 0, 0, 3, BatchMatMulV3MergeBatchBasicTilingData);" << std::endl;
-      // 分支7: BASIC_LEVEL, BASIC, NO_FULL_LOAD, ON_THE_FLY, FOR_BATCH
+      // 分支2: BASIC_LEVEL, BASIC, NO_FULL_LOAD, ON_THE_FLY, FOR_BATCH
       ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
             "BATCH_ITER_MODEL == 0) {"
          << std::endl;
       ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 0, 0, 0, BatchMatMulV3BasicTilingData);" << std::endl;
-      // 分支7: BASIC_LEVEL, BASIC, A_FULL_LOAD, ON_THE_FLY, FOR_BATCH
+      // 分支3: BASIC_LEVEL, BASIC, A_FULL_LOAD, ON_THE_FLY, FOR_BATCH
       ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 1 && BATCH_L0C2OUT_MODEL == 0 && "
             "BATCH_ITER_MODEL == 0) {"
          << std::endl;
       ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 1, 0, 0, BatchMatMulV3BasicTilingData);" << std::endl;
-      // 分支8: BASIC_LEVEL, BASIC, B_FULL_LOAD, ON_THE_FLY, FOR_BATCH
+      // 分支4: BASIC_LEVEL, BASIC, B_FULL_LOAD, ON_THE_FLY, FOR_BATCH
       ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 2 && BATCH_L0C2OUT_MODEL == 0 && "
             "BATCH_ITER_MODEL == 0) {"
          << std::endl;
       ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 2, 0, 0, BatchMatMulV3BasicTilingData);" << std::endl;
-      // 分支9: HIGH_LEVEL, K_EQUAL_ZERO, NO_FULL_LOAD, ON_THE_FLY, FOR_BATCH
-      ss << "  } else if (BATCH_API_LEVEL == 0 && BMODEL == 2 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
-            "BATCH_ITER_MODEL == 0) {"
+      // 分支5: BASIC_LEVEL, BASIC, NO_FULL_LOAD, ON_THE_FLY, ITER_BATCH_SINGLE_BIAS
+      ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
+            "BATCH_ITER_MODEL == 1) {"
          << std::endl;
-      ss << "    _DISPATCH_BATCH_MATMUL(0, 2, 0, 0, 0, MatMulV3KEqZeroBasicTilingData);" << std::endl;
-      // 分支10: BASIC_LEVEL, STREAM_K, NO_FULL_LOAD, ON_THE_FLY, FOR_BATCH
+      ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 0, 0, 1, BatchMatMulV3IterBatchBasicTilingData);" << std::endl;
+      // 分支6: BASIC_LEVEL, STREAM_K, NO_FULL_LOAD, ON_THE_FLY, FOR_BATCH
       ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 1 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
             "BATCH_ITER_MODEL == 0) {"
          << std::endl;
       ss << "    _DISPATCH_BATCH_MATMUL(1, 1, 0, 0, 0, BatchMatMulV3BasicTilingData);" << std::endl;
-      // 分支11: BASIC_LEVEL, STREAM_K, NO_FULL_LOAD, 1V2_ND_ALIG_FIXPIPE, FOR_BATCH
+      // 分支7: BASIC_LEVEL, STREAM_K, NO_FULL_LOAD, 1V2_ND_ALIG_FIXPIPE, FOR_BATCH
       ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 1 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 2 && "
             "BATCH_ITER_MODEL == 0) {"
          << std::endl;
       ss << "    _DISPATCH_BATCH_MATMUL(1, 1, 0, 2, 0, BatchMatMulV3BasicTilingData);" << std::endl;
+      // 分支8: HIGH_LEVEL, BASIC, NO_FULL_LOAD, ON_THE_FLY, ITER_BATCH_SINGLE_BIAS
+      ss << "  } else if (BATCH_API_LEVEL == 0 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
+            "BATCH_ITER_MODEL == 1) {"
+         << std::endl;
+      ss << "    _DISPATCH_BATCH_MATMUL(0, 0, 0, 0, 1, BatchMatMulV3TilingData);" << std::endl;
+      // 分支9: BASIC_LEVEL, BASIC, NO_FULL_LOAD, 1V2_ND_ALIG_FIXPIPE, ITER_BATCH_SINGLE_BIAS
+      ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 2 && "
+            "BATCH_ITER_MODEL == 1) {"
+         << std::endl;
+      ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 0, 2, 1, BatchMatMulV3IterBatchBasicTilingData);" << std::endl;
+      // 分支10: BASIC_LEVEL, BASIC, NO_FULL_LOAD, ON_THE_FLY, MERGE_BATCH
+      ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
+            "BATCH_ITER_MODEL == 3) {"
+         << std::endl;
+      ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 0, 0, 3, BatchMatMulV3MergeBatchBasicTilingData);" << std::endl;
+      // 分支11: BASIC_LEVEL, BASIC, NO_FULL_LOAD, ON_THE_FLY, BATCH_MATMUL_TO_MUL
+      ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 0 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
+            "BATCH_ITER_MODEL == 2) {"
+         << std::endl;
+      ss << "    _DISPATCH_BATCH_MATMUL(1, 0, 0, 0, 2, BatchMatMulToMulBasicTilingData);" << std::endl;
+      // 分支12: BASIC_LEVEL, K_EQUAL_ZERO, NO_FULL_LOAD, ON_THE_FLY, FOR_BATCH
+      ss << "  } else if (BATCH_API_LEVEL == 1 && BMODEL == 2 && BATCH_FULL_LOAD == 0 && BATCH_L0C2OUT_MODEL == 0 && "
+            "BATCH_ITER_MODEL == 0) {"
+         << std::endl;
+      ss << "    _DISPATCH_BATCH_MATMUL(1, 2, 0, 0, 0, MatMulV3KEqZeroBasicTilingData);" << std::endl;
       ss << "  } else {" << std::endl;
       ss << "    return -1;" << std::endl;
       ss << "  }" << std::endl;
@@ -4973,57 +4973,54 @@ std::string Kernel::GenKernelFuncCallForInductor(const ascir::FusedScheduledResu
       ss << "  // BATCH_MODEL is fixed to 0 (not used in matmul)" << std::endl;
       ss << std::endl;
 
-      // 分支1: HIGH_LEVEL, NO_FULL_LOAD, BASIC, ON_THE_FLY
-      ss << "  if (API_LEVEL == 0 && FULL_LOAD == 0 && MODEL == 0 && L0C2OUT_MODEL == 0) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(0, 0, 0, 0, MatMulV3TilingDataCopy);" << std::endl;
-      // 分支2: BASIC_LEVEL, NO_FULL_LOAD, BASIC, ON_THE_FLY
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 0 && L0C2OUT_MODEL == 0) {" << std::endl;
+      // 分支1: BASIC_LEVEL, NO_FULL_LOAD, BASIC, ON_THE_FLY
+      ss << "  if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 0 && L0C2OUT_MODEL == 0) {" << std::endl;
       ss << "    _DISPATCH_MATMUL(1, 0, 0, 0, MatMulV3BasicTilingData);" << std::endl;
-      // 分支3: BASIC_LEVEL, B_FULL_LOAD, BASIC, ON_THE_FLY
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 2 && MODEL == 0 && L0C2OUT_MODEL == 0) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(1, 0, 2, 0, MatMulV3BasicTilingData);" << std::endl;
-      // 分支4: BASIC_LEVEL, NO_FULL_LOAD, STREAM_K, ON_THE_FLY
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 1 && L0C2OUT_MODEL == 0) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(1, 1, 0, 0, MatMulV3BasicTilingData);" << std::endl;
-      // 分支5: BASIC_LEVEL, NO_FULL_LOAD, STREAM_K, 1V2_ND_ALIG_FIXPIPE
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 1 && L0C2OUT_MODEL == 2) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(1, 1, 0, 2, MatMulV3BasicTilingData);" << std::endl;
-      // 分支6: HIGH_LEVEL, NO_FULL_LOAD, K_EQUAL_ZERO, ON_THE_FLY
-      ss << "  } else if (API_LEVEL == 0 && FULL_LOAD == 0 && MODEL == 2 && L0C2OUT_MODEL == 0) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(0, 2, 0, 0, MatMulV3KEqZeroBasicTilingData);" << std::endl;
-      // 分支7: BASIC_LEVEL, A_FULL_LOAD, BASIC, ON_THE_FLY
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 1 && MODEL == 0 && L0C2OUT_MODEL == 0) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(1, 0, 1, 0, MatMulV3BasicTilingData);" << std::endl;
-      // 分支8: BASIC_LEVEL, A_FULL_LOAD, BASIC, 1V1_ND_ALIG_FIXPIPE
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 1 && MODEL == 0 && L0C2OUT_MODEL == 1) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(1, 0, 1, 1, MatMulV3BasicTilingData);" << std::endl;
-      // 分支9: BASIC_LEVEL, B_FULL_LOAD, BASIC, 1V1_ND_ALIG_FIXPIPE
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 2 && MODEL == 0 && L0C2OUT_MODEL == 1) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(1, 0, 2, 1, MatMulV3BasicTilingData);" << std::endl;
-      // 分支10: BASIC_LEVEL, NO_FULL_LOAD, BASIC, 1V1_ND_ALIG_FIXPIPE
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 0 && L0C2OUT_MODEL == 1) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(1, 0, 0, 1, MatMulV3BasicTilingData);" << std::endl;
-      // 分支11: BASIC_LEVEL, NO_FULL_LOAD, BASIC, 1V2_ND_ALIG_FIXPIPE
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 0 && L0C2OUT_MODEL == 2) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(1, 0, 0, 2, MatMulV3BasicTilingData);" << std::endl;
-      // 分支12: BASIC_LEVEL, A_FULL_LOAD, BASIC, 1V2_ND_ALIG_FIXPIPE
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 1 && MODEL == 0 && L0C2OUT_MODEL == 2) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(1, 0, 1, 2, MatMulV3BasicTilingData);" << std::endl;
-      // 分支13: BASIC_LEVEL, B_FULL_LOAD, BASIC, 1V2_ND_ALIG_FIXPIPE
-      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 2 && MODEL == 0 && L0C2OUT_MODEL == 2) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(1, 0, 2, 2, MatMulV3BasicTilingData);" << std::endl;
-      // 分支14: HIGH_LEVEL, AB_FULL_LOAD, BASIC, ON_THE_FLY
-      ss << "  } else if (API_LEVEL == 0 && FULL_LOAD == 3 && MODEL == 0 && L0C2OUT_MODEL == 0) {" << std::endl;
-      ss << "    _DISPATCH_MATMUL(0, 0, 3, 0, MatMulV3TilingDataCopy);" << std::endl;
-      // 分支15: BASIC_LEVEL, NO_FULL_LOAD, BASIC_SPLIT_K, ON_THE_FLY
+      // 分支2: BASIC_LEVEL, NO_FULL_LOAD, SLICE, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 5 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 5, 0, 0, MatMulV3BasicTilingData);" << std::endl;
+      // 分支3: BASIC_LEVEL, NO_FULL_LOAD, BASIC_SPLIT_K, ON_THE_FLY
       ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 6 && L0C2OUT_MODEL == 0) {" << std::endl;
       ss << "    _DISPATCH_MATMUL(1, 6, 0, 0, MatMulV3BasicTilingData);" << std::endl;
-      // 分支16: BASIC_LEVEL, NO_FULL_LOAD, SK_SPLIT_K, ON_THE_FLY
+      // 分支4: BASIC_LEVEL, B_FULL_LOAD, BASIC, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 2 && MODEL == 0 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 0, 2, 0, MatMulV3BasicTilingData);" << std::endl;
+      // 分支5: BASIC_LEVEL, A_FULL_LOAD, BASIC, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 1 && MODEL == 0 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 0, 1, 0, MatMulV3BasicTilingData);" << std::endl;
+      // 分支6: BASIC_LEVEL, NO_FULL_LOAD, STREAM_K, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 1 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 1, 0, 0, MatMulV3BasicTilingData);" << std::endl;
+      // 分支7: BASIC_LEVEL, NO_FULL_LOAD, STREAM_K, 1V2_ND_ALIG_FIXPIPE
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 1 && L0C2OUT_MODEL == 2) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 1, 0, 2, MatMulV3BasicTilingData);" << std::endl;
+      // 分支8: BASIC_LEVEL, NO_FULL_LOAD, SK_SPLIT_K, ON_THE_FLY
       ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 7 && L0C2OUT_MODEL == 0) {" << std::endl;
       ss << "    _DISPATCH_MATMUL(1, 7, 0, 0, MatMulV3BasicTilingData);" << std::endl;
-      // 分支17: BASIC_LEVEL, NO_FULL_LOAD, SK_SPLIT_K, 1V2_ND_ALIG_FIXPIPE
+      // 分支9: BASIC_LEVEL, NO_FULL_LOAD, SK_SPLIT_K, 1V2_ND_ALIG_FIXPIPE
       ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 7 && L0C2OUT_MODEL == 2) {" << std::endl;
       ss << "    _DISPATCH_MATMUL(1, 7, 0, 2, MatMulV3BasicTilingData);" << std::endl;
+      // 分支10: BASIC_LEVEL, NO_FULL_LOAD, K_EQUAL_ZERO, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 2 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 2, 0, 0, MatMulV3KEqZeroBasicTilingData);" << std::endl;
+      // 分支11: BASIC_LEVEL, B_FULL_LOAD, BASIC, 1V1_ND_ALIG_FIXPIPE
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 2 && MODEL == 0 && L0C2OUT_MODEL == 1) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 0, 2, 1, MatMulV3BasicTilingData);" << std::endl;
+      // 分支12: BASIC_LEVEL, NO_FULL_LOAD, BASIC, 1V1_ND_ALIG_FIXPIPE
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 0 && L0C2OUT_MODEL == 1) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 0, 0, 1, MatMulV3BasicTilingData);" << std::endl;
+      // 分支13: BASIC_LEVEL, NO_FULL_LOAD, BASIC, 1V2_ND_ALIG_FIXPIPE
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 0 && L0C2OUT_MODEL == 2) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 0, 0, 2, MatMulV3BasicTilingData);" << std::endl;
+      // 分支14: BASIC_LEVEL, B_FULL_LOAD, BASIC, 1V2_ND_ALIG_FIXPIPE
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 2 && MODEL == 0 && L0C2OUT_MODEL == 2) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 0, 2, 2, MatMulV3BasicTilingData);" << std::endl;
+      // 分支15: BASIC_LEVEL, NO_FULL_LOAD, TO_MUL, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 3 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 3, 0, 0, MatMulToMulBasicTilingData);" << std::endl;
+      // 分支16: BASIC_LEVEL, NO_FULL_LOAD, TO_MULTI_MUL, ON_THE_FLY
+      ss << "  } else if (API_LEVEL == 1 && FULL_LOAD == 0 && MODEL == 4 && L0C2OUT_MODEL == 0) {" << std::endl;
+      ss << "    _DISPATCH_MATMUL(1, 4, 0, 0, MatMulToVectorBasicTilingData);" << std::endl;
       ss << "  } else {" << std::endl;
       ss << "    return -1;" << std::endl;
       ss << "  }" << std::endl;
