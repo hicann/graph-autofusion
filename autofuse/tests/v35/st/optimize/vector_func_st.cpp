@@ -215,7 +215,8 @@ TEST_F(VectorFuncSt, TrueDivAddRsqrtHostCodegen) {
   const auto true_div_pos = vf_body.find("AscendC::MicroAPI::Div<float, &high_precision_div_mode>(");
   const auto add_pos = vf_body.find("AscendC::MicroAPI::Adds(");
   const auto sqrt_pos = vf_body.find("AscendC::MicroAPI::Sqrt(");
-  const auto rsqrt_div_pos = vf_body.find("AscendC::MicroAPI::Div(", true_div_pos + 1U);
+  const auto rsqrt_div_pos =
+      vf_body.find("AscendC::MicroAPI::Div<float, &high_precision_div_mode>(", true_div_pos + 1U);
   ASSERT_NE(true_div_pos, std::string::npos);
   ASSERT_NE(add_pos, std::string::npos);
   ASSERT_NE(sqrt_pos, std::string::npos);
