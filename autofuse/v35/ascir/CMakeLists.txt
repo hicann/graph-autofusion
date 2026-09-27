@@ -5,6 +5,7 @@ target_sources(aihac_codegen PRIVATE
 )
 
 target_include_directories(ascir_builtin_ops PRIVATE
+        ${CODE_ROOT_DIR}
         ${CODE_ROOT_DIR}/ascir
         ${CODE_ROOT_DIR}/v35/ascir
 )

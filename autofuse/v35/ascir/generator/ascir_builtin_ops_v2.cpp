@@ -688,7 +688,7 @@ REG_ASC_IR(Rsqrt).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::
 REG_ASC_IR(Reciprocal)
     .Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::ReciprocalAscIrAttImplV2>(),
                             af::ascir::AscIrImplCreator<af::ascir::ReciprocalAscIrCodegenImplV2>(),
-                            {{"T", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16, DT_INT64, DT_UINT64}}}});
+                            {{"T", TensorType{DT_FLOAT16, DT_FLOAT, DT_BF16}}}});
 
 REG_ASC_IR(Erf).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::ErfAscIrAttImplV2>(),
                                        af::ascir::AscIrImplCreator<af::ascir::ErfAscIrCodegenImplV2>(),
