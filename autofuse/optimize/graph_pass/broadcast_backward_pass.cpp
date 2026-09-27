@@ -19,6 +19,7 @@
 
 #include "ascir_ops.h"
 #include "ascir_ops_utils.h"
+#include "ascir_utils.h"
 #include "ascgraph_info_complete.h"
 #include "common_utils.h"
 #include "graph/symbolizer/symbolic_utils.h"
@@ -394,6 +395,50 @@ Status GetBroAxises(const std::vector<NodePtr> &bro_nodes, std::vector<int64_t> 
   return SUCCESS;
 }
 
+// 收集广播节点的全部扩维轴：输出 repeat!=1 且（生产者缺失该轴，或生产者该轴
+// repeat=1/stride=0）。单轴广播结果与 GetBroAxisFromNode 一致；单节点多轴扩维
+// （真实前端形态，如退化轴 Arange [1,1,N] 一步扩到 [B,M,N]）为首轴语义的超集。
+// 同链判定与删除判定必须使用全集，否则首轴相同而轴集不同的分支会被误判等价，
+// 删除对方广播后丢失非公共轴扩维语义。
+Status GetAllBroAxisesFromNode(const NodePtr &bro_node, std::set<int64_t> &bro_axises) {
+  bro_axises.clear();
+  NodePtr pre_bro_node;
+  GE_ASSERT_SUCCESS(GetPeerOutNodeSafe(bro_node, pre_bro_node, 0));
+  AscTensorAttr *pre_bro_output_attr = nullptr;
+  GE_ASSERT_SUCCESS(GetOutputTensorAttr(pre_bro_node, pre_bro_output_attr));
+  AscTensorAttr *bro_output_attr = nullptr;
+  GE_ASSERT_SUCCESS(GetOutputTensorAttr(bro_node, bro_output_attr));
+
+  // 视图三元组尺寸必须自洽（生产者与广播之间轴数允许不同——前缀扩维形态）；
+  // 不自洽的视图属于非法图结构，fail-closed 返回失败，避免越界读取。
+  const bool pre_view_valid = pre_bro_output_attr->axis.size() == pre_bro_output_attr->repeats.size() &&
+                              pre_bro_output_attr->axis.size() == pre_bro_output_attr->strides.size();
+  const bool bro_view_valid = bro_output_attr->axis.size() == bro_output_attr->repeats.size() &&
+                              bro_output_attr->axis.size() == bro_output_attr->strides.size();
+  if (!pre_view_valid || !bro_view_valid) {
+    GELOGW("Cannot infer broadcast axes from inconsistent views: broadcast[%s], source[%s].",
+           bro_node->GetName().c_str(), pre_bro_node->GetName().c_str());
+    return FAILED;
+  }
+
+  for (size_t index = 0U; index < bro_output_attr->axis.size(); index++) {
+    if (IsEqOne(bro_output_attr->repeats[index])) {
+      continue;
+    }
+    const auto pre_axis_iter =
+        std::find(pre_bro_output_attr->axis.begin(), pre_bro_output_attr->axis.end(), bro_output_attr->axis[index]);
+    if (pre_axis_iter == pre_bro_output_attr->axis.end()) {
+      bro_axises.insert(bro_output_attr->axis[index]);
+      continue;
+    }
+    const size_t pre_index = static_cast<size_t>(std::distance(pre_bro_output_attr->axis.begin(), pre_axis_iter));
+    if (IsEqOne(pre_bro_output_attr->repeats[pre_index]) && IsEqZero(pre_bro_output_attr->strides[pre_index])) {
+      bro_axises.insert(bro_output_attr->axis[index]);
+    }
+  }
+  return SUCCESS;
+}
+
 Status GetBroAxisesIndex(std::vector<size_t> &bro_axis_idx, const std::vector<Expression> &pre_bro_repeats,
                          const std::vector<Expression> &pre_bro_strides,
                          const std::vector<Expression> &last_bro_repeats) {
@@ -414,11 +459,21 @@ bool IsSameBroNodes(const std::vector<NodePtr> &bro_nodes1, const std::vector<No
   if (bro_nodes1.size() != bro_nodes2.size()) {
     return false;
   }
-  std::vector<int64_t> bro_axis_idx1;
-  std::vector<int64_t> bro_axis_idx2;
-  GetBroAxises(bro_nodes1, bro_axis_idx1);
-  GetBroAxises(bro_nodes2, bro_axis_idx2);
-  return bro_axis_idx1 == bro_axis_idx2;
+  // 逐节点比较全扩维轴集：首轴相同而轴集不同（如 {s0,s1} vs {s0,s2}）的分支
+  // 不是同链，删重复广播+整链后移会丢失非公共轴扩维语义，必须改走公共轴
+  // partial backward（否则改写后 Add 输入/输出视图不一致）。
+  for (size_t index = 0U; index < bro_nodes1.size(); index++) {
+    std::set<int64_t> bro_axis_set1;
+    std::set<int64_t> bro_axis_set2;
+    if (GetAllBroAxisesFromNode(bro_nodes1[index], bro_axis_set1) != SUCCESS ||
+        GetAllBroAxisesFromNode(bro_nodes2[index], bro_axis_set2) != SUCCESS) {
+      return false;
+    }
+    if (bro_axis_set1 != bro_axis_set2) {
+      return false;
+    }
+  }
+  return true;
 }
 
 Status RemoveAndRelinkNodeEdge(af::InDataAnchorPtr &bro_in_anchor, af::OutDataAnchorPtr &bro_out_anchor) {
@@ -543,7 +598,13 @@ Status GetNodeScalarInputList(const af::AscNodePtr &asc_node, std::vector<bool> 
 Status ProcessOtherInputBranches(const NodePtr &next_comp_op, size_t current_idx, const std::vector<int64_t> &bro_axes,
                                  std::vector<bool> &is_scalar_list);
 
-bool HasMultipleInputsBroadcastBehind(const NodePtr &node) {
+// 统计 node 的输入中由"非本事务"broadcast 支撑的路数：peer 是 Broadcast 时直接判定，peer 是 compute 时看其
+// in-0 生产者（本链广播后移后将停靠在 peer 与 node 之间，属于本链而非外源）。excluded_bro_nodes 为本次
+// 后移事务涉及的广播全集：链内广播（bro_nodes，提交期后移到链尾 compute 与 node 之间）与同轴兄弟广播
+// （pending_remove_bros，提交期统一删除，但探测期仍垫在链内多输入节点的输入上，会被 in-0 生产者检查看到）。
+// 二者提交后都不会以"peer 背后的外源广播"形态存在，排除后语义变为"≥2 路外源广播才拒绝"，
+// 避免本事务自己的广播反过来否决自己的后移。
+bool HasMultipleInputsBroadcastBehind(const NodePtr &node, const std::vector<NodePtr> &excluded_bro_nodes) {
   if (node->GetAllInDataAnchorsSize() <= 1U) {
     return false;
   }
@@ -558,12 +619,14 @@ bool HasMultipleInputsBroadcastBehind(const NodePtr &node) {
     }
     bool has_broadcast = false;
     if (peer->GetType() == kBroadcastType) {
-      has_broadcast = true;
+      has_broadcast = std::find(excluded_bro_nodes.begin(), excluded_bro_nodes.end(), peer) == excluded_bro_nodes.end();
     } else {
       NodePtr pre_node;
       if (GetPeerOutNodeSafe(peer, pre_node, 0) == SUCCESS && pre_node != nullptr &&
           pre_node->GetType() == kBroadcastType) {
-        has_broadcast = true;
+        // peer 背后的广播属于本事务（链内广播将移到 peer 与 node 之间、待删兄弟提交期删除）时不算"别人"。
+        has_broadcast =
+            std::find(excluded_bro_nodes.begin(), excluded_bro_nodes.end(), pre_node) == excluded_bro_nodes.end();
       }
     }
     if (has_broadcast) {
@@ -675,14 +738,15 @@ bool CheckScalarInputSupport(const NodePtr &next_node, const std::vector<NodePtr
   return true;
 }
 
-bool IsMulInputsCanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePtr> &bro_nodes, AscGraph &graph,
-                            std::set<NodePtr> &mul_input_nodes) {
+bool IsMulInputsCanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePtr> &bro_nodes,
+                            std::set<NodePtr> &mul_input_nodes,
+                            std::vector<std::vector<NodePtr>> &pending_remove_bros) {
   auto in_data_anchor_size = next_node->GetAllInDataAnchorsSize();
   if (in_data_anchor_size == 1U) {
     return false;
   }
 
-  // 多输入节点的同轴兄弟 broadcast 删除与部分后移登记都发生在本函数内；若该节点下游到达
+  // 多输入节点的同轴兄弟 broadcast 删除登记与部分后移注册都发生在本函数内；若该节点下游到达
   // IndirectLoad，任何改写都会破坏索引链视图，必须在此整体拒绝。
   if (ChainReachesIndirectLoad(next_node)) {
     GELOGD("Skip multi-input backward at node[%s]: downstream reaches IndirectLoad.", next_node->GetName().c_str());
@@ -719,6 +783,16 @@ bool IsMulInputsCanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<N
       }
       return false;
     }
+    // Arange 生产者链的同轴重复广播删除与整链后移未适配（退化轴视图代数缺失），
+    // fail-closed：不删重复广播、链到此为止，图保持原状，交由 partial backward
+    // 的组级守卫决定是否按公共轴后移。
+    NodePtr chain_producer;
+    if (!bro_nodes.empty() && GetPeerOutNodeSafe(bro_nodes.front(), chain_producer, 0) == SUCCESS &&
+        chain_producer != nullptr && chain_producer->GetType() == Arange::Type) {
+      GELOGI("Skip multi-input backward at node[%s]: branch producer[%s] is Arange.", next_node->GetName().c_str(),
+             chain_producer->GetName().c_str());
+      return false;
+    }
     remove_bro_nodes_list.push_back(temp_bro_nodes);
   }
 
@@ -727,20 +801,23 @@ bool IsMulInputsCanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<N
   }
 
   for (std::vector<NodePtr> &remove_nodes : remove_bro_nodes_list) {
-    RemoveBroadcasts(remove_nodes, graph);
+    // 探测期只登记、提交期统一删除：链收集后的守卫（外源广播/IndirectLoad 下游/视图轴数）拒绝提交时
+    // 图保持原状，避免"兄弟已删、链未后移"的半改写状态。
+    pending_remove_bros.push_back(std::move(remove_nodes));
   }
   return true;
 }
 
-bool CanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePtr> &bro_nodes, AscGraph &graph,
-                 std::set<NodePtr> &mul_input_nodes) {
+bool CanBackward(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePtr> &bro_nodes,
+                 std::set<NodePtr> &mul_input_nodes, std::vector<std::vector<NodePtr>> &pending_remove_bros) {
   if (!CheckBackwardCommon(next_node)) {
     return false;
   }
   if (!IsSingleOutNode(next_node)) {
     return false;
   }
-  if (!IsSingleInNode(next_node) && !IsMulInputsCanBackward(cur_node, next_node, bro_nodes, graph, mul_input_nodes)) {
+  if (!IsSingleInNode(next_node) &&
+      !IsMulInputsCanBackward(cur_node, next_node, bro_nodes, mul_input_nodes, pending_remove_bros)) {
     return false;
   }
   return true;
@@ -765,8 +842,9 @@ Status CollectBroNodes(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePt
 }
 
 Status CollectCmpNodes(NodePtr &cur_node, NodePtr &next_node, std::vector<NodePtr> &nodes,
-                       std::vector<NodePtr> &bro_nodes, AscGraph &graph, std::set<NodePtr> &mul_input_nodes) {
-  while (CanBackward(cur_node, next_node, bro_nodes, graph, mul_input_nodes)) {
+                       std::vector<NodePtr> &bro_nodes, std::set<NodePtr> &mul_input_nodes,
+                       std::vector<std::vector<NodePtr>> &pending_remove_bros) {
+  while (CanBackward(cur_node, next_node, bro_nodes, mul_input_nodes, pending_remove_bros)) {
     nodes.push_back(next_node);
     cur_node = next_node;
     GE_ASSERT_SUCCESS(GetSingleNextNode(cur_node, next_node));
@@ -1171,6 +1249,14 @@ Status BackwardMultiRefBroadcast(const NodePtr &candidate_node, const NodePtr &m
   NodePtr pre_bro_node = ToAscNode(pre_bro_out_anchor->GetOwnerNode());
   bool is_pre_scalar = IsScalarLikeProducer(pre_bro_node);
 
+  // Arange 生产者的多消费后移沿用整链视图推导（UpdateComputeNodesAscTensorAttr），
+  // 退化轴视图代数未适配，与单链路径同等 fail-closed。
+  if (pre_bro_node->GetType() == Arange::Type) {
+    GELOGI("Skip multi-ref broadcast backward at merge[%s]: branch producer[%s] is Arange.",
+           merge_node->GetName().c_str(), pre_bro_node->GetName().c_str());
+    return FAILED;
+  }
+
   if (is_pre_scalar) {
     std::vector<int64_t> bro_axes;
     if (!bro_nodes.empty()) {
@@ -1295,9 +1381,18 @@ Status RemoveBroadcasts(AscGraph &graph, std::vector<std::vector<NodePtr>> &bro_
   for (std::vector<NodePtr> &bro_nodes : bro_nodes_list) {
     std::vector<NodePtr> remove_nodes;
     for (auto it = bro_nodes.begin(); it != bro_nodes.end();) {
-      int64_t bro_axis;
-      GE_ASSERT_SUCCESS(GetBroAxisFromNode(*it, bro_axis));
-      if ((bro_axis != -1) && common_axises.count(bro_axis) != 0) {
+      // 仅当广播的全部扩维轴都属于公共轴时才可整节点删除；单节点多轴扩维
+      // （[1,1,N]→[B,M,N]）含非公共轴时必须保留节点——其输出视图随后由
+      // UpdateOutputTensor 塌缩公共轴，节点退化为仅扩非公共轴，非公共轴的
+      // 扩维职责保留在计算之前（外积语义不变）。整节点删除会丢失非公共轴
+      // 扩维（否则改写后视图不一致）。
+      std::set<int64_t> expansion_axes;
+      GE_ASSERT_SUCCESS(GetAllBroAxisesFromNode(*it, expansion_axes));
+      const bool all_axes_common = !expansion_axes.empty() && std::all_of(expansion_axes.begin(), expansion_axes.end(),
+                                                                          [&common_axises](int64_t axis) {
+                                                                            return common_axises.count(axis) != 0;
+                                                                          });
+      if (all_axes_common) {
         remove_nodes.push_back(*it);
         it = bro_nodes.erase(it);
       } else {
@@ -1455,6 +1550,50 @@ Status UpdateOutputTensor(std::vector<NodePtr> &nodes, std::set<int64_t> &common
   return SUCCESS;
 }
 
+// 公共轴塌缩要求每个分支的生产者视图都以退化轴（repeat=1）表达全部公共轴：
+// 生产者视图缺失公共轴（1D Arange 前缀扩维，如 [cols] → [rows,cols]）时，
+// 删除/塌缩分支广播会让生产者直连计算节点并留下两侧轴集不一致的边（tiling
+// 不可融合）。改写前 fail-closed。
+// 例外：scalar-like 生产者（Scalar/ScalarData/IndexExpr）输出视图恒为空（构图
+// 协议），标量语义与轴无关、可广播到任意视图，公共轴塌缩不改变其取值——免轴
+// 检查放行，与图级门控合入前的 partial backward 行为一致（标量链经 Cast 穿透
+// 参与多输入组的级联后移依赖此路径）。
+bool PartialBackwardBranchesCoverCommonAxes(const std::vector<std::vector<NodePtr>> &bro_nodes_list,
+                                            const std::set<int64_t> &common_axises) {
+  for (const auto &row : bro_nodes_list) {
+    if (row.empty()) {
+      return false;
+    }
+    NodePtr producer;
+    if (GetPeerOutNodeSafe(row.front(), producer, 0) != SUCCESS || producer == nullptr) {
+      return false;
+    }
+    if (IsScalarLikeProducer(producer)) {
+      continue;
+    }
+    AscTensorAttr *producer_output_attr = nullptr;
+    if (GetOutputTensorAttr(producer, producer_output_attr) != SUCCESS) {
+      return false;
+    }
+    for (const auto common_axis : common_axises) {
+      const auto axis_iter =
+          std::find(producer_output_attr->axis.begin(), producer_output_attr->axis.end(), common_axis);
+      if (axis_iter == producer_output_attr->axis.end()) {
+        GELOGI("Skip partial broadcast backward: common axis[%ld] is missing in producer[%s] view.",
+               static_cast<long>(common_axis), producer->GetName().c_str());
+        return false;
+      }
+      const size_t axis_index = static_cast<size_t>(std::distance(producer_output_attr->axis.begin(), axis_iter));
+      if (!IsEqOne(producer_output_attr->repeats[axis_index])) {
+        GELOGI("Skip partial broadcast backward: common axis[%ld] varies (repeat != 1) in producer[%s] view.",
+               static_cast<long>(common_axis), producer->GetName().c_str());
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 Status JudgePartBackward(std::set<NodePtr> &mul_input_nodes, bool &is_changed, AscGraph &graph) {
   std::set<NodePtr> next_mul_input_nodes;
   for (auto mul_input_node : mul_input_nodes) {
@@ -1474,6 +1613,9 @@ Status JudgePartBackward(std::set<NodePtr> &mul_input_nodes, bool &is_changed, A
              mul_input_node->GetName().c_str(), bro_nodes_list.size(), origin_bro_nodes.size(), common_axises.size());
       continue;
     }
+    if (!PartialBackwardBranchesCoverCommonAxes(bro_nodes_list, common_axises)) {
+      continue;
+    }
     TensorInfo expanded_tensor_info;
     GE_ASSERT_SUCCESS(GetTensorInfo(origin_bro_nodes.back(), expanded_tensor_info));
 
@@ -1483,12 +1625,18 @@ Status JudgePartBackward(std::set<NodePtr> &mul_input_nodes, bool &is_changed, A
     auto next_node = mul_input_node;
     GE_ASSERT_SUCCESS(GetSingleNextNode(cur_node, next_node));
     compute_nodes.push_back(mul_input_node);
-    GE_ASSERT_SUCCESS(
-        CollectCmpNodes(cur_node, next_node, compute_nodes, origin_bro_nodes, graph, next_mul_input_nodes));
+    std::vector<std::vector<NodePtr>> pending_remove_bros;
+    GE_ASSERT_SUCCESS(CollectCmpNodes(cur_node, next_node, compute_nodes, origin_bro_nodes, next_mul_input_nodes,
+                                      pending_remove_bros));
     GELOGD("Move partial broadcast at node[%s]: common_axes=%zu, compute_nodes=%zu, broadcasts=%zu.",
            mul_input_node->GetName().c_str(), common_axises.size(), compute_nodes.size(), origin_bro_nodes.size());
 
     is_changed = true;
+    // 部分后移的分支链删除与链内同轴兄弟删除操作的是不相交节点集，先应用 pending 与原"探测期删除"
+    // 行为终态等价，同时保证失败路径上图未被改写。
+    for (std::vector<NodePtr> &remove_nodes : pending_remove_bros) {
+      GE_ASSERT_SUCCESS(RemoveBroadcasts(remove_nodes, graph));
+    }
     GE_ASSERT_SUCCESS(RemoveBroadcasts(graph, bro_nodes_list, common_axises));
     GE_ASSERT_SUCCESS(InsertBroadcastNode(compute_nodes.back(), graph, common_axises, expanded_tensor_info));
 
@@ -1520,9 +1668,11 @@ Status ProcessOriginalBackwardLogic(AscGraph &graph, bool &is_changed, std::set<
 
       std::vector<NodePtr> bro_nodes;
       std::vector<NodePtr> compute_nodes;
+      std::vector<std::vector<NodePtr>> pending_remove_bros;
       NodePtr pre_bro_node = start_node;
       GE_ASSERT_SUCCESS(CollectBroNodes(cur_node, next_node, bro_nodes));
-      GE_ASSERT_SUCCESS(CollectCmpNodes(cur_node, next_node, compute_nodes, bro_nodes, graph, mul_input_nodes));
+      GE_ASSERT_SUCCESS(
+          CollectCmpNodes(cur_node, next_node, compute_nodes, bro_nodes, mul_input_nodes, pending_remove_bros));
 
       GELOGI("Move broadcast backward from node[%s]: broadcasts=%zu, computes=%zu.", peer_in_node->GetName().c_str(),
              bro_nodes.size(), compute_nodes.size());
@@ -1530,7 +1680,16 @@ Status ProcessOriginalBackwardLogic(AscGraph &graph, bool &is_changed, std::set<
       if (!bro_nodes.empty() && !compute_nodes.empty()) {
         // 后移会把 compute 链输出改写为后移视图；若链尾下游到达 IndirectLoad，
         // 索引链视图被标量化会导致 IndirectLoad 索引解析错误，必须整体拒绝。
-        if (HasMultipleInputsBroadcastBehind(next_node) || ChainReachesIndirectLoad(next_node)) {
+        // 守卫只统计外源广播：本事务广播——链内广播（bro_nodes，后移后停靠在链尾 compute 与 next_node
+        // 之间）与已登记待删的同轴兄弟广播（pending_remove_bros，提交期统一删除）——都不构成拒绝理由。
+        // 待删兄弟探测期仍垫在链内多输入节点的输入上，若不排除会被守卫经 peer 的 in-0 生产者检查
+        // 误计为外源广播、与真正的外源广播凑满 count≥2 而误拒提交；兄弟删除已延迟到提交期，
+        // 图未被改写，拒绝时可干净放弃。
+        std::vector<NodePtr> transaction_bro_nodes = bro_nodes;
+        for (const std::vector<NodePtr> &remove_nodes : pending_remove_bros) {
+          transaction_bro_nodes.insert(transaction_bro_nodes.end(), remove_nodes.begin(), remove_nodes.end());
+        }
+        if (HasMultipleInputsBroadcastBehind(next_node, transaction_bro_nodes) || ChainReachesIndirectLoad(next_node)) {
           GELOGI(
               "Skip broadcast backward at node[%s]: next node[%s] has peer inputs with broadcast behind or "
               "downstream reaches IndirectLoad.",
@@ -1551,7 +1710,20 @@ Status ProcessOriginalBackwardLogic(AscGraph &graph, bool &is_changed, std::set<
               last_bro_output_attr->repeats.size());
           continue;
         }
+        // Arange 生产者的整链后移未适配：整链后移把 compute 链输出改写为 Arange
+        // 退化视图，退化轴（size=1/stride=0）的扩维职责语义在视图改写中丢失
+        // （triu/remainder_cast 类图 codegen 失败）。链级 fail-closed，保持图原状。
+        if (pre_bro_node->GetType() == Arange::Type) {
+          GELOGI("Skip broadcast backward at node[%s]: pre-broadcast producer[%s] is Arange.",
+                 peer_in_node->GetName().c_str(), pre_bro_node->GetName().c_str());
+          continue;
+        }
         is_changed = true;
+        // 提交期统一执行链上多输入节点的同轴兄弟广播删除：守卫与轴数检查全部通过才动手，
+        // 保证"删除 + 移动"原子化，杜绝"兄弟已删、链未后移"的半改写状态。
+        for (std::vector<NodePtr> &remove_nodes : pending_remove_bros) {
+          GE_ASSERT_SUCCESS(RemoveBroadcasts(remove_nodes, graph));
+        }
         GE_ASSERT_SUCCESS(BroadcastBackwardReally(compute_nodes, bro_nodes, pre_bro_node));
       }
     }
@@ -1565,24 +1737,10 @@ Status BroadcastBackward(AscGraph &graph) {
     return SUCCESS;
   }
 
-  // Arange 生产者的广播后移尚未适配：退化轴视图（轴数一致但含 size=1/stride=0 轴）在
-  // 视图改写中丢失广播语义（triu/remainder_cast/degenerate_arange_add_3d 真机 codegen
-  // 失败），partial backward 亦无法保持 tiling 融合性（multi_arange 真机 tiling 失败）。
-  // 专项支持合入前对含 Arange 广播生产者的图整体跳过（fail-closed），避免改写损伤。
-  for (const auto &node : graph.GetAllNodes()) {
-    if (node->GetType() != kBroadcastType) {
-      continue;
-    }
-    NodePtr producer;
-    if (GetPeerOutNodeSafe(node, producer, 0) != SUCCESS || producer == nullptr) {
-      continue;
-    }
-    if (producer->GetType() == Arange::Type) {
-      GELOGI("Skip broadcast backward for graph[%s]: broadcast[%s] has Arange producer[%s].", graph.GetName().c_str(),
-             node->GetName().c_str(), producer->GetName().c_str());
-      return SUCCESS;
-    }
-  }
+  // Arange 生产者的改写防护已下沉为链级/组级判定：单链与多消费路径按生产者
+  // 类型 fail-closed；partial backward 按公共轴在生产者视图中的退化性放行
+  // （退化轴 Arange 公共轴后移）或拒绝（1D 前缀扩维）。含 Arange 的图中与
+  // Arange 无关的正常链不再被整体跳过。
 
   GE_ASSERT_SUCCESS(broadcast_backward_shared_split::SplitSharedBroadcastBranches(graph));
   GE_ASSERT_SUCCESS(broadcast_backward_shared_split::SplitSharedBroadcastConsumers(graph));
@@ -1594,7 +1752,6 @@ Status BroadcastBackward(AscGraph &graph) {
 
     std::set<NodePtr> mul_input_nodes;
     GE_ASSERT_SUCCESS(ProcessOriginalBackwardLogic(graph, is_changed, mul_input_nodes));
-
     if (!mul_input_nodes.empty()) {
       GE_ASSERT_SUCCESS(JudgePartBackward(mul_input_nodes, is_changed, graph));
     }
