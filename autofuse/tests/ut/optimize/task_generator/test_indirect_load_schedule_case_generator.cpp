@@ -188,7 +188,13 @@ void BuildIndexPreChain(const af::AscOpOutput &index_load_output, const std::vec
   indirect_load.x2 = index_floor_to_int.y;
 }
 
-af::AscGraph BuildIndirectLoadGraph(int64_t axis, bool has_input_pre_node = false, bool full_prefix = false) {
+// [Bug A] index 链尾部额外外部消费者的图形态：kExternalStore 为合法的直连 store
+// （纳入融合区域、收为空节点输出链），kIllegalConsumer 为非法的 Abs→store 消费者
+// （SIMT 候选必须整候选淘汰）。
+enum class IndexChainExtraConsumer { kNone, kExternalStore, kIllegalConsumer };
+
+af::AscGraph BuildIndirectLoadGraph(int64_t axis, bool has_input_pre_node = false, bool full_prefix = false,
+                                    IndexChainExtraConsumer index_extra = IndexChainExtraConsumer::kNone) {
   af::AscGraph graph("indirect_load_ut_graph");
   const af::Expression s0 = graph.CreateSizeVar("s0");
   const af::Expression s1 = graph.CreateSizeVar("s1");
@@ -238,6 +244,29 @@ af::AscGraph BuildIndirectLoadGraph(int64_t axis, bool has_input_pre_node = fals
   af::ascir_op::Load index_load("index_load");
   index_load.x = index.y;
   SetNodeView(index_load, af::DT_INT32, output_axes, output_repeats, output_strides);
+  if (index_extra == IndexChainExtraConsumer::kExternalStore) {
+    af::ascir_op::Store index_store("index_store");
+    index_store.x = index_load.y;
+    SetNodeView(index_store, af::DT_INT32, output_axes, output_repeats, output_strides);
+    af::ascir_op::Output index_y("index_y");
+    index_y.x = index_store.y;
+    index_y.y.dtype = af::DT_INT32;
+    index_y.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+    index_y.attr.api.type = af::ApiType::kAPITypeBuffer;
+    index_y.ir_attr.SetIndex(1);
+    index_y.attr.sched.axis = output_axes;
+    *index_y.y.axis = output_axes;
+    *index_y.y.repeats = output_repeats;
+    *index_y.y.strides = output_strides;
+  } else if (index_extra == IndexChainExtraConsumer::kIllegalConsumer) {
+    af::ascir_op::Abs index_abs("index_abs");
+    index_abs.x = index_load.y;
+    SetNodeView(index_abs, af::DT_INT32, output_axes, output_repeats, output_strides);
+    SetVectorApi(index_abs);
+    af::ascir_op::Store index_store("index_store");
+    index_store.x = index_abs.y;
+    SetNodeView(index_store, af::DT_INT32, output_axes, output_repeats, output_strides);
+  }
 
   af::ascir_op::IndirectLoad indirect_load("indirect_load");
   BuildInputPreChain(input_load.y, input_axes, input_repeats, input_strides, has_input_pre_node, full_prefix,
@@ -994,6 +1023,53 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimtSetsDcacheAndUsesUnifiedVectoriz
   EXPECT_TRUE(behavior.skips_ub_lifecycle);
   EXPECT_TRUE(behavior.preserves_vectorized_axis);
   EXPECT_FALSE(ascgen_utils::indirect_load::ShouldApplyInputInnerVectorization(indirect_load));
+}
+
+// [Bug A] index 链尾部的区域外直连 store：SIMT 候选将其纳入融合区域并获得
+// kSimtDirectGmBoundary 角色（跳过普通调度发射）；lowering 收为空节点输出链，
+// 链值由 codegen 侧 Index() 求值器结果注入。
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimtFoldsIndexChainExternalStoreIntoRegion) {
+  auto graph = BuildIndirectLoadGraph(2, false, false, IndexChainExtraConsumer::kExternalStore);
+  // 链去重按 target tensor id 判定，图构造需保证关键边/目标张量 id 互异。
+  const auto index_load_node = graph.FindNode("index_load");
+  ASSERT_NE(index_load_node, nullptr);
+  index_load_node->outputs()[0]->attr.mem.tensor_id = 100;
+  const auto index_store_node = graph.FindNode("index_store");
+  ASSERT_NE(index_store_node, nullptr);
+  index_store_node->outputs()[0]->attr.mem.tensor_id = 101;
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  EXPECT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  const auto simt_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
+  ASSERT_NE(simt_iter, graphs.end());
+  const auto index_store = simt_iter->FindNode("index_store");
+  ASSERT_NE(index_store, nullptr);
+  EXPECT_EQ(ascgen_utils::indirect_load::GetTemplateRole(index_store),
+            ascgen_utils::indirect_load::TemplateRole::kSimtDirectGmBoundary);
+  const auto indirect_load = simt_iter->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::IndirectLoadLoweringMetadata metadata;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetLoweringMetadata(indirect_load, metadata), af::SUCCESS);
+  ASSERT_EQ(metadata.simt.output_chains.size(), 2UL);
+  const auto &index_chain = metadata.simt.output_chains.back();
+  EXPECT_TRUE(index_chain.node_names.empty());
+  EXPECT_EQ(index_chain.result_tensor_id, metadata.simt.index_result_tensor_id);
+  EXPECT_EQ(index_chain.result_tensor_id, 100);
+  EXPECT_EQ(index_chain.target_tensor_id, 101);
+  EXPECT_EQ(index_chain.dtype, af::DT_INT32);
+}
+
+// [Bug A 非法形态] index 链尾部喂给非 store 的外部消费者（Abs→store）：该形态
+// 无法由 SIMT 标量求值器供值，静默丢弃会导致目标 buffer 永不写入，SIMT 候选
+// 必须整候选淘汰。
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimtRejectsIndexChainIllegalExternalConsumer) {
+  auto graph = BuildIndirectLoadGraph(2, false, false, IndexChainExtraConsumer::kIllegalConsumer);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  EXPECT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  EXPECT_EQ(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt), graphs.end());
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, ClassifiesDenseLayout) {

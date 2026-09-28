@@ -426,6 +426,70 @@ bool CollectSimtBackwardRegion(const NodePath &roots, const af::AscNodePtr &indi
   return true;
 }
 
+void CollectSimtOutputConsumerClosure(const af::AscNodePtr &indirect_load, NodeSet &closure) {
+  NodePath roots;
+  for (const auto &out_node : indirect_load->GetOutDataNodes()) {
+    const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out_node);
+    if (consumer != nullptr) {
+      roots.emplace_back(consumer);
+    }
+  }
+  const auto visit = [](const af::AscNodePtr &node, bool &stop) -> af::Status {
+    (void)node;
+    (void)stop;
+    return af::SUCCESS;
+  };
+  (void)TraverseOutputConsumers(roots, closure, visit);
+}
+
+// [index 链外部 store] index 生产链尾部张量的区域外直连 store 会被 lowering 收为
+// 额外输出链（链值 = Index() 求值器结果），此处将其纳入 SIMT 融合区域（获得
+// kSimtDirectGmBoundary 角色，跳过普通调度发射）；index 链其余无法供值的外部消费者
+// 静默丢弃会导致目标 buffer 永不写入，必须整候选淘汰。合法消费者集 = IndirectLoad
+// 自身 ∪ 融合区域（index 链与输出链的 backward 闭包——含经多输入算子合流进输出链
+// 的 side-input，如 embedding+reduce 图中消费 index load 的 Ge/Select）∪ IL 输出的
+// 前向闭包（post-Reduce 普通调度链）；守卫只扫 index 链子集，不扫全融合区域。
+bool FoldSimtIndexChainExternalStores(const af::AscNodePtr &indirect_load, const af::AscNodePtr &index_root,
+                                      NodeSet &region) {
+  NodeSet index_chain;
+  if (!CollectSimtBackwardRegion({index_root}, indirect_load, index_chain)) {
+    return false;
+  }
+  NodeSet output_consumers;
+  CollectSimtOutputConsumerClosure(indirect_load, output_consumers);
+  const auto owner_graph = indirect_load->GetOwnerComputeGraph();
+  if (owner_graph == nullptr) {
+    return false;
+  }
+  const auto inputs = indirect_load->inputs();
+  if (inputs.size() <= ascgen_utils::indirect_load::kIndexTensorIndex) {
+    return false;
+  }
+  const ascir::TensorId index_tensor_id = inputs[ascgen_utils::indirect_load::kIndexTensorIndex]->attr.mem.tensor_id;
+  for (const auto &graph_node : owner_graph->GetDirectNode()) {
+    const auto node = std::dynamic_pointer_cast<af::AscNode>(graph_node);
+    if (node == nullptr || index_chain.count(node.get()) == 0UL) {
+      continue;
+    }
+    for (const auto &out_node : node->GetOutDataNodes()) {
+      const auto consumer = std::dynamic_pointer_cast<af::AscNode>(out_node);
+      if (consumer == nullptr || consumer == indirect_load || region.count(consumer.get()) != 0UL ||
+          output_consumers.count(consumer.get()) != 0UL) {
+        continue;
+      }
+      if (node == index_root && af::ops::IsOps<af::ascir_op::Store>(consumer) && !consumer->inputs().empty() &&
+          consumer->inputs()[0]->attr.mem.tensor_id == index_tensor_id) {
+        region.emplace(consumer.get());
+        continue;
+      }
+      GELOGI("[IndirectLoad] Reject SIMT candidate: index chain node[%s] has unsupported external consumer[%s, %s].",
+             node->GetNamePtr(), consumer->GetNamePtr(), consumer->GetTypePtr());
+      return false;
+    }
+  }
+  return true;
+}
+
 void CollectSimtFusedRegionMembers(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis,
                                    NodeSet &region) {
   region.clear();
@@ -438,6 +502,10 @@ void CollectSimtFusedRegionMembers(const af::AscNodePtr &indirect_load, const Re
     return;
   }
   if (!CollectSimtBackwardRegion({index_root, output_terminal}, indirect_load, region)) {
+    region.clear();
+    return;
+  }
+  if (!FoldSimtIndexChainExternalStores(indirect_load, index_root, region)) {
     region.clear();
   }
 }

@@ -770,6 +770,47 @@ af::Status CollectSimtOutputChainBuilds(const NodePath &graph_nodes, const af::A
   return af::SUCCESS;
 }
 
+// [index 链外部 store] index 生产链尾部张量除喂给 IndirectLoad 的 index 输入外，
+// 还可能存在区域外直连 store（调度侧已校验唯一合法外部消费形态并将其纳入融合
+// 区域）。该 store 收为额外输出链：nodes 恒为空，链值在 codegen 侧由 Index()
+// 求值器结果注入；与值侧收集器按 target 去重，避免合流 store 双链双写。
+af::Status CollectSimtIndexChainStoreBuilds(const NodePath &graph_nodes, const af::AscNodePtr &index_root,
+                                            ascir::TensorId index_result_tensor_id,
+                                            std::vector<SimtOutputChainBuild> &chains) {
+  if (index_root == nullptr) {
+    return af::SUCCESS;
+  }
+  std::unordered_set<ascir::TensorId> collected_targets;
+  for (const auto &chain : chains) {
+    collected_targets.emplace(chain.metadata.target_tensor_id);
+  }
+  for (const af::AscNodePtr &node : graph_nodes) {
+    if (!af::ops::IsOps<af::ascir_op::Store>(node)) {
+      continue;
+    }
+    const auto producer = GetInputProducer(node, 0UL);
+    if (producer != index_root) {
+      continue;
+    }
+    const size_t producer_output_index = GetProducerOutputIndex(node);
+    GE_ASSERT_TRUE(producer_output_index < producer->outputs().size(),
+                   "IndirectLoad SIMT index terminal[%s] producer output index[%zu] is invalid.", node->GetNamePtr(),
+                   producer_output_index);
+    const ascir::TensorId result_tensor_id = producer->outputs()[producer_output_index]->attr.mem.tensor_id;
+    const ascir::TensorId target_tensor_id = node->outputs()[0]->attr.mem.tensor_id;
+    if (result_tensor_id != index_result_tensor_id || collected_targets.count(target_tensor_id) != 0UL) {
+      continue;
+    }
+    SimtOutputChainBuild chain;
+    chain.metadata.result_tensor_id = result_tensor_id;
+    chain.metadata.target_tensor_id = target_tensor_id;
+    chain.metadata.dtype = producer->outputs()[producer_output_index]->attr.dtype;
+    chains.emplace_back(std::move(chain));
+    collected_targets.emplace(target_tensor_id);
+  }
+  return af::SUCCESS;
+}
+
 af::Status ValidateSimtLoweringNode(const af::AscNodePtr &node) {
   if (IsSimtDirectGmBoundary(node) || af::ops::IsOps<af::ascir_op::Scalar>(node) ||
       af::ops::IsOps<af::ascir_op::ScalarData>(node) || af::ops::IsOps<af::ascir_op::Arange>(node) ||
@@ -952,13 +993,15 @@ void AppendRuntimeParams(std::vector<af::Expression> &target, const std::vector<
 }
 
 af::Status BuildSimtPolicyMetadata(const TemplateLogicalView &logical_view, const NodePath &index_nodes, size_t axis,
-                                   bool embedding_structured, bool &mixed_index_views, SimtPolicyMetadata &metadata) {
+                                   bool embedding_structured, bool &mixed_index_views, SimtPolicyMetadata &metadata,
+                                   LogicalTensorView &policy_index_view) {
   const size_t rank = logical_view.input.sizes.size();
   GE_ASSERT_TRUE(rank < 64UL, "IndirectLoad SIMT rank must be smaller than 64.");
   LogicalTensorView input = logical_view.input;
   LogicalTensorView index = logical_view.index;
   const auto &output = logical_view.output;
   const bool index_broadcast_strided = ApplySimtIndexPhysicalStrides(index_nodes, index, mixed_index_views);
+  policy_index_view = index;
   const bool strided = logical_view.input.kind != IndirectLoadLayoutKind::kDense ||
                        logical_view.index.kind != IndirectLoadLayoutKind::kDense || index_broadcast_strided;
   af::Expression inner_span = af::sym::kSymbolOne;
@@ -1097,6 +1140,8 @@ af::Status BuildSimtLoweringMetadata(const af::AscNodePtr &indirect_load, Indire
 
   std::vector<SimtOutputChainBuild> chain_builds;
   GE_ASSERT_SUCCESS(CollectSimtOutputChainBuilds(graph_nodes, indirect_load, chain_builds));
+  GE_ASSERT_SUCCESS(
+      CollectSimtIndexChainStoreBuilds(graph_nodes, index_root, simt.index_result_tensor_id, chain_builds));
   std::vector<bool> keep_chain(chain_builds.size(), true);
   for (size_t chain_index = 0UL; chain_index < chain_builds.size(); ++chain_index) {
     const bool contains_reduce =
@@ -1179,14 +1224,30 @@ af::Status BuildSimtLoweringMetadata(const af::AscNodePtr &indirect_load, Indire
   }
 
   bool mixed_index_views = false;
+  LogicalTensorView policy_index_view;
   GE_ASSERT_SUCCESS(BuildSimtPolicyMetadata(metadata.logical_view, index_nodes, static_cast<size_t>(metadata.axis),
                                             metadata.access_info.can_use_simt_structured, mixed_index_views,
-                                            simt.policy));
+                                            simt.policy, policy_index_view));
   for (const auto &node : index_load_nodes) {
-    simt.index_loads.push_back(
-        {node->GetName(),
-         SimtLoadUsesZeroOffset(node) ? SimtLoadAddressSource::kZeroOffset : SimtLoadAddressSource::kOutputOffset,
-         mixed_index_views, GetNodeOutputView(node)});
+    const LogicalTensorView current_view = GetNodeOutputView(node);
+    SimtLoadMetadata load_meta;
+    load_meta.node_name = node->GetName();
+    load_meta.address_source =
+        SimtLoadUsesZeroOffset(node) ? SimtLoadAddressSource::kZeroOffset : SimtLoadAddressSource::kOutputOffset;
+    // [非 dense index 视图] policy 的 index_offset 步长空间由（经零 stride 改写后的）
+    // index 逻辑视图决定：视图非 dense（strided/广播形态，步长已嵌入 index_offset，
+    // 如 kStrided policy 的 runtime 参数）时，裸线性偏移即正确，既有 strided/broadcast
+    // index 用例保持快路径——不能按 load 改写后视图与逻辑视图的字面步长相等判定
+    // （调度器会把 load 视图 split 改写为模板轴空间，rank/符号必然不一致）。仅当
+    // policy index 视图 dense（index_offset ≡ 逻辑位置、不含任何物理步长）且 load
+    // 物理视图与输出逻辑视图非 dense 等价时（如 inductor 形态：index 输入逻辑视图
+    // dense、源 load 物理视图为 [128]/[39]+offset 的列切片），线性偏移会丢行 stride
+    // 导致错位读——与输出侧 GM load 恒 true 的规则对齐，交由坐标折叠重建。
+    const bool policy_index_dense = IsDense(policy_index_view);
+    load_meta.use_logical_offset =
+        mixed_index_views || (policy_index_dense && !IsDenseEquivalentView(current_view, metadata.logical_view.output));
+    load_meta.physical_view = current_view;
+    simt.index_loads.push_back(std::move(load_meta));
   }
   // Every GM side load inside the SIMT region is addressed with the full logical output_index,
   // including post-Reduce regions, so its physical view must always provide the coordinate
@@ -1235,6 +1296,40 @@ af::Status FinalizeLoweringMetadata(const af::AscNodePtr &node, bool &is_support
   GE_ASSERT_SUCCESS(SetLoweringMetadata(node, metadata));
   is_supported = true;
   return af::SUCCESS;
+}
+
+bool IsDenseEquivalentView(const LogicalTensorView &load_view, const LogicalTensorView &output_view) {
+  if (load_view.sizes.size() != load_view.strides.size() || output_view.sizes.size() != output_view.strides.size()) {
+    return false;
+  }
+  af::Expression load_total = af::sym::kSymbolOne;
+  af::Expression expected_stride = af::sym::kSymbolOne;
+  bool has_dense_tail = false;
+  for (size_t rev = 0UL; rev < load_view.sizes.size(); ++rev) {
+    const size_t dim = load_view.sizes.size() - 1UL - rev;
+    const bool unit_size = af::SymbolicUtils::StaticCheckEq(load_view.sizes[dim], af::ops::One) == af::TriBool::kTrue;
+    const bool zero_stride =
+        af::SymbolicUtils::StaticCheckEq(load_view.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue;
+    if (unit_size || zero_stride) {
+      continue;  // 退化轴不参与连续性与计数
+    }
+    if (!has_dense_tail) {
+      // 最右侧有效轴必须 stride==1
+      if (af::SymbolicUtils::StaticCheckEq(load_view.strides[dim], af::ops::One) != af::TriBool::kTrue) {
+        return false;
+      }
+      has_dense_tail = true;
+    } else if (af::SymbolicUtils::StaticCheckEq(load_view.strides[dim], expected_stride) != af::TriBool::kTrue) {
+      return false;
+    }
+    expected_stride = af::sym::Mul(load_view.sizes[dim], expected_stride);
+    load_total = af::sym::Mul(load_view.sizes[dim], load_total);
+  }
+  af::Expression output_total = af::sym::kSymbolOne;
+  for (const auto &size : output_view.sizes) {
+    output_total = af::sym::Mul(size, output_total);
+  }
+  return af::SymbolicUtils::StaticCheckEq(load_total, output_total) == af::TriBool::kTrue;
 }
 
 af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout,

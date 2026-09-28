@@ -221,6 +221,13 @@ af::Status GetImplementation(const af::AscNodePtr &node, Implementation &impleme
 af::Status ClassifyIndirectLoadLayout(const LogicalTensorView &logical, IndirectLoadTensorLayout &layout,
                                       bool allow_non_overlapping_zero_stride = false);
 af::Status ValidateIndirectLoadOutputLayout(const LogicalTensorView &output);
+// 判断 load 的物理视图是否与输出逻辑视图覆盖同一 dense 连续区域（语义等价）：
+// 1) load 视图各有效轴（size!=1 且 stride!=0）的 stride 满足后缀乘积连续性；
+// 2) 所有有效轴 sizes 的乘积与输出视图 sizes 乘积符号相等。
+// 满足时 load 的线性偏移与 output_index 相同，可直接使用线性偏移，无需坐标重建。
+// 调度会把普通节点视图 merge/split 到模板轴空间（如 outer 被拆为
+// [s3*s4*s5/Tb, Tb]），符号级全等比较会漏判这类等价视图。
+bool IsDenseEquivalentView(const LogicalTensorView &load_view, const LogicalTensorView &output_view);
 bool ShouldApplyInputInnerVectorization(const af::AscNodePtr &node);
 af::AscNodePtr GetInputProducer(const af::AscNodePtr &node, size_t input_index);
 af::AscNodePtr GetOnlyOutputConsumer(const af::AscNodePtr &node);
