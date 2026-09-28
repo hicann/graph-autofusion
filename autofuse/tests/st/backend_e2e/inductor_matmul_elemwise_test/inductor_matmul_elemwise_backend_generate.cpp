@@ -86,6 +86,33 @@ TEST_F(TestBackendInductorMatmulElemwiseE2e, InductorMatmulElemwiseE2eCodegen) {
   }
 }
 
+TEST_F(TestBackendInductorMatmulElemwiseE2e, InductorBatchMatmulElemwiseE2eCodegen) {
+  auto graph = ascir::ShareGraph::LoadBatchMatmulElewiseBrcFusedGraph();
+  auto parts = splitString(KERNEL_SRC_LIST, ':');
+  ASSERT_EQ(parts.size(), kExpectedKernelSrcCount);
+
+  try {
+    optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+    codegen::Codegen codegen(codegen::CodegenOptions{});
+    ascir::FusedScheduledResult fused_schedule_result;
+    fused_schedule_result.node_idx_to_scheduled_results.push_back({});
+    ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), 0);
+    ASSERT_TRUE(ascgen_utils::IsCubeFusedScheduled(fused_schedule_result));
+
+    codegen::CodegenResult result;
+    ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), 0);
+
+    EXPECT_NE(result.kernel.find("BATCH_API_LEVEL"), std::string::npos);
+    EXPECT_NE(result.kernel.find("_DISPATCH_BATCH_MATMUL"), std::string::npos);
+    EXPECT_NE(result.kernel.find("BatchMatMulV3TilingData"), std::string::npos);
+    EXPECT_EQ(result.kernel.find("int8_t API_LEVEL = (tiling_key >> 0) & 0xF;"), std::string::npos);
+  } catch (const std::exception &e) {
+    FAIL() << e.what();
+  } catch (...) {
+    FAIL() << "inductor batch matmul elemwise codegen failed";
+  }
+}
+
 TEST_F(TestBackendInductorMatmulElemwiseE2e, CvTilingUsesDirectLogHeaderDependency) {
   auto graph = ascir::ShareGraph::LoadMatmulElewiseBrcFusedGraph(true);
   optimize::Optimizer optimizer(optimize::OptimizerOptions{});

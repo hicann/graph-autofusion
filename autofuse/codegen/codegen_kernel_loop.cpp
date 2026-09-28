@@ -396,6 +396,39 @@ static bool IsLoadNodeSplitB(const ascir::NodeView &node, const Tiler &tiler, st
   }
 }
 
+// 多输入节点的缓存刷新条件按 “||” 语义取并集：任一输入到达自身刷新点就必须重新执行，复用仅在
+// 所有输入都保持不变的窗口内有效。按 “ || ” 拆分子项去重，避免嵌套多输入场景重复累加同一条件。
+// 示例：Add 的两个输入链分别缓存于 A 轴和 R 轴，输入0的条件为
+// "dis_enable_cache_a || control_dis_enable_cache_a"、输入1的条件为 "dis_enable_cache_r"，
+// 合并结果为 "dis_enable_cache_a || control_dis_enable_cache_a || dis_enable_cache_r"；
+// 若两个输入的条件相同（如均为 "dis_enable_cache_r"），去重后合并结果仍为 "dis_enable_cache_r"。
+static void MergeCacheACacheRCondition(const std::string &cur_input_cache_condition, std::string &merged) {
+  static const std::string kCondSep = " || ";
+  if (cur_input_cache_condition.empty()) {
+    return;
+  }
+  std::vector<std::string> merged_terms;
+  size_t pos = 0;
+  while (pos < merged.size()) {
+    size_t end = merged.find(kCondSep, pos);
+    merged_terms.emplace_back(merged.substr(pos, end == std::string::npos ? end : end - pos));
+    pos = (end == std::string::npos) ? end : end + kCondSep.size();
+  }
+  pos = 0;
+  while (pos < cur_input_cache_condition.size()) {
+    size_t end = cur_input_cache_condition.find(kCondSep, pos);
+    std::string term = cur_input_cache_condition.substr(pos, end == std::string::npos ? end : end - pos);
+    if (std::find(merged_terms.begin(), merged_terms.end(), term) == merged_terms.end()) {
+      if (!merged.empty()) {
+        merged += kCondSep;
+      }
+      merged += term;
+      merged_terms.emplace_back(term);
+    }
+    pos = (end == std::string::npos) ? end : end + kCondSep.size();
+  }
+}
+
 static bool IsNodeSplitB(const ascir::NodeView &node, const Tiler &tiler, std::string &enable_cache_with_condition,
                          bool is_ar, bool is_link_to_brc = false) {
   if (IsOps<Data>(node) || node->GetInDataNodesSize() == 0U) {
@@ -413,15 +446,20 @@ static bool IsNodeSplitB(const ascir::NodeView &node, const Tiler &tiler, std::s
   if (!node_link_to_brc && !remove_pad_link_brc) {
     return false;
   }
+  // 各输入链的缓存刷新条件相互独立，必须取并集：任一输入数据变化都会使本节点的缓存失效。
+  std::string all_inputs_merged_cache_condition;
   for (const auto &in_node : node->GetInDataNodes()) {
     GE_ASSERT_NOTNULL(in_node, "Input of node %s[%s] is null", node->GetTypePtr(), node->GetNamePtr());
     GE_ASSERT_NOTNULL(std::dynamic_pointer_cast<af::AscNode>(in_node));
     const auto &prev_node = std::dynamic_pointer_cast<af::AscNode>(in_node);
-    if (!IsOps<Scalar>(prev_node) && !IsNodeSplitB(prev_node, tiler, enable_cache_with_condition, is_ar, true)) {
+    std::string cur_input_cache_condition;
+    if (!IsOps<Scalar>(prev_node) && !IsNodeSplitB(prev_node, tiler, cur_input_cache_condition, is_ar, true)) {
       return false;
     }
+    MergeCacheACacheRCondition(cur_input_cache_condition, all_inputs_merged_cache_condition);
   }
-  return !enable_cache_with_condition.empty();
+  enable_cache_with_condition = all_inputs_merged_cache_condition;
+  return !all_inputs_merged_cache_condition.empty();
 }
 
 static bool IsValidCacheCondition(const af::ExecuteCondition &exec_condition) {
@@ -495,11 +533,11 @@ Status Loop::ConstructFromNodes(ascir::NodeViewVisitorConst nodes, const Tiler &
                                 IsNodeSplitB(node, tiler, call->enable_cache_with_condition, current_loop->is_ar))
                              : IsValidCacheCondition(call->exec_condition);
     GELOGI(
-        "Node[%s][%s] cache eligibility: has_reduce[%d], enable_cache[%d], exec_condition[%u], "
-        "reduce_cache_condition[%s]",
+        "Node[%s][%s] cache eligibility: has_reduce[%d], enable_cache[%d], fixed_indirect_load_param[%d], "
+        "exec_condition[%u], reduce_cache_condition[%s]",
         node->GetNamePtr(), node->GetTypePtr(), static_cast<int32_t>(this->is_graph_has_reduce_node),
-        static_cast<int32_t>(call->enable_cache), static_cast<uint32_t>(call->exec_condition),
-        call->enable_cache_with_condition.c_str());
+        static_cast<int32_t>(call->enable_cache), static_cast<int32_t>(is_fixed_indirect_load_parameter),
+        static_cast<uint32_t>(call->exec_condition), call->enable_cache_with_condition.c_str());
     call->axis = current_loop->axis_id;
     call->depth = current_axis.size();
     InitApiCallContext(node, tpipe, call, lifecycle_edge);

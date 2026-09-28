@@ -975,6 +975,92 @@ static void CreateBatchMatmulElemwiseDynamicGraph(af::AscGraph &graph) {
   x1Local->outputs[0].attr.mem.position = af::Position::kPositionVecIn;
 }
 
+// 创建 BatchMatMul 融合图的一路输入（Data+Load），并在 load 存活期间绑定到 matmul 的指定输入
+// 注意：不可将 load.y 以返回值形式带出本函数，AscOpOutput 绑定的存储随局部 Load 析构而失效
+static void CreateBatchMatmulOperand(af::AscGraph &graph, af::ascir_op::BatchMatMul &matmul, bool bind_x1,
+                                     const char *data_name, const char *load_name, int64_t index,
+                                     const std::vector<int64_t> &axes, const std::vector<af::Expression> &strides,
+                                     const std::vector<af::Expression> &repeats) {
+  af::ascir_op::Data data(data_name, graph);
+  data.attr.sched.axis = axes;
+  data.y.dtype = ge::DT_FLOAT16;
+  *data.y.axis = axes;
+  data.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  *data.y.strides = strides;
+  *data.y.repeats = repeats;
+  data.ir_attr.SetIndex(index);
+
+  af::ascir_op::Load load(load_name);
+  load.attr.sched.axis = axes;
+  load.x = data.y;
+  *load.y.axis = axes;
+  load.y.dtype = ge::DT_FLOAT16;
+  *load.y.strides = strides;
+  *load.y.repeats = repeats;
+  if (bind_x1) {
+    matmul.x1 = load.y;
+  } else {
+    matmul.x2 = load.y;
+  }
+}
+
+// 组装 BatchMatMul 节点及其两路输入，输出布局由后续 elementwise 节点复用
+static void CreateBatchMatmulFusedPrefix(af::AscGraph &graph, af::ascir_op::BatchMatMul &matmul) {
+  auto batch = graph.CreateSizeVar(2);
+  auto m = graph.CreateSizeVar(32);
+  auto n = graph.CreateSizeVar(32);
+  auto k = graph.CreateSizeVar(32);
+  auto z_batch = graph.CreateAxis("z_batch", batch);
+  auto z_m = graph.CreateAxis("z_m", m);
+  auto z_n = graph.CreateAxis("z_n", n);
+  auto z_k = graph.CreateAxis("z_k", k);
+
+  CreateBatchMatmulOperand(graph, matmul, true, "data0", "load0", 0, {z_batch.id, z_m.id, z_k.id},
+                           {m * k, k, af::ops::One}, {batch, m, k});
+  CreateBatchMatmulOperand(graph, matmul, false, "data1", "load1", 1, {z_batch.id, z_k.id, z_n.id},
+                           {k * n, n, af::ops::One}, {batch, k, n});
+  matmul.attr.sched.axis = {z_batch.id, z_m.id, z_n.id};
+  matmul.y.dtype = ge::DT_FLOAT;
+  *matmul.y.axis = {z_batch.id, z_m.id, z_n.id};
+  *matmul.y.repeats = {batch, m, n};
+  *matmul.y.strides = {m * n, n, af::ops::One};
+  matmul.attr.api.compute_type = af::ComputeType::kComputeCube;
+  matmul.ir_attr.SetAdj_x1(0);
+  matmul.ir_attr.SetAdj_x2(0);
+  matmul.ir_attr.SetHas_relu(0);
+  matmul.ir_attr.SetEnable_hf32(0);
+  matmul.ir_attr.SetOffset_x(0);
+}
+
+// BatchMatMul + elementwise 完整融合图：供 Optimizer 自动做 CV 调度（切图并插入 Workspace）
+static void CreateBatchMatmulElemwiseFusedGraph(af::AscGraph &graph) {
+  af::ascir_op::BatchMatMul batch_matmul("batch_matmul");
+  CreateBatchMatmulFusedPrefix(graph, batch_matmul);
+
+  af::ascir_op::Relu relu("relu");
+  relu.attr.sched.axis = batch_matmul.attr.sched.axis;
+  relu.x = batch_matmul.y;
+  *relu.y.axis = *batch_matmul.y.axis;
+  relu.y.dtype = ge::DT_FLOAT;
+  *relu.y.repeats = *batch_matmul.y.repeats;
+  *relu.y.strides = *batch_matmul.y.strides;
+  relu.attr.api.compute_type = af::ComputeType::kComputeElewise;
+
+  af::ascir_op::Store store_op("store");
+  store_op.attr.sched.axis = batch_matmul.attr.sched.axis;
+  store_op.x = relu.y;
+  *store_op.y.axis = *batch_matmul.y.axis;
+  store_op.y.dtype = ge::DT_FLOAT;
+  *store_op.y.strides = *batch_matmul.y.strides;
+  *store_op.y.repeats = *batch_matmul.y.repeats;
+
+  af::ascir_op::Output output_op("output");
+  output_op.x = store_op.y;
+  output_op.y.dtype = ge::DT_FLOAT;
+  output_op.ir_attr.SetIndex(0);
+  optimize::AscGraphInfoComplete::CompleteApiInfo(graph);
+}
+
 static void VerifyDynamicShapeTiling(const std::map<std::string, std::string> &res) {
   auto pos = res.at("tiling_def_and_tiling_const").find("extern \"C\" int64_t FindBestTilingKey");
   ASSERT_NE(pos, std::string::npos);
@@ -5422,6 +5508,28 @@ TEST_F(TestCodegenTiling, CodegenGenerateForInductorCvFusionShouldKeepCubeWrappe
   const std::string wrapper_cpp = result.tiling.substr(wrapper_cpp_pos, wrapper_cpp_end_pos - wrapper_cpp_pos);
   EXPECT_NE(wrapper_cpp.find("#include \"cube_kernel_tiling_wrapper.h\""), std::string::npos);
   EXPECT_NE(wrapper_cpp.find("#include \"autofuse_tiling_func_log.h\""), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, CodegenGenerateForInductorBatchMatmulShouldEmitBatchDispatch) {
+  af::AscGraph graph("batch_matmul_inductor_fuse");
+  CreateBatchMatmulElemwiseFusedGraph(graph);
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused_schedule_result;
+  ASSERT_EQ(optimizer.Optimize(graph, fused_schedule_result), af::SUCCESS);
+  ASSERT_TRUE(ascgen_utils::IsCubeFusedScheduled(fused_schedule_result));
+
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  EXPECT_NE(result.kernel.find("int8_t BATCH_API_LEVEL = (tiling_key >> 0) & 0xF;"), std::string::npos);
+  EXPECT_NE(result.kernel.find("int8_t BATCH_ITER_MODEL = (tiling_key >> 8) & 0xF;"), std::string::npos);
+  EXPECT_NE(result.kernel.find("int8_t BMODEL = (tiling_key >> 12) & 0xF;"), std::string::npos);
+  EXPECT_NE(result.kernel.find("int8_t BATCH_FULL_LOAD = (tiling_key >> 16) & 0xF;"), std::string::npos);
+  EXPECT_NE(result.kernel.find("int8_t BATCH_L0C2OUT_MODEL = (tiling_key >> 20) & 0xF;"), std::string::npos);
+  EXPECT_NE(result.kernel.find("_DISPATCH_BATCH_MATMUL"), std::string::npos);
+  EXPECT_NE(result.kernel.find("BatchMatMulV3TilingData"), std::string::npos);
+  EXPECT_EQ(result.kernel.find("int8_t API_LEVEL = (tiling_key >> 0) & 0xF;"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, CodegenGenerateForInductorCvFusionShouldFallbackToSafetyWhenUbCasesFail) {

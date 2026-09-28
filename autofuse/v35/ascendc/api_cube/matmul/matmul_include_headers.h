@@ -26,5 +26,7 @@
 #include "arch35/mat_mul_streamk_basic_cmct.h"
 #include "arch35/mat_mul_fixpipe_opti_basic_cmct.h"
 #include "arch35/mat_mul_input_k_eq_zero_clear_output.h"
+#include "arch35/mat_mul_to_mul_cmct.h"
+#include "arch35/mat_mul_to_multi_mul_cmct.h"
 
 #endif  // MATMUL_INCLUDE_HEADERS_H

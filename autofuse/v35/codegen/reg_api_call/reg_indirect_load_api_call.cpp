@@ -145,46 +145,53 @@ std::string JoinSizeExprs(const std::vector<ascir::SizeExpr> &exprs, const TPipe
   return ss.str();
 }
 
-// 判断 load 的物理视图是否与输出逻辑视图覆盖同一 dense 连续区域（语义等价）：
-// 1) load 视图各有效轴（size!=1 且 stride!=0）的 stride 满足后缀乘积连续性；
-// 2) 所有有效轴 sizes 的乘积与输出视图 sizes 乘积符号相等。
-// 满足时 load 的线性偏移与 output_index 相同，可直接使用 output_index，无需坐标
-// 重建。调度会把普通节点视图 merge/split 到模板轴空间（如 outer 被拆为
-// [s3*s4*s5/Tb, Tb]），符号级全等比较会漏判这类等价视图，导致在 SIMT 静态成员
-// 函数（无 tiling data 参数）内生成非法 t-> 求解变量引用。
-bool IsDenseEquivalentView(const ascgen_utils::indirect_load::LogicalTensorView &load_view,
-                           const ascgen_utils::indirect_load::LogicalTensorView &output_view) {
-  if (load_view.sizes.size() != load_view.strides.size() || output_view.sizes.size() != output_view.strides.size()) {
-    return false;
+// [strided 视图扁平化] 调度器把节点视图 merge/split 到模板轴空间（如 a0 拆为
+// [128/Tb, Tb, 1]）后，strided index load 的物理视图与逻辑输出 rank 不再对齐，
+// 坐标折叠循环无法直接消费。去掉退化轴（size==1；stride==0 且 size>1 的广播轴
+// 承载重复语义、不可去）后，把满足 strides[i] == strides[i+1] * sizes[i+1] 的
+// 相邻轴合并（merged size = sizes[i] * sizes[i+1]，merged stride = strides[i+1]），
+// 得到遍历顺序不变的语义等价低 rank 视图。符号乘积化简（如 (128/Tb)*Tb == 128）
+// 与 IsDenseEquivalentView 的总量比较同源，已被生产 dense 等价路径验证。
+void FlattenSimtStridedView(ascgen_utils::indirect_load::LogicalTensorView &view) {
+  if (view.sizes.size() != view.strides.size()) {
+    return;
   }
-  af::Expression load_total = af::sym::kSymbolOne;
-  af::Expression expected_stride = af::sym::kSymbolOne;
-  bool has_dense_tail = false;
-  for (size_t rev = 0UL; rev < load_view.sizes.size(); ++rev) {
-    const size_t dim = load_view.sizes.size() - 1UL - rev;
-    const bool unit_size = af::SymbolicUtils::StaticCheckEq(load_view.sizes[dim], af::ops::One) == af::TriBool::kTrue;
-    const bool zero_stride =
-        af::SymbolicUtils::StaticCheckEq(load_view.strides[dim], af::sym::kSymbolZero) == af::TriBool::kTrue;
-    if (unit_size || zero_stride) {
-      continue;  // 退化轴不参与连续性与计数
+  const bool has_axis_ids = view.axis_ids.size() == view.sizes.size();
+  std::vector<af::AxisId> axis_ids;
+  std::vector<af::Expression> sizes;
+  std::vector<af::Expression> strides;
+  for (size_t dim = 0UL; dim < view.sizes.size(); ++dim) {
+    if (af::SymbolicUtils::StaticCheckEq(view.sizes[dim], af::ops::One) == af::TriBool::kTrue) {
+      continue;
     }
-    if (!has_dense_tail) {
-      // 最右侧有效轴必须 stride==1
-      if (af::SymbolicUtils::StaticCheckEq(load_view.strides[dim], af::ops::One) != af::TriBool::kTrue) {
-        return false;
+    if (has_axis_ids) {
+      axis_ids.emplace_back(view.axis_ids[dim]);
+    }
+    sizes.emplace_back(view.sizes[dim]);
+    strides.emplace_back(view.strides[dim]);
+  }
+  bool merged = true;
+  while (merged && sizes.size() > 1UL) {
+    merged = false;
+    for (size_t dim = 0UL; dim + 1UL < sizes.size(); ++dim) {
+      if (af::SymbolicUtils::StaticCheckEq(strides[dim], af::sym::Mul(strides[dim + 1UL], sizes[dim + 1UL])) !=
+          af::TriBool::kTrue) {
+        continue;
       }
-      has_dense_tail = true;
-    } else if (af::SymbolicUtils::StaticCheckEq(load_view.strides[dim], expected_stride) != af::TriBool::kTrue) {
-      return false;
+      sizes[dim] = af::sym::Mul(sizes[dim], sizes[dim + 1UL]);
+      strides[dim] = strides[dim + 1UL];
+      if (has_axis_ids) {
+        axis_ids.erase(axis_ids.begin() + static_cast<int64_t>(dim) + 1);
+      }
+      sizes.erase(sizes.begin() + static_cast<int64_t>(dim) + 1);
+      strides.erase(strides.begin() + static_cast<int64_t>(dim) + 1);
+      merged = true;
+      break;
     }
-    expected_stride = af::sym::Mul(load_view.sizes[dim], expected_stride);
-    load_total = af::sym::Mul(load_view.sizes[dim], load_total);
   }
-  af::Expression output_total = af::sym::kSymbolOne;
-  for (const auto &size : output_view.sizes) {
-    output_total = af::sym::Mul(size, output_total);
-  }
-  return af::SymbolicUtils::StaticCheckEq(load_total, output_total) == af::TriBool::kTrue;
+  view.axis_ids = std::move(axis_ids);
+  view.sizes = std::move(sizes);
+  view.strides = std::move(strides);
 }
 
 af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
@@ -232,12 +239,12 @@ af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_l
       }
       continue;
     }
-    const auto &view = load->second.physical_view;
+    ascgen_utils::indirect_load::LogicalTensorView view = load->second.physical_view;
     // 调度会把普通节点的 tensor view merge/split 到模板轴空间（如 a0 拆为
     // [64/a0Tb, a0Tb]），视图 rank 可与输出逻辑视图不同但语义 dense 同构：等价时
     // 直接使用 output_index，避免在 SIMT 静态成员函数（无 tiling data 参数）内生成
     // 引用 t-> 求解变量的坐标表达式。dense 判定不要求 rank 相等，置于 rank 断言之前。
-    if (IsDenseEquivalentView(view, logical_view.output)) {
+    if (ascgen_utils::indirect_load::IsDenseEquivalentView(view, logical_view.output)) {
       expressions[node->GetName()] = append_load_offset(output_index_expr);
       continue;
     }
@@ -301,8 +308,22 @@ af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_l
           }
         }
       }
-      GE_ASSERT_TRUE(false, "SIMT index Load[%s] physical view rank mismatch.", node->GetNamePtr());
-      continue;
+      // [strided 视图扁平化] 调度器 split 改写产生的 rank 差 strided 视图（如
+      // [128]/[39]+offset 列切片被改写为 [128/Tb, Tb, 1]/[39*Tb, 39, 39]）此前
+      // 均走 dense 线性路径，折叠路径从未覆盖：先符号化扁平化（去退化轴 + 相邻
+      // 轴合并）再与输出 rank 对齐。折叠循环按输出轴逐维取模，要求扁平化后各维
+      // 尺寸与输出逻辑视图一致，否则语义未对齐（如过度合并成 [4,4]/[8,1] 对
+      // [2,8] 输出），保留原断言兜底。
+      FlattenSimtStridedView(view);
+      bool flattened_aligns = view.sizes.size() == rank && view.strides.size() == rank;
+      for (size_t dim = 0UL; flattened_aligns && dim < rank; ++dim) {
+        flattened_aligns =
+            af::SymbolicUtils::StaticCheckEq(view.sizes[dim], logical_view.output.sizes[dim]) == af::TriBool::kTrue;
+      }
+      if (!flattened_aligns) {
+        GE_ASSERT_TRUE(false, "SIMT index Load[%s] physical view rank mismatch.", node->GetNamePtr());
+        continue;
+      }
     }
 
     std::string offset;
@@ -776,6 +797,23 @@ af::Status GenerateSimtOutputsEvaluator(const std::string &input_dtype, const st
                                                            "output_index", offsets, ss));
   GE_ASSERT_SUCCESS(
       EmitSimtEvaluatorNodes(nodes, load_metadata, &offsets, logical_view, "output_index", "output_index", values, ss));
+  // index 生产链尾部的外部 store 收为空节点输出链：链值由 Index() 求值器结果注入
+  // （与 gather 值的 "value" 种子同构）。已由值侧求值产出（含输出侧 GM load 产出）
+  // 的张量不注入，避免合流链双写。
+  for (size_t i = 0UL; i < chains.size(); ++i) {
+    const ascir::TensorId chain_result_tensor_id = chains[i].result_tensor_id;
+    if (chain_result_tensor_id == value_tensor_id || values.count(chain_result_tensor_id) != 0UL) {
+      continue;
+    }
+    const bool produced_by_output_load = std::any_of(nodes.begin(), nodes.end(), [&](const af::AscNodePtr &node) {
+      return load_metadata.count(node->GetName()) != 0UL && !node->outputs().empty() &&
+             node->outputs()[0]->attr.mem.tensor_id == chain_result_tensor_id;
+    });
+    if (produced_by_output_load) {
+      continue;
+    }
+    values[chain_result_tensor_id] = "Index(output_index, index_offset, context)";
+  }
   ss << "    OutputPack outputs;" << std::endl;
   for (size_t i = 0UL; i < chains.size(); ++i) {
     const auto found = values.find(chains[i].result_tensor_id);

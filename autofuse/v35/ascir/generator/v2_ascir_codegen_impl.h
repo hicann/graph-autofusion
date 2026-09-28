@@ -21,6 +21,7 @@
 #include "ascir_codegen_v2.h"
 #include "schedule_result.h"
 #include "generator/ascir_common.h"
+#include "optimize/pre_process/pre_process_config.h"
 
 namespace af {
 namespace ascir {
@@ -2326,11 +2327,17 @@ class ReluAscIrCodegenImplV2 : public AscIrCodegenV2 {
 
 class ReciprocalAscIrCodegenImplV2 : public AscIrCodegenV2 {
  public:
+  [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    if (IsReciprocalInBlacklist()) {
+      return std::vector<std::unique_ptr<TmpBufDesc>>();
+    }
+    return CalcVoidTmpSizeV2(node);
+  }
   [[nodiscard]] std::string GetApiCallName() const override {
-    return "UnaryApiCall";
+    return IsReciprocalInBlacklist() ? "UnaryApiCall" : "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Reciprocal";
+    return IsReciprocalInBlacklist() ? "Reciprocal" : "ReciprocalExtend";
   }
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
     return IsSimtFloatDtype(GetSimtInputDtype(node)) && GetSimtInputDtype(node) == GetSimtOutputDtype(node);
@@ -2350,9 +2357,21 @@ class ReciprocalAscIrCodegenImplV2 : public AscIrCodegenV2 {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {{DT_BF16, DT_FLOAT}};
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    if (IsReciprocalInBlacklist()) {
+      return {};
+    }
+    return {"reciprocal_reg_base.h"};
+  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
+    if (IsReciprocalInBlacklist()) {
+      return {
+          "basic_api/kernel_operator_vec_unary_intf.h",
+      };
+    }
     return {
         "basic_api/kernel_operator_vec_unary_intf.h",
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -2361,6 +2380,13 @@ class ReciprocalAscIrCodegenImplV2 : public AscIrCodegenV2 {
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
     return true;
+  }
+
+ private:
+  // Reciprocal 命中精度提升黑名单（配置 Reciprocal 或 all）时，codegen 回落内置 Reciprocal（Vector
+  // adv_api）快速路径，跳过 regbase Extend 高精度实现；类型字符串与 REG_ASC_IR(Reciprocal) 注册名一致
+  static bool IsReciprocalInBlacklist() {
+    return af::pre_process::PreProcessConfig::Instance().IsInImprovePrecisionBlacklist("Reciprocal");
   }
 };
 

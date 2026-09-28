@@ -251,7 +251,7 @@ void BuildSimdGraph(ILTestGraph &g, af::DataType input_dtype = ge::DT_FLOAT16) {
 // Same output axes z2, z3 as SIMD but annotated as SIMT.
 // IndirectLoad output chain ends at Store (for FindSimtOutputStore).
 
-void BuildSimtGraph(ILTestGraph &g, bool add_second_output = false) {
+void BuildSimtGraph(ILTestGraph &g, bool add_second_output = false, bool add_index_store = false) {
   const af::Expression One = af::sym::kSymbolOne;
 
   Data x_data("x", g.graph);
@@ -330,6 +330,26 @@ void BuildSimtGraph(ILTestGraph &g, bool add_second_output = false) {
     second_y_out.y.dtype = ge::DT_FLOAT16;
   }
 
+  // [index 链外部 store] index 生产链尾部（idx_load 输出）除喂 IndirectLoad 外的
+  // 区域外直连 store：调度侧守卫会将其纳入 SIMT 融合区域，lowering 收为空节点
+  // 输出链，codegen 用 Index() 求值器结果注入链值。
+  Store index_store("index_store");
+  Output index_y_out("index_y");
+  if (add_index_store) {
+    g.graph.AddNode(index_store);
+    index_store.x = idx_load.y;
+    index_store.y.dtype = ge::DT_INT32;
+    index_store.attr.sched.axis = {g.z2.id, g.z3.id};
+    *index_store.y.axis = {g.z2.id, g.z3.id};
+    *index_store.y.repeats = {g.s2, g.s3};
+    *index_store.y.strides = {g.s3, One};
+
+    g.graph.AddNode(index_y_out);
+    index_y_out.ir_attr.SetIndex(2);
+    index_y_out.x = index_store.y;
+    index_y_out.y.dtype = ge::DT_INT32;
+  }
+
   // ----- API attrs -----
   for (const char *name : {"x", "idx"}) {
     auto n = g.graph.FindNode(name);
@@ -358,6 +378,13 @@ void BuildSimtGraph(ILTestGraph &g, bool add_second_output = false) {
     second_store_node->attr.api.compute_type = af::ComputeType::kComputeStore;
     second_store_node->attr.api.type = af::ApiType::kAPITypeCompute;
     second_store_node->attr.api.unit = af::ComputeUnit::kUnitMTE2;
+  }
+
+  if (add_index_store) {
+    auto index_store_node = g.graph.FindNode("index_store");
+    index_store_node->attr.api.compute_type = af::ComputeType::kComputeStore;
+    index_store_node->attr.api.type = af::ApiType::kAPITypeCompute;
+    index_store_node->attr.api.unit = af::ComputeUnit::kUnitMTE2;
   }
 
   auto y_node = g.graph.FindNode("y");
@@ -395,6 +422,13 @@ void BuildSimtGraph(ILTestGraph &g, bool add_second_output = false) {
     second_store_node->attr.sched.loop_axis = z2z3Tb->id;
     second_store_node->outputs[0].attr.vectorized_axis = {z2z3t->id};
     second_store_node->outputs[0].attr.vectorized_strides = {One};
+  }
+
+  if (add_index_store) {
+    auto index_store_node = g.graph.FindNode("index_store");
+    index_store_node->attr.sched.loop_axis = z2z3Tb->id;
+    index_store_node->outputs[0].attr.vectorized_axis = {z2z3t->id};
+    index_store_node->outputs[0].attr.vectorized_strides = {One};
   }
 
   // ----- Memory allocation -----
@@ -455,6 +489,15 @@ void BuildSimtGraph(ILTestGraph &g, bool add_second_output = false) {
     second_store_node->outputs[0].attr.mem.hardware = af::MemHardware::kMemHardwareGM;
     second_store_node->outputs[0].attr.mem.position = af::Position::kPositionGM;
     second_store_node->outputs[0].attr.que.id = af::kIdNone;
+  }
+
+  if (add_index_store) {
+    auto index_store_node = g.graph.FindNode("index_store");
+    index_store_node->outputs[0].attr.mem.tensor_id = 11;
+    index_store_node->outputs[0].attr.mem.alloc_type = af::AllocType::kAllocTypeGlobal;
+    index_store_node->outputs[0].attr.mem.hardware = af::MemHardware::kMemHardwareGM;
+    index_store_node->outputs[0].attr.mem.position = af::Position::kPositionGM;
+    index_store_node->outputs[0].attr.que.id = af::kIdNone;
   }
 }
 
@@ -825,6 +868,11 @@ void AnnotateSimtTemplate(af::AscGraph &graph) {
   if (second_store != nullptr) {
     ASSERT_EQ(SetTemplateRole(second_store, TemplateRole::kSimtDirectGmBoundary), af::SUCCESS);
   }
+  const auto index_store = graph.FindNode("index_store");
+  if (index_store != nullptr) {
+    // 与调度侧 FoldSimtIndexChainExternalStores 的区域标注保持一致。
+    ASSERT_EQ(SetTemplateRole(index_store, TemplateRole::kSimtDirectGmBoundary), af::SUCCESS);
+  }
   const auto direct_store = graph.FindNode("direct_store");
   if (direct_store != nullptr) {
     ASSERT_EQ(SetTemplateRole(direct_store, TemplateRole::kSimtDirectGmBoundary), af::SUCCESS);
@@ -1069,9 +1117,10 @@ void GenerateSimtFuncDefinitionFromGraph(ILTestGraph &g, std::string &definition
   definition = ss.str();
 }
 
-void GenerateSimtFuncDefinition(ILTestGraph &g, std::string &definition, bool add_second_output = false) {
+void GenerateSimtFuncDefinition(ILTestGraph &g, std::string &definition, bool add_second_output = false,
+                                bool add_index_store = false) {
   SimtCodegenContext context;
-  BuildSimtGraph(g, add_second_output);
+  BuildSimtGraph(g, add_second_output, add_index_store);
   AnnotateSimtTemplate(g.graph);
   GenerateSimtFuncDefinitionFromGraph(g, definition);
 }
@@ -1127,6 +1176,103 @@ TEST(IndirectLoadApiCallTest, GenerateFuncDefinitionUsesUint32OffsetsForStaticSh
   GenerateSimtFuncDefinition(g, def);
 
   EXPECT_NE(def.find("uint32_t output_index"), std::string::npos);
+}
+
+// [Bug A] index 生产链尾部的区域外直连 store 收为空节点输出链，链值由 Index()
+// 求值器结果注入；gather 值链仍走 "value" 种子。
+TEST(IndirectLoadApiCallTest, GenerateSimtFuncDefinitionEmitsIndexChainStore) {
+  ILTestGraph g("simt_index_store");
+  std::string def;
+  GenerateSimtFuncDefinition(g, def, false, true);
+
+  EXPECT_NE(def.find("struct OutputPack"), std::string::npos);
+  EXPECT_NE(def.find("half output0"), std::string::npos);
+  EXPECT_NE(def.find("int32_t output1"), std::string::npos);
+  EXPECT_NE(def.find("struct OutputTargets"), std::string::npos);
+  EXPECT_NE(def.find("__gm__ half *output0"), std::string::npos);
+  EXPECT_NE(def.find("__gm__ int32_t *output1"), std::string::npos);
+  EXPECT_NE(def.find("outputs.output0 = value"), std::string::npos);
+  EXPECT_NE(def.find("outputs.output1 = Index(output_index, index_offset, context);"), std::string::npos);
+  EXPECT_NE(def.find("targets.output0[output_index] = outputs.output0"), std::string::npos);
+  EXPECT_NE(def.find("targets.output1[output_index] = outputs.output1"), std::string::npos);
+}
+
+// [Bug B] index load 物理视图与输出逻辑视图 dense 等价时保持线性偏移快路径。
+TEST(IndirectLoadApiCallTest, GenerateSimtIndexLoadKeepsLinearOffsetForDenseEquivalentView) {
+  ILTestGraph g("simt_dense_index_offset", 2, 8, 2, 8);
+  std::string def;
+  GenerateSimtFuncDefinition(g, def);
+
+  EXPECT_NE(def.find("context.gm_5[index_offset]"), std::string::npos);
+  EXPECT_EQ(def.find("index_coord_0"), std::string::npos);
+}
+
+// [Bug B] index load 物理视图非 dense 等价（行 stride 放大 2 倍的列切片形态）时，
+// 线性偏移会丢行 stride，必须走坐标折叠重建。
+TEST(IndirectLoadApiCallTest, GenerateSimtIndexLoadFoldsNonDenseEquivalentView) {
+  SimtCodegenContext context;
+  ILTestGraph g("simt_strided_index_offset", 2, 8, 2, 8);
+  BuildSimtGraph(g);
+  const auto idx_load = g.graph.FindNode("idx_load");
+  ASSERT_NE(idx_load, nullptr);
+  idx_load->outputs[0].attr.repeats = {g.s2, g.s3};
+  idx_load->outputs[0].attr.strides = {g.s3 * af::Symbol(2), af::sym::kSymbolOne};
+  AnnotateSimtTemplate(g.graph);
+  std::string def;
+  GenerateSimtFuncDefinitionFromGraph(g, def);
+
+  EXPECT_NE(def.find("index_coord_0"), std::string::npos);
+  EXPECT_NE(def.find("context.gm_5[index_coord_0"), std::string::npos);
+  EXPECT_EQ(def.find("context.gm_5[index_offset]"), std::string::npos);
+}
+
+// [Bug B 门控] 逻辑 index 视图与 load 物理步长一致（kStrided policy 已把 index 物理
+// 步长嵌入 index_offset）时，即使视图对输出非 dense 等价，也必须保持线性偏移快路径
+// （再做坐标折叠会双重乘 stride）。
+TEST(IndirectLoadApiCallTest, GenerateSimtIndexLoadKeepsLinearOffsetWhenPolicyEmbedsStrides) {
+  SimtCodegenContext context;
+  ILTestGraph g("simt_strided_index_policy_match", 2, 8, 2, 8);
+  BuildSimtGraph(g);
+  const af::Expression row_stride = g.s3 * af::Symbol(2);
+  const auto idx_load = g.graph.FindNode("idx_load");
+  ASSERT_NE(idx_load, nullptr);
+  idx_load->outputs[0].attr.repeats = {g.s2, g.s3};
+  idx_load->outputs[0].attr.strides = {row_stride, af::sym::kSymbolOne};
+  AnnotateSimtTemplate(g.graph);
+  const auto il = g.graph.FindNode("indirect_load");
+  ASSERT_NE(il, nullptr);
+  TemplateLogicalView view;
+  ASSERT_EQ(GetTemplateLogicalView(il, view), af::SUCCESS);
+  view.index.strides = {row_stride, af::sym::kSymbolOne};
+  ASSERT_EQ(ClassifyIndirectLoadLayout(view.index, view.index), af::SUCCESS);
+  ASSERT_EQ(SetTemplateLogicalView(il, view), af::SUCCESS);
+  std::string def;
+  GenerateSimtFuncDefinitionFromGraph(g, def);
+
+  EXPECT_NE(def.find("context.gm_5[index_offset]"), std::string::npos);
+  EXPECT_EQ(def.find("index_coord_0"), std::string::npos);
+}
+
+// [Bug B 端到端] 调度器把 strided index load 的视图 split 到模板轴空间后（rank 高于
+// 逻辑输出、含退化轴与切分残轴，如 [128]/[39] 被改写为 [128/Tb, Tb, 1]/[39*Tb, 39, 39]），
+// 坐标折叠路径必须先做符号化扁平化（去退化轴 + 相邻轴合并）再重建坐标。
+TEST(IndirectLoadApiCallTest, GenerateSimtIndexLoadFoldsSplitStridedView) {
+  SimtCodegenContext context;
+  ILTestGraph g("simt_split_strided_index_offset", 2, 8, 2, 8);
+  BuildSimtGraph(g);
+  const auto idx_load = g.graph.FindNode("idx_load");
+  ASSERT_NE(idx_load, nullptr);
+  // 模拟调度器 split 改写后的 rank-4 strided 视图：有效轴 [s2, s3]（行 stride 16），
+  // 尾部带 size==1 的切分残轴。扁平化应还原为 {s2, s3}/{16, 1} 后走坐标折叠。
+  idx_load->outputs[0].attr.repeats = {g.s2, af::Symbol(4), af::Symbol(2), af::ops::One};
+  idx_load->outputs[0].attr.strides = {g.s3 * af::Symbol(2), af::Symbol(2), af::sym::kSymbolOne, af::sym::kSymbolOne};
+  AnnotateSimtTemplate(g.graph);
+  std::string def;
+  GenerateSimtFuncDefinitionFromGraph(g, def);
+
+  EXPECT_NE(def.find("index_coord_0"), std::string::npos);
+  EXPECT_NE(def.find("context.gm_5[index_coord_0"), std::string::npos);
+  EXPECT_EQ(def.find("context.gm_5[index_offset]"), std::string::npos);
 }
 
 void InsertSimtIdentityBroadcast(ILTestGraph &g, const char *name, const char *producer_name, const char *consumer_name,
