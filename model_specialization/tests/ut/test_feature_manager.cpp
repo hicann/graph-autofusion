@@ -148,7 +148,7 @@ TEST_F(FeatureManagerTest, SkFeaturesGenerateKernelSpecificOptions) {
   EXPECT_EQ(manager.Get<Feature::SK_COMPILE_OPTIONS>("addcustom"),
             (Arguments{"--enable-super-kernel", "-D__ASCENDC_SUPER_KERNEL_DEBUG__",
                        "-D__ASCENDC_SUPER_KERNEL_ENABLE_GM_GET_SET_VALUE_DCCI__",
-                       "-D__ASCENDC_SUPER_KERNEL_DISABLE_DCCI__=1"}));
+                       "-D__ASCENDC_SUPER_KERNEL_DISABLE_DCCI__"}));
   EXPECT_EQ(manager.Get<Feature::SK_COMPILE_OPTIONS>("matmul_123"),
             (Arguments{"--enable-super-kernel", "-D__ASCENDC_SUPER_KERNEL_DEBUG__",
                        "-D__ASCENDC_SUPER_KERNEL_ENABLE_GM_GET_SET_VALUE_DCCI__"}));

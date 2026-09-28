@@ -92,7 +92,7 @@ bool ConvertDcciDisableOnKernel(const aclmdlRISpecSKFeature &feature, const std:
   if (feature.kernelNameCount != 0) {
     output.push_back({".*", {"-D__ASCENDC_SUPER_KERNEL_ENABLE_GM_GET_SET_VALUE_DCCI__"}});
   }
-  return AppendKernelFeatureRules(feature, field, {"-D__ASCENDC_SUPER_KERNEL_DISABLE_DCCI__=1"}, output);
+  return AppendKernelFeatureRules(feature, field, {"-D__ASCENDC_SUPER_KERNEL_DISABLE_DCCI__"}, output);
 }
 
 struct SkConverter {

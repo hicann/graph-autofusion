@@ -85,14 +85,14 @@ TEST_F(FeatureManagerSt, PublicApiInitializesAndQueriesMultipleKernels) {
   EXPECT_EQ(manager.Get<Feature::SK_COMPILE_OPTIONS>("addcustom_tiling"),
             (Arguments{"--enable-super-kernel", "-D__ASCENDC_SUPER_KERNEL_DEBUG__",
                        "-D__ASCENDC_SUPER_KERNEL_ENABLE_GM_GET_SET_VALUE_DCCI__",
-                       "-D__ASCENDC_SUPER_KERNEL_DISABLE_DCCI__=1"}));
+                       "-D__ASCENDC_SUPER_KERNEL_DISABLE_DCCI__"}));
   EXPECT_EQ(manager.Get<Feature::SK_COMPILE_OPTIONS>("matmul_aic_only"),
             (Arguments{"--enable-super-kernel", "-D__ASCENDC_SUPER_KERNEL_DEBUG__",
                        "-D__ASCENDC_SUPER_KERNEL_ENABLE_GM_GET_SET_VALUE_DCCI__"}));
   EXPECT_EQ(manager.Get<Feature::SK_COMPILE_OPTIONS>("matmul_leakyrelu_123"),
             (Arguments{"--enable-super-kernel", "-D__ASCENDC_SUPER_KERNEL_DEBUG__",
                        "-D__ASCENDC_SUPER_KERNEL_ENABLE_GM_GET_SET_VALUE_DCCI__",
-                       "-D__ASCENDC_SUPER_KERNEL_DISABLE_DCCI__=1"}));
+                       "-D__ASCENDC_SUPER_KERNEL_DISABLE_DCCI__"}));
 }
 
 TEST_F(FeatureManagerSt, EnableSkZeroSuppressesSkArguments) {
