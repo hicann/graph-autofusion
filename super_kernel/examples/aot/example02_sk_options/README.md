@@ -64,7 +64,7 @@ flowchart TB
 
 样例通过 `torch.compile` 的 `options` 展示 SuperKernel 的静态编译、融合优化、执行调优和问题诊断能力。
 
-| 类别 | 配置入口 | 展示的能力 |
+| 类别 | 配置入口 | 作用 |
 | --- | --- | --- |
 | 基础选项 | `options` 顶层 | 静态编译和 SuperKernel 融合。 |
 | 优化选项 | `super_kernel_optimize_options` | 算子调度、缓存一致性、提前启动和融合策略。 |
@@ -72,35 +72,35 @@ flowchart TB
 
 ### 基础选项
 
-| 选项 | 样例值 |
-| --- | --- |
-| `static_kernel_compile` | `True` |
-| `super_kernel_optimize` | `True` |
+| 选项 | 样例值 | 作用 |
+| --- | --- | --- |
+| `static_kernel_compile` | `True` | 启用静态 kernel 编译并生成编译产物。 |
+| `super_kernel_optimize` | `True` | 启用 SuperKernel 融合优化。 |
 
 ### 优化选项
 
 以下配置用于展示 SuperKernel 面向复杂融合场景的执行优化能力：
 
-| 选项 | 样例值 |
-| --- | --- |
-| `auto_op_parallel` | `0` |
-| `dcci_before_kernel_start` | `[".*"]` |
-| `dcci_after_kernel_end` | `[".*"]` |
-| `dcci_disable_on_kernel` | `[".*"]` |
-| `early_start` | `1` |
-| `aggressive_opt_strategies.value_breaker_bypass` | `0b10` |
-| `aggressive_opt_strategies.task_breaker_bypass` | `0b00` |
+| 选项 | 样例值 | 作用 |
+| --- | --- | --- |
+| `auto_op_parallel` | `0` | 控制算子自动并行调度。 |
+| `dcci_before_kernel_start` | `[".*"]` | 为匹配的子 kernel 配置执行前的缓存一致性处理。 |
+| `dcci_after_kernel_end` | `[".*"]` | 为匹配的子 kernel 配置执行后的缓存一致性处理。 |
+| `dcci_disable_on_kernel` | `[".*"]` | 控制匹配的子 kernel 是否执行内部缓存一致性处理。 |
+| `early_start` | `1` | 控制相邻任务的提前启动优化。 |
+| `aggressive_opt_strategies.value_breaker_bypass` | `0b10` | 控制融合时是否绕过 value 相关边界。 |
+| `aggressive_opt_strategies.task_breaker_bypass` | `0b00` | 控制融合时是否绕过 task 相关边界。 |
 
 ### 调试选项
 
 以下配置用于展示 SuperKernel 的问题诊断能力。本样例中的调试选项均设为 `0`：
 
-| 选项 | 样例值 |
-| --- | --- |
-| `debug_sync_all` | `0` |
-| `debug_op_exec_trace` | `0` |
-| `debug_cross_core_sync_check` | `0` |
-| `debug_per_op_max_core_num` | `0` |
+| 选项 | 样例值 | 作用 |
+| --- | --- | --- |
+| `debug_sync_all` | `0` | 控制全核同步调试，用于定位执行时序问题。 |
+| `debug_op_exec_trace` | `0` | 控制算子执行跟踪，用于定位异常执行位置。 |
+| `debug_cross_core_sync_check` | `0` | 控制跨核同步检查。 |
+| `debug_per_op_max_core_num` | `0` | 控制单算子最大核数运行，用于单算子诊断。 |
 
 ## 执行命令
 

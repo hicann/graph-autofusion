@@ -77,36 +77,36 @@ optimization, execution tuning, and diagnostics.
 
 ### Basic Options
 
-| Option | Sample value |
-| --- | --- |
-| `static_kernel_compile` | `True` |
-| `super_kernel_optimize` | `True` |
+| Option | Sample value | Purpose |
+| --- | --- | --- |
+| `static_kernel_compile` | `True` | Enables static kernel compilation and generates compilation artifacts. |
+| `super_kernel_optimize` | `True` | Enables SuperKernel fusion optimization. |
 
 ### Optimization Options
 
 The following configuration demonstrates SuperKernel execution optimization for complex fusion scenarios:
 
-| Option | Sample value |
-| --- | --- |
-| `auto_op_parallel` | `0` |
-| `dcci_before_kernel_start` | `[".*"]` |
-| `dcci_after_kernel_end` | `[".*"]` |
-| `dcci_disable_on_kernel` | `[".*"]` |
-| `early_start` | `1` |
-| `aggressive_opt_strategies.value_breaker_bypass` | `0b10` |
-| `aggressive_opt_strategies.task_breaker_bypass` | `0b00` |
+| Option | Sample value | Purpose |
+| --- | --- | --- |
+| `auto_op_parallel` | `0` | Controls automatic parallel scheduling of operators. |
+| `dcci_before_kernel_start` | `[".*"]` | Configures cache coherency handling before matched sub-kernels run. |
+| `dcci_after_kernel_end` | `[".*"]` | Configures cache coherency handling after matched sub-kernels run. |
+| `dcci_disable_on_kernel` | `[".*"]` | Controls internal cache coherency handling for matched sub-kernels. |
+| `early_start` | `1` | Controls early-start optimization between adjacent tasks. |
+| `aggressive_opt_strategies.value_breaker_bypass` | `0b10` | Controls whether value-related boundaries are bypassed during fusion. |
+| `aggressive_opt_strategies.task_breaker_bypass` | `0b00` | Controls whether task-related boundaries are bypassed during fusion. |
 
 ### Debug Options
 
 The following configuration demonstrates SuperKernel diagnostic capabilities. All debug options are set to `0` in
 this sample:
 
-| Option | Sample value |
-| --- | --- |
-| `debug_sync_all` | `0` |
-| `debug_op_exec_trace` | `0` |
-| `debug_cross_core_sync_check` | `0` |
-| `debug_per_op_max_core_num` | `0` |
+| Option | Sample value | Purpose |
+| --- | --- | --- |
+| `debug_sync_all` | `0` | Controls full-core synchronization diagnostics for execution-order issues. |
+| `debug_op_exec_trace` | `0` | Controls operator execution tracing to locate abnormal execution. |
+| `debug_cross_core_sync_check` | `0` | Controls cross-core synchronization checks. |
+| `debug_per_op_max_core_num` | `0` | Controls per-operator maximum-core execution for isolated diagnostics. |
 
 ## Execution Command
 
