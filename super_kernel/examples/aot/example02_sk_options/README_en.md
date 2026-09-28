@@ -49,73 +49,64 @@ pip install -r super_kernel/examples/requirements.txt
 
 ```mermaid
 flowchart TB
-    query[query] --> fia1[npu_fused_infer_attention_score]
-    kv[key / value / lengths] --> fia1
-    fia1 --> moe[npu_moe_gating_top_k_softmax_v2]
-    moe --> quant["dynamic_quant → to(float16)"]
-    quant --> attention["dav-2201: npu_incre_flash_attention<br/>dav-3510: npu_fused_infer_attention_score"]
-    kv --> attention
-    attention --> fia2[npu_fused_infer_attention_score]
-    kv --> fia2
-    fia2 --> gmm[npu_grouped_matmul]
-    weight[weight] --> gmm
-    fia2 --> add[add]
-    gmm --> add
-    attention --> attention_out[attention output]
-    add --> add_out[add output]
+    inputs["Inputs"] --> attention1["Attention"]
+    attention1 --> moe["MoE"]
+    moe --> attention2["Attention"]
+
+    attention2 --> attention_output["Attention output"]
+    attention2 --> attention3["Attention"]
+    attention3 --> grouped_matmul["Grouped Matmul"]
+    attention3 --> add["Add"]
+    grouped_matmul --> add
+    add --> add_output["Add output"]
 ```
 
-The network backbones in the two sample scripts share the same topology and differ only in the middle attention
-operator. The sample first runs an eager baseline and then runs the SuperKernel statically compiled version with the
-same inputs. The two outputs are
-checked with `rtol=1e-3` and `atol=1e-2`.
+This sample demonstrates SuperKernel fusion optimization, execution tuning, and diagnostics for complex Attention
+networks, with result consistency verified against the eager baseline.
 
 ## Option Reference
 
-The sample demonstrates three groups of switches through `torch.compile` `options`:
+The sample uses `torch.compile` `options` to demonstrate SuperKernel capabilities in static compilation, fusion
+optimization, execution tuning, and diagnostics.
 
-| Group | Configuration entry | Purpose |
+| Group | Configuration entry | Demonstrated capability |
 | --- | --- | --- |
-| Basic switches | Top-level `options` | Enable static kernel compilation and SuperKernel fusion optimization. |
-| Optimization switches | `super_kernel_optimize_options` | Control scheduling, cache coherency, early start, and fusion strategies. |
-| Debug switches | `super_kernel_debug_options` | Control synchronization, execution tracing, cross-core checks, and per-operator diagnostics. |
+| Basic options | Top-level `options` | Static compilation and SuperKernel fusion. |
+| Optimization options | `super_kernel_optimize_options` | Operator scheduling, cache coherency, early start, and fusion strategies. |
+| Debug options | `super_kernel_debug_options` | Synchronization, execution tracing, cross-core checks, and per-operator diagnostics. |
 
-### Basic Switches
+### Basic Options
 
-| Option | Sample value | Function and effect |
-| --- | --- | --- |
-| `static_kernel_compile` | `True` | Enables static kernel compilation and generates a `.run` package. |
-| `super_kernel_optimize` | `True` | Enables SuperKernel fusion optimization. |
+| Option | Sample value |
+| --- | --- |
+| `static_kernel_compile` | `True` |
+| `super_kernel_optimize` | `True` |
 
-### Optimization Switches
+### Optimization Options
 
-`super_kernel_optimize_options` configures fusion and execution strategies:
+The following configuration demonstrates SuperKernel execution optimization for complex fusion scenarios:
 
-| Option | Sample value | Function and effect |
-| --- | --- | --- |
-| `auto_op_parallel` | `0` | Controls automatic operator parallelism; the sample disables it and uses default priority scheduling. |
-| `dcci_before_kernel_start` | `[".*"]` | Adds DCCI before every matched sub-`kernel` to maintain cache coherency explicitly. |
-| `dcci_after_kernel_end` | `[".*"]` | Adds DCCI after every matched sub-`kernel`. |
-| `dcci_disable_on_kernel` | `[".*"]` | Disables internal DCCI for matched sub-`kernel` objects so the preceding options control its placement. |
-| `early_start` | `1` | Enables the early-start path so subsequent tasks can start early after synchronization constraints are met. |
-| `aggressive_opt_strategies.value_breaker_bypass` | `0b10` | Allows validated unpaired value/memory waits to remain eligible for fusion. |
-| `aggressive_opt_strategies.task_breaker_bypass` | `0b00` | Keeps default task boundaries by disabling task-breaker bypass. |
+| Option | Sample value |
+| --- | --- |
+| `auto_op_parallel` | `0` |
+| `dcci_before_kernel_start` | `[".*"]` |
+| `dcci_after_kernel_end` | `[".*"]` |
+| `dcci_disable_on_kernel` | `[".*"]` |
+| `early_start` | `1` |
+| `aggressive_opt_strategies.value_breaker_bypass` | `0b10` |
+| `aggressive_opt_strategies.task_breaker_bypass` | `0b00` |
 
-### Debug Switches
+### Debug Options
 
-`super_kernel_debug_options` controls diagnostic behavior. The sample keeps every option at `0`, with the related
-debug capability disabled. The table also describes the effect of setting each option to `1`:
+The following configuration demonstrates SuperKernel diagnostic capabilities. All debug options are set to `0` in
+this sample:
 
-| Option | Sample value | Sample behavior and enabled effect |
-| --- | --- | --- |
-| `debug_sync_all` | `0` | Disabled in this sample; when set to `1`, replaces synchronization tasks with full-core synchronization to diagnose execution ordering. |
-| `debug_op_exec_trace` | `0` | Disabled in this sample; when set to `1`, records SuperKernel and sub-operator start/end states to locate a hang. |
-| `debug_cross_core_sync_check` | `0` | Disabled in this sample; when set to `1`, checks cross-core synchronization for MIX sub-`kernel` objects and enables execution tracing. |
-| `debug_per_op_max_core_num` | `0` | Disabled in this sample; when set to `1`, splits each fusible operator into its own scope and builds a debug configuration with the maximum available cores. |
-
-These values demonstrate option configuration and are not general recommendations for every network. For complete
-constraints, see the
-[TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md).
+| Option | Sample value |
+| --- | --- |
+| `debug_sync_all` | `0` |
+| `debug_op_exec_trace` | `0` |
+| `debug_cross_core_sync_check` | `0` |
+| `debug_per_op_max_core_num` | `0` |
 
 ## Execution Command
 
@@ -143,20 +134,8 @@ The script selects `main-dav-2201.py` or `main-dav-3510.py` based on `--npu-arch
 
 ## Expected Result
 
-When eager validation passes and a `.run` package is generated, the command exits with status 0 and includes:
+When the SuperKernel static compilation result matches the eager baseline, the output includes the following key log:
 
 ```text
-eager add_out: shape=(3, 1, 1024), dtype=torch.float16, mean=<value>
-eager ifa_out: shape=(3, 1, 1024), dtype=torch.float16, mean=<value>
-compiled add_out: shape=(3, 1, 1024), dtype=torch.float16, mean=<value>
-compiled ifa_out: shape=(3, 1, 1024), dtype=torch.float16, mean=<value>
-Golden check passed
-Test completed!
 execute sample success
 ```
-
-To inspect the results:
-
-- The run log is written to both the terminal and `tmp/run.log`, including the shape, data type, and mean of both outputs.
-- Static kernel compilation artifacts are under `static_kernel_compile_outputs/`. `run.sh` checks that at least one
-  `.run` package exists. If none exists, it fails and reports the path of `*_compile_error.log` when available.

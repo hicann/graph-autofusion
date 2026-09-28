@@ -9,7 +9,7 @@
 
 - 优化选项覆盖算子并行、DCCI 缓存一致性、提前启动和激进融合策略。
 - 调试选项覆盖全核同步、算子执行跟踪、跨核同步检查和单算子最大核数运行。
-- 通过统一的 `torch.compile` 配置入口组合优化与调试开关，并以 eager 基线校验结果一致性。
+- 通过统一的 `torch.compile` 配置入口组合优化与调试选项，并以 eager 基线校验结果一致性。
 
 ## 目录结构
 
@@ -25,7 +25,7 @@ example02_sk_options/
 └── static_kernel_compile_outputs/        # 静态 kernel 编译产物，包含 .run 包（运行时生成）
 ```
 
-## 前置依赖
+## 环境依赖
 
 支持如下产品型号：
 
@@ -45,70 +45,62 @@ pip install -r super_kernel/examples/requirements.txt
 
 ```mermaid
 flowchart TB
-    query[query] --> fia1[npu_fused_infer_attention_score]
-    kv[key / value / lengths] --> fia1
-    fia1 --> moe[npu_moe_gating_top_k_softmax_v2]
-    moe --> quant["dynamic_quant → to(float16)"]
-    quant --> attention["dav-2201: npu_incre_flash_attention<br/>dav-3510: npu_fused_infer_attention_score"]
-    kv --> attention
-    attention --> fia2[npu_fused_infer_attention_score]
-    kv --> fia2
-    fia2 --> gmm[npu_grouped_matmul]
-    weight[weight] --> gmm
-    fia2 --> add[add]
-    gmm --> add
-    attention --> attention_out[attention output]
-    add --> add_out[add output]
+    inputs["输入"] --> attention1["Attention"]
+    attention1 --> moe["MoE"]
+    moe --> attention2["Attention"]
+
+    attention2 --> attention_output["Attention 输出"]
+    attention2 --> attention3["Attention"]
+    attention3 --> grouped_matmul["Grouped Matmul"]
+    attention3 --> add["Add"]
+    grouped_matmul --> add
+    add --> add_output["Add 输出"]
 ```
 
-两个样例网络的主干拓扑一致，仅中间的 attention 算子因架构而异。样例先执行 eager 基线，再使用相同输入执行
-SuperKernel 静态编译版本，并以 `rtol=1e-3`、`atol=1e-2` 校验两个输出。
+该样例展示 SuperKernel 对复杂 Attention 网络的融合优化、执行调优和问题诊断能力，并通过与 eager 基线
+对比验证结果一致性。
 
 ## 选项说明
 
-样例通过 `torch.compile` 的 `options` 展示三类开关：
+样例通过 `torch.compile` 的 `options` 展示 SuperKernel 的静态编译、融合优化、执行调优和问题诊断能力。
 
-| 类别 | 配置入口 | 作用 |
+| 类别 | 配置入口 | 展示的能力 |
 | --- | --- | --- |
-| 基础开关 | `options` 顶层 | 启用静态 kernel 编译和 SuperKernel 融合优化。 |
-| 优化开关 | `super_kernel_optimize_options` | 控制算子调度、缓存一致性、提前启动和融合策略。 |
-| 调试开关 | `super_kernel_debug_options` | 控制同步、执行跟踪、跨核检查和单算子调试方式。 |
+| 基础选项 | `options` 顶层 | 静态编译和 SuperKernel 融合。 |
+| 优化选项 | `super_kernel_optimize_options` | 算子调度、缓存一致性、提前启动和融合策略。 |
+| 调试选项 | `super_kernel_debug_options` | 同步、执行跟踪、跨核检查和单算子诊断。 |
 
-### 基础开关
+### 基础选项
 
-| 选项 | 样例值 | 功能与效果 |
-| --- | --- | --- |
-| `static_kernel_compile` | `True` | 启用静态 kernel 编译并生成 `.run` 包。 |
-| `super_kernel_optimize` | `True` | 启用 SuperKernel 融合优化。 |
+| 选项 | 样例值 |
+| --- | --- |
+| `static_kernel_compile` | `True` |
+| `super_kernel_optimize` | `True` |
 
-### 优化开关
+### 优化选项
 
-`super_kernel_optimize_options` 配置融合与执行策略：
+以下配置用于展示 SuperKernel 面向复杂融合场景的执行优化能力：
 
-| 选项 | 样例值 | 功能与效果 |
-| --- | --- | --- |
-| `auto_op_parallel` | `0` | 控制自动算子并行；样例关闭该能力，使用默认优先级调度。 |
-| `dcci_before_kernel_start` | `[".*"]` | 对所有匹配的子 `kernel`，在执行前增加 DCCI，显式维护缓存一致性。 |
-| `dcci_after_kernel_end` | `[".*"]` | 对所有匹配的子 `kernel`，在执行后增加 DCCI。 |
-| `dcci_disable_on_kernel` | `[".*"]` | 关闭匹配子 `kernel` 内部的 DCCI，由前后两个选项显式控制 DCCI 时机。 |
-| `early_start` | `1` | 启用提前启动路径，使后续任务可在满足同步约束时提前启动。 |
-| `aggressive_opt_strategies.value_breaker_bypass` | `0b10` | 允许规则校验后的非配对 value/memory wait 继续参与融合。 |
-| `aggressive_opt_strategies.task_breaker_bypass` | `0b00` | 不绕过 task breaker，保留默认任务边界。 |
+| 选项 | 样例值 |
+| --- | --- |
+| `auto_op_parallel` | `0` |
+| `dcci_before_kernel_start` | `[".*"]` |
+| `dcci_after_kernel_end` | `[".*"]` |
+| `dcci_disable_on_kernel` | `[".*"]` |
+| `early_start` | `1` |
+| `aggressive_opt_strategies.value_breaker_bypass` | `0b10` |
+| `aggressive_opt_strategies.task_breaker_bypass` | `0b00` |
 
-### 调试开关
+### 调试选项
 
-`super_kernel_debug_options` 控制诊断行为。本样例均设为 `0`，保持调试能力关闭；下表同时说明设为 `1`
-时的开启效果：
+以下配置用于展示 SuperKernel 的问题诊断能力。本样例中的调试选项均设为 `0`：
 
-| 选项 | 样例值 | 样例行为及开启效果 |
-| --- | --- | --- |
-| `debug_sync_all` | `0` | 本样例关闭；设为 `1` 时，将同步任务切换为全核同步，用于定位执行时序问题。 |
-| `debug_op_exec_trace` | `0` | 本样例关闭；设为 `1` 时，记录 SuperKernel 及其子算子的启动、结束状态，用于定位卡死位置。 |
-| `debug_cross_core_sync_check` | `0` | 本样例关闭；设为 `1` 时，检查 MIX 子 `kernel` 的跨核同步状态，并启用算子执行跟踪。 |
-| `debug_per_op_max_core_num` | `0` | 本样例关闭；设为 `1` 时，将每个可融合算子拆分为独立 scope，并按设备最大可用核数构造调试执行配置。 |
-
-上述取值用于展示选项配置，不是所有网络的通用推荐。完整约束参见
-[TorchAir SuperKernel 使用说明](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md)。
+| 选项 | 样例值 |
+| --- | --- |
+| `debug_sync_all` | `0` |
+| `debug_op_exec_trace` | `0` |
+| `debug_cross_core_sync_check` | `0` |
+| `debug_per_op_max_core_num` | `0` |
 
 ## 执行命令
 
@@ -135,20 +127,8 @@ bash run.sh --npu-arch=dav-2201
 
 ## 预期执行结果
 
-eager 与静态编译结果校验通过且成功生成 `.run` 包时，命令退出码为 0，输出包含：
+SuperKernel 静态编译结果与 eager 基线一致时，输出如下关键日志：
 
 ```text
-eager add_out: shape=(3, 1, 1024), dtype=torch.float16, mean=<value>
-eager ifa_out: shape=(3, 1, 1024), dtype=torch.float16, mean=<value>
-compiled add_out: shape=(3, 1, 1024), dtype=torch.float16, mean=<value>
-compiled ifa_out: shape=(3, 1, 1024), dtype=torch.float16, mean=<value>
-Golden check passed
-Test completed!
 execute sample success
 ```
-
-结果查看方式：
-
-- 运行日志同时输出到终端与 `tmp/run.log`，其中包含两个输出的形状、数据类型和均值。
-- 静态 kernel 编译产物位于 `static_kernel_compile_outputs/`。`run.sh` 检查其中是否至少生成一个
-  `.run` 包；未生成时返回失败，若同时存在 `*_compile_error.log`，则输出其路径。

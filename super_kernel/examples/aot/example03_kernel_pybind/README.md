@@ -3,7 +3,7 @@
 ## 用例功能
 
 该样例展示 SuperKernel 对自定义算子的支持：开发者自行编写的 AscendC 算子同样可以接入 PyTorch，
-并参与 TorchAir `npugraph_ex` 静态编译和 SuperKernel 优化。样例的核心计算使用自行实现的加法算子
+并通过 TorchAir `npugraph_ex` 参与 SuperKernel 优化。样例的核心计算使用自行实现的加法算子
 `add_custom`，而非调用 `torch_npu` 提供的同类算子，覆盖从算子编译、注册到 SuperKernel 执行的完整流程。
 
 核心特点：
@@ -35,7 +35,7 @@ example03_kernel_pybind/
 └── static_kernel_compile_outputs/         # 静态 kernel 编译产物（运行时生成）
 ```
 
-## 前置依赖
+## 环境依赖
 
 支持如下产品型号：
 
@@ -57,33 +57,26 @@ pip install -r super_kernel/examples/requirements.txt
 
 ```mermaid
 flowchart TB
-    source["add_custom.asc<br/>AscendC custom add + SK_BIND"] --> extension["bisheng 编译<br/>pybind 扩展"]
-    extension --> registered["torch.library 注册<br/>torch.ops.ascendc_ops.add_custom"]
-    registered --> model["CustomAddModel<br/>显式 SuperKernel scope"]
-    inputs["CPU 输入<br/>x / y"] --> golden["torch.add<br/>golden"]
-    inputs --> npu["复制到 NPU"]
-    npu --> model
-    model --> compiled["npugraph_ex 静态编译<br/>SuperKernel 优化与执行"]
-    compiled --> output[output]
-    golden --> check["torch.allclose<br/>rtol=1e-3, atol=1e-3"]
-    output --> check
+    source["AscendC 自定义实现"] --> integration["SK_BIND 与 PyTorch 注册"]
+    integration --> custom_add["启用 SuperKernel 的自定义 Add"]
+
+    inputs["输入 x / y"] --> custom_add
+    custom_add --> output["输出"]
+
+    inputs --> golden["CPU Add"]
+    output --> check["结果一致性校验"]
+    golden --> check
 ```
 
-`add_custom.asc` 同时定义普通 kernel 入口和 `__sk__` SuperKernel 入口，并通过 `SK_BIND` 建立绑定。
-构建后的 pybind 扩展负责调用 kernel，`torch.library` 则提供 Meta 和 NPU 实现，使自定义算子能够被
-`torch.compile` 捕获。`CustomAddModel` 将算子放入 `custom_add_sk` scope 后，由 `npugraph_ex` 完成
-静态编译和 SuperKernel 执行。
+该样例展示 SuperKernel 对 AscendC 自定义算子的支持。自定义 Add 完成 PyTorch 注册后可参与
+SuperKernel 优化，并通过与 CPU 基线对比验证结果一致性。
 
-## 关键配置
+样例启用 SuperKernel 优化和单算子调试能力：
 
-| 配置 | 样例值 | 功能与效果 |
-| --- | --- | --- |
-| `static_kernel_compile` | `True` | 启用静态 kernel 编译。 |
-| `super_kernel_optimize` | `True` | 启用 SuperKernel 优化。 |
-| `debug_per_op_max_core_num` | `1` | 将可融合算子分别构造为独立 scope，并按设备最大可用核数生成调试配置。 |
-
-完整选项说明参见
-[TorchAir SuperKernel 使用说明](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md)。
+| 选项 | 样例值 |
+| --- | --- |
+| `super_kernel_optimize` | `True` |
+| `debug_per_op_max_core_num` | `1` |
 
 ## 执行命令
 
@@ -112,15 +105,8 @@ bash run.sh --npu-arch=dav-2201
 
 ## 预期执行结果
 
-自定义算子输出与 CPU `torch.add` 结果校验通过时，输出包含：
+自定义 AscendC 算子通过 SuperKernel 执行且结果与 CPU 基线一致时，输出如下关键日志：
 
 ```text
-Test passed: the with sk output matches the golden result
 execute sample success
 ```
-
-结果查看方式：
-
-- 运行日志同时输出到终端与 `tmp/run.log`。
-- 静态 kernel 编译产物位于 `static_kernel_compile_outputs/`。未生成 `.run` 且存在
-  `*_compile_error.log` 时，`run.sh` 返回失败并输出错误日志路径。

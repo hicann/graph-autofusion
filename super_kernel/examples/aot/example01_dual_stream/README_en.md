@@ -46,42 +46,23 @@ pip install -r super_kernel/examples/requirements.txt
 ## Use Case Details
 
 ```mermaid
-%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 40, "diagramPadding": 4}}}%%
-flowchart TB
-    subgraph current["Current NPU stream on entry to forward"]
-        current_record["event1.record()"]
-    end
-    subgraph stream1["stream1"]
-        stream1_wait["event1.wait(stream1)"] --> qm1["quant_matmul"]
-        qm1 --> gmm1[grouped_matmul]
-        gmm1 --> stream1_record1["event1.record()"]
-        stream1_record1 --> swiglu[dequant_swiglu_quant]
-        swiglu --> stream1_record2["event2.record()"]
-        stream1_record2 --> dq1[dynamic_quant → dq_res_1]
-    end
-    subgraph stream2["stream2"]
-        stream2_wait1["event1.wait(stream2)"] --> qm2["quant_matmul"]
-        qm2 --> arn2[add_rms_norm]
-        arn2 --> stream2_wait2["event2.wait(stream2)"]
-        stream2_wait2 --> dq2[dynamic_quant → dq_res_2]
-    end
-    current_record -. event1 .-> stream1_wait
-    stream1_record1 -. event1 .-> stream2_wait1
-    stream1_record2 -. event2 .-> stream2_wait2
+sequenceDiagram
+    participant Stream1 as Stream 1
+    participant Stream2 as Stream 2
+
+    Stream1->>Stream1: Matmul → Grouped Matmul
+    Stream1-->>Stream2: event1
+
+    Stream1->>Stream1: SwiGLU
+    Stream2->>Stream2: Matmul → Add RMSNorm
+
+    Stream1-->>Stream2: event2
+    Stream1->>Stream1: Output 1
+    Stream2->>Stream2: Output 2
 ```
 
-Solid arrows indicate task submission order within a `stream`; dashed arrows indicate synchronization through an
-`event`. `event1` first synchronizes the current NPU `stream` on entry to `forward` with `stream1`. It is recorded again
-after `grouped_matmul` to synchronize `stream1` with `stream2`. `event2` synchronizes the two `stream` objects after
-`dequant_swiglu_quant`.
-
-The sample performs these steps:
-
-1. Builds the inputs and creates two NPU `stream` objects and two `event` objects.
-2. Enables `static_kernel_compile`, `super_kernel_optimize`, and `auto_op_parallel`, then runs the SK version.
-3. Disables SuperKernel optimization and runs the Non-SK baseline.
-4. Compares the two `dq_res_2` outputs with `atol=1e-3` and `rtol=1e-3`.
-5. Checks that static kernel compilation generated a `.run` package.
+This sample demonstrates SuperKernel support for dual-stream computation graphs. It handles `event`-based cross-stream
+control dependencies while preserving result consistency after optimization.
 
 ## Execution Command
 
@@ -104,23 +85,11 @@ For Atlas A3 or Atlas A2 products:
 bash run.sh --npu-arch=dav-2201
 ```
 
-This sample uses the currently visible NPU. For SuperKernel options, see the
-[TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md).
-
 ## Expected Result
 
-When the accuracy comparison passes and a `.run` package is generated, the command exits with status 0 and includes:
+When the SuperKernel and Non-SK results match in the dual-stream scenario and static compilation succeeds, the output
+includes the following key log:
 
 ```text
-  output[0] allclose(atol=0.001, rtol=0.001): PASS
-  output[1] allclose(atol=0.001, rtol=0.001): PASS
-
-Test passed: SK and Non-SK outputs match!
 execute sample success
 ```
-
-To inspect the results:
-
-- The run log is written to both the terminal and `tmp/run.log`.
-- Static kernel compilation artifacts are under `static_kernel_compile_outputs/`. `run.sh` checks that at least one
-  `.run` package exists. If none exists, it fails and reports the path of `*_compile_error.log` when available.

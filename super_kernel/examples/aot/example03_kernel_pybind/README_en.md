@@ -3,7 +3,7 @@
 ## Use Case
 
 This sample demonstrates SuperKernel support for custom operators: an AscendC operator implemented by a developer can
-be integrated with PyTorch and participate in TorchAir `npugraph_ex` static compilation and SuperKernel optimization.
+be integrated with PyTorch and participate in SuperKernel optimization through TorchAir `npugraph_ex`.
 The sample uses its own `add_custom` implementation for the core computation instead of a corresponding `torch_npu`
 operator, covering the complete path from operator compilation and registration to SuperKernel execution.
 
@@ -59,33 +59,26 @@ Source the CANN environment before running the sample and make sure the `bisheng
 
 ```mermaid
 flowchart TB
-    source["add_custom.asc<br/>AscendC custom add + SK_BIND"] --> extension["bisheng compilation<br/>pybind extension"]
-    extension --> registered["torch.library registration<br/>torch.ops.ascendc_ops.add_custom"]
-    registered --> model["CustomAddModel<br/>explicit SuperKernel scope"]
-    inputs["CPU inputs<br/>x / y"] --> golden["torch.add<br/>golden"]
-    inputs --> npu["Copy to NPU"]
-    npu --> model
-    model --> compiled["npugraph_ex static compilation<br/>SuperKernel optimization and execution"]
-    compiled --> output[output]
-    golden --> check["torch.allclose<br/>rtol=1e-3, atol=1e-3"]
-    output --> check
+    source["Custom AscendC implementation"] --> integration["SK_BIND and PyTorch registration"]
+    integration --> custom_add["SuperKernel-enabled Custom Add"]
+
+    inputs["Inputs x / y"] --> custom_add
+    custom_add --> output["Output"]
+
+    inputs --> golden["CPU Add"]
+    output --> check["Result consistency check"]
+    golden --> check
 ```
 
-`add_custom.asc` defines both a regular kernel entry point and an `__sk__` SuperKernel entry point, then binds them
-with `SK_BIND`. The compiled pybind extension launches the kernel, while `torch.library` provides the Meta and NPU
-implementations required for `torch.compile` capture. `CustomAddModel` places the operator in the `custom_add_sk`
-scope, and `npugraph_ex` performs static compilation and SuperKernel execution.
+This sample demonstrates SuperKernel support for custom AscendC operators. After PyTorch registration, the custom Add
+operator can participate in SuperKernel optimization, with result consistency verified against the CPU baseline.
 
-## Key Configuration
+The sample enables SuperKernel optimization and per-operator diagnostics:
 
-| Configuration | Sample value | Function and effect |
-| --- | --- | --- |
-| `static_kernel_compile` | `True` | Enables static kernel compilation. |
-| `super_kernel_optimize` | `True` | Enables SuperKernel optimization. |
-| `debug_per_op_max_core_num` | `1` | Builds a separate scope for each fusible operator and creates a debug configuration using the maximum available cores. |
-
-For the complete option reference, see the
-[TorchAir SuperKernel guide](https://gitcode.com/Ascend/torchair/blob/master/docs/zh/npugraph_ex/advanced/superkernel.md).
+| Option | Sample value |
+| --- | --- |
+| `super_kernel_optimize` | `True` |
+| `debug_per_op_max_core_num` | `1` |
 
 ## Execution Command
 
@@ -114,15 +107,9 @@ when the sample exits without affecting a package with the same name in the curr
 
 ## Expected Result
 
-When the custom operator output matches the CPU `torch.add` result, the output includes:
+When the custom AscendC operator runs through SuperKernel and its result matches the CPU baseline, the output includes
+the following key log:
 
 ```text
-Test passed: the with sk output matches the golden result
 execute sample success
 ```
-
-To inspect the results:
-
-- The run log is written to both the terminal and `tmp/run.log`.
-- Static kernel compilation artifacts are under `static_kernel_compile_outputs/`. If no `.run` package is generated
-  and a `*_compile_error.log` file exists, `run.sh` fails and reports the error log path.
