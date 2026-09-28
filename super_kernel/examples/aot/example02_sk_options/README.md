@@ -2,14 +2,71 @@
 
 ## 用例功能
 
-该样例展示 SuperKernel 面向复杂融合场景的灵活调优与诊断能力，以及相关选项在 TorchAir `npugraph_ex`
-静态编译（AOT）场景中的配置方式。样例编译 attention 网络并与 eager 基线对比，验证选项组合下的结果一致性。
+该样例展示 SuperKernel 面向复杂 Attention 网络融合场景的融合优化、执行调优与问题诊断能力，以及相关选项
+在 TorchAir `npugraph_ex` 静态编译（AOT）场景中的配置方式。样例编译 Attention 网络并与 eager 基线
+对比，验证选项组合下的结果一致性。
 
 核心特点：
 
 - 优化选项覆盖算子并行、DCCI 缓存一致性、提前启动和激进融合策略。
 - 调试选项覆盖全核同步、算子执行跟踪、跨核同步检查和单算子最大核数运行。
 - 通过统一的 `torch.compile` 配置入口组合优化与调试选项，并以 eager 基线校验结果一致性。
+
+```mermaid
+flowchart TB
+    inputs["输入"] --> attention1["Attention"]
+    attention1 --> moe["MoE"]
+    moe --> attention2["Attention"]
+
+    attention2 --> attention_output["Attention 输出"]
+    attention2 --> attention3["Attention"]
+    attention3 --> grouped_matmul["Grouped Matmul"]
+    attention3 --> add["Add"]
+    grouped_matmul --> add
+    add --> add_output["Add 输出"]
+```
+
+### 选项说明
+
+样例通过 `torch.compile` 的 `options` 展示 SuperKernel 的静态编译、融合优化、执行调优和问题诊断能力。
+
+| 类别 | 配置入口 | 作用 |
+| --- | --- | --- |
+| 基础选项 | `options` 顶层 | 静态编译和 SuperKernel 融合。 |
+| 优化选项 | `super_kernel_optimize_options` | 算子调度、缓存一致性、提前启动和融合策略。 |
+| 调试选项 | `super_kernel_debug_options` | 同步、执行跟踪、跨核检查和单算子诊断。 |
+
+#### 基础选项
+
+| 选项 | 样例值 | 作用 |
+| --- | --- | --- |
+| `static_kernel_compile` | `True` | 启用静态 kernel 编译。 |
+| `super_kernel_optimize` | `True` | 启用 SuperKernel 融合优化。 |
+
+#### 优化选项
+
+以下配置用于展示 SuperKernel 面向复杂融合场景的执行优化能力：
+
+| 选项 | 样例值 | 作用 |
+| --- | --- | --- |
+| `auto_op_parallel` | `0` | 控制算子自动并行调度。 |
+| `dcci_before_kernel_start` | `[".*"]` | 为匹配的子 kernel 配置执行前的缓存一致性处理。 |
+| `dcci_after_kernel_end` | `[".*"]` | 为匹配的子 kernel 配置执行后的缓存一致性处理。 |
+| `dcci_disable_on_kernel` | `[".*"]` | 控制匹配的子 kernel 是否执行内部缓存一致性处理。 |
+| `early_start` | `1` | 控制相邻任务的提前启动优化。 |
+| `aggressive_opt_strategies.value_breaker_bypass` | `0b10` | 控制融合时是否绕过 value 相关边界。 |
+| `aggressive_opt_strategies.task_breaker_bypass` | `0b00` | 控制融合时是否绕过 task 相关边界。 |
+
+#### 调试选项
+
+以下配置用于展示 SuperKernel 的问题诊断能力。本样例中的调试选项均设为 `0`：
+
+| 选项 | 样例值 | 作用 |
+| --- | --- | --- |
+| `debug_sync_all` | `0` | 控制全核同步调试，用于定位执行时序问题。 |
+| `debug_op_exec_trace` | `0` | 控制算子执行跟踪，用于定位异常执行位置。 |
+| `debug_cross_core_sync_check` | `0` | 控制跨核同步检查。 |
+| `debug_per_op_max_core_num` | `0` | 控制单算子最大核数运行，用于单算子诊断。 |
 
 ## 目录结构
 
@@ -19,10 +76,7 @@ example02_sk_options/
 ├── README_en.md                          # 英文说明文档
 ├── main-dav-2201.py                      # dav-2201 attention 网络与选项配置
 ├── main-dav-3510.py                      # dav-3510 attention 网络与选项配置
-├── run.sh                                # 选择目标架构、运行样例并检查编译产物
-├── log/                                  # 日志目录（运行时生成）
-├── tmp/                                  # 保存 run.log（运行时生成）
-└── static_kernel_compile_outputs/        # 静态 kernel 编译产物，包含 .run 包（运行时生成）
+└── run.sh                                # 运行样例
 ```
 
 ## 环境依赖
@@ -41,70 +95,7 @@ example02_sk_options/
 pip install -r super_kernel/examples/requirements.txt
 ```
 
-## 用例介绍
-
-```mermaid
-flowchart TB
-    inputs["输入"] --> attention1["Attention"]
-    attention1 --> moe["MoE"]
-    moe --> attention2["Attention"]
-
-    attention2 --> attention_output["Attention 输出"]
-    attention2 --> attention3["Attention"]
-    attention3 --> grouped_matmul["Grouped Matmul"]
-    attention3 --> add["Add"]
-    grouped_matmul --> add
-    add --> add_output["Add 输出"]
-```
-
-该样例展示 SuperKernel 对复杂 Attention 网络的融合优化、执行调优和问题诊断能力，并通过与 eager 基线
-对比验证结果一致性。
-
-## 选项说明
-
-样例通过 `torch.compile` 的 `options` 展示 SuperKernel 的静态编译、融合优化、执行调优和问题诊断能力。
-
-| 类别 | 配置入口 | 作用 |
-| --- | --- | --- |
-| 基础选项 | `options` 顶层 | 静态编译和 SuperKernel 融合。 |
-| 优化选项 | `super_kernel_optimize_options` | 算子调度、缓存一致性、提前启动和融合策略。 |
-| 调试选项 | `super_kernel_debug_options` | 同步、执行跟踪、跨核检查和单算子诊断。 |
-
-### 基础选项
-
-| 选项 | 样例值 | 作用 |
-| --- | --- | --- |
-| `static_kernel_compile` | `True` | 启用静态 kernel 编译并生成编译产物。 |
-| `super_kernel_optimize` | `True` | 启用 SuperKernel 融合优化。 |
-
-### 优化选项
-
-以下配置用于展示 SuperKernel 面向复杂融合场景的执行优化能力：
-
-| 选项 | 样例值 | 作用 |
-| --- | --- | --- |
-| `auto_op_parallel` | `0` | 控制算子自动并行调度。 |
-| `dcci_before_kernel_start` | `[".*"]` | 为匹配的子 kernel 配置执行前的缓存一致性处理。 |
-| `dcci_after_kernel_end` | `[".*"]` | 为匹配的子 kernel 配置执行后的缓存一致性处理。 |
-| `dcci_disable_on_kernel` | `[".*"]` | 控制匹配的子 kernel 是否执行内部缓存一致性处理。 |
-| `early_start` | `1` | 控制相邻任务的提前启动优化。 |
-| `aggressive_opt_strategies.value_breaker_bypass` | `0b10` | 控制融合时是否绕过 value 相关边界。 |
-| `aggressive_opt_strategies.task_breaker_bypass` | `0b00` | 控制融合时是否绕过 task 相关边界。 |
-
-### 调试选项
-
-以下配置用于展示 SuperKernel 的问题诊断能力。本样例中的调试选项均设为 `0`：
-
-| 选项 | 样例值 | 作用 |
-| --- | --- | --- |
-| `debug_sync_all` | `0` | 控制全核同步调试，用于定位执行时序问题。 |
-| `debug_op_exec_trace` | `0` | 控制算子执行跟踪，用于定位异常执行位置。 |
-| `debug_cross_core_sync_check` | `0` | 控制跨核同步检查。 |
-| `debug_per_op_max_core_num` | `0` | 控制单算子最大核数运行，用于单算子诊断。 |
-
 ## 执行命令
-
-`--npu-arch` 用于指定目标 NPU 架构，样例会根据该参数选择对应的 attention 网络。应根据实际使用的产品型号选择参数值：
 
 | `--npu-arch` 取值 | 对应产品 |
 | --- | --- |
@@ -123,11 +114,9 @@ Atlas A3 或 Atlas A2 系列产品执行：
 bash run.sh --npu-arch=dav-2201
 ```
 
-脚本根据 `--npu-arch` 选择对应的 `main-dav-2201.py` 或 `main-dav-3510.py`，并使用当前可见 NPU。
-
 ## 预期执行结果
 
-SuperKernel 静态编译结果与 eager 基线一致时，输出如下关键日志：
+样例执行成功时会输出如下关键日志：
 
 ```text
 execute sample success

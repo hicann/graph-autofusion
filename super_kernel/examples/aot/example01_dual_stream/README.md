@@ -2,14 +2,30 @@
 
 ## 用例功能
 
-该样例展示了 SuperKernel 对双流计算图的融合优化能力，包括跨流控制依赖处理、自动算子并行、静态编译
-和执行结果校验。
+该样例展示了 SuperKernel 对双流计算图的融合优化能力，包括跨流控制依赖处理、自动算子并行和静态编译，
+并验证融合优化前后的执行结果一致性。
 
 核心特点：
 
 - 支持双流场景，可正确处理两个 NPU `stream` 之间由 `event` 建立的控制依赖。
 - 通过 `auto_op_parallel` 启用自动算子并行，简化双流计算图的 SuperKernel 优化配置。
 - 自动对比 SK 与 Non-SK 的执行结果，验证融合优化后的结果一致性。
+
+```mermaid
+sequenceDiagram
+    participant Stream1 as 流 1
+    participant Stream2 as 流 2
+
+    Stream1->>Stream1: Matmul → Grouped Matmul
+    Stream1-->>Stream2: event1
+
+    Stream1->>Stream1: SwiGLU
+    Stream2->>Stream2: Matmul → Add RMSNorm
+
+    Stream1-->>Stream2: event2
+    Stream1->>Stream1: 输出 1
+    Stream2->>Stream2: 输出 2
+```
 
 ## 目录结构
 
@@ -18,10 +34,7 @@ example01_dual_stream/
 ├── README.md                             # 中文说明文档
 ├── README_en.md                          # 英文说明文档
 ├── main.py                               # 构造双流模型，运行 SK/Non-SK 版本并对比精度
-├── run.sh                                # 解析 --npu-arch，运行 main.py 并检查编译产物
-├── log/                                  # 日志目录（运行时生成）
-├── tmp/                                  # 保存 run.log（运行时生成）
-└── static_kernel_compile_outputs/        # 静态 kernel 编译产物，包含 .run 包（运行时生成）
+└── run.sh                                # 运行样例
 ```
 
 ## 环境依赖
@@ -40,29 +53,7 @@ example01_dual_stream/
 pip install -r super_kernel/examples/requirements.txt
 ```
 
-## 用例介绍
-
-```mermaid
-sequenceDiagram
-    participant Stream1 as 流 1
-    participant Stream2 as 流 2
-
-    Stream1->>Stream1: Matmul → Grouped Matmul
-    Stream1-->>Stream2: event1
-
-    Stream1->>Stream1: SwiGLU
-    Stream2->>Stream2: Matmul → Add RMSNorm
-
-    Stream1-->>Stream2: event2
-    Stream1->>Stream1: 输出 1
-    Stream2->>Stream2: 输出 2
-```
-
-该样例展示 SuperKernel 对双流计算图的支持，可处理由 `event` 建立的跨流控制依赖，并保证优化前后结果一致。
-
 ## 执行命令
-
-`--npu-arch` 指定样例的目标 NPU 架构，应根据实际运行样例的产品型号选择：
 
 | `--npu-arch` 取值 | 对应产品 |
 | --- | --- |
@@ -83,7 +74,7 @@ bash run.sh --npu-arch=dav-2201
 
 ## 预期执行结果
 
-双流场景下，SuperKernel 与 Non-SK 的执行结果一致且静态编译成功时，输出如下关键日志：
+样例执行成功时会输出如下关键日志：
 
 ```text
 execute sample success

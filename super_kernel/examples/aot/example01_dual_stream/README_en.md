@@ -3,7 +3,8 @@
 ## Use Case
 
 This sample demonstrates SuperKernel fusion optimization for dual-stream computation graphs, including cross-stream
-control dependency handling, automatic operator parallelism, static compilation, and result verification.
+control dependency handling, automatic operator parallelism, and static compilation, while verifying result
+consistency before and after fusion optimization.
 
 Key features:
 
@@ -13,6 +14,22 @@ Key features:
   dual-stream computation graphs.
 - Automatically compares SK and Non-SK results to verify consistency after fusion optimization.
 
+```mermaid
+sequenceDiagram
+    participant Stream1 as Stream 1
+    participant Stream2 as Stream 2
+
+    Stream1->>Stream1: Matmul → Grouped Matmul
+    Stream1-->>Stream2: event1
+
+    Stream1->>Stream1: SwiGLU
+    Stream2->>Stream2: Matmul → Add RMSNorm
+
+    Stream1-->>Stream2: event2
+    Stream1->>Stream1: Output 1
+    Stream2->>Stream2: Output 2
+```
+
 ## Directory Structure
 
 ```text
@@ -20,10 +37,7 @@ example01_dual_stream/
 ├── README.md                             # Chinese documentation
 ├── README_en.md                          # English documentation
 ├── main.py                               # Builds the dual-stream model, runs SK/Non-SK, and compares accuracy
-├── run.sh                                # Parses --npu-arch, runs main.py, and checks compilation artifacts
-├── log/                                  # Log directory (generated at runtime)
-├── tmp/                                  # Contains run.log (generated at runtime)
-└── static_kernel_compile_outputs/        # Static kernel artifacts, including a .run package (generated at runtime)
+└── run.sh                                # Runs the sample
 ```
 
 ## Prerequisites
@@ -43,30 +57,7 @@ Finally, install the sample's Python dependencies:
 pip install -r super_kernel/examples/requirements.txt
 ```
 
-## Use Case Details
-
-```mermaid
-sequenceDiagram
-    participant Stream1 as Stream 1
-    participant Stream2 as Stream 2
-
-    Stream1->>Stream1: Matmul → Grouped Matmul
-    Stream1-->>Stream2: event1
-
-    Stream1->>Stream1: SwiGLU
-    Stream2->>Stream2: Matmul → Add RMSNorm
-
-    Stream1-->>Stream2: event2
-    Stream1->>Stream1: Output 1
-    Stream2->>Stream2: Output 2
-```
-
-This sample demonstrates SuperKernel support for dual-stream computation graphs. It handles `event`-based cross-stream
-control dependencies while preserving result consistency after optimization.
-
 ## Execution Command
-
-`--npu-arch` specifies the target NPU architecture and must match the product model in use:
 
 | `--npu-arch` | Corresponding Products |
 | --- | --- |
@@ -87,8 +78,7 @@ bash run.sh --npu-arch=dav-2201
 
 ## Expected Result
 
-When the SuperKernel and Non-SK results match in the dual-stream scenario and static compilation succeeds, the output
-includes the following key log:
+When the sample runs successfully, it outputs the following key log:
 
 ```text
 execute sample success
