@@ -2,8 +2,8 @@
 
 ## 用例功能
 
-该样例展示 SuperKernel 面向复杂 Attention 网络融合场景的融合优化、执行调优与问题诊断能力，以及相关选项
-在 TorchAir `npugraph_ex` 静态编译（AOT）场景中的配置方式。样例编译 Attention 网络并与 eager 基线
+该用例展示 SuperKernel 面向复杂 Attention 网络融合场景的融合优化、执行调优与问题诊断能力，以及相关选项
+在 TorchAir `npugraph_ex` 静态编译（AOT）场景中的配置方式。用例编译 Attention 网络并与 eager 基线
 对比，验证选项组合下的结果一致性。
 
 核心特点：
@@ -28,7 +28,7 @@ flowchart TB
 
 ### 选项说明
 
-样例通过 `torch.compile` 的 `options` 展示 SuperKernel 的静态编译、融合优化、执行调优和问题诊断能力。
+用例通过 `torch.compile` 的 `options` 展示 SuperKernel 的静态编译、融合优化、执行调优和问题诊断能力。
 
 | 类别 | 配置入口 | 作用 |
 | --- | --- | --- |
@@ -59,7 +59,7 @@ flowchart TB
 
 #### 调试选项
 
-以下配置用于展示 SuperKernel 的问题诊断能力。本样例中的调试选项均设为 `0`：
+以下配置用于展示 SuperKernel 的问题诊断能力。本用例中的调试选项均设为 `0`：
 
 | 选项 | 样例值 | 作用 |
 | --- | --- | --- |
@@ -76,7 +76,7 @@ example02_sk_options/
 ├── README_en.md                          # 英文说明文档
 ├── main-dav-2201.py                      # dav-2201 attention 网络与选项配置
 ├── main-dav-3510.py                      # dav-3510 attention 网络与选项配置
-└── run.sh                                # 运行样例
+└── run.sh                                # 运行用例
 ```
 
 ## 环境依赖
@@ -102,7 +102,7 @@ pip install -r super_kernel/examples/requirements.txt
 | `dav-3510` | Ascend 950 系列产品（如 Ascend 950PR、Ascend 950DT） |
 | `dav-2201` | Atlas A3 训练/推理系列产品、Atlas A2 训练/推理系列产品 |
 
-在样例目录下，Ascend 950 系列产品执行：
+在用例目录下，Ascend 950 系列产品执行：
 
 ```bash
 bash run.sh --npu-arch=dav-3510
@@ -116,7 +116,7 @@ bash run.sh --npu-arch=dav-2201
 
 ## 预期执行结果
 
-样例执行成功时会输出如下关键日志：
+用例执行成功时会输出如下关键日志：
 
 ```text
 execute sample success

@@ -2,7 +2,7 @@
 
 ## 用例功能
 
-该样例展示了 SuperKernel 对双流计算图的融合优化能力，包括跨流控制依赖处理、自动算子并行和静态编译，
+该用例展示了 SuperKernel 对双流计算图的融合优化能力，包括跨流控制依赖处理、自动算子并行和静态编译，
 并验证融合优化前后的执行结果一致性。
 
 核心特点：
@@ -34,7 +34,7 @@ example01_dual_stream/
 ├── README.md                             # 中文说明文档
 ├── README_en.md                          # 英文说明文档
 ├── main.py                               # 构造双流模型，运行 SK/Non-SK 版本并对比精度
-└── run.sh                                # 运行样例
+└── run.sh                                # 运行用例
 ```
 
 ## 环境依赖
@@ -60,7 +60,7 @@ pip install -r super_kernel/examples/requirements.txt
 | `dav-3510` | Ascend 950 系列产品（如 Ascend 950PR、Ascend 950DT） |
 | `dav-2201` | Atlas A3 训练/推理系列产品、Atlas A2 训练/推理系列产品 |
 
-在样例目录下，Ascend 950 系列产品执行：
+在用例目录下，Ascend 950 系列产品执行：
 
 ```bash
 bash run.sh --npu-arch=dav-3510
@@ -74,7 +74,7 @@ bash run.sh --npu-arch=dav-2201
 
 ## 预期执行结果
 
-样例执行成功时会输出如下关键日志：
+用例执行成功时会输出如下关键日志：
 
 ```text
 execute sample success
