@@ -892,6 +892,13 @@ Status Loop::GenerateLoop(const Tiler &tiler, const TPipe &tpipe, std::vector<as
       ss << "int32_t block_dim_offset = " << peer.Str() << " * " << tiler.Size(axis.size) << ";" << std::endl;
       ApiCall *call = FindIndirectLoadOpCall(this, true);
       if (call != nullptr) {
+        const auto behavior =
+            ascgen_utils::indirect_load::GetTemplateBehavior(std::dynamic_pointer_cast<af::AscNode>(call->node));
+        const auto indirect_load = std::dynamic_pointer_cast<af::AscNode>(call->node);
+        const bool has_post_reduce = ascgen_utils::indirect_load::GetPostReduceConsumer(indirect_load) != nullptr;
+        if (!behavior.skips_ub_lifecycle || has_post_reduce) {
+          GE_CHK_STATUS_RET(call->AllocOutputs(tpipe, ss), "Codegen alloc hoisted IndirectLoad outputs failed");
+        }
         std::string call_code;
         GE_CHK_STATUS_RET(call->Generate(tpipe, current_axis, call_code), "Codegen generate hoisted call failed");
         ss << call_code << std::endl;

@@ -198,6 +198,7 @@ af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_l
                                                   const std::vector<af::AscNodePtr> &nodes,
                                                   const SimtLoadMetadataMap &load_metadata, const TPipe &tpipe,
                                                   const std::string &offset_type, const std::string &output_index_expr,
+                                                  const std::string &direct_offset_expr, bool has_post_reduce,
                                                   SimtLoadIndexOffsetExpressions &expressions, std::stringstream &ss) {
   expressions.clear();
   const size_t rank = logical_view.output.sizes.size();
@@ -232,7 +233,7 @@ af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_l
             base_offset = "index_offset";
             break;
           case ascgen_utils::indirect_load::SimtLoadAddressSource::kOutputOffset:
-            base_offset = output_index_expr;
+            base_offset = direct_offset_expr;
             break;
         }
         expressions[node->GetName()] = append_load_offset(base_offset);
@@ -307,6 +308,15 @@ af::Status BuildSimtPerLoadIndexOffsetExpressions(const ascgen_utils::indirect_l
             continue;
           }
         }
+      }
+      int64_t payload_size = 0;
+      if (has_post_reduce && !view.sizes.empty() && !view.strides.empty() &&
+          af::SymbolicUtils::StaticCheckEq(view.sizes.back(), af::ops::One) == af::TriBool::kTrue &&
+          af::SymbolicUtils::StaticCheckEq(view.strides.back(), af::ops::Zero) == af::TriBool::kTrue &&
+          !logical_view.output.sizes.empty() && logical_view.output.sizes.back().GetConstValue(payload_size) &&
+          payload_size > 1) {
+        expressions[node->GetName()] = append_load_offset(output_index_expr + " / " + std::to_string(payload_size));
+        continue;
       }
       // [strided 视图扁平化] 调度器 split 改写产生的 rank 差 strided 视图（如
       // [128]/[39]+offset 列切片被改写为 [128/Tb, Tb, 1]/[39*Tb, 39, 39]）此前
@@ -765,7 +775,7 @@ af::Status GenerateSimtOutputsEvaluator(const std::string &input_dtype, const st
                                         const std::vector<af::AscNodePtr> &nodes,
                                         const SimtLoadMetadataMap &load_metadata,
                                         const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
-                                        const TPipe &tpipe, std::stringstream &ss) {
+                                        const TPipe &tpipe, bool has_post_reduce, std::stringstream &ss) {
   GE_ASSERT_TRUE(!chains.empty(), "IndirectLoad SIMT output chains are empty.");
   std::string primary_output_dtype;
   GE_ASSERT_SUCCESS(Tensor::DtypeName(chains[0].dtype, primary_output_dtype));
@@ -794,7 +804,8 @@ af::Status GenerateSimtOutputsEvaluator(const std::string &input_dtype, const st
      << " output_index, " << offset_type << " index_offset, const Context &context) {" << std::endl;
   SimtLoadIndexOffsetExpressions offsets;
   GE_ASSERT_SUCCESS(BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type,
-                                                           "output_index", offsets, ss));
+                                                           "output_index", "output_index", has_post_reduce, offsets,
+                                                           ss));
   GE_ASSERT_SUCCESS(
       EmitSimtEvaluatorNodes(nodes, load_metadata, &offsets, logical_view, "output_index", "output_index", values, ss));
   // index 生产链尾部的外部 store 收为空节点输出链：链值由 Index() 求值器结果注入
@@ -826,8 +837,20 @@ af::Status GenerateSimtOutputsEvaluator(const std::string &input_dtype, const st
   ss << "  __simt_callee__ __aicore__ inline static void Store(const OutputTargets &targets, " << offset_type
      << " output_index, " << offset_type << " local_index, const OutputPack &outputs) {" << std::endl;
   for (size_t i = 0UL; i < chains.size(); ++i) {
-    ss << "    targets.output" << i << "[" << (chains[i].local_target ? "local_index" : "output_index")
-       << "] = outputs.output" << i << ";" << std::endl;
+    std::string output_offset = "output_index";
+    if (chains[i].local_target) {
+      if (!logical_view.output.sizes.empty()) {
+        const auto inner_size = tpipe.tiler.Size(logical_view.output.sizes.back());
+        std::string dtype;
+        GE_ASSERT_SUCCESS(Tensor::DtypeName(chains[i].dtype, dtype));
+        const auto row_stride = "KernelUtils::SizeAlign(" + inner_size + ", 32/sizeof(" + dtype + "))";
+        output_offset =
+            "(local_index / (" + inner_size + ")) * (" + row_stride + ") + local_index % (" + inner_size + ")";
+      } else {
+        output_offset = "local_index";
+      }
+    }
+    ss << "    targets.output" << i << "[" << output_offset << "] = outputs.output" << i << ";" << std::endl;
   }
   ss << "  }" << std::endl;
   return af::SUCCESS;
@@ -854,13 +877,14 @@ af::Status GenSimtIndexEvaluator(const std::string &index_dtype, const std::stri
                                  ascir::TensorId result_tensor_id, const std::vector<af::AscNodePtr> &nodes,
                                  const SimtLoadMetadataMap &load_metadata,
                                  const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
-                                 const TPipe &tpipe, std::stringstream &ss) {
+                                 const TPipe &tpipe, bool has_post_reduce, std::stringstream &ss) {
   std::map<ascir::TensorId, std::string> values;
   ss << "  __simt_callee__ __aicore__ inline static " << index_dtype << " Index(" << offset_type << " output_index, "
      << offset_type << " index_offset, const Context &context) {" << std::endl;
   SimtLoadIndexOffsetExpressions offsets;
   GE_ASSERT_SUCCESS(BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type,
-                                                           "index_offset", offsets, ss));
+                                                           "output_index", "index_offset", has_post_reduce, offsets,
+                                                           ss));
   return GenerateSimtEvaluatorBody(nodes, values, result_tensor_id, load_metadata, ss, logical_view, "index_offset",
                                    "output_index", &offsets);
 }
@@ -869,14 +893,15 @@ af::Status GenAicoreIndexEvaluator(const std::string &index_dtype, const std::st
                                    ascir::TensorId result_tensor_id, const std::vector<af::AscNodePtr> &nodes,
                                    const SimtLoadMetadataMap &load_metadata,
                                    const ascgen_utils::indirect_load::TemplateLogicalView &logical_view,
-                                   const TPipe &tpipe, std::stringstream &ss) {
+                                   const TPipe &tpipe, bool has_post_reduce, std::stringstream &ss) {
   std::map<ascir::TensorId, std::string> values;
   ss << "  static constexpr bool kSupportsAicoreIndex = true;" << std::endl;
   ss << "  __aicore__ inline static " << index_dtype << " AicoreIndex(" << offset_type
      << " output_index, const Context &context) {" << std::endl;
   SimtLoadIndexOffsetExpressions offsets;
   GE_ASSERT_SUCCESS(BuildSimtPerLoadIndexOffsetExpressions(logical_view, nodes, load_metadata, tpipe, offset_type,
-                                                           "output_index", offsets, ss));
+                                                           "output_index", "output_index", has_post_reduce, offsets,
+                                                           ss));
   return GenerateAicoreIndexEvaluatorBody(nodes, values, result_tensor_id, load_metadata, offsets, ss);
 }
 
@@ -1241,14 +1266,15 @@ Status IndirectLoadRegApiCall::GenerateFuncDefinition(const TPipe &tpipe, const 
   ss << "  static constexpr uint32_t kUbOutputCount = " << ub_output_count << "U;" << std::endl;
 
   GE_ASSERT_SUCCESS(GenSimtIndexEvaluator(index_dtype, offset_type, index_result_tensor_id_, index_nodes_,
-                                          simt_index_loads_, logical_view_, tpipe, ss));
+                                          simt_index_loads_, logical_view_, tpipe, has_post_reduce_, ss));
   if (simt_policy_.policy == ascgen_utils::indirect_load::SimtAddressPolicy::kEmbedding &&
       CanGenerateAicoreIndexEvaluator(index_nodes_, simt_index_loads_)) {
     GE_ASSERT_SUCCESS(GenAicoreIndexEvaluator(index_dtype, offset_type, index_result_tensor_id_, index_nodes_,
-                                              simt_index_loads_, logical_view_, tpipe, ss));
+                                              simt_index_loads_, logical_view_, tpipe, has_post_reduce_, ss));
   }
   GE_ASSERT_SUCCESS(GenerateSimtOutputsEvaluator(input_dtype, offset_type, simt_value_tensor_id_, output_chains_,
-                                                 output_nodes_, simt_output_loads_, logical_view_, tpipe, ss));
+                                                 output_nodes_, simt_output_loads_, logical_view_, tpipe,
+                                                 has_post_reduce_, ss));
   ss << "};" << std::endl;
   ss << "#endif" << std::endl;
   return af::SUCCESS;
@@ -1415,13 +1441,29 @@ Status IndirectLoadRegApiCall::GenerateSimtInvocation(const TPipe &tpipe, const 
   std::string actual_size_expr;
   std::string output_offset_expr;
   if (has_post_reduce_) {
-    const Tensor *output_tensor = tpipe.GetTensor(output_result_tensor_id_);
-    GE_ASSERT_NOTNULL(output_tensor, "IndirectLoad SIMT post Reduce output tensor is missing.");
-    af::Expression output_element_count;
-    GE_ASSERT_SUCCESS(CalcVectorizedElementCount(*output_tensor, output_element_count));
-    actual_size_expr = tpipe.tiler.Size(output_element_count);
+    const auto local_chain = std::find_if(output_chains_.begin(), output_chains_.end(),
+                                          [](const SimtOutputChain &chain) { return chain.local_target; });
+    GE_ASSERT_TRUE(local_chain != output_chains_.end(), "IndirectLoad SIMT post Reduce local output is missing.");
+    const Tensor *local_target = tpipe.GetTensor(local_chain->target_tensor_id);
+    GE_ASSERT_NOTNULL(local_target, "IndirectLoad SIMT post Reduce local target is missing.");
+    const Tensor *value_tensor = tpipe.GetTensor(simt_value_tensor_id_);
+    GE_ASSERT_NOTNULL(value_tensor, "IndirectLoad SIMT value tensor is missing.");
+    // 后置 Reduce 的目标是 IndirectLoad value tensor，而 API 调用的输出会重定向到最终
+    // GM result tensor。自行管理 UB 生命周期的模板已暴露该 local tensor；其他模板则需在
+    // 提升后的调用前显式分配。
+    const bool skips_ub_lifecycle =
+        node != nullptr && ascgen_utils::indirect_load::GetTemplateBehavior(node).skips_ub_lifecycle;
+    if (!skips_ub_lifecycle && !local_target->no_need_realloc) {
+      std::string local_target_alloc;
+      GE_ASSERT_SUCCESS(tpipe.TensorAlloc(*local_target, local_target_alloc));
+      ss << local_target_alloc;
+    }
+    af::Expression local_element_count;
+    GE_ASSERT_SUCCESS(CalcVectorizedElementCount(*value_tensor, local_element_count));
+    actual_size_expr = tpipe.tiler.ActualSize(local_element_count);
+    const std::string local_tile_size_expr = tpipe.tiler.Size(local_element_count);
     output_offset_expr = "(static_cast<" + offset_type + ">(block_dim_offset) + static_cast<" + offset_type + ">(" +
-                         outer_tb_var + ")) * " + PromoteSizeExpr(actual_size_expr, offset_type);
+                         outer_tb_var + ")) * " + PromoteSizeExpr(local_tile_size_expr, offset_type);
   } else {
     actual_size_expr = outer_tb_var + "_loop_size";
     output_offset_expr = "static_cast<" + offset_type + ">(block_dim_offset)";

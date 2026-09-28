@@ -1257,18 +1257,13 @@ af::Status BuildSimtLoweringMetadata(const af::AscNodePtr &indirect_load, Indire
     load_meta.node_name = node->GetName();
     load_meta.address_source =
         SimtLoadUsesZeroOffset(node) ? SimtLoadAddressSource::kZeroOffset : SimtLoadAddressSource::kOutputOffset;
-    // [非 dense index 视图] policy 的 index_offset 步长空间由（经零 stride 改写后的）
-    // index 逻辑视图决定：视图非 dense（strided/广播形态，步长已嵌入 index_offset，
-    // 如 kStrided policy 的 runtime 参数）时，裸线性偏移即正确，既有 strided/broadcast
-    // index 用例保持快路径——不能按 load 改写后视图与逻辑视图的字面步长相等判定
-    // （调度器会把 load 视图 split 改写为模板轴空间，rank/符号必然不一致）。仅当
-    // policy index 视图 dense（index_offset ≡ 逻辑位置、不含任何物理步长）且 load
-    // 物理视图与输出逻辑视图非 dense 等价时（如 inductor 形态：index 输入逻辑视图
-    // dense、源 load 物理视图为 [128]/[39]+offset 的列切片），线性偏移会丢行 stride
-    // 导致错位读——与输出侧 GM load 恒 true 的规则对齐，交由坐标折叠重建。
+    // 唯一 index Load 通常可直接使用按其物理 view 计算的 index_offset。对于 dense policy
+    // 下的非 dense 物理 view，或多个 index Load，仍必须按各自 view 做 logical offset
+    // 坐标折叠，避免丢失行 stride 或将主 Load 的偏移用于 side-input。
     const bool policy_index_dense = IsDense(policy_index_view);
     load_meta.use_logical_offset =
-        mixed_index_views || (policy_index_dense && !IsDenseEquivalentView(current_view, metadata.logical_view.output));
+        index_load_nodes.size() != 1UL || mixed_index_views ||
+        (policy_index_dense && !IsDenseEquivalentView(current_view, metadata.logical_view.output));
     load_meta.physical_view = current_view;
     // [行级广播 side-input] 尾轴零贡献（stride==0 且 size==1）的广播形态：记原始
     // 视图（此时已过 NormalizeTemplateAxes 的轴改写，若视图已符号化则再取一次不可
@@ -1278,7 +1273,7 @@ af::Status BuildSimtLoweringMetadata(const af::AscNodePtr &indirect_load, Indire
     // 改写后视图无法可靠判定（split 破坏结构特征）——读 generator 在视图改写前
     // 写入的节点 attr 标记。
     load_meta.is_row_broadcast = ascir::IsRowBroadcastLoad(*node);
-    load_meta.original_view = current_view;
+    load_meta.original_view = load_meta.physical_view;
     simt.index_loads.push_back(std::move(load_meta));
   }
   // Every GM side load inside the SIMT region is addressed with the full logical output_index,
