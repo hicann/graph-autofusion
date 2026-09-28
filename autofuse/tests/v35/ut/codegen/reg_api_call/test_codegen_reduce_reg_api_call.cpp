@@ -16,6 +16,7 @@
 
 #include "runtime_stub.h"
 #include "platform_context.h"
+#include "common_utils.h"
 
 using namespace af::ops;
 using namespace codegen;
@@ -140,7 +141,7 @@ TEST_F(RegReduceApicallTest, RegReduceApi_Test_001) {
   EXPECT_EQ(status, af::SUCCESS);
   EXPECT_NE(result.find("first_actual"), std::string::npos);
   EXPECT_NE(result.find("tmp_reduce_shape"), std::string::npos);
-  EXPECT_NE(result.find("ReduceMax<"), std::string::npos);
+  EXPECT_NE(result.find("ReduceMaxExtend<"), std::string::npos) << result;
   EXPECT_NE(result.find("AscendC::Pattern::Reduce::AR"), std::string::npos);
   EXPECT_EQ(result.find("AscirNodeParams"), std::string::npos);
 }
@@ -384,7 +385,8 @@ TEST_F(RegReduceApicallTest, RegReduceApi_Test_004) {
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
-  af::ascir_op::Max reduce("reduce");  graph.AddNode(reduce);
+  af::ascir_op::Max reduce("reduce");
+  graph.AddNode(reduce);
 
   auto nodex = graph.FindNode("x");
   af::AscTensor tensorx = nodex->outputs[0];
@@ -487,7 +489,8 @@ TEST_F(RegReduceApicallTest, RegReduceApicallTest_Int32_Inner) {
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
-  af::ascir_op::Sum reduce("reduce");  graph.AddNode(reduce);
+  af::ascir_op::Sum reduce("reduce");
+  graph.AddNode(reduce);
 
   auto nodex = graph.FindNode("x");
   af::AscTensor tensorx = nodex->outputs[0];
@@ -592,7 +595,8 @@ TEST_F(RegReduceApicallTest, RegReduceApicallTest_Int32_Outer) {
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
-  af::ascir_op::Sum reduce("reduce");  graph.AddNode(reduce);
+  af::ascir_op::Sum reduce("reduce");
+  graph.AddNode(reduce);
 
   auto nodex = graph.FindNode("x");
   af::AscTensor tensorx = nodex->outputs[0];
@@ -697,7 +701,8 @@ TEST_F(RegReduceApicallTest, RegReduceApicallTest_ReduceMean_NoNeed_MultiReduce_
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
-  af::ascir_op::Sum reduce("reduce");  graph.AddNode(reduce);
+  af::ascir_op::Sum reduce("reduce");
+  graph.AddNode(reduce);
 
   auto nodex = graph.FindNode("x");
   af::AscTensor tensorx = nodex->outputs[0];
@@ -802,7 +807,8 @@ TEST_F(RegReduceApicallTest, RegReduceApicallTest_ReduceMean_NoNeed_MultiReduce_
   af::AscGraph graph("test");
   af::ascir_op::Data x("x", graph);
   af::ascir_op::Data y("y", graph);
-  af::ascir_op::Sum reduce("reduce");  graph.AddNode(reduce);
+  af::ascir_op::Sum reduce("reduce");
+  graph.AddNode(reduce);
 
   auto nodex = graph.FindNode("x");
   af::AscTensor tensorx = nodex->outputs[0];
@@ -938,4 +944,29 @@ TEST_F(RegReduceApicallTest, RegReduceApicallTest_ParseAttr) {
   RegReduceApiCall call(api_name);
   auto node_max = graph.FindNode("max0");
   EXPECT_EQ(call.CallParseAttr(node_max), af::SUCCESS);
+}
+
+TEST_F(RegReduceApicallTest, ReduceSumInt8AndInt16DoNotRequireCast) {
+  for (const auto dtype : {af::DT_INT8, af::DT_INT16}) {
+    SCOPED_TRACE(::testing::Message() << "dtype=" << static_cast<int32_t>(dtype));
+    af::AscGraph graph("reduce_sum_integer_dtype");
+
+    af::ascir_op::Data data("data", graph);
+    data.y.dtype = dtype;
+
+    af::ascir_op::Sum sum("sum");
+    sum.x = data.y;
+    sum.y.dtype = dtype;
+
+    auto sum_node = graph.FindNode("sum");
+    ASSERT_NE(sum_node, nullptr);
+    auto codegen_impl = ascgen_utils::GetAscIrCodegenImpl(sum_node->GetType());
+    ASSERT_NE(codegen_impl, nullptr);
+
+    const auto [input_dtypes, output_dtypes] = codegen_impl->GetConversionDtype(*sum_node);
+    ASSERT_EQ(input_dtypes.size(), 1U);
+    ASSERT_EQ(output_dtypes.size(), 1U);
+    EXPECT_EQ(input_dtypes[0], dtype);
+    EXPECT_EQ(output_dtypes[0], dtype);
+  }
 }

@@ -54,6 +54,6 @@ TEST_F(TestBackendLoadCompareCastSumStoreE2e, LoadCompareCastSumStoreE2eCodegen)
     EXPECT_NE(kernel.find("{static_cast<uint16_t>(((32 * Ceiling((Rational(1 , 32) * t->z2t_size))))/(1)), "
                           "static_cast<uint16_t>(1)}"),
               std::string::npos);
-    EXPECT_NE(kernel.find("ReduceSum<float, AscendC::Pattern::Reduce::RA, true>"), std::string::npos);
+    EXPECT_NE(kernel.find("ReduceSumExtend<float, AscendC::Pattern::Reduce::RA, true>"), std::string::npos);
   });
 }

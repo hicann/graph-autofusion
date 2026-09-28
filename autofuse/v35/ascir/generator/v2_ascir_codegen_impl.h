@@ -2576,7 +2576,7 @@ class MaxAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "ReduceMax";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"reduce_init_reg_base.h"};
+    return {"reduce_init_reg_base.h", "reduce_extend_reg_base.h"};
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) {
@@ -2610,14 +2610,12 @@ class SumAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "ReduceSum";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"reduce_init_reg_base.h"};
+    return {"reduce_init_reg_base.h", "reduce_extend_reg_base.h"};
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) {
     const std::map<ge::DataType, ge::DataType> sum_dtype_map = {{ge::DataType::DT_BF16, ge::DataType::DT_FLOAT},
-                                                                {ge::DataType::DT_FLOAT16, ge::DataType::DT_FLOAT},
-                                                                {ge::DataType::DT_INT8, ge::DataType::DT_FLOAT},
-                                                                {ge::DataType::DT_INT16, ge::DataType::DT_FLOAT}};
+                                                                {ge::DataType::DT_FLOAT16, ge::DataType::DT_FLOAT}};
     return GetConversionFromDtypeMap(node, sum_dtype_map);
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
@@ -2647,7 +2645,7 @@ class MinAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "ReduceMin";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"reduce_init_reg_base.h"};
+    return {"reduce_init_reg_base.h", "reduce_extend_reg_base.h"};
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) {
@@ -2681,7 +2679,7 @@ class MeanAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "ReduceMean";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"reduce_init_reg_base.h"};
+    return {"reduce_init_reg_base.h", "reduce_extend_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
@@ -2710,7 +2708,7 @@ class ProdAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "ReduceProd";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"reduce_init_reg_base.h"};
+    return {"reduce_init_reg_base.h", "reduce_extend_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
@@ -2739,7 +2737,7 @@ class AnyAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "ReduceAny";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"reduce_init_reg_base.h"};
+    return {"reduce_init_reg_base.h", "reduce_extend_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
@@ -2768,7 +2766,7 @@ class AllAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "ReduceAll";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"reduce_init_reg_base.h"};
+    return {"reduce_init_reg_base.h", "reduce_extend_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
