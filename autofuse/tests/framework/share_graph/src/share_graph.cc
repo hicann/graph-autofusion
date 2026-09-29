@@ -10085,6 +10085,91 @@ af::ComputeGraphPtr ShareGraph::LoadMatmulElewiseBrcFusedGraph(bool is_dynamic) 
   return compute_graph;
 }
 
+static void CreateBatchMatmulPrefix(const MatmulGraphContext &context, af::ascir_op::BatchMatMul &matmul) {
+  af::ascir_op::Data data0("data0", context.graph);
+  SetFullMatmulGraphLayout(data0, context, af::DT_FLOAT16);
+  data0.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  data0.ir_attr.SetIndex(0);
+  af::ascir_op::Load load0("load0");
+  load0.x = data0.y;
+  SetFullMatmulGraphLayout(load0, context, af::DT_FLOAT16);
+
+  af::ascir_op::Data data1("data1", context.graph);
+  SetFullMatmulGraphLayout(data1, context, af::DT_FLOAT16);
+  data1.attr.api.compute_type = af::ComputeType::kComputeInvalid;
+  data1.ir_attr.SetIndex(1);
+  af::ascir_op::Load load1("load1");
+  load1.x = data1.y;
+  SetFullMatmulGraphLayout(load1, context, af::DT_FLOAT16);
+
+  matmul.x1 = load0.y;
+  matmul.x2 = load1.y;
+  SetFullMatmulGraphLayout(matmul, context, af::DT_FLOAT);
+  matmul.ir_attr.SetAdj_x1(1);
+  matmul.ir_attr.SetAdj_x2(0);
+  matmul.ir_attr.SetHas_relu(0);
+  matmul.ir_attr.SetEnable_hf32(0);
+  matmul.ir_attr.SetOffset_x(0);
+}
+
+static void CreateBatchMatmulElewiseBrcGraph(af::AscGraph &graph, bool is_dynamic) {
+  const auto context = CreateMatmulGraphContext(graph, is_dynamic);
+  af::ascir_op::BatchMatMul matmul("matmul");
+  CreateBatchMatmulPrefix(context, matmul);
+
+  af::ascir_op::Add add_op("add");
+  add_op.x1 = matmul.y;
+  SetFullMatmulGraphLayout(add_op, context, af::DT_FLOAT);
+  ConnectAddBroadcast(context, add_op);
+
+  af::ascir_op::Mul mul("mul");
+  mul.x1 = add_op.y;
+  SetFullMatmulGraphLayout(mul, context, af::DT_FLOAT);
+  ConnectSigmoidBroadcast(context, mul);
+
+  af::ascir_op::Sub sub("sub");
+  sub.x1 = mul.y;
+  SetFullMatmulGraphLayout(sub, context, af::DT_FLOAT);
+  ConnectRsqrtBroadcast(context, sub);
+  CreateMatmulGraphOutput(context, sub.y);
+}
+
+af::ComputeGraphPtr ShareGraph::LoadBatchMatmulElewiseBrcFusedGraph(bool is_dynamic) {
+  auto builder = GraphBuilder("load_batch_matmul_elewise_brc_store_test");
+  auto data0 = builder.AddNode("data0", "Data", 0, 1);
+  af::AttrUtils::SetInt(data0->GetOpDescBarePtr(), "_parent_node_index", 0);
+  auto data1 = builder.AddNode("data1", "Data", 0, 1);
+  af::AttrUtils::SetInt(data1->GetOpDescBarePtr(), "_parent_node_index", 1);
+  auto data2 = builder.AddNode("data2", "Data", 0, 1);
+  af::AttrUtils::SetInt(data2->GetOpDescBarePtr(), "_parent_node_index", 2);
+  auto data3 = builder.AddNode("data3", "Data", 0, 1);
+  af::AttrUtils::SetInt(data3->GetOpDescBarePtr(), "_parent_node_index", 3);
+  auto data4 = builder.AddNode("data4", "Data", 0, 1);
+  af::AttrUtils::SetInt(data4->GetOpDescBarePtr(), "_parent_node_index", 4);
+
+  auto ascbc = builder.AddNode("ascbc", "AscGraph", 5, 1);
+  auto netoutput = builder.AddNode("netoutput1", af::NETOUTPUT, 1, 0);
+
+  builder.AddDataEdge(data0, 0, ascbc, 0);
+  builder.AddDataEdge(data1, 0, ascbc, 1);
+  builder.AddDataEdge(data2, 0, ascbc, 2);
+  builder.AddDataEdge(data3, 0, ascbc, 3);
+  builder.AddDataEdge(data4, 0, ascbc, 4);
+  builder.AddDataEdge(ascbc, 0, netoutput, 0);
+  ComputeGraphPtr compute_graph = builder.GetGraph();
+  if (compute_graph == nullptr) {
+    return nullptr;
+  }
+  auto ascbc_node = compute_graph->FindNode("ascbc");
+  af::AscGraph sub_graph("load_batch_matmul_elewise_brc_store");
+  CreateBatchMatmulElewiseBrcGraph(sub_graph, is_dynamic);
+
+  std::string sub_graph_str;
+  af::AscGraphUtils::SerializeToReadable(sub_graph, sub_graph_str);
+  af::AttrUtils::SetStr(ascbc_node->GetOpDescBarePtr(), "ascgraph", sub_graph_str);
+  return compute_graph;
+}
+
 /**
  *               where
  *          /        \     \
