@@ -52,9 +52,10 @@ class TestLockDetector : public ::testing::Test {
 
   // Helper function to create a wait node
   SuperKernelBaseNode *CreateWaitNode(uint64_t nodeId, uint32_t streamIdx, uint64_t preNodeId = INVALID_TASK_ID,
-                                      uint64_t nextNodeId = INVALID_TASK_ID, uint64_t notifyNodeId = INVALID_TASK_ID) {
-    auto node = std::make_unique<SuperKernelMemoryNode>(nullptr, ACL_MODEL_RI_TASK_VALUE_WAIT, 0, streamIdx,
-                                                        INVALID_STREAM_ID, INVALID_TASK_ID);
+                                      uint64_t nextNodeId = INVALID_TASK_ID, uint64_t notifyNodeId = INVALID_TASK_ID,
+                                      uint64_t nodeIdxInStream = 0) {
+    auto node = std::make_unique<SuperKernelMemoryNode>(nullptr, ACL_MODEL_RI_TASK_VALUE_WAIT, nodeIdxInStream,
+                                                        streamIdx, INVALID_STREAM_ID, INVALID_TASK_ID);
     node->SetNodeId(nodeId);
     node->SetNextNodeId(nextNodeId);
     node->SetPreNodeId(preNodeId);
@@ -71,9 +72,9 @@ class TestLockDetector : public ::testing::Test {
   // Helper function to create a notify node
   SuperKernelBaseNode *CreateNotifyNode(uint64_t nodeId, uint32_t streamIdx, uint64_t preNodeId = INVALID_TASK_ID,
                                         uint64_t nextNodeId = INVALID_TASK_ID, uint64_t eventId = INVALID_TASK_ID,
-                                        std::vector<uint64_t> waitNodeIds = {}) {
-    auto node = std::make_unique<SuperKernelMemoryNode>(nullptr, ACL_MODEL_RI_TASK_VALUE_WRITE, 0, streamIdx,
-                                                        INVALID_STREAM_ID, INVALID_TASK_ID);
+                                        std::vector<uint64_t> waitNodeIds = {}, uint64_t nodeIdxInStream = 0) {
+    auto node = std::make_unique<SuperKernelMemoryNode>(nullptr, ACL_MODEL_RI_TASK_VALUE_WRITE, nodeIdxInStream,
+                                                        streamIdx, INVALID_STREAM_ID, INVALID_TASK_ID);
     node->SetNodeId(nodeId);
     node->SetNextNodeId(nextNodeId);
     node->SetPreNodeId(preNodeId);
@@ -104,8 +105,9 @@ class TestLockDetector : public ::testing::Test {
 
   // Helper function to create a kernel node with custom core counts
   SuperKernelBaseNode *CreateKernelNodeWithCores(uint64_t nodeId, uint32_t streamIdx, uint64_t preNodeId,
-                                                 uint64_t nextNodeId, uint32_t numBlocks, SkKernelType kernelType) {
-    auto node = std::make_unique<SuperKernelKernelNode>(nullptr, ACL_MODEL_RI_TASK_KERNEL, 0, streamIdx,
+                                                 uint64_t nextNodeId, uint32_t numBlocks, SkKernelType kernelType,
+                                                 uint64_t nodeIdxInStream = 0) {
+    auto node = std::make_unique<SuperKernelKernelNode>(nullptr, ACL_MODEL_RI_TASK_KERNEL, nodeIdxInStream, streamIdx,
                                                         INVALID_STREAM_ID, INVALID_TASK_ID);
     node->SetNodeId(nodeId);
     node->SetNextNodeId(nextNodeId);
@@ -170,6 +172,7 @@ class TestLockDetector : public ::testing::Test {
   std::unique_ptr<SuperKernelOptionsManager> opts;
   std::unique_ptr<LockDetector> lockDetector;
 };
+
 // Test 1: one stream, kernel node (after wait node) exceeds max sk cube/vec num
 TEST_F(TestLockDetector, SingleStreamKernelFirst) {
   // ======================= graph =======================
@@ -643,4 +646,176 @@ TEST_F(TestLockDetector, notifyInOtherSKWithoutSameStream) {
   EXPECT_FALSE(lockDetector->IsFusible(*w3));
   EXPECT_FALSE(w3->isVisited);
   EXPECT_FALSE(k9->isVisited);
+}
+
+TEST_F(TestLockDetector, ThreeStreamsCrossScopeNotifyUsesCurrentScopeId) {
+  // stream 0: k1 -> k2 -> k3 -> notify1
+  // stream 1: k4 -> k5 -> k6 -> wait1 -> k7 (already in SK)
+  // stream 2: k8 -> k9 -> k10 -> wait2 -> k11 (current scope)
+  // notify1 signals both wait1 and wait2.
+  auto *k1 = CreateKernelNodeWithCores(1, 0, INVALID_TASK_ID, 2, 2, SkKernelType::AIC_ONLY);
+  auto *k2 = CreateKernelNodeWithCores(2, 0, 1, 3, 2, SkKernelType::AIC_ONLY);
+  auto *k3 = CreateKernelNodeWithCores(3, 0, 2, 4, 2, SkKernelType::AIC_ONLY);
+  auto *notify1 = CreateNotifyNode(4, 0, 3, INVALID_TASK_ID, 1, {8, 13});
+
+  auto *k4 = CreateKernelNodeWithCores(5, 1, INVALID_TASK_ID, 6, 2, SkKernelType::AIC_ONLY);
+  auto *k5 = CreateKernelNodeWithCores(6, 1, 5, 7, 2, SkKernelType::AIC_ONLY);
+  auto *k6 = CreateKernelNodeWithCores(7, 1, 6, 8, 2, SkKernelType::AIC_ONLY);
+  auto *wait1 = CreateWaitNode(8, 1, INVALID_TASK_ID, 9, 4);
+  auto *k7 = CreateKernelNodeWithCores(9, 1, 8, INVALID_TASK_ID, 2, SkKernelType::AIC_ONLY);
+
+  auto *k8 = CreateKernelNodeWithCores(10, 2, INVALID_TASK_ID, 11, 2, SkKernelType::AIC_ONLY);
+  auto *k9 = CreateKernelNodeWithCores(11, 2, 10, 12, 2, SkKernelType::AIC_ONLY);
+  auto *k10 = CreateKernelNodeWithCores(12, 2, 11, 13, 2, SkKernelType::AIC_ONLY);
+  auto *wait2 = CreateWaitNode(13, 2, INVALID_TASK_ID, 14, 4);
+  auto *k11 = CreateKernelNodeWithCores(14, 2, 13, INVALID_TASK_ID, 2, SkKernelType::AIC_ONLY);
+
+  SetupStreams({{1, 2, 3, 4}, {5, 6, 7, 8, 9}, {10, 11, 12, 13, 14}});
+  SetupEvent(1, 4, {8, 13});
+
+  constexpr uint16_t stream2ScopeId = 101;
+  constexpr uint16_t stream3ScopeId = 102;
+  for (auto *node : {k4, k5, k6, wait1, k7}) {
+    node->SetScopeId(stream2ScopeId);
+  }
+  for (auto *node : {k8, k9, k10, wait2, k11}) {
+    node->SetScopeId(stream3ScopeId);
+  }
+
+  // Stream 2 is already fused into the SK.
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 10});
+  EXPECT_TRUE(lockDetector->IsFusible(*k4));
+  EXPECT_TRUE(lockDetector->IsFusible(*k5));
+  EXPECT_TRUE(lockDetector->IsFusible(*k6));
+  EXPECT_TRUE(lockDetector->IsFusible(*wait1));
+  EXPECT_TRUE(lockDetector->IsFusible(*k7));
+
+  // The stream 3 scope must use its current scope core requirement while the
+  // notify on stream 1 still has waits in both scopes.
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 2});
+  EXPECT_EQ(k8->GetScopeId(), stream3ScopeId);
+  EXPECT_EQ(k11->GetScopeId(), stream3ScopeId);
+  EXPECT_TRUE(lockDetector->IsFusible(*k8));
+  EXPECT_TRUE(lockDetector->IsFusible(*k9));
+  EXPECT_TRUE(lockDetector->IsFusible(*k10));
+  EXPECT_TRUE(lockDetector->IsFusible(*wait2));
+  EXPECT_TRUE(lockDetector->IsFusible(*k11));
+  EXPECT_EQ(lockDetector->superKernelCubeNum, 2U);
+  EXPECT_EQ(lockDetector->superKernelVecNum, 0U);
+  (void)notify1;
+}
+
+TEST_F(TestLockDetector, SerializedCandidateFoundByEarlierWaitBeforeCurrentScope) {
+  auto *matchingWait = CreateWaitNode(1, 0, INVALID_TASK_ID, 2, 20, 0);
+  auto *unrelatedWait = CreateWaitNode(2, 0, 1, 3, 30, 1);
+  auto *currentKernel = CreateKernelNodeWithCores(3, 0, 2, 4, 1, SkKernelType::AIC_ONLY, 2);
+  auto *currentWait = CreateWaitNode(4, 0, 3, INVALID_TASK_ID, 40, 3);
+
+  auto *candidateHead = CreateKernelNodeWithCores(10, 1, INVALID_TASK_ID, 11, 1, SkKernelType::AIC_ONLY, 0);
+  auto *candidateTail = CreateKernelNodeWithCores(11, 1, 10, 20, 1, SkKernelType::AIC_ONLY, 1);
+  auto *matchingNotify = CreateNotifyNode(20, 1, 11, INVALID_TASK_ID, 1, {1}, 2);
+  auto *unrelatedNotify = CreateNotifyNode(30, 2, INVALID_TASK_ID, INVALID_TASK_ID, 2, {2}, 0);
+  SetupStreams({{1, 2, 3, 4}, {10, 11, 20}, {30}});
+
+  lockDetector->skRangeInStream[0] = {2, 2};
+  lockDetector->parallelScopeHeadNodeIds_[0] = 3;
+  lockDetector->parallelScopeTailNodeIds_[0] = 3;
+  LockDetector::ScopeRuntimeInfo candidate;
+  candidate.headNodeIds[1] = 10;
+  candidate.tailNodeIds[1] = 11;
+
+  EXPECT_TRUE(lockDetector->IsSerializedWithCandidateScope(*currentWait, 1, candidate));
+  (void)matchingWait;
+  (void)unrelatedWait;
+  (void)currentKernel;
+  (void)candidateHead;
+  (void)candidateTail;
+  (void)matchingNotify;
+  (void)unrelatedNotify;
+}
+
+TEST_F(TestLockDetector, SerializedCandidateFoundByLaterNotifyAfterCurrentWait) {
+  auto *currentKernel = CreateKernelNodeWithCores(1, 0, INVALID_TASK_ID, 2, 1, SkKernelType::AIC_ONLY, 0);
+  auto *currentWait = CreateWaitNode(2, 0, 1, 3, 40, 1);
+  auto *unrelatedNotify = CreateNotifyNode(3, 0, 2, 4, 1, {}, 2);
+  auto *matchingNotify = CreateNotifyNode(4, 0, 3, INVALID_TASK_ID, 2, {10}, 3);
+
+  auto *candidateWait = CreateWaitNode(10, 1, INVALID_TASK_ID, 11, 4, 0);
+  auto *candidateHead = CreateKernelNodeWithCores(11, 1, 10, 12, 1, SkKernelType::AIC_ONLY, 1);
+  auto *candidateTail = CreateKernelNodeWithCores(12, 1, 11, INVALID_TASK_ID, 1, SkKernelType::AIC_ONLY, 2);
+  SetupStreams({{1, 2, 3, 4}, {10, 11, 12}});
+
+  lockDetector->skRangeInStream[0] = {0, 0};
+  lockDetector->parallelScopeHeadNodeIds_[0] = 1;
+  lockDetector->parallelScopeTailNodeIds_[0] = 1;
+  LockDetector::ScopeRuntimeInfo candidate;
+  candidate.headNodeIds[1] = 11;
+  candidate.tailNodeIds[1] = 12;
+
+  EXPECT_TRUE(lockDetector->IsSerializedWithCandidateScope(*currentWait, 10, candidate));
+  (void)currentKernel;
+  (void)unrelatedNotify;
+  (void)matchingNotify;
+  (void)candidateWait;
+  (void)candidateHead;
+  (void)candidateTail;
+}
+
+TEST_F(TestLockDetector, CandidateWithoutOrderingEvidenceMayRunInParallel) {
+  auto *currentKernel = CreateKernelNodeWithCores(1, 0, INVALID_TASK_ID, 2, 1, SkKernelType::AIC_ONLY, 0);
+  auto *currentWait = CreateWaitNode(2, 0, 1, 3, 30, 1);
+  auto *notify = CreateNotifyNode(3, 0, 2, INVALID_TASK_ID, 1, {10}, 2);
+
+  auto *candidateHead = CreateKernelNodeWithCores(10, 1, INVALID_TASK_ID, 11, 1, SkKernelType::AIC_ONLY, 0);
+  auto *candidateWait = CreateWaitNode(11, 1, 10, INVALID_TASK_ID, 3, 1);
+  SetupStreams({{1, 2, 3}, {10, 11}});
+
+  lockDetector->skRangeInStream[0] = {0, 0};
+  lockDetector->parallelScopeHeadNodeIds_[0] = 1;
+  lockDetector->parallelScopeTailNodeIds_[0] = 1;
+  LockDetector::ScopeRuntimeInfo candidate;
+  candidate.headNodeIds[1] = 10;
+  candidate.tailNodeIds[1] = 11;
+
+  EXPECT_FALSE(lockDetector->IsSerializedWithCandidateScope(*currentWait, 11, candidate));
+  (void)currentKernel;
+  (void)notify;
+  (void)candidateHead;
+  (void)candidateWait;
+}
+
+TEST_F(TestLockDetector, MergedCandidateStreamsParticipateInLaterSerializationCheck) {
+  auto *currentKernel = CreateKernelNodeWithCores(1, 0, INVALID_TASK_ID, 2, 1, SkKernelType::AIC_ONLY, 0);
+  auto *currentWait = CreateWaitNode(2, 0, 1, INVALID_TASK_ID, 30, 1);
+
+  auto *mergedHead = CreateKernelNodeWithCores(10, 1, INVALID_TASK_ID, 11, 1, SkKernelType::AIC_ONLY, 0);
+  auto *mergedTail = CreateKernelNodeWithCores(11, 1, 10, 12, 1, SkKernelType::AIC_ONLY, 1);
+  auto *notify = CreateNotifyNode(12, 1, 11, INVALID_TASK_ID, 1, {20}, 2);
+
+  auto *candidateWait = CreateWaitNode(20, 2, INVALID_TASK_ID, 21, 12, 0);
+  auto *candidateHead = CreateKernelNodeWithCores(21, 2, 20, 22, 1, SkKernelType::AIC_ONLY, 1);
+  auto *candidateTail = CreateKernelNodeWithCores(22, 2, 21, INVALID_TASK_ID, 1, SkKernelType::AIC_ONLY, 2);
+  SetupStreams({{1, 2}, {10, 11, 12}, {20, 21, 22}});
+
+  lockDetector->skRangeInStream[0] = {0, 0};
+  lockDetector->parallelScopeHeadNodeIds_[0] = 1;
+  lockDetector->parallelScopeTailNodeIds_[0] = 1;
+  LockDetector::ScopeRuntimeInfo mergedScope;
+  mergedScope.streamIds = {1};
+  mergedScope.headNodeIds[1] = 10;
+  mergedScope.tailNodeIds[1] = 11;
+  lockDetector->MergeCandidateScopeRange(mergedScope);
+
+  LockDetector::ScopeRuntimeInfo candidate;
+  candidate.headNodeIds[2] = 21;
+  candidate.tailNodeIds[2] = 22;
+
+  EXPECT_TRUE(lockDetector->IsSerializedWithCandidateScope(*currentWait, 20, candidate));
+  (void)currentKernel;
+  (void)mergedHead;
+  (void)mergedTail;
+  (void)notify;
+  (void)candidateWait;
+  (void)candidateHead;
+  (void)candidateTail;
 }
