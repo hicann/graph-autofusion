@@ -336,7 +336,9 @@ struct ScopeExtInfo {
 class SuperKernelScopeInfo {
  public:
   SuperKernelScopeInfo() : scopeId_(ScopeIdGenerator::Instance().NextId()) {}
-  ~SuperKernelScopeInfo() = default;
+  ~SuperKernelScopeInfo() {
+    ClearNodeScopeIds();
+  }
   SuperKernelScopeInfo(const SuperKernelScopeInfo &) = delete;
   SuperKernelScopeInfo &operator=(const SuperKernelScopeInfo &) = delete;
   SuperKernelScopeInfo(SuperKernelScopeInfo &&other) noexcept
@@ -346,9 +348,12 @@ class SuperKernelScopeInfo {
         scopeBitFlags_(other.scopeBitFlags_),
         breakInfo_(std::move(other.breakInfo_)),
         scopeCoreInfo_(other.scopeCoreInfo_),
-        extInfo_(std::move(other.extInfo_)) {}
+        extInfo_(std::move(other.extInfo_)) {
+    other.nodes_.clear();
+  }
   SuperKernelScopeInfo &operator=(SuperKernelScopeInfo &&other) noexcept {
     if (this != &other) {
+      ClearNodeScopeIds();
       scopeId_ = other.scopeId_;
       scopeStreamInfos_ = std::move(other.scopeStreamInfos_);
       nodes_ = std::move(other.nodes_);
@@ -356,6 +361,7 @@ class SuperKernelScopeInfo {
       breakInfo_ = std::move(other.breakInfo_);
       scopeCoreInfo_ = other.scopeCoreInfo_;
       extInfo_ = std::move(other.extInfo_);
+      other.nodes_.clear();
     }
     return *this;
   }
@@ -379,11 +385,27 @@ class SuperKernelScopeInfo {
   const std::vector<SuperKernelBaseNode *> &GetNodes() const {
     return nodes_;
   }
+  void ClearNodeScopeIds() const {
+    for (auto *node : nodes_) {
+      if (node != nullptr && node->GetScopeId() == scopeId_) {
+        node->ClearScopeId();
+      }
+    }
+  }
   void SetNodes(std::vector<SuperKernelBaseNode *> nodeList) {
+    ClearNodeScopeIds();
     nodes_ = std::move(nodeList);
+    for (auto *node : nodes_) {
+      if (node != nullptr) {
+        node->SetScopeId(scopeId_);
+      }
+    }
   }
   void AddNode(SuperKernelBaseNode *node) {
     nodes_.push_back(node);
+    if (node != nullptr) {
+      node->SetScopeId(scopeId_);
+    }
   }
 
   // ============ ScopeBitFlags ============
