@@ -36,10 +36,22 @@ void PrintSKNodesDetail(std::string skFuncName, SuperKernelScopeInfo &scopeInfo)
   }
 }
 
-void PrintSKNodes(std::string skFuncName, SuperKernelScopeInfo &scopeInfo) {
+void PrintSKNodesWithLaunchInfoDetail(std::string skFuncName, SuperKernelScopeInfo &scopeInfo,
+                                      const SkLaunchInfo &launchInfo) {
+  uint16_t scopeId = scopeInfo.GetScopeId();
+  auto &nodes = scopeInfo.GetExtInfo().filteredNodes;
+  SK_LOGI("  SK Function: %s, scope id: %u, Node Count: %zu, kernelType: %s, numBlocks: %u, batchMode: %d",
+          skFuncName.c_str(), scopeId, nodes.size(), to_string(launchInfo.entryInfo.entryType),
+          launchInfo.entryInfo.numBlocks, static_cast<int>(launchInfo.isScheModeOn));
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    SK_LOGI("    [%zu] %s", i, nodes[i]->Format().c_str());
+  }
+}
+
+void PrintSKNodes(std::string skFuncName, SuperKernelScopeInfo &scopeInfo, const SkLaunchInfo &launchInfo) {
   {
     SK_LOG_CONTEXT_SIMPLE("sk_fused_nodes.log");
-    PrintSKNodesDetail(skFuncName, scopeInfo);
+    PrintSKNodesWithLaunchInfoDetail(skFuncName, scopeInfo, launchInfo);
   }
   PrintSKNodesDetail(skFuncName, scopeInfo);
 }
@@ -250,7 +262,6 @@ bool SuperKernelOptimizer::Schedule(SuperKernelScopeInfo &scopeInfo, SuperKernel
   }
 
   std::string skFuncName = GetSkFuncName(reorderedTaskNodes, scopeInfo.GetScopeId(), scopeInfo.GetExtInfo().scopeName);
-  PrintSKNodes(skFuncName, scopeInfo);
   PrintTaskNodesDetail(reorderedTaskNodes, "reordered task nodes");
 
   std::vector<SuperKernelBaseNode *> customTasks;
@@ -282,6 +293,7 @@ bool SuperKernelOptimizer::Schedule(SuperKernelScopeInfo &scopeInfo, SuperKernel
     SK_LOGE("schedule failed: build launch info failed");
     return false;
   }
+  PrintSKNodes(skFuncName, scopeInfo, launchInfo);
   SK_LOGI(
       "schedule scope: build finished, entryType=%s, entryFuncHandle=%p, skFuncName=%s, useSimtEntry=%d, "
       "skMaxDcacheSize=%zu, isScheModeOn=%d",
