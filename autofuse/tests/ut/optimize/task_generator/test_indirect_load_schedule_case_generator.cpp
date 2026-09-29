@@ -1770,9 +1770,14 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceMetadataCoversReduceAxisLa
     ExpectAxisOrigins(simt_graph, simt_axes.outer_axis, simt_outer);
     ExpectAxisOrigins(simt_graph, simt_axes.inner_axis, simt_inner);
     EXPECT_EQ(simt_axes.input_inner_axis, af::kIdNone);
-    // 单 Reduce 后置保持主线固定 tile：可求解 tile 仅限 gather+norm 复合形态。
-    EXPECT_NE(simt_axes.tile_outer_axis, af::kIdNone);
-    EXPECT_NE(simt_axes.tile_inner_axis, af::kIdNone);
+    const bool is_ar = suffix.find('A', first_reduce) == std::string::npos;
+    if (is_ar) {
+      EXPECT_EQ(simt_axes.tile_outer_axis, af::kIdNone);
+      EXPECT_EQ(simt_axes.tile_inner_axis, af::kIdNone);
+    } else {
+      EXPECT_NE(simt_axes.tile_outer_axis, af::kIdNone);
+      EXPECT_NE(simt_axes.tile_inner_axis, af::kIdNone);
+    }
     EXPECT_EQ(simt_view.input.axis_ids, input_axes);
     EXPECT_EQ(simt_view.index.axis_ids, output_axes);
     EXPECT_EQ(simt_view.output.axis_ids, output_axes);
@@ -2383,9 +2388,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SoftmaxDedicatedCandidateSolvesTileS
   ExpectAxisOrigins(simt_graph, axes.outer_axis, expected_outer);
 }
 
-// post-Reduce SIMT（普通单 Reduce）保持主线固定 tile：可求解 tile 仅限 gather+norm
-// 复合形态（Softmax 专用/多 Reduce 配对），单 Reduce 批量形态存在数值回归。
-TEST(IndirectLoadScheduleCaseGeneratorTest, SimtPostReduceCandidateKeepsFixedTile) {
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimtArPostReduceCandidateUsesSolvableTile) {
   auto graph = BuildPostReduceGraph("ARR");
   const auto output_axes = graph.FindNode("indirect_load")->outputs()[0]->attr.axis;
   optimize::IndirectLoadScheduleCaseGenerator generator;
@@ -2399,15 +2402,32 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimtPostReduceCandidateKeepsFixedTil
 
   ascgen_utils::indirect_load::TemplateAxes axes;
   ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(simt_indirect_load, axes), af::SUCCESS);
-  // 单 Reduce 不启用可求解 tile：固定 tile 轴照常注解（主线行为）。
-  EXPECT_NE(axes.tile_outer_axis, af::kIdNone);
-  EXPECT_NE(axes.tile_inner_axis, af::kIdNone);
+  // AR Reduce 的 retained prefix 由调度期按 UB 容量切分，Reduce suffix 保持完整。
+  EXPECT_EQ(axes.tile_outer_axis, af::kIdNone);
+  EXPECT_EQ(axes.tile_inner_axis, af::kIdNone);
   // ARR 布局：first_reduce 在第 2 轴，outer=[y0,y1]，inner=[y2,y3]。
   const size_t first_reduce = 2UL;
   const std::vector<af::AxisId> expected_outer(output_axes.begin(), output_axes.begin() + first_reduce);
   const std::vector<af::AxisId> expected_inner(output_axes.begin() + first_reduce, output_axes.end());
   ExpectAxisOrigins(*simt_iter, axes.outer_axis, expected_outer);
   ExpectAxisOrigins(*simt_iter, axes.inner_axis, expected_inner);
+}
+
+TEST(IndirectLoadScheduleCaseGeneratorTest, SimtRaPostReduceCandidateKeepsFixedTile) {
+  auto graph = BuildPostReduceGraph("RAA");
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  const auto simt_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt);
+  ASSERT_NE(simt_iter, graphs.end());
+  const auto simt_indirect_load = simt_iter->FindNode("indirect_load");
+  ASSERT_NE(simt_indirect_load, nullptr);
+
+  ascgen_utils::indirect_load::TemplateAxes axes;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetTemplateAxes(simt_indirect_load, axes), af::SUCCESS);
+  EXPECT_NE(axes.tile_outer_axis, af::kIdNone);
+  EXPECT_NE(axes.tile_inner_axis, af::kIdNone);
 }
 
 }  // namespace

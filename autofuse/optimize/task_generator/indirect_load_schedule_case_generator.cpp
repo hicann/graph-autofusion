@@ -34,7 +34,6 @@ namespace {
 constexpr int64_t kIndirectLoadSimtDcacheSize = 32 * 1024;
 constexpr int64_t kEmbeddingSimdPayloadBytesThreshold = 2048;
 constexpr int64_t kEmbeddingSimdLookupCountThreshold = 32;
-constexpr uint32_t kVectorDataBlockBytes = 32U;
 constexpr int32_t kEmbeddingFastPathScore = 2;
 constexpr int32_t kEmbeddingAlternateFastPathScore = 1;
 constexpr size_t kIndirectLoadInputCount = 2UL;
@@ -664,25 +663,7 @@ bool HasSupportedReduceSuffix(const PostReduceLayout &layout, size_t begin) {
   return has_reduce_axis && transitions <= 1UL;
 }
 
-bool IsPostReduceInnermostAxisAligned(const af::AscNodePtr &reduce) {
-  if (reduce == nullptr || reduce->inputs().size() != 1UL || reduce->inputs()[0] == nullptr) {
-    return false;
-  }
-  const auto input = reduce->inputs()[0];
-  if (input->attr.repeats.empty()) {
-    return false;
-  }
-  const uint32_t dtype_size = af::GetSizeByDataType(input->attr.dtype);
-  if (dtype_size == 0U || kVectorDataBlockBytes % dtype_size != 0U) {
-    return false;
-  }
-  const uint32_t alignment = kVectorDataBlockBytes / dtype_size;
-  return af::SymbolicUtils::StaticCheckEq(af::sym::Mod(input->attr.repeats.back(), af::Symbol(alignment)),
-                                          af::ops::Zero) == af::TriBool::kTrue;
-}
-
-af::Status ValidateSimtPostReduceLayout(const af::AscNodePtr &indirect_load, const af::AscNodePtr &reduce,
-                                        size_t &boundary, bool &is_legal) {
+af::Status ValidateSimtPostReduceLayout(const af::AscNodePtr &reduce, size_t &boundary, bool &is_legal) {
   is_legal = true;
   if (reduce == nullptr) {
     return af::SUCCESS;
@@ -696,15 +677,24 @@ af::Status ValidateSimtPostReduceLayout(const af::AscNodePtr &indirect_load, con
     is_legal = false;
     return af::SUCCESS;
   }
-  const size_t axis_index = GetIndirectLoadAxisIndex(indirect_load);
-  GE_ASSERT_TRUE(axis_index != kIndirectLoadInvalidAxisIndex, "IndirectLoad axis index of node[%s] is invalid.",
-                 indirect_load->GetNamePtr());
-  const bool is_embedding_feature_reduce =
-      axis_index == 0UL && layout.axes.size() == 3UL && layout.kinds.size() == 3UL &&
-      layout.kinds[0] == ReduceAxisKind::kRetained && layout.kinds[1] == ReduceAxisKind::kRetained &&
-      layout.kinds[2] == ReduceAxisKind::kReduced && IsPostReduceInnermostAxisAligned(reduce);
-  boundary = is_embedding_feature_reduce ? 1UL : layout.first_reduce;
+  boundary = layout.first_reduce;
   is_legal = HasSupportedReduceSuffix(layout, boundary);
+  return af::SUCCESS;
+}
+
+af::Status IsSimtArPostReduce(const af::AscNodePtr &reduce, bool &is_ar) {
+  is_ar = false;
+  if (reduce == nullptr) {
+    return af::SUCCESS;
+  }
+  PostReduceLayout layout;
+  bool is_legal = false;
+  GE_ASSERT_SUCCESS(BuildPostReduceLayout(reduce, layout, is_legal));
+  if (!is_legal || layout.first_reduce == layout.axes.size()) {
+    return af::SUCCESS;
+  }
+  is_ar = std::none_of(layout.kinds.begin() + static_cast<int64_t>(layout.first_reduce), layout.kinds.end(),
+                       [](ReduceAxisKind kind) { return kind == ReduceAxisKind::kRetained; });
   return af::SUCCESS;
 }
 
@@ -1466,9 +1456,9 @@ af::Status NormalizeSimtAxesForTemplate(af::AscGraph &graph, const af::AscNodePt
   // 固定 tile 轴：tile 行数交由调度期 TileTiling 走通用 TileSplit 按 UB 容量求解，使单个
   // tile 覆盖多行，消除逐行 SIMT/向量交替（VF_CALL 启动与 PipeBarrier 次数随行数下降）。
   // 无 post-Reduce 的 SIMT boundary 保持输出 rank，维持固定单行 tile 语义不变。
-  // solve_tile_size 仅由 gather+norm 复合形态（Softmax 专用或多 Reduce 配对）启用：
-  // 通用单 Reduce 后置（如 IL→Sum）保持固定 tile 的主线行为，可求解 tile 的批量
-  // kernel 形态在单 Reduce 图上存在数值回归（e2e 输出与参考不符）。
+  // 对 AR 后置 Reduce，solve_tile_size 允许调度期按 UB 容量求解多行 tile。
+  // SIMT index evaluator 使用完整 output_index 重建每个 Index Load 的逻辑偏移，
+  // 因而 direct index 与 Cast/Add/Where 等复合 index 共用该路径。
   GE_ASSERT_SUCCESS(
       NormalizeAxesForTemplate(graph, indirect_load, boundary, af::kIdNone, af::kIdNone, false, solve_tile_size));
   return af::SUCCESS;
@@ -2417,7 +2407,7 @@ af::Status ValidateTemplate(const af::AscNodePtr &indirect_load, ascir::Template
     // FindPostReduceChain 保留首个 Reduce 作为 SIMT local target 锚点，并继续
     // 遍历其后的 Broadcast/Elementwise/Reduce；后续统计阶段由普通调度链执行，
     // 因而串行和共享输入两类复合区域均可复用现有 Codegen。
-    GE_ASSERT_SUCCESS(ValidateSimtPostReduceLayout(indirect_load, analysis.post_reduce, boundary, is_candidate_legal));
+    GE_ASSERT_SUCCESS(ValidateSimtPostReduceLayout(analysis.post_reduce, boundary, is_candidate_legal));
     if (is_candidate_legal) {
       GE_ASSERT_SUCCESS(ValidateSimtTemplateRegion(analysis, is_candidate_legal));
     }
@@ -2464,12 +2454,11 @@ af::Status NormalizeTemplateAxes(af::AscGraph &graph, const af::AscNodePtr &indi
       return SeedCompositeReduceInputViews(indirect_load, analysis.composite_reduces);
     }
   } else {
-    // SIMT tile 全部回退主线固定形态（CreateFixedTileSplit 预建固定行数轴，
-    // 逐行发射）：多行批量发射（solve_tile 求解行数 + 一次发射整 tile）要求
-    // StridedPolicy/index 寻址/下游 api 全链按多行物理布局适配，主线从未有过该形态，
-    // 生产实证存在 SIMT GM 访问越界（AIC 334/341）与数值错误且适配面大。逐行发射下
-    // 每行 count=inner、index 与行一一对应，全部回到主线已验证语义。
-    const bool solve_tile = false;
+    // 仅 AR 后置 Reduce 开启可求解 tile：TileInner 代表多个 retained
+    // feature 行，reduced suffix 保持完整向量化，避免将 RA 的 retained
+    // 后缀误并入同一 Reduce API 窗口。
+    bool solve_tile = false;
+    GE_ASSERT_SUCCESS(IsSimtArPostReduce(analysis.post_reduce, solve_tile));
     GE_ASSERT_SUCCESS(NormalizeSimtAxesForTemplate(graph, indirect_load, boundary, solve_tile));
   }
   if (is_softmax_post) return af::SUCCESS;

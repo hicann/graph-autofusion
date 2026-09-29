@@ -2569,6 +2569,13 @@ TEST_F(AutoSchedulerUT, IndirectLoadSimtPostReducePreservesOuterRepeatsAndKeepsV
   const auto reduce = scheduled_graph.FindNode("reduce");
   ASSERT_NE(indirect_load, nullptr);
   ASSERT_NE(reduce, nullptr);
+  const auto scheduled_axes = scheduled_graph.GetAllAxis();
+  const auto feature_tile_inner =
+      std::find_if(scheduled_axes.begin(), scheduled_axes.end(), [&template_axes](const auto &axis) {
+        return axis != nullptr && axis->type == ascir::Axis::Type::kAxisTypeTileInner && axis->from.size() == 1UL &&
+               axis->from.front() == template_axes.outer_axis;
+      });
+  ASSERT_NE(feature_tile_inner, scheduled_axes.end());
   ASSERT_EQ(indirect_load->outputs().size(), 1UL);
   const auto &il_output = indirect_load->outputs()[0]->attr;
   const auto first_inner = std::find(il_output.axis.begin(), il_output.axis.end(), first_inner_axis);
@@ -2584,6 +2591,7 @@ TEST_F(AutoSchedulerUT, IndirectLoadSimtPostReducePreservesOuterRepeatsAndKeepsV
   EXPECT_EQ(reduce->inputs[0].attr.vectorized_axis, il_output.vectorized_axis);
   EXPECT_EQ(reduce->inputs[0].attr.vectorized_strides, il_output.vectorized_strides);
   EXPECT_FALSE(reduce->inputs[0].attr.vectorized_axis.empty());
+  EXPECT_EQ(reduce->inputs[0].attr.vectorized_axis.front(), (*feature_tile_inner)->id);
 }
 
 TEST_F(AutoSchedulerUT, TilingGroup_gen_elementwise_tilingGroup) {

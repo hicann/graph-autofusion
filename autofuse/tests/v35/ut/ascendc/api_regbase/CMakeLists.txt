@@ -39,6 +39,7 @@ add_library(test_regbase_ascendc OBJECT
     ./test_reciprocal_extend.cpp
     ./test_relu.cpp
     ./test_rsqrt.cpp
+    ./test_sigmoid.cpp
     ./test_round.cpp
     ./test_sinh.cpp
     ./test_tanh.cpp

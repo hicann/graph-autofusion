@@ -1471,7 +1471,8 @@ TEST(IndirectLoadApiCallTest, GenerateSimtPostReduceKeepsParallelStoreChain) {
   EXPECT_NE(definition.find("__gm__ half *output"), std::string::npos);
   EXPECT_NE(definition.find("__ubuf__ half *output"), std::string::npos);
   EXPECT_NE(definition.find("[output_index] = outputs.output"), std::string::npos);
-  EXPECT_NE(definition.find("[local_index] = outputs.output"), std::string::npos);
+  EXPECT_NE(definition.find("targets.output1[(local_index / ("), std::string::npos);
+  EXPECT_NE(definition.find("KernelUtils::SizeAlign"), std::string::npos);
 }
 
 // ==================== SIMT post-reduce Init ====================

@@ -120,6 +120,68 @@ void RemapOutputVectorizedAxes(af::AscGraph &graph, const af::AscNodePtr &node, 
   output.attr.vectorized_axis = remapped;
 }
 
+void PrependPostReduceTileAxis(const af::AscNodePtr &indirect_load, const ascir::AxisId tile_inner_axis) {
+  const auto reduce = ascgen_utils::indirect_load::GetPostReduceConsumer(indirect_load);
+  if (tile_inner_axis == af::kIdNone || reduce == nullptr) {
+    return;
+  }
+  std::vector<af::AscNodePtr> pending{indirect_load};
+  std::set<af::Node *> visited;
+  for (size_t index = 0UL; index < pending.size(); ++index) {
+    const auto &node = pending[index];
+    if (node == nullptr || !visited.emplace(node.get()).second) {
+      continue;
+    }
+    for (const auto &output : node->outputs()) {
+      if (output == nullptr ||
+          std::find(output->attr.axis.begin(), output->attr.axis.end(), tile_inner_axis) == output->attr.axis.end() ||
+          std::find(output->attr.vectorized_axis.begin(), output->attr.vectorized_axis.end(), tile_inner_axis) !=
+              output->attr.vectorized_axis.end()) {
+        continue;
+      }
+      output->attr.vectorized_axis.insert(output->attr.vectorized_axis.begin(), tile_inner_axis);
+      output->attr.vectorized_strides.clear();
+      output->attr.vectorized_strides.reserve(output->attr.vectorized_axis.size());
+      for (const auto vectorized_axis : output->attr.vectorized_axis) {
+        const auto axis_it = std::find(output->attr.axis.begin(), output->attr.axis.end(), vectorized_axis);
+        if (axis_it == output->attr.axis.end()) {
+          return;
+        }
+        output->attr.vectorized_strides.emplace_back(
+            output->attr.strides[static_cast<size_t>(std::distance(output->attr.axis.begin(), axis_it))]);
+      }
+    }
+    if (node.get() == reduce.get()) {
+      continue;
+    }
+    for (const auto &next : node->GetOutDataNodes()) {
+      const auto next_node = std::dynamic_pointer_cast<af::AscNode>(next);
+      if (next_node == nullptr) {
+        continue;
+      }
+      for (size_t input_index = 0UL; input_index < next_node->inputs().size(); ++input_index) {
+        const auto input_anchor = next_node->GetInDataAnchor(static_cast<int32_t>(input_index));
+        const auto output_anchor = input_anchor == nullptr ? nullptr : input_anchor->GetPeerOutAnchor();
+        if (output_anchor == nullptr || output_anchor->GetOwnerNode().get() != node.get()) {
+          continue;
+        }
+        const size_t output_index = static_cast<size_t>(output_anchor->GetIdx());
+        if (output_index >= node->outputs().size()) {
+          return;
+        }
+        const auto &source = node->outputs()[output_index]->attr;
+        auto &target = next_node->inputs()[input_index]->attr;
+        target.axis = source.axis;
+        target.repeats = source.repeats;
+        target.strides = source.strides;
+        target.vectorized_axis = source.vectorized_axis;
+        target.vectorized_strides = source.vectorized_strides;
+      }
+      pending.emplace_back(next_node);
+    }
+  }
+}
+
 }  // namespace
 
 af::Status SyncSimtBoundaryViews(af::AscGraph &graph,
@@ -167,6 +229,21 @@ af::Status SyncSimtBoundaryViews(af::AscGraph &graph,
       }
       RemapOutputVectorizedAxes(graph, node, *output, merged_axis_ids, tiled_axes_list);
     }
+  }
+  // 只有 SIMT 后接 AR Reduce 的可求解 tile 才需要将动态生成的 tile-inner
+  // 作为多行 vectorized 轴传播。SIMD 和固定 tile 的 SIMT 均保持原有视图，
+  // 避免把固定 tile-inner 错当作 featuret 插入 Reduce 输入。
+  if (ascir::GetTemplateIdOrDefault(*indirect_load) != ascir::TemplateId::kIndirectLoadSimt ||
+      template_axes.tile_inner_axis != af::kIdNone) {
+    return af::SUCCESS;
+  }
+  for (const auto &tiled_axes : tiled_axes_list) {
+    if (tiled_axes.first == nullptr || tiled_axes.second == nullptr || tiled_axes.first->from.size() != 1UL ||
+        tiled_axes.first->from[0] != template_axes.outer_axis) {
+      continue;
+    }
+    PrependPostReduceTileAxis(indirect_load, tiled_axes.second->id);
+    break;
   }
   return af::SUCCESS;
 }
