@@ -463,6 +463,16 @@ class SuperKernelBaseNode {
   void ClearScopeBitFlags() {
     scopeBitFlags.reset();
   }
+
+  uint16_t GetScopeId() const {
+    return scopeId;
+  }
+  void SetScopeId(uint16_t inputScopeId) {
+    scopeId = inputScopeId;
+  }
+  void ClearScopeId() {
+    scopeId = INVALID_SCOPE_ID;
+  }
   void MarkEventNodeToScope(SuperKernelBaseNode *node);
 
   // Notify node expand number setters
@@ -558,6 +568,7 @@ class SuperKernelBaseNode {
   bool isInvalidated = false;
   std::unordered_set<uint32_t> scopeStreamIds;
   std::bitset<MAX_SCOPE_NUM> scopeBitFlags;
+  uint16_t scopeId = INVALID_SCOPE_ID;
 };
 
 // Derived Node Classes
