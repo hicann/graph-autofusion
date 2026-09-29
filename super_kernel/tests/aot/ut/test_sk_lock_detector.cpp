@@ -705,6 +705,43 @@ TEST_F(TestLockDetector, ThreeStreamsCrossScopeNotifyUsesCurrentScopeId) {
   (void)notify1;
 }
 
+TEST_F(TestLockDetector, NotifyPredecessorStreamExcludesCandidateScope) {
+  auto *currentKernel = CreateKernelNodeWithCores(1, 0, INVALID_TASK_ID, 2, 4, SkKernelType::AIC_ONLY, 0);
+  auto *currentWait = CreateWaitNode(2, 0, 1, 3, 10, 1);
+  auto *nextKernel = CreateKernelNodeWithCores(3, 0, 2, INVALID_TASK_ID, 5, SkKernelType::AIC_ONLY, 2);
+  CreateKernelNodeWithCores(9, 1, INVALID_TASK_ID, 20, 4, SkKernelType::AIC_ONLY, 0);
+  CreateNotifyNode(20, 1, 9, 11, 2, {21}, 1);
+  auto *candidateWait = CreateWaitNode(11, 1, 20, 12, 10, 2);
+  auto *candidateKernel = CreateKernelNodeWithCores(12, 1, 11, INVALID_TASK_ID, 4, SkKernelType::AIC_ONLY, 3);
+  CreateWaitNode(21, 2, INVALID_TASK_ID, 10, 20, 0);
+  CreateNotifyNode(10, 2, 21, INVALID_TASK_ID, 1, {2, 11}, 1);
+  SetupStreams({{1, 2, 3}, {9, 20, 11, 12}, {21, 10}});
+
+  constexpr uint16_t currentScopeId = 1;
+  constexpr uint16_t candidateScopeId = 2;
+  for (auto *node : {currentKernel, currentWait, nextKernel}) {
+    node->SetScopeId(currentScopeId);
+  }
+  candidateWait->SetScopeId(candidateScopeId);
+  candidateKernel->SetScopeId(candidateScopeId);
+  LockDetector::ScopeRuntimeInfo candidateScope;
+  candidateScope.coreInfo = {SkKernelType::AIC_ONLY, 4};
+  candidateScope.streamIds.insert(1);
+  candidateScope.headNodeIds.emplace(1, 12);
+  candidateScope.tailNodeIds.emplace(1, 12);
+  lockDetector->scopeInfos_.emplace(candidateScopeId, candidateScope);
+  lockDetector->SetCurrentScopeId(currentScopeId);
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 4});
+
+  const auto savedDeviceCubeNum = LockDetector::deviceRealCubeNum;
+  LockDetector::deviceRealCubeNum = 10;
+  EXPECT_TRUE(lockDetector->IsFusible(*currentKernel));
+  EXPECT_TRUE(lockDetector->IsFusible(*currentWait));
+  lockDetector->SetScopeCoreInfo({SkKernelType::AIC_ONLY, 5});
+  EXPECT_TRUE(lockDetector->IsFusible(*nextKernel));
+  LockDetector::deviceRealCubeNum = savedDeviceCubeNum;
+}
+
 TEST_F(TestLockDetector, SerializedCandidateFoundByEarlierWaitBeforeCurrentScope) {
   auto *matchingWait = CreateWaitNode(1, 0, INVALID_TASK_ID, 2, 20, 0);
   auto *unrelatedWait = CreateWaitNode(2, 0, 1, 3, 30, 1);

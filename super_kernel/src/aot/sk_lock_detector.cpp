@@ -32,7 +32,7 @@ void LockDetector::Init(SuperKernelGraph &graph) {
   superKernelCubeNum = 0;
   superKernelVecNum = 0;
   currentScopeId_ = INVALID_SCOPE_ID;
-  fusedNotifyWaitIds_.clear();
+  fusedNotifyWaitInfos_.clear();
   scopeCoreInfoChanged_ = false;
   nodeNum = 0;
   kernelNodeNum = 0;
@@ -211,7 +211,8 @@ void LockDetector::MergeCandidateScopeRange(const ScopeRuntimeInfo &candidateSco
 
 bool LockDetector::CheckNotifyWaitScopeCombinations(const SuperKernelBaseNode &waitNode,
                                                     const SuperKernelBaseNode &notifyNode, uint32_t skCubeNum,
-                                                    uint32_t skVecNum, uint32_t depCubeNum, uint32_t depVecNum) {
+                                                    uint32_t skVecNum, uint32_t depCubeNum, uint32_t depVecNum,
+                                                    const std::unordered_set<uint32_t> &predecessorStreamIds) {
   std::map<uint16_t, uint64_t> candidateWaitsByScope;
   for (const auto candidateWaitNodeId : notifyNode.GetCorrespondingWaitNodeIds()) {
     const auto *candidateWaitNode = graph_->GetNodeById(candidateWaitNodeId);
@@ -242,6 +243,7 @@ bool LockDetector::CheckNotifyWaitScopeCombinations(const SuperKernelBaseNode &w
     }
     const auto &[candidateWaitId, candidateScope] = candidates[index];
     if (HasIntersection(candidateScope->streamIds, skStreamIds) ||
+        HasIntersection(candidateScope->streamIds, predecessorStreamIds) ||
         IsSerializedWithCandidateScope(waitNode, candidateWaitId, *candidateScope)) {
       return true;
     }
@@ -265,11 +267,12 @@ bool LockDetector::CheckNotifyWaitScopeCombinations(const SuperKernelBaseNode &w
 
 bool LockDetector::CheckFusedWaitNotifies(uint32_t skCubeNum, uint32_t skVecNum, uint32_t depCubeNum,
                                           uint32_t depVecNum) {
-  for (const auto &[notifyId, waitId] : fusedNotifyWaitIds_) {
+  for (const auto &[notifyId, waitInfo] : fusedNotifyWaitInfos_) {
     const auto *notifyNode = graph_->GetNodeById(notifyId);
-    const auto *waitNode = graph_->GetNodeById(waitId);
+    const auto *waitNode = graph_->GetNodeById(waitInfo.waitId);
     if (notifyNode != nullptr && waitNode != nullptr &&
-        !CheckNotifyWaitScopeCombinations(*waitNode, *notifyNode, skCubeNum, skVecNum, depCubeNum, depVecNum)) {
+        !CheckNotifyWaitScopeCombinations(*waitNode, *notifyNode, skCubeNum, skVecNum, depCubeNum, depVecNum,
+                                          waitInfo.predecessorStreamIds)) {
       deadlockReason_ = DeadlockFailReason::NOTIFY_INSUFFICIENT_CORES;
       return false;
     }
@@ -493,7 +496,7 @@ void LockDetector::Reset() {
   superKernelCubeNum = 0;
   superKernelVecNum = 0;
   currentScopeId_ = INVALID_SCOPE_ID;
-  fusedNotifyWaitIds_.clear();
+  fusedNotifyWaitInfos_.clear();
   scopeCoreInfoChanged_ = false;
   nodeNum = 0;
   kernelNodeNum = 0;
@@ -597,33 +600,47 @@ bool LockDetector::GetWaitNodeFusibleStatus(SuperKernelBaseNode &curNode) {
   }
   // Case 3: notify node is in the same SK stream
   if (IsInSKStream(*notifyNode)) {
-    return CheckNotifyInSKStream(curNode, *notifyNode);
-  }
+    if (!CheckNotifyInSKStream(curNode, *notifyNode)) {
+      return false;
+    }
+  } else if (!HasIntersection(skStreamIds, notifyNode->GetScopeStreamIds())) {
+    // A notify outside the SK streams needs resource and dependency checks.
+    // Case 5: notify node has core resource requirement
+    if (notifyNode->GetCubeNum() > 0 || notifyNode->GetVecNum() > 0) {
+      bool canFuse = HasEnoughCores(notifyNode, false);
+      SK_LOGD("[lock detector] Wait node %s: notify %s has cores, canFuse=%d", curNode.Format().c_str(),
+              notifyNode->Format().c_str(), canFuse);
+      if (canFuse) {
+        tempVisitedNodes.emplace_back(notifyNode->GetNodeId());
+      } else {
+        deadlockReason_ = DeadlockFailReason::NOTIFY_INSUFFICIENT_CORES;
+        return false;
+      }
+    }
 
-  // Case 4: notify node is in other sk, which cover multi stream. these stream intersect with the stream of wait node
-  //         Note: will not receive wait node which notify after it (in scope)
-  if (HasIntersection(skStreamIds, notifyNode->GetScopeStreamIds())) {
-    return true;
-  }
-
-  // Case 5: notify node has core resource requirement
-  if (notifyNode->GetCubeNum() > 0 || notifyNode->GetVecNum() > 0) {
-    bool canFuse = HasEnoughCores(notifyNode, false);
-    SK_LOGD("[lock detector] Wait node %s: notify %s has cores, canFuse=%d", curNode.Format().c_str(),
-            notifyNode->Format().c_str(), canFuse);
-    if (canFuse) {
-      tempVisitedNodes.emplace_back(notifyNode->GetNodeId());
-    } else {
-      deadlockReason_ = DeadlockFailReason::NOTIFY_INSUFFICIENT_CORES;
-      return canFuse;
+    // Case 6: notify node is in different stream, check for deadlock
+    bool hasDeadlock = HasDeadlock(notifyNode);
+    SK_LOGD("[lock detector] Wait node %s: notify %s HasDeadlock=%d", curNode.Format().c_str(),
+            notifyNode->Format().c_str(), hasDeadlock);
+    if (hasDeadlock) {
+      return false;
     }
   }
 
-  // Case 6: notify node is in different stream, check for deadlock
-  bool hasDeadlock = HasDeadlock(notifyNode);
-  SK_LOGD("[lock detector] Wait node %s: notify %s HasDeadlock=%d", curNode.Format().c_str(),
-          notifyNode->Format().c_str(), hasDeadlock);
-  return !hasDeadlock;
+  std::unordered_set<uint32_t> predecessorStreamIds;
+  for (const auto nodeId : tempVisitedNodes) {
+    const auto *node = graph_->GetNodeById(nodeId);
+    if (node != nullptr) {
+      predecessorStreamIds.insert(node->GetStreamIdxInGraph());
+    }
+  }
+  if (!CheckNotifyWaitScopeCombinations(curNode, *notifyNode, superKernelCubeNum, superKernelVecNum, depOpCubeNum,
+                                        depOpVecNum, predecessorStreamIds)) {
+    deadlockReason_ = DeadlockFailReason::NOTIFY_INSUFFICIENT_CORES;
+    return false;
+  }
+  fusedNotifyWaitInfos_.emplace(notifyId, FusedNotifyWaitInfo{curNode.GetNodeId(), std::move(predecessorStreamIds)});
+  return true;
 }
 
 bool LockDetector::CheckNotifyInSKStream(SuperKernelBaseNode &curNode, SuperKernelBaseNode &notifyNode) {
@@ -673,21 +690,6 @@ bool LockDetector::GetFusibleStatus(SuperKernelBaseNode &curNode) {
     }
     tempVisitedNodes.clear();
     bool canFuse = GetWaitNodeFusibleStatus(curNode);
-    if (canFuse && curNode.GetCorrespondingNotifyNodeId() != INVALID_TASK_ID) {
-      const uint64_t notifyId = curNode.GetCorrespondingNotifyNodeId();
-      const auto *notifyNode = graph_->GetNodeById(notifyId);
-      if (notifyNode != nullptr && !CheckNotifyWaitScopeCombinations(curNode, *notifyNode, superKernelCubeNum,
-                                                                     superKernelVecNum, depOpCubeNum, depOpVecNum)) {
-        deadlockReason_ = DeadlockFailReason::NOTIFY_INSUFFICIENT_CORES;
-        canFuse = false;
-      }
-      if (canFuse && !CheckFusedWaitNotifies(superKernelCubeNum, superKernelVecNum, depOpCubeNum, depOpVecNum)) {
-        canFuse = false;
-      }
-      if (canFuse) {
-        fusedNotifyWaitIds_.emplace(notifyId, curNode.GetNodeId());
-      }
-    }
     if (canFuse) {
       nodes.insert(nodes.end(), tempVisitedNodes.begin(), tempVisitedNodes.end());
     } else {
