@@ -91,7 +91,7 @@ af::Status FillSpecificParams(const af::AscNodePtr &ge_node, NodeInfo &node_info
   if (node_info.node_type == kVectorFunc) {
     return FillVectorFuncParams(*params, node_info);
   }
-  if (node_info.node_type == kCast) {
+  if (node_info.node_type == kCast || node_info.node_type == kCeil2Int) {
     return FillCastParams(*params, node_info);
   }
   if (node_info.node_type == kBroadcast) {
@@ -104,7 +104,7 @@ af::Status FillSpecificParams(const af::AscNodePtr &ge_node, NodeInfo &node_info
   if (node_info.node_type == kWhere || node_info.node_type == kSelect) {
     return FillWhereParams(*params, node_info);
   }
-  if (node_info.node_type == kIsnan || node_info.node_type == kIsFinite) {
+  if (node_info.node_type == kIsnan || node_info.node_type == kIsFinite || node_info.node_type == kIsInf) {
     return FillUnaryBitWidthChangeParams(*params, node_info);
   }
   if (node_info.node_type == kTranspose) {

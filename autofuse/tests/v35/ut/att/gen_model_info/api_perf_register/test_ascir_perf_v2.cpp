@@ -96,7 +96,9 @@ att::TensorShapeInfo MakeCastShape(const std::string &data_type, const Expr &dim
 
 std::string GetUnaryPerfExpr(const std::string &api_name, const std::string &input_dtype,
                              const std::string &output_dtype, const Expr &dim) {
-  auto api = ApiPerfFactory::Instance().Create(api_name);
+  // IsInf has no V1 registration, its factory name is the V2 entry "IsInfV2".
+  const std::string create_name = api_name == kIsInf ? kIsInf + "V2" : api_name;
+  auto api = ApiPerfFactory::Instance().Create(create_name);
   EXPECT_NE(api, nullptr);
   NodeDetail node_info;
   node_info.input_dtype = {input_dtype};
@@ -109,6 +111,8 @@ std::string GetUnaryPerfExpr(const std::string &api_name, const std::string &inp
   PerfOutputInfo perf_res;
   if (api_name == kIsnan) {
     EXPECT_EQ(ascendcperf_v2::IsNanPerf(node_info, perf_res), af::SUCCESS);
+  } else if (api_name == kIsInf) {
+    EXPECT_EQ(ascendcperf_v2::IsInfPerf(node_info, perf_res), af::SUCCESS);
   } else {
     EXPECT_EQ(ascendcperf_v2::IsFinitePerf(node_info, perf_res), af::SUCCESS);
   }
@@ -165,6 +169,18 @@ TEST_F(UTestAscirPerfV2, IsFinitePerfUsesNonBoolOutputFormula) {
   EXPECT_EQ(GetUnaryPerfExpr(kIsFinite, kFloat32, kFloat32, CreateExpr(64)), "40");
 }
 
+TEST_F(UTestAscirPerfV2, IsInfPerfUsesFloat32BoolFormula) {
+  EXPECT_EQ(GetUnaryPerfExpr(kIsInf, kFloat32, kBool, CreateExpr(64)), "55");
+}
+
+TEST_F(UTestAscirPerfV2, IsInfPerfUsesFloat16BoolFormula) {
+  EXPECT_EQ(GetUnaryPerfExpr(kIsInf, kFloat16, kBool, CreateExpr(64)), "53");
+}
+
+TEST_F(UTestAscirPerfV2, IsInfPerfUsesFloat32Uint8Formula) {
+  EXPECT_EQ(GetUnaryPerfExpr(kIsInf, kFloat32, kUInt8, CreateExpr(64)), "55");
+}
+
 TEST_F(UTestAscirPerfV2, TransposePerfUsesDim2Inner1Formula) {
   const auto result =
       GetTransposePerfExpr(2, 1, {CreateExpr(2), CreateExpr(64)}, {CreateExpr(3)}, {CreateExpr(64), CreateExpr(1)});
@@ -218,9 +234,9 @@ TEST_F(UTestAscirPerfV2, TransposePerfFallsBackToUnitVectorWhenParamsInvalid) {
   EXPECT_TRUE(result.ternary_expr.empty());
 }
 
-std::string GetCastPerfExpr(const std::string &input_dtype, const std::string &output_dtype,
-                            const ascir_param::CastNodeParams &cast_params = {}) {
-  auto cast_v2 = ApiPerfFactory::Instance().Create("CastV2");
+std::string GetCastPerfExpr(const std::string &api_name, const std::string &input_dtype,
+                            const std::string &output_dtype, const ascir_param::CastNodeParams &cast_params = {}) {
+  auto cast_v2 = ApiPerfFactory::Instance().Create(api_name);
   EXPECT_NE(cast_v2, nullptr);
   auto cast_v2_perf = cast_v2->GetPerfFunc();
   const Expr dim = CreateExpr(129);
@@ -388,6 +404,67 @@ TEST_F(UTestAscirPerfV2, FillSpecificParamsStoresCompareParamsOnAscNode) {
   EXPECT_EQ(Str(node_info.compare_node_params.outer_call_count), "outer_call_count");
   EXPECT_EQ(Str(node_info.compare_node_params.output_dims[0]), "outer");
   EXPECT_EQ(Str(node_info.compare_node_params.input_strides[0]), "in_stride");
+}
+
+TEST_F(UTestAscirPerfV2, FillSpecificParamsStoresCastParamsOnCeil2IntNode) {
+  af::AscGraph graph("ceil2int_param_graph");
+  af::ascir_op::Data x("x", graph);
+  af::ascir_op::Ceil2Int ceil2int("ceil2int");
+  graph.AddNode(ceil2int);
+  ceil2int.x = x.y;
+
+  auto ceil2int_node = graph.FindNode("ceil2int");
+  ASSERT_NE(ceil2int_node, nullptr);
+  auto params = std::make_shared<ascir_param::AscirNodeParams>();
+  params->api_name = "Ceil2Int";
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+  params->specific_params =
+      MakeCastParams({CreateExpr("outer"), CreateExpr("inner")}, {CreateExpr("out_stride"), CreateExpr(1)},
+                     {CreateExpr("in_stride"), CreateExpr(1)});
+  ASSERT_TRUE(ceil2int_node->GetOpDesc()->SetExtAttr("AscirNodeParams", params));
+
+  NodeInfo node_info;
+  node_info.name = "ceil2int";
+  node_info.node_type = kCeil2Int;
+  EXPECT_EQ(FillSpecificParams(ceil2int_node, node_info), af::SUCCESS);
+  EXPECT_TRUE(node_info.cast_node_params.valid);
+  ASSERT_EQ(node_info.cast_node_params.output_dims.size(), 2U);
+  EXPECT_EQ(Str(node_info.cast_node_params.output_dims[0]), "outer");
+  EXPECT_EQ(Str(node_info.cast_node_params.output_strides[0]), "out_stride");
+  EXPECT_EQ(Str(node_info.cast_node_params.input_strides[0]), "in_stride");
+}
+
+TEST_F(UTestAscirPerfV2, FillSpecificParamsStoresUnaryBitWidthParamsOnIsInfNode) {
+  af::AscGraph graph("isinf_param_graph");
+  af::ascir_op::Data x("x", graph);
+  af::ascir_op::IsInf is_inf("is_inf");
+  graph.AddNode(is_inf);
+  is_inf.x = x.y;
+
+  auto is_inf_node = graph.FindNode("is_inf");
+  ASSERT_NE(is_inf_node, nullptr);
+  auto params = std::make_shared<ascir_param::AscirNodeParams>();
+  params->api_name = "IsInf";
+  params->status = ascir_param::ParamBuildStatus::kBuilt;
+  ascir_param::UnaryBitWidthChangeNodeParams unary_params;
+  unary_params.valid = true;
+  unary_params.cal_count = CreateExpr("cal_count");
+  unary_params.outer_repeats = {CreateExpr("outer_repeat")};
+  unary_params.input_strides = {CreateExpr("in_stride")};
+  unary_params.output_strides = {CreateExpr("out_stride")};
+  params->specific_params = unary_params;
+  ASSERT_TRUE(is_inf_node->GetOpDesc()->SetExtAttr("AscirNodeParams", params));
+
+  NodeInfo node_info;
+  node_info.name = "is_inf";
+  node_info.node_type = kIsInf;
+  EXPECT_EQ(FillSpecificParams(is_inf_node, node_info), af::SUCCESS);
+  EXPECT_TRUE(node_info.unary_bitwidth_change_node_params.valid);
+  EXPECT_EQ(Str(node_info.unary_bitwidth_change_node_params.cal_count), "cal_count");
+  ASSERT_EQ(node_info.unary_bitwidth_change_node_params.outer_repeats.size(), 1U);
+  EXPECT_EQ(Str(node_info.unary_bitwidth_change_node_params.outer_repeats[0]), "outer_repeat");
+  EXPECT_EQ(Str(node_info.unary_bitwidth_change_node_params.input_strides[0]), "in_stride");
+  EXPECT_EQ(Str(node_info.unary_bitwidth_change_node_params.output_strides[0]), "out_stride");
 }
 
 TEST_F(UTestAscirPerfV2, CompareVfHeadCostByInputType) {
@@ -2412,17 +2489,17 @@ TEST_F(UTestAscirPerfV2, TestCastV2) {
 TEST_F(UTestAscirPerfV2, TestCastV2SameBitIntegerUsesDataCopyCostOnly) {
   auto cast_params =
       MakeCastParams({CreateExpr(2), CreateExpr(64)}, {CreateExpr(64), CreateExpr(1)}, {CreateExpr(64), CreateExpr(1)});
-  EXPECT_EQ(GetCastPerfExpr("int8", "uint8", cast_params), "52");
+  EXPECT_EQ(GetCastPerfExpr("CastV2", "int8", "uint8", cast_params), "52");
 }
 
 TEST_F(UTestAscirPerfV2, TestCastV2UInt8ToInt64UsesInterleaveCost) {
   auto cast_params = MakeCastParams({CreateExpr(64)}, {CreateExpr(1)}, {CreateExpr(1)});
-  EXPECT_EQ(GetCastPerfExpr("uint8", "int64", cast_params), "42");
+  EXPECT_EQ(GetCastPerfExpr("CastV2", "uint8", "int64", cast_params), "42");
 }
 
 TEST_F(UTestAscirPerfV2, TestCastV2Int64ToUInt8UsesPackCost) {
   auto cast_params = MakeCastParams({CreateExpr(64)}, {CreateExpr(1)}, {CreateExpr(1)});
-  EXPECT_EQ(GetCastPerfExpr("int64", "uint8", cast_params), "38");
+  EXPECT_EQ(GetCastPerfExpr("CastV2", "int64", "uint8", cast_params), "38");
 }
 
 TEST_F(UTestAscirPerfV2, TestCastV2DynamicStrideCreatesRepeatTernary) {
@@ -2446,7 +2523,19 @@ TEST_F(UTestAscirPerfV2, TestCastV2DynamicStrideCreatesRepeatTernary) {
 TEST_F(UTestAscirPerfV2, TestCastV2DynamicCallCountMultipliesFinalCost) {
   auto cast_params =
       MakeCastParams({CreateExpr(2), CreateExpr(64)}, {CreateExpr(64), CreateExpr(1)}, {CreateExpr(64), CreateExpr(1)});
-  EXPECT_EQ(GetCastPerfExpr("float32", "float16", cast_params), "(((2 * cast_repeat_time) + 24) * cast_call_count)");
+  EXPECT_EQ(GetCastPerfExpr("CastV2", "float32", "float16", cast_params),
+            "(((2 * cast_repeat_time) + 24) * cast_call_count)");
+}
+
+TEST_F(UTestAscirPerfV2, TestCeil2IntV2ReusesCastV2Formula) {
+  auto cast_params = MakeCastParams({CreateExpr(129)}, {CreateExpr(1)}, {CreateExpr(1)});
+  for (const auto &input_dtype : {"float32", "float16", "bfloat16"}) {
+    SCOPED_TRACE(input_dtype);
+    const std::string ceil2int_expr = GetCastPerfExpr("Ceil2IntV2", input_dtype, "int32", cast_params);
+    EXPECT_EQ(ceil2int_expr, GetCastPerfExpr("CastV2", input_dtype, "int32", cast_params));
+    EXPECT_NE(ceil2int_expr, "0");
+  }
+  EXPECT_EQ(GetCastPerfExpr("Ceil2IntV2", "float32", "int32", cast_params), "34");
 }
 
 TEST_F(UTestAscirPerfV2, TestSumV2) {

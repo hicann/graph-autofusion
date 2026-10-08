@@ -63,6 +63,7 @@ af::Status BitwiseAndPerf(const NodeDetail &node_info, PerfOutputInfo &perf);
 af::Status FloorDivPerf(const NodeDetail &node_info, PerfOutputInfo &perf);
 af::Status IsNanPerf(const NodeDetail &node_info, PerfOutputInfo &perf);
 af::Status IsFinitePerf(const NodeDetail &node_info, PerfOutputInfo &perf);
+af::Status IsInfPerf(const NodeDetail &node_info, PerfOutputInfo &perf);
 af::Status TransposePerf(const NodeDetail &node_info, PerfOutputInfo &perf);
 }  // namespace ascendcperf_v2
 }  // namespace att

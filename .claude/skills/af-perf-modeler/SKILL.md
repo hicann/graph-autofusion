@@ -1,6 +1,6 @@
 ---
 name: af-perf-modeler
-description: Use when graph-autofusion 用户提到 Cast/Reduce/Compare 等算子的性能公式、ATT 性能建模、MicroAPI 成本、repeat_time/call_count、codegen 与性能公式对齐。
+description: Use when graph-autofusion 用户提到 Cast/Reduce/Compare 等算子的性能公式、ATT 性能建模、MicroAPI 成本、repeat_time/call_count、codegen 与性能公式对齐，或需定位官方 AscendC API（adv_api/basic_api）在 asc-devkit 算子仓中的源码实现。
 ---
 
 # graph-autofusion V2 节点性能公式建模
@@ -14,19 +14,21 @@ description: Use when graph-autofusion 用户提到 Cast/Reduce/Compare 等算�
 建模前必须先定位并读取：
 
 - codegen impl：`autofuse/v35/ascir/generator/v2_ascir_codegen_impl.h`。
-- 节点对应的 AscendC API 源码：`autofuse/v35/ascendc/api_regbase/` 下由 `GetApiName()` 指向的实现。
+- 节点对应的 AscendC API 源码：项目内 regbase（V2 在 `autofuse/v35/ascendc/api_regbase/`，V1 在 `autofuse/ascendc/api/`）或官方 API 算子仓 `../asc-devkit`，按「定位算子源码入口」和「官方 API 算子仓（asc-devkit）定位」判定。
 - codegen API 调用生成逻辑：`autofuse/v35/codegen/` 下由 `GetApiCallName()` 指向的 `{ApiCallName}::Generate`。
 - 性能表：`autofuse/v35/att/api_perf_register/perf_param_v2.cpp`。
 - 当前性能注册/实现：`autofuse/v35/att/api_perf_register/ascir_api_perf_v2.cpp` 和 `autofuse/v35/att/api_perf_register/ascendc_regbase_perf.cpp`。
 - 如需从 codegen 向 ATT 透传参数，参考 `VectorFuncNodeParams`、`EnrichAscirGraphNodeParams`、`FillSpecificParams`、`specific_params` 及其参数传递路径。
+- 官方 API 算子仓前提：先在 graph-autofusion 仓同级目录检查 `../asc-devkit` 是否存在；不存在时先执行 `git clone https://gitcode.com/cann/asc-devkit ../asc-devkit` 拉取代码，再继续建模。
 
 如果源码入口、API 参数、codegen 传参、分支含义或 MicroAPI 语义不确定，必须先向用户说明不确定点并询问，不能编造公式。
 
 ## 通用建模流程
 
 1. **定位算子源码入口**
-   - 从 `v2_ascir_codegen_impl.h` 找到目标算子对应的 `GetApiName()`。
-   - 在 `autofuse/v35/ascendc/api_regbase/` 下查找该 API 名称的定义。
+   - 从 `v2_ascir_codegen_impl.h` 找到目标算子对应的 `GetApiName()`，并读取该 Codegen 类的 `LoadApiHeaderFiles()` / `IncludeApiHeaderFiles()`，按返回值判定源码归属：
+     - `LoadApiHeaderFiles()` 返回 `*_reg_base.h`：项目内 regbase，源码在本仓。V2 在 `autofuse/v35/ascendc/api_regbase/`，V1 在 `autofuse/ascendc/api/`；文件名可通过注册 map 反查（V2 `autofuse/v35/codegen/ascendc_reg_base_api_register.cpp`，V1 `autofuse/codegen/ascendc_api_registry.cpp`）。
+     - `IncludeApiHeaderFiles()` 返回 `adv_api/...`、`basic_api/...` 等 CANN 官方头：源码不在本仓，必须进入「官方 API 算子仓（asc-devkit）定位」流程，禁止跳过源码分析或凭经验编公式。
    - 读取 API 实现及其调用的 helper，不只读 perf 代码。
    - 若 API 名称和源码实现无法唯一对应，先询问用户确认。
 
@@ -36,6 +38,8 @@ description: Use when graph-autofusion 用户提到 Cast/Reduce/Compare 等算�
    - 根据 `ApiCallName` 在 `autofuse/v35/codegen/` 下找到 `{ApiCallName}::Generate`。
    - 从 `Generate` 中分析生成代码实际传入 AscendC API 的参数，包括 `inputs`、`outputs`、scalar、offset、stride、mask、loop 参数、tmp buf、axis 信息等。
    - 注意：codegen 的 `inputs/outputs` 是生成代码用的 `Tensor`，ATT 性能计算的 `input_shapes/output_shapes` 是性能建模用的 `TensorShapeInfo`，两者语义对应但不是同一对象。
+
+   （官方 API 的源码定位见下节「官方 API 算子仓（asc-devkit）定位」。）
 
 3. **必要参数从 codegen 传递到 ATT**
    - 如果性能公式需要 codegen 阶段才能确定的参数，例如 loop merge 后的 `cal_count`、`outer_repeats`、stride、mask mode、特殊分支标记，不要在 ATT 中凭空假设。
@@ -98,6 +102,15 @@ Expr res = VfPerfUtils::GetVFHeadCost() + max_latency + all_vf_instruct_cost;
 res.Simplify();
 perf.pipe_res[PipeType::AIV_VEC] = res;
 ```
+
+## 官方 API 算子仓（asc-devkit）定位
+
+`IncludeApiHeaderFiles()` 返回官方头路径（源码不在 graph-autofusion 仓）时，按以下步骤在算子仓定位源码：
+
+1. **算子仓位置**：graph-autofusion 同级目录 `../asc-devkit`。目录不存在时先从 `https://gitcode.com/cann/asc-devkit` 拉取代码到同级目录（`git clone https://gitcode.com/cann/asc-devkit ../asc-devkit`）；拉取失败时再向用户确认算子仓实际路径，不得因此放弃源码分析。
+2. **查找文件**：`find ../asc-devkit -name "*<api_name>*"`（如 `find ../asc-devkit -name "*is_inf*"`）。`include/` 与 `impl/` 平铺在仓库根下：声明头如 `include/adv_api/math/is_inf.h`，实现头如 `impl/adv_api/detail/math/isinf/is_inf_common_impl.h`。
+3. **追实现头**：声明头通常只有校验和转发（如 `IsInf -> IsInfImpl`），按声明头内部相对 include 或 impl 路径约定找到真实实现；MicroAPI 序列在 `*ImplVF` / `*Impl` 等 `__simd_vf__` / `__aicore__` 函数中。
+4. **确认 arch 分支**：实现内 `#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510 || __NPU_ARCH__ == 5102)` 分支才是 v35 目标实现；arch、dtype、`if constexpr`、bool/非 bool 输出等分支都要纳入分支分析。
 
 ## MicroAPI 映射规则
 
@@ -185,6 +198,8 @@ Expr res = VfPerfUtils::GetVFHeadCost() + max_latency + all_vf_instruct_cost;
 | 忽略 `if constexpr` 或 scalar/mask 分支 | 每个源码分支单独列触发条件和计数 |
 | 把所有 MicroAPI 都乘 `repeat_time` | 按源码实际循环层级计算次数 |
 | 找不到性能表项就跳过 | 使用 `kPlaceholder` 并注释真实 MicroAPI |
+| 官方 API 在本仓 regbase 找不到就放弃源码分析 | 按 `IncludeApiHeaderFiles()` 判定官方 API，进入「官方 API 算子仓（asc-devkit）定位」流程 |
+| 猜 CANN 安装目录路径找官方 API 源码 | 建模一律读 `../asc-devkit` 源码仓 |
 | 性能表暂不支持真实 dtype 就换成支持的 dtype | 保持源码真实 MicroAPI 类型和 dtype，后续扩展性能表 |
 | 多个同类 MicroAPI 重复调用多次 | 合并为一次 `AddVfInstructPerf`，次数求和 |
 | 把不同真实 MicroAPI 汇总到一个 `kPlaceholder` | 按真实 MicroAPI、方向/模式和 dtype 分开调用 |
@@ -199,6 +214,7 @@ Expr res = VfPerfUtils::GetVFHeadCost() + max_latency + all_vf_instruct_cost;
 完成公式后至少检查：
 
 - API 源码入口能从 `GetApiName()` 追溯。
+- 官方 API 的源码依据来自 `../asc-devkit` 的声明头+实现头，并已确认 v35 目标 arch 分支。
 - API 调用参数能从 `{ApiCallName}::Generate` 追溯。
 - ATT 使用的额外参数若来自 codegen，已通过节点参数传递；若性能函数只能访问 `NodeInfo`，必须确认 `EnrichAscirGraphNodeParams` 已预注册空结构、`Generate` 已填值、`FillSpecificParams` 已提取到 `NodeInfo`。
 - 公式中的每个 `AddVfInstructPerf` 都能追溯到源码 MicroAPI。
