@@ -1,8 +1,46 @@
 # example01_dual_stream
 
-This sample creates control dependencies with two NPU streams and events, and enables automatic SuperKernel operator parallelism through `auto_op_parallel`. It compares the outputs produced with and without SuperKernel optimization.
+## Use Case
 
-## Environment Requirements
+This sample demonstrates SuperKernel fusion optimization for dual-stream computation graphs, including cross-stream
+control dependency handling, automatic operator parallelism, and static compilation, while verifying result
+consistency before and after fusion optimization.
+
+Key features:
+
+- Supports dual-stream scenarios and correctly handles `event`-based control dependencies between two NPU `stream`
+  objects.
+- Enables automatic operator parallelism through `auto_op_parallel`, simplifying SuperKernel optimization for
+  dual-stream computation graphs.
+- Automatically compares SK and Non-SK results to verify consistency after fusion optimization.
+
+```mermaid
+sequenceDiagram
+    participant Stream1 as Stream 1
+    participant Stream2 as Stream 2
+
+    Stream1->>Stream1: Matmul → Grouped Matmul
+    Stream1-->>Stream2: event1
+
+    Stream1->>Stream1: SwiGLU
+    Stream2->>Stream2: Matmul → Add RMSNorm
+
+    Stream1-->>Stream2: event2
+    Stream1->>Stream1: Output 1
+    Stream2->>Stream2: Output 2
+```
+
+## Directory Structure
+
+```text
+example01_dual_stream/
+├── README.md                             # Chinese documentation
+├── README_en.md                          # English documentation
+├── main.py                               # Builds the dual-stream model, runs SK/Non-SK, and compares accuracy
+└── run.sh                                # Runs the sample
+```
+
+## Prerequisites
 
 This sample supports the following product models:
 
@@ -20,8 +58,6 @@ pip install -r super_kernel/examples/requirements.txt
 ```
 
 ## Execution Command
-
-`--npu-arch` specifies the target NPU architecture and must match the product model in use:
 
 | `--npu-arch` | Corresponding Products |
 | --- | --- |
@@ -42,7 +78,7 @@ bash run.sh --npu-arch=dav-2201
 
 ## Expected Result
 
-On success, the sample prints the following key log:
+When the sample runs successfully, it outputs the following key log:
 
 ```text
 execute sample success
