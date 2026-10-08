@@ -68,6 +68,16 @@ class TestParsePerfLines(unittest.TestCase):
         )
         self.assertEqual(cases, [])
 
+    def test_parse_signed_and_scientific_numbers(self):
+        log = (
+            "[Op] [PERF] Load_0[Load]: AIV_MTE2 = "
+            "(base_cycles=-1.25e+02 + head_cost=2.5E1) = +1.0e+03\n"
+        )
+        cases = parse_perf_lines(log, "Op")
+        node = cases[0].nodes[0]
+        self.assertAlmostEqual(node.total, 1000.0)
+        self.assertEqual([item.value for item in node.sub_items], [-125.0, 25.0])
+
 
 if __name__ == "__main__":
     unittest.main()
