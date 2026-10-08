@@ -141,6 +141,7 @@ set(ascendc_api_regbase_extend_src
         rsqrt.h
         sigmoid.h
         mul.h
+        round.h
 )
 
 set(generated_regbase_files)
