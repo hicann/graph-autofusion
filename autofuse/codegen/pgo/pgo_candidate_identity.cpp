@@ -70,7 +70,7 @@ std::array<uint8_t, kDigestSize> Digest128(const std::string &payload) {
 
 }  // namespace
 
-std::string BuildCandidateKey(const std::string &graph_name, const std::string &tiling_repr, uint32_t workspace_size,
+std::string BuildCandidateKey(const std::string &graph_name, const std::string &tiling_repr, uint64_t workspace_size,
                               uint32_t block_dim) {
   const std::string payload =
       graph_name + "|" + tiling_repr + "|" + std::to_string(workspace_size) + "|" + std::to_string(block_dim);

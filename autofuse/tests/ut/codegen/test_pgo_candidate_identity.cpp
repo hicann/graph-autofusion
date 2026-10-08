@@ -37,6 +37,13 @@ TEST(PgoCandidateIdentity, BuildCandidateKeyDiffersAcrossCandidateFields) {
   EXPECT_NE(base, BuildCandidateKey("graph0", "{repr:1}", 1024U, 16U));
 }
 
+TEST(PgoCandidateIdentity, BuildCandidateKeyPreservesWorkspaceAboveUint32) {
+  constexpr uint64_t kMaxUint32Workspace = 0xffffffffULL;
+  constexpr uint64_t kFirstWorkspaceAboveUint32 = 0x100000000ULL;
+  EXPECT_NE(BuildCandidateKey("graph0", "{repr:1}", kMaxUint32Workspace, 8U),
+            BuildCandidateKey("graph0", "{repr:1}", kFirstWorkspaceAboveUint32, 8U));
+}
+
 TEST(PgoCandidateIdentity, BuildCandidateKeySeparatesConcatenatedFields) {
   // "ab|c" and "a|b|c" must not collide: the key depends on field boundaries.
   EXPECT_NE(BuildCandidateKey("ab", "c", 1U, 1U), BuildCandidateKey("a", "b|c", 1U, 1U));

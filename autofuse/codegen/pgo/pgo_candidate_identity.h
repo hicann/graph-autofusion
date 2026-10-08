@@ -21,12 +21,12 @@ struct PgoCandidateIdentity {
   std::string profiler_name;
   std::string tiling_repr;
   std::string kernel_file;
-  uint32_t workspace_size = 0;
+  uint64_t workspace_size = 0;
   uint32_t block_dim = 0;
   uint64_t duration_ns = 0;
 };
 
-std::string BuildCandidateKey(const std::string &graph_name, const std::string &tiling_repr, uint32_t workspace_size,
+std::string BuildCandidateKey(const std::string &graph_name, const std::string &tiling_repr, uint64_t workspace_size,
                               uint32_t block_dim);
 bool IsValidCandidateKey(const std::string &candidate_key);
 

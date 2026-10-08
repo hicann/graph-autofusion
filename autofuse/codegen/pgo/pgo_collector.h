@@ -39,7 +39,7 @@ extern "C" int AutofusePgoCollectorBegin(void *collector, const char *candidate_
 // used by the manifest writer. This keeps Inductor runners independent of the
 // identity digest implementation while preserving the tuple identity contract.
 extern "C" int AutofusePgoCollectorBeginCandidate(void *collector, const char *graph_name, const char *tiling_repr,
-                                                  uint32_t workspace_size, uint32_t block_dim);
+                                                  uint64_t workspace_size, uint32_t block_dim);
 extern "C" int AutofusePgoCollectorRecordLaunch(void *collector, uint64_t launch_sequence);
 extern "C" int AutofusePgoCollectorEnd(void *collector);
 // Compatibility name: this aborts the whole in-flight batch, not just one candidate.

@@ -404,7 +404,7 @@ def test_publish_pgo_bundle_binds_hashes_and_replaces_tiling_last(
     assert manifest["bundle_schema_version"] == 2
     assert manifest["cache_root"] == "pgo_v2"
     assert manifest["generation"] == "generation1"
-    assert manifest["result_protocol_version"] == 1
+    assert manifest["result_protocol_version"] == 2
     assert manifest["profiling_backend"] == "mspti_equivalent"
     assert manifest["requires_mspti"] is False
     assert (

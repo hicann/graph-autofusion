@@ -116,7 +116,7 @@ class CollectorImpl final : public PgoCollector {
     return 0;
   }
 
-  int BeginCandidateTuple(const char *graph_name, const char *tiling_repr, uint32_t workspace_size,
+  int BeginCandidateTuple(const char *graph_name, const char *tiling_repr, uint64_t workspace_size,
                           uint32_t block_dim) {
     if (graph_name == nullptr || tiling_repr == nullptr || *graph_name == '\0' || *tiling_repr == '\0' ||
         block_dim == 0U) {
@@ -348,7 +348,7 @@ extern "C" int AutofusePgoCollectorBegin(void *collector, const char *candidate_
   return collector == nullptr ? -1 : static_cast<CollectorImpl *>(collector)->BeginCandidate(candidate_key);
 }
 extern "C" int AutofusePgoCollectorBeginCandidate(void *collector, const char *graph_name, const char *tiling_repr,
-                                                  uint32_t workspace_size, uint32_t block_dim) {
+                                                  uint64_t workspace_size, uint32_t block_dim) {
   return collector == nullptr ? -1
                               : static_cast<CollectorImpl *>(collector)->BeginCandidateTuple(graph_name, tiling_repr,
                                                                                              workspace_size, block_dim);
