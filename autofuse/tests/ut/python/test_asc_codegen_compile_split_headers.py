@@ -23,6 +23,19 @@ def asc_codegen_compile_module():
         yield module
 
 
+def test_pgo_compile_command_links_autofuse_collector(
+    asc_codegen_compile_module,
+):
+    asc_codegen_compile_module.ASCEND_PATH = "/opt/cann"
+    command = asc_codegen_compile_module.build_pgo_compile_command(
+        "/tmp/graph_pgo.cpp", "/tmp/graph_pgo"
+    )
+
+    assert "-laihac_codegen" in command
+    assert "-L/opt/cann/lib64" in command
+    assert "-Wl,-rpath,/opt/cann/lib64" in command
+
+
 def test_process_tiling_funcs_writes_split_headers(tmpdir, asc_codegen_compile_module):
     template_dict = {
         "TilingHead": "common",

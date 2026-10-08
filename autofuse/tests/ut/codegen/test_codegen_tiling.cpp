@@ -4494,16 +4494,22 @@ TEST_F(TestCodegenTiling, GenerateForPgoShouldUseTensorArgsForProfilingSignature
   EXPECT_EQ(tiling_code.find("AutofuseTilingData tiling_data;"), std::string::npos);
 }
 
-TEST_F(TestCodegenTiling, TfAndInductorPgoShouldSortUint64DurationsConsistently) {
+TEST_F(TestCodegenTiling, TfAndInductorPgoShouldSortAclDurationsConsistently) {
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
 
   const auto tf_source = GenerateForPgo(fused_schedule_result, "/tmp");
   const auto inductor_source = GenInductorPgoRunner(fused_schedule_result);
 
+  // Duration ranking moved into libaihac_codegen (pgo_task_record.cpp); the
+  // generated sources only delegate measurement to the collector ABI.
   EXPECT_EQ(tf_source.find("std::greater<int>()"), std::string::npos);
-  EXPECT_NE(tf_source.find("std::greater<uint64_t>()"), std::string::npos);
+  EXPECT_EQ(tf_source.find("std::greater<double>()"), std::string::npos);
   EXPECT_EQ(inductor_source.find("std::greater<int>()"), std::string::npos);
-  EXPECT_NE(inductor_source.find("std::greater<uint64_t>()"), std::string::npos);
+  EXPECT_EQ(inductor_source.find("std::greater<double>()"), std::string::npos);
+  EXPECT_NE(tf_source.find("AutofusePgoCollectorGetCandidateDurationNs"), std::string::npos);
+  EXPECT_NE(inductor_source.find("AutofusePgoCollectorGetCandidateDurationNs"), std::string::npos);
+  EXPECT_EQ(tf_source.find("mspti"), std::string::npos);
+  EXPECT_EQ(inductor_source.find("mspti"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, TfPgoGeneratedSourceContractShouldRemainStable) {
@@ -4517,6 +4523,14 @@ TEST_F(TestCodegenTiling, TfPgoGeneratedSourceContractShouldRemainStable) {
   EXPECT_NE(source.find("const char *pgo_dir"), std::string::npos);
   EXPECT_NE(source.find("PgoTilingSearch"), std::string::npos);
   EXPECT_NE(source.find("static_pgo("), std::string::npos);
+  EXPECT_NE(source.find("AutofusePgoCollectorBegin(collector, PGO_GRAPH_NAME)"), std::string::npos);
+  EXPECT_NE(source.find("int PgoBeginCandidate(void *collector)"), std::string::npos);
+  EXPECT_NE(source.find("const int begin_status = PgoBeginCandidate(g_pgo_collector);"), std::string::npos);
+  EXPECT_EQ(source.find("int PgoBeginCandidate(void *collector, AutofuseTilingData *tiling_data, "
+                        "uint32_t workspace_size)"),
+            std::string::npos);
+  EXPECT_NE(source.find("DLOGI(\"InitAclPgoEvents failed, status: %d\", status)"), std::string::npos);
+  EXPECT_EQ(source.find("get_tiling_data_repr_fn(tiling_data)"), std::string::npos);
   EXPECT_EQ(source.find("kInductorPgoRunnerAbi"), std::string::npos);
   EXPECT_EQ(source.find("kPgoTopnMagic"), std::string::npos);
 }
@@ -4531,6 +4545,13 @@ TEST_F(TestCodegenTiling, InductorPgoRunnerGeneratedSourceContractShouldRemainSt
   EXPECT_NE(source.find("PGOGetProfilingBatch"), std::string::npos);
   EXPECT_EQ(source.find("kInductorPgoRunnerAbi"), std::string::npos);
   EXPECT_NE(source.find("GenerateMeasuredTopnSolutions"), std::string::npos);
+  EXPECT_NE(source.find("int PgoBeginCandidate(void *collector, AutofuseTilingData *tiling_data, "
+                        "uint32_t workspace_size)"),
+            std::string::npos);
+  EXPECT_NE(source.find("const int begin_status = PgoBeginCandidate(g_pgo_collector, tiling_data, workspace_size);"),
+            std::string::npos);
+  EXPECT_NE(source.find("get_tiling_data_repr_fn(tiling_data)"), std::string::npos);
+  EXPECT_EQ(source.find("__attribute__((weak))"), std::string::npos);
   EXPECT_NE(source.find("kPgoTopnMagic"), std::string::npos);
   EXPECT_EQ(source.find("const char *pgo_dir"), std::string::npos);
   EXPECT_EQ(source.find("static_pgo("), std::string::npos);
@@ -4932,6 +4953,8 @@ void AssertSchemeAContract(const codegen::CodegenResult &result) {
   EXPECT_EQ(device_source.find("AUTOFUSE_PGO_DEVICE_SOURCE_ABI"), std::string::npos);
   EXPECT_NE(device_source.find(result.kernel), std::string::npos);
   EXPECT_NE(result.tiling.find("extern \"C\" int64_t GenerateMeasuredTopnSolutions("), std::string::npos);
+  EXPECT_NE(result.tiling.find("if (callback_ret == kPgoProfileUnsupported)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("return callback_ret;"), std::string::npos);
   EXPECT_EQ(result.tiling.find("kInductorPgoProxyAbi"), std::string::npos);
   EXPECT_NE(result.tiling.find("return RunInductorPgoProxy(input_configs, topn, tiling_datas, workspaces, block_dims,"),
             std::string::npos);
@@ -5221,38 +5244,65 @@ TEST_F(TestCodegenTiling, GenerateForPgoShouldLoadFindBestTilingKeyOnlyWhenSuppo
 
 void AssertDlopenRunnerProfiling(const std::string &runner) {
   EXPECT_NE(runner.find("PGOGetProfilingBatch"), std::string::npos);
-  EXPECT_EQ(runner.find("bool IsTargetPgoKernel(const msptiActivityKernel *kernel)"), std::string::npos);
-  EXPECT_EQ(runner.find("std::strcmp(kernel->name, PGO_GRAPH_NAME)"), std::string::npos);
-  EXPECT_EQ(runner.find("g_seen_correlation_ids.insert(kernel->correlationId).second"), std::string::npos);
-  EXPECT_EQ(runner.find("g_is_mix_operator ? \"KERNEL_MIX_AIV\" : \"KERNEL_AIVEC\""), std::string::npos);
-  EXPECT_NE(runner.find("void SavePgoKernel(const msptiActivityKernel *kernel)"), std::string::npos);
-  EXPECT_NE(runner.find("SavePgoKernel(kernel)"), std::string::npos);
-  EXPECT_NE(runner.find("g_profiling_map.size() != expected_records"), std::string::npos);
-  const auto batch_callback_pos = runner.find("const uint64_t expected_records = batch_size * loop");
-  const auto teardown_pos = runner.find("TearDownMspti(&subscriber)", batch_callback_pos);
-  const auto flush_pos = runner.find("FlushPgoActivities(expected_records)", batch_callback_pos);
-  ASSERT_NE(batch_callback_pos, std::string::npos);
-  ASSERT_NE(flush_pos, std::string::npos);
-  ASSERT_NE(teardown_pos, std::string::npos);
-  EXPECT_LT(teardown_pos, flush_pos);
-  const auto single_teardown_pos =
-      runner.find("const msptiResult teardown_result = TearDownMspti(&subscriber)", teardown_pos + 1U);
-  const auto single_flush_pos = runner.find("FlushPgoActivities(loop)", flush_pos + 1U);
-  ASSERT_NE(single_teardown_pos, std::string::npos);
-  ASSERT_NE(single_flush_pos, std::string::npos);
-  EXPECT_LT(single_teardown_pos, single_flush_pos);
-  EXPECT_EQ(runner.find("msptiActivityDisable(MSPTI_ACTIVITY_KIND_KERNEL)"), std::string::npos);
-  const auto teardown_func_pos = runner.find("msptiResult TearDownMspti(msptiSubscriberHandle *subscriber)");
-  const auto unsubscribe_pos = runner.find("msptiUnsubscribe(*subscriber)", teardown_func_pos);
-  const auto teardown_flush_pos = runner.find("msptiActivityFlushAll(1)", unsubscribe_pos);
-  ASSERT_NE(teardown_func_pos, std::string::npos);
-  ASSERT_NE(unsubscribe_pos, std::string::npos);
-  ASSERT_NE(teardown_flush_pos, std::string::npos);
-  EXPECT_LT(unsubscribe_pos, teardown_flush_pos);
-  EXPECT_NE(runner.find("if (g_profiling_record_count.load(std::memory_order_acquire) >= expected_records)"),
+  EXPECT_EQ(runner.find("mspti.h"), std::string::npos);
+  EXPECT_EQ(runner.find("msptiActivity"), std::string::npos);
+  EXPECT_EQ(runner.find("msptiSubscriberHandle"), std::string::npos);
+  // Timing no longer uses ACL events; the collector owns measurement via
+  // profapi/STARS, so no event creation is generated.
+  EXPECT_EQ(runner.find("aclrtCreateEvent"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorBeginCandidate"), std::string::npos);
+  EXPECT_NE(runner.find("get_tiling_data_repr_fn(tiling_data)"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorFinalizeBatch"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorGetCandidateDurationNs"), std::string::npos);
+  EXPECT_EQ(runner.find("AutofusePgoCollectorGetDurationNs"), std::string::npos);
+  EXPECT_EQ(runner.find("aclrtRecordEvent"), std::string::npos);
+  EXPECT_EQ(runner.find("aclrtEventGetTimestamp"), std::string::npos);
+  EXPECT_NE(runner.find("aclrtSynchronizeStream"), std::string::npos);
+  EXPECT_NE(runner.find("kPgoMeasureLoop = 20U"), std::string::npos);
+  const auto retry_definition = runner.find("kPgoRetryCount = 5");
+  const auto retry_loop = runner.find("for (int i = 0; i < kPgoRetryCount; i++)");
+  ASSERT_NE(retry_definition, std::string::npos);
+  ASSERT_NE(retry_loop, std::string::npos);
+  EXPECT_LT(retry_definition, retry_loop);
+  EXPECT_NE(runner.find("kPgoBatchGroupSize = 1000U"), std::string::npos);
+  EXPECT_NE(runner.find("DestroyAclPgoEvents"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorRecordLaunch"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorFinalizeBatch"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorGetCandidateDurationNs"), std::string::npos);
+  EXPECT_NE(runner.find("kPgoProfileUnsupported = -13"), std::string::npos);
+  const auto unsupported_warning = runner.find("PGO profiling unsupported on this device; fallback to non-PGO path");
+  const auto unsupported_branch = runner.find("if (init_status == kPgoProfileUnsupported)");
+  ASSERT_NE(unsupported_warning, std::string::npos);
+  ASSERT_NE(unsupported_branch, std::string::npos);
+  EXPECT_LT(unsupported_branch, unsupported_warning);
+  EXPECT_NE(runner.find("result = kPgoProfileUnsupported;"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"InitAclPgoEvents failed, status: %d\", status)"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"PgoBeginCandidate failed, status: %d\", begin_status)"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"AutofusePgoCollectorRecordLaunch failed, status: %d\", record_status)"),
             std::string::npos);
-  EXPECT_NE(runner.find("if (SetUpMspti(&subscriber) != MSPTI_SUCCESS)"), std::string::npos);
-  EXPECT_NE(runner.find("g_mspti_activity_error || teardown_result != MSPTI_SUCCESS"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"WrapperOnlyLaunch failed, ERROR: %d\", launch_status)"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"AutofusePgoCollectorEnd failed, status: %d\", end_status)"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"AutofusePgoCollectorFinalizeBatch failed, status: %d\", finalize_status)"),
+            std::string::npos);
+  EXPECT_EQ(runner.find("AutofusePgoCollectorGetDurationNs"), std::string::npos);
+  const auto batch_loop = runner.find("while (it != profiles->end())");
+  const auto batch_init = runner.find("auto init_status = InitAclPgoEvents();");
+  const auto batch_process = runner.find("result = ProfilingBatchProcess(workspace_size, it, end_it);");
+  const auto batch_finalize = runner.find("AutofusePgoCollectorFinalizeBatch(g_pgo_collector)");
+  ASSERT_NE(batch_loop, std::string::npos);
+  ASSERT_NE(batch_init, std::string::npos);
+  ASSERT_NE(batch_process, std::string::npos);
+  ASSERT_NE(batch_finalize, std::string::npos);
+  EXPECT_LT(batch_loop, batch_init);
+  EXPECT_LT(batch_init, batch_process);
+  // GenPgoBatchProcess (which contains the first FinalizeBatch call) is emitted
+  // before GenPgoGetProfilingBatch, so finalize text precedes the batch loop.
+  EXPECT_GT(batch_process, batch_finalize);
+  EXPECT_EQ(runner.find("aclrtEventElapsedTime"), std::string::npos);
+  EXPECT_EQ(runner.find("kPgoMinMeasureRepeats"), std::string::npos);
+  EXPECT_NE(runner.find("for (uint64_t launch_count = 0U; launch_count < kPgoMeasureLoop; ++launch_count)"),
+            std::string::npos);
+  EXPECT_EQ(runner.find("static_cast<double>(launch_count)"), std::string::npos);
 }
 
 void AssertDlopenRunnerProtocol(const std::string &runner) {
@@ -5289,8 +5339,8 @@ void AssertDlopenRunnerLaunch(const std::string &runner, const std::string &kern
   EXPECT_NE(runner.find("aclrtBinaryGetFunction(g_pgo_bin_handle, kInductorPgoKernelName"), std::string::npos);
   EXPECT_NE(runner.find("AutofuseTilingData tiling_data;"), std::string::npos);
   EXPECT_NE(runner.find("g_launch_params.aiv_args.tiling_data = tiling_data;"), std::string::npos);
-  EXPECT_NE(runner.find("if (UpdateLaunchParam(tiling_data) != ACL_SUCCESS)"), std::string::npos);
-  EXPECT_NE(runner.find("if (UpdateLaunchParam(*tiling_data) != ACL_SUCCESS)"), std::string::npos);
+  EXPECT_NE(runner.find("const auto update_status = UpdateLaunchParam(it->tiling_data);"), std::string::npos);
+  EXPECT_NE(runner.find("const auto update_status = UpdateLaunchParam(*tiling_data);"), std::string::npos);
   EXPECT_NE(runner.find("WrapperOnlyLaunch(uint32_t workspace_size, AutofuseTilingData *tiling_data) {\n"
                         "  (void)workspace_size;"),
             std::string::npos);
@@ -5346,6 +5396,10 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldGenerateValidatedSpawn
   EXPECT_NE(result.tiling.find("AUTOFUSE_PGO_GENERATION"), std::string::npos);
   EXPECT_NE(result.tiling.find("bundle_schema_version"), std::string::npos);
   EXPECT_NE(result.tiling.find("result_protocol_version"), std::string::npos);
+  EXPECT_NE(result.tiling.find("profiling_backend"), std::string::npos);
+  EXPECT_NE(result.tiling.find("requires_mspti"), std::string::npos);
+  EXPECT_NE(result.tiling.find("profiling_backend == \"mspti_equivalent\""), std::string::npos);
+  EXPECT_NE(result.tiling.find("kPgoCacheRootName"), std::string::npos);
   EXPECT_EQ(result.tiling.find("runner_abi"), std::string::npos);
   EXPECT_EQ(result.tiling.find("proxy_abi"), std::string::npos);
   EXPECT_EQ(result.tiling.find("device_source_abi"), std::string::npos);

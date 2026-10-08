@@ -19,8 +19,8 @@ void TilingLib::GenSharedPgoRuntimeLaunch(const ascir::FusedScheduledResult &fus
 
 void TilingLib::GenSharedPgoRuntimeProfiling(const ascir::FusedScheduledResult &fused_schedule_result,
                                              std::stringstream &ss, bool direct_link) const {
-  GenPgoMsptiProfiling(ss, direct_link);
-  GenPgoBatchProcess(ss, direct_link);
+  GenPgoAclProfiling(ss, direct_link);
+  GenPgoBatchProcess(ss);
   GenPgoGetProfilingBatch(fused_schedule_result, ss, direct_link);
   GenPgoGetProfiling(fused_schedule_result, ss, direct_link);
 }

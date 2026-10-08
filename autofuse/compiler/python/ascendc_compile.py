@@ -11,9 +11,9 @@
 # -----------------------------------------------------------------------------------------------------------
 import ctypes
 import fcntl
-import hashlib
 import json
 import os
+import hashlib
 import re
 import sys
 import tbe.common.utils.log as logger
@@ -53,9 +53,10 @@ CV_WRAPPER_SPLIT_KEY = "BCubeKernelTilingWrapperCpp"
 CV_WRAPPER_CACHE_DIR_NAME = "cv_tiling_wrapper_cache"
 CV_WRAPPER_SO_BASENAME = "libautofuse_cv_tiling_wrapper"
 CV_WRAPPER_RPATH_OPTION = f"-Wl,-rpath,$ORIGIN/{CV_WRAPPER_CACHE_DIR_NAME}"
-PGO_BUNDLE_SCHEMA_VERSION = 1
+PGO_BUNDLE_SCHEMA_VERSION = 2
 PGO_RESULT_PROTOCOL_VERSION = 1
 PGO_KERNEL_FORMAT = "aicore_binary_elf_v1"
+PGO_CACHE_ROOT_NAME = "pgo_v2"
 if not os.path.exists(ASCEND_PATH):
     ASCEND_PATH = os.getenv("ASCEND_HOME_PATH", ASCEND_PATH)
 
@@ -106,6 +107,7 @@ class PgoBundle:
     output_file: str
     generation: str
     ld_preload: str = ""
+    cache_root: str = ""
 
 
 def record_inductor_compile_duration(stage, step, graph_name, start, duration):
@@ -322,21 +324,37 @@ def prepare_shared_cv_wrapper(args: argparse.Namespace, temp_dir, host_files):
     return regular_host_files
 
 
-def link_pgo_executable(target_file, obj_files, mspti_link_flags):
+def get_pgo_collector_lib_dir():
+    """Locate a libaihac_codegen.so that exports the PGO collector ABI.
+
+    When compiling from a source tree (UT/ST runs), the installed run package
+    under ASCEND_PATH usually predates the sources being compiled and lacks the
+    AutofusePgoCollector* symbols, so prefer the repo-built library. Deployed
+    installations ship a matching library under ASCEND_PATH and fall back to it.
+    """
+    candidate = os.path.join(PYF_PATH, "..", "..", "..", "build", "autofuse")
+    if os.path.isfile(os.path.join(candidate, "libaihac_codegen.so")):
+        return os.path.realpath(candidate)
+    return None
+
+
+def link_pgo_executable(target_file, obj_files):
     link_command = [f"{ASCEND_PATH}/tools/bisheng_compiler/bin/bisheng", *obj_files]
     link_command.extend(["-fPIC", "-o", target_file])
+    collector_dir = get_pgo_collector_lib_dir()
+    if collector_dir is not None:
+        link_command.extend(["-L", collector_dir])
+        link_command.append(f"-Wl,-rpath,{collector_dir}")
     link_command.extend(["-L", f"{ASCEND_PATH}/lib64"])
     link_command.extend(["-L", f"{ASCEND_PATH}/{machine}-linux/lib64"])
     link_command.extend([f"-l{link_library}" for link_library in HOST_LINK_LIBRARIES])
+    # PGO runners use the internal task-track collector exported by Autofuse.
+    # This keeps profapi/driver symbols dynamically loaded and avoids any
+    # link-time dependency on the legacy profiler shim.
+    link_command.append("-laihac_codegen")
     link_command.extend(
         ["-lascendcl", "-lruntime", "-lunified_dlog", "-lascendalog", "-lc_sec", "-lm"]
     )
-    link_command.extend(
-        f"-Wl,-rpath,{option[2:]}"
-        for option in mspti_link_flags
-        if option.startswith("-L") and len(option) > 2
-    )
-    link_command.extend(mspti_link_flags)
     link_command.extend(["-lstdc++", "-ldl", "-lpthread"])
     run_compile_command(link_command, "LinkPgoExecutable")
     return target_file
@@ -360,12 +378,9 @@ def extract_aicore_binary(kernel_obj_path, output_file):
 
 
 def build_pgo_sidecars(args, temp_dir):
-    mspti_dir, preload_files, link_flags = args.pgo_mspti_config
-    args.pgo_mspti_dir = mspti_dir
-    args.pgo_ld_preload = ":".join(preload_files)
     runner_obj = compile_host_obj_file(args, temp_dir, args.pgo_runner_file)
     runner_file = os.path.join(temp_dir, "pgo_runner")
-    link_pgo_executable(runner_file, [runner_obj], link_flags)
+    link_pgo_executable(runner_file, [runner_obj])
     args.device_files = args.pgo_device_file
     device_obj = compile_device_obj(args, temp_dir)
     kernel_file = os.path.join(temp_dir, f"pgo_kernel.{PGO_KERNEL_FORMAT}")
@@ -373,8 +388,13 @@ def build_pgo_sidecars(args, temp_dir):
     return runner_file, kernel_file
 
 
-def get_pgo_sidecar_paths(output_file, generation):
-    generation_dir = f"{os.path.realpath(output_file)}.pgo.{generation}"
+def get_pgo_cache_root(output_file):
+    return f"{os.path.realpath(output_file)}.{PGO_CACHE_ROOT_NAME}"
+
+
+def get_pgo_sidecar_paths(output_file, generation, cache_root=None):
+    cache_root = cache_root or get_pgo_cache_root(output_file)
+    generation_dir = os.path.join(os.path.realpath(cache_root), generation)
     output_name = os.path.basename(output_file)
     return {
         "generation_dir": generation_dir,
@@ -398,9 +418,12 @@ def file_sha256(path):
 def build_pgo_manifest(bundle):
     return {
         "bundle_schema_version": PGO_BUNDLE_SCHEMA_VERSION,
+        "cache_root": PGO_CACHE_ROOT_NAME,
         "generation": bundle.generation,
         "result_protocol_version": PGO_RESULT_PROTOCOL_VERSION,
-        "ld_preload": bundle.ld_preload,
+        "profiling_backend": "mspti_equivalent",
+        "requires_mspti": False,
+        "ld_preload": "",
         "artifacts": {
             "tiling_so": {
                 "file": os.path.basename(bundle.output_file),
@@ -426,15 +449,11 @@ def write_pgo_manifest(path, manifest):
 
 
 def cleanup_stale_pgo_generations(output_file, current_generation_dir):
-    output_file = os.path.realpath(output_file)
-    output_dir = os.path.dirname(output_file)
-    generation_prefix = os.path.basename(output_file) + ".pgo."
+    cache_root = get_pgo_cache_root(output_file)
     previous_generations = []
     try:
-        for entry in os.scandir(output_dir):
-            if not entry.name.startswith(generation_prefix) or not entry.is_dir(
-                follow_symlinks=False
-            ):
+        for entry in os.scandir(cache_root):
+            if not entry.is_dir(follow_symlinks=False):
                 continue
             if os.path.realpath(entry.path) == os.path.realpath(current_generation_dir):
                 continue
@@ -452,7 +471,9 @@ def publish_pgo_bundle(bundle):
     output_file = os.path.realpath(bundle.output_file)
     output_dir = os.path.dirname(output_file)
     os.makedirs(output_dir, exist_ok=True)
-    paths = get_pgo_sidecar_paths(output_file, bundle.generation)
+    cache_root = bundle.cache_root or get_pgo_cache_root(output_file)
+    os.makedirs(cache_root, exist_ok=True)
+    paths = get_pgo_sidecar_paths(output_file, bundle.generation, cache_root)
     staging_dir = tempfile.mkdtemp(
         prefix=f".{os.path.basename(output_file)}.pgo.", dir=output_dir
     )
@@ -478,6 +499,7 @@ def publish_pgo_bundle(bundle):
                 output_file,
                 bundle.generation,
                 bundle.ld_preload,
+                cache_root,
             )
         )
         write_pgo_manifest(os.path.join(staging_dir, "manifest.json"), manifest)
@@ -589,9 +611,6 @@ def build_host_base_options(args: argparse.Namespace, temp_dir):
         "-Wfloat-equal",
         "-fvisibility=default",
     ]
-    mspti_dir = getattr(args, "pgo_mspti_dir", None)
-    if mspti_dir:
-        options.extend(["-I", os.path.join(mspti_dir, "include")])
     pgo_generation = getattr(args, "pgo_generation", None)
     if pgo_generation:
         options.extend(["-D", f'AUTOFUSE_PGO_GENERATION="{pgo_generation}"'])
@@ -1278,20 +1297,43 @@ def copy_so_to_output(so_file, args, src_directory):
     os.chdir(src_directory)
 
 
-def build_host_output(args, pch_path=None):
-    should_build_sidecars = (
+def should_build_pgo_sidecars(args):
+    return (
         getattr(args, "pgo_runner_file", None) is not None
-        and getattr(args, "pgo_mspti_config", None) is not None
+        and getattr(args, "pgo_device_file", None) is not None
     )
-    if should_build_sidecars:
+
+
+def prepare_pgo_generation(args):
+    """Resolve the PGO generation before the host sources are compiled.
+
+    build_host_base_options embeds AUTOFUSE_PGO_GENERATION into the tiling host
+    compile command, so the generation must exist by the time compile_host_objs
+    runs. The value is created once and reused by build_pgo_bundle so that the
+    published manifest matches the generation compiled into the tiling .so.
+    """
+    if (
+        should_build_pgo_sidecars(args)
+        and getattr(args, "pgo_generation", None) is None
+    ):
         args.pgo_generation = uuid.uuid4().hex
-    if pch_path is None:
-        tiling_obj_paths = compile_host_objs(args, args.temp_dir)
-    else:
+
+
+def build_host_output(args, pch_path=None):
+    prepare_pgo_generation(args)
+    if pch_path is not None:
         tiling_obj_paths = compile_host_objs(args, args.temp_dir, pch_path)
+    else:
+        tiling_obj_paths = compile_host_objs(args, args.temp_dir)
     so_file = link_tiling_so(args, tiling_obj_paths, args.temp_dir)
-    if not should_build_sidecars:
+    return build_pgo_bundle(args, so_file)
+
+
+def build_pgo_bundle(args, so_file):
+    if not should_build_pgo_sidecars(args):
         return so_file
+    prepare_pgo_generation(args)
+    args.pgo_cache_root = get_pgo_cache_root(args.output_file)
     try:
         runner_file, kernel_file = build_pgo_sidecars(args, args.temp_dir)
         publish_pgo_bundle(
@@ -1302,6 +1344,7 @@ def build_host_output(args, pch_path=None):
                 args.output_file,
                 args.pgo_generation,
                 getattr(args, "pgo_ld_preload", ""),
+                args.pgo_cache_root,
             )
         )
         return None
@@ -1370,12 +1413,14 @@ def main(args):
         elif args.stage == "device":
             so_file = build_kernel_target(args, None, args.temp_dir)
         else:  # all
+            prepare_pgo_generation(args)
             with host_compile_batch(args) as pch_path:
                 if pch_path is None:
                     tiling_obj_paths = compile_host_objs(args, args.temp_dir)
                 else:
                     tiling_obj_paths = compile_host_objs(args, args.temp_dir, pch_path)
             so_file = build_kernel_target(args, tiling_obj_paths, args.temp_dir)
+            so_file = build_pgo_bundle(args, so_file)
         if so_file is not None:
             copy_so_to_output(so_file, args, src_directory)
     finally:

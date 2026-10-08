@@ -351,6 +351,7 @@ int InitInductorPgoAcl(const InductorPgoRunnerArgs &args) {
   ret = aclrtSetDevice(args.device_id);
   if (ret != ACL_SUCCESS) { DLOGE("acl set device failed, ERROR: %d", ret); return FAILED; }
   g_device_id = args.device_id;
+  g_pgo_device_id = static_cast<uint32_t>(args.device_id);
   g_device_set = true;
   ret = aclrtCreateStream(&g_stream);
   if (ret != ACL_SUCCESS) { DLOGE("acl create stream failed, ERROR: %d", ret); return FAILED; }
@@ -428,6 +429,10 @@ int RunInductorPgo(const InductorPgoRunnerArgs &args) {
   std::vector<int64_t> block_dims;
   const auto ret = generate_measured_topn_solutions_fn(
       {}, args.topn, tiling_datas, workspaces, block_dims, &g_res_limit);
+  if (ret == kPgoProfileUnsupported) {
+    DLOGW("PGO profiling unsupported on this device; fallback to non-PGO path");
+    return FAILED;
+  }
   if (ret != 0) { DLOGE("GenerateMeasuredTopnSolutions failed, ERROR: %" PRId64, ret); return FAILED; }
   if (tiling_datas.empty()) { return FAILED; }
   if (WritePgoTopnResult(args.result_file, tiling_datas, workspaces, block_dims) != SUCCESS) {

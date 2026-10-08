@@ -19,7 +19,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from compile_test_utils import PYTHON_DIR, load_compile_module
+from compile_test_utils import (
+    PYTHON_DIR,
+    load_compile_module,
+    make_tbe_log_stub_modules,
+)
 
 MODULE_NAME = "autofuse.compiler.python.ascendc_compile"
 MODULE_PATH = os.path.join(PYTHON_DIR, "ascendc_compile.py")
@@ -56,6 +60,9 @@ def ascendc_compile_module():
             "asc_op_compile_base.common.platform"
         ),
         "asc_op_compile_base.common.platform.platform_info": platform_info_module,
+        # Stub tbe log so the fixture never triggers the real (slow, and
+        # process-global-state polluting) TBE package init.
+        **make_tbe_log_stub_modules(),
     }
     with load_compile_module(
         MODULE_NAME, MODULE_PATH, extra_modules=extra_modules
@@ -67,7 +74,7 @@ def _noop_run_compile_command(cmd, stage_name):
     return None
 
 
-def _make_host_pgo_args(tmpdir, mspti_config):
+def _make_host_pgo_args(tmpdir):
     return type(
         "Args",
         (),
@@ -76,7 +83,7 @@ def _make_host_pgo_args(tmpdir, mspti_config):
             "temp_dir": str(tmpdir),
             "output_file": str(tmpdir.join("tiling.so")),
             "pgo_runner_file": str(tmpdir.join("runner.cpp")),
-            "pgo_mspti_config": mspti_config,
+            "pgo_device_file": str(tmpdir.join("device.cpp")),
         },
     )()
 
@@ -176,7 +183,7 @@ def test_link_shared_appends_extra_link_options(ascendc_compile_module):
     assert "-Wl,-rpath,$ORIGIN/cv_tiling_wrapper_cache" in captured["cmd"]
 
 
-def test_link_pgo_executable_uses_host_runtime_and_mspti_libraries(
+def test_link_pgo_executable_uses_host_runtime_without_profiler_libraries(
     ascendc_compile_module,
 ):
     captured = {}
@@ -190,7 +197,7 @@ def test_link_pgo_executable_uses_host_runtime_and_mspti_libraries(
     ascendc_compile_module.module.machine = "x86_64"
 
     result = ascendc_compile_module.link_pgo_executable(
-        "pgo_runner", ["solver.o", "runner.o"], ["-L/mspti/lib64", "-lmspti"]
+        "pgo_runner", ["solver.o", "runner.o"]
     )
 
     assert result == "pgo_runner"
@@ -212,9 +219,6 @@ def test_link_pgo_executable_uses_host_runtime_and_mspti_libraries(
         "-lascendalog",
         "-lc_sec",
         "-lm",
-        "-L/mspti/lib64",
-        "-Wl,-rpath,/mspti/lib64",
-        "-lmspti",
         "-lstdc++",
         "-ldl",
         "-lpthread",
@@ -229,9 +233,7 @@ def test_link_pgo_executable_propagates_link_failure(ascendc_compile_module):
     ascendc_compile_module.module.run_compile_command = fake_run_compile_command
 
     with pytest.raises(ascendc_compile_module.CompileError, match="link failed"):
-        ascendc_compile_module.link_pgo_executable(
-            "pgo_runner", ["runner.o"], ["-lmspti"]
-        )
+        ascendc_compile_module.link_pgo_executable("pgo_runner", ["runner.o"])
 
 
 def test_extract_aicore_binary_uses_bisheng_objcopy_fallback(
@@ -301,7 +303,7 @@ def test_get_pgo_sidecar_paths_are_generation_scoped(ascendc_compile_module, tmp
 
     paths = ascendc_compile_module.get_pgo_sidecar_paths(output_file, "generation1")
 
-    assert paths["generation_dir"] == output_file + ".pgo.generation1"
+    assert paths["generation_dir"] == output_file + ".pgo_v2/generation1"
     assert paths["tiling_so"].endswith("/tiling.so")
     assert paths["runner"].endswith("/tiling.so.pgo_runner")
     assert paths["kernel"].endswith("/tiling.so.pgo_kernel.aicore_binary_elf_v1")
@@ -324,11 +326,6 @@ def test_build_pgo_sidecars_compiles_runner_then_device_binary(
         {
             "pgo_runner_file": runner_source,
             "pgo_device_file": device_source,
-            "pgo_mspti_config": (
-                "/mspti",
-                ["/mspti/lib64/libprof_common.so", "/mspti/lib64/libmspti.so"],
-                ["-lmspti"],
-            ),
         },
     )()
 
@@ -336,8 +333,8 @@ def test_build_pgo_sidecars_compiles_runner_then_device_binary(
         events.append(("compile_runner", source))
         return source + ".o"
 
-    def fake_link_runner(target, objects, flags):
-        events.append(("link_runner", target, objects, flags))
+    def fake_link_runner(target, objects):
+        events.append(("link_runner", target, objects))
         open(target, "wb").write(b"runner")
         return target
 
@@ -367,10 +364,6 @@ def test_build_pgo_sidecars_compiles_runner_then_device_binary(
     ]
     assert open(runner, "rb").read() == b"runner"
     assert open(kernel, "rb").read() == b"device-elf"
-    assert args.pgo_mspti_dir == "/mspti"
-    assert (
-        args.pgo_ld_preload == "/mspti/lib64/libprof_common.so:/mspti/lib64/libmspti.so"
-    )
 
 
 def test_publish_pgo_bundle_binds_hashes_and_replaces_tiling_last(
@@ -400,7 +393,7 @@ def test_publish_pgo_bundle_binds_hashes_and_replaces_tiling_last(
         [built_tiling, built_runner, built_kernel],
         output_file,
         "generation1",
-        "/mspti/lib64/libmspti.so",
+        "",
     )
     paths = ascendc_compile_module.publish_pgo_bundle(bundle)
 
@@ -408,9 +401,12 @@ def test_publish_pgo_bundle_binds_hashes_and_replaces_tiling_last(
     assert replace_events[-2][1] == paths["generation_dir"]
     assert open(paths["tiling_so"], "rb").read() == b"tiling"
     manifest = json.loads(open(paths["manifest"]).read())
-    assert manifest["bundle_schema_version"] == 1
+    assert manifest["bundle_schema_version"] == 2
+    assert manifest["cache_root"] == "pgo_v2"
     assert manifest["generation"] == "generation1"
     assert manifest["result_protocol_version"] == 1
+    assert manifest["profiling_backend"] == "mspti_equivalent"
+    assert manifest["requires_mspti"] is False
     assert (
         not {
             "protocol",
@@ -422,7 +418,7 @@ def test_publish_pgo_bundle_binds_hashes_and_replaces_tiling_last(
         }
         & manifest.keys()
     )
-    assert manifest["ld_preload"] == "/mspti/lib64/libmspti.so"
+    assert manifest["ld_preload"] == ""
     assert manifest["artifacts"]["tiling_so"]["file"] == "tiling.so"
     assert (
         manifest["artifacts"]["tiling_so"]["sha256"]
@@ -443,8 +439,9 @@ def test_publish_pgo_bundle_keeps_current_and_previous_generation(
     ascendc_compile_module, tmpdir
 ):
     output_file = str(tmpdir.join("tiling.so"))
-    old_generation = output_file + ".pgo.generation1"
-    previous_generation = output_file + ".pgo.generation2"
+    cache_root = output_file + ".pgo_v2"
+    old_generation = cache_root + "/generation1"
+    previous_generation = cache_root + "/generation2"
     os.makedirs(old_generation)
     os.makedirs(previous_generation)
     os.utime(old_generation, ns=(1, 1))
@@ -514,14 +511,14 @@ def test_publish_pgo_bundle_failure_keeps_previous_tiling_and_removes_new_genera
         )
 
     assert open(output_file, "rb").read() == b"old-tiling"
-    assert not os.path.exists(output_file + ".pgo.generation2")
+    assert not os.path.exists(output_file + ".pgo_v2/generation2")
 
 
 def test_main_host_pgo_builds_bundle_and_skips_plain_copy(
     ascendc_compile_module, tmpdir
 ):
     events = []
-    args = _make_host_pgo_args(tmpdir, ("/mspti", [], []))
+    args = _make_host_pgo_args(tmpdir)
 
     def fake_link_tiling_so(*_):
         return str(tmpdir.join("built_tiling.so"))
@@ -532,7 +529,7 @@ def test_main_host_pgo_builds_bundle_and_skips_plain_copy(
     ascendc_compile_module.module.compile_host_objs = lambda *_: ["/tmp/build/host.o"]
     ascendc_compile_module.module.link_tiling_so = fake_link_tiling_so
     ascendc_compile_module.module.build_pgo_sidecars = fake_build_pgo_sidecars
-    args.pgo_ld_preload = "/mspti/lib64/libmspti.so"
+    args.pgo_ld_preload = ""
 
     def fake_publish(bundle):
         events.append(
@@ -563,26 +560,106 @@ def test_main_host_pgo_builds_bundle_and_skips_plain_copy(
     )
     assert len(events[0][4]) == 32
     assert args.pgo_generation == events[0][4]
-    assert events[0][5] == "/mspti/lib64/libmspti.so"
+    assert events[0][5] == ""
+
+
+def test_main_all_pgo_builds_bundle_after_kernel_link(ascendc_compile_module, tmpdir):
+    events = []
+    args = _make_host_pgo_args(tmpdir)
+    args.stage = "all"
+    args.device_files = str(tmpdir.join("device.cpp"))
+
+    class NoPchBatch:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *_):
+            return False
+
+    def fake_build_pgo_sidecars(*_):
+        return str(tmpdir.join("built_runner")), str(tmpdir.join("built_kernel"))
+
+    def fake_publish(bundle):
+        events.append(
+            (
+                bundle.tiling_file,
+                bundle.runner_file,
+                bundle.kernel_file,
+                bundle.output_file,
+            )
+        )
+
+    ascendc_compile_module.module.host_compile_batch = lambda *_: NoPchBatch()
+    ascendc_compile_module.module.compile_host_objs = lambda *_: ["host.o"]
+    ascendc_compile_module.module.build_kernel_target = lambda *_: str(
+        tmpdir.join("built_kernel_so")
+    )
+    ascendc_compile_module.module.build_pgo_sidecars = fake_build_pgo_sidecars
+    ascendc_compile_module.module.publish_pgo_bundle = fake_publish
+    ascendc_compile_module.module.copy_so_to_output = lambda *_: pytest.fail(
+        "plain copy must not run"
+    )
+    args.pgo_ld_preload = ""
+
+    ascendc_compile_module.main(args)
+
+    assert events == [
+        (
+            str(tmpdir.join("built_kernel_so")),
+            str(tmpdir.join("built_runner")),
+            str(tmpdir.join("built_kernel")),
+            str(tmpdir.join("tiling.so")),
+        )
+    ]
+    assert len(args.pgo_generation) == 32
+
+
+def test_build_host_output_resolves_generation_before_host_compile(
+    ascendc_compile_module, tmpdir
+):
+    args = _make_host_pgo_args(tmpdir)
+    compiled_generations = []
+
+    def fake_compile_host_objs(*_):
+        # Capture the generation as seen at host compile time: the tiling source
+        # embeds AUTOFUSE_PGO_GENERATION here, so it must already be resolved.
+        compiled_generations.append(getattr(args, "pgo_generation", None))
+        return ["/tmp/build/host.o"]
+
+    def fake_link_tiling_so(*_):
+        return str(tmpdir.join("built_tiling.so"))
+
+    def fake_build_pgo_sidecars(*_):
+        return str(tmpdir.join("built_runner")), str(tmpdir.join("built_kernel"))
+
+    published_generations = []
+    ascendc_compile_module.module.compile_host_objs = fake_compile_host_objs
+    ascendc_compile_module.module.link_tiling_so = fake_link_tiling_so
+    ascendc_compile_module.module.build_pgo_sidecars = fake_build_pgo_sidecars
+    ascendc_compile_module.module.publish_pgo_bundle = lambda bundle: (
+        published_generations.append(bundle.generation)
+    )
+    ascendc_compile_module.module.copy_so_to_output = lambda *_: pytest.fail(
+        "plain copy must not run"
+    )
+    args.pgo_ld_preload = ""
+
+    ascendc_compile_module.build_host_output(args)
+
+    assert len(compiled_generations) == 1
+    assert compiled_generations[0] is not None
+    assert len(compiled_generations[0]) == 32
+    # The published manifest must keep the same generation the .so was compiled
+    # with, otherwise the runtime proxy rejects the bundle.
+    assert published_generations == [compiled_generations[0]]
 
 
 def test_main_host_pgo_failure_falls_back_to_plain_tiling(
-    ascendc_compile_module, tmpdir, monkeypatch
+    ascendc_compile_module, tmpdir
 ):
     original_dir = os.getcwd()
     copied = []
-    warnings = []
-    args = _make_host_pgo_args(tmpdir, ("/mspti", [], []))
-
-    monkeypatch.setattr(
-        ascendc_compile_module.module,
-        "logger",
-        types.SimpleNamespace(
-            info=lambda *_args: None,
-            error=lambda *_args: None,
-            warning=lambda message, *args: warnings.append(message % args),
-        ),
-    )
+    args = _make_host_pgo_args(tmpdir)
 
     def fake_link_tiling_so(*_):
         return str(tmpdir.join("built_tiling.so"))
@@ -607,14 +684,12 @@ def test_main_host_pgo_failure_falls_back_to_plain_tiling(
             original_dir,
         )
     ]
-    assert warnings == [
-        "[PGO] Inductor PGO sidecar build failed, skip PGO: sidecar failed"
-    ]
     assert os.getcwd() == original_dir
 
 
 def test_build_host_output_passes_pch_to_host_compile(ascendc_compile_module, tmpdir):
-    args = _make_host_pgo_args(tmpdir, None)
+    args = _make_host_pgo_args(tmpdir)
+    args.pgo_runner_file = None
     captured = {}
 
     def fake_compile_host_objs(compile_args, temp_dir, pch_path):
@@ -633,29 +708,31 @@ def test_build_host_output_passes_pch_to_host_compile(ascendc_compile_module, tm
     assert captured["pch_path"] == "/tmp/cache/host.pch"
 
 
-def test_main_host_pgo_without_mspti_skips_sidecars_and_copies_plain_tiling(
-    ascendc_compile_module, tmpdir
-):
-    copied = []
-    args = _make_host_pgo_args(tmpdir, None)
+def test_host_pgo_without_mspti_builds_acl_sidecars(ascendc_compile_module, tmpdir):
+    published = []
+    args = _make_host_pgo_args(tmpdir)
 
-    def fake_build_host_output(*_):
+    def fake_compile_host_objs(*_):
+        return [str(tmpdir.join("host.o"))]
+
+    def fake_link_tiling_so(*_):
         return str(tmpdir.join("built_tiling.so"))
 
-    def fail_build_pgo_sidecars(*_):
-        pytest.fail("sidecars must not be built without MSPTI")
+    def fake_build_pgo_sidecars(*_):
+        return str(tmpdir.join("built_runner")), str(tmpdir.join("built_kernel"))
 
-    def record_copy(so_file, compile_args, src_dir):
-        copied.append(so_file)
+    ascendc_compile_module.module.compile_host_objs = fake_compile_host_objs
+    ascendc_compile_module.module.link_tiling_so = fake_link_tiling_so
+    ascendc_compile_module.module.build_pgo_sidecars = fake_build_pgo_sidecars
+    ascendc_compile_module.module.publish_pgo_bundle = published.append
 
-    ascendc_compile_module.module.build_host_output = fake_build_host_output
-    ascendc_compile_module.module.build_pgo_sidecars = fail_build_pgo_sidecars
-    ascendc_compile_module.module.copy_so_to_output = record_copy
+    result = ascendc_compile_module.build_host_output(args)
 
-    ascendc_compile_module.main(args)
-
-    assert copied == [str(tmpdir.join("built_tiling.so"))]
-    assert not hasattr(args, "pgo_generation")
+    assert result is None
+    assert len(published) == 1
+    assert published[0].runner_file.endswith("built_runner")
+    assert published[0].kernel_file.endswith("built_kernel")
+    assert not hasattr(args, "pgo_mspti_config")
 
 
 def test_host_target_records_compile_and_link_stage(
@@ -1411,7 +1488,7 @@ def _assert_compile_host_objs_skips_shared_cv_wrapper_source(
     )
 
 
-def test_build_host_compile_cmd_adds_pgo_mspti_include(ascendc_compile_module):
+def test_build_host_compile_cmd_excludes_mspti_include(ascendc_compile_module):
     args = _make_compile_args("/tmp/build/host/graph_tiling_func_PgoRunner.cpp")
     args.pgo_mspti_dir = "/usr/local/Ascend/cann/tools/mspti"
     args.pgo_generation = "generation1"
@@ -1424,7 +1501,7 @@ def test_build_host_compile_cmd_adds_pgo_mspti_include(ascendc_compile_module):
         "/tmp/build/host/graph_tiling_func_PgoRunner.cpp.o",
     )
 
-    assert "/usr/local/Ascend/cann/tools/mspti/include" in cmd
+    assert not any("mspti" in str(option).lower() for option in cmd)
     assert "-D_GLIBCXX_USE_CXX11_ABI=1" in cmd
     assert 'AUTOFUSE_PGO_GENERATION="generation1"' in cmd
 

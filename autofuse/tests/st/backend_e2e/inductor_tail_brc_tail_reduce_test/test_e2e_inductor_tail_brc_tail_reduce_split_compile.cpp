@@ -37,12 +37,17 @@ namespace {
 using autofuse::tests::FileExists;
 using autofuse::tests::ReadFile;
 std::string FindGenerationDir(const std::string &tiling_so) {
+  // The internal PGO collector publishes bundles as <tiling>.pgo_v2/<generation>
+  // (cache root name shared with the manifest writer in ascendc_compile.py).
   const std::filesystem::path output(tiling_so);
-  const std::string prefix = output.filename().string() + ".pgo.";
+  const std::filesystem::path cache_dir = output.parent_path() / (output.filename().string() + ".pgo_v2");
+  std::error_code ec;
+  if (!std::filesystem::is_directory(cache_dir, ec)) {
+    return {};
+  }
   std::string result;
-  for (const auto &entry : std::filesystem::directory_iterator(output.parent_path())) {
-    const auto name = entry.path().filename().string();
-    if (entry.is_directory() && name.rfind(prefix, 0U) == 0U) {
+  for (const auto &entry : std::filesystem::directory_iterator(cache_dir, ec)) {
+    if (entry.is_directory()) {
       if (!result.empty()) return {};
       result = entry.path().string();
     }

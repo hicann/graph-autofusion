@@ -127,7 +127,10 @@ function(autofuse_apply_shared_visibility target_name)
     target_link_libraries(${target_name} PRIVATE autofuse_shared_visibility)
 endfunction()
 
-if (DEFINED RUN_TEST)
+# Coverage flags belong to test builds only. build.sh passes -DRUN_TEST=0 when
+# reconfiguring a product/package build, and a bare "DEFINED" check would
+# wrongly instrument the shipped run package with gcov.
+if(DEFINED RUN_TEST AND RUN_TEST EQUAL 1)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage")
 endif ()

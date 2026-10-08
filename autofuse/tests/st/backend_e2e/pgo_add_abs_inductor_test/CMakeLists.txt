@@ -9,10 +9,6 @@ set(PGO_ADD_ABS_INDUCTOR_OUTPUT_DIR ${PGO_ADD_ABS_INDUCTOR_WORKDIR}/split_compil
 
 set(PYAUTOFUSE_DIR ${CMAKE_BINARY_DIR}/autofuse/tests)
 set(AUTOFUSE_PYTHON_DIR ${CODE_ROOT_DIR}/compiler/python)
-set(AUTOFUSE_TEST_MSPTI_DIR "$ENV{AUTOFUSE_MSPTI_PATH}")
-if(AUTOFUSE_TEST_MSPTI_DIR STREQUAL "")
-    set(AUTOFUSE_TEST_MSPTI_DIR "${ASCEND_INSTALL_PATH}/tools/mspti")
-endif()
 set(PGO_ADD_ABS_INDUCTOR_RUNTIME_LD_LIBRARY_PATH
     "${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/ascendc_ir/generator:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/ascendc_ir:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph/expression:${CMAKE_BINARY_DIR}/autofuse/graph_metadef/graph:${CMAKE_BINARY_DIR}/autofuse/tests:${CMAKE_BINARY_DIR}/autofuse/tests/depends/common:${CMAKE_BINARY_DIR}/autofuse/tests/depends/slog:${CMAKE_BINARY_DIR}/autofuse/tests/depends/trace:${CMAKE_BINARY_DIR}/autofuse/tests/depends/runtime:${CMAKE_BINARY_DIR}/autofuse/ascir/generator:${CMAKE_BINARY_DIR}/autofuse/ascir/meta:${ASCEND_INSTALL_PATH}/${CMAKE_SYSTEM_PROCESSOR}-linux/lib64:$ENV{LD_LIBRARY_PATH}")
 
@@ -71,7 +67,6 @@ target_compile_definitions(pgo_add_abs_inductor_test_e2e PRIVATE
     PYAUTOFUSE_DIR="${PYAUTOFUSE_DIR}"
     AUTOFUSE_PYTHON_DIR="${AUTOFUSE_PYTHON_DIR}"
     ASCEND_HOME_PATH="${ASCEND_INSTALL_PATH}"
-    MSPTI_DIR="${AUTOFUSE_TEST_MSPTI_DIR}"
     HOST_HELPER_BIN="$<TARGET_FILE:pgo_add_abs_inductor_host_abi1_helper>"
     HOST_DYNAMIC_SHAPE_ARGS="32,16,16"
 )

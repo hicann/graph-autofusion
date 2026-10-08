@@ -455,6 +455,12 @@ def prepare_compile_context(argv, stage, tiling_repr):
     args = parse_compile_args(argv)
     args.stage = stage
     args.tiling_repr = tiling_repr
+    get_pgo_cache_root = getattr(ascendc_compile, "get_pgo_cache_root", None)
+    args.pgo_cache_root = (
+        get_pgo_cache_root(args.output_file)
+        if callable(get_pgo_cache_root)
+        else f"{os.path.realpath(args.output_file)}.pgo_v2"
+    )
     if (
         stage in ("host", "host_obj")
         and HOST_CXX11_ABI_PREFIX not in args.compile_options
@@ -485,9 +491,9 @@ def write_compile_host_sources(sources, args, tiling_def_file, base_host_file):
             host_file_path, base_host_file, args.graph_name, host_impl_code
         )
         return
-    if args.stage not in ("host", "host_obj"):
+    if args.stage not in ("all", "host", "host_obj"):
         raise ascendc_compile.CompileError(
-            "Inductor PGO sidecar is supported only in host_compile stage"
+            "Inductor PGO sidecar is supported only in all/host_compile stages"
         )
     device_file_path = os.path.join(args.temp_dir, "device")
     generate_file(device_file_path, tiling_def_file, sources[SOURCES_TILING_STRUCT])
@@ -496,9 +502,6 @@ def write_compile_host_sources(sources, args, tiling_def_file, base_host_file):
             host_file_path, device_file_path, args.graph_name, host_impl_code
         )
     )
-    args.pgo_mspti_config = get_inductor_pgo_mspti_config()
-    if args.pgo_mspti_config is None:
-        _log_warning("[PGO] MSPTI is unavailable, skip Inductor PGO sidecars")
 
 
 def write_compile_device_sources(sources, args, tiling_def_file, base_device_file):
@@ -678,22 +681,6 @@ def build_kernel_so(tiling_def_code, argv: List[str], *, tiling_repr=None):
     )
 
 
-def get_inductor_pgo_mspti_config_from_dir(mspti_dir):
-    mspti_dir = os.path.realpath(mspti_dir)
-    include_file = os.path.join(mspti_dir, "include", "mspti.h")
-    lib_dir = os.path.join(mspti_dir, "lib64")
-    mspti_so = os.path.join(lib_dir, "libmspti.so")
-    if not os.path.isfile(include_file) or not os.path.isfile(mspti_so):
-        return None
-    prof_common_so = os.path.join(lib_dir, "libprof_common.so")
-    preload_files = [mspti_so]
-    link_flags = [f"-L{lib_dir}", "-lmspti"]
-    if os.path.isfile(prof_common_so):
-        preload_files.insert(0, prof_common_so)
-        link_flags.append("-lprof_common")
-    return mspti_dir, preload_files, link_flags
-
-
 def get_current_cann_root():
     module_file = getattr(ascendc_compile, "__file__", "")
     if not module_file:
@@ -717,15 +704,6 @@ def get_inductor_pgo_cann_root_candidates():
     for env_name in CANN_ROOT_ENV_NAMES:
         add_candidate(os.getenv(env_name))
     return candidates
-
-
-def get_inductor_pgo_mspti_config():
-    for cann_root in get_inductor_pgo_cann_root_candidates():
-        mspti_dir = os.path.join(cann_root, "tools", "mspti")
-        config = get_inductor_pgo_mspti_config_from_dir(mspti_dir)
-        if config is not None:
-            return config
-    return None
 
 
 def extract_time(line):

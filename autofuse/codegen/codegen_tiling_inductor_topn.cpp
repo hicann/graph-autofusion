@@ -569,6 +569,7 @@ void TilingLib::GenTopnMeasuredCoreSearch(std::stringstream &ss, const std::stri
 }
 
 void TilingLib::GenTopnMeasuredBatchProfiling(std::stringstream &ss) const {
+  ss << "  constexpr int64_t kPgoProfileUnsupported = -13;" << std::endl;
   ss << "  std::vector<AutofuseTilingDataPerf> raw_candidates;" << std::endl;
   ss << "  uint32_t workspace_size = 0U;" << std::endl;
   ss << "  for (const auto &tiling_data : measured_tiling_datas) {" << std::endl;
@@ -580,9 +581,13 @@ void TilingLib::GenTopnMeasuredBatchProfiling(std::stringstream &ss) const {
   ss << "    return -1;" << std::endl;
   ss << "  }" << std::endl;
   ss << "  auto measured_candidates = NormalizePgoMeasuredCandidates(std::move(raw_candidates));" << std::endl;
-  ss << "  if (PgoConfig::Instance().batch_callback(PgoConfig::Instance().tensor_args, "
-        "PgoConfig::Instance().stream, workspace_size, &measured_candidates) != 0) {"
+  ss << "  const auto callback_ret = PgoConfig::Instance().batch_callback(PgoConfig::Instance().tensor_args, "
+        "PgoConfig::Instance().stream, workspace_size, &measured_candidates);"
      << std::endl;
+  ss << "  if (callback_ret == kPgoProfileUnsupported) {" << std::endl;
+  ss << "    return callback_ret;" << std::endl;
+  ss << "  }" << std::endl;
+  ss << "  if (callback_ret != 0) {" << std::endl;
   GenTopnSetFailureMessage(ss, "    ", "batch profiling callback failed");
   ss << "    return -1;" << std::endl;
   ss << "  }" << std::endl;

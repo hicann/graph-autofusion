@@ -577,7 +577,7 @@ std::map<std::string, std::string> TilingLib::GenerateForInductor(
   ascir::FusedScheduledResult elemwise_schedule_result = fused_schedule_result;
   const bool is_cube_fused_scheduled = ascgen_utils::IsCubeFusedScheduled(fused_schedule_result);
   if (enable_autofuse_pgo_ && !IsSupportedInductorPgoScene(fused_schedule_result)) {
-    GELOGE(af::FAILED, "Inductor MSPTI PGO only supports static, non-CV kernels");
+    GELOGE(af::FAILED, "Inductor ACL event PGO only supports static, non-CV kernels");
     return {{kTilingDefAndConstIdentify, ascgen_utils::INVALID_TILING}};
   }
   if (is_cube_fused_scheduled) {

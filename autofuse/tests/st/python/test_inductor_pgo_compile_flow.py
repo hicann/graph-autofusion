@@ -112,7 +112,8 @@ def test_scheme_a_host_compile_publishes_generation_bundle_last(
         assert Path(args.pgo_runner_file).name == "test_graph_tiling_func_PgoRunner.cpp"
         assert Path(args.pgo_device_file).name == "test_graph_pgo_device.cpp"
         generation = "stgeneration"
-        generation_dir = Path(f"{output_file}.pgo.{generation}")
+        generation_dir = Path(f"{output_file}.pgo_v2/{generation}")
+        generation_dir.parent.mkdir()
         staging_dir = tmp_path / ".staging"
         staging_dir.mkdir()
         (staging_dir / "tiling.so").write_bytes(b"tiling")
@@ -123,7 +124,8 @@ def test_scheme_a_host_compile_publishes_generation_bundle_last(
         (staging_dir / "manifest.json").write_text(
             json.dumps(
                 {
-                    "bundle_schema_version": 1,
+                    "bundle_schema_version": 2,
+                    "cache_root": "pgo_v2",
                     "generation": generation,
                     "result_protocol_version": 1,
                 }
@@ -137,12 +139,6 @@ def test_scheme_a_host_compile_publishes_generation_bundle_last(
         published["generation_dir"] = generation_dir
 
     compile_adapter_module.ascendc_compile.main = fake_main
-    monkeypatch.setattr(
-        compile_adapter_module.module,
-        "get_inductor_pgo_mspti_config",
-        lambda: (os.fspath(tmp_path / "mspti"), [], []),
-    )
-
     compile_adapter_module.host_compile(
         "struct AutofuseTilingData {};", _make_scheme_a_host_impl(), argv
     )
