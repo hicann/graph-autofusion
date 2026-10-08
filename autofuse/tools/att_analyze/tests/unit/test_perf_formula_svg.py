@@ -70,6 +70,19 @@ class TestRenderOpSection(unittest.TestCase):
         frag, h = render_svg("FlashAttentionScore", cases, selected_case=(1, 0, 0))
         self.assertIn("red", frag.lower())
 
+    def test_all_zero_cross_case_metric_is_renderable(self):
+        cases = [make_case(case_id=0), make_case(case_id=1)]
+        for case in cases:
+            for node in case.nodes:
+                node.sub_items = [SubItem("idle_cycles", 0.0, 0.0)]
+                node.total = 0.0
+
+        frag, height = render_svg("FlashAttentionScore", cases, selected_case=None)
+
+        self.assertIn("敏感参数: idle_cycles", frag)
+        self.assertIn('width="0"', frag)
+        self.assertGreater(height, 0)
+
 
 class TestBuildFullSvg(unittest.TestCase):
     """build_full_svg combines multiple operator sections into a valid single SVG"""
