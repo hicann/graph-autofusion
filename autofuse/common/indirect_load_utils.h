@@ -102,6 +102,13 @@ struct IndirectLoadAccessInfo {
   // SIMD uses a contiguous payload suffix and a zero-stride index suffix.
   // This is stricter than the generalized SIMT structured-layout condition.
   bool can_use_simd_embedding = false;
+  // [SK窗口可行性] index 源头是否物理收敛（沿生产链回溯到 Load，其原始视图在
+  // gather 轴 payload 维上零贡献/退化）。源头收敛时 gather 的引用按行/列成组，
+  // SK 行窗口只需装载被引用分片；源头不收敛（逐元素独立引用，如
+  // index=[13,10,20000] 全轴 stride 非零）时 SK 窗口必须覆盖 axis 维全部，
+  // 退化为全量。kind 为 generic 但源头收敛的形态（如尾轴 gather 无 payload
+  // 后缀）不受 kind 标签影响。
+  bool index_source_converged = false;
 };
 
 enum class SimdFallback : int64_t {
@@ -217,6 +224,8 @@ af::Status SetTemplateLogicalView(const af::AscNodePtr &node, const TemplateLogi
 af::Status GetTemplateLogicalView(const af::AscNodePtr &node, TemplateLogicalView &view);
 af::Status SetIndirectLoadAccessInfo(const af::AscNodePtr &node, const IndirectLoadAccessInfo &info);
 af::Status GetIndirectLoadAccessInfo(const af::AscNodePtr &node, IndirectLoadAccessInfo &info);
+// [SK窗口可行性] 现场判定 index 源头收敛性（不依赖候选流程构建的 attr，跨图副本安全）。
+bool IsIndexSourceConverged(const af::AscNodePtr &indirect_load);
 af::Status SetLoweringMetadata(const af::AscNodePtr &node, const IndirectLoadLoweringMetadata &metadata);
 af::Status GetLoweringMetadata(const af::AscNodePtr &node, IndirectLoadLoweringMetadata &metadata);
 bool HasLoweringMetadata(const af::AscNodePtr &node);

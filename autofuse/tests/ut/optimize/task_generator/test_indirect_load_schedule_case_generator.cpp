@@ -2432,3 +2432,253 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimtRaPostReduceCandidateKeepsFixedT
 }
 
 }  // namespace
+
+// ==================== SK分段SIMT化（R轴超限重定向）====================
+
+// 构造带 Reduce 链的 gather 图：index 可切换收敛/非收敛，shape 可调以触发/不触发
+// 窗口超限。
+af::AscGraph BuildSkRedirectGraph(bool non_converged_index, int64_t input_rows, bool composite_norm,
+                                  int64_t dim = 20000) {
+  af::AscGraph graph("sk_redirect_ut_graph");
+  const af::Expression s_rows = graph.CreateSizeVar(1);
+  const af::Expression s_dim = graph.CreateSizeVar(dim);
+  const af::Expression s_table = graph.CreateSizeVar(input_rows);
+  const auto a0 = graph.CreateAxis("a0", s_rows);
+  const auto a1 = graph.CreateAxis("a1", s_dim);
+  const std::vector<af::AxisId> axes = {a0.id, a1.id};
+  const std::vector<af::Expression> full = {s_rows, s_dim};
+  const std::vector<af::Expression> full_strides = {s_dim, af::sym::kSymbolOne};
+  const std::vector<af::Expression> row = {s_rows, af::sym::kSymbolOne};
+  const std::vector<af::Expression> row_strides = {af::sym::kSymbolOne, af::sym::kSymbolZero};
+
+  af::ascir_op::Data table("table", graph);
+  table.ir_attr.SetIndex(0);
+  table.y.dtype = af::DT_FLOAT;
+  af::ascir_op::Load table_load("table_load");
+  table_load.x = table.y;
+  SetNodeView(table_load, af::DT_FLOAT, axes, {s_table, s_dim}, {s_dim, af::sym::kSymbolOne});
+
+  af::ascir_op::Data index("index", graph);
+  index.ir_attr.SetIndex(1);
+  index.y.dtype = af::DT_INT64;
+  af::ascir_op::Load index_load("index_load");
+  index_load.x = index.y;
+  if (non_converged_index) {
+    // 非收敛：每元素独立行号（全轴 stride 非零）。
+    SetNodeView(index_load, af::DT_INT64, axes, full, full_strides);
+  } else {
+    // 收敛：每行一个行号（尾轴零贡献）。
+    SetNodeView(index_load, af::DT_INT64, axes, row, row_strides);
+  }
+
+  af::ascir_op::IndirectLoad indirect_load("indirect_load");
+  indirect_load.x1 = table_load.y;
+  if (non_converged_index) {
+    indirect_load.x2 = index_load.y;
+  } else {
+    // 收敛形态经 Broadcast 补齐逻辑形状（IL 语义要求 index 与输出 repeats 匹配）：
+    // 源头 [rows,1]/[1,0]（尾轴零贡献）广播到 [rows,dim]。
+    af::ascir_op::Broadcast index_broadcast("index_broadcast");
+    index_broadcast.x = index_load.y;
+    SetNodeView(index_broadcast, af::DT_INT64, axes, full, full_strides);
+    indirect_load.x2 = index_broadcast.y;
+  }
+  indirect_load.ir_attr.SetAxis(0);
+  indirect_load.ir_attr.SetNegative_index_support(true);
+  indirect_load.ir_attr.SetNeed_check_bound(true);
+  indirect_load.ir_attr.SetMax(s_table);
+  SetNodeView(indirect_load, af::DT_FLOAT, axes, full, full_strides);
+
+  if (composite_norm) {
+    // 双 Reduce 复合链（LayerNorm 形态）：mean → broadcast → diff（菱形）→ var。
+    af::ascir_op::Sum mean_sum("mean_sum");
+    mean_sum.x = indirect_load.y;
+    mean_sum.attr.api.compute_type = af::ComputeType::kComputeReduce;
+    mean_sum.attr.sched.axis = axes;
+    SetNodeView(mean_sum, af::DT_FLOAT, axes, row, row_strides);
+    af::ascir_op::Broadcast mean_broadcast("mean_broadcast");
+    mean_broadcast.x = mean_sum.y;
+    SetNodeView(mean_broadcast, af::DT_FLOAT, axes, full, full_strides);
+    af::ascir_op::Sub diff("diff");
+    diff.x1 = indirect_load.y;
+    diff.x2 = mean_broadcast.y;
+    SetNodeView(diff, af::DT_FLOAT, axes, full, full_strides);
+    af::ascir_op::Mul square("square");
+    square.x1 = diff.y;
+    square.x2 = diff.y;
+    SetNodeView(square, af::DT_FLOAT, axes, full, full_strides);
+    af::ascir_op::Sum var_sum("var_sum");
+    var_sum.x = square.y;
+    var_sum.attr.api.compute_type = af::ComputeType::kComputeReduce;
+    var_sum.attr.sched.axis = axes;
+    SetNodeView(var_sum, af::DT_FLOAT, axes, row, row_strides);
+    af::ascir_op::Broadcast var_broadcast("var_broadcast");
+    var_broadcast.x = var_sum.y;
+    SetNodeView(var_broadcast, af::DT_FLOAT, axes, full, full_strides);
+    af::ascir_op::Mul norm_out("norm_out");
+    norm_out.x1 = diff.y;
+    norm_out.x2 = var_broadcast.y;
+    SetNodeView(norm_out, af::DT_FLOAT, axes, full, full_strides);
+    af::ascir_op::Store store("store");
+    store.x = norm_out.y;
+    SetNodeView(store, af::DT_FLOAT, axes, full, full_strides);
+    af::ascir_op::Output output("output");
+    output.ir_attr.SetIndex(0);
+    output.x = store.y;
+    SetNodeView(output, af::DT_FLOAT, axes, full, full_strides);
+  } else {
+    // 单 Reduce 链。
+    af::ascir_op::Sum sum("sum");
+    sum.x = indirect_load.y;
+    sum.attr.api.compute_type = af::ComputeType::kComputeReduce;
+    sum.attr.sched.axis = axes;
+    SetNodeView(sum, af::DT_FLOAT, axes, row, row_strides);
+    af::ascir_op::Store store("store");
+    store.x = sum.y;
+    SetNodeView(store, af::DT_FLOAT, axes, row, row_strides);
+    af::ascir_op::Output output("output");
+    output.ir_attr.SetIndex(0);
+    output.x = store.y;
+    SetNodeView(output, af::DT_FLOAT, axes, row, row_strides);
+  }
+  return graph;
+}
+
+void SetUpSkRedirectPlatform() {
+  ge::PlatformContext::GetInstance().Reset();
+  ge::PlatformInfo platform_info;
+  platform_info.soc_ver = "3510";
+  platform_info.ub_size = 245760;
+  platform_info.aiv_num = 48;
+  ge::PlatformContext::GetInstance().SetPlatformInfo(platform_info);
+}
+
+// 非收敛 index（逐元素独立行号）：index_source_converged 应为 false。
+TEST(IndirectLoadScheduleCaseGeneratorTest, AccessInfoMarksNonConvergedIndexSource) {
+  auto graph = BuildSkRedirectGraph(true, 4, false);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  ASSERT_FALSE(graphs.empty());
+  // AccessInfo 在候选生成的 metadata 阶段构建，从任一候选图的 IL 节点读取。
+  const auto indirect_load = graphs.front().FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::IndirectLoadAccessInfo access_info;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetIndirectLoadAccessInfo(indirect_load, access_info), af::SUCCESS);
+  EXPECT_FALSE(access_info.index_source_converged);
+}
+
+// 收敛 index（尾轴零贡献，每行一个行号）：index_source_converged 应为 true。
+TEST(IndirectLoadScheduleCaseGeneratorTest, AccessInfoMarksConvergedIndexSource) {
+  auto graph = BuildSkRedirectGraph(false, 4, false);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  ASSERT_FALSE(graphs.empty());
+  const auto indirect_load = graphs.front().FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  ascgen_utils::indirect_load::IndirectLoadAccessInfo access_info;
+  ASSERT_EQ(ascgen_utils::indirect_load::GetIndirectLoadAccessInfo(indirect_load, access_info), af::SUCCESS);
+  EXPECT_TRUE(access_info.index_source_converged);
+}
+
+// 窗口超限 + 单 Reduce：SK 候选重定向为 SIMT（分段标记 + output workspace 边界，
+// input/index 无 workspace 边界）。
+TEST(IndirectLoadScheduleCaseGeneratorTest, SkRedirectsToSimtWhenWindowExceedsUb) {
+  PlatformContextReset platform_reset;
+  SetUpSkRedirectPlatform();
+  // input=[8192,256]×4B=8MB + index=[1,256]×8B > UB(245KB)。
+  auto graph = BuildSkRedirectGraph(true, 8192, false);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  // 重定向后图列表含两个 SIMT template（原 SIMT 候选 + 重定向 SK），按分段标记定位。
+  auto sk_iter = graphs.end();
+  for (auto iter = graphs.begin(); iter != graphs.end(); ++iter) {
+    const auto candidate = iter->FindNode("indirect_load");
+    if (candidate != nullptr && ascir::GetTemplateIdOrDefault(*candidate) == ascir::TemplateId::kIndirectLoadSimt &&
+        ascir::IsSkSegmentedSimt(*candidate)) {
+      sk_iter = iter;
+      break;
+    }
+  }
+  ASSERT_NE(sk_iter, graphs.end());
+  auto &sk_graph = *sk_iter;
+  const auto indirect_load = sk_graph.FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  EXPECT_EQ(ascir::GetTemplateIdOrDefault(*indirect_load), ascir::TemplateId::kIndirectLoadSimt);
+  EXPECT_EQ(ascir::GetTemplateIdOrDefault(*indirect_load), ascir::TemplateId::kIndirectLoadSimt);
+  // output 侧 workspace 边界存在，input/index 侧不存在（IL 直读 GM）。
+  bool has_output_boundary = false;
+  bool has_input_boundary = false;
+  for (const auto &node : sk_graph.GetAllNodes()) {
+    const auto &name = node->GetName();
+    if (name.find("indirect_load_sk_output") != std::string::npos && af::ops::IsOps<af::ascir_op::Workspace>(node)) {
+      has_output_boundary = true;
+    }
+    if ((name.find("indirect_load_sk_input") != std::string::npos ||
+         name.find("indirect_load_sk_index") != std::string::npos) &&
+        af::ops::IsOps<af::ascir_op::Workspace>(node)) {
+      has_input_boundary = true;
+    }
+  }
+  EXPECT_TRUE(has_output_boundary);
+  EXPECT_FALSE(has_input_boundary);
+}
+
+// 窗口不超限（小表）：SK 候选保持原行窗口路径（template=SK，无分段标记）。
+TEST(IndirectLoadScheduleCaseGeneratorTest, SkKeepsOriginalPathWhenWindowFits) {
+  PlatformContextReset platform_reset;
+  SetUpSkRedirectPlatform();
+  // input=[4,256]×4B=4KB < UB。
+  auto graph = BuildSkRedirectGraph(true, 4, false, 256);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  const auto sk_iter = FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSK);
+  ASSERT_NE(sk_iter, graphs.end());
+  const auto indirect_load = sk_iter->FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  EXPECT_FALSE(ascir::IsSkSegmentedSimt(*indirect_load));
+}
+
+// 复合 Norm（双 Reduce 菱形）+ 窗口超限：重定向后 Norm 链的 Reduce/多消费者输出
+// 均插入 workspace 边界（每段数据流自足）。
+TEST(IndirectLoadScheduleCaseGeneratorTest, SkRedirectsCompositeNormChain) {
+  PlatformContextReset platform_reset;
+  SetUpSkRedirectPlatform();
+  auto graph = BuildSkRedirectGraph(true, 8192, true);
+  optimize::IndirectLoadScheduleCaseGenerator generator;
+  std::vector<af::AscGraph> graphs;
+  std::vector<std::string> score_functions;
+  ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
+  auto sk_iter = graphs.end();
+  for (auto iter = graphs.begin(); iter != graphs.end(); ++iter) {
+    const auto candidate = iter->FindNode("indirect_load");
+    if (candidate != nullptr && ascir::GetTemplateIdOrDefault(*candidate) == ascir::TemplateId::kIndirectLoadSimt &&
+        ascir::IsSkSegmentedSimt(*candidate)) {
+      sk_iter = iter;
+      break;
+    }
+  }
+  ASSERT_NE(sk_iter, graphs.end());
+  auto &sk_graph = *sk_iter;
+  const auto indirect_load = sk_graph.FindNode("indirect_load");
+  ASSERT_NE(indirect_load, nullptr);
+  // mean/var 两个 Reduce 与菱形 diff 的输出边界均存在。
+  int32_t norm_boundaries = 0;
+  for (const auto &node : sk_graph.GetAllNodes()) {
+    const auto &name = node->GetName();
+    if ((name.find("mean_sum_sk_n") != std::string::npos || name.find("var_sum_sk_n") != std::string::npos ||
+         name.find("diff_sk_n") != std::string::npos) &&
+        af::ops::IsOps<af::ascir_op::Workspace>(node)) {
+      ++norm_boundaries;
+    }
+  }
+  // mean(1) + diff(2消费者) + var(1) = 4 个边界 workspace 节点（pre 形态）。
+  EXPECT_GE(norm_boundaries, 3);
+}

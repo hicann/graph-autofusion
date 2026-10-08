@@ -22,6 +22,10 @@ constexpr char kTemplateRoleAttr[] = "af.internal.indirect_load.role";
 // [8,2048,1]/[2048,1,0]）。在视图被调度期 split 改写前（generator 的视图补全阶段）
 // 判定记录，供 codegen 坐标重建兜底使用——改写后视图 rank/尺寸失配无法再判定。
 constexpr char kRowBroadcastLoadAttr[] = "af.internal.indirect_load.row_broadcast_load";
+// [SK分段SIMT] SK 候选在窗口超限形态下将 IL 段重定向为 SIMT 执行（仅保留 output
+// workspace 边界，Reduce/Norm 段独立调度承载 R 轴分 tile）。该标记使分区后的
+// 模板轴恢复走 SIMT 归一（与原 SK 的 RestoreSkTemplateAxes 对应）。
+constexpr char kSkSegmentedSimtAttr[] = "af.internal.indirect_load.sk_segmented_simt";
 constexpr char kDcacheSizeAttr[] = "af.internal.template.dcache_size";
 }  // namespace
 
@@ -89,6 +93,22 @@ inline af::Status SetTemplateId(const af::AscNodePtr &node, TemplateId template_
   GE_ASSERT_TRUE(op_desc->SetExtAttr(kTemplateIdAttr, static_cast<int64_t>(template_id)),
                  "Set internal template id failed, node = %s", node->GetNamePtr());
   return af::SUCCESS;
+}
+
+inline af::Status SetSkSegmentedSimt(const af::AscNodePtr &node, bool enabled) {
+  GE_ASSERT_NOTNULL(node);
+  auto op_desc = node->GetOpDesc();
+  GE_ASSERT_NOTNULL(op_desc);
+  GE_ASSERT_TRUE(op_desc->SetExtAttr(kSkSegmentedSimtAttr, static_cast<int64_t>(enabled ? 1 : 0)),
+                 "Set sk segmented simt flag failed, node = %s", node->GetNamePtr());
+  return af::SUCCESS;
+}
+
+inline bool IsSkSegmentedSimt(const af::AscNode &node) {
+  if (node.GetOpDesc() == nullptr) {
+    return false;
+  }
+  return node.GetOpDesc()->TryGetExtAttr(kSkSegmentedSimtAttr, static_cast<int64_t>(0)) != 0;
 }
 
 inline af::Status SetRowBroadcastLoad(const af::AscNodePtr &node, bool enabled) {

@@ -1224,36 +1224,81 @@ af::Status InsertWorkspaceBoundary(af::AscGraph &graph, const af::AscNodePtr &sr
 }
 
 af::Status PartitionSkGraph(af::AscGraph &graph, const af::AscNodePtr &indirect_load, bool align_input_path,
-                            bool align_index_path) {
-  for (size_t input_idx = 0UL; input_idx < kIndirectLoadInputCount; ++input_idx) {
-    const auto input_anchor = indirect_load->GetInDataAnchor(input_idx);
-    GE_ASSERT_NOTNULL(input_anchor);
-    const auto peer_out_anchor = input_anchor->GetPeerOutAnchor();
-    GE_ASSERT_NOTNULL(peer_out_anchor);
-    auto producer = std::dynamic_pointer_cast<af::AscNode>(peer_out_anchor->GetOwnerNode());
-    GE_ASSERT_NOTNULL(producer);
-    const std::string role = input_idx == ascgen_utils::indirect_load::kInputTensorIndex ? "input" : "index";
-    const bool align_path =
-        input_idx == ascgen_utils::indirect_load::kInputTensorIndex ? align_input_path : align_index_path;
-    GE_ASSERT_SUCCESS(
-        InsertWorkspaceBoundary(graph, producer, static_cast<size_t>(peer_out_anchor->GetIdx()), indirect_load,
-                                input_idx, indirect_load->GetName() + "_sk_" + role, align_path,
-                                input_idx == ascgen_utils::indirect_load::kIndexTensorIndex && align_path));
-  }
+                            bool align_index_path, bool skip_input_boundaries = false) {
+  // [SK段SIMT化] 窗口超限形态：input/index 不插 workspace 边界（IL 段以 SIMT 语义
+  // 从 GM 直读原输入），仅保留 output 边界连接消费子图（Reduce/Norm 段独立调度，
+  // 承载 R 轴分 tile 归约）。
+  if (!skip_input_boundaries) {
+    for (size_t input_idx = 0UL; input_idx < kIndirectLoadInputCount; ++input_idx) {
+      const auto input_anchor = indirect_load->GetInDataAnchor(input_idx);
+      GE_ASSERT_NOTNULL(input_anchor);
+      const auto peer_out_anchor = input_anchor->GetPeerOutAnchor();
+      GE_ASSERT_NOTNULL(peer_out_anchor);
+      auto producer = std::dynamic_pointer_cast<af::AscNode>(peer_out_anchor->GetOwnerNode());
+      GE_ASSERT_NOTNULL(producer);
+      const std::string role = input_idx == ascgen_utils::indirect_load::kInputTensorIndex ? "input" : "index";
+      const bool align_path =
+          input_idx == ascgen_utils::indirect_load::kInputTensorIndex ? align_input_path : align_index_path;
+      GE_ASSERT_SUCCESS(
+          InsertWorkspaceBoundary(graph, producer, static_cast<size_t>(peer_out_anchor->GetIdx()), indirect_load,
+                                  input_idx, indirect_load->GetName() + "_sk_" + role, align_path,
+                                  input_idx == ascgen_utils::indirect_load::kIndexTensorIndex && align_path));
+    }
 
+  }  // skip_input_boundaries
   const auto output_anchor = indirect_load->GetOutDataAnchor(0UL);
   GE_ASSERT_NOTNULL(output_anchor);
   const auto peer_input_anchors = output_anchor->GetPeerInDataAnchors();
-  GE_ASSERT_TRUE(peer_input_anchors.size() == 1UL,
-                 "IndirectLoad SK requires exactly one output consumer, node[%s], consumer count:%zu.",
-                 indirect_load->GetNamePtr(), peer_input_anchors.size());
-  const auto peer_input_anchor = *peer_input_anchors.begin();
-  GE_ASSERT_NOTNULL(peer_input_anchor);
-  auto consumer = std::dynamic_pointer_cast<af::AscNode>(peer_input_anchor->GetOwnerNode());
-  GE_ASSERT_NOTNULL(consumer);
-  GE_ASSERT_SUCCESS(InsertWorkspaceBoundary(graph, indirect_load, 0UL, consumer,
-                                            static_cast<size_t>(peer_input_anchor->GetIdx()),
-                                            indirect_load->GetName() + "_sk_output", false, false));
+  // [SK段SIMT化] IL 输出可能多消费者（LayerNorm 的 x 与 x-mean 菱形：IL 直连
+  // Reduce 与 Elementwise 分支，SIMT 流程的前置改写会折叠过渡 Cast）。逐消费者
+  // 边独立边界化：IL 输出写 N 份 workspace，各消费者从对应 workspace 读取——
+  // 语义等价（数据相同），不要求单消费者。
+  const auto &il_output_anchors = peer_input_anchors;
+  GE_ASSERT_TRUE(!il_output_anchors.empty(), "IndirectLoad SK requires at least one output consumer, node[%s].",
+                 indirect_load->GetNamePtr());
+  // [SK段SIMT化] IL 输出可能多消费者（LayerNorm 的 x 与 x-mean 菱形）。单份
+  // workspace：首个消费者走完整边界（IL→store→workspace，workspace→load→consumer），
+  // 其余消费者的输入边改接到该 load 输出——共享同一份数据，不产生多副本 load。
+  // [SK段SIMT化] 多消费者时单份产出、多份读取：SIMT body 的 OutputTargets 仅支持
+  // 单个 GM 输出（kGmOutputCount=1），IL 段只建一个 store/pre（写一份 workspace）；
+  // 每个消费段各建独立的 post/load（同名 workspace 读同一 GM buffer，post 之间无
+  // 边），连通性分量互不连通。单消费者时退化为标准 InsertWorkspaceBoundary。
+  const std::string boundary_name = indirect_load->GetName() + "_sk_output";
+  const auto first_peer = *il_output_anchors.begin();
+  GE_ASSERT_NOTNULL(first_peer);
+  auto first_consumer = std::dynamic_pointer_cast<af::AscNode>(first_peer->GetOwnerNode());
+  GE_ASSERT_NOTNULL(first_consumer);
+  GE_ASSERT_SUCCESS(InsertWorkspaceBoundary(graph, indirect_load, 0UL, first_consumer,
+                                            static_cast<size_t>(first_peer->GetIdx()), boundary_name, false, false));
+  if (il_output_anchors.size() > 1UL) {
+    const std::string workspace_name = boundary_name + "_workspace";
+    std::vector<af::InDataAnchorPtr> extra_peers;
+    for (const auto &peer_input_anchor : il_output_anchors) {
+      if (peer_input_anchor != first_peer && peer_input_anchor != nullptr) {
+        extra_peers.emplace_back(peer_input_anchor);
+      }
+    }
+    for (const auto &peer_input_anchor : extra_peers) {
+      GE_ASSERT_GRAPH_SUCCESS(af::GraphUtils::RemoveEdge(output_anchor, peer_input_anchor));
+    }
+    size_t load_seq = 1UL;
+    for (const auto &peer_input_anchor : extra_peers) {
+      af::ascir_op::Workspace workspace_post(workspace_name.c_str());
+      af::ascir_op::Load load((boundary_name + "_load" + std::to_string(load_seq)).c_str());
+      const auto post_node = graph.AddNode(workspace_post);
+      const auto load_node = graph.AddNode(load);
+      GE_ASSERT_NOTNULL(post_node);
+      GE_ASSERT_NOTNULL(load_node);
+      // load 拷贝产出侧视图。post 与 InsertWorkspaceBoundary 保持一致：不拷贝
+      // （Workspace 节点无视图/tensor_id 语义，拷贝源 tensor_id 会污染 workspace
+      // 大小收集体系，导致各段偏移分配退化为 0）。
+      GE_ASSERT_SUCCESS(CopyBoundaryTensorAttr(indirect_load, 0UL, load_node));
+      GE_ASSERT_GRAPH_SUCCESS(
+          af::GraphUtils::AddEdge(post_node->GetOutDataAnchor(0UL), load_node->GetInDataAnchor(0UL)));
+      GE_ASSERT_GRAPH_SUCCESS(af::GraphUtils::AddEdge(load_node->GetOutDataAnchor(0UL), peer_input_anchor));
+      ++load_seq;
+    }
+  }
   return af::SUCCESS;
 }
 
@@ -1269,7 +1314,12 @@ af::Status BuildSkPartitionOrder(const ascir::ImplGraph &graph, const af::AscNod
         break;
       }
     }
-    GE_ASSERT_NOTNULL(workspace_pre, "IndirectLoad SK terminal workspace[%s] is not found.", workspace_name.c_str());
+    if (workspace_pre == nullptr) {
+      // [SK分段SIMT] 窗口超限形态仅保留 output 边界（input/index 由 IL 段 GM 直读），
+      // 缺失的边界 workspace 跳过而非报错。
+      GELOGD("[IndirectLoad] SK partition order skips missing workspace[%s].", workspace_name.c_str());
+      continue;
+    }
     node_order.emplace_back(workspace_pre);
     ordered_nodes.emplace(workspace_pre);
   }
@@ -1399,6 +1449,8 @@ af::Status SeedPostReduceInputVectorizedView(const af::AscNodePtr &indirect_load
   return af::SUCCESS;
 }
 
+af::Status NormalizeSimtAxesForTemplate(af::AscGraph &graph, const af::AscNodePtr &indirect_load, size_t boundary,
+                                        bool solve_tile_size);
 af::Status RestoreSkTemplateAxes(std::vector<ascir::ImplGraph> &grouped_graphs) {
   for (auto &graph : grouped_graphs) {
     af::AscNodePtr indirect_load;
@@ -1406,11 +1458,24 @@ af::Status RestoreSkTemplateAxes(std::vector<ascir::ImplGraph> &grouped_graphs) 
     if (indirect_load == nullptr) {
       continue;
     }
-    GE_ASSERT_TRUE(ascir::GetTemplateIdOrDefault(*indirect_load) == ascir::TemplateId::kIndirectLoadSK,
-                   "IndirectLoad partitioned graph[%s] has unexpected template.", graph.GetName().c_str());
+    const auto restored_template = ascir::GetTemplateIdOrDefault(*indirect_load);
     const size_t axis_index = GetIndirectLoadAxisIndex(indirect_load);
     GE_ASSERT_TRUE(axis_index != kIndirectLoadInvalidAxisIndex, "IndirectLoad axis index of node[%s] is invalid.",
                    indirect_load->GetNamePtr());
+    if (restored_template == ascir::TemplateId::kIndirectLoadSimt && ascir::IsSkSegmentedSimt(*indirect_load)) {
+      // [SK分段SIMT] 分区后子图轴表仅含节点引用的原始轴，候选图期归一新建的模板轴
+      // 不在其中，调度期 BuildIndirectLoadAxisGroup 的 FindAxis 会失败。与原 SK 相同，
+      // 在子图内重新执行 SIMT 归一。post 链已被 output workspace 边界隔断为独立子图，
+      // 本子图内 IL 输出直连边界 Store，无 post-Reduce——与主线无 post-Reduce SIMT
+      // 同语义：boundary=输出 rank，outer=完整输出视图（SIMT 逐元素枚举全部输出），
+      // 而非 axis 前缀（那会使 outer 退化为合成单轴、发射数=1）。
+      const auto simt_output_axes = indirect_load->outputs()[0]->attr.axis;
+      GE_ASSERT_SUCCESS(
+          NormalizeSimtAxesForTemplate(graph, indirect_load, simt_output_axes.size(), /*solve_tile_size=*/false));
+      continue;
+    }
+    GE_ASSERT_TRUE(restored_template == ascir::TemplateId::kIndirectLoadSK,
+                   "IndirectLoad partitioned graph[%s] has unexpected template.", graph.GetName().c_str());
     ascir::AxisId input_inner_axis = af::kIdNone;
     GE_ASSERT_SUCCESS(BuildSkInputInnerAxis(graph, indirect_load, axis_index, input_inner_axis));
     GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, axis_index, input_inner_axis, af::kIdNone));
@@ -2572,13 +2637,270 @@ af::Status ApplySkGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_
   return af::SUCCESS;
 }
 
+// [SK段SIMT化] 平台 UB 与 tensor 逻辑总量（动态 shape 返回 false）。
+constexpr int64_t kIndirectLoadUbReservedBytes = 32768;  // SIMT 预留 tmp/sync/dcache 下界
+// SIMT post-Reduce 的 R 域 UB 下界系数：输出 tile 双缓冲（2 份）+ Reduce 输入完整
+// R 域（1 份），共 3 份 R 域驻留 UB。
+constexpr int64_t kSimtRDomainUbFactor = 3;
+
+bool TryGetIndirectLoadPlatformUbSize(int64_t &ub_size) {
+  ge::PlatformInfo platform_info;
+  if (!ge::PlatformContext::GetInstance().TryGetInitializedPlatformInfo(platform_info)) {
+    return false;
+  }
+  ub_size = platform_info.ub_size;
+  return ub_size > 0;
+}
+
+bool TryGetTensorLogicalBytes(const af::AscTensor &tensor, int64_t &bytes) {
+  int64_t count = 1;
+  for (const auto &repeat : tensor.attr.repeats) {
+    int64_t value = 0;
+    if (!repeat.GetConstValue(value) || value <= 0) {
+      return false;  // 动态 shape 保守放行
+    }
+    count *= value;
+  }
+  bytes = count * static_cast<int64_t>(af::GetSizeByDataType(tensor.attr.dtype));
+  return true;
+}
+
+// [SK段SIMT化] SK 行窗口对当前图形态是否退化为全量不可行：
+// IndirectLoadSk 设备 API 的窗口 = axis 起完整 payload 后缀 × 窗口行数，index 需
+// 全量驻留该段 UB。index 源头不收敛（逐元素独立引用，沿 gather 轴枚举任意行号）
+// 时窗口行数必须覆盖 axis 维全部 → 窗口 = input 全量 + index 全量，超出单核 UB
+// 即该形态的 SK 不可行（调度期必然被 StaticUbTemplateFilter 淘汰）。
+// 源头收敛（引用按行/列成组）的形态窗口只需被引用分片，不受此限。
+bool IsSkWindowUbInfeasible(const af::AscNodePtr &indirect_load) {
+  // 现场判定收敛性：AccessInfo attr 写在先跑的 SIMD/SIMT 候选图副本上，SK 候选
+  // 副本拷贝自原图时为空，跨副本读取会把收敛形态误判为非收敛而误触发重定向
+  // （原版 user_layernorm：收敛 index + 大表被误重定向，产生 dtype 错位的 kernel）。
+  if (ascgen_utils::indirect_load::IsIndexSourceConverged(indirect_load)) {
+    return false;  // 引用成组：窗口按分片装载，不按全量判定
+  }
+  int64_t ub_size = 0;
+  if (!TryGetIndirectLoadPlatformUbSize(ub_size)) {
+    return false;  // 平台信息不可得时保守走原 SK 路径
+  }
+  const auto &inputs = indirect_load->inputs();
+  int64_t input_bytes = 0;
+  int64_t index_bytes = 0;
+  if (!TryGetTensorLogicalBytes(*inputs[ascgen_utils::indirect_load::kInputTensorIndex], input_bytes) ||
+      !TryGetTensorLogicalBytes(*inputs[ascgen_utils::indirect_load::kIndexTensorIndex], index_bytes)) {
+    return false;  // 动态 shape 保守走原 SK 路径
+  }
+  if (input_bytes + index_bytes > ub_size) {
+    GELOGI("[IndirectLoad] SK window (generic access) bytes %ld (input %ld + index %ld) exceeds platform UB %ld.",
+           input_bytes + index_bytes, input_bytes, index_bytes, ub_size);
+    return true;
+  }
+  return false;
+}
+
+// [SK段SIMT化] SIMT 候选自身的 UB 可行性（硬下界）：输出 tile 双缓冲（2R）+
+// Reduce 输入完整 R 域（R）+ 预留（32KB），R=IL 输出尾轴尺寸×dtype。SIMT 可行时
+// SK 候选无需重定向——重定向是为 SK 行窗口不可行且无其他活路时提供的分段替代；
+// SIMT 可用的图（如 softmax 专用形态带 Scalar 标量链/多输入，R 可全载）走原
+// SIMT 内联路径，分段形态对其不支持（生产 9.28：SIMT 可行却重定向，边界化误伤
+// 标量输入链）。
+bool IsSimtUbInfeasible(const af::AscNodePtr &indirect_load) {
+  int64_t ub_size = 0;
+  if (!TryGetIndirectLoadPlatformUbSize(ub_size)) {
+    return false;
+  }
+  // outputs() 每次调用重建内部快照，先前返回的引用会悬垂——一次性拷贝所需数据。
+  const auto outputs = indirect_load->outputs();
+  if (outputs.empty() || outputs[0] == nullptr || outputs[0]->attr.repeats.empty()) {
+    return false;
+  }
+  const auto output_repeats = outputs[0]->attr.repeats;
+  const auto output_dtype = outputs[0]->attr.dtype;
+  int64_t tail = 0;
+  if (!output_repeats.back().GetConstValue(tail) || tail <= 0) {
+    return false;  // 动态 shape 保守不重定向
+  }
+  const int64_t r_bytes = tail * static_cast<int64_t>(af::GetSizeByDataType(output_dtype));
+  return kSimtRDomainUbFactor * r_bytes + kIndirectLoadUbReservedBytes > ub_size;
+}
+
+// [SK段SIMT化] 重定向的形态约束：IL 输出的下游闭包（DAG，LayerNorm 的
+// x-mean 为菱形双消费）全部由 Cast/Reduce/Broadcast/Elementwise/Scalar/Store/
+// Output 构成、且至少一个 Reduce 时允许重定向——即 Norm 类复合区域结构本身。
+// 这是 R 非全载需要分段归约的目标形态：IL 段 SIMT gather 写 output workspace，
+// 消费子图（单/多 Reduce 的 Norm DAG）独立调度，R 轴分 tile 由其自身 tiling 承载。
+// 闭包含 IL/Transpose 等特殊算子或控制边时维持原 SK 行为不重定向。
+bool IsNormRegionDag(const af::AscNodePtr &indirect_load) {
+  std::vector<af::AscNodePtr> pending;
+  std::unordered_set<const af::AscNode *> visited;
+  int32_t reduce_count = 0;
+  bool seen_store = false;
+  // 起点为 IL 本身（不在白名单），仅检查其下游闭包。
+  for (const auto &consumer : indirect_load->GetOutDataNodes()) {
+    pending.emplace_back(std::dynamic_pointer_cast<af::AscNode>(consumer));
+  }
+  for (size_t cursor = 0UL; cursor < pending.size() && cursor < 256UL; ++cursor) {
+    const af::AscNodePtr node = pending[cursor];
+    if (node == nullptr || !visited.emplace(node.get()).second) {
+      continue;
+    }
+    const bool is_allowed = af::ops::IsOps<af::ascir_op::Cast>(node) || ScheduleUtils::IsReduce(node) ||
+                            af::ops::IsOps<af::ascir_op::Broadcast>(node) ||
+                            af::ops::IsOps<af::ascir_op::Store>(node) || af::ops::IsOps<af::ascir_op::Output>(node) ||
+                            af::ops::IsOps<af::ascir_op::Scalar>(node) ||
+                            af::ops::IsOps<af::ascir_op::ScalarData>(node) || ScheduleUtils::IsElewise(node);
+    if (!is_allowed) {
+      return false;
+    }
+    if (ScheduleUtils::IsReduce(node)) {
+      ++reduce_count;
+    }
+    if (af::ops::IsOps<af::ascir_op::Store>(node)) {
+      seen_store = true;
+    }
+    for (const auto &consumer : node->GetOutDataNodes()) {
+      pending.emplace_back(std::dynamic_pointer_cast<af::AscNode>(consumer));
+    }
+  }
+  // [SK段SIMT化] 多 Reduce 复合区域（LayerNorm mean/var）的消费子图在通用调度
+  // 生成 R 轴切分模板后，VF 节点跨循环引用统计链 tensor（codegen
+  // ConnectApiCallInputs 找不到生产 ApiCall，实测 id[%d] 缺失），为通用 codegen
+  // 的结构性缺口——维持单 Reduce 限制；多 Reduce 分段需消费子图内部再分段
+  // （workspace 链），作为后续专项。
+  return reduce_count >= 1 && seen_store;
+}
+
+// [SK段SIMT化·复合Norm] Norm 链分段化。通用调度对含 Reduce 的连通图按 R 轴切
+// loop，Reduce/多消费者节点输出的下游若与其同分量，跨 loop 引用（codegen
+// ConnectApiCallInputs 在单 loop 的 tensor_calls 中找不到生产者）。且连通性分区
+// 为双向遍历（上下游都走），LayerNorm 的 x-mean 菱形（diff 被方差链与输出链双
+// 消费）使单一 Reduce 边界无法切断分量。规则：对每个 Reduce 节点、每个多消费
+// 者计算节点的输出，逐消费者独立插 workspace 边界（每边一份，彻底切断连通分
+// 量）——每个子图数据流自足（输入均为 Load），R 切分不再产生跨循环依赖，与独
+// 立 LayerNorm 的统计段/消费段分离形态对齐。单消费者非 Reduce 节点不切（同段
+// 内常规流水）。
+af::Status PartitionNormReduceBoundaries(af::AscGraph &graph, const af::AscNodePtr &indirect_load) {
+  // [边界化范围] 仅 IL 输出下游闭包（Norm DAG）：输入前置链（Scalar 标量广播等
+  // side-input 生产链）不在范围内——对它边界化会使 SIMT 流程的输入回溯
+  // （CompleteInputDataTensorAttrs：Load 的 producer 必须是 Data）遇到边界
+  // load（producer 为 workspace）而失败（生产 9.28：scalar1 多消费者被误切）。
+  std::unordered_set<const af::AscNode *> downstream;
+  {
+    std::vector<af::AscNodePtr> pending;
+    for (const auto &consumer : indirect_load->GetOutDataNodes()) {
+      pending.emplace_back(std::dynamic_pointer_cast<af::AscNode>(consumer));
+    }
+    for (size_t cursor = 0UL; cursor < pending.size() && cursor < 256UL; ++cursor) {
+      const af::AscNodePtr node = pending[cursor];
+      if (node == nullptr || !downstream.emplace(node.get()).second) {
+        continue;
+      }
+      for (const auto &consumer : node->GetOutDataNodes()) {
+        pending.emplace_back(std::dynamic_pointer_cast<af::AscNode>(consumer));
+      }
+    }
+  }
+  std::vector<std::pair<af::AscNodePtr, af::AscNodePtr>> boundary_targets;
+  for (const auto &node : graph.GetAllNodes()) {
+    if (node == nullptr || node == indirect_load || downstream.find(node.get()) == downstream.end()) {
+      continue;  // 仅 IL 下游闭包内的节点；IL 输出由 PartitionSkGraph 的 output 边界处理
+    }
+    const bool is_boundary_node =
+        af::ops::IsOps<af::ascir_op::Workspace>(node) || af::ops::IsOps<af::ascir_op::Store>(node) ||
+        af::ops::IsOps<af::ascir_op::Load>(node) || af::ops::IsOps<af::ascir_op::Data>(node) ||
+        af::ops::IsOps<af::ascir_op::Output>(node);
+    if (is_boundary_node) {
+      continue;
+    }
+    const auto out_anchor = node->GetOutDataAnchor(0UL);
+    if (out_anchor == nullptr) {
+      continue;
+    }
+    const auto &peers = out_anchor->GetPeerInDataAnchors();
+    if (peers.empty()) {
+      continue;
+    }
+    bool has_non_store_consumer = false;
+    for (const auto &peer : peers) {
+      const auto consumer = peer != nullptr && peer->GetOwnerNode() != nullptr
+                                ? std::dynamic_pointer_cast<af::AscNode>(peer->GetOwnerNode())
+                                : nullptr;
+      if (consumer != nullptr && !af::ops::IsOps<af::ascir_op::Store>(consumer)) {
+        has_non_store_consumer = true;
+        break;
+      }
+    }
+    if (!has_non_store_consumer) {
+      continue;  // 输出直连 Store（段尾）
+    }
+    if (ScheduleUtils::IsReduce(node) || peers.size() > 1UL) {
+      for (const auto &peer : peers) {
+        const auto consumer = peer != nullptr && peer->GetOwnerNode() != nullptr
+                                  ? std::dynamic_pointer_cast<af::AscNode>(peer->GetOwnerNode())
+                                  : nullptr;
+        if (consumer != nullptr) {
+          boundary_targets.emplace_back(node, consumer);
+        }
+      }
+    }
+  }
+  size_t boundary_seq = 0UL;
+  for (const auto &target : boundary_targets) {
+    const auto &node = target.first;
+    const auto &consumer = target.second;
+    const auto out_anchor = node->GetOutDataAnchor(0UL);
+    // 按消费者定位其当前连到本生产者输出的输入边（边被逐条改接，重新查找）。
+    af::InDataAnchorPtr peer_anchor = nullptr;
+    const auto consumer_inputs = consumer->GetInDataNodes();
+    for (size_t in_idx = 0UL; in_idx < consumer_inputs.size(); ++in_idx) {
+      const auto in_anchor = consumer->GetInDataAnchor(in_idx);
+      if (in_anchor != nullptr && in_anchor->GetPeerOutAnchor() == out_anchor) {
+        peer_anchor = in_anchor;
+        break;
+      }
+    }
+    if (peer_anchor == nullptr) {
+      continue;  // 该边已被此前的边界化改接
+    }
+    const std::string boundary_name = node->GetName() + "_sk_n" + std::to_string(boundary_seq);
+    GE_ASSERT_SUCCESS(InsertWorkspaceBoundary(graph, node, 0UL, consumer, static_cast<size_t>(peer_anchor->GetIdx()),
+                                              boundary_name, false, false));
+    ++boundary_seq;
+    GELOGI("[IndirectLoad] SK norm boundary[%s] inserted (node[%s] consumer[%s]).", boundary_name.c_str(),
+           node->GetNamePtr(), consumer->GetNamePtr());
+  }
+  return af::SUCCESS;
+}
+
 af::Status ApplyGraphPass(af::AscGraph &graph, const af::AscNodePtr &indirect_load, ascir::TemplateId template_id,
-                          bool &is_candidate_legal) {
+                          bool &is_candidate_legal, bool has_live_candidate = true) {
   GELOGD("[IndirectLoad] Apply graph pass for node[%s], template_id[%d].", indirect_load->GetNamePtr(),
          static_cast<int32_t>(template_id));
   is_candidate_legal = true;
   if (template_id == ascir::TemplateId::kIndirectLoadSK) {
-    return ApplySkGraphPass(graph, indirect_load, is_candidate_legal);
+    // [SK段SIMT化] index 源头不收敛且全量窗口超出单核 UB 的形态（如
+    // gather(axis=0) 逐元素 index + 尾轴大 R）：IndirectLoadSk 行窗口模型退化为
+    // 全量不可行。保留 SK 的 output workspace 边界（消费子图/Reduce 段独立调度，
+    // 承载 R 轴分 tile 归约），IL 段整体重定向为 SIMT 模板走全套流程（input/
+    // index GM 直读，输出 tile 写 output workspace）——SK 分段设计对 R 非全载
+    // 场景的本意。复合 Norm 区域（多 Reduce）维持既有拒绝语义。
+    // 门禁放宽：SIMT 候选可能因布局校验被拒（如 mean(dim=-2) 中间轴归约，
+    // IsSimtUbInfeasible 只看尾轴 UB 下界无法覆盖）——前序 SIMD/SIMT 候选全灭时
+    // SK 是最后活路，此时即使 SIMT 的 UB 下界可行也必须重定向。
+    if (IsSkWindowUbInfeasible(indirect_load) && IsNormRegionDag(indirect_load) &&
+        (IsSimtUbInfeasible(indirect_load) || !has_live_candidate)) {
+      GELOGI("[IndirectLoad] SK candidate redirects IL to SIMT (window exceeds UB), node[%s].",
+             indirect_load->GetNamePtr());
+      // 先 Norm 边界化再 output 边界：闭包按 IL 下游数据流计算，output 边界插入后
+      // IL 直接消费者变为边界 store，Norm 链被隔断在闭包之外（生产 9.28 复验：
+      // 边界 0 个、分区 0 子图、has_none_graph）。Norm 边界先行，IL 直连 Norm 链首，
+      // 闭包完整；随后 output 边界插在 IL 与 Norm 链首之间。
+      GE_ASSERT_SUCCESS(PartitionNormReduceBoundaries(graph, indirect_load));
+      GE_ASSERT_SUCCESS(PartitionSkGraph(graph, indirect_load, false, false, /*skip_input_boundaries=*/true));
+      template_id = ascir::TemplateId::kIndirectLoadSimt;
+      GE_ASSERT_SUCCESS(ascir::SetSkSegmentedSimt(indirect_load, true));
+    } else {
+      return ApplySkGraphPass(graph, indirect_load, is_candidate_legal);
+    }
   }
   if (template_id == ascir::TemplateId::kIndirectLoadSimt) {
     GE_ASSERT_SUCCESS(ClearSimtTemplateRoles(graph));
@@ -2802,7 +3124,8 @@ Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std:
              static_cast<int32_t>(template_id), candidate_indirect_load->GetNamePtr());
     }
     bool is_candidate_legal = false;
-    GE_ASSERT_SUCCESS(ApplyGraphPass(candidate_graph, candidate_indirect_load, template_id, is_candidate_legal));
+    GE_ASSERT_SUCCESS(
+        ApplyGraphPass(candidate_graph, candidate_indirect_load, template_id, is_candidate_legal, !graphs.empty()));
     if (!is_candidate_legal) {
       GELOGW("[IndirectLoad] Skip illegal template candidate[%d] for node[%s].", static_cast<int32_t>(template_id),
              candidate_indirect_load->GetNamePtr());
@@ -2832,8 +3155,13 @@ Status IndirectLoadScheduleCaseGenerator::GeneratorTask(ascir::HintGraph &optimi
     task.has_load_store_conversion = HasLoadStoreConversion();
     af::AscNodePtr indirect_load;
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ValidateSingleIndirectLoadNode(graph, indirect_load));
+    // [SK分段SIMT] 重定向形态（template 已是 SIMT 但图含 output workspace 边界）与
+    // SK 走同一分区/恢复路径（分区后子图需重新执行模板归一）。
     const bool is_sk_template =
-        indirect_load != nullptr && ascir::GetTemplateIdOrDefault(*indirect_load) == ascir::TemplateId::kIndirectLoadSK;
+        indirect_load != nullptr &&
+        (ascir::GetTemplateIdOrDefault(*indirect_load) == ascir::TemplateId::kIndirectLoadSK ||
+         (ascir::GetTemplateIdOrDefault(*indirect_load) == ascir::TemplateId::kIndirectLoadSimt &&
+          ascir::IsSkSegmentedSimt(*indirect_load)));
     GE_CHK_STATUS_RET(PartitionTaskGraph(graph, indirect_load, is_sk_template, task.grouped_graphs),
                       "Failed to partition graph");
     GE_ASSERT_SUCCESS(RefreshTaskAxisSizes(task.grouped_graphs, need_update_axis, is_sk_template));

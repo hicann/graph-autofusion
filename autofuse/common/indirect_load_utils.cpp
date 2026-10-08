@@ -650,6 +650,13 @@ af::Status AnalyzeIndirectLoadAccess(const af::AscNodePtr &node, const TemplateL
   info.kind = embedding_like ? IndirectLoadAccessInfo::Kind::kEmbeddingLike : IndirectLoadAccessInfo::Kind::kGeneric;
   info.can_use_simt_structured = embedding_like;
   info.can_use_simd_embedding = IsSimdEmbeddingAccess(logical_view, info);
+  // [SK窗口可行性] 源头收敛：视图层证据（inner 轴零 stride）或生产链回溯的源头
+  // 视图证据。源头收敛时 gather 引用成组（按行/列），SK 行窗口只需装载被引用
+  // 分片；源头不收敛（逐元素独立引用）时 SK 窗口必须覆盖 axis 维全部，退化为
+  // 全量。尾轴 gather（无 payload 后缀）等 kind 为 generic 但源头收敛的形态
+  // 由此字段正确区分。
+  info.index_source_converged =
+      index_has_zero_stride_on_inner_axes || IsIndexPayloadInvariantFromSources(node, input, index, axis_index);
   return af::SUCCESS;
 }
 
@@ -1294,6 +1301,32 @@ af::Status BuildSimtLoweringMetadata(const af::AscNodePtr &indirect_load, Indire
   return af::SUCCESS;
 }
 }  // namespace
+
+// [SK窗口可行性] 现场判定 index 源头收敛性（不依赖候选流程构建的 AccessInfo attr——
+// attr 写在先跑的 SIMD/SIMT 候选图副本上，SK 候选副本从原图拷贝时为空，跨副本读取
+// 会把收敛形态误判为非收敛而误触发重定向）。视图直接取 IL 两个输入生产者的输出
+// 视图，与 HasZeroStrideOnInputPayload / IsIndexPayloadInvariantFromSources 同源。
+bool IsIndexSourceConverged(const af::AscNodePtr &indirect_load) {
+  if (indirect_load == nullptr) {
+    return false;
+  }
+  const auto input_producer = GetInputProducer(indirect_load, kInputTensorIndex);
+  const auto index_producer = GetInputProducer(indirect_load, kIndexTensorIndex);
+  if (input_producer == nullptr || index_producer == nullptr) {
+    return false;
+  }
+  const auto input = GetNodeOutputView(input_producer);
+  const auto index = GetNodeOutputView(index_producer);
+  int64_t axis = -1L;
+  // 注意 GetAttrValue 返回 graphStatus（成功为 0），不能以 !status 判定失败。
+  if (indirect_load->attr.ir_attr == nullptr || indirect_load->attr.ir_attr->GetAttrValue("axis", axis) != 0 ||
+      axis < 0L) {
+    return false;
+  }
+  const size_t axis_index = static_cast<size_t>(axis);
+  return HasZeroStrideOnInputPayload(input, index, axis_index) ||
+         IsIndexPayloadInvariantFromSources(indirect_load, input, index, axis_index);
+}
 
 af::Status FinalizeLoweringMetadata(const af::AscNodePtr &node, bool &is_supported) {
   is_supported = false;
