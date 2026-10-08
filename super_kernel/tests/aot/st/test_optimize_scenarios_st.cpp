@@ -175,6 +175,32 @@ TEST_F(AotSystemTest, OptimizeDebugDumpPersistsOptionsAndGeneratedTaskQueues) {
   }
   EXPECT_EQ(functionNodes, (std::vector<uint32_t>{model.Snapshot(first).id, model.Snapshot(second).id}));
   EXPECT_EQ(EnabledEntries(model, stream), 1U);
+  const auto tasks = model.Tasks(stream);
+  const auto entry = std::find_if(tasks.begin(), tasks.end(), [](const auto &task) {
+    return !task.disabled && task.type == ACL_MODEL_RI_TASK_KERNEL && task.setParamsCount != 0;
+  });
+  ASSERT_NE(entry, tasks.end());
+  ASSERT_EQ(entry->function.rfind("sk_entry_aiv", 0), 0U);
+  const std::string expectedLaunchInfo =
+      ", kernelType: AIV_ONLY, numBlocks: " + std::to_string(entry->numBlocks) + ", batchMode: 1";
+  std::ifstream fusedNodesLog(directory / "sk_fused_nodes.log");
+  ASSERT_TRUE(fusedNodesLog.is_open());
+  std::vector<std::string> functionLines;
+  size_t launchInfoLineCount = 0;
+  for (std::string line; std::getline(fusedNodesLog, line);) {
+    if (line.find("SK Function:") != std::string::npos) {
+      functionLines.push_back(line);
+    }
+    if (line.find("SK LaunchInfo{") != std::string::npos) {
+      ++launchInfoLineCount;
+    }
+  }
+  ASSERT_EQ(functionLines.size(), 1U);
+  ASSERT_GE(functionLines.front().size(), expectedLaunchInfo.size());
+  EXPECT_EQ(functionLines.front().compare(functionLines.front().size() - expectedLaunchInfo.size(),
+                                          expectedLaunchInfo.size(), expectedLaunchInfo),
+            0);
+  EXPECT_EQ(launchInfoLineCount, 0U);
   model.Destroy();
   // Reinitialize logging through the public API before removing its directory.
   ASSERT_EQ(unsetenv("ASCEND_OP_COMPILE_SAVE_KERNEL_META"), 0);
