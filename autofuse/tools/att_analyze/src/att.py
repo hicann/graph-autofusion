@@ -51,8 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_vt.add_argument(
         "--scene", choices=["tf", "inductor"], default=None, help="不填则自动检测"
     )
-    p_vt.add_argument("--preset", choices=["A", "B"], default="A")
-    p_vt.add_argument(
+    input_source = p_vt.add_mutually_exclusive_group()
+    input_source.add_argument("--preset", choices=["A", "B"], default="A")
+    input_source.add_argument(
         "--input-json", default=None, help="输入参数 JSON，与 --preset 互斥"
     )
     p_vt.add_argument(

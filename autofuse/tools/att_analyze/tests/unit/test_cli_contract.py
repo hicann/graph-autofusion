@@ -100,6 +100,15 @@ def test_verify_tiling_accepts_aiv_num_override():
     assert args.aiv_num == 40
 
 
+def test_verify_tiling_rejects_conflicting_input_sources():
+    from att import build_parser
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["verify-tiling", "source", "--preset", "B", "--input-json", "input.json"]
+        )
+
+
 def test_operator_order_is_first_seen_and_stable():
     content = (
         "[Z] [PROF]Among all schedule results, graph0_result0 is the best choice\n"
