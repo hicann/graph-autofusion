@@ -161,6 +161,22 @@ class TestParseLogFileSummaryModes(unittest.TestCase):
         self.assertEqual(summaries[0].case, 0)
         self.assertEqual(summaries[0].objective_value, 123.0)
 
+    def test_parses_signed_and_scientific_metrics(self):
+        path = self._write_temp_log(
+            """
+[Op] [PROF]Among the templates, tiling case 0 of graph0_result1_g0 is the best choice
+[Op] [PROF]Among all schedule results, graph0_result1 is the best choice
+[Op] [PROF]The objective value of the tiling data is -1.25e+02 in graph0_result1_g0_0
+[Op] [PROF]The value of s0t_size is +2.5E1 in graph0_result1_g0_0
+[Op] The value of graph0_result1 is 3.0e+02
+"""
+        )
+        summary = self.parser.parse_log_file(path)[0]
+
+        self.assertEqual(summary.objective_value, -125.0)
+        self.assertEqual(summary.tiling_values["s0t_size"], 25.0)
+        self.assertEqual(summary.result_performance, 300.0)
+
 
 class TestFinalTilingRecords(unittest.TestCase):
     def setUp(self):

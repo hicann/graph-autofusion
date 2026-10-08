@@ -19,6 +19,9 @@ from typing import Dict, List, Optional, Tuple
 from .evidence_schema import FinalTilingRecord, FinalTilingSummaryRecord
 
 
+_NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+
+
 @dataclass
 class OperatorSummary:
     operator_name: str
@@ -46,13 +49,13 @@ class LogParser:
                 r"\[PROF\]Among the templates,\s*tiling case\s+(\d+)\s+of\s+graph(\d+)_result(\d+)_g(\d+)\s+is the best choice"
             ),
             "tiling_value": re.compile(
-                r"\[PROF\]The value of\s+(\w+)\s+is\s+([\d.]+)\s+in\s+graph(\d+)_result(\d+)_g(\d+)_(\d+)"
+                rf"\[PROF\]The value of\s+(\w+)\s+is\s+({_NUMBER})\s+in\s+graph(\d+)_result(\d+)_g(\d+)_(\d+)"
             ),
             "objective_value": re.compile(
-                r"\[PROF\]The objective value of the tiling data is\s+([\d.]+)\s+in\s+graph(\d+)_result(\d+)_g(\d+)_(\d+)"
+                rf"\[PROF\]The objective value of the tiling data is\s+({_NUMBER})\s+in\s+graph(\d+)_result(\d+)_g(\d+)_(\d+)"
             ),
             "result_performance": re.compile(
-                r"\[([^\]]+)\]\s+The value of\s+graph(\d+)_result(\d+)\s+is\s+([\d.]+)"
+                rf"\[([^\]]+)\]\s+The value of\s+graph(\d+)_result(\d+)\s+is\s+({_NUMBER})"
             ),
         }
 
@@ -604,7 +607,7 @@ class LogParser:
     ) -> Dict[str, float]:
         tiling_values = {}
         pattern = re.compile(
-            rf"\[{re.escape(operator_name)}\]\s*\[PROF\]The value of\s+(\w+)\s+is\s+([\d.]+)\s+in\s+graph{graph_id}_result{result_id}_g{group_id}_{case_id}"
+            rf"\[{re.escape(operator_name)}\]\s*\[PROF\]The value of\s+(\w+)\s+is\s+({_NUMBER})\s+in\s+graph{graph_id}_result{result_id}_g{group_id}_{case_id}"
         )
         for match in pattern.finditer(log_content):
             tiling_values[match.group(1)] = float(match.group(2))
@@ -621,7 +624,7 @@ class LogParser:
     ) -> Dict[str, float]:
         metrics = {}
         objective_pattern = re.compile(
-            rf"\[{re.escape(operator_name)}\]\s*\[PROF\]The objective value of the tiling data is\s+([\d.]+)\s+in\s+graph{graph_id}_result{result_id}_g{group_id}_{case_id}"
+            rf"\[{re.escape(operator_name)}\]\s*\[PROF\]The objective value of the tiling data is\s+({_NUMBER})\s+in\s+graph{graph_id}_result{result_id}_g{group_id}_{case_id}"
         )
         match = objective_pattern.search(log_content)
         if match:
@@ -639,7 +642,7 @@ class LogParser:
         self, log_content: str, operator_name: str, graph_id: int, result_id: int
     ) -> Optional[float]:
         pattern = re.compile(
-            rf"\[{re.escape(operator_name)}\]\s+The value of\s+graph{graph_id}_result{result_id}\s+is\s+([\d.]+)"
+            rf"\[{re.escape(operator_name)}\]\s+The value of\s+graph{graph_id}_result{result_id}\s+is\s+({_NUMBER})"
         )
         match = pattern.search(log_content)
         if match:
