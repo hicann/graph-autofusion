@@ -43,12 +43,12 @@ def detect_scene(source_dir: str) -> str:
 def load_input_params(args) -> Dict:
     """加载输入参数，优先级：--input-json > --preset"""
     if getattr(args, "input_json", None):
-        with open(args.input_json) as f:
+        with open(args.input_json, encoding="utf-8") as f:
             params = json.load(f)
     else:
         preset_dir = os.path.join(os.path.dirname(__file__), "presets")
         preset_file = os.path.join(preset_dir, f"preset_{args.preset}.json")
-        with open(preset_file) as f:
+        with open(preset_file, encoding="utf-8") as f:
             params = json.load(f)
     override = getattr(args, "aiv_num", None)
     if isinstance(override, int):
@@ -135,7 +135,7 @@ def load_compile_config(args) -> Dict:
 
 def extract_inductor_artifacts(output_code_py: str) -> Tuple[str, str]:
     """从 output_code.py 提取 tiling_def 和 host_impl 字符串"""
-    with open(output_code_py) as f:
+    with open(output_code_py, encoding="utf-8") as f:
         src = f.read()
     artifacts_match = re.search(r"(\w+_artifacts)\s*=\s*\{", src)
     if not artifacts_match:
@@ -195,9 +195,13 @@ def prepare_build_dir(
         output_code = os.path.join(source_dir, "output_code.py")
         tiling_def, host_impl = extract_inductor_artifacts(output_code)
         build_dir = tmp_dir
-        with open(os.path.join(build_dir, "autofuse_tiling_data.h"), "w") as f:
+        with open(
+            os.path.join(build_dir, "autofuse_tiling_data.h"), "w", encoding="utf-8"
+        ) as f:
             f.write(tiling_def)
-        with open(os.path.join(build_dir, "tiling_func.cpp"), "w") as f:
+        with open(
+            os.path.join(build_dir, "tiling_func.cpp"), "w", encoding="utf-8"
+        ) as f:
             f.write(host_impl)
     else:
         build_dir = tmp_dir
@@ -220,7 +224,7 @@ def prepare_build_dir(
 
     cmake_path = os.path.join(build_dir, "CMakeLists.txt")
     if not os.path.exists(cmake_path):
-        with open(cmake_path, "w") as f:
+        with open(cmake_path, "w", encoding="utf-8") as f:
             f.write(
                 _CMAKELISTS_TEMPLATE.format(
                     kernel_name=kernel_name,
