@@ -12,6 +12,7 @@
 import csv
 import os
 import argparse
+import sys
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
@@ -630,10 +631,13 @@ def main():
             reporter.save_excel_report(output_file)
 
     except FileNotFoundError as e:
-        print(f"Error: {e}")
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

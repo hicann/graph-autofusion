@@ -37,6 +37,40 @@ def test_help_lists_all_commands():
     )
 
 
+def test_compare_missing_csv_returns_failure(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            ENTRYPOINT,
+            "compare",
+            str(tmp_path / "missing-a.csv"),
+            str(tmp_path / "missing-b.csv"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "not found" in result.stderr
+    assert result.stdout == ""
+
+
+def test_summary_missing_log_returns_failure(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            ENTRYPOINT,
+            "summary",
+            str(tmp_path / "missing.log"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "not found" in result.stdout
+
+
 def test_examples_start_with_cli_usage(capsys):
     spec = importlib.util.spec_from_file_location("att_examples", EXAMPLES)
     examples = importlib.util.module_from_spec(spec)

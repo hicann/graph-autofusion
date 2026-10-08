@@ -25,6 +25,6 @@ def run(args):
     old_argv = sys.argv[:]
     sys.argv = ["summary_templates"] + argv
     try:
-        summary_templates.main()
+        return summary_templates.main()
     finally:
         sys.argv = old_argv

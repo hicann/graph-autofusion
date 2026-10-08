@@ -23,6 +23,6 @@ def run(args):
     old_argv = sys.argv[:]
     sys.argv = ["compare_csv"] + argv
     try:
-        compare_csv.main()
+        return compare_csv.main()
     finally:
         sys.argv = old_argv
