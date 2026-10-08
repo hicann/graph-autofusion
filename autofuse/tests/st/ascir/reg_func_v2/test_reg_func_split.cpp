@@ -18,7 +18,7 @@
 #include "ascir_ops.h"
 #include "ascir_utils.h"
 
-#include "../../compiler/graph/optimize/autofuse/ascir/reg_func/defalut_reg_func.h"
+#include "../../compiler/graph/optimize/autofuse/ascir/reg_func/default_reg_func.h"
 
 namespace af {
 namespace ascir {

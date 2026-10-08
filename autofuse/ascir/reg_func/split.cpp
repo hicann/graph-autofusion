@@ -10,7 +10,7 @@
 
 #include "ascendc_ir.h"
 #include "graph/symbolizer/symbolic_utils.h"
-#include "defalut_reg_func.h"
+#include "default_reg_func.h"
 
 namespace af {
 namespace ascir {

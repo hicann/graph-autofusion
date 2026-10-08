@@ -8,7 +8,7 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 #include "default_reg_func_v2.h"
-#include "reg_func/defalut_reg_func.h"
+#include "reg_func/default_reg_func.h"
 
 namespace af {
 namespace ascir {

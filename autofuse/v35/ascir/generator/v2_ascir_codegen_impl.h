@@ -15,7 +15,7 @@
 #include <set>
 #include "ascendc_ir.h"
 #include "indirect_load_utils.h"
-#include "reg_func/defalut_reg_func.h"
+#include "reg_func/default_reg_func.h"
 #include "reg_func/default_reg_func_v2.h"
 #include "symbolizer/symbolic_utils.h"
 #include "ascir_codegen_v2.h"
