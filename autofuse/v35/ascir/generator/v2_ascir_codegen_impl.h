@@ -3243,10 +3243,10 @@ class MulAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "BinaryApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Mul";
+    return "MulExtend";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"scalar_mul.h"};
+    return {"mul_reg_base.h"};
   }
   [[nodiscard]] std::string GetMicroApiCallName() const override {
     return "MicroApiCall";
@@ -3271,7 +3271,10 @@ class MulAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
-    (void)node;
+    AscNodeInputs node_inputs = node.inputs;
+    if (node_inputs[0].attr.dtype == DT_BOOL) {
+      return false;
+    }
     return true;
   }
   [[nodiscard]] bool IsInplaceSupported(const AscNode &mul_node) const override {
