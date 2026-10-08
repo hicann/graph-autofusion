@@ -578,7 +578,8 @@ TQue::TQue(ascir::QueId que_id, ascir::Position src_position, const std::string 
       size(this->name + "_size"),
       depth(this->name + "_depth"),
       buf_num(this->name + "_buf_num"),
-      buf(Type("LocalTensor<uint8_t>"), name + "_buf") {}
+      buf(Type("LocalTensor<uint8_t>"), name + "_buf"),
+      is_bind(true) {}
 
 std::string TQue::AllocBuf(const bool with_define) const {
   stringstream ss;

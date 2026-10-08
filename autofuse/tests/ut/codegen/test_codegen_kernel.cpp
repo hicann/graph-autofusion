@@ -1861,10 +1861,30 @@ class CodegenKernel_CallSync : public ::testing::Test {
   }
 };
 
-TEST_F(CodegenKernel_CallSync, Load_Store_ShouldSyncMte2ToMte3) {
+TEST_F(CodegenKernel_CallSync, Load_Store_BindQue_ShouldNotSyncMte2ToMte3) {
   auto load = Load("Load", x);
   load->attr.api.compute_type = af::ComputeType::kComputeLoad;
   auto store = Store("Store", load);
+
+  EXPECT_EQ(Generate(), std::string{"uint32_t q1_reuse1_offset = 0;\n"
+                                    "LocalTensor<uint8_t> q1_buf = q1.AllocTensor<uint8_t>();\n"
+                                    "const uint32_t local_1_actual_size = 1;\n"
+                                    "LocalTensor<half> local_1;\n"
+                                    "local_1 = q1_buf[q1_reuse1_offset].template ReinterpretCast<half>();\n"
+                                    "Load();\n"
+                                    "q1.EnQue(q1_buf);\n"
+                                    "\n"
+                                    "q1_buf = q1.DeQue<uint8_t>();\n"
+                                    "Store();\n"
+                                    "q1.FreeTensor(q1_buf);\n"
+                                    "\n"});
+}
+
+TEST_F(CodegenKernel_CallSync, Load_MultiStoreConsumer_ShouldSyncMte2ToMte3) {
+  auto load = Load("Load", x);
+  load->attr.api.compute_type = af::ComputeType::kComputeLoad;
+  auto store1 = Store("Store", load);
+  auto store2 = Store("Store_1", load);
 
   EXPECT_EQ(Generate(), std::string{"uint32_t q1_reuse1_offset = 0;\n"
                                     "LocalTensor<uint8_t> q1_buf = q1.AllocTensor<uint8_t>();\n"
@@ -1882,6 +1902,8 @@ TEST_F(CodegenKernel_CallSync, Load_Store_ShouldSyncMte2ToMte3) {
                                     "\n"
                                     "q1_buf = q1.DeQue<uint8_t>();\n"
                                     "Store();\n"
+                                    "\n"
+                                    "Store_1();\n"
                                     "q1.FreeTensor(q1_buf);\n"
                                     "\n"});
 }

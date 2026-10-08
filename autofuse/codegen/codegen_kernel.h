@@ -204,6 +204,7 @@ class TQue : public Variable {
   Variable buf;
   bool is_cv_ub_fusion{false};
   bool skip_init_for_simt_direct_gm{false};
+  bool is_bind{false};
 
   TQue(ascir::QueId que_id, ascir::Position pos, std::string &position_name);
   TQue(ascir::QueId que_id, ascir::Position src_position, const std::string &src_position_name,
