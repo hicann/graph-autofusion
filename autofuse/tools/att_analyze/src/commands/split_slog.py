@@ -117,7 +117,11 @@ class SlogSplitter:
             ensure_output_dir(dir_path)
             for i, content in enumerate(cases):
                 case_id = self._case_id(content, i)
-                with open(os.path.join(dir_path, f"case{case_id}.log"), "w") as f:
+                with open(
+                    os.path.join(dir_path, f"case{case_id}.log"),
+                    "w",
+                    encoding="utf-8",
+                ) as f:
                     f.write(content)
 
     def write_runtime_output(
@@ -130,7 +134,11 @@ class SlogSplitter:
             ensure_output_dir(dir_path)
             for i, content in enumerate(cases):
                 case_id = self._case_id(content, i)
-                with open(os.path.join(dir_path, f"case{case_id}.log"), "w") as f:
+                with open(
+                    os.path.join(dir_path, f"case{case_id}.log"),
+                    "w",
+                    encoding="utf-8",
+                ) as f:
                     f.write(content)
 
 
