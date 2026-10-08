@@ -727,6 +727,28 @@ af::Status ValidateSimdPostReduceLayout(const af::AscNodePtr &indirect_load, con
   return af::SUCCESS;
 }
 
+bool HasReduceBeforeGatherAxis(const af::AscNodePtr &indirect_load) {
+  const auto reduce = ascgen_utils::indirect_load::GetPostReduceConsumer(indirect_load);
+  if (reduce == nullptr) {
+    return false;
+  }
+  PostReduceLayout layout;
+  bool is_legal = false;
+  if (BuildPostReduceLayout(reduce, layout, is_legal) != af::SUCCESS || !is_legal) {
+    return false;
+  }
+  const size_t gather_axis = GetIndirectLoadAxisIndex(indirect_load);
+  if (gather_axis == kIndirectLoadInvalidAxisIndex || gather_axis >= layout.kinds.size()) {
+    return false;
+  }
+  for (size_t index = 0UL; index < layout.kinds.size(); ++index) {
+    if (layout.kinds[index] == ReduceAxisKind::kReduced) {
+      return index < gather_axis;
+    }
+  }
+  return false;
+}
+
 // 归约轴推导：复用 Reduce 布局分析的真实 zero 转变规则，不能以任意
 // stride 差作为归约依据；保留轴在重排 View 下也可能改变 stride。
 std::vector<af::AxisId> CalcReduceAxesFromNode(const af::AscNodePtr &reduce) {
@@ -1926,7 +1948,13 @@ af::Status AnalyzeInputPath(const af::AscNodePtr &indirect_load, size_t input_id
                    physical_attr.repeats};
   } else {
     GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::ClassifyIndirectLoadLayout(
-        view, plan.layout, template_id == ascir::TemplateId::kIndirectLoadSimt && has_broadcast));
+        view, plan.layout,
+        (template_id == ascir::TemplateId::kIndirectLoadSimt || template_id == ascir::TemplateId::kIndirectLoadSK) &&
+            has_broadcast));
+    if (template_id == ascir::TemplateId::kIndirectLoadSK && has_broadcast &&
+        plan.layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kStrided) {
+      plan.layout.physical_repeats = physical_attr.repeats;
+    }
   }
   if (plan.layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kUnsupported) {
     GELOGI("[IndirectLoad] Reject candidate[%d]: input path layout%s is unsupported.",
@@ -2057,6 +2085,18 @@ af::Status ApplyTemplatePathLayouts(const af::AscNodePtr &indirect_load, ascir::
   const NodePath &index_path = is_simd ? analysis.index_region : analysis.index_path;
   const auto &input_layout = preparation.input.layout;
   const auto &index_layout = preparation.index.layout;
+  // SK 将输入链切分为独立的 GM->workspace 子图。对 Broadcast 源的 strided
+  // view，workspace 边界会从该链末端的 Load 拷贝 tensor attr；若不在切分前
+  // 写回物理 view，子图会把 Broadcast 后的逻辑 extent 当成源 GM 连续布局，
+  // 导致错误的 GM 偏移。SIMD/SIMT 仍沿用各自的 strided 处理方式。
+  if (template_id == ascir::TemplateId::kIndirectLoadSK) {
+    if (input_layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kStrided) {
+      GE_ASSERT_SUCCESS(ApplyPhysicalView(input_path, input_layout));
+    }
+    if (index_layout.kind == ascgen_utils::indirect_load::IndirectLoadLayoutKind::kStrided) {
+      GE_ASSERT_SUCCESS(ApplyPhysicalView(index_path, index_layout));
+    }
+  }
   // [post-Reduce 稠密视图] IL 输出链到达 Reduce（含经 elementwise 中间链，如
   // gather+ele+sum / gather+norm）时不做 kStridedUbPath 对齐标注：该标注会经
   // SetVectorizedStridesForTensor(kAligned) 把视图尾轴按对齐块描述（如 4→8），
@@ -2735,6 +2775,11 @@ Status IndirectLoadScheduleCaseGenerator::Generate(ascir::HintGraph &graph, std:
       {ascir::TemplateId::kIndirectLoadSK, ascgen_utils::indirect_load::Implementation::kDefault}};
   for (const TemplateCase &template_case : cases) {
     const ascir::TemplateId template_id = template_case.template_id;
+    if (HasReduceBeforeGatherAxis(indirect_load) && template_id != ascir::TemplateId::kIndirectLoadSK) {
+      GELOGI("[IndirectLoad] Skip non-SK candidate[%d] for R-before-gather-axis post-Reduce layout, node[%s].",
+             static_cast<int32_t>(template_id), indirect_load->GetNamePtr());
+      continue;
+    }
     ascir::ImplGraph candidate_graph(graph.GetName().c_str());
     GE_ASSERT_TRUE(candidate_graph.CopyFrom(graph), "Failed to copy graph [%s].", graph.GetName().c_str());
     const af::AscNodePtr candidate_indirect_load = candidate_graph.FindNode(indirect_load_name.c_str());

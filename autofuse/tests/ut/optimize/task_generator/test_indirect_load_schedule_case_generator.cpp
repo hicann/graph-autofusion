@@ -1813,7 +1813,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceMetadataCoversReduceAxisLa
   }
 }
 
-TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceRejectsSimdWhenOuterAxisIsReduced) {
+TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceUsesSkWhenOuterAxisIsReducedBeforeGather) {
   auto graph = BuildPostReduceGraph("RRR", true);
   optimize::IndirectLoadScheduleCaseGenerator generator;
   std::vector<af::AscGraph> graphs;
@@ -1821,7 +1821,8 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceRejectsSimdWhenOuterAxisIs
   ASSERT_EQ(generator.Generate(graph, graphs, score_functions), af::SUCCESS);
 
   EXPECT_EQ(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimd), graphs.end());
-  EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt), graphs.end());
+  EXPECT_EQ(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSimt), graphs.end());
+  EXPECT_NE(FindGeneratedGraphByTemplate(graphs, ascir::TemplateId::kIndirectLoadSK), graphs.end());
 }
 
 TEST(IndirectLoadScheduleCaseGeneratorTest, PostReduceRejectsMultipleReduceSegmentsForBothTemplates) {
