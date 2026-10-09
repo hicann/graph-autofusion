@@ -1021,10 +1021,9 @@ Status JudgeNextCompOpSupportsScalarInput(const NodePtr &node, bool &is_next_sup
   bool all_branches_support_scalar = true;
   for (const auto &peer_in_anchor : peer_in_anchors) {
     NodePtr branch_start_node = ToAscNode(peer_in_anchor->GetOwnerNode());
-    NodePtr cur_node = branch_start_node;
 
     std::vector<NodePtr> bro_nodes;
-    NodePtr temp_cur_node = branch_start_node;
+    NodePtr temp_cur_node = node;
     NodePtr temp_next_node = branch_start_node;
     GE_ASSERT_SUCCESS(CollectBroNodes(temp_cur_node, temp_next_node, bro_nodes));
 
@@ -1036,9 +1035,7 @@ Status JudgeNextCompOpSupportsScalarInput(const NodePtr &node, bool &is_next_sup
 
     bool is_support = false;
     std::vector<int64_t> bro_axes;
-    if (!bro_nodes.empty()) {
-      GE_ASSERT_SUCCESS(GetBroAxises(bro_nodes, bro_axes));
-    }
+    GE_ASSERT_SUCCESS(GetBroAxises(bro_nodes, bro_axes));
     GE_ASSERT_SUCCESS(CheckNodeSupportsScalarInput(compute_node, peer_in_anchor->GetIdx(), bro_axes, is_support));
     if (!is_support) {
       all_branches_support_scalar = false;
