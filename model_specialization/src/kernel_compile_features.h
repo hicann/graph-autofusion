@@ -16,8 +16,7 @@
 #include <vector>
 #include "aclmodel_specialization.h"
 
-namespace sk {
-namespace static_compile {
+namespace model_spec {
 namespace detail {
 
 enum class CompileOptionType { BASIC, SK };
@@ -40,6 +39,5 @@ class CompileOptionFeature final {
 };
 
 }  // namespace detail
-}  // namespace static_compile
-}  // namespace sk
+}  // namespace model_spec
 #endif

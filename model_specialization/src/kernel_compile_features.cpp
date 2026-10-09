@@ -16,8 +16,7 @@
 #include <utility>
 #include "sk_log.h"
 
-namespace sk {
-namespace static_compile {
+namespace model_spec {
 namespace detail {
 namespace {
 bool PrepareKernelNamePattern(const std::string &pattern, std::string &normalized) {
@@ -231,5 +230,4 @@ std::vector<std::string> CompileOptionFeature::Get(CompileOptionType type, std::
 }
 
 }  // namespace detail
-}  // namespace static_compile
-}  // namespace sk
+}  // namespace model_spec

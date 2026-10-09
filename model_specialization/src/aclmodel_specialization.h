@@ -12,7 +12,25 @@
 #define ACLMODEL_SPECIALIZATION_H
 
 #include <cstdint>
-#include "super_kernel.h"
+#include "acl/acl.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#if defined(_MSC_VER)
+#ifdef FUNC_VISIBILITY
+#define ACL_FUNC_VISIBILITY _declspec(dllexport)
+#else
+#define ACL_FUNC_VISIBILITY
+#endif
+#else
+#ifdef FUNC_VISIBILITY
+#define ACL_FUNC_VISIBILITY __attribute__((visibility("default")))
+#else
+#define ACL_FUNC_VISIBILITY
+#endif
+#endif
 
 // Internal input contract until the public ACL header is integrated.
 struct aclmdlRISpecCompileOption {
@@ -28,7 +46,7 @@ struct aclmdlRISpecSKFeature {
 };
 
 struct aclmdlRISpecOptions {
-  uint64_t jobs;  // Zero defaults to one serial compilation job.
+  uint64_t jobs;  // Accepted but not yet honoured: kernels are always compiled serially.
   uint64_t specCompileOptionCount;
   aclmdlRISpecCompileOption *specCompileOptions;
   bool enableSK;
@@ -37,9 +55,31 @@ struct aclmdlRISpecOptions {
   char reserved[128];
 };
 
-aclError aclmdlRISpecOptimize(aclmdlRI modelRI, aclmdlRISpecOptions *options);
-aclError aclmdlRISpecScopeBegin(aclrtStream stream);
-aclError aclmdlRISpecScopeEnd(aclrtStream stream);
-aclError aclmdlRISpecOptimizeByFlag(aclmdlRI modelRI, aclmdlRISpecOptions *options);
+/**
+ * @brief Specialize eligible kernels in an idle model, preserving their launch parameters.
+ *
+ * The caller must exclude concurrent execution, modification and destruction, and keep the
+ * specialized values invariant. options may be null for defaults; its referenced data must remain
+ * valid and unchanged during this call. Unsupported kernels retain their original functions.
+ *
+ * @retval ACL_SUCCESS Optimization completed, including when every kernel was skipped because it
+ * could not be specialized.
+ * @retval ACL_ERROR_INVALID_PARAM Invalid model or configuration.
+ * @retval ACL_ERROR_BAD_ALLOC Insufficient resources before the model was modified.
+ * A specialized binary that cannot be loaded, or that lacks its kernel entry, is reported rather
+ * than skipped: it indicates a broken artifact or an exhausted resource, and the model is left
+ * untouched because loading precedes any modification.
+ * A failed commit is not rolled back, so some tasks may already use specialized functions; their
+ * binaries stay loaded until the model is destroyed. The caller keeps ownership of the model and
+ * decides what to do with it.
+ */
+ACL_FUNC_VISIBILITY aclError aclmdlRISpecOptimize(aclmdlRI modelRI, aclmdlRISpecOptions *options);
+ACL_FUNC_VISIBILITY aclError aclmdlRISpecScopeBegin(aclrtStream stream);
+ACL_FUNC_VISIBILITY aclError aclmdlRISpecScopeEnd(aclrtStream stream);
+ACL_FUNC_VISIBILITY aclError aclmdlRISpecOptimizeByFlag(aclmdlRI modelRI, aclmdlRISpecOptions *options);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
