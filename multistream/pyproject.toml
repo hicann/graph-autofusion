@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multistream"
+version = "0.1.0"
+description = "Pure Python MiniDAG stream planning algorithms; planning needs the CANN Runtime library at run time"
+requires-python = ">=3.7"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "setuptools>=61",
+    "wheel",
+    "pytest>=7.4.4",
+    "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.0.0",
+    "coverage[toml]>=7.2.7",
+]
+
+# This directory is itself the ``multistream`` package (it has an
+# ``__init__.py``), so setuptools' automatic discovery cannot be used.  The
+# explicit mapping below keeps ``tests``, ``scripts`` and any generated
+# ``build`` directory out of the wheel.
+[tool.setuptools]
+package-dir = {"multistream" = "."}
+packages = [
+    "multistream",
+    "multistream.common",
+    "multistream.minidag",
+    "multistream.algorithm",
+]
+
+[tool.pytest.ini_options]
+# The package lives in this directory, so ``import multistream`` needs the
+# parent directory on the import path. Shared test helpers live under tests/.
+pythonpath = ["..", "tests"]
+testpaths = ["tests/ut"]
+markers = [
+    "ut: multistream unit test",
+    "st: multistream system test",
+    "runtime: exercises the Runtime ABI through an isolated stub",
+    "package: checks wheel delivery and import isolation",
+    "perf: scale and resource trend test",
+]
