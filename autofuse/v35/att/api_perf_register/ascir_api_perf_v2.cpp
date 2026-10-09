@@ -401,6 +401,16 @@ af::Status CastApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_sh
   return af::SUCCESS;
 }
 
+af::Status Ceil2IntApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_shapes,
+                       [[maybe_unused]] const std::vector<TensorShapeInfo> &output_shapes,
+                       [[maybe_unused]] const NodeInfo &node, PerfOutputInfo &perf_res) {
+  NodeDetail node_info;
+  GE_ASSERT_SUCCESS(SetNodeDetail(input_shapes, output_shapes, node_info));
+  node_info.cast_node_params = node.cast_node_params;
+  GE_ASSERT_SUCCESS(ascendcperf_v2::CastPerf(node_info, perf_res));
+  return af::SUCCESS;
+}
+
 af::Status RemovePadApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_shapes,
                         [[maybe_unused]] const std::vector<TensorShapeInfo> &output_shapes,
                         [[maybe_unused]] const NodeInfo &node, PerfOutputInfo &perf_res) {
@@ -548,6 +558,16 @@ af::Status IsFiniteApi([[maybe_unused]] const std::vector<TensorShapeInfo> &inpu
   return af::SUCCESS;
 }
 
+af::Status IsInfApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_shapes,
+                    [[maybe_unused]] const std::vector<TensorShapeInfo> &output_shapes, const NodeInfo &node,
+                    PerfOutputInfo &perf_res) {
+  NodeDetail node_info;
+  GE_ASSERT_SUCCESS(SetNodeDetail(input_shapes, output_shapes, node_info));
+  node_info.unary_bitwidth_change_node_params = node.unary_bitwidth_change_node_params;
+  GE_ASSERT_SUCCESS(ascendcperf_v2::IsInfPerf(node_info, perf_res));
+  return af::SUCCESS;
+}
+
 af::Status TransposeApi([[maybe_unused]] const std::vector<TensorShapeInfo> &input_shapes,
                         [[maybe_unused]] const std::vector<TensorShapeInfo> &output_shapes, const NodeInfo &node,
                         PerfOutputInfo &perf_res) {
@@ -656,6 +676,7 @@ REGISTER_EVAL_FUNC_TAG(kMul, V2, ascir_v2::MulApi);
 REGISTER_EVAL_FUNC_TAG(kProd, V2, ascir_reduce_v2::ProdApi);
 REGISTER_EVAL_FUNC_TAG(kLeakyRelu, V2, ascir_v2::LeakyReluApi);
 REGISTER_EVAL_FUNC_TAG(kCast, V2, ascir_v2::CastApi);
+REGISTER_EVAL_FUNC_TAG(kCeil2Int, V2, ascir_v2::Ceil2IntApi);
 REGISTER_EVAL_FUNC_TAG(kSum, V2, ascir_reduce_v2::SumApi);
 REGISTER_EVAL_FUNC_TAG(kRemovePad, V2, ascir_v2::RemovePadApi);
 REGISTER_EVAL_FUNC_TAG(kWhere, V2, ascir_v2::WhereApi);
@@ -674,6 +695,7 @@ REGISTER_EVAL_FUNC_TAG(kBitwiseAnd, V2, ascir_v2::BitwiseAndApi);
 REGISTER_EVAL_FUNC_TAG(kFloorDiv, V2, ascir_v2::FloorDivApi);
 REGISTER_EVAL_FUNC_TAG(kIsnan, V2, ascir_v2::IsNanApi);
 REGISTER_EVAL_FUNC_TAG(kIsFinite, V2, ascir_v2::IsFiniteApi);
+REGISTER_EVAL_FUNC_TAG(kIsInf, V2, ascir_v2::IsInfApi);
 REGISTER_EVAL_FUNC_TAG(kTranspose, V2, ascir_v2::TransposeApi);
 ApiPerfRegister<ApiPerf> add_api_perf_v2(ApiPerfRegisterV2(kAdd, kAdd + "V2", nullptr, &perf_param_table_v2,
                                                            &tiling_schedule_config_table_v2));
@@ -722,7 +744,8 @@ ApiPerfRegister<ApiPerf> atan2_api_perf_v2(ApiPerfRegisterV2(kAtan2, kUnitVector
                                                              &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> copysign_api_perf_v2(ApiPerfRegisterV2(kCopySign, kUnitVector, nullptr, &perf_param_table_v2,
                                                                 &tiling_schedule_config_table_v2));
-ApiPerfRegister<ApiPerf> ceil2int_api_perf_v2(ApiPerfRegisterV2(kCeil2Int, kUnitVector, nullptr, &perf_param_table_v2,
+ApiPerfRegister<ApiPerf> ceil2int_api_perf_v2(ApiPerfRegisterV2(kCeil2Int, kCeil2Int + "V2", nullptr,
+                                                                &perf_param_table_v2,
                                                                 &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> logical_and_api_perf_v2(ApiPerfRegisterV2(kLogicalAnd, kLogicalAnd + "V2", nullptr,
                                                                    &perf_param_table_v2,
@@ -892,7 +915,7 @@ ApiPerfRegister<ApiPerf> isnan_api_perf_v2(ApiPerfRegisterV2(kIsnan, kIsnan + "V
 ApiPerfRegister<ApiPerf> isfinite_api_perf_v2(ApiPerfRegisterV2(kIsFinite, kIsFinite + "V2", nullptr,
                                                                 &perf_param_table_v2,
                                                                 &tiling_schedule_config_table_v2));
-ApiPerfRegister<ApiPerf> isinf_api_perf_v2(ApiPerfRegisterV2(kIsInf, kUnitVector, nullptr, &perf_param_table_v2,
+ApiPerfRegister<ApiPerf> isinf_api_perf_v2(ApiPerfRegisterV2(kIsInf, kIsInf + "V2", nullptr, &perf_param_table_v2,
                                                              &tiling_schedule_config_table_v2));
 ApiPerfRegister<ApiPerf> maskedfill_api_perf_v2(ApiPerfRegisterV2(kMaskedFill, kUnitVector, nullptr,
                                                                   &perf_param_table_v2,

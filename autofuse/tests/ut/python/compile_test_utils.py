@@ -114,6 +114,40 @@ def _patch_module(original_modules, name, module):
     return module
 
 
+def make_tbe_log_stub_modules():
+    """Build sys.modules stubs for tbe.common.utils.log.
+
+    Loading the real TBE log module takes ~1 minute and its package init
+    pollutes process-global state, which makes ascir Optimize tests that run
+    later in the same pytest process fail with "Optimize fail". Compile
+    modules under test only use info/warning/error logging, so a stub keeps
+    them hermetic and fast.
+    """
+    stubs = {}
+
+    def _stub(name, **attrs):
+        module = types.ModuleType(name)
+        for key, value in attrs.items():
+            setattr(module, key, value)
+        stubs[name] = module
+        return module
+
+    tbe_module = _stub("tbe")
+    _stub("tbe.common")
+    _stub("tbe.common.utils")
+    log_module = _stub(
+        "tbe.common.utils.log",
+        info=_AscCodegenDummyLogger.info,
+        warning=_AscCodegenDummyLogger.warning,
+        error=_AscCodegenDummyLogger.error,
+        debug=lambda *args, **kwargs: None,
+    )
+    tbe_module.common = stubs["tbe.common"]
+    stubs["tbe.common"].utils = stubs["tbe.common.utils"]
+    stubs["tbe.common.utils"].log = log_module
+    return stubs
+
+
 def _stub_module(original_modules, name, **attrs):
     module = types.ModuleType(name)
     for key, value in attrs.items():

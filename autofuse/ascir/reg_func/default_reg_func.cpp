@@ -9,7 +9,7 @@
  */
 #include <cstdint>
 #include <algorithm>
-#include "defalut_reg_func.h"
+#include "default_reg_func.h"
 #include "graph/symbolizer/symbolic_utils.h"
 
 namespace af {

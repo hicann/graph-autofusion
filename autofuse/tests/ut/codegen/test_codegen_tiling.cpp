@@ -105,6 +105,29 @@ bool CompileCode(const std::string &code, bool append_main = true) {
   return compile_exit_code == 0;
 }
 
+bool CompileAndRunCode(const std::string &code) {
+  const std::string temp_dir = std::string(CMAKE_BINARY_DIR) + "/tests/ut/temp_run_codegen_tiling";
+  std::filesystem::remove_all(temp_dir);
+  std::filesystem::create_directories(temp_dir);
+  const std::string source_file = temp_dir + "/temp_codegen_tiling.cpp";
+  const std::string binary_file = temp_dir + "/temp_codegen_tiling";
+
+  std::ofstream source_stream(source_file);
+  source_stream << code;
+  source_stream.close();
+
+  const std::string compile_command = "g++ -std=c++17 " + source_file + " -o " + binary_file;
+  const auto [compile_exit_code, compile_output] = execute_command(compile_command);
+  if (compile_exit_code != 0) {
+    std::filesystem::remove_all(temp_dir);
+    return false;
+  }
+
+  const auto [run_exit_code, run_output] = execute_command(binary_file);
+  std::filesystem::remove_all(temp_dir);
+  return run_exit_code == 0;
+}
+
 void ExpectSystemHeaders(const std::string &source, const std::vector<std::string> &required,
                          const std::vector<std::string> &forbidden) {
   for (const auto &header : required) {
@@ -1337,17 +1360,63 @@ TEST_F(TestCodegenTiling, NoWorkspaceTest) {
   ascir::FusedScheduledResult fused_schedule_result;
   fused_schedule_result.node_idx_to_scheduled_results.push_back(schedule_results);
 
-  EXPECT_EQ(this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result),
-            std::string{"uint32_t GetWorkspaceSize(const AutofuseTilingData &t) {\n"
-                        "  using namespace optiling;\n"
-                        "  uint32_t ws_size = 0;\n"
-                        "    if (t.tiling_key == 0) {\n"
-                        "      ws_size += 0;\n"
-                        "    }\n"
-                        "\n"
-                        "  ws_size = (ws_size + 512 - 1) / 512 * 512;\n"
-                        "  return ws_size;\n"
-                        "}\n"});
+  const auto code = this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result);
+  EXPECT_NE(code.find("bool GetWorkspaceSize(const AutofuseTilingData &t, uint64_t &workspace_size) {"),
+            std::string::npos);
+  EXPECT_NE(code.find("if (!CheckedWorkspaceAdd(ws_size, 0, ws_size))"), std::string::npos);
+  EXPECT_NE(code.find("if (!CheckedWorkspaceAlign(ws_size, 512U, ws_size))"), std::string::npos);
+  EXPECT_NE(code.find("return true;"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GetWorkspaceSizeUsesUint64AndCheckedHelpers) {
+  ascir::ImplGraph graph0("test_graph0");
+  ascir::ScheduledResult schedule_result;
+  ascir::ScheduleGroup schedule_group;
+  schedule_group.impl_graphs.push_back(graph0);
+  schedule_result.schedule_groups.push_back(schedule_group);
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.node_idx_to_scheduled_results.push_back({schedule_result});
+
+  const auto code = this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result);
+
+  EXPECT_NE(code.find("bool GetWorkspaceSize(const AutofuseTilingData &t, uint64_t &workspace_size) {"),
+            std::string::npos);
+  EXPECT_NE(code.find("uint64_t ws_size = 0;"), std::string::npos);
+  EXPECT_NE(code.find("inline bool CheckedWorkspaceAdd("), std::string::npos);
+  EXPECT_NE(code.find("inline bool CheckedWorkspaceAlign("), std::string::npos);
+  EXPECT_NE(code.find("if (!CheckedWorkspaceAlign(ws_size, 512U, ws_size)) {"), std::string::npos);
+  EXPECT_NE(code.find("workspace_size = ws_size;"), std::string::npos);
+  EXPECT_EQ(code.find("uint32_t GetWorkspaceSize("), std::string::npos);
+  EXPECT_EQ(code.find("uint32_t ws_size"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, DirectTilingAbiUsesUint64WorkspaceSize) {
+  ascir::ImplGraph graph0("test_graph0");
+  ascir::ScheduledResult schedule_result;
+  ascir::ScheduleGroup schedule_group;
+  schedule_group.impl_graphs.push_back(graph0);
+  schedule_result.schedule_groups.push_back(schedule_group);
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.node_idx_to_scheduled_results.push_back({schedule_result});
+
+  const auto inductor_code = this->GenTilingFuncForInductor(fused_schedule_result, fused_schedule_result,
+                                                            "AutofuseTiling", "AutofuseTilingData");
+  const auto direct_code = this->GenTilingFunc({}, fused_schedule_result, "AutofuseTiling", "AutofuseTilingData", "48");
+
+  EXPECT_NE(inductor_code.find("uint64_t* workspaceSize"), std::string::npos);
+  EXPECT_EQ(inductor_code.find("uint32_t* workspaceSize"), std::string::npos);
+  EXPECT_NE(direct_code.find("uint64_t* workspaceSize"), std::string::npos);
+  EXPECT_EQ(direct_code.find("uint32_t* workspaceSize"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, CubeCommonTilingAbiUsesUint64WorkspaceSize) {
+  const auto cube_code = this->GenCVTilingFunc();
+  const auto common_code = this->GenTilingDataBlockDimAndWss();
+
+  EXPECT_NE(cube_code.find("uint64_t workspace_size;"), std::string::npos);
+  EXPECT_NE(common_code.find("uint64_t* workspace_size"), std::string::npos);
+  EXPECT_EQ(cube_code.find("uint32_t workspace_size;"), std::string::npos);
+  EXPECT_EQ(common_code.find("uint32_t* workspace_size"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, PrepareMatMulAttrsShouldUseDefaultOpImplModeForMatMulV3) {
@@ -1406,17 +1475,85 @@ TEST_F(TestCodegenTiling, SingleGroupWorkspaceSymbolTest) {
   ascir::FusedScheduledResult fused_schedule_result;
   fused_schedule_result.workspace_nodes.push_back(workspace_node);
   fused_schedule_result.node_idx_to_scheduled_results.push_back(schedule_results);
-  EXPECT_EQ(this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result),
-            std::string{"uint32_t GetWorkspaceSize(const AutofuseTilingData &t) {\n"
-                        "  using namespace optiling;\n"
-                        "  uint32_t ws_size = 0;\n"
-                        "    if (t.tiling_key == 0) {\n"
-                        "      ws_size += Max(0, (2 * Max(Max(1, t.s1), (t.s0 * t.s1))));\n"
-                        "    }\n"
-                        "\n"
-                        "  ws_size = (ws_size + 512 - 1) / 512 * 512;\n"
-                        "  return ws_size;\n"
-                        "}\n"});
+  const auto code = this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result);
+  EXPECT_NE(code.find("uint64_t ws_size = 0;"), std::string::npos);
+  EXPECT_NE(code.find("const uint64_t workspace_size_symbol_0 = static_cast<uint64_t>(t.s0);"), std::string::npos);
+  EXPECT_NE(code.find("const uint64_t workspace_size_symbol_1 = static_cast<uint64_t>(t.s1);"), std::string::npos);
+  EXPECT_NE(code.find("Max(0, (2 * Max(Max(1, workspace_size_symbol_1), (workspace_size_symbol_0 * "
+                      "workspace_size_symbol_1))))"),
+            std::string::npos);
+  EXPECT_NE(code.find("if (!CheckedWorkspaceAlign(ws_size, 512U, ws_size))"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, GetWorkspaceSizeEvaluatesSymbolsInUint64Domain) {
+  ascir::ImplGraph graph0("test_graph0");
+  auto s0 = graph0.CreateSizeVar("s0");
+  auto s1 = graph0.CreateSizeVar("s1");
+
+  auto z0 = graph0.CreateAxis("z0", s0);
+  auto z1 = graph0.CreateAxis("z1", s1);
+
+  af::ascir_op::Workspace workspace("workspace");
+  graph0.AddNode(workspace);
+  workspace.y.dtype = ge::DT_FLOAT16;
+
+  af::ascir_op::Load load("load");
+  graph0.AddNode(load);
+  load.x = workspace.y;
+  load.attr.sched.axis = {z0.id, z1.id};
+  *load.y.axis = {z0.id, z1.id};
+  *load.y.repeats = {s0, s1};
+  *load.y.strides = {s1, af::ops::One};
+
+  auto load_node = graph0.FindNode("load");
+  auto workspace_node = graph0.FindNode("workspace");
+  workspace_node->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  workspace_node->outputs[0].attr.mem.tensor_id = 0;
+  load_node->outputs[0].attr.dtype = ge::DT_FLOAT16;
+  load_node->outputs[0].attr.mem.tensor_id = 1;
+
+  ascir::ScheduledResult schedule_result;
+  ascir::ScheduleGroup schedule_group;
+  schedule_group.impl_graphs.push_back(graph0);
+  schedule_result.schedule_groups.push_back(schedule_group);
+  ascir::FusedScheduledResult fused_schedule_result;
+  fused_schedule_result.workspace_nodes.push_back(workspace_node);
+  fused_schedule_result.node_idx_to_scheduled_results.push_back({schedule_result});
+
+  const auto code = this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result);
+  const std::string source = R"(
+#include <cstdint>
+
+struct AutofuseTilingData {
+  uint32_t tiling_key;
+  uint32_t s0;
+  uint32_t s1;
+};
+
+namespace optiling {
+template <typename T, typename U>
+inline auto Max(T a, U b) {
+  return static_cast<double>(a) > static_cast<double>(b) ? a : b;
+}
+}  // namespace optiling
+
+#define OP_LOGE(...) ((void)0)
+#define OP_LOGW(...) ((void)0)
+#define OP_NAME "workspace-size-test"
+
+)" + code + R"(
+
+int main() {
+  AutofuseTilingData tiling_data{0U, 707981472U, 4U};
+  uint64_t workspace_size = 0U;
+  if (!GetWorkspaceSize(tiling_data, workspace_size)) {
+    return 2;
+  }
+  return workspace_size == 5663852032ULL ? 0 : 3;
+}
+)";
+
+  EXPECT_TRUE(CompileAndRunCode(source));
 }
 
 TEST_F(TestCodegenTiling, SingleGroupWorkspaceValueTest) {
@@ -1461,17 +1598,10 @@ TEST_F(TestCodegenTiling, SingleGroupWorkspaceValueTest) {
   ascir::FusedScheduledResult fused_schedule_result;
   fused_schedule_result.workspace_nodes.push_back(workspace_node);
   fused_schedule_result.node_idx_to_scheduled_results.push_back(schedule_results);
-  EXPECT_EQ(this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result),
-            std::string{"uint32_t GetWorkspaceSize(const AutofuseTilingData &t) {\n"
-                        "  using namespace optiling;\n"
-                        "  uint32_t ws_size = 0;\n"
-                        "    if (t.tiling_key == 0) {\n"
-                        "      ws_size += 600;\n"
-                        "    }\n"
-                        "\n"
-                        "  ws_size = (ws_size + 512 - 1) / 512 * 512;\n"
-                        "  return ws_size;\n"
-                        "}\n"});
+  const auto code = this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result);
+  EXPECT_NE(code.find("uint64_t ws_size = 0;"), std::string::npos);
+  EXPECT_NE(code.find("if (!CheckedWorkspaceAdd(ws_size, 600, ws_size))"), std::string::npos);
+  EXPECT_NE(code.find("if (!CheckedWorkspaceAlign(ws_size, 512U, ws_size))"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, TfTilingWithConfigShouldUseParsedUbSizeDirectly) {
@@ -1545,9 +1675,11 @@ TEST_F(TestCodegenTiling, GetWorkspaceSizeGuardsDynamicDenominator) {
   fused_schedule_result.node_idx_to_scheduled_results.push_back({schedule_result});
 
   const auto code = this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result);
-  EXPECT_NE(code.find("if (t.a1t_size <= 0) {"), std::string::npos);
-  EXPECT_NE(code.find("return ws_size;"), std::string::npos);
-  EXPECT_LT(code.find("if (t.a1t_size <= 0) {"), code.find("ws_size += "));
+  EXPECT_NE(code.find("const uint64_t workspace_size_symbol_0 = static_cast<uint64_t>(t.a1t_size);"),
+            std::string::npos);
+  EXPECT_NE(code.find("if (workspace_size_symbol_0 <= 0) {"), std::string::npos);
+  EXPECT_NE(code.find("return false;"), std::string::npos);
+  EXPECT_LT(code.find("if (workspace_size_symbol_0 <= 0) {"), code.find("CheckedWorkspaceAdd(ws_size"));
 }
 
 TEST_F(TestCodegenTiling, MultiGroupWorkspaceSymbolTest) {
@@ -1621,23 +1753,18 @@ TEST_F(TestCodegenTiling, MultiGroupWorkspaceSymbolTest) {
   fused_schedule_result.workspace_nodes.push_back(workspace_node);
   fused_schedule_result.workspace_nodes.push_back(workspace1_node);
   fused_schedule_result.node_idx_to_scheduled_results.push_back(schedule_results);
-  EXPECT_EQ(this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result),
-            std::string{"uint32_t GetWorkspaceSize(const AutofuseTilingData &t) {\n"
-                        "  using namespace optiling;\n"
-                        "  uint32_t ws_size = 0;\n"
-                        "  if (t.graph0_tiling_key == 0) {\n"
-                        "    if (t.graph0_result0_g0_tiling_data.tiling_key == 0) {\n"
-                        "      ws_size += Max(0, (2 * Max(Max(1, t.graph0_result0_g0_tiling_data.s1), "
-                        "(t.graph0_result0_g0_tiling_data.s0 * t.graph0_result0_g0_tiling_data.s1))));\n"
-                        "    }\n"
-                        "    if (t.graph0_result0_g1_tiling_data.tiling_key == 0) {\n"
-                        "      ws_size += Max(0, (2 * Max(Max(1, t.graph0_result0_g1_tiling_data.s1), "
-                        "(t.graph0_result0_g1_tiling_data.s0 * t.graph0_result0_g1_tiling_data.s1))));\n"
-                        "    }\n"
-                        "  }\n"
-                        "  ws_size = (ws_size + 512 - 1) / 512 * 512;\n"
-                        "  return ws_size;\n"
-                        "}\n"});
+  const auto code = this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result);
+  EXPECT_NE(code.find("uint64_t ws_size = 0;"), std::string::npos);
+  EXPECT_NE(code.find("const uint64_t workspace_size_symbol_0 = static_cast<uint64_t>("
+                      "t.graph0_result0_g0_tiling_data.s0);"),
+            std::string::npos);
+  EXPECT_NE(code.find("Max(0, (2 * Max(Max(1, workspace_size_symbol_1), (workspace_size_symbol_0 * "
+                      "workspace_size_symbol_1))))"),
+            std::string::npos);
+  EXPECT_NE(code.find("const uint64_t workspace_size_symbol_0 = static_cast<uint64_t>("
+                      "t.graph0_result0_g1_tiling_data.s0);"),
+            std::string::npos);
+  EXPECT_NE(code.find("if (!CheckedWorkspaceAlign(ws_size, 512U, ws_size))"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, MultiGroupWorkspaceValueTest) {
@@ -1711,21 +1838,11 @@ TEST_F(TestCodegenTiling, MultiGroupWorkspaceValueTest) {
   fused_schedule_result.workspace_nodes.push_back(workspace_node);
   fused_schedule_result.workspace_nodes.push_back(workspace1_node);
   fused_schedule_result.node_idx_to_scheduled_results.push_back(schedule_results);
-  EXPECT_EQ(this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result),
-            std::string{"uint32_t GetWorkspaceSize(const AutofuseTilingData &t) {\n"
-                        "  using namespace optiling;\n"
-                        "  uint32_t ws_size = 0;\n"
-                        "  if (t.graph0_tiling_key == 0) {\n"
-                        "    if (t.graph0_result0_g0_tiling_data.tiling_key == 0) {\n"
-                        "      ws_size += 1024;\n"
-                        "    }\n"
-                        "    if (t.graph0_result0_g1_tiling_data.tiling_key == 0) {\n"
-                        "      ws_size += 1000;\n"
-                        "    }\n"
-                        "  }\n"
-                        "  ws_size = (ws_size + 512 - 1) / 512 * 512;\n"
-                        "  return ws_size;\n"
-                        "}\n"});
+  const auto code = this->GenGetWorkspaceSizeFunc("AutofuseTilingData", fused_schedule_result);
+  EXPECT_NE(code.find("uint64_t ws_size = 0;"), std::string::npos);
+  EXPECT_NE(code.find("if (!CheckedWorkspaceAdd(ws_size, 1024, ws_size))"), std::string::npos);
+  EXPECT_NE(code.find("if (!CheckedWorkspaceAdd(ws_size, 1000, ws_size))"), std::string::npos);
+  EXPECT_NE(code.find("if (!CheckedWorkspaceAlign(ws_size, 512U, ws_size))"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, EmptyTensorKernel) {
@@ -4480,10 +4597,17 @@ TEST_F(TestCodegenTiling, GenerateForPgoShouldUseTensorArgsForProfilingSignature
   EXPECT_EQ(tiling_code.find("void* input1,"), std::string::npos);
   EXPECT_EQ(tiling_code.find("void* input2,"), std::string::npos);
   EXPECT_EQ(tiling_code.find("void* output1,"), std::string::npos);
-  EXPECT_NE(tiling_code.find("int WrapperOnlyLaunch(uint32_t workspace_size, AutofuseTilingData *tiling_data)"),
+  EXPECT_NE(tiling_code.find("int WrapperOnlyLaunch(uint64_t workspace_size, AutofuseTilingData *tiling_data)"),
             std::string::npos);
-  EXPECT_NE(tiling_code.find("int ProfilingBatchProcess(uint32_t workspace_size, "
+  EXPECT_NE(tiling_code.find("int ProfilingBatchProcess(uint64_t workspace_size, "
                              "std::vector<AutofuseTilingDataPerf>::iterator begin"),
+            std::string::npos);
+  EXPECT_NE(tiling_code.find("DLOGE(\"malloc workspace failed, size: %\" PRIu64 \", ERROR: %d\""), std::string::npos);
+  EXPECT_NE(tiling_code.find("if (workspace_size > SIZE_MAX)"), std::string::npos);
+  codegen::PgoShapeStringStream pgo_shape_dim;
+  const auto pgo_tiling_code =
+      this->GenPgoAutofuseTiling(fused_schedule_result, pgo_shape_dim, "AutofuseTilingData", false);
+  EXPECT_NE(pgo_tiling_code.find("CheckedWorkspaceAdd(*workspaceSize, 16ULL * 1024ULL * 1024ULL, *workspaceSize)"),
             std::string::npos);
   EXPECT_EQ(tiling_code.find("WrapperOnlyLaunch(PgoTensorArgs *tensor_args"), std::string::npos);
   EXPECT_EQ(tiling_code.find("ProfilingBatchProcess(PgoTensorArgs *tensor_args"), std::string::npos);
@@ -4494,16 +4618,22 @@ TEST_F(TestCodegenTiling, GenerateForPgoShouldUseTensorArgsForProfilingSignature
   EXPECT_EQ(tiling_code.find("AutofuseTilingData tiling_data;"), std::string::npos);
 }
 
-TEST_F(TestCodegenTiling, TfAndInductorPgoShouldSortUint64DurationsConsistently) {
+TEST_F(TestCodegenTiling, TfAndInductorPgoShouldSortAclDurationsConsistently) {
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
 
   const auto tf_source = GenerateForPgo(fused_schedule_result, "/tmp");
   const auto inductor_source = GenInductorPgoRunner(fused_schedule_result);
 
+  // Duration ranking moved into libaihac_codegen (pgo_task_record.cpp); the
+  // generated sources only delegate measurement to the collector ABI.
   EXPECT_EQ(tf_source.find("std::greater<int>()"), std::string::npos);
-  EXPECT_NE(tf_source.find("std::greater<uint64_t>()"), std::string::npos);
+  EXPECT_EQ(tf_source.find("std::greater<double>()"), std::string::npos);
   EXPECT_EQ(inductor_source.find("std::greater<int>()"), std::string::npos);
-  EXPECT_NE(inductor_source.find("std::greater<uint64_t>()"), std::string::npos);
+  EXPECT_EQ(inductor_source.find("std::greater<double>()"), std::string::npos);
+  EXPECT_NE(tf_source.find("AutofusePgoCollectorGetCandidateDurationNs"), std::string::npos);
+  EXPECT_NE(inductor_source.find("AutofusePgoCollectorGetCandidateDurationNs"), std::string::npos);
+  EXPECT_EQ(tf_source.find("mspti"), std::string::npos);
+  EXPECT_EQ(inductor_source.find("mspti"), std::string::npos);
 }
 
 TEST_F(TestCodegenTiling, TfPgoGeneratedSourceContractShouldRemainStable) {
@@ -4517,6 +4647,14 @@ TEST_F(TestCodegenTiling, TfPgoGeneratedSourceContractShouldRemainStable) {
   EXPECT_NE(source.find("const char *pgo_dir"), std::string::npos);
   EXPECT_NE(source.find("PgoTilingSearch"), std::string::npos);
   EXPECT_NE(source.find("static_pgo("), std::string::npos);
+  EXPECT_NE(source.find("AutofusePgoCollectorBegin(collector, PGO_GRAPH_NAME)"), std::string::npos);
+  EXPECT_NE(source.find("int PgoBeginCandidate(void *collector)"), std::string::npos);
+  EXPECT_NE(source.find("const int begin_status = PgoBeginCandidate(g_pgo_collector);"), std::string::npos);
+  EXPECT_EQ(source.find("int PgoBeginCandidate(void *collector, AutofuseTilingData *tiling_data, "
+                        "uint32_t workspace_size)"),
+            std::string::npos);
+  EXPECT_NE(source.find("DLOGI(\"InitAclPgoEvents failed, status: %d\", status)"), std::string::npos);
+  EXPECT_EQ(source.find("get_tiling_data_repr_fn(tiling_data)"), std::string::npos);
   EXPECT_EQ(source.find("kInductorPgoRunnerAbi"), std::string::npos);
   EXPECT_EQ(source.find("kPgoTopnMagic"), std::string::npos);
 }
@@ -4531,6 +4669,13 @@ TEST_F(TestCodegenTiling, InductorPgoRunnerGeneratedSourceContractShouldRemainSt
   EXPECT_NE(source.find("PGOGetProfilingBatch"), std::string::npos);
   EXPECT_EQ(source.find("kInductorPgoRunnerAbi"), std::string::npos);
   EXPECT_NE(source.find("GenerateMeasuredTopnSolutions"), std::string::npos);
+  EXPECT_NE(source.find("int PgoBeginCandidate(void *collector, AutofuseTilingData *tiling_data, "
+                        "uint64_t workspace_size)"),
+            std::string::npos);
+  EXPECT_NE(source.find("const int begin_status = PgoBeginCandidate(g_pgo_collector, tiling_data, workspace_size);"),
+            std::string::npos);
+  EXPECT_NE(source.find("get_tiling_data_repr_fn(tiling_data)"), std::string::npos);
+  EXPECT_EQ(source.find("__attribute__((weak))"), std::string::npos);
   EXPECT_NE(source.find("kPgoTopnMagic"), std::string::npos);
   EXPECT_EQ(source.find("const char *pgo_dir"), std::string::npos);
   EXPECT_EQ(source.find("static_pgo("), std::string::npos);
@@ -4658,7 +4803,7 @@ TEST_F(TestCodegenTiling, WrapperBackfillsWorkspaceAndBlockDim) {
   ASSERT_TRUE(tiling_files.find(codegen::kTilingDefAndConstIdentify) != tiling_files.end());
   const auto &tiling_impl = tiling_files.at(codegen::kTilingDefAndConstIdentify);
   // Workspace must be dynamically computed from tiling_data
-  EXPECT_NE(tiling_impl.find("GetWorkspaceSize(sol.tiling_data)"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("GetWorkspaceSize(sol.tiling_data, workspace_size)"), std::string::npos);
   // Block dim must be dynamically extracted from tiling_data
   EXPECT_NE(tiling_impl.find("sol.tiling_data.get_block_dim()"), std::string::npos);
 }
@@ -4932,6 +5077,8 @@ void AssertSchemeAContract(const codegen::CodegenResult &result) {
   EXPECT_EQ(device_source.find("AUTOFUSE_PGO_DEVICE_SOURCE_ABI"), std::string::npos);
   EXPECT_NE(device_source.find(result.kernel), std::string::npos);
   EXPECT_NE(result.tiling.find("extern \"C\" int64_t GenerateMeasuredTopnSolutions("), std::string::npos);
+  EXPECT_NE(result.tiling.find("if (callback_ret == kPgoProfileUnsupported)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("return callback_ret;"), std::string::npos);
   EXPECT_EQ(result.tiling.find("kInductorPgoProxyAbi"), std::string::npos);
   EXPECT_NE(result.tiling.find("return RunInductorPgoProxy(input_configs, topn, tiling_datas, workspaces, block_dims,"),
             std::string::npos);
@@ -5221,46 +5368,76 @@ TEST_F(TestCodegenTiling, GenerateForPgoShouldLoadFindBestTilingKeyOnlyWhenSuppo
 
 void AssertDlopenRunnerProfiling(const std::string &runner) {
   EXPECT_NE(runner.find("PGOGetProfilingBatch"), std::string::npos);
-  EXPECT_EQ(runner.find("bool IsTargetPgoKernel(const msptiActivityKernel *kernel)"), std::string::npos);
-  EXPECT_EQ(runner.find("std::strcmp(kernel->name, PGO_GRAPH_NAME)"), std::string::npos);
-  EXPECT_EQ(runner.find("g_seen_correlation_ids.insert(kernel->correlationId).second"), std::string::npos);
-  EXPECT_EQ(runner.find("g_is_mix_operator ? \"KERNEL_MIX_AIV\" : \"KERNEL_AIVEC\""), std::string::npos);
-  EXPECT_NE(runner.find("void SavePgoKernel(const msptiActivityKernel *kernel)"), std::string::npos);
-  EXPECT_NE(runner.find("SavePgoKernel(kernel)"), std::string::npos);
-  EXPECT_NE(runner.find("g_profiling_map.size() != expected_records"), std::string::npos);
-  const auto batch_callback_pos = runner.find("const uint64_t expected_records = batch_size * loop");
-  const auto teardown_pos = runner.find("TearDownMspti(&subscriber)", batch_callback_pos);
-  const auto flush_pos = runner.find("FlushPgoActivities(expected_records)", batch_callback_pos);
-  ASSERT_NE(batch_callback_pos, std::string::npos);
-  ASSERT_NE(flush_pos, std::string::npos);
-  ASSERT_NE(teardown_pos, std::string::npos);
-  EXPECT_LT(teardown_pos, flush_pos);
-  const auto single_teardown_pos =
-      runner.find("const msptiResult teardown_result = TearDownMspti(&subscriber)", teardown_pos + 1U);
-  const auto single_flush_pos = runner.find("FlushPgoActivities(loop)", flush_pos + 1U);
-  ASSERT_NE(single_teardown_pos, std::string::npos);
-  ASSERT_NE(single_flush_pos, std::string::npos);
-  EXPECT_LT(single_teardown_pos, single_flush_pos);
-  EXPECT_EQ(runner.find("msptiActivityDisable(MSPTI_ACTIVITY_KIND_KERNEL)"), std::string::npos);
-  const auto teardown_func_pos = runner.find("msptiResult TearDownMspti(msptiSubscriberHandle *subscriber)");
-  const auto unsubscribe_pos = runner.find("msptiUnsubscribe(*subscriber)", teardown_func_pos);
-  const auto teardown_flush_pos = runner.find("msptiActivityFlushAll(1)", unsubscribe_pos);
-  ASSERT_NE(teardown_func_pos, std::string::npos);
-  ASSERT_NE(unsubscribe_pos, std::string::npos);
-  ASSERT_NE(teardown_flush_pos, std::string::npos);
-  EXPECT_LT(unsubscribe_pos, teardown_flush_pos);
-  EXPECT_NE(runner.find("if (g_profiling_record_count.load(std::memory_order_acquire) >= expected_records)"),
+  EXPECT_EQ(runner.find("mspti.h"), std::string::npos);
+  EXPECT_EQ(runner.find("msptiActivity"), std::string::npos);
+  EXPECT_EQ(runner.find("msptiSubscriberHandle"), std::string::npos);
+  // Timing no longer uses ACL events; the collector owns measurement via
+  // profapi/STARS, so no event creation is generated.
+  EXPECT_EQ(runner.find("aclrtCreateEvent"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorBeginCandidate"), std::string::npos);
+  EXPECT_NE(runner.find("get_tiling_data_repr_fn(tiling_data)"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorFinalizeBatch"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorGetCandidateDurationNs"), std::string::npos);
+  EXPECT_EQ(runner.find("AutofusePgoCollectorGetDurationNs"), std::string::npos);
+  EXPECT_EQ(runner.find("aclrtRecordEvent"), std::string::npos);
+  EXPECT_EQ(runner.find("aclrtEventGetTimestamp"), std::string::npos);
+  EXPECT_NE(runner.find("aclrtSynchronizeStream"), std::string::npos);
+  EXPECT_NE(runner.find("kPgoMeasureLoop = 20U"), std::string::npos);
+  const auto retry_definition = runner.find("kPgoRetryCount = 5");
+  const auto retry_loop = runner.find("for (int i = 0; i < kPgoRetryCount; i++)");
+  ASSERT_NE(retry_definition, std::string::npos);
+  ASSERT_NE(retry_loop, std::string::npos);
+  EXPECT_LT(retry_definition, retry_loop);
+  EXPECT_NE(runner.find("kPgoBatchGroupSize = 1000U"), std::string::npos);
+  EXPECT_NE(runner.find("DestroyAclPgoEvents"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorRecordLaunch"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorFinalizeBatch"), std::string::npos);
+  EXPECT_NE(runner.find("AutofusePgoCollectorGetCandidateDurationNs"), std::string::npos);
+  EXPECT_NE(runner.find("kPgoProfileUnsupported = -13"), std::string::npos);
+  const auto unsupported_warning = runner.find("PGO profiling unsupported on this device; fallback to non-PGO path");
+  const auto unsupported_branch = runner.find("if (init_status == kPgoProfileUnsupported)");
+  ASSERT_NE(unsupported_warning, std::string::npos);
+  ASSERT_NE(unsupported_branch, std::string::npos);
+  EXPECT_LT(unsupported_branch, unsupported_warning);
+  EXPECT_NE(runner.find("result = kPgoProfileUnsupported;"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"InitAclPgoEvents failed, status: %d\", status)"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"PgoBeginCandidate failed, status: %d\", begin_status)"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"AutofusePgoCollectorRecordLaunch failed, status: %d\", record_status)"),
             std::string::npos);
-  EXPECT_NE(runner.find("if (SetUpMspti(&subscriber) != MSPTI_SUCCESS)"), std::string::npos);
-  EXPECT_NE(runner.find("g_mspti_activity_error || teardown_result != MSPTI_SUCCESS"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"WrapperOnlyLaunch failed, ERROR: %d\", launch_status)"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"AutofusePgoCollectorEnd failed, status: %d\", end_status)"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"AutofusePgoCollectorFinalizeBatch failed, status: %d\", finalize_status)"),
+            std::string::npos);
+  EXPECT_EQ(runner.find("AutofusePgoCollectorGetDurationNs"), std::string::npos);
+  const auto batch_loop = runner.find("while (it != profiles->end())");
+  const auto batch_init = runner.find("auto init_status = InitAclPgoEvents();");
+  const auto batch_process = runner.find("result = ProfilingBatchProcess(workspace_size, it, end_it);");
+  const auto batch_finalize = runner.find("AutofusePgoCollectorFinalizeBatch(g_pgo_collector)");
+  ASSERT_NE(batch_loop, std::string::npos);
+  ASSERT_NE(batch_init, std::string::npos);
+  ASSERT_NE(batch_process, std::string::npos);
+  ASSERT_NE(batch_finalize, std::string::npos);
+  EXPECT_LT(batch_loop, batch_init);
+  EXPECT_LT(batch_init, batch_process);
+  // GenPgoBatchProcess (which contains the first FinalizeBatch call) is emitted
+  // before GenPgoGetProfilingBatch, so finalize text precedes the batch loop.
+  EXPECT_GT(batch_process, batch_finalize);
+  EXPECT_EQ(runner.find("aclrtEventElapsedTime"), std::string::npos);
+  EXPECT_EQ(runner.find("kPgoMinMeasureRepeats"), std::string::npos);
+  EXPECT_NE(runner.find("for (uint64_t launch_count = 0U; launch_count < kPgoMeasureLoop; ++launch_count)"),
+            std::string::npos);
+  EXPECT_EQ(runner.find("static_cast<double>(launch_count)"), std::string::npos);
 }
 
 void AssertDlopenRunnerProtocol(const std::string &runner) {
-  EXPECT_NE(runner.find("AUTOFUSE_PGO_TOPN_V1"), std::string::npos);
+  EXPECT_NE(runner.find("AUTOFUSE_PGO_TOPN_V2"), std::string::npos);
   EXPECT_NE(runner.find("constexpr size_t kPgoTopnMagicSize = 20U"), std::string::npos);
-  EXPECT_NE(runner.find("constexpr uint32_t kPgoTopnProtocolVersion = 1U"), std::string::npos);
+  EXPECT_NE(runner.find("constexpr uint32_t kPgoTopnProtocolVersion = 2U"), std::string::npos);
   EXPECT_NE(runner.find("sizeof(AutofuseTilingData)"), std::string::npos);
   EXPECT_NE(runner.find("std::is_trivially_copyable<AutofuseTilingData>::value"), std::string::npos);
+  EXPECT_NE(runner.find("uint64_t workspace, int64_t block_dim"), std::string::npos);
+  EXPECT_NE(runner.find("workspace > static_cast<uint64_t>(INT64_MAX)"), std::string::npos);
+  EXPECT_NE(runner.find("WritePgoValue(out, workspace)"), std::string::npos);
   EXPECT_NE(runner.find("WritePgoValue(out, tiling_hash)"), std::string::npos);
   EXPECT_NE(runner.find("void PgoSaveTilingKey(const AutofuseTilingData &tiling_data, double best_perf"),
             std::string::npos);
@@ -5289,16 +5466,16 @@ void AssertDlopenRunnerLaunch(const std::string &runner, const std::string &kern
   EXPECT_NE(runner.find("aclrtBinaryGetFunction(g_pgo_bin_handle, kInductorPgoKernelName"), std::string::npos);
   EXPECT_NE(runner.find("AutofuseTilingData tiling_data;"), std::string::npos);
   EXPECT_NE(runner.find("g_launch_params.aiv_args.tiling_data = tiling_data;"), std::string::npos);
-  EXPECT_NE(runner.find("if (UpdateLaunchParam(tiling_data) != ACL_SUCCESS)"), std::string::npos);
-  EXPECT_NE(runner.find("if (UpdateLaunchParam(*tiling_data) != ACL_SUCCESS)"), std::string::npos);
-  EXPECT_NE(runner.find("WrapperOnlyLaunch(uint32_t workspace_size, AutofuseTilingData *tiling_data) {\n"
+  EXPECT_NE(runner.find("const auto update_status = UpdateLaunchParam(it->tiling_data);"), std::string::npos);
+  EXPECT_NE(runner.find("const auto update_status = UpdateLaunchParam(*tiling_data);"), std::string::npos);
+  EXPECT_NE(runner.find("WrapperOnlyLaunch(uint64_t workspace_size, AutofuseTilingData *tiling_data) {\n"
                         "  (void)workspace_size;"),
             std::string::npos);
-  EXPECT_NE(runner.find("PGOGetProfilingBatch(PgoTensorArgs *tensor_args, void* stream, uint32_t workspace_size, "
+  EXPECT_NE(runner.find("PGOGetProfilingBatch(PgoTensorArgs *tensor_args, void* stream, uint64_t workspace_size, "
                         "std::vector<AutofuseTilingDataPerf> *profiles) {\n"
                         "  (void)tensor_args;\n  (void)stream;"),
             std::string::npos);
-  EXPECT_NE(runner.find("PGOGetProfiling(PgoTensorArgs *tensor_args, void *stream, uint32_t workspace_size, "
+  EXPECT_NE(runner.find("PGOGetProfiling(PgoTensorArgs *tensor_args, void *stream, uint64_t workspace_size, "
                         "AutofuseTilingData *tiling_data, double *outCostTime) {\n"
                         "  (void)tensor_args;\n  (void)stream;"),
             std::string::npos);
@@ -5334,6 +5511,26 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldGenerateDlopenRunner) 
   EXPECT_NE(result.tiling.find("extern \"C\" int64_t FindBestTilingKey"), std::string::npos);
 }
 
+TEST_F(TestCodegenTiling, GenerateForInductorPgoTopnShouldGuardUint64WorkspaceExport) {
+  ScopedAutofusePgoFlag pgo_flag(true);
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
+  codegen::Codegen codegen(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+
+  ASSERT_EQ(codegen.GenerateForInductor(fused_schedule_result, result), af::SUCCESS);
+
+  EXPECT_NE(result.tiling.find("uint64_t workspace_size = 0U;"), std::string::npos);
+  EXPECT_NE(result.tiling.find("if (!GetWorkspaceSize(tiling_data, candidate_workspace_size))"), std::string::npos);
+  EXPECT_NE(result.tiling.find("uint64_t default_workspace = 0U;"), std::string::npos);
+  EXPECT_NE(result.tiling.find("if (!GetWorkspaceSize(default_tiling, default_workspace))"), std::string::npos);
+  EXPECT_NE(result.tiling.find("std::vector<int64_t> export_workspaces;"), std::string::npos);
+  EXPECT_NE(result.tiling.find("workspace_size > static_cast<uint64_t>(INT64_MAX)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("workspaces.swap(export_workspaces);"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("    workspaces.push_back("), std::string::npos);
+  EXPECT_EQ(result.tiling.find("static_cast<int64_t>(GetWorkspaceSize(sol.tiling_data))"), std::string::npos);
+}
+
 TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldGenerateValidatedSpawnProxy) {
   ScopedAutofusePgoFlag pgo_flag(true);
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
@@ -5346,6 +5543,10 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldGenerateValidatedSpawn
   EXPECT_NE(result.tiling.find("AUTOFUSE_PGO_GENERATION"), std::string::npos);
   EXPECT_NE(result.tiling.find("bundle_schema_version"), std::string::npos);
   EXPECT_NE(result.tiling.find("result_protocol_version"), std::string::npos);
+  EXPECT_NE(result.tiling.find("profiling_backend"), std::string::npos);
+  EXPECT_NE(result.tiling.find("requires_mspti"), std::string::npos);
+  EXPECT_NE(result.tiling.find("profiling_backend == \"mspti_equivalent\""), std::string::npos);
+  EXPECT_NE(result.tiling.find("kPgoCacheRootName"), std::string::npos);
   EXPECT_EQ(result.tiling.find("runner_abi"), std::string::npos);
   EXPECT_EQ(result.tiling.find("proxy_abi"), std::string::npos);
   EXPECT_EQ(result.tiling.find("device_source_abi"), std::string::npos);
@@ -5368,6 +5569,16 @@ TEST_F(TestCodegenTiling, GenerateForInductorPgoTrueShouldGenerateValidatedSpawn
   EXPECT_NE(result.tiling.find("constexpr int64_t kMaxPgoTopn = 1024"), std::string::npos);
   EXPECT_NE(result.tiling.find("ParseInductorPgoResult"), std::string::npos);
   EXPECT_NE(result.tiling.find("GetTilingDataRepr(&tiling_data) != repr"), std::string::npos);
+  EXPECT_EQ(result.tiling.find("AUTOFUSE_PGO_TOPN_V1"), std::string::npos);
+  EXPECT_NE(result.tiling.find("AUTOFUSE_PGO_TOPN_V2"), std::string::npos);
+  EXPECT_NE(result.tiling.find("uint64_t workspace = 0;"), std::string::npos);
+  EXPECT_NE(result.tiling.find("workspace > static_cast<uint64_t>(INT64_MAX)"), std::string::npos);
+  EXPECT_NE(result.tiling.find("std::vector<uint64_t> parsed_workspaces;"), std::string::npos);
+  const auto version_check_pos = result.tiling.find("version != kPgoTopnProtocolVersion");
+  const auto record_loop_pos = result.tiling.find("for (uint32_t i = 0; i < count; ++i)");
+  ASSERT_NE(version_check_pos, std::string::npos);
+  ASSERT_NE(record_loop_pos, std::string::npos);
+  EXPECT_LT(version_check_pos, record_loop_pos);
   const size_t measured_search = result.tiling.find("static int64_t GetTopnCandidateSolutions");
   const size_t proxy_start = result.tiling.find("#include <spawn.h>", measured_search);
   ASSERT_NE(measured_search, std::string::npos);

@@ -19,7 +19,7 @@
 #include "ascir_utils.h"
 
 #include "../test_util.h"
-#include "defalut_reg_func.h"
+#include "default_reg_func.h"
 namespace af {
 namespace ascir {
 

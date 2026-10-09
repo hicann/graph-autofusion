@@ -26,6 +26,7 @@ RepeatParams CalculateRepeatParams(const std::string &input_dtype, const Expr &c
 namespace {
 constexpr uint32_t kIsNanMaxLatency = 26U;
 constexpr uint32_t kIsFiniteMaxLatency = 16U;
+constexpr uint32_t kIsInfMaxLatency = 28U;
 
 af::Status RegVfPerf(const std::string &vf_instruct_type, const NodeDetail &node_info, PerfOutputInfo &perf) {
   GELOGD("[ATT Reduce] %s node info is %s.", vf_instruct_type.c_str(), node_info.ToString().c_str());
@@ -260,6 +261,32 @@ af::Status IsFinitePerf(const NodeDetail &node_info, PerfOutputInfo &perf) {
         VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, mask_pack_count));
   }
   return FinishUnaryBitWidthChangePerf(CreateExpr(kIsFiniteMaxLatency), all_vf_instruct_cost, call_count, perf);
+}
+
+af::Status IsInfPerf(const NodeDetail &node_info, PerfOutputInfo &perf) {
+  GE_ASSERT_TRUE(!node_info.input_dtype.empty() && !node_info.output_dtype.empty());
+  Expr cal_count;
+  const Expr call_count = GetUnaryBitWidthChangeCallCount(node_info, cal_count);
+  const RepeatParams params = CalculateRepeatParams(node_info.input_dtype[0], cal_count);
+  const Expr repeat_time = params.repeat_time;
+  Expr max_latency = CreateExpr(0);
+  Expr all_vf_instruct_cost = CreateExpr(0);
+
+  // IsInf: codegen ReinterpretCast<bool> makes output always bool, MaskPack is always executed.
+  // Actual 7 repeat: Duplicate(2), UpdateMask(1 repeat), Select(1 repeat), MaskOr(1 repeat) are not recorded.
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kLoad, node_info.input_dtype[0], max_latency, all_vf_instruct_cost, repeat_time));
+  // Reg::CompareScalar<CMPMODE::EQ> for +Inf and -Inf.
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kCompareScalarEQ, node_info.input_dtype[0], max_latency,
+                                                   all_vf_instruct_cost, repeat_time * kSymTwo));
+  // Reg::MaskPack for cmpMaskReg and mask: float packs twice each, half packs once each.
+  const Expr mask_pack_count = node_info.input_dtype[0] == kFloat32 ? repeat_time * kSymTwo : repeat_time;
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, mask_pack_count));
+  GE_ASSERT_SUCCESS(
+      VfPerfUtils::AddVfInstructPerf(kMaskPack, kUInt8, max_latency, all_vf_instruct_cost, mask_pack_count));
+  GE_ASSERT_SUCCESS(VfPerfUtils::AddVfInstructPerf(kStore, kFloat32, max_latency, all_vf_instruct_cost, repeat_time));
+  return FinishUnaryBitWidthChangePerf(CreateExpr(kIsInfMaxLatency), all_vf_instruct_cost, call_count, perf);
 }
 
 namespace {

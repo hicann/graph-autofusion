@@ -26,6 +26,7 @@ constexpr const char *kAscirNodeParams = "AscirNodeParams";
 constexpr const char *kVectorFunc = "VectorFunc";
 constexpr const char *kCast = "Cast";
 constexpr const char *kBroadcast = "Broadcast";
+constexpr const char *kCeil2Int = "Ceil2Int";
 
 bool IsCompareParamSupported(const std::string &api_name) {
   static const std::set<std::string> kCompareTypes = {"Ge", "Eq", "Ne", "Gt", "Le", "Lt"};
@@ -562,7 +563,7 @@ af::Status EnrichAscirNodeParams(const AscirParamSourceContext &source) {
   if (source.node->GetType() == kVectorFunc) {
     return RegisterVectorFuncAscirNodeParams(source.node);
   }
-  if (source.node->GetType() == kCast) {
+  if (source.node->GetType() == kCast || source.node->GetType() == kCeil2Int) {
     return RegisterCastAscirNodeParams(source.node);
   }
   if (source.node->GetType() == kBroadcast) {
@@ -571,7 +572,7 @@ af::Status EnrichAscirNodeParams(const AscirParamSourceContext &source) {
   if (IsCompareParamSupported(source.node->GetType())) {
     return RegisterCompareAscirNodeParams(source.node);
   }
-  if (source.node->GetType() == "Isnan" || source.node->GetType() == "IsFinite") {
+  if (source.node->GetType() == "Isnan" || source.node->GetType() == "IsFinite" || source.node->GetType() == "IsInf") {
     return RegisterUnaryBitWidthChangeAscirNodeParams(source.node);
   }
   if (source.node->GetType() == "Transpose") {

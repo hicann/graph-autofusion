@@ -37,6 +37,40 @@ def test_help_lists_all_commands():
     )
 
 
+def test_compare_missing_csv_returns_failure(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            ENTRYPOINT,
+            "compare",
+            str(tmp_path / "missing-a.csv"),
+            str(tmp_path / "missing-b.csv"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "not found" in result.stderr
+    assert result.stdout == ""
+
+
+def test_summary_missing_log_returns_failure(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            ENTRYPOINT,
+            "summary",
+            str(tmp_path / "missing.log"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "not found" in result.stdout
+
+
 def test_examples_start_with_cli_usage(capsys):
     spec = importlib.util.spec_from_file_location("att_examples", EXAMPLES)
     examples = importlib.util.module_from_spec(spec)
@@ -64,6 +98,15 @@ def test_verify_tiling_accepts_aiv_num_override():
         ["verify-tiling", "source", "--preset", "B", "--aiv-num", "40"]
     )
     assert args.aiv_num == 40
+
+
+def test_verify_tiling_rejects_conflicting_input_sources():
+    from att import build_parser
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["verify-tiling", "source", "--preset", "B", "--input-json", "input.json"]
+        )
 
 
 def test_operator_order_is_first_seen_and_stable():

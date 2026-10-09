@@ -1473,7 +1473,11 @@ bool ApiCall::WaitInputMte(const TPipe &tpipe, const ApiTensor *in, const Tensor
       ((in->write->compute_type == ascir::ComputeType::kComputeLoad) && (in->write->type != Gather::Type) &&
        (in->write->type != IndirectLoad::Type)) &&
       IsUnitFirstRead(*this, *in)) {
-    ss << tpipe.SyncMte2ToMte3(t) << std::endl;
+    // TQueBind直连MTE2到MTE3, 无需同步
+    const auto t_que = tpipe.GetQue(t.que_id);
+    if (t_que == nullptr || !t_que->is_bind) {
+      ss << tpipe.SyncMte2ToMte3(t) << std::endl;
+    }
   }
   if ((t.position == af::Position::kPositionVecOut) && IsUnitFirstRead(*this, *in)) {
     // 1. vec->store 2. vec->vec store store 3. vec->store vec store

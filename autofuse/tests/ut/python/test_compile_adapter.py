@@ -15,8 +15,11 @@ import types
 
 import pytest
 
-from compile_test_utils import PYTHON_DIR, load_compile_module
-import autofuse
+from compile_test_utils import (
+    PYTHON_DIR,
+    load_compile_module,
+    make_tbe_log_stub_modules,
+)
 
 MODULE_NAME = "autofuse.compile_adapter"
 MODULE_PATH = os.path.join(PYTHON_DIR, "compile_adapter.py")
@@ -49,16 +52,6 @@ def _execute_scheme_a_host_compile(compile_adapter_module, tmpdir):
     return args
 
 
-def _make_mspti_install(tmpdir):
-    cann_root = tmpdir.mkdir("cann")
-    mspti_dir = cann_root.mkdir("tools").mkdir("mspti")
-    mspti_dir.mkdir("include").join("mspti.h").write("header")
-    lib_dir = mspti_dir.mkdir("lib64")
-    mspti_so = lib_dir.join("libmspti.so")
-    mspti_so.write("library")
-    return cann_root, mspti_dir, lib_dir, mspti_so
-
-
 def _clear_cann_root_envs(monkeypatch):
     for env_name in ("ASCEND_TOOLKIT_HOME", "ASCEND_HOME_PATH", "ASCEND_HOME"):
         monkeypatch.delenv(env_name, raising=False)
@@ -80,7 +73,12 @@ def compile_adapter_module():
         MODULE_NAME,
         MODULE_PATH,
         extra_autofuse_attrs={"ascendc_compile": ascendc_compile_module},
-        extra_modules={"autofuse.ascendc_compile": ascendc_compile_module},
+        extra_modules={
+            "autofuse.ascendc_compile": ascendc_compile_module,
+            # Stub tbe log so the fixture never triggers the real (slow, and
+            # process-global-state polluting) TBE package init.
+            **make_tbe_log_stub_modules(),
+        },
     ) as loaded_module:
         yield loaded_module
 
@@ -640,11 +638,6 @@ def test_execute_compile_prepares_scheme_a_sidecars_without_changing_host_api(
         captured["args"] = args
 
     compile_adapter_module.ascendc_compile.main = capture_args
-    monkeypatch.setattr(
-        compile_adapter_module.module,
-        "get_inductor_pgo_mspti_config",
-        lambda: ("/mspti", ["/mspti/libmspti.so"], ["-lmspti"]),
-    )
     _execute_scheme_a_host_compile(compile_adapter_module, tmpdir)
 
     compiled_args = captured["args"]
@@ -653,52 +646,35 @@ def test_execute_compile_prepares_scheme_a_sidecars_without_changing_host_api(
     ]
     assert compiled_args.pgo_runner_file.endswith("graph_tiling_func_PgoRunner.cpp")
     assert compiled_args.pgo_device_file.endswith("graph_pgo_device.cpp")
-    assert compiled_args.pgo_mspti_config == (
-        "/mspti",
-        ["/mspti/libmspti.so"],
-        ["-lmspti"],
-    )
+    assert not hasattr(compiled_args, "pgo_mspti_config")
 
 
 def test_execute_compile_scheme_a_without_mspti_keeps_pgo_proxy_runtime_linkage(
-    compile_adapter_module, tmpdir, monkeypatch
+    compile_adapter_module, tmpdir
 ):
     captured = {}
-    warnings = []
 
     def capture_args(args):
         captured["args"] = args
 
     compile_adapter_module.ascendc_compile.main = capture_args
-    monkeypatch.setattr(
-        compile_adapter_module.module, "get_inductor_pgo_mspti_config", lambda: None
-    )
-    monkeypatch.setattr(
-        compile_adapter_module.module,
-        "logger",
-        types.SimpleNamespace(
-            info=lambda *_args: None,
-            error=lambda *_args: None,
-            warning=lambda message, *args: warnings.append(message % args),
-        ),
-    )
     _execute_scheme_a_host_compile(compile_adapter_module, tmpdir)
 
     compiled_args = captured["args"]
     assert compiled_args.pgo_runner_file.endswith("graph_tiling_func_PgoRunner.cpp")
     assert compiled_args.pgo_device_file.endswith("graph_pgo_device.cpp")
-    assert compiled_args.pgo_mspti_config is None
-    assert warnings == ["[PGO] MSPTI is unavailable, skip Inductor PGO sidecars"]
+    assert not hasattr(compiled_args, "pgo_mspti_config")
 
 
-def test_execute_compile_scheme_a_rejects_stage_all(
+def test_execute_compile_scheme_a_supports_stage_all(
     compile_adapter_module, tmpdir, monkeypatch
 ):
-    monkeypatch.setattr(
-        compile_adapter_module.module,
-        "get_inductor_pgo_mspti_config",
-        lambda: ("/mspti", ["/mspti/libmspti.so"], ["-lmspti"]),
-    )
+    captured = {}
+
+    def capture_args(args):
+        captured["args"] = args
+
+    compile_adapter_module.ascendc_compile.main = capture_args
     args = type(
         "Args",
         (),
@@ -710,111 +686,23 @@ def test_execute_compile_scheme_a_rejects_stage_all(
         },
     )()
 
-    with pytest.raises(
-        compile_adapter_module.ascendc_compile.CompileError, match="host_compile"
-    ):
-        compile_adapter_module.execute_compile(
-            {
-                "tiling_struct_code": "struct AutofuseTilingData {};",
-                "host_impl_code": _make_scheme_a_split_host_impl(),
-                "kernel_impl_code": 'extern "C" void kernel() {}',
-            },
-            args,
-        )
-
-
-def test_get_inductor_pgo_mspti_config_uses_ascend_toolkit_home(
-    compile_adapter_module, tmpdir, monkeypatch
-):
-    _clear_cann_root_envs(monkeypatch)
-    cann_root, mspti_dir, lib_dir, mspti_so = _make_mspti_install(tmpdir)
-    monkeypatch.setenv("ASCEND_TOOLKIT_HOME", str(cann_root))
-
-    config = compile_adapter_module.get_inductor_pgo_mspti_config()
-
-    assert config == (
-        os.path.realpath(str(mspti_dir)),
-        [os.path.realpath(str(mspti_so))],
-        [f"-L{os.path.realpath(str(lib_dir))}", "-lmspti"],
+    compile_adapter_module.execute_compile(
+        {
+            "tiling_struct_code": "struct AutofuseTilingData {};",
+            "host_impl_code": _make_scheme_a_split_host_impl(),
+            "kernel_impl_code": 'extern "C" void kernel() {}',
+        },
+        args,
     )
 
-
-def test_get_inductor_pgo_mspti_config_includes_optional_prof_common(
-    compile_adapter_module, tmpdir, monkeypatch
-):
-    _clear_cann_root_envs(monkeypatch)
-    cann_root = tmpdir.mkdir("cann")
-    mspti_dir = cann_root.mkdir("tools").mkdir("mspti")
-    mspti_dir.mkdir("include").join("mspti.h").write("header")
-    lib_dir = mspti_dir.mkdir("lib64")
-    mspti_so = lib_dir.join("libmspti.so")
-    prof_common_so = lib_dir.join("libprof_common.so")
-    mspti_so.write("library")
-    prof_common_so.write("library")
-    monkeypatch.setenv("ASCEND_TOOLKIT_HOME", str(cann_root))
-
-    config = compile_adapter_module.get_inductor_pgo_mspti_config()
-
-    assert config == (
-        os.path.realpath(str(mspti_dir)),
-        [os.path.realpath(str(prof_common_so)), os.path.realpath(str(mspti_so))],
-        [f"-L{os.path.realpath(str(lib_dir))}", "-lmspti", "-lprof_common"],
-    )
-
-
-def test_get_inductor_pgo_mspti_config_rejects_incomplete_cann_root(
-    compile_adapter_module, tmpdir, monkeypatch
-):
-    _clear_cann_root_envs(monkeypatch)
-    cann_root = tmpdir.mkdir("cann")
-    mspti_dir = cann_root.mkdir("tools").mkdir("mspti")
-    mspti_dir.mkdir("include").join("mspti.h").write("header")
-    monkeypatch.setenv("ASCEND_TOOLKIT_HOME", str(cann_root))
-
-    assert compile_adapter_module.get_inductor_pgo_mspti_config() is None
-
-
-def test_get_inductor_pgo_mspti_config_uses_current_cann_root(
-    compile_adapter_module, tmpdir, monkeypatch
-):
-    _clear_cann_root_envs(monkeypatch)
-    cann_root, mspti_dir, lib_dir, mspti_so = _make_mspti_install(tmpdir)
-    package_dir = cann_root.mkdir("python").mkdir("site-packages").mkdir("autofuse")
-    monkeypatch.setattr(
-        compile_adapter_module.ascendc_compile,
-        "__file__",
-        str(package_dir.join("ascendc_compile.py")),
-        raising=False,
-    )
-
-    assert compile_adapter_module.get_inductor_pgo_mspti_config() == (
-        os.path.realpath(str(mspti_dir)),
-        [os.path.realpath(str(mspti_so))],
-        [f"-L{os.path.realpath(str(lib_dir))}", "-lmspti"],
-    )
-
-
-def test_get_inductor_pgo_mspti_config_uses_cann_root_without_importing_codegen(
-    compile_adapter_module, tmpdir, monkeypatch
-):
-    _clear_cann_root_envs(monkeypatch)
-    cann_root, mspti_dir, lib_dir, mspti_so = _make_mspti_install(tmpdir)
-    monkeypatch.setenv("ASCEND_TOOLKIT_HOME", str(cann_root))
-
-    asc_codegen_compile = types.SimpleNamespace(
-        pgo_get_mspti_config=lambda: (_ for _ in ()).throw(
-            AssertionError("asc_codegen_compile should not be used")
-        )
-    )
-    monkeypatch.setattr(
-        autofuse, "asc_codegen_compile", asc_codegen_compile, raising=False
-    )
-
-    assert compile_adapter_module.get_inductor_pgo_mspti_config() == (
-        os.path.realpath(str(mspti_dir)),
-        [os.path.realpath(str(mspti_so))],
-        [f"-L{os.path.realpath(str(lib_dir))}", "-lmspti"],
-    )
+    compiled_args = captured["args"]
+    assert compiled_args.stage == "all"
+    assert compiled_args.host_files == [
+        os.path.join(str(tmpdir), "host", "graph_tiling_func_solver_func.cpp")
+    ]
+    assert compiled_args.pgo_runner_file.endswith("graph_tiling_func_PgoRunner.cpp")
+    assert compiled_args.pgo_device_file.endswith("graph_pgo_device.cpp")
+    assert compiled_args.device_files.endswith("graph_op_kernel.cpp")
 
 
 @pytest.mark.parametrize(

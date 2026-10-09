@@ -13,7 +13,7 @@
 
 #include "ascendc_ir.h"
 #include "graph/ascendc_ir/ascir_registry.h"
-#include "../reg_func/defalut_reg_func.h"
+#include "../reg_func/default_reg_func.h"
 #include "ascir_common.h"
 
 namespace af {

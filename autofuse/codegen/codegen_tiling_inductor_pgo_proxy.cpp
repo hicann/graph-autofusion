@@ -54,21 +54,26 @@ void AppendInductorPgoProxyDeclarations(std::stringstream &ss, const std::string
   ss << "}  // namespace inductor_pgo_fallback" << std::endl;
   ss << R"(
 namespace {
-constexpr uint32_t kPgoBundleSchemaVersion = 1U;
+constexpr uint32_t kPgoBundleSchemaVersion = 2U;
 constexpr int64_t kMaxPgoTopn = 1024;
 constexpr size_t kMaxPgoManifestSize = 1024U * 1024U;
 constexpr size_t kMaxPgoArtifactSize = 512U * 1024U * 1024U;
 constexpr size_t kMaxPgoResultSize = 256U * 1024U * 1024U;
 constexpr char kPgoKernelFormat[] = "aicore_binary_elf_v1";
-constexpr char kPgoTopnMagic[] = "AUTOFUSE_PGO_TOPN_V1";
-constexpr uint32_t kPgoTopnProtocolVersion = 1U;
+constexpr char kPgoCacheRootName[] = "pgo_v2";
+constexpr char kPgoTopnMagic[] = "AUTOFUSE_PGO_TOPN_V2";
+constexpr uint32_t kPgoTopnProtocolVersion = 2U;
 constexpr uint32_t kPgoTopnRecordHeaderSize = 32U;
 constexpr char kPgoGeneration[] = AUTOFUSE_PGO_GENERATION;
 static_assert(std::is_trivially_copyable<AutofuseTilingData>::value);
 static_assert(std::is_standard_layout<AutofuseTilingData>::value);
 struct InductorPgoArtifacts {
-  std::string tiling_so; std::string generation_dir; std::string runner;
-  std::string kernel; std::string manifest; std::string ld_preload;
+  std::string tiling_so;
+  std::string generation_dir;
+  std::string runner;
+  std::string kernel;
+  std::string manifest;
+  std::string ld_preload;
 };
 )";
 }
@@ -87,7 +92,8 @@ bool ReadPgoFile(const std::string &path, size_t limit, std::vector<uint8_t> &da
   if (!file.is_open()) { return false; }
   const auto size = file.tellg();
   if (size < 0 || static_cast<uint64_t>(size) > limit) { return false; }
-  data.resize(static_cast<size_t>(size)); file.seekg(0, std::ios::beg);
+  data.resize(static_cast<size_t>(size));
+  file.seekg(0, std::ios::beg);
   return data.empty() || static_cast<bool>(file.read(reinterpret_cast<char *>(data.data()), size));
 }
 
@@ -103,16 +109,39 @@ bool GetJsonString(const std::string &json, const std::string &key, size_t begin
   const auto quote = colon == std::string::npos ? colon : json.find('"', colon + 1U);
   const auto end = quote == std::string::npos ? quote : json.find('"', quote + 1U);
   if (end == std::string::npos) { return false; }
-  value = json.substr(quote + 1U, end - quote - 1U); return true;
+  value = json.substr(quote + 1U, end - quote - 1U);
+  return true;
 }
 
 bool GetJsonUint(const std::string &json, const std::string &key, uint32_t &value) {
-  const std::string token = "\"" + key + "\""; const auto key_pos = json.find(token);
+  const std::string token = "\"" + key + "\"";
+  const auto key_pos = json.find(token);
   const auto colon = key_pos == std::string::npos ? key_pos : json.find(':', key_pos + token.size());
   if (colon == std::string::npos) { return false; }
-  char *end = nullptr; errno = 0; const auto parsed = std::strtoul(json.c_str() + colon + 1U, &end, 10);
+  char *end = nullptr;
+  errno = 0;
+  const auto parsed = std::strtoul(json.c_str() + colon + 1U, &end, 10);
   if (errno != 0 || end == json.c_str() + colon + 1U || parsed > UINT32_MAX) { return false; }
-  value = static_cast<uint32_t>(parsed); return true;
+  value = static_cast<uint32_t>(parsed);
+  return true;
+}
+
+bool GetJsonBool(const std::string &json, const std::string &key, bool &value) {
+  const std::string token = "\"" + key + "\"";
+  const auto key_pos = json.find(token);
+  const auto colon = key_pos == std::string::npos ? key_pos : json.find(':', key_pos + token.size());
+  if (colon == std::string::npos) { return false; }
+  const auto value_pos = json.find_first_not_of(" \t\r\n", colon + 1U);
+  if (value_pos == std::string::npos) { return false; }
+  if (json.compare(value_pos, 4U, "true") == 0) {
+    value = true;
+    return true;
+  }
+  if (json.compare(value_pos, 5U, "false") == 0) {
+    value = false;
+    return true;
+  }
+  return false;
 }
 )";
 }
@@ -131,16 +160,20 @@ bool ComputeFileSha256(const std::string &path, std::string &hex) {
   const bool valid = sha256 != nullptr && sha256(data.data(), data.size(), digest) != nullptr;
   dlclose(crypto);
   if (!valid) { return false; }
-  constexpr char digits[] = "0123456789abcdef"; hex.resize(64U);
+  constexpr char digits[] = "0123456789abcdef";
+  hex.resize(64U);
   for (size_t i = 0; i < 32U; ++i) {
-    hex[2U * i] = digits[digest[i] >> 4U]; hex[2U * i + 1U] = digits[digest[i] & 0xFU];
+    hex[2U * i] = digits[digest[i] >> 4U];
+    hex[2U * i + 1U] = digits[digest[i] & 0xFU];
   }
   return true;
 }
 
 bool ValidateArtifactHash(const std::string &json, const std::string &name, const std::string &path) {
   const auto section = json.find("\"" + name + "\"");
-  std::string file_name; std::string expected_hash; std::string actual_hash;
+  std::string file_name;
+  std::string expected_hash;
+  std::string actual_hash;
   return section != std::string::npos && GetJsonString(json, "file", section, file_name) &&
       GetJsonString(json, "sha256", section, expected_hash) && file_name == PgoBaseName(path) &&
       expected_hash.size() == 64U && ComputeFileSha256(path, actual_hash) && actual_hash == expected_hash;
@@ -159,17 +192,26 @@ bool ValidateInductorPgoManifest(InductorPgoArtifacts &artifacts) {
     return false;
   }
   const std::string json(bytes.begin(), bytes.end());
-  std::string generation; std::string ld_preload;
-  uint32_t bundle_schema_version = 0; uint32_t result_protocol_version = 0;
+  std::string cache_root;
+  std::string generation;
+  std::string ld_preload;
+  std::string profiling_backend;
+  bool requires_mspti = true;
+  uint32_t bundle_schema_version = 0;
+  uint32_t result_protocol_version = 0;
   if (!GetJsonUint(json, "bundle_schema_version", bundle_schema_version) ||
+      !GetJsonString(json, "cache_root", 0U, cache_root) ||
       !GetJsonString(json, "generation", 0U, generation) ||
       !GetJsonUint(json, "result_protocol_version", result_protocol_version) ||
+      !GetJsonString(json, "profiling_backend", 0U, profiling_backend) ||
+      !GetJsonBool(json, "requires_mspti", requires_mspti) ||
       !GetJsonString(json, "ld_preload", 0U, ld_preload)) {
     OP_LOGE(OP_NAME, "Invalid Inductor PGO manifest fields: %s", artifacts.manifest.c_str());
     return false;
   }
-  const bool valid = bundle_schema_version == kPgoBundleSchemaVersion && generation == kPgoGeneration &&
-      result_protocol_version == kPgoTopnProtocolVersion &&
+  const bool valid = (bundle_schema_version == kPgoBundleSchemaVersion) && (generation == kPgoGeneration) &&
+      (result_protocol_version == kPgoTopnProtocolVersion) && (cache_root == kPgoCacheRootName) &&
+      (profiling_backend == "mspti_equivalent") && (!requires_mspti) && (ld_preload.empty()) &&
       ValidateArtifactHash(json, "tiling_so", artifacts.tiling_so) &&
       ValidateArtifactHash(json, "runner", artifacts.runner) &&
       ValidateArtifactHash(json, "kernel", artifacts.kernel);
@@ -199,7 +241,7 @@ bool ResolveInductorPgoArtifactsUncached(InductorPgoArtifacts &artifacts) {
     return false;
   }
   const std::string tiling_entry = real_path;
-  artifacts.generation_dir = tiling_entry + ".pgo." + kPgoGeneration;
+  artifacts.generation_dir = tiling_entry + "." + kPgoCacheRootName + "/" + kPgoGeneration;
   const std::string base = PgoBaseName(tiling_entry);
   artifacts.tiling_so = artifacts.generation_dir + "/" + base;
   artifacts.runner = artifacts.generation_dir + "/" + base + ".pgo_runner";
@@ -247,11 +289,14 @@ void TilingLib::GenInductorPgoProxyResultParser(std::stringstream &ss, const std
 template <typename T>
 bool ReadPgoResultValue(const std::vector<uint8_t> &data, size_t &offset, T &value) {
   if (offset > data.size() || sizeof(T) > data.size() - offset) { return false; }
-  std::memcpy(&value, data.data() + offset, sizeof(T)); offset += sizeof(T); return true;
+  std::memcpy(&value, data.data() + offset, sizeof(T));
+  offset += sizeof(T);
+  return true;
 }
 
 uint64_t HashProxyTiling(const void *data, size_t size) {
-  const auto *bytes = static_cast<const uint8_t *>(data); uint64_t hash = 1469598103934665603ULL;
+  const auto *bytes = static_cast<const uint8_t *>(data);
+  uint64_t hash = 1469598103934665603ULL;
   for (size_t i = 0; i < size; ++i) { hash = (hash ^ bytes[i]) * 1099511628211ULL; }
   return hash;
 }
@@ -261,31 +306,52 @@ uint64_t HashProxyTiling(const void *data, size_t size) {
   ss << R"(  std::vector<uint8_t> data;
   if (!ReadPgoFile(path, kMaxPgoResultSize, data) || data.size() < 40U ||
       std::memcmp(data.data(), kPgoTopnMagic, 20U) != 0) { return false; }
-  size_t offset = 20U; uint32_t version = 0; uint32_t flags = 0; uint32_t count = 0;
-  uint32_t tiling_size = 0; uint32_t record_header_size = 0;
+  size_t offset = 20U;
+  uint32_t version = 0;
+  uint32_t flags = 0;
+  uint32_t count = 0;
+  uint32_t tiling_size = 0;
+  uint32_t record_header_size = 0;
   if (!ReadPgoResultValue(data, offset, version) || !ReadPgoResultValue(data, offset, flags) ||
       !ReadPgoResultValue(data, offset, count) || !ReadPgoResultValue(data, offset, tiling_size) ||
       !ReadPgoResultValue(data, offset, record_header_size) || version != kPgoTopnProtocolVersion || flags != 0U ||
       count == 0U || count > static_cast<uint64_t>(topn) || tiling_size != sizeof(AutofuseTilingData) ||
       record_header_size != kPgoTopnRecordHeaderSize) { return false; }
 )";
-  ss << "  std::vector<" << tiling << "> parsed_tilings; std::vector<int64_t> parsed_workspaces;" << std::endl;
-  ss << R"(  std::vector<int64_t> parsed_block_dims; parsed_tilings.reserve(count);
+  ss << "  std::vector<" << tiling << "> parsed_tilings;" << std::endl;
+  ss << "  std::vector<uint64_t> parsed_workspaces;" << std::endl;
+  ss << R"(  std::vector<int64_t> parsed_block_dims;
+  parsed_tilings.reserve(count);
   for (uint32_t i = 0; i < count; ++i) {
-    uint64_t repr_len = 0; int64_t workspace = 0; int64_t block_dim = 0; uint64_t tiling_hash = 0;
+    uint64_t repr_len = 0;
+    uint64_t workspace = 0;
+    int64_t block_dim = 0;
+    uint64_t tiling_hash = 0;
     AutofuseTilingData tiling_data = {};
     if (!ReadPgoResultValue(data, offset, repr_len) || !ReadPgoResultValue(data, offset, workspace) ||
         !ReadPgoResultValue(data, offset, block_dim) || !ReadPgoResultValue(data, offset, tiling_hash) ||
         !ReadPgoResultValue(data, offset, tiling_data) || repr_len == 0U || repr_len > 16U * 1024U * 1024U ||
-        repr_len > data.size() - offset || workspace < 0 || block_dim <= 0 || block_dim > UINT32_MAX) { return false; }
-    const std::string repr(reinterpret_cast<const char *>(data.data() + offset), repr_len); offset += repr_len;
+        repr_len > data.size() - offset || workspace > static_cast<uint64_t>(INT64_MAX) || block_dim <= 0 ||
+        block_dim > UINT32_MAX) { return false; }
+    const std::string repr(reinterpret_cast<const char *>(data.data() + offset), repr_len);
+    offset += repr_len;
+    uint64_t expected_workspace = 0;
     if (HashProxyTiling(&tiling_data, sizeof(tiling_data)) != tiling_hash ||
-        GetTilingDataRepr(&tiling_data) != repr || static_cast<int64_t>(GetWorkspaceSize(tiling_data)) != workspace ||
+        GetTilingDataRepr(&tiling_data) != repr || !GetWorkspaceSize(tiling_data, expected_workspace) ||
+        expected_workspace != workspace ||
         static_cast<int64_t>(tiling_data.get_block_dim()) != block_dim) { return false; }
-    parsed_tilings.push_back(tiling_data); parsed_workspaces.push_back(workspace); parsed_block_dims.push_back(block_dim);
+    parsed_tilings.push_back(tiling_data);
+    parsed_workspaces.push_back(workspace);
+    parsed_block_dims.push_back(block_dim);
   }
   if (offset != data.size()) { return false; }
-  tiling_datas.swap(parsed_tilings); workspaces.swap(parsed_workspaces); block_dims.swap(parsed_block_dims); return true;
+  tiling_datas.swap(parsed_tilings);
+  block_dims.swap(parsed_block_dims);
+  workspaces.resize(parsed_workspaces.size());
+  for (size_t i = 0; i < parsed_workspaces.size(); ++i) {
+    workspaces[i] = static_cast<int64_t>(parsed_workspaces[i]);
+  }
+  return true;
 }
 )";
 }
@@ -297,7 +363,8 @@ void AppendInductorPgoResultPathAndWait(std::stringstream &ss) {
 bool MakeInductorPgoResultPath(std::string &path) {
   char result_dir_template[] = "/tmp/autofuse_inductor_pgo_XXXXXX";
   if (mkdtemp(result_dir_template) == nullptr) { return false; }
-  path = std::string(result_dir_template) + "/result.bin"; return true;
+  path = std::string(result_dir_template) + "/result.bin";
+  return true;
 }
 
 std::string PgoParentPath(const std::string &path) {
@@ -306,7 +373,8 @@ std::string PgoParentPath(const std::string &path) {
 }
 
 void RemoveInductorPgoResultPath(const std::string &path) {
-  unlink(path.c_str()); unlink((path + ".tmp").c_str());
+  unlink(path.c_str());
+  unlink((path + ".tmp").c_str());
   rmdir(PgoParentPath(path).c_str());
 }
 
@@ -367,8 +435,10 @@ void AppendInductorPgoRunnerSpawn(std::stringstream &ss) {
   ss << R"(
 int SpawnInductorPgoRunner(const InductorPgoArtifacts &artifacts, int32_t device_id, const ResLimit &limit,
                            int64_t topn, const std::string &result_path) {
-  const std::string device = std::to_string(device_id); const std::string aiv = std::to_string(limit.aiv_num);
-  const std::string ub = std::to_string(limit.ub_size); const std::string topn_arg = std::to_string(topn);
+  const std::string device = std::to_string(device_id);
+  const std::string aiv = std::to_string(limit.aiv_num);
+  const std::string ub = std::to_string(limit.ub_size);
+  const std::string topn_arg = std::to_string(topn);
   std::vector<char *> argv = {const_cast<char *>(artifacts.runner.c_str()), const_cast<char *>(device.c_str()),
       const_cast<char *>(aiv.c_str()), const_cast<char *>(ub.c_str()), const_cast<char *>("autofuse"),
       const_cast<char *>(artifacts.tiling_so.c_str()), const_cast<char *>(artifacts.kernel.c_str()),
@@ -406,7 +476,9 @@ void TilingLib::GenInductorPgoProxyFunction(std::stringstream &ss, const std::st
      << "const std::vector<std::map<std::string, std::string>> &input_configs, int64_t topn, "
      << "std::vector<" << tiling << "> &tiling_datas, std::vector<int64_t> &workspaces, "
      << "std::vector<int64_t> &block_dims, ResLimit *res_limit) {" << std::endl;
-  ss << R"(  tiling_datas.clear(); workspaces.clear(); block_dims.clear();
+  ss << R"(  tiling_datas.clear();
+  workspaces.clear();
+  block_dims.clear();
   if (topn <= 0 || topn > kMaxPgoTopn) { return -1; }
   const ResLimit effective_res_limit = GetResLimit(res_limit);
   const ResLimit *limit = &effective_res_limit;

@@ -15,7 +15,7 @@
 #include <set>
 #include "ascendc_ir.h"
 #include "indirect_load_utils.h"
-#include "reg_func/defalut_reg_func.h"
+#include "reg_func/default_reg_func.h"
 #include "reg_func/default_reg_func_v2.h"
 #include "symbolizer/symbolic_utils.h"
 #include "ascir_codegen_v2.h"
@@ -2138,13 +2138,16 @@ class SqrtAscIrCodegenImplV2 : public AscIrCodegenV2 {
 class RsqrtAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
  public:
   [[nodiscard]] std::vector<std::unique_ptr<TmpBufDesc>> CalcTmpBufSize(const AscNode &node) override {
+    if (IsRsqrtInBlacklist()) {
+      return std::vector<std::unique_ptr<TmpBufDesc>>();
+    }
     return CalcVoidTmpSizeV2(node);
   }
   [[nodiscard]] std::string GetApiCallName() const override {
-    return "UnaryApiTmpCall";
+    return IsRsqrtInBlacklist() ? "UnaryApiCall" : "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "RsqrtExtend";
+    return IsRsqrtInBlacklist() ? "Rsqrt" : "RsqrtExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Rsqrt";
@@ -2175,6 +2178,9 @@ class RsqrtAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return GetConversionFromDtypeMap(rsqrt_node, dtype_conversion_map);
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    if (IsRsqrtInBlacklist()) {
+      return {};
+    }
     return {"rsqrt_reg_base.h"};
   }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
@@ -2189,6 +2195,13 @@ class RsqrtAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithSingleOutput(node), "Node %s[%s] check shape consistency failed",
                       node.GetTypePtr(), node.GetNamePtr());
     return true;
+  }
+
+ private:
+  // Rsqrt 命中精度提升黑名单（配置 Rsqrt 或 all）时，codegen 回落内置 Rsqrt（Vector
+  // adv_api）快速路径，跳过 regbase Extend 高精度实现；类型字符串与 REG_ASC_IR(Rsqrt) 注册名一致
+  static bool IsRsqrtInBlacklist() {
+    return af::pre_process::PreProcessConfig::Instance().IsInImprovePrecisionBlacklist("Rsqrt");
   }
 };
 
@@ -3243,10 +3256,10 @@ class MulAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "BinaryApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Mul";
+    return "MulExtend";
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
-    return {"scalar_mul.h"};
+    return {"mul_reg_base.h"};
   }
   [[nodiscard]] std::string GetMicroApiCallName() const override {
     return "MicroApiCall";
@@ -3271,7 +3284,10 @@ class MulAscIrCodegenImplV2 : public AscIrCodegenV2 {
   }
 
   [[nodiscard]] bool IsVectorFunctionSupported(const AscNode &node) const override {
-    (void)node;
+    AscNodeInputs node_inputs = node.inputs;
+    if (node_inputs[0].attr.dtype == DT_BOOL) {
+      return false;
+    }
     return true;
   }
   [[nodiscard]] bool IsInplaceSupported(const AscNode &mul_node) const override {

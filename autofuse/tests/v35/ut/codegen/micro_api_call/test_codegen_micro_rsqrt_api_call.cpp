@@ -18,6 +18,7 @@
 #include "codegen_kernel.h"
 #include "micro_api_call/micro_api_call_factory.h"
 #include "micro_api_call/micro_rsqrt_api_call.h"
+#include "optimize/pre_process/pre_process_config.h"
 #include "platform_context.h"
 #include "runtime_stub.h"
 
@@ -100,6 +101,30 @@ TEST_F(MicroRsqrtApiCallTest, GeneratesFloatRsqrtInstructionSequence) {
             "AscendC::MicroAPI::Sqrt(vreg_1, vreg_0, p_reg);\n"
             "AscendC::MicroAPI::Div<float, &high_precision_div_mode>(vreg_1, vreg_1_rsqrt_one, vreg_1, p_reg);\n");
   EXPECT_EQ(result.find("Sqrt(vreg_0,"), std::string::npos);
+}
+
+// 配置 Rsqrt 黑名单：Rsqrt micro 路径的内部 Div 回落默认精度模式
+TEST_F(MicroRsqrtApiCallTest, BlacklistRsqrtUsesDefaultDivMode) {
+  setenv("AUTOFUSE_FLAGS", "--autofuse_enhance_precision_blacklist=Rsqrt", 1);
+  af::pre_process::PreProcessConfig::Instance().Reset();
+
+  RsqrtMicroFixture fixture;
+  MicroRsqrtApiCall call("Rsqrt");
+  ASSERT_EQ(call.Init(fixture.rsqrt), af::SUCCESS);
+  call.AddInput(0);
+  call.AddOutput(1);
+
+  CallParam param{"p_reg", "", "float"};
+  std::string result;
+  ASSERT_EQ(call.Generate(fixture.tensor_manager, fixture.tpipe, param, result), af::SUCCESS);
+  EXPECT_EQ(result,
+            "AscendC::MicroAPI::RegTensor<float> vreg_1_rsqrt_one;\n"
+            "AscendC::MicroAPI::Duplicate(vreg_1_rsqrt_one, static_cast<float>(1.0), p_reg);\n"
+            "AscendC::MicroAPI::Sqrt(vreg_1, vreg_0, p_reg);\n"
+            "AscendC::MicroAPI::Div<float>(vreg_1, vreg_1_rsqrt_one, vreg_1, p_reg);\n");
+
+  unsetenv("AUTOFUSE_FLAGS");
+  af::pre_process::PreProcessConfig::Instance().Reset();
 }
 
 TEST_F(MicroRsqrtApiCallTest, FactoryCreatesRsqrtMicroCallForRsqrtNode) {

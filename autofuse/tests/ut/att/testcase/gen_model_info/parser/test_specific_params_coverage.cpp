@@ -47,13 +47,17 @@ TEST_F(SpecificParamsCoverageTest, CopiesCastLayoutWithoutAliasingPayload) {
   payload.output_dims = {af::Symbol(32)};
   payload.output_strides = {af::Symbol(1)};
   payload.input_strides = {af::Symbol(2)};
-  ASSERT_EQ(Fill(kCast, payload), af::SUCCESS);
-  EXPECT_TRUE(info_.cast_node_params.valid);
-  EXPECT_EQ(info_.cast_node_params.output_dims, payload.output_dims);
-  EXPECT_EQ(info_.cast_node_params.output_strides, payload.output_strides);
-  EXPECT_EQ(info_.cast_node_params.input_strides, payload.input_strides);
-  params_->specific_params = std::monostate{};
-  EXPECT_EQ(info_.cast_node_params.output_dims, payload.output_dims);
+  for (const auto &type : {kCast, kCeil2Int}) {
+    SCOPED_TRACE(type);
+    info_.cast_node_params = {};
+    ASSERT_EQ(Fill(type, payload), af::SUCCESS);
+    EXPECT_TRUE(info_.cast_node_params.valid);
+    EXPECT_EQ(info_.cast_node_params.output_dims, payload.output_dims);
+    EXPECT_EQ(info_.cast_node_params.output_strides, payload.output_strides);
+    EXPECT_EQ(info_.cast_node_params.input_strides, payload.input_strides);
+    params_->specific_params = std::monostate{};
+    EXPECT_EQ(info_.cast_node_params.output_dims, payload.output_dims);
+  }
 }
 
 TEST_F(SpecificParamsCoverageTest, CopiesComparisonPayloadForAllComparisonKinds) {
@@ -102,14 +106,14 @@ TEST_F(SpecificParamsCoverageTest, CopiesWhereAndSelectBroadcastAndMaskMetadata)
   }
 }
 
-TEST_F(SpecificParamsCoverageTest, CopiesUnaryBitWidthMetadataForBothPredicates) {
+TEST_F(SpecificParamsCoverageTest, CopiesUnaryBitWidthMetadataForAllPredicates) {
   ascir_param::UnaryBitWidthChangeNodeParams payload;
   payload.valid = true;
   payload.cal_count = af::Symbol(64);
   payload.outer_repeats = {af::Symbol(3)};
   payload.output_strides = {af::Symbol(1)};
   payload.input_strides = {af::Symbol(4)};
-  for (const auto &type : {kIsnan, kIsFinite}) {
+  for (const auto &type : {kIsnan, kIsFinite, kIsInf}) {
     SCOPED_TRACE(type);
     info_.unary_bitwidth_change_node_params = {};
     ASSERT_EQ(Fill(type, payload), af::SUCCESS);
@@ -151,7 +155,7 @@ TEST_F(SpecificParamsCoverageTest, CopiesTransposeAndVectorFunctionMetadata) {
 TEST_F(SpecificParamsCoverageTest, RejectsMissingPayloadAndInvalidBuildStateWithoutOverwritingOutput) {
   info_.cast_node_params.valid = true;
   info_.cast_node_params.output_dims = {af::Symbol(19)};
-  for (const auto &type : {kCast, kGe, kWhere, kIsnan, kTranspose, kVectorFunc, kSum}) {
+  for (const auto &type : {kCast, kCeil2Int, kGe, kWhere, kIsnan, kIsInf, kTranspose, kVectorFunc, kSum}) {
     SCOPED_TRACE(type);
     EXPECT_NE(Fill(type, std::monostate{}), af::SUCCESS);
   }

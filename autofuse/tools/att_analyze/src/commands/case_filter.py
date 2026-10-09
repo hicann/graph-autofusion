@@ -46,6 +46,10 @@ def parse_case_arg(value: Optional[str]) -> Optional[CaseFilter]:
     current_dim = None
     for token in value.split(","):
         token = token.strip()
+        # Accept the trailing comma commonly produced when a list is built
+        # incrementally on the command line (for example, ``r=1,2,``).
+        if not token:
+            continue
         if "=" in token:
             raw_dim, id_str = token.split("=", 1)
             raw_dim = raw_dim.strip()

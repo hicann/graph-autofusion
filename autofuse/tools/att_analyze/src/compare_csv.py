@@ -12,6 +12,7 @@
 import csv
 import os
 import argparse
+import sys
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
@@ -111,8 +112,8 @@ class CSVComparator:
         differences = []
 
         if file1_cols != file2_cols:
-            only_in_file1 = set(file1_cols) - set(file2_cols)
-            only_in_file2 = set(file2_cols) - set(file1_cols)
+            only_in_file1 = sorted(set(file1_cols) - set(file2_cols))
+            only_in_file2 = sorted(set(file2_cols) - set(file1_cols))
 
             if only_in_file1:
                 differences.append(f"列仅在文件1中: {', '.join(only_in_file1)}")
@@ -630,10 +631,13 @@ def main():
             reporter.save_excel_report(output_file)
 
     except FileNotFoundError as e:
-        print(f"Error: {e}")
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

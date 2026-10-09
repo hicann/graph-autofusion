@@ -234,13 +234,18 @@ void VisitPgoCandidateTensors(const ascir::FusedScheduledResult &fused_schedule_
 }
 
 void AppendPgoTensorMalloc(std::stringstream &ss, const std::string &tensor_name,
-                           const std::vector<std::string> &size_expressions) {
+                           const std::vector<std::string> &size_expressions, const std::string &failure_action) {
   if (size_expressions.empty()) {
     return;
   }
   if (std::find(size_expressions.begin(), size_expressions.end(), "") != size_expressions.end()) {
     ss << "  DLOGE(\"Invalid or symbolic PGO " << tensor_name << " memory size\");" << std::endl;
-    ss << "  return FAILED;" << std::endl;
+    if (failure_action.empty()) {
+      ss << "  return FAILED;" << std::endl;
+    } else {
+      ss << "  " << failure_action << std::endl;
+      ss << "  return FAILED;" << std::endl;
+    }
     return;
   }
   const std::string size_name = tensor_name + "_size";
@@ -252,7 +257,12 @@ void AppendPgoTensorMalloc(std::stringstream &ss, const std::string &tensor_name
   ss << "  ret = aclrtMalloc(&" << tensor_name << ", " << size_name << ", ACL_MEM_MALLOC_HUGE_FIRST);" << std::endl;
   ss << "  if (ret != ACL_SUCCESS) {" << std::endl;
   ss << "    DLOGE(\"aclrtMalloc " << tensor_name << " failed. ERROR: %d\", ret);" << std::endl;
-  ss << "    return FAILED;" << std::endl;
+  if (failure_action.empty()) {
+    ss << "    return FAILED;" << std::endl;
+  } else {
+    ss << "    " << failure_action << std::endl;
+    ss << "    return FAILED;" << std::endl;
+  }
   ss << "  }" << std::endl;
 }
 }  // namespace
@@ -288,7 +298,8 @@ std::vector<std::string> TilingLib::CalculatePgoIoMemorySizeStrs(
   return size_expressions;
 }
 
-std::string TilingLib::PGOSearchTensorMallocDef(const ascir::FusedScheduledResult &fused_schedule_result) const {
+std::string TilingLib::PGOSearchTensorMallocDef(const ascir::FusedScheduledResult &fused_schedule_result,
+                                                const std::string &failure_action) const {
   std::stringstream ss;
   int index = 0;
   for (auto &input : fused_schedule_result.input_nodes) {
@@ -299,7 +310,7 @@ std::string TilingLib::PGOSearchTensorMallocDef(const ascir::FusedScheduledResul
     af::AscNode *asc_out_node = static_cast<af::AscNode *>(out_node);
     const auto size_expressions = CalculatePgoIoMemorySizeStrs(fused_schedule_result, GetPgoIoIndex(input, index), true,
                                                                asc_out_node->outputs[0]);
-    AppendPgoTensorMalloc(ss, "input" + std::to_string(index), size_expressions);
+    AppendPgoTensorMalloc(ss, "input" + std::to_string(index), size_expressions, failure_action);
     index++;
   }
   index = 0;
@@ -307,7 +318,7 @@ std::string TilingLib::PGOSearchTensorMallocDef(const ascir::FusedScheduledResul
     if (af::ops::IsOps<af::ascir_op::Output>(output)) {
       const auto size_expressions =
           CalculatePgoIoMemorySizeStrs(fused_schedule_result, GetPgoIoIndex(output, index), false, output->inputs[0]);
-      AppendPgoTensorMalloc(ss, "output" + std::to_string(index), size_expressions);
+      AppendPgoTensorMalloc(ss, "output" + std::to_string(index), size_expressions, failure_action);
       index++;
     }
   }
@@ -420,10 +431,10 @@ std::string TilingLib::PGOProfilingCallbackDef(const ascir::FusedScheduledResult
   ss << PGOTensorArgsDef();
   ss << "typedef long int (*ProfilingCallback)(";
   ss << PGOSearchFuncInputOutputCallBackDef(fused_schedule_result);
-  ss << "void *stream, uint32_t workspaceSize, " << tiling << " *tiling_data, double *cost_time);" << std::endl;
+  ss << "void *stream, uint64_t workspaceSize, " << tiling << " *tiling_data, double *cost_time);" << std::endl;
   ss << "typedef long int (*ProfilingBatchCallback)(";
   ss << PGOSearchFuncInputOutputCallBackDef(fused_schedule_result);
-  ss << "void *stream, uint32_t workspaceSize, std::vector<AutofuseTilingDataPerf> *profiles);" << std::endl;
+  ss << "void *stream, uint64_t workspaceSize, std::vector<AutofuseTilingDataPerf> *profiles);" << std::endl;
   AppendPgoConfigDef(ss);
   ss << std::endl;
 

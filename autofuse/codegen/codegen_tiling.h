@@ -175,7 +175,8 @@ class TilingLib {
   std::vector<std::string> CalculatePgoIoMemorySizeStrs(const ::ascir::FusedScheduledResult &fused_schedule_result,
                                                         int64_t io_index, bool is_input,
                                                         const ::ascir::TensorAttr &fallback_tensor) const;
-  std::string PGOSearchTensorMallocDef(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
+  std::string PGOSearchTensorMallocDef(const ::ascir::FusedScheduledResult &fused_schedule_result,
+                                       const std::string &failure_action = "") const;
   std::string PGOSearchTensorFreeDef(const ::ascir::FusedScheduledResult &fused_schedule_result) const;
   // codegen_tiling.cpp: fallback headers and ordinary tiling helpers.
   std::string StubHeadersWithoutCodegenFunc() const;
@@ -287,7 +288,7 @@ class TilingLib {
   std::string GenPGOGetTilingKey(const std::string tiling) const;
   std::string GenSavePGOSearchTilingDataFunc(const std::string tiling) const;
   std::string GenSavePGOConfigTilingDataFunc() const;
-  // codegen_tiling_pgo_common.cpp: shared MSPTI callbacks and launch/runtime source generation.
+  // codegen_tiling_pgo_common.cpp: shared ACL event profiling and launch/runtime source generation.
   void GenPgoSaveTilingKey(std::stringstream &ss) const;
   void GenPgoAppendSearchTilingData(std::stringstream &ss) const;
   void GenPgoKernelLaunchOpArgs(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss,
@@ -321,28 +322,16 @@ class TilingLib {
   void GenPgoWrapperKernelLaunch(std::stringstream &ss) const;
   void GenPgoWrapper(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss,
                      bool direct_link = false) const;
-  void GenPgoProfilingConstants(std::stringstream &ss, bool direct_link = false) const;
-  void GenPgoMsptiStringTable(std::stringstream &ss) const;
-  void GenPgoMsptiRequest(std::stringstream &ss, bool direct_link = false) const;
-  void GenPgoDirectMsptiKernelHandlers(std::stringstream &ss) const;
-  void GenPgoDirectMsptiComplete(std::stringstream &ss) const;
-  void GenPgoLegacyMsptiComplete(std::stringstream &ss) const;
-  void GenPgoMsptiComplete(std::stringstream &ss, bool direct_link = false) const;
-  void GenPgoMsptiToolFunction(std::stringstream &ss, bool direct_link = false) const;
-  void GenPgoMsptiProfiling(std::stringstream &ss, bool direct_link = false) const;
-  void GenPgoDirectBatchCallback(std::stringstream &ss) const;
-  void GenPgoBatchCallback(std::stringstream &ss) const;
-  void GenPgoDirectBatchProcess(std::stringstream &ss) const;
-  void GenPgoBatchProcess(std::stringstream &ss, bool direct_link = false) const;
-  void GenPgoProfilingBatchSetup(std::stringstream &ss, bool direct_link) const;
+  void GenPgoAclProfiling(std::stringstream &ss, bool direct_link = false) const;
+  void GenPgoBatchProcess(std::stringstream &ss) const;
+  void GenPgoProfilingBatchSetup(std::stringstream &ss) const;
   void GenPgoGetProfilingBatch(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss,
                                bool direct_link = false) const;
   void GenPgoDirectProfilingCallback(std::stringstream &ss) const;
-  void GenPgoLegacyProfilingCallback(std::stringstream &ss) const;
-  void GenPgoProfilingCallback(std::stringstream &ss, bool direct_link = false) const;
-  void GenPgoProfilingSetup(std::stringstream &ss, bool direct_link) const;
-  void GenPgoProfilingLaunch(std::stringstream &ss, bool direct_link) const;
-  void GenPgoProfilingWorkspaceCleanup(std::stringstream &ss, bool direct_link) const;
+  void GenPgoProfilingCallback(std::stringstream &ss) const;
+  void GenPgoProfilingSetup(std::stringstream &ss) const;
+  void GenPgoProfilingLaunch(std::stringstream &ss) const;
+  void GenPgoProfilingWorkspaceCleanup(std::stringstream &ss) const;
   void GenPgoGetProfiling(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss,
                           bool direct_link = false) const;
   void GenPgoFunc(const ::ascir::FusedScheduledResult &fused_schedule_result, std::stringstream &ss) const;

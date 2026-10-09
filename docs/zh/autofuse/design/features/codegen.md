@@ -301,6 +301,8 @@ Kernel 文件中调用的 AscendC API（如 `DataCopyPadExtend`、`Abs` 等）�
 
 `TilingData::Generate`（autofuse/codegen/codegen_tiling_data.cpp）生成 `AutofuseTilingData` 结构体定义，字段包括 tiling_key、block_dim、workspace 大小、各切分轴 size 等；多 ScheduleGroup 场景生成统一的包装结构。对于静态 shape 的 Inductor 场景，还会生成全 const 初值版本，将 tiling 计算前移到编译期。
 
+workspace 字节数与字节偏移均使用 `uint64_t`，单块超过 2 GiB、累计超过 4 GiB 时不会截断。直接 tiling ABI 使用 `uint64_t *workspace_size`；Host 侧累加与 512B 对齐使用受检计算，溢出时返回失败。非 Inductor 直接 tiling 在累计 workspace 后保留既有 16 MiB reserved workspace 语义。
+
 #### 6.3.2 tiling_func 生成
 
 Host 侧 tiling 函数由 `TilingLib` 组织生成（autofuse/codegen/codegen_tiling.cpp），包括 `AutofuseGetTilingSize`（估算 tiling 所需内存）、`AutofuseTiling`（主 tiling 函数，根据 shape 计算 tiling_key 和各轴切分大小）、workspace 计算等函数。除常规生成外，tiling 侧还支持：

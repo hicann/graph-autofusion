@@ -127,7 +127,10 @@ def _render_group(
                 )
             )
             h += _LINE_H
-            max_v = max(vals) if vals else 1
+            # A valid profiling record may contain an all-zero metric (for
+            # example, when a pipe was not used).  Keep the chart renderable
+            # in that case instead of dividing by zero below.
+            max_v = max(vals) if vals and max(vals) != 0 else 1
             for c, v in zip(cases, vals):
                 bar_w = int((v / max_v) * (col_w - 80))
                 bar_y = y + h

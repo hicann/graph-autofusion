@@ -40,13 +40,13 @@ add_library(test_regbase_ascendc OBJECT
     ./test_relu.cpp
     ./test_rsqrt.cpp
     ./test_sigmoid.cpp
-    ./test_round.cpp
     ./test_sinh.cpp
     ./test_tanh.cpp
     ./test_silu.cpp
     ./test_tan.cpp
     ./test_square.cpp
     ./test_signbit.cpp
+    ./test_round.cpp
     ./test_round_to_int.cpp
     ./test_trunc_div.cpp
     ./test_trunc_to_int.cpp

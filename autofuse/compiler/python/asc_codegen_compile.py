@@ -843,7 +843,7 @@ def static_shape_cv_common_compile(
         import ctypes
 
         # 创建变量接收返回值
-        workspace_size = ctypes.c_uint32()
+        workspace_size = ctypes.c_uint64()
         block_dim = ctypes.c_uint32()
         ret = lib.GenTilingDataValueBlockDimAndWss(
             ctypes.c_char_p(pgo_config_path.encode("utf-8")),
@@ -1272,27 +1272,7 @@ def generate_pgo_code(params, code_gen, pgo_dir, host_build_dir):
     generate_file(host_build_dir, graph_name + "_pgo.cpp", pgo_src)
 
 
-def pgo_get_mspti_config():
-    """获取PGO依赖的mspti相关配置"""
-    mspti_dir = os.path.join(ASCEND_PATH, "tools", "mspti")
-    mspti_lib64_dir = os.path.join(mspti_dir, "lib64")
-    mspti_so = os.path.join(mspti_lib64_dir, "libmspti.so")
-    libprof_common_so = os.path.join(mspti_lib64_dir, "libprof_common.so")
-
-    if not os.path.exists(mspti_so):
-        return None
-
-    has_prof_common = os.path.exists(libprof_common_so)
-    preload_so_paths = [libprof_common_so, mspti_so] if has_prof_common else [mspti_so]
-
-    link_flags = [f"-L{mspti_lib64_dir}", "-lmspti"]
-    if has_prof_common:
-        link_flags.append("-lprof_common")
-
-    return mspti_dir, preload_so_paths, link_flags
-
-
-def build_pgo_compile_command(source_file, output_file, mspti_dir, mspti_link_flags):
+def build_pgo_compile_command(source_file, output_file):
     """构建PGO编译命令"""
     machine = platform.machine()
     base_cmd = ["g++", "-std=c++17", "-O2", "-fPIC"]
@@ -1303,29 +1283,30 @@ def build_pgo_compile_command(source_file, output_file, mspti_dir, mspti_link_fl
         f"-I{ASCEND_PATH}/include/experiment/msprof",
         f"-I{ASCEND_PATH}/{machine}-linux/include/toolchain",
         f"-I{ASCEND_PATH}/{machine}-linux/pkg_inc/base",
-        f"-I{mspti_dir}/include",
     ]
     libs = [
         f"-L{ASCEND_PATH}/lib64",
+        f"-L{ASCEND_PATH}/{machine}-linux/lib64",
+        "-Wl,-rpath,$ORIGIN",
+        f"-Wl,-rpath,{ASCEND_PATH}/lib64",
+        f"-Wl,-rpath,{ASCEND_PATH}/{machine}-linux/lib64",
+        "-laihac_codegen",
         "-lascendcl",
         "-lruntime",
         "-lunified_dlog",
         "-lc_sec",
-        *mspti_link_flags,
         "-ldl",
     ]
     cmd = base_cmd + [source_file, "-o", output_file] + includes + libs
     return cmd
 
 
-def pgo_compile(graph_name, host_build_dir, mspti_dir, mspti_link_flags):
+def pgo_compile(graph_name, host_build_dir):
     """编译PGO代码"""
     pgo_source_file = os.path.join(host_build_dir, f"{graph_name}_pgo.cpp")
     output_file = os.path.join(host_build_dir, "pgo")
 
-    cmd = build_pgo_compile_command(
-        pgo_source_file, output_file, mspti_dir, mspti_link_flags
-    )
+    cmd = build_pgo_compile_command(pgo_source_file, output_file)
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         msg = "cmd = " + " ".join(cmd) + "\n"
@@ -1338,7 +1319,7 @@ def pgo_compile(graph_name, host_build_dir, mspti_dir, mspti_link_flags):
     return output_file
 
 
-def pgo_program_exec(temp_dir, exec_type=0, *, pgo_exec_params, mspti_so_list):
+def pgo_program_exec(temp_dir, exec_type=0, *, pgo_exec_params):
     """执行PGO, 0表示首次动态调优，1表示二次调优"""
     host_build_dir = os.path.join(temp_dir, "host")
     pgo_file = os.path.join(host_build_dir, "pgo")
@@ -1348,7 +1329,7 @@ def pgo_program_exec(temp_dir, exec_type=0, *, pgo_exec_params, mspti_so_list):
     kernel_name = pgo_exec_params.get("kernel_name")
     try:
         graph_so = f"{ASCEND_PATH}/lib64/libgraph_af.so"
-        ld_preload_items = [graph_so] + mspti_so_list
+        ld_preload_items = [graph_so]
         existing_ld_preload = os.environ.get("LD_PRELOAD")
         if existing_ld_preload:
             ld_preload_items.append(existing_ld_preload)
@@ -1411,7 +1392,7 @@ def get_pgo_exec_params(*args, params):
     }
 
 
-def pgo_second_optimization(*args, temp_dir, params, op_kernel_src, mspti_so_list):
+def pgo_second_optimization(*args, temp_dir, params, op_kernel_src):
     """静态tiling的二次调优"""
     from autofuse.compile_adapter import (
         pgo_get_top_result,
@@ -1478,7 +1459,6 @@ def pgo_second_optimization(*args, temp_dir, params, op_kernel_src, mspti_so_lis
         result = pgo_program_exec(
             temp_dir=temp_dir,
             exec_type=1,
-            mspti_so_list=mspti_so_list,
             pgo_exec_params=pgo_exec_params,
         )
         return result
@@ -1501,12 +1481,6 @@ def asc_pgo_exec(*args, temp_dir, params, op_kernel_src, code_gen):
     schedule_results = params["schedule_results"]
     graph_name = camel_to_snake(gen_valid_name(schedule_results.get_name()))
     logger.info(f"[PGO] Start PGO tuning for graph: {graph_name}")
-    mspti_cfg = pgo_get_mspti_config()
-    if mspti_cfg is None:
-        _log_warning("[PGO] libmspti.so not installed, skip pgo tuning")
-        return
-    mspti_dir, mspti_so_list, mspti_link_flags = mspti_cfg
-
     pgo_dir = get_pgo_dir(temp_dir)
     os.makedirs(pgo_dir, exist_ok=True)
     host_build_dir = os.path.join(temp_dir, "host")
@@ -1541,8 +1515,6 @@ def asc_pgo_exec(*args, temp_dir, params, op_kernel_src, code_gen):
     output = pgo_compile(
         graph_name=graph_name,
         host_build_dir=host_build_dir,
-        mspti_dir=mspti_dir,
-        mspti_link_flags=mspti_link_flags,
     )
     timestamp_set(False, graph_name, "CompilePGO")
     if output is None:
@@ -1554,7 +1526,6 @@ def asc_pgo_exec(*args, temp_dir, params, op_kernel_src, code_gen):
     result = pgo_program_exec(
         temp_dir=temp_dir,
         exec_type=0,
-        mspti_so_list=mspti_so_list,
         pgo_exec_params=pgo_exec_params,
     )
     timestamp_set(False, graph_name, "RunForPGO")
@@ -1568,7 +1539,6 @@ def asc_pgo_exec(*args, temp_dir, params, op_kernel_src, code_gen):
         temp_dir=temp_dir,
         params=params,
         op_kernel_src=op_kernel_src,
-        mspti_so_list=mspti_so_list,
     )
     timestamp_set(False, graph_name, "SecondOptimizeForPGO")
     if result is False:

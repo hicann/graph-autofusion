@@ -17,7 +17,7 @@
 #include "ascir.h"
 #include "ascir_ops.h"
 #include "ascir_utils.h"
-#include "defalut_reg_func.h"
+#include "default_reg_func.h"
 
 namespace af {
 namespace ascir {

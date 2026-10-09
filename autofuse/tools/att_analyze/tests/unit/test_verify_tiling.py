@@ -84,14 +84,26 @@ class TestLoadInputParams(unittest.TestCase):
         self.assertIn("source=preset_B", text)
 
     def test_custom_json(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump({"dynamic_dims": [256], "aiv_num": 10, "ub_size": 100000}, f)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        ) as f:
+            json.dump(
+                {
+                    "dynamic_dims": [256],
+                    "aiv_num": 10,
+                    "ub_size": 100000,
+                    "label": "中文",
+                },
+                f,
+                ensure_ascii=False,
+            )
             fname = f.name
         try:
             args = MagicMock()
             args.input_json = fname
             params = load_input_params(args)
             self.assertEqual(params["dynamic_dims"], [256])
+            self.assertEqual(params["label"], "中文")
         finally:
             os.unlink(fname)
 

@@ -496,7 +496,11 @@ clean_coverage_artifacts() {
 }
 
 function build_package_inner(){
-  cmake_config
+  # Test configurations set RUN_TEST=1 to build test-only targets.  That
+  # cache entry also disables Autofuse install rules in autofuse/CMakeLists.txt
+  # and would silently produce a SuperKernel-only run package.  Packaging is
+  # always a product build, so explicitly reset the guard here.
+  cmake_config "-DRUN_TEST=0"
   build "all package"
 }
 
@@ -715,8 +719,16 @@ PYEOF
   if [ "X$ENABLE_AUTOFUSE" == "Xon" ]; then
     echo "---------------- Start build autofuse ----------------"
     mkdir -pv ${BUILD_PATH} &&
-    cd ${BUILD_PATH} &&
-    cmake_config "-DCANN_3RD_LIB_PATH=${CANN_3RD_LIB_PATH}" &&
+    cd ${BUILD_PATH} || { echo "Prepare autofuse build failed."; exit 1; }
+    if [ "X$ENABLE_BUILD_PACKAGE" == "Xon" ]; then
+      # Configure product packaging before the first build.  Reusing a test
+      # cache here would add all RUN_TEST targets to `build all`; resetting
+      # only in build_package_inner is too late.
+      cmake_config "-DCANN_3RD_LIB_PATH=${CANN_3RD_LIB_PATH} -DRUN_TEST=0"
+    else
+      cmake_config "-DCANN_3RD_LIB_PATH=${CANN_3RD_LIB_PATH}"
+    fi
+
     build all || { echo "Build autofuse failed."; exit 1; }
     echo "Build autofuse success!"
   fi

@@ -467,13 +467,13 @@ def main():
 
     if not os.path.exists(args.log_path):
         print(f"Error: Path '{args.log_path}' not found.")
-        return
+        return 1
 
     if os.path.isdir(args.log_path) or args.recursive:
         log_files = find_log_files(args.log_path)
         if not log_files:
             print(f"No .log files found in '{args.log_path}'")
-            return
+            return 1
         print(f"Found {len(log_files)} log file(s)")
     else:
         log_files = [args.log_path]
@@ -509,7 +509,7 @@ def main():
 
     if not all_summaries and not all_final_records:
         print("No data to export.")
-        return
+        return 1
 
     if args.format == "console":
         if args.output:
@@ -531,6 +531,8 @@ def main():
         output_file = args.output if args.output else "output.xlsx"
         export_to_excel(all_summaries, output_file, final_records=all_final_records)
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

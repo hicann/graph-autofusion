@@ -42,7 +42,7 @@ Status MicroRsqrtApiCall::Generate(const TensorManager &tensor_mng, [[maybe_unus
   ss << "AscendC::MicroAPI::Div";
   if (input_tensor->dtype_ == ge::DT_FLOAT) {
     ss << "<" << dtype_name;
-    if (!af::pre_process::PreProcessConfig::Instance().IsInImprovePrecisionBlacklist(af::ascir_op::Div::Type)) {
+    if (!af::pre_process::PreProcessConfig::Instance().IsInImprovePrecisionBlacklist(af::ascir_op::Rsqrt::Type)) {
       ss << ", &high_precision_div_mode";
     }
     ss << ">";

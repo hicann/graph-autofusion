@@ -37,3 +37,14 @@ def test_case_is_compared_as_a_field_not_identity():
     assert common == ["Add|0|0|0"]
     assert not only_one
     assert not only_two
+
+
+def test_compare_structure_reports_missing_columns_deterministically():
+    differences = CSVComparator().compare_structure(
+        ["Operator", "Zeta", "Alpha"], ["Operator", "Beta"]
+    )
+
+    assert differences == [
+        "列仅在文件1中: Alpha, Zeta",
+        "列仅在文件2中: Beta",
+    ]

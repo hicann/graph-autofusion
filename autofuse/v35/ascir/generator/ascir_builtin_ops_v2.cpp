@@ -798,7 +798,7 @@ REG_ASC_IR(Div).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::Di
 REG_ASC_IR(Mul).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::MulAscIrAttImplV2>(),
                                        af::ascir::AscIrImplCreator<af::ascir::MulAscIrCodegenImplV2>(),
                                        {{"T", TensorType{DT_INT8, DT_UINT8, DT_BF16, DT_INT16, DT_INT32, DT_FLOAT16,
-                                                         DT_FLOAT, DT_INT64, DT_UINT32, DT_UINT64}}}});
+                                                         DT_FLOAT, DT_INT64, DT_UINT32, DT_UINT64, DT_BOOL}}}});
 
 REG_ASC_IR(Minimum).Impl(v2_soc_versions, {af::ascir::AscIrImplCreator<af::ascir::MinimumAscIrAttImplV2>(),
                                            af::ascir::AscIrImplCreator<af::ascir::MinimumAscIrCodegenImplV2>(),

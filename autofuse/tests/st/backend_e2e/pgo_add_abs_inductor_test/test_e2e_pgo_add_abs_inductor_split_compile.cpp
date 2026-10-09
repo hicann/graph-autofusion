@@ -36,10 +36,6 @@
 #ifndef PGO_FAKE_CALLBACK_SRC
 #define PGO_FAKE_CALLBACK_SRC ""
 #endif
-#ifndef MSPTI_DIR
-#define MSPTI_DIR ""
-#endif
-
 namespace {
 
 using autofuse::tests::FileExists;
@@ -66,12 +62,6 @@ int RunPgoArtifactCompile(const std::string &tiling_def, const std::string &host
   const std::string script_path = work_dir + "/run_pgo_compile.py";
   WriteFile(script_path, PythonPreamble() +
                              "from autofuse import compile_adapter as ca\n"
-                             "mspti_dir = '" +
-                             std::string(MSPTI_DIR) +
-                             "'\n"
-                             "ca.get_inductor_pgo_mspti_config = lambda: (\n"
-                             "    mspti_dir, [mspti_dir + '/lib64/libmspti.so'],\n"
-                             "    ['-L' + mspti_dir + '/lib64', '-lmspti'])\n"
                              "argv = ['--graph_name=pgo_add_abs_inductor',\n"
                              "        '--output_file=" +
                              work_dir +
@@ -155,7 +145,7 @@ std::string MeasuredTopnLinkScript(const std::string &work_dir) {
          "binary = '" +
          work_dir +
          "/pgo_measured_topn_fake_callback'\n"
-         "ac.link_pgo_executable(binary, [callback_obj], [])\n"
+         "ac.link_pgo_executable(binary, [callback_obj])\n"
          "kernel = '" +
          work_dir +
          "/fake_kernel.aicore_binary_elf_v1'\n"
@@ -261,7 +251,7 @@ TEST_F(TestBackendPgoAddAbsInductorSplitCompile, PgoRunnerAndDynamicKernelCompil
   EXPECT_NE(RunCommand("nm -D " + runner + " | grep -q 'GenerateTopnSolutions'"), 0);
   EXPECT_EQ(RunCommand("strings " + runner + " | grep -q 'GenerateMeasuredTopnSolutions'"), 0);
   EXPECT_EQ(RunCommand("readelf -h " + device_binary + " | grep -q 'EXEC (Executable file)'"), 0);
-  EXPECT_EQ(RunCommand("LD_PRELOAD=" + std::string(MSPTI_DIR) + "/lib64/libmspti.so " + runner), 1);
+  EXPECT_NE(RunCommand("ldd " + runner + " | grep -qi mspti"), 0);
 }
 
 TEST_F(TestBackendPgoAddAbsInductorSplitCompile, MeasuredTopnUsesCompleteFakeSampling) {

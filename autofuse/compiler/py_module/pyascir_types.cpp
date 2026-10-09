@@ -726,8 +726,7 @@ PyObject *HintGraph::FromGraph(af::AscGraph *graph) {
   graph_object->name = PyUnicode_FromString(graph->GetName().c_str());
   graph_object->graph = new af::AscGraph(graph->GetName().c_str());
   if (graph_object->graph == nullptr) {
-    Py_DECREF(graph_object->name);
-    delete graph_object;
+    Py_DECREF(graph_object);
     return nullptr;
   }
 

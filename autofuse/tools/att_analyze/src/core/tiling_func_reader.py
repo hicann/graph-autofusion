@@ -47,8 +47,9 @@ _LINE_RE = re.compile(
     r"\[PERF\](?:\[graph(\d+)_result(\d+)_g(\d+)_(R?\d+)\])?\s*"
     r"(\w+)\[(\w+)\]:\s*(\w+)\s*=\s*(.+)"
 )
-_TOTAL_RE = re.compile(r"=\s*([\d.]+)\s*$")
-_ITEM_RE = re.compile(r"(\w+)=([\d.]+)")
+_NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+_TOTAL_RE = re.compile(rf"=\s*({_NUMBER})\s*$")
+_ITEM_RE = re.compile(rf"(\w+)\s*=\s*({_NUMBER})")
 
 
 def _parse_rhs(rhs: str) -> Tuple[List[SubItem], float]:

@@ -39,6 +39,10 @@ class TestParseCaseArg(unittest.TestCase):
         self.assertEqual(f.groups, [0])
         self.assertEqual(f.cases, [0, 1])
 
+    def test_ignores_empty_list_tokens(self):
+        f = parse_case_arg("r=0, 1,,")
+        self.assertEqual(f.results, [0, 1])
+
     def test_longform(self):
         f = parse_case_arg("result=1,group=0,case=2")
         self.assertEqual(f.results, [1])

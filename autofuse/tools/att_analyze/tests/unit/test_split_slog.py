@@ -81,6 +81,17 @@ class TestSlogSplitter(unittest.TestCase):
             )
             self.assertTrue(os.path.exists(case1_path))
 
+    def test_write_output_preserves_utf8_log_content(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.splitter.write_runtime_output(
+                {(0, 0, 0): ["算子日志：中文内容\n"]}, "Op", tmpdir
+            )
+            output_path = os.path.join(
+                tmpdir, "Op", "runtime", "graph0_result0", "g0", "case0.log"
+            )
+            with open(output_path, encoding="utf-8") as stream:
+                self.assertEqual(stream.read(), "算子日志：中文内容\n")
+
 
 if __name__ == "__main__":
     unittest.main()
