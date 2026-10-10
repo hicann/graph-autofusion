@@ -180,7 +180,7 @@ For device errors or timeouts:
    `debug_per_op_max_core_num`. These are diagnosis-only runs.
 
 When a custom Ascend C child is implicated, read
-[ascend-c-superkernel-auto-tune.md](ascend-c-superkernel-auto-tune.md).
+[ascend-c-superkernel-adaptation.md](ascend-c-superkernel-adaptation.md).
 
 ## Performance Diagnosis
 
