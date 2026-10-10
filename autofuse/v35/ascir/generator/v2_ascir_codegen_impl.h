@@ -1855,7 +1855,7 @@ class RoundAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     return "UnaryApiTmpCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Round";
+    return "RoundExtend";
   }
   [[nodiscard]] std::string GetSimtScalarApiName() const override {
     return "Round";
@@ -1866,9 +1866,13 @@ class RoundAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
     std::map<ge::DataType, ge::DataType> dtype_conversion_map = {{DT_BF16, DT_FLOAT}};
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    return {"round_reg_base.h"};
+  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "adv_api/math/round.h",
+        "basic_api/reg_compute/kernel_reg_compute_intf.h",
     };
   }
   [[nodiscard]] bool IsNodeValid(const AscNode &node) const override {
@@ -2076,7 +2080,7 @@ class SqrtAscIrCodegenImplV2 : public AscIrCodegenV2 {
     return "UnaryApiCall";
   }
   [[nodiscard]] std::string GetApiName() const override {
-    return "Sqrt";
+    return IsSqrtInBlacklist() ? "Sqrt" : "SqrtExtend";
   }
 
   [[nodiscard]] std::string GetMicroApiCallName() const override {
@@ -2105,6 +2109,12 @@ class SqrtAscIrCodegenImplV2 : public AscIrCodegenV2 {
     };
     return GetConversionFromDtypeMap(sqrt_node, dtype_conversion_map);
   }
+  [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {
+    if (IsSqrtInBlacklist()) {
+      return {};
+    }
+    return {"sqrt_reg_base.h"};
+  }
   [[nodiscard]] std::vector<std::string> IncludeApiHeaderFiles() const override {
     return {
         "basic_api/kernel_operator_vec_unary_intf.h",
@@ -2132,6 +2142,13 @@ class SqrtAscIrCodegenImplV2 : public AscIrCodegenV2 {
       expr = "AscendC::Simt::Sqrt(static_cast<float>(" + inputs[0] + "))";
     }
     return ge::GRAPH_SUCCESS;
+  }
+
+ private:
+  // Sqrt 命中精度提升黑名单（配置 Sqrt 或 all）时，codegen 回落内置 Sqrt（Vector
+  // adv_api）快速路径，跳过 regbase Extend 高精度实现；类型字符串与 REG_ASC_IR(Sqrt) 注册名一致
+  static bool IsSqrtInBlacklist() {
+    return af::pre_process::PreProcessConfig::Instance().IsInImprovePrecisionBlacklist("Sqrt");
   }
 };
 

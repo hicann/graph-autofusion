@@ -11,12 +11,24 @@
 #define __ASCENDC_API_REGBASE_ATANH_H__
 
 constexpr uint32_t ATANH_THREAD_NUM = 1024;
+constexpr float ATANH_SMALL_INPUT_BOUND = 0.125f;
+
+// 对齐 ops 仓 arch35 atanh 单算子（OpAtanhSimtKernel 的 AtanhFloat）：
+// atanhf 的对数公式 ln((1+x)/(1-x)) 在零附近丢有效位，
+// |x| < 0.125 时改用泰勒展开 x + x^3/3 + x^5/5 + x^7/7，省略项低于 FP32 精度。
+__simt_callee__ __aicore__ inline float AtanhFloat(float value) {
+  if (value > -ATANH_SMALL_INPUT_BOUND && value < ATANH_SMALL_INPUT_BOUND) {
+    float square = value * value;
+    return value + value * square * (1.0f / 3.0f + square * (1.0f / 5.0f + square * (1.0f / 7.0f)));
+  }
+  return atanhf(value);
+}
 
 template <typename T>
 __simt_vf__ __aicore__ LAUNCH_BOUND(ATANH_THREAD_NUM) inline void AtanhSimtCompute(__ubuf__ T *x, __ubuf__ T *y,
                                                                                    const int64_t total_num) {
   for (int64_t i = threadIdx.x; i < total_num; i += blockDim.x) {
-    y[i] = atanhf(x[i]);
+    y[i] = AtanhFloat(x[i]);
   }
 }
 
