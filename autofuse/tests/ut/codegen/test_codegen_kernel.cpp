@@ -718,10 +718,10 @@ TEST(CodegenKernel, ApiCallPreProcessUbScalarTest) {
                         "SetFlag<HardEvent::MTE2_S>(eventID);\n"
                         "WaitFlag<HardEvent::MTE2_S>(eventID);\n"
                         "global_1_ub_scalar = global_1.GetValue(0);\n"
+                        "}\n"
                         "AscendC::PipeBarrier<PIPE_ALL>();\n"
                         "Duplicate(global_1[0], global_1_ub_scalar, 32/sizeof(float));\n"
-                        "AscendC::PipeBarrier<PIPE_V>();\n"
-                        "}\n"});
+                        "AscendC::PipeBarrier<PIPE_V>();\n"});
 }
 
 TEST(CodegenKernel, ApiCallPreProcessLoadUbScalarTest) {
@@ -783,10 +783,10 @@ TEST(CodegenKernel, ApiCallPreProcessLoadUbScalarTest) {
                         "SetFlag<HardEvent::MTE2_S>(eventID);\n"
                         "WaitFlag<HardEvent::MTE2_S>(eventID);\n"
                         "global_1_ub_scalar = global_1.GetValue(0);\n"
+                        "}\n"
                         "AscendC::PipeBarrier<PIPE_ALL>();\n"
                         "Duplicate(global_1[0], global_1_ub_scalar, 32/sizeof(float));\n"
-                        "AscendC::PipeBarrier<PIPE_V>();\n"
-                        "}\n"});
+                        "AscendC::PipeBarrier<PIPE_V>();\n"});
 }
 
 TEST(CodegenKernel, ApiCallPostProcessLoadUbScalarInt64Test) {
@@ -843,11 +843,11 @@ TEST(CodegenKernel, ApiCallPostProcessLoadUbScalarInt64Test) {
                         "SetFlag<HardEvent::MTE2_S>(eventID);\n"
                         "WaitFlag<HardEvent::MTE2_S>(eventID);\n"
                         "global_1_ub_scalar = global_1.GetValue(0);\n"
+                        "}\n"
                         "AscendC::PipeBarrier<PIPE_ALL>();\n"
                         "Duplicate(global_1[0], global_1_ub_scalar, 32/sizeof(int64_t), "
                         "int64_dup_scratch_tensor);\n"
-                        "AscendC::PipeBarrier<PIPE_V>();\n"
-                        "}\n"});
+                        "AscendC::PipeBarrier<PIPE_V>();\n"});
 }
 
 TEST(CodegenKernel, Int64DupScratchAllocTest) {
