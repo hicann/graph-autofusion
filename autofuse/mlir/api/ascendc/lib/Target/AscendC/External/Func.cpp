@@ -12,6 +12,75 @@
 
 using namespace mlir;
 
+namespace {
+
+void bindParameterNames(CodeEmitter& codeEmitter, func::FuncOp functionOp)
+{
+    // Explicit parameter names are part of the external compilation protocol.
+    for (BlockArgument arg : functionOp.getArguments()) {
+        if (auto name = functionOp.getArgAttrOfType<StringAttr>(arg.getArgNumber(), "ascendc.parameter_name")) {
+            codeEmitter.bindParameterName(arg, name.getValue());
+        }
+    }
+}
+
+LogicalResult emitFunctionSignature(CodeEmitter& codeEmitter, func::FuncOp functionOp)
+{
+    raw_ostream& os = codeEmitter.ostream();
+    bool isMainFunction = functionOp->hasAttr(ascendc::attr::global);
+    auto args = functionOp.getArguments();
+
+    os << (isMainFunction ? "extern \"C\"  __global__ " : "__inline__ __attribute__((always_inline)) ");
+    os << "__aicore__ ";
+    FAIL_OR(codeEmitter.emitTypes(functionOp.getLoc(), functionOp.getResultTypes()));
+    os << " " << functionOp.getName() << "(";
+    FAIL_OR(interleaveCommaWithError(args, os, [&](BlockArgument arg) {
+        if (failed(codeEmitter.emitType(functionOp.getLoc(), arg.getType()))) {
+            return failure();
+        }
+        os << " " << codeEmitter.getOrCreateName(arg);
+        return success();
+    }));
+    os << ") {\n";
+    return success();
+}
+
+LogicalResult emitBlockDeclarations(CodeEmitter& codeEmitter, func::FuncOp functionOp)
+{
+    raw_ostream& os = codeEmitter.ostream();
+    Region::BlockListType& blocks = functionOp.getBlocks();
+    for (Block& block : llvm::drop_begin(blocks)) {
+        for (BlockArgument& arg : block.getArguments()) {
+            if (codeEmitter.hasValueInScope(arg)) {
+                return functionOp.emitOpError(" block argument #") << arg.getArgNumber() << " is out of scope";
+            }
+            if (failed(codeEmitter.emitType(block.getParentOp()->getLoc(), arg.getType()))) {
+                return failure();
+            }
+            os << " " << codeEmitter.getOrCreateName(arg) << ";\n";
+        }
+    }
+    return success();
+}
+
+LogicalResult emitFunctionBody(CodeEmitter& codeEmitter, func::FuncOp functionOp)
+{
+    Region::BlockListType& blocks = functionOp.getBlocks();
+    for (Block& block : blocks) {
+        if (!block.hasNoPredecessors() && failed(codeEmitter.emitLabel(block))) {
+            return failure();
+        }
+        for (Operation& op : block.getOperations()) {
+            if (failed(emitOperation(codeEmitter, op, needsSemicolon(op)))) {
+                return failure();
+            }
+        }
+    }
+    return success();
+}
+
+} // namespace
+
 LogicalResult mlir::printOperation(CodeEmitter& codeEmitter, func::ConstantOp constantOp)
 {
     Operation* operation = constantOp.getOperation();
@@ -60,22 +129,20 @@ LogicalResult mlir::printOperation(CodeEmitter& codeEmitter, func::FuncOp functi
     CodeEmitter::Scope scope(codeEmitter);
     auto& os = codeEmitter.ostream();
 
-    bool isMainFunction = functionOp->hasAttr(ascendc::attr::global);
-    auto args = functionOp.getArguments();
-
-    os << (isMainFunction ? "extern \"C\"  __global__ " : "__inline__ __attribute__((always_inline)) ");
-    os << "__aicore__ ";
-    FAIL_OR(codeEmitter.emitTypes(functionOp.getLoc(), functionOp.getResultTypes()));
-    os << " " << functionOp.getName() << "(";
-    FAIL_OR(interleaveCommaWithError(args, os, [&](BlockArgument arg) {
-        if (failed(codeEmitter.emitType(functionOp.getLoc(), arg.getType()))) {
-            return failure();
-        }
-        os << " " << codeEmitter.getOrCreateName(arg);
-        return success();
-    }));
-    os << ") {\n";
+    bindParameterNames(codeEmitter, functionOp);
+    FAIL_OR(emitFunctionSignature(codeEmitter, functionOp));
     os.indent();
+    if (functionOp->hasAttr(ascendc::attr::global)) {
+        // 任务类型由桥接层决策后以模块属性 autofuse.kernel_task_type 传入,这里照单打印;
+        // 缺省(无属性)兜底 AIV_ONLY,兼容不经桥接的直跑场景。
+        // isMainFunction 现在是 emitFunctionSignature 的局部变量,此处用同一判据重算。
+        auto module = functionOp->getParentOfType<mlir::ModuleOp>();
+        auto taskTypeAttr = module ? module->getAttrOfType<mlir::StringAttr>("autofuse.kernel_task_type")
+                                   : mlir::StringAttr();
+        os << "KERNEL_TASK_TYPE_DEFAULT("
+           << (taskTypeAttr ? taskTypeAttr.getValue() : llvm::StringRef("KERNEL_TYPE_AIV_ONLY"))
+           << ");\n";
+    }
 
     Region::BlockListType& blocks = functionOp.getBlocks();
     // Create label names for basic blocks.
@@ -83,30 +150,8 @@ LogicalResult mlir::printOperation(CodeEmitter& codeEmitter, func::FuncOp functi
         codeEmitter.getOrCreateName(block);
     }
 
-    // Declare variables for basic block arguments.
-    for (Block& block : llvm::drop_begin(blocks)) {
-        for (BlockArgument& arg : block.getArguments()) {
-            if (codeEmitter.hasValueInScope(arg)) {
-                return functionOp.emitOpError(" block argument #") << arg.getArgNumber() << " is out of scope";
-            }
-            if (failed(codeEmitter.emitType(block.getParentOp()->getLoc(), arg.getType()))) {
-                return failure();
-            }
-            os << " " << codeEmitter.getOrCreateName(arg) << ";\n";
-        }
-    }
-
-    for (Block& block : blocks) {
-        // Only print a label if the block has predecessors.
-        if (!block.hasNoPredecessors() && failed(codeEmitter.emitLabel(block))) {
-            return failure();
-        }
-        for (Operation& op : block.getOperations()) {
-            if (failed(emitOperation(codeEmitter, op, needsSemicolon(op)))) {
-                return failure();
-            }
-        }
-    }
+    FAIL_OR(emitBlockDeclarations(codeEmitter, functionOp));
+    FAIL_OR(emitFunctionBody(codeEmitter, functionOp));
 
     os.unindent() << "}";
 

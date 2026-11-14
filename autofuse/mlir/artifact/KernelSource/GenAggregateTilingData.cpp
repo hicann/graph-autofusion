@@ -47,8 +47,7 @@ size_t getStageCount(const AggregatePlanInfo &info) {
 // 自带 `block_dim`/`corenum`/`ub_size`/`hbm_size`。判据缺了 stage 这一维，两 stage 单 plan
 // 时 ATT 生成 `graph0_tiling_key` 而根上没有这个字段。
 bool isFlatLayout(ArrayRef<AggregatePlanInfo> infos) {
-  return infos.size() == 1U && !infos.front().module->hasAttr(mlir::afplan::kStaticSelectionAttrName) &&
-         infos.front().candidate.getSubgraph() == 0 && getStageCount(infos.front()) == 1U;
+  return infos.size() == 1U && infos.front().candidate.getSubgraph() == 0 && getStageCount(infos.front()) == 1U;
 }
 
 FailureOr<SmallVector<AggregatePlanInfo>> collectAndValidateAggregatePlanInfos(ArrayRef<ModuleOp> planModules,
@@ -97,8 +96,7 @@ LogicalResult sortAndValidateSubgraphAndPlanIds(SmallVector<AggregatePlanInfo> &
       info.module.emitError("GenAggregateTilingData: duplicate or invalid plan ID");
       return failure();
     }
-    // Frozen winners retain their original plan ID, even when it is not zero.
-    if (!info.module->hasAttr(mlir::afplan::kStaticSelectionAttrName) && planId != previousPlan + 1) {
+    if (planId != previousPlan + 1) {
       info.module.emitError("GenAggregateTilingData: plan IDs must be contiguous");
       return failure();
     }
@@ -227,5 +225,13 @@ FailureOr<OwningOpRef<ModuleOp>> mlir::ascend::kernel::runGenAggregateTilingData
   }
   attachAggregateMetadata(*entry, aggregate);
   attachPlanContracts(builder, *entry, *infos);
+  // 桥接层(ScheduleToAfir)在plan module上写的kernel任务类型属性,需要拷贝到entry module;
+  // 发射层(Func.cpp)从entry module读,不拷贝则永远走兜底AIV_ONLY,修复不生效
+  constexpr llvm::StringLiteral kKernelTaskTypeAttr = "autofuse.kernel_task_type";
+  // 任务类型取第一个 plan module:当前一次聚合只对应一套任务类型(纯AIV桥接决策),
+  // 多 plan 场景落地时需在此明确不一致时的策略。
+  if (auto taskType = planModules.front()->getAttrOfType<mlir::StringAttr>(kKernelTaskTypeAttr)) {
+    (*entry)->setAttr(kKernelTaskTypeAttr, taskType);
+  }
   return entry;
 }

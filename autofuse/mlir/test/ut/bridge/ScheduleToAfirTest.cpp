@@ -669,64 +669,15 @@ TEST(ScheduleToAfirTest, TilingSpecTracksDerivedShapeVariablesIndividually) {
   EXPECT_NE(source->find("extern \"C\" bool AutofuseIsStaticShape() {\n  return false;"), std::string::npos);
   EXPECT_EQ(source->find("graph0_result0_g1_tiling_data.set_s0(s0)"), std::string::npos);
   EXPECT_NE(source->find("graph0_result0_g1_tiling_data.set_s1(s1)"), std::string::npos);
-  EXPECT_NE(source->find("limit->aiv_num > g_no_limit_res.aiv_num"), std::string::npos);
-  EXPECT_NE(source->find("limit->ub_size <= 256"), std::string::npos);
 }
 
-TEST(ScheduleToAfirTest, FrozenTilingRejectsResourceMismatchAndMissingStageFields) {
-  mlir::MLIRContext context;
-  llvm::SmallVector<llvm::StringRef> fields = {"tiling_key", "s0", "workspace2"};
-  auto module = MakeTilingContractModule(context, 0, 2, {fields}, {});
-  module->getOperation()->setAttr(mlir::afir::kWorkspaceTensorIdsAttrName, mlir::DenseI64ArrayAttr::get(&context, {2}));
-  llvm::SmallVector<mlir::ModuleOp> modules = {*module};
-  auto spec = mlir::bridge::buildAggregateTilingProgramSpec(modules);
-  ASSERT_TRUE(mlir::succeeded(spec));
-  mlir::bridge::StaticTilingData solved;
-  solved.resources = {static_cast<uint64_t>(spec->target.getAivNum()), static_cast<uint64_t>(spec->target.getUbSize())};
-  for (const char *name : {"block_dim", "corenum", "ub_size", "hbm_size", "tiling_key", "s0"}) {
-    solved.fields["fusion"][name] = {1, 0, 0, 0};
-  }
-  solved.fields["fusion"]["workspace2"] = {64, 0, 0, 0, 0, 0, 0, 0};
-  solved.workspace_size = 512;
-  // Nested schedules must not silently obtain a missing stage's fields from fusion scope.
-  EXPECT_TRUE(mlir::failed(mlir::bridge::emitStaticTilingFunc(*spec, solved)));
-  for (const auto &plan : spec->plans) {
-    for (const auto &stage : plan.stages) {
-      for (const auto &field : stage.fields) {
-        if (field == "workspace2") {
-          continue;
-        }
-        solved.fields[stage.tiling_field_name][field] = {1, 0, 0, 0};
-      }
-    }
-  }
-  auto source = mlir::bridge::emitStaticTilingFunc(*spec, solved);
-  ASSERT_TRUE(mlir::succeeded(source));
-  EXPECT_NE(source->find("set_graph0_tiling_key(2U)"), std::string::npos);
-  EXPECT_NE(source->find("std::memcpy(&t.workspace2"), std::string::npos);
-  EXPECT_NE(source->find("workspace_size = 512ULL"), std::string::npos);
-  EXPECT_EQ(source->find("std::memcpy(&t.graph0_result2_g0_tiling_data.workspace2"), std::string::npos);
-  solved.resources.ub_size += 256;
-  EXPECT_TRUE(mlir::failed(mlir::bridge::emitStaticTilingFunc(*spec, solved)));
-}
-
-TEST(ScheduleToAfirTest, FrozenAggregateKeepsNonzeroPlanIdentity) {
+TEST(ScheduleToAfirTest, AggregateRejectsNonzeroStartingPlanIdentity) {
   mlir::MLIRContext context;
   llvm::SmallVector<llvm::StringRef> fields = {"tiling_key"};
   auto module = MakeTilingContractModule(context, 0, 2, {fields}, {});
   module->getOperation()->setAttr(mlir::afir::kModuleKindAttrName,
                                   mlir::StringAttr::get(&context, mlir::afir::kPlanModuleKind));
   llvm::SmallVector<mlir::ModuleOp> modules = {*module};
-  EXPECT_TRUE(failed(mlir::ascend::kernel::runGenAggregateTilingData(modules)));
-  module->getOperation()->setAttr(mlir::afplan::kStaticSelectionAttrName, mlir::UnitAttr::get(&context));
-  auto entry = mlir::ascend::kernel::runGenAggregateTilingData(modules);
-  ASSERT_TRUE(succeeded(entry));
-  auto schemaAttr = (*entry)->getOperation()->getAttrOfType<mlir::TypeAttr>("ascendc.tiling_schema");
-  ASSERT_TRUE(schemaAttr);
-  auto schema = mlir::cast<mlir::emitasc::PyStructType>(schemaAttr.getValue());
-  EXPECT_TRUE(HasStructField(schema, "graph0_result2_g0_tiling_data"));
-  EXPECT_FALSE(HasStructField(schema, "graph0_result0_g0_tiling_data"));
-  modules.push_back(*module);
   EXPECT_TRUE(failed(mlir::ascend::kernel::runGenAggregateTilingData(modules)));
 }
 
@@ -804,8 +755,8 @@ TEST(ScheduleToAfirTest, WorkspaceUint64CapacityAndOverflowExecuteGeneratedHelpe
   file << "#include <cstdint>\n#include <limits>\n"
           "struct Stage { uint32_t tiling_key = 0, s0 = 0, t = 0; };\n"
           "struct AutofuseTilingData { Stage graph0_result0_g0_tiling_data, graph0_result0_g1_tiling_data;\n"
-          " uint32_t block_dim = 0; void set_block_dim(uint32_t x) { block_dim = x; }\n"
-          " uint32_t get_block_dim() const { return block_dim; } void set_ub_size(uint32_t) {} };\n"
+          " uint32_t block_dim = 0, ub_size = 0; void set_block_dim(uint32_t x) { block_dim = x; }\n"
+          " uint32_t get_block_dim() const { return block_dim; } void set_ub_size(uint32_t x) { ub_size = x; } };\n"
           "namespace optiling { bool GetTiling(AutofuseTilingData &, int, void *) { return true; } }\n";
   file << source->substr(begin);
   file << R"cpp(
@@ -814,6 +765,42 @@ TEST(ScheduleToAfirTest, WorkspaceUint64CapacityAndOverflowExecuteGeneratedHelpe
       uint64_t size = UINT64_MAX;
       uint32_t blocks = 0;
       if (AutofuseTiling(&data, &size, &blocks, nullptr) != 0 || size != 0) return 1;
+      if (blocks != g_no_limit_res.aiv_num || data.ub_size != g_no_limit_res.ub_size - 256U) return 6;
+      std::vector<AutofuseTilingData> solutions;
+      std::vector<int64_t> workspaces, block_dims;
+      auto limit = g_no_limit_res;
+      limit.aiv_num = 2;
+      if (GenerateTopnSolutions({}, 10, solutions, workspaces, block_dims, &limit) != 0 || solutions.size() != 1 ||
+          workspaces.size() != 1 || block_dims.size() != 1 || workspaces[0] != 0 || block_dims[0] != 2 ||
+          solutions[0].get_block_dim() != 2)
+        return 10;
+      if (GenerateTopnSolutions({}, 0, solutions, workspaces, block_dims) == 0 || !solutions.empty() ||
+          !workspaces.empty() || !block_dims.empty())
+        return 11;
+      if (GenerateTopnSolutions({{{"unsupported", "1"}}}, 1, solutions, workspaces, block_dims) == 0) return 12;
+      limit.ub_size = 0;
+      // ResLimit 非零字段覆盖默认值后,ub_size=0 归一化为 g_no_limit_res 默认值,
+      // 与仅填 aiv_num=2 的上一用例等价,应正常产出唯一解而非被拒为空。
+      if (GenerateTopnSolutions({}, 1, solutions, workspaces, block_dims, &limit) != 0 || solutions.size() != 1 ||
+          workspaces.size() != 1 || block_dims.size() != 1 || block_dims[0] != 2)
+        return 13;
+      limit = g_no_limit_res;
+      limit.aiv_num = 1;
+      if (AutofuseTiling(&data, &size, &blocks, &limit) != 0 || blocks != 1 ||
+          data.ub_size != g_no_limit_res.ub_size - 256U)
+        return 7;
+      limit.aiv_num = 0;
+      limit.ub_size = 4096;
+      if (AutofuseTiling(&data, &size, &blocks, &limit) != 0 || blocks != g_no_limit_res.aiv_num ||
+          data.ub_size != 4096U - 256U)
+        return 8;
+      limit.ub_size = 256;
+      if (AutofuseTiling(&data, &size, &blocks, &limit) != -1) return 9;
+      limit.ub_size = g_no_limit_res.ub_size + 1;
+      if (AutofuseTiling(&data, &size, &blocks, &limit) != -1) return 14;
+      limit.ub_size = 0;
+      limit.aiv_num = g_no_limit_res.aiv_num + 1;
+      if (AutofuseTiling(&data, &size, &blocks, &limit) != -1) return 15;
       auto &a = data.graph0_result0_g0_tiling_data;
       auto &b = data.graph0_result0_g1_tiling_data;
       a.s0 = 65536;
