@@ -6867,16 +6867,18 @@ std::string Kernel::GenCvDispatchEntryForInductor(const ascir::FusedScheduledRes
     ss << "}" << std::endl;
     ss << "#endif" << std::endl;
   }
-  // tiling 尾参按值随 launch 命令搬运，无 GM tiling 缓冲与显式 H2D；
-  // 静态 const 场景形参不消费。
+  // tiling 尾参仅在动态shape场景下随launch命令搬运;静态const场景kernel读kConstTilingData， 形参整体裁剪
   ss << "extern \"C\" __global__ __aicore__ void " << entry_name << "(" << io_params;
-  ss << GM_ADDR("workspace").AsArg() << ", CVAutofuseTilingData tiling_data)" << std::endl;
+  ss << GM_ADDR("workspace").AsArg() << std::endl;
+  ss << "#ifndef INDUCTOR_CONST_TILING_DATA" << std::endl;
+  ss << ", CVAutofuseTilingData tiling_data" << std::endl;
+  ss << "#endif" << std::endl;
+  ss << ")" << std::endl;
   ss << "{" << std::endl;
   ss << "  KERNEL_TASK_TYPE_DEFAULT(" << (is_aiv_entry ? kKernelTaskTypeAIVOnly : kernel_task_type) << ");"
      << std::endl;
   ss << "#ifdef INDUCTOR_CONST_TILING_DATA" << std::endl;
   ss << "  const CVAutofuseTilingData &cv_tiling = kConstTilingData;" << std::endl;
-  ss << "  (void)tiling_data;" << std::endl;
   ss << "#else" << std::endl;
   // 值参位于 launch 参数区（非 __gm__），直接引用绑定。
   ss << "  const CVAutofuseTilingData &cv_tiling = tiling_data;" << std::endl;

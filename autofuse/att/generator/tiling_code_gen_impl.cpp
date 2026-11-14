@@ -2572,6 +2572,9 @@ af::Status TilingCodeGenImpl::GenGetSetTilingImpl(const ModelInfo &model_info) {
   if (ws_vars.empty()) {
     tiling_func_.AddLine("    (void)tiling_data; (void)workspace_map;");
   } else {
+    if (ws_vars.find("tiling_data.get_") == std::string::npos) {
+      tiling_func_.AddLine("    (void)tiling_data;");
+    }
     tiling_func_.AddLine(ws_vars);
   }
   tiling_func_.AddLine("    return true;");

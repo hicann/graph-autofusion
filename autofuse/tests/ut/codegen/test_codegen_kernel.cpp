@@ -7888,6 +7888,24 @@ TEST_F(CodegenKernelConv2DTest, KernelFuncDeclare_LaunchDecoupleDropsModeTemplat
   EXPECT_EQ(declare.find("TILING_DATA_T t"), std::string::npos);
 }
 
+TEST_F(CodegenKernelConv2DTest, GenCvDispatch_TilingParamGuardedByConstMacro) {
+  ::ascir::FusedScheduledResult fused_scheduled_result;
+  fused_scheduled_result.fused_graph_name = af::AscendString("matmul_dusion");
+  ::ascir::ScheduledResult scheduled_result;
+  scheduled_result.cube_type = ::ascir::CubeTemplateType::kUBFuse;
+  fused_scheduled_result.node_idx_to_scheduled_results.push_back({scheduled_result});
+
+  const std::string entry =
+      codegen::Kernel::GenCvDispatchEntryForInductor(fused_scheduled_result, "KERNEL_TYPE_MIX_AIC_1_2", false);
+
+  EXPECT_NE(entry.find("#ifndef INDUCTOR_CONST_TILING_DATA"), std::string::npos);
+  EXPECT_NE(entry.find(", CVAutofuseTilingData tiling_data"), std::string::npos);
+  // 静态烧录形态去 (void)tiling_data：值参被 #ifndef 编译掉后不再需要消费标记
+  EXPECT_EQ(entry.find("(void)tiling_data"), std::string::npos);
+  EXPECT_NE(entry.find("const CVAutofuseTilingData &cv_tiling = kConstTilingData;"), std::string::npos);
+  EXPECT_NE(entry.find("const CVAutofuseTilingData &cv_tiling = tiling_data;"), std::string::npos);
+}
+
 TEST_F(CodegenKernelConv2DTest, GenCubeCommonTiling_TilingTypeArgFollowsLaunchDecouple) {
   codegen::Kernel kernel("matmul_kernel");
   kernel.tpipe.is_inductor = true;
