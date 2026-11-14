@@ -3847,6 +3847,12 @@ Status Kernel::GenMulGroupKernelWithRegTilingKey(const ascir::FusedScheduledResu
     auto scheduled_results = fused_schedule_result.node_idx_to_scheduled_results[graph_id];
     for (size_t i = 0; i < scheduled_results.size(); i++) {
       auto schedule_groups = scheduled_results[i].schedule_groups;
+      // 空 group 的 result 在 host 侧按整条 result 作废，设备侧若继续展开剩余 group 会与 host 的 key 编号错位
+      const bool has_empty_group = std::any_of(schedule_groups.begin(), schedule_groups.end(),
+                                               [](const auto &group) { return group.impl_graphs.empty(); });
+      if (has_empty_group) {
+        continue;
+      }
       auto enable_group_parallel = scheduled_results[i].enable_group_parallel;
       std::vector<std::vector<TilingFuncCall>> per_group_func_calls;
       ascir::CubeTemplateType cv_fusion_type = scheduled_results[i].cube_type;
@@ -4944,7 +4950,8 @@ Status Kernel::GenKernelFuncByTilingKey(const ascir::FusedScheduledResult &fused
   if (ascgen_utils::IsCubeFusedScheduled(fused_schedule_result) && (config.is_inductor || is_dynamic)) {
     GE_ASSERT_SUCCESS(GenCVKernelFuncWithMulGroup(fused_schedule_result, config, ss, ss1, use_list_tensor));
   } else if (ascgen_utils::CanUseTilingKey(fused_schedule_result) && !config.is_inductor &&
-             !ascgen_utils::IsCubeCommonFusedScheduled(fused_schedule_result)) {
+             !ascgen_utils::IsCubeCommonFusedScheduled(fused_schedule_result) &&
+             ascgen_utils::IsTilingKeyCountWithinLimit(fused_schedule_result)) {
     GE_ASSERT_SUCCESS(GenKernelFuncWithRegTilingKey(fused_schedule_result, config, ss, ss1, use_list_tensor));
   } else {
     GE_ASSERT_SUCCESS(GenKernelFuncWithParseTilingData(fused_schedule_result, config, ss, ss1, use_list_tensor));
