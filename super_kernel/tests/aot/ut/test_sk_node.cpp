@@ -33,7 +33,9 @@
 #include "runtime/rt.h"
 #include "securec.h"
 #include "sk_lock_detector.h"
-
+#include "super_kernel.h"
+#include "model_fixture.h"
+#include "model_fixture_internal.h"
 // Forward declaration for InitSuperKernelBindMap (defined in sk_dump_json.cpp)
 SkBindMap InitSuperKernelBindMap(aclrtBinHandle binHdl);
 
@@ -2657,4 +2659,131 @@ TEST_F(SkNodeTest, IdentifyAndHandleSimtKernel_AllocUbufQueryFailed) {
   EXPECT_FALSE(node.nodeInfos.kernelInfos.hasAllocUbufSize);
   EXPECT_FALSE(node.IsFusible());
   EXPECT_EQ(node.GetFusionFailReason(), FusionFailReason::KERNEL_ATTR_GET_FAILED);
+}
+
+TEST_F(SkNodeTest, BindMapRejectsOverflowBeforeMetadataCopy) {
+  auto hugeCount = +[](void *, int, size_t *count) -> int {
+    *count = std::numeric_limits<size_t>::max();
+    return 0;
+  };
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(hugeCount));
+  MOCKER(rtBinaryGetMetaInfo).expects(never());
+  EXPECT_TRUE(InitSuperKernelBindMap(reinterpret_cast<aclrtBinHandle>(0x9101)).empty());
+}
+
+TEST_F(SkNodeTest, BindMapReportsOriginalRuntimeError) {
+  MOCKER(rtBinaryGetMetaNum).stubs().will(returnValue(-73));
+  ut_log::LogBuffer::Instance().Clear();
+  EXPECT_TRUE(InitSuperKernelBindMap(reinterpret_cast<aclrtBinHandle>(0x9102)).empty());
+  EXPECT_NE(ut_log::LogBuffer::Instance().GetContent().find("ret=-73"), std::string::npos);
+}
+
+TEST_F(SkNodeTest, BindMapReportsMetadataCopyError) {
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(returnValue(-74));
+  ut_log::LogBuffer::Instance().Clear();
+  EXPECT_TRUE(InitSuperKernelBindMap(reinterpret_cast<aclrtBinHandle>(0x9103)).empty());
+  EXPECT_NE(ut_log::LogBuffer::Instance().GetContent().find("ret=-74"), std::string::npos);
+}
+
+TEST_F(SkNodeTest, MixedKernelSecondCoreFailureKeepsNodeUnfusible) {
+  UtSkNodeRITaskInternal task{};
+  task.taskId = 100;
+  task.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x9104);
+  task.params.kernelTaskParams.numBlocks = 4;
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForSkNode));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferForNodeDump)).then(returnValue(-75));
+  SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
+  EXPECT_TRUE(node.InitNode());
+  EXPECT_FALSE(node.IsFusible());
+  EXPECT_EQ(node.nodeInfos.kernelInfos.resolvedNum, 0U);
+  EXPECT_EQ(node.nodeInfos.kernelInfos.bindmapFailReason, BindmapFailReason::BIN_HOST_ADDR_GET_FAILED);
+}
+
+TEST_F(SkNodeTest, FunctionOffsetAtCodeEndIsRejected) {
+  UtSkNodeRITaskInternal task{};
+  task.taskId = 100;
+  task.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.type = ACL_MODEL_RI_TASK_KERNEL;
+  task.params.kernelTaskParams.funcHandle = reinterpret_cast<aclrtFuncHandle>(0x9105);
+  task.params.kernelTaskParams.numBlocks = 4;
+  MOCKER(aclrtGetFunctionName).stubs().will(invoke(FakeAclrtGetFunctionNameRegular));
+  MOCKER(aclrtFunctionGetBinary).stubs().will(invoke(FakeAclrtFunctionGetBinaryForBindmapReason));
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(FakeRtBinaryGetMetaNumTwoEntriesForSkNode));
+  MOCKER(rtBinaryGetMetaInfo).stubs().will(invoke(FakeRtBinaryGetMetaInfoSameCapForSkNode));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForNodeDump));
+  MOCKER(aclrtGetFunctionAddr).stubs().will(invoke(FakeAclrtGetFunctionAddrForSkNode));
+  MOCKER(rtGetBinBuffer).expects(never());
+  SuperKernelKernelNode node(MakeOriginTask(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
+  EXPECT_TRUE(node.InitNode());
+  EXPECT_FALSE(node.IsFusible());
+  EXPECT_EQ(node.GetFusionFailReasonInfo().GetBindmapFailReason(), BindmapFailReason::INVALID_CODE_RANGE);
+}
+
+TEST_F(SkNodeTest, DumpSingleKernelBinaryReportsBufferedWriteFailure) {
+  const std::string dir = MakeTmpDir("write_full");
+  const std::string path = dir + "/write_full_0xABC000.o";
+  ASSERT_EQ(symlink("/dev/full", path.c_str()), 0);
+  MOCKER(rtGetBinBuffer).stubs().will(invoke(FakeRtGetBinBufferForNodeDump));
+  MOCKER(aclrtBinaryGetDevAddress).stubs().will(invoke(FakeAclrtBinaryGetDevAddressForNodeDump));
+  KernelInfos info;
+  info.funcName = "write_full";
+  EXPECT_FALSE(DumpSingleKernelBinary(info, dir));
+  unlink(path.c_str());
+  rmdir(dir.c_str());
+}
+
+TEST_F(SkNodeTest, KernelUpdateRejectsMissingLaunchArguments) {
+  TestRITask task{};
+  SuperKernelKernelNode node(MakeTaskHandle(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
+  SkLaunchInfo launchInfo;
+  launchInfo.entryInfo.skEntryFunc = reinterpret_cast<aclrtFuncHandle>(0x9201);
+  UpdateContext ctx{};
+  ctx.launchInfo = &launchInfo;
+  MOCKER(aclmdlRITaskSetParams).expects(never());
+  EXPECT_FALSE(node.Update(ctx));
+}
+
+TEST_F(SkNodeTest, MetadataFailurePreservesModelOptimizationAndReasonReporting) {
+  sk::test::Model model;
+  auto badStream = model.AddStream();
+  auto badTask = model.AddKernel(badStream, "metadata_failure");
+  auto goodStream = model.AddStream();
+  model.AddKernel(goodStream, "fusible_first");
+  model.AddKernel(goodStream, "fusible_second");
+  aclmdlRITaskParams params{};
+  ASSERT_EQ(aclmdlRITaskGetParams(badTask, &params), ACL_SUCCESS);
+  aclrtBinHandle badBinary = nullptr;
+  ASSERT_EQ(aclrtFunctionGetBinary(params.kernelTaskParams.funcHandle, &badBinary), ACL_SUCCESS);
+  auto secondBadTask = model.AddKernel(badStream, "metadata_failure_again");
+  ASSERT_EQ(aclmdlRITaskSetParams(secondBadTask, &params), ACL_SUCCESS);
+  MOCKER(rtBinaryGetMetaNum).expects(once()).with(eq(badBinary), any(), any()).will(returnValue(-73));
+  auto count = +[](void *binary, int, size_t *num) -> int {
+    *num = sk::test::BinaryMetadataCount(binary);
+    return 0;
+  };
+  MOCKER(rtBinaryGetMetaNum).stubs().will(invoke(count));
+  ut_log::LogBuffer::Instance().Clear();
+  EXPECT_EQ(aclskOptimize(model.Handle(), nullptr), ACL_SUCCESS);
+  EXPECT_EQ(model.SuccessfulUpdates(), 1U);
+  const auto bad = model.Snapshot(badTask);
+  EXPECT_FALSE(bad.disabled);
+  EXPECT_EQ(bad.setParamsCount, 0U);
+  bool fused = false;
+  for (const auto &task : model.Tasks(goodStream)) {
+    fused |= !task.disabled && task.function.find("sk_entry_") == 0;
+  }
+  EXPECT_TRUE(fused);
+  const auto logs = ut_log::LogBuffer::Instance().GetContent();
+  EXPECT_NE(logs.find("ret=-73"), std::string::npos);
+  EXPECT_NE(logs.find("BINDMAP_INIT_EMPTY"), std::string::npos);
+  EXPECT_NE(logs.find("Completed dumping fusion fail reasons"), std::string::npos);
+  EXPECT_NE(logs.find("Dumping all task queues to JSON"), std::string::npos);
 }

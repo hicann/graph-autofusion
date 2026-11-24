@@ -86,6 +86,7 @@ enum class BindmapFailReason : uint8_t {
   BINDMAP_ENTRY_CONFLICT,    // 7: Duplicated bind map entry has inconsistent value
   BINDMAP_CAP_INCONSISTENT,  // 8: Bind map cap is inconsistent
   BIN_HOST_ADDR_GET_FAILED,  // 9: Failed to get binary host address
+  INVALID_CODE_RANGE,        // 10: Invalid device code range, function offset or size
 };
 
 inline const char *to_string(BindmapFailReason reason) {
@@ -110,6 +111,8 @@ inline const char *to_string(BindmapFailReason reason) {
       return "BINDMAP_CAP_INCONSISTENT";
     case BindmapFailReason::BIN_HOST_ADDR_GET_FAILED:
       return "BIN_HOST_ADDR_GET_FAILED";
+    case BindmapFailReason::INVALID_CODE_RANGE:
+      return "INVALID_CODE_RANGE";
     default:
       return "UNKNOWN_BINDMAP_REASON";
   }

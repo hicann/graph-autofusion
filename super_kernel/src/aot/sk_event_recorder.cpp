@@ -17,6 +17,11 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <fstream>
+#include <new>
+#include <iomanip>
+#include <locale>
+#include <sstream>
+#include <nlohmann/json.hpp>
 #include "acl/acl.h"
 #include "sk_log.h"
 #include "aprof_pub.h"
@@ -27,6 +32,7 @@
     aclError __ret = x;                                     \
     if (__ret != ACL_ERROR_NONE) {                          \
       SK_LOGE("[sk time profiling] acl Error: %d.", __ret); \
+      ReportError(__ret);                                   \
       return;                                               \
     }                                                       \
   } while (0)
@@ -53,6 +59,8 @@ static int32_t AscendProfilingCallBack(uint32_t type, void *data, uint32_t len) 
 }
 
 namespace {
+constexpr int PROFILING_TIME_DECIMAL_PLACES = 6;  // 保持原 %f 的六位小数格式。
+
 std::string GetProfilingFilePath(const std::string &directory, uint32_t deviceId) {
   return directory + "/sk_prof_device_" + std::to_string(deviceId) + ".json";
 }
@@ -72,18 +80,27 @@ void SetupProfilingModelContext(SkLaunchInfo &launchInfo, const SuperKernelScope
 
 bool SetupProfilingRuntime(const std::vector<SuperKernelBaseNode *> &taskNodes, SkLaunchInfo &launchInfo,
                            const SuperKernelScopeInfo &scopeInfo, const std::string &modelId) {
+  auto &recorder = SkEventRecorder::Instance();
   int32_t deviceId = 0;
-  aclError aclRet = aclrtGetDevice(&deviceId);
-  if (aclRet != ACL_SUCCESS) {
-    SK_LOGE("[sk time profiling] Failed to get device id, ret=%d\n", aclRet);
+  if (recorder.IsEnabled()) {
+    const aclError ret = aclrtGetDevice(&deviceId);
+    if (ret != ACL_SUCCESS) {
+      SK_LOGE("[sk time profiling] Failed to get device id, ret=%d\n", ret);
+      return false;
+    }
+  }
+  // 正常未开启 profiling 时地址为空；准备缓冲区失败则返回错误，中断后续优化。
+  const aclError ret = recorder.GetGmAddrForDevice(deviceId, launchInfo.eventGmAddr);
+  if (ret != ACL_SUCCESS) {
+    SK_LOGE("[sk time profiling] Failed to get event GM address, ret=%d; optimization will be aborted", ret);
     return false;
   }
-  launchInfo.eventGmAddr = SkEventRecorder::Instance().GetGmAddrForDevice(deviceId);
-  // 获取gm地址失败后，只通知 kernel 侧禁用 profiling（enabled=0），不中断后续host调度流程
-  const bool profilingEnabled = (launchInfo.eventGmAddr != nullptr);
-  if (!profilingEnabled) {
-    SK_LOGW("[sk time profiling] Failed to get event GM address, profiling will be disabled");
+  if (launchInfo.eventGmAddr == nullptr) {
+    launchInfo.modelIdIndex = 0;
+    launchInfo.skId = 0;
+    return true;
   }
+  const bool profilingEnabled = true;
 
   launchInfo.modelIdIndex = SkEventRecorder::Instance().RegisterModelId(modelId);
   launchInfo.skId = static_cast<uint32_t>(scopeInfo.GetScopeId());
@@ -162,11 +179,11 @@ std::string SkEventRecorder::CreateOutputDir() {
   return std::string(pidDir);
 }
 
-bool SkEventRecorder::Init() {
+aclError SkEventRecorder::Init() {
   // 已经初始化过，直接返回
   if (enabled.load()) {
     SK_LOGI("[sk time profiling] Dump the time of superkernel has already been initialized, skip re-initialization");
-    return true;
+    return ACL_SUCCESS;
   }
   std::call_once(initFlag_, [this]() {
     SK_LOGI("[sk time profiling] ===================== Start dump the time of superkernel =======================");
@@ -175,11 +192,12 @@ bool SkEventRecorder::Init() {
       return;
     }
 
+    std::unique_lock<std::mutex> lifecycleLock(lifecycleMutex_);
     globalRunning.store(true);
     aclError aclRet = aclrtGetDevice(&dumpDeviceId);
     if (aclRet != ACL_SUCCESS) {
       SK_LOGE("[sk time profiling] Failed to get device id, ret=%d\n", aclRet);
-      globalRunning.store(false);
+      ReportError(aclRet);
       return;
     }
 
@@ -187,12 +205,16 @@ bool SkEventRecorder::Init() {
     int ret = pthread_create(&dumpThread, nullptr, DumpThreadFunc, this);
     if (ret != 0) {
       SK_LOGE("[sk time profiling] Failed to create dump thread, ret=%d\n", ret);
-      globalRunning.store(false);
+      ReportError(ACL_ERROR_FAILURE);
       return;
     }
-    // 所有初始化完成后再标记为启用，确保其他线程看到 enabled==true 时一切就绪
-    enabled.store(true);
-
+    threadStarted_ = true;
+    // 等待后台线程完成 SetDevice，避免线程已退出但 recorder 仍被标记为启用。
+    std::unique_lock<std::mutex> startupLock(mutex);
+    startupCv_.wait(startupLock, [this]() { return startupDone_; });
+    if (error_.load() != ACL_SUCCESS) {
+      return;
+    }
     // 注册 Msprof 回调，profiling 结束时获取输出路径
     int32_t profRet = MsprofRegisterCallback(ASCENDC_KERNEL_ID, AscendProfilingCallBack);
     if (profRet != 0) {
@@ -201,9 +223,15 @@ bool SkEventRecorder::Init() {
       SK_LOGI("[sk time profiling] MsprofRegisterCallback success\n");
     }
 
+    // 所有初始化完成后再标记为启用，确保其他线程看到 enabled==true 时一切就绪
+    enabled.store(true);
     SK_LOGI("[sk time profiling] Event recorder enabled with single dump thread\n");
   });
-  return enabled.load();
+  const aclError ret = error_.load();
+  if (ret != ACL_SUCCESS) {
+    SkProfilingShutdown();
+  }
+  return ret;
 }
 
 bool SkEventRecorder::ParseEnvAndSetSize() {
@@ -244,17 +272,23 @@ bool SkEventRecorder::ParseEnvAndSetSize() {
   return true;
 }
 
-void *SkEventRecorder::GetGmAddrForDevice(uint32_t deviceId) {
+aclError SkEventRecorder::GetGmAddrForDevice(uint32_t deviceId, void *&gmAddr) {
+  gmAddr = nullptr;
   SK_LOGI("[sk time profiling] Start getting device gm addr for device %u\n", deviceId);
   if (!enabled.load()) {
     SK_LOGW("[sk time profiling] Profiling is not enabled for device %u\n", deviceId);
     SK_LOGD("[sk time profiling] End get device gm addr on device: %u\n", deviceId);
-    return nullptr;
+    return error_.load();
   }
   if (deviceId >= SK_EVENT_MAX_DEVICE_NUM) {
     SK_LOGE("[sk time profiling] deviceId %u is out of range [0, %u)\n", deviceId, SK_EVENT_MAX_DEVICE_NUM);
     SK_LOGD("[sk time profiling] End get device gm addr on device: %u\n", deviceId);
-    return nullptr;
+    return ACL_ERROR_INVALID_PARAM;
+  }
+  if (deviceId != static_cast<uint32_t>(dumpDeviceId)) {
+    SK_LOGE("[sk time profiling] Only device %d is supported by this recorder, requested device=%u", dumpDeviceId,
+            deviceId);
+    return ACL_ERROR_INVALID_PARAM;
   }
 
   SkEventDeviceCtx *ctx = &deviceCtxs;
@@ -262,14 +296,19 @@ void *SkEventRecorder::GetGmAddrForDevice(uint32_t deviceId) {
   // Double-check locking：确保每个 device 只初始化一次
   if (ctx->active.load()) {
     SK_LOGI("[sk time profiling] End get device gm addr on device: %u, addr: %p\n", deviceId, ctx->gmAddr.get());
-    return ctx->gmAddr.get();
+    gmAddr = ctx->gmAddr.get();
+    return ACL_SUCCESS;
   }
 
-  std::lock_guard<std::mutex> lock(mutex);
+  std::unique_lock<std::mutex> lock(mutex);
+  if (!enabled.load()) {
+    return error_.load();
+  }
   if (ctx->active.load() || ctx->gmAddr != nullptr) {
     SK_LOGI("[sk time profiling] Device gm addr already exists for device %u, addr: %p\n", deviceId, ctx->gmAddr.get());
     SK_LOGI("[sk time profiling] End get device gm addr on device: %u, addr: %p\n", deviceId, ctx->gmAddr.get());
-    return ctx->gmAddr.get();
+    gmAddr = ctx->gmAddr.get();
+    return ACL_SUCCESS;
   } else {
     SK_LOGI("[sk time profiling] Device buffer not allocated yet, allocating now for device %u\n", deviceId);
     // 创建上下文
@@ -277,13 +316,25 @@ void *SkEventRecorder::GetGmAddrForDevice(uint32_t deviceId) {
     if (ctx == nullptr) {
       SK_LOGE("[sk time profiling] Failed to create device ctx for device %u\n", deviceId);
       SK_LOGD("[sk time profiling] End get device gm addr on device: %u\n", deviceId);
-      return nullptr;
+      // 上下文尚未发布给后台线程或设备任务，可以清理本次创建的资源。
+      deviceCtxs.outputFp.Close();
+      deviceCtxs.hostBuf.reset();
+      deviceCtxs.gmAddr.reset();
+      deviceCtxs.outputDir.clear();
+      // Shutdown 会先获取生命周期锁再获取 mutex，必须先释放此处的 mutex。
+      lock.unlock();
+      SkProfilingShutdown();
+      return error_.load();
     }
     SK_LOGI("[sk time profiling] Device gm addr created for device: %u, addr: %p\n", deviceId, ctx->gmAddr.get());
     SK_LOGI("[sk time profiling] End get device gm addr on device: %u\n", deviceId);
   }
 
-  return ctx ? ctx->gmAddr.get() : nullptr;
+  const aclError ret = error_.load();
+  if (ret == ACL_SUCCESS) {
+    gmAddr = ctx->gmAddr.get();
+  }
+  return ret;
 }
 
 bool SkEventRecorder::InitDeviceOutputFile(SkEventDeviceCtx *ctx, uint32_t deviceId) {
@@ -291,12 +342,13 @@ bool SkEventRecorder::InitDeviceOutputFile(SkEventDeviceCtx *ctx, uint32_t devic
   if (filename.size() >= SPRINT_LEN_BUFFER) {
     SK_LOGE("[sk time profiling] Output filename too long for device %u, length=%zu, max=%u\n", deviceId,
             filename.size(), SPRINT_LEN_BUFFER - 1);
-    SkProfilingShutdown();
+    ReportError(ACL_ERROR_FAILURE);
     return false;
   }
 
   if (!ctx->outputFp.Open(filename.c_str(), "w+b")) {
     SK_LOGE("[sk time profiling] Failed to open output file: %s\n", filename.c_str());
+    ReportError(ACL_ERROR_FAILURE);
     return false;
   }
 
@@ -305,7 +357,7 @@ bool SkEventRecorder::InitDeviceOutputFile(SkEventDeviceCtx *ctx, uint32_t devic
   if (written != strlen(jsonStart)) {
     SK_LOGE("[sk time profiling] Failed to write JSON start to file: %s, written=%zu, expected=%zu\n", filename.c_str(),
             written, strlen(jsonStart));
-    SkProfilingShutdown();
+    ReportError(ACL_ERROR_FAILURE);
     return false;
   }
 
@@ -320,7 +372,7 @@ SkEventDeviceCtx *SkEventRecorder::CreateDeviceCtx(uint32_t deviceId) {
   ctx->outputDir = CreateOutputDir();
   if (ctx->outputDir.empty()) {
     SK_LOGE("[sk time profiling] Failed to create output directory for device %u\n", deviceId);
-    SkProfilingShutdown();
+    ReportError(ACL_ERROR_FAILURE);
     return nullptr;
   }
 
@@ -329,38 +381,34 @@ SkEventDeviceCtx *SkEventRecorder::CreateDeviceCtx(uint32_t deviceId) {
   aclError allocRet = aclrtMalloc(&rawGmAddr, totalSize_, ACL_MEM_MALLOC_HUGE_FIRST);
   if (allocRet != ACL_SUCCESS || rawGmAddr == nullptr) {
     SK_LOGE("[sk time profiling] Failed to malloc GM for device %u, ret=%d\n", deviceId, allocRet);
-    SkProfilingShutdown();
+    ReportError(allocRet == ACL_SUCCESS ? ACL_ERROR_FAILURE : allocRet);
     return nullptr;
   }
   ctx->gmAddr.reset(rawGmAddr);
   allocRet = aclrtMemset(rawGmAddr, totalSize_, 0, totalSize_);
   if (allocRet != ACL_SUCCESS) {
     SK_LOGE("[sk time profiling] Failed to memset GM for device %u, ret=%d\n", deviceId, allocRet);
-    SkProfilingShutdown();
+    ReportError(allocRet);
     return nullptr;
   }
   SK_LOGI("[sk time profiling] Malloc device gm addr, device %u, addr: %p\n", deviceId, ctx->gmAddr.get());
 
   // 3. 分配 host 缓冲区（使用智能指针，RAII 管理）
-  ctx->hostBuf = std::make_unique<uint8_t[]>(totalSize_);
+  ctx->hostBuf.reset(new (std::nothrow) uint8_t[totalSize_]);
   if (ctx->hostBuf == nullptr) {
     SK_LOGE("[sk time profiling] Failed to allocate host buf for device %u\n", deviceId);
-    SkProfilingShutdown();
+    ReportError(ACL_ERROR_FAILURE);
     return nullptr;
   }
   SK_LOGI("[sk time profiling] Malloc host buf addr, device %u, addr: %p\n", deviceId, ctx->hostBuf.get());
   errno_t memRet = memset_s(ctx->hostBuf.get(), totalSize_, 0, totalSize_);
   if (memRet != EOK) {
     SK_LOGE("[sk time profiling] memset_s hostBuf failed for device %u, ret=%d\n", deviceId, memRet);
-    SkProfilingShutdown();
+    ReportError(ACL_ERROR_FAILURE);
     return nullptr;
   }
   // 4. 创建临时输出文件（用于存储 node 事件）
   if (!InitDeviceOutputFile(ctx, deviceId)) {
-    ctx->outputFp.Close();
-    ctx->hostBuf.reset();
-    ctx->gmAddr.reset();
-    ctx->outputDir.clear();
     return nullptr;
   }
 
@@ -437,8 +485,16 @@ void *SkEventRecorder::DumpThreadFunc(void *arg) {
   SkEventRecorder *recorder = static_cast<SkEventRecorder *>(arg);
   SK_LOGI("[sk time profiling] New global dump thread setdevice: %d\n", recorder->dumpDeviceId);
   aclError result = aclrtSetDevice(recorder->dumpDeviceId);
-  if (result != 0) {
-    SK_LOGE("[sk time profiling] Acl set device failed, ERROR: %ld, deviceId: %d\n", result, recorder->dumpDeviceId);
+  {
+    std::lock_guard<std::mutex> lock(recorder->mutex);
+    if (result != ACL_SUCCESS) {
+      SK_LOGE("[sk time profiling] Acl set device failed, ERROR: %d, deviceId: %d\n", result, recorder->dumpDeviceId);
+      recorder->ReportError(result);
+    }
+    recorder->startupDone_ = true;
+  }
+  recorder->startupCv_.notify_one();
+  if (result != ACL_SUCCESS) {
     return nullptr;
   }
   SK_LOGI("[sk time profiling] Global dump thread started writing on deviceId: %d", recorder->dumpDeviceId);
@@ -460,7 +516,7 @@ void *SkEventRecorder::DumpThreadFunc(void *arg) {
   }
   // 最后一次刷新所有 device
   SkEventDeviceCtx *ctx = &recorder->deviceCtxs;
-  if (ctx->active.load()) {
+  if (ctx->active.load() && recorder->error_.load() == ACL_SUCCESS) {
     recorder->DumpDeviceData(ctx);
   }
 
@@ -494,11 +550,32 @@ void *SkEventRecorder::DumpThreadFunc(void *arg) {
   return nullptr;
 }
 
+namespace {
+bool EscapeProfilingJsonString(const std::string &value, std::string &escaped) {
+  constexpr char hexDigits[] = "0123456789abcdef";
+  escaped.clear();
+  for (const unsigned char ch : value) {
+    if (ch == '\\' || ch == '\"') {
+      escaped.push_back('\\');
+      escaped.push_back(static_cast<char>(ch));
+    } else if (ch < 0x20U) {
+      escaped += "\\u00";
+      escaped.push_back(hexDigits[ch >> 4U]);
+      escaped.push_back(hexDigits[ch & 0xfU]);
+    } else {
+      escaped.push_back(static_cast<char>(ch));
+    }
+  }
+  return nlohmann::json::accept("\"" + escaped + "\"");
+}
+}  // namespace
+
 bool SkEventRecorder::WriteNodeEventToJson(SkEventDeviceCtx *ctx, const SkKernelEventRecord *record, uint32_t core,
                                            const SkNodeInfo &nodeInfo) {
   if (!ctx->outputFp.IsValid()) {
     SK_LOGE("[sk time profiling] Output file is not open: %s\n",
             GetProfilingFilePath(ctx->outputDir, ctx->deviceId).c_str());
+    ReportError(ACL_ERROR_FAILURE);
     return false;  // 文件未打开，跳过写入
   }
 
@@ -510,24 +587,36 @@ bool SkEventRecorder::WriteNodeEventToJson(SkEventDeviceCtx *ctx, const SkKernel
       SK_LOGE("[sk time profiling] Failed to seek in output file: %s\n",
               GetProfilingFilePath(ctx->outputDir, ctx->deviceId).c_str());
       ctx->outputFp.Close();
-      SkProfilingShutdown();
+      ReportError(ACL_ERROR_FAILURE);
       return false;
     }
 
     double tsStart = (double)record->startTime / GetSkRuntimeConfig().tickUsMultiplier;
     double tsEnd = (double)record->endTime / GetSkRuntimeConfig().tickUsMultiplier;
     char jsonLine[SPRINT_LEN_BUFFER];
+    std::string escapedName;
+    std::string escapedModelId;
+    if (!EscapeProfilingJsonString(nodeInfo.nodeName, escapedName) ||
+        !EscapeProfilingJsonString(modelId, escapedModelId)) {
+      SK_LOGE("[sk time profiling] Invalid UTF-8 in event name or model id, skId=%u", record->skId);
+      ReportError(ACL_ERROR_INVALID_PARAM);
+      return false;
+    }
+    std::ostringstream timestamps;
+    timestamps.imbue(std::locale::classic());
+    timestamps << std::fixed << std::setprecision(PROFILING_TIME_DECIMAL_PLACES) << "\"ts\":" << tsStart
+               << ",\"dur\":" << tsEnd - tsStart;
     int len = snprintf_s(jsonLine, sizeof(jsonLine), sizeof(jsonLine) - 1,
                          "\"ph\":\"X\",\"name\":\"[%u/%u]%s\",\"pid\":\"%s\",\"tid\":%u,"
-                         "\"ts\":%f,\"dur\":%f,\"args\":{\"modelId\":\"%s\",\"skId\":%u,\"nodeId\":%u}},\n{}]",
-                         record->blockIdx, record->blockNum, nodeInfo.nodeName.c_str(), CoreIsAiv(core) ? "AIV" : "AIC",
-                         core, tsStart, (tsEnd - tsStart), modelId.c_str(), record->skId, record->nodeId);
+                         "%s,\"args\":{\"modelId\":\"%s\",\"skId\":%u,\"nodeId\":%u}},\n{}]",
+                         record->blockIdx, record->blockNum, escapedName.c_str(), CoreIsAiv(core) ? "AIV" : "AIC", core,
+                         timestamps.str().c_str(), escapedModelId.c_str(), record->skId, record->nodeId);
 
-    if (len < 0) {
+    if (len < 0 || !timestamps.good()) {
       SK_LOGE("[sk time profiling] snprintf_s failed for JSON line, modelId=%s, skId=%u, nodeId=%u\n", modelId.c_str(),
               record->skId, record->nodeId);
       ctx->outputFp.Close();
-      SkProfilingShutdown();
+      ReportError(ACL_ERROR_FAILURE);
       return false;
     } else if (len > 0 && len < sizeof(jsonLine)) {
       size_t written = fwrite(jsonLine, 1, len, ctx->outputFp.Get());
@@ -535,7 +624,7 @@ bool SkEventRecorder::WriteNodeEventToJson(SkEventDeviceCtx *ctx, const SkKernel
         SK_LOGE("[sk time profiling] Failed to write JSON line to %s, written=%zu, expected=%d\n",
                 GetProfilingFilePath(ctx->outputDir, ctx->deviceId).c_str(), written, len);
         ctx->outputFp.Close();
-        SkProfilingShutdown();
+        ReportError(ACL_ERROR_FAILURE);
         return false;
       }
     } else {
@@ -556,6 +645,7 @@ bool SkEventRecorder::WriteSkEventToJson(SkEventDeviceCtx *ctx, const SkKernelEv
   if (!ctx->outputFp.IsValid()) {
     SK_LOGE("[sk time profiling] SK event output file is not open: %s\n",
             GetProfilingFilePath(ctx->outputDir, ctx->deviceId).c_str());
+    ReportError(ACL_ERROR_FAILURE);
     return false;  // 文件未打开，跳过写入
   }
 
@@ -567,7 +657,7 @@ bool SkEventRecorder::WriteSkEventToJson(SkEventDeviceCtx *ctx, const SkKernelEv
       SK_LOGE("[sk time profiling] SK event failed to seek in output file: %s\n",
               GetProfilingFilePath(ctx->outputDir, ctx->deviceId).c_str());
       ctx->outputFp.Close();
-      SkProfilingShutdown();
+      ReportError(ACL_ERROR_FAILURE);
       return false;
     }
 
@@ -575,17 +665,28 @@ bool SkEventRecorder::WriteSkEventToJson(SkEventDeviceCtx *ctx, const SkKernelEv
     double tsEnd = (double)record->endTime / GetSkRuntimeConfig().tickUsMultiplier;
     char jsonLine[SPRINT_LEN_BUFFER];
     std::string skName = SkEventRecorder::Instance().GetSkName(modelId, record->skId);
+    std::string escapedName;
+    std::string escapedModelId;
+    if (!EscapeProfilingJsonString(skName, escapedName) || !EscapeProfilingJsonString(modelId, escapedModelId)) {
+      SK_LOGE("[sk time profiling] Invalid UTF-8 in event name or model id, skId=%u", record->skId);
+      ReportError(ACL_ERROR_INVALID_PARAM);
+      return false;
+    }
+    std::ostringstream timestamps;
+    timestamps.imbue(std::locale::classic());
+    timestamps << std::fixed << std::setprecision(PROFILING_TIME_DECIMAL_PLACES) << "\"ts\":" << tsStart
+               << ",\"dur\":" << tsEnd - tsStart;
     int len = snprintf_s(jsonLine, sizeof(jsonLine), sizeof(jsonLine) - 1,
                          "\"ph\":\"X\",\"name\":\"[%u/%u] %s\",\"pid\":\"%s\",\"tid\":%u,"
-                         "\"ts\":%f,\"dur\":%f,\"args\":{\"modelId\":\"%s\",\"skId\":%u}},\n{}]",
-                         record->blockIdx, record->blockNum, skName.c_str(), CoreIsAiv(core) ? "AIV" : "AIC", core,
-                         tsStart, (tsEnd - tsStart), modelId.c_str(), record->skId);
+                         "%s,\"args\":{\"modelId\":\"%s\",\"skId\":%u}},\n{}]",
+                         record->blockIdx, record->blockNum, escapedName.c_str(), CoreIsAiv(core) ? "AIV" : "AIC", core,
+                         timestamps.str().c_str(), escapedModelId.c_str(), record->skId);
 
-    if (len < 0) {
+    if (len < 0 || !timestamps.good()) {
       SK_LOGE("[sk time profiling] SK event snprintf_s failed for JSON line, modelId=%s, skId=%u", modelId.c_str(),
               record->skId);
       ctx->outputFp.Close();
-      SkProfilingShutdown();
+      ReportError(ACL_ERROR_FAILURE);
       return false;
     } else if (len > 0 && len < sizeof(jsonLine)) {
       size_t written = fwrite(jsonLine, 1, len, ctx->outputFp.Get());
@@ -593,7 +694,7 @@ bool SkEventRecorder::WriteSkEventToJson(SkEventDeviceCtx *ctx, const SkKernelEv
         SK_LOGE("[sk time profiling] SK event failed to write sk event JSON line to %s, written=%zu, expected=%d\n",
                 GetProfilingFilePath(ctx->outputDir, ctx->deviceId).c_str(), written, len);
         ctx->outputFp.Close();
-        SkProfilingShutdown();
+        ReportError(ACL_ERROR_FAILURE);
         return false;
       }
     } else {
@@ -634,9 +735,15 @@ void SkEventRecorder::DumpDeviceData(SkEventDeviceCtx *ctx) {
   aclmdlRICaptureMode mode =
       ACL_MODEL_RI_CAPTURE_MODE_RELAXED;  // support CAPTURE MODE GLOBAL on host, when using device printf
   CHECK_ACL_RETURN(aclmdlRICaptureThreadExchangeMode(&mode));
-  CHECK_ACL_RETURN(
-      aclrtMemcpy(ctx->hostBuf.get(), ctx->totalSize, ctx->gmAddr.get(), ctx->totalSize, ACL_MEMCPY_DEVICE_TO_HOST));
-  CHECK_ACL_RETURN(aclmdlRICaptureThreadExchangeMode(&mode));
+  const aclError copyRet =
+      aclrtMemcpy(ctx->hostBuf.get(), ctx->totalSize, ctx->gmAddr.get(), ctx->totalSize, ACL_MEMCPY_DEVICE_TO_HOST);
+  const aclError restoreRet = aclmdlRICaptureThreadExchangeMode(&mode);
+  if (copyRet != ACL_SUCCESS || restoreRet != ACL_SUCCESS) {
+    SK_LOGE("[sk time profiling] Copy or capture mode restoration failed, copyRet=%d, restoreRet=%d", copyRet,
+            restoreRet);
+    ReportError(copyRet != ACL_SUCCESS ? copyRet : restoreRet);
+    return;
+  }
 
   uint8_t *hostBuf = ctx->hostBuf.get();
   bool hasNewData = false;
@@ -671,28 +778,42 @@ void SkEventRecorder::DumpDeviceData(SkEventDeviceCtx *ctx) {
   }
 
   if (hasNewData && ctx->outputFp.IsValid()) {
-    fflush(ctx->outputFp.Get());
+    if (fflush(ctx->outputFp.Get()) != 0) {
+      SK_LOGE("[sk time profiling] Failed to flush profiling output, errno=%d", errno);
+      ReportError(ACL_ERROR_FAILURE);
+    }
   }
 }
 
 void SkEventRecorder::SkProfilingShutdown() {
-  if (!enabled.load()) {
-    return;
-  }
-
+  std::lock_guard<std::mutex> lifecycleLock(lifecycleMutex_);
   // 停止全局后台线程
+  // 错误路径可能已清除 enabled，仍须根据 threadStarted_ 回收已创建的线程。
   globalRunning.store(false);
-  pthread_join(dumpThread, nullptr);
-
-  // 释放所有资源
-  SkEventDeviceCtx *ctx = &deviceCtxs;
-  if (ctx->active.load()) {
-    // hostBuf unique_ptr 自动释放，无需手动 free
-    ctx->hostBuf.reset();
-    ctx->active.store(0);
-  }
-
   enabled.store(false);
+  if (threadStarted_) {
+    const int ret = pthread_join(dumpThread, nullptr);
+    if (ret != 0) {
+      SK_LOGE("[sk time profiling] Failed to join dump thread, ret=%d", ret);
+      ReportError(ACL_ERROR_FAILURE);
+      return;
+    }
+    threadStarted_ = false;
+  }
+  // 释放 host 搬运资源；此时后台线程已退出，不会再访问 hostBuf。
+  // 已发布的 GM 仍可能被设备任务引用，沿用原有生命周期，不在这里释放。
+  std::lock_guard<std::mutex> lock(mutex);
+  // hostBuf unique_ptr 自动释放，无需手动 free
+  deviceCtxs.hostBuf.reset();
+  deviceCtxs.active.store(0);
+}
+
+void SkEventRecorder::ReportError(aclError error) {
+  // 保留首次失败；后台线程只报告错误并退出，由宿主线程执行 Shutdown/join。
+  aclError expected = ACL_SUCCESS;
+  error_.compare_exchange_strong(expected, error);
+  enabled.store(false);
+  globalRunning.store(false);
 }
 
 void SkEventRecorder::AddNodeInfoMapping(const std::string &modelId, uint32_t skId, uint32_t nodeId,
@@ -939,14 +1060,7 @@ bool DumpProfilingDetail(const std::vector<SuperKernelBaseNode *> &taskNodes, Sk
   SkEventRecorder::Instance().AddSkNameMapping(modelId, static_cast<uint32_t>(scopeInfo.GetScopeId()),
                                                launchInfo.skFuncName);
 
-  if (SkEventRecorder::Instance().IsEnabled()) {
-    return SetupProfilingRuntime(taskNodes, launchInfo, scopeInfo, modelId);
-  } else {
-    launchInfo.eventGmAddr = nullptr;
-    launchInfo.modelIdIndex = 0;
-    launchInfo.skId = 0;
-  }
-  return true;
+  return SetupProfilingRuntime(taskNodes, launchInfo, scopeInfo, modelId);
 }
 
 std::string GetSkFuncName(const std::vector<SuperKernelBaseNode *> &nodes, uint16_t scopeId,
@@ -954,6 +1068,10 @@ std::string GetSkFuncName(const std::vector<SuperKernelBaseNode *> &nodes, uint1
   const SuperKernelBaseNode *startKernelNode = nullptr;
   const SuperKernelBaseNode *endKernelNode = nullptr;
   for (const auto *node : nodes) {
+    if (node == nullptr) {
+      SK_LOGE("Null node while generating SK function name, scopeId=%u", scopeId);
+      return "";
+    }
     if (node->GetNodeType() == SkNodeType::NODE_KERNEL) {
       if (startKernelNode == nullptr) {
         startKernelNode = node;

@@ -45,7 +45,13 @@ int main(int argc, char **argv) {
       auto stream = model.AddStream();
       model.AddKernel(stream, "profile_first");
       model.AddKernel(stream, "profile_second");
-      Require(aclskOptimize(model.Handle(), nullptr) == ACL_SUCCESS, "optimize profiling model");
+      const aclError ret = aclskOptimize(model.Handle(), nullptr);
+      if (scenario == "memset_failure" || scenario == "directory_failure") {
+        Require(ret != ACL_SUCCESS, "recorder failure must abort optimization");
+        Require(model.SuccessfulUpdates() == 0, "failed recorder must not update model");
+        continue;
+      }
+      Require(ret == ACL_SUCCESS, "optimize profiling model");
       Require(model.SuccessfulUpdates() == 1, "profiling must preserve model update");
       bool hasEntry = false;
       for (const auto &task : model.Tasks(stream)) {

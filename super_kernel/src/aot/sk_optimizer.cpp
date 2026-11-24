@@ -295,6 +295,12 @@ bool SuperKernelOptimizer::Schedule(SuperKernelScopeInfo &scopeInfo, SuperKernel
     SK_LOGE("no tasks for super kernel optimization: scope has 0 nodes for optimization");
     return false;
   }
+  for (const auto *node : taskNodes) {
+    if (node == nullptr) {
+      SK_LOGE("Null task node before scheduling");
+      return false;
+    }
+  }
   std::vector<SuperKernelBaseNode *> reorderedTaskNodes = ReorderWaitNodesForTaskBuild(taskNodes);
   if (reorderedTaskNodes.size() != taskNodes.size()) {
     SK_LOGE("task reorder produced invalid size: originalCount=%zu, reorderedCount=%zu", taskNodes.size(),
@@ -308,6 +314,9 @@ bool SuperKernelOptimizer::Schedule(SuperKernelScopeInfo &scopeInfo, SuperKernel
   }
 
   std::string skFuncName = GetSkFuncName(reorderedTaskNodes, scopeInfo.GetScopeId(), scopeInfo.GetExtInfo().scopeName);
+  if (skFuncName.empty()) {
+    return false;
+  }
   PrintTaskNodesDetail(reorderedTaskNodes, "reordered task nodes");
 
   const auto &eventNodes = scopeInfo.GetExtInfo().eventNodes;

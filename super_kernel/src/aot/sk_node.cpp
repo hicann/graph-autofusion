@@ -241,6 +241,8 @@ const char *FusionFailReasonInfo::GetBindmapDetail() const {
       return "bind map cap inconsistent";
     case BindmapFailReason::BIN_HOST_ADDR_GET_FAILED:
       return "failed to get binary host address";
+    case BindmapFailReason::INVALID_CODE_RANGE:
+      return "invalid device function code range";
     default:
       return "";
   }
@@ -314,8 +316,9 @@ SkBindMap InitSuperKernelBindMap(aclrtBinHandle binHdl) {
   constexpr size_t payloadSize = sizeof(SknlValuePayload);
 
   size_t metaNum = 0;
-  if (int ret = rtBinaryGetMetaNum(binHdl, RT_BINARY_TYPE_SK_INFO, &metaNum) != 0) {
-    SK_LOGI("rtBinaryGetMetaNum unsuccessful, ret=%d", ret);
+  rtError_t ret = rtBinaryGetMetaNum(binHdl, RT_BINARY_TYPE_SK_INFO, &metaNum);
+  if (ret != 0) {
+    SK_LOGE("rtBinaryGetMetaNum unsuccessful, ret=%d", ret);
     return SkBindMap();
   }
   if (metaNum == 0) {
@@ -325,6 +328,11 @@ SkBindMap InitSuperKernelBindMap(aclrtBinHandle binHdl) {
 
   SK_LOGI("binHdl=0x%lx, metaNum=%lu, payloadSize=%zu", (uint64_t)binHdl, metaNum, payloadSize);
 
+  if (metaNum > std::vector<uint8_t>().max_size() / payloadSize || metaNum > std::vector<size_t>().max_size() ||
+      metaNum > std::vector<void *>().max_size()) {
+    SK_LOGE("SuperKernel metadata count exceeds allocation limit, metaNum=%zu", metaNum);
+    return {};
+  }
   std::vector<uint8_t> dataPool(metaNum * payloadSize);
   std::vector<size_t> infoSize(metaNum, payloadSize);
   std::vector<void *> metaDataList(metaNum);
@@ -333,9 +341,9 @@ SkBindMap InitSuperKernelBindMap(aclrtBinHandle binHdl) {
     metaDataList[i] = &dataPool[i * payloadSize];
   }
 
-  if (int ret =
-          rtBinaryGetMetaInfo(binHdl, RT_BINARY_TYPE_SK_INFO, metaNum, metaDataList.data(), infoSize.data()) != 0) {
-    SK_LOGW("Failed to get SuperKernel metadata from binary, ret=%d; fusion will be skipped", ret);
+  ret = rtBinaryGetMetaInfo(binHdl, RT_BINARY_TYPE_SK_INFO, metaNum, metaDataList.data(), infoSize.data());
+  if (ret != 0) {
+    SK_LOGE("Failed to get SuperKernel metadata from binary, ret=%d", ret);
     return SkBindMap();
   }
 
@@ -453,8 +461,8 @@ const SkBindMap &GetSkBindMap(aclrtBinHandle binHdl) {
 }
 
 template <SkNodeCoreType coreType>
-bool InitSingleCoreFunc(const CoreFuncInitContext &ctx, aclrtBinHandle binHdl, void *binDevAddr,
-                        uint32_t &validFuncNum) {
+bool InitSingleCoreFunc(const CoreFuncInitContext &ctx, aclrtBinHandle binHdl, void *binDevAddr, uint32_t &validFuncNum,
+                        size_t binDevSize) {
   std::string coreName = "";
   if (coreType == SkNodeCoreType::AIC) {
     coreName = "AIC";
@@ -463,11 +471,20 @@ bool InitSingleCoreFunc(const CoreFuncInitContext &ctx, aclrtBinHandle binHdl, v
   }
   constexpr uint32_t coreTypeId = static_cast<uint32_t>(coreType);  // 0 : aic, 1 : aiv
   uint64_t skFuncOffset = ctx.bindIt->second.sknlFuncs[ctx.splitIdx];
-  ctx.info->funcAddr[coreTypeId] = skFuncOffset + (uint64_t)binDevAddr;
+  const uint64_t base = reinterpret_cast<uintptr_t>(binDevAddr);
+  if (skFuncOffset >= binDevSize || skFuncOffset > std::numeric_limits<uint64_t>::max() - base) {
+    SK_LOGE("Invalid SK function offset, split=%zu, offset=%lu, codeSize=%zu", ctx.splitIdx, skFuncOffset, binDevSize);
+    if (ctx.failReason != nullptr) {
+      *ctx.failReason = BindmapFailReason::INVALID_CODE_RANGE;
+    }
+    return false;
+  }
+  ctx.info->funcAddr[coreTypeId] = skFuncOffset + base;
   ctx.info->funcOffset[coreTypeId] = skFuncOffset;  // Save offset for dfx info
   void *binHostAddr = nullptr;
   uint32_t binHostSize = 0;
-  if (int ret = rtGetBinBuffer(binHdl, RT_BIN_HOST_ADDR, &binHostAddr, &binHostSize) != 0) {
+  const rtError_t ret = rtGetBinBuffer(binHdl, RT_BIN_HOST_ADDR, &binHostAddr, &binHostSize);
+  if (ret != 0) {
     SK_LOGE("split[%zu] rtGetBinBuffer failed for %s, ret=%d", ctx.splitIdx, coreName.c_str(), ret);
     if (ctx.failReason != nullptr) {
       *ctx.failReason = BindmapFailReason::BIN_HOST_ADDR_GET_FAILED;
@@ -479,6 +496,13 @@ bool InitSingleCoreFunc(const CoreFuncInitContext &ctx, aclrtBinHandle binHdl, v
   std::string symbolBind = "";
   if (GetFuncSymbolInfo(binHdl, static_cast<const char *>(binHostAddr), binHostSize, skFuncOffset, symbolName, funcSize,
                         symbolBind)) {
+    if (funcSize > binDevSize - skFuncOffset) {
+      SK_LOGE("SK function exceeds code range, offset=%lu, size=%lu, codeSize=%zu", skFuncOffset, funcSize, binDevSize);
+      if (ctx.failReason != nullptr) {
+        *ctx.failReason = BindmapFailReason::INVALID_CODE_RANGE;
+      }
+      return false;
+    }
     ctx.info->prefetchCnt[coreTypeId] = AlignUpAndClamp(funcSize, coreTypeId);
     ctx.info->symbolBind[coreTypeId] = symbolBind;
     SK_LOGI("split[%zu] %s symbol=%s, size=0x%lx, bind=%s", ctx.splitIdx, coreName.c_str(), symbolName.c_str(),
@@ -498,18 +522,21 @@ bool InitSingleCoreFunc(const CoreFuncInitContext &ctx, aclrtBinHandle binHdl, v
 
 bool InitSingleSplitFunc(ResolvedFunctionInfo &info, size_t splitIdx, const SkBindMap &bindMap,
                          SkBindMap::iterator aicIt, SkBindMap::iterator aivIt, aclrtBinHandle binHdl, void *binDevAddr,
-                         uint32_t &resolvedNum, BindmapFailReason &failReason) {
-  bool res = false;
+                         uint32_t &resolvedNum, BindmapFailReason &failReason, size_t binDevSize) {
   uint32_t validFuncNum = 0;
   if (aicIt != bindMap.end()) {
     CoreFuncInitContext aicCtx = {&info, aicIt, splitIdx, &failReason};
-    res |= InitSingleCoreFunc<SkNodeCoreType::AIC>(aicCtx, binHdl, binDevAddr, validFuncNum);
+    if (!InitSingleCoreFunc<SkNodeCoreType::AIC>(aicCtx, binHdl, binDevAddr, validFuncNum, binDevSize)) {
+      return false;
+    }
   }
   if (aivIt != bindMap.end()) {
     CoreFuncInitContext aivCtx = {&info, aivIt, splitIdx, &failReason};
-    res |= InitSingleCoreFunc<SkNodeCoreType::AIV>(aivCtx, binHdl, binDevAddr, validFuncNum);
+    if (!InitSingleCoreFunc<SkNodeCoreType::AIV>(aivCtx, binHdl, binDevAddr, validFuncNum, binDevSize)) {
+      return false;
+    }
   }
-  if (!res) {
+  if (aicIt == bindMap.end() && aivIt == bindMap.end()) {
     return false;
   }
   if (validFuncNum > 0) {
@@ -546,6 +573,11 @@ bool InitKernelResolvedFuncs(KernelInfos &kernelInfos) {
     return false;
   }
 
+  if (binDevAddr == nullptr || binDevSize == 0) {
+    SK_LOGE("Runtime returned an empty binary code range for %s", kernelInfos.funcName.c_str());
+    kernelInfos.bindmapFailReason = BindmapFailReason::INVALID_CODE_RANGE;
+    return false;
+  }
   void *addr[2] = {nullptr, nullptr};  // {aic addr, aiv addr}
   aclRet = aclrtGetFunctionAddr(oriFuncHdl, addr, addr + 1);
   if (aclRet != ACL_SUCCESS) {
@@ -611,7 +643,7 @@ bool InitKernelResolvedFuncs(KernelInfos &kernelInfos) {
     ResolvedFunctionInfo info{};
     BindmapFailReason failReason = BindmapFailReason::NONE;
     if (!InitSingleSplitFunc(info, i, bindMap, aicItor, aivItor, binHdl, binDevAddr, kernelInfos.resolvedNum,
-                             failReason)) {
+                             failReason, binDevSize)) {
       SK_LOGW("Failed to initialize kernel function for SK node split[%zu]; fusion will be skipped", i);
       kernelInfos.bindmapFailReason = failReason;
       return false;
@@ -1265,6 +1297,10 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
     }
     hasUpdateParams = true;
   } else if (ctx.launchInfo != nullptr && ctx.launchInfo->entryInfo.skEntryFunc != nullptr) {
+    if (ctx.launchInfo->devArgs.Get() == nullptr) {
+      SK_LOGE("SK launch arguments are null for %s", Format().c_str());
+      return false;
+    }
     updateParams.type = ACL_MODEL_RI_TASK_KERNEL;
     updateParams.opInfoPtr = ctx.launchInfo->cacheInfo;
     updateParams.opInfoSize = ctx.launchInfo->cacheopInfoSize;
@@ -1650,7 +1686,7 @@ bool DumpSingleKernelBinary(const KernelInfos &kernelInfo, const std::string &ke
   // Get binary buffer from runtime
   void *binHostAddr = nullptr;
   uint32_t binHostSize = 0;
-  int rtRet = rtGetBinBuffer(kernelInfo.binHdl, RT_BIN_HOST_ADDR, &binHostAddr, &binHostSize);
+  rtError_t rtRet = rtGetBinBuffer(kernelInfo.binHdl, RT_BIN_HOST_ADDR, &binHostAddr, &binHostSize);
   if (rtRet != 0 || binHostAddr == nullptr || binHostSize == 0) {
     SK_LOGW("Failed to get bin buffer for kernel %s, rtRet=%d, addr=%p, size=%u", kernelInfo.funcName.c_str(), rtRet,
             binHostAddr, binHostSize);
@@ -1660,9 +1696,9 @@ bool DumpSingleKernelBinary(const KernelInfos &kernelInfo, const std::string &ke
   // Get binary device address (code segment start address)
   void *binDevAddr = nullptr;
   size_t binDevSize = 0;
-  rtRet = aclrtBinaryGetDevAddress(kernelInfo.binHdl, &binDevAddr, &binDevSize);
-  if (rtRet != 0) {
-    SK_LOGW("Failed to get bin dev address for kernel %s, rtRet=%d", kernelInfo.funcName.c_str(), rtRet);
+  const aclError aclRet = aclrtBinaryGetDevAddress(kernelInfo.binHdl, &binDevAddr, &binDevSize);
+  if (aclRet != ACL_SUCCESS) {
+    SK_LOGW("Failed to get bin dev address for kernel %s, rtRet=%d", kernelInfo.funcName.c_str(), aclRet);
     return false;
   }
   uint64_t codeSegmentAddr = reinterpret_cast<uint64_t>(binDevAddr);
@@ -1682,6 +1718,10 @@ bool DumpSingleKernelBinary(const KernelInfos &kernelInfo, const std::string &ke
 
   outFile.write(static_cast<char *>(binHostAddr), binHostSize);
   outFile.close();
+  if (outFile.fail()) {
+    SK_LOGW("Failed to write or close kernel binary: %s", oFilePath.c_str());
+    return false;
+  }
 
   SK_LOGI("Dumped kernel binary: %s, size=%u bytes, codeSegAddr=%lu", oFilePath.c_str(), binHostSize, codeSegmentAddr);
   return true;
@@ -1731,7 +1771,7 @@ uint32_t DumpSkEntryBinary(const std::string &kernelBinsDir) {
 
   void *entryBinAddr = nullptr;
   uint32_t entryBinSize = 0;
-  int rtRet = rtGetBinBuffer(entryBinHandle, RT_BIN_HOST_ADDR, &entryBinAddr, &entryBinSize);
+  rtError_t rtRet = rtGetBinBuffer(entryBinHandle, RT_BIN_HOST_ADDR, &entryBinAddr, &entryBinSize);
   if (rtRet != 0 || entryBinAddr == nullptr || entryBinSize == 0) {
     SK_LOGW("Failed to get SK entry bin buffer, rtRet=%d", rtRet);
     return 0;
@@ -1740,9 +1780,9 @@ uint32_t DumpSkEntryBinary(const std::string &kernelBinsDir) {
   // Get SK entry binary device address (code segment start address)
   void *entryBinDevAddr = nullptr;
   size_t entryBinDevSize = 0;
-  rtRet = aclrtBinaryGetDevAddress(entryBinHandle, &entryBinDevAddr, &entryBinDevSize);
-  if (rtRet != 0) {
-    SK_LOGW("Failed to get SK entry bin dev address, rtRet=%d", rtRet);
+  const aclError aclRet = aclrtBinaryGetDevAddress(entryBinHandle, &entryBinDevAddr, &entryBinDevSize);
+  if (aclRet != ACL_SUCCESS) {
+    SK_LOGW("Failed to get SK entry bin dev address, ret=%d", aclRet);
     return 0;
   }
   uint64_t codeSegmentAddr = reinterpret_cast<uint64_t>(entryBinDevAddr);
@@ -1760,6 +1800,10 @@ uint32_t DumpSkEntryBinary(const std::string &kernelBinsDir) {
 
   skOutFile.write(static_cast<char *>(entryBinAddr), entryBinSize);
   skOutFile.close();
+  if (skOutFile.fail()) {
+    SK_LOGW("Failed to write or close kernel binary: %s", skOFilePath.c_str());
+    return 0;
+  }
 
   SK_LOGI("Dumped SK entry binary: %s, size=%u bytes, codeSegAddr=%lu", skOFilePath.c_str(), entryBinSize,
           codeSegmentAddr);

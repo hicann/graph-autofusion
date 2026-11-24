@@ -20,6 +20,8 @@
 #include <cstdlib>
 #include <thread>
 #include <chrono>
+#include <locale>
+#include <nlohmann/json.hpp>
 #include <fstream>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -32,6 +34,10 @@
 #include "sk_event_recorder.h"
 #include "sk_graph.h"
 #include "sk_node.h"
+#include "sk_optimizer.h"
+#include "super_kernel.h"
+#include "model_fixture.h"
+#include "aprof_pub.h"
 
 // 辅助函数：包装现已公开的 CoreIsAiv，返回 0/1 以匹配旧测试断言
 // 注：sk_event_recorder.h 中的 CoreIsAiv 现在依赖 GetCurrentSkKernelArch()，
@@ -53,6 +59,7 @@ class SkEventRecorderTest : public testing::Test {
   void TearDown() override {
     // 确保每次测试后 recorder 被重置
     SkEventRecorder::Instance().SkProfilingShutdown();
+    GlobalMockObject::verify();
     // gmAddr 现在是 unique_ptr，通过 reset 释放
     SkEventRecorder::Instance().deviceCtxs.gmAddr.reset();
     SkEventRecorder::Instance().deviceCtxs.hostBuf.reset();
@@ -69,6 +76,8 @@ class SkEventRecorderTest : public testing::Test {
     unsetenv("ASCEND_PROF_SK_ON");
     SkUtResetTestControls();
     // 重置 call_once 标志，使后续测试的 Init() 可以重新执行
+    SkEventRecorder::Instance().error_.store(ACL_SUCCESS);
+    SkEventRecorder::Instance().startupDone_ = false;
     SkEventRecorder::Instance().initFlag_.~once_flag();
     new (&SkEventRecorder::Instance().initFlag_) std::once_flag();
     // 重置 static 成员变量
@@ -88,6 +97,9 @@ class SkEventRecorderTest : public testing::Test {
     }
     // 清理 sk_meta/<pid> 目录
     std::string pidDir = "./sk_meta/" + std::to_string(pid);
+    for (const char *name : {"escaped.json", "locale.json"}) {
+      remove((pidDir + "/" + name).c_str());
+    }
     rmdir(pidDir.c_str());
     // 尝试清理 sk_meta 目录（如果为空）
     rmdir("./sk_meta");
@@ -195,8 +207,8 @@ TEST_F(SkEventRecorderTest, InstanceReturnsSameInstance) {
 
 // Test 2: 默认状态下未启用
 TEST_F(SkEventRecorderTest, DisabledByDefault) {
-  bool result = SkEventRecorder::Instance().Init();
-  EXPECT_FALSE(result);
+  aclError result = SkEventRecorder::Instance().Init();
+  EXPECT_EQ(result, ACL_SUCCESS);
   EXPECT_FALSE(SkEventRecorder::Instance().IsEnabled());
 }
 
@@ -204,8 +216,8 @@ TEST_F(SkEventRecorderTest, DisabledByDefault) {
 TEST_F(SkEventRecorderTest, EnabledWhenEnvSetToValidSize) {
   setenv("ASCEND_PROF_SK_ON", "64", 1);
 
-  bool result = SkEventRecorder::Instance().Init();
-  EXPECT_TRUE(result);
+  aclError result = SkEventRecorder::Instance().Init();
+  EXPECT_EQ(result, ACL_SUCCESS);
   EXPECT_TRUE(SkEventRecorder::Instance().IsEnabled());
 
   SkEventRecorder::Instance().SkProfilingShutdown();
@@ -215,8 +227,8 @@ TEST_F(SkEventRecorderTest, EnabledWhenEnvSetToValidSize) {
 TEST_F(SkEventRecorderTest, NotEnabledWhenEnvNotOne) {
   setenv("ASCEND_PROF_SK_ON", "0", 1);
 
-  bool result = SkEventRecorder::Instance().Init();
-  EXPECT_FALSE(result);
+  aclError result = SkEventRecorder::Instance().Init();
+  EXPECT_EQ(result, ACL_SUCCESS);
   EXPECT_FALSE(SkEventRecorder::Instance().IsEnabled());
 }
 
@@ -224,16 +236,16 @@ TEST_F(SkEventRecorderTest, NotEnabledWhenEnvNotOne) {
 TEST_F(SkEventRecorderTest, NotEnabledWhenEnvSetToOtherValue) {
   setenv("ASCEND_PROF_SK_ON", "true", 1);
 
-  bool result = SkEventRecorder::Instance().Init();
-  EXPECT_FALSE(result);
+  aclError result = SkEventRecorder::Instance().Init();
+  EXPECT_EQ(result, ACL_SUCCESS);
   EXPECT_FALSE(SkEventRecorder::Instance().IsEnabled());
 }
 
 TEST_F(SkEventRecorderTest, NotEnabledWhenEnvHasTrailingCharacters) {
   setenv("ASCEND_PROF_SK_ON", "123abc", 1);
 
-  bool result = SkEventRecorder::Instance().Init();
-  EXPECT_FALSE(result);
+  aclError result = SkEventRecorder::Instance().Init();
+  EXPECT_EQ(result, ACL_SUCCESS);
   EXPECT_FALSE(SkEventRecorder::Instance().IsEnabled());
 }
 
@@ -506,7 +518,8 @@ TEST(SkEventRecorderDav3510Test, CoreIsAiv_DoesNotFallThroughToAscend910Rule) {
 
 // Test 17: GetGmAddrForDevice 在未启用时返回 nullptr
 TEST_F(SkEventRecorderTest, GetGmAddrForDeviceReturnsNullWhenDisabled) {
-  void *addr = SkEventRecorder::Instance().GetGmAddrForDevice(0);
+  void *addr = nullptr;
+  EXPECT_EQ(SkEventRecorder::Instance().GetGmAddrForDevice(0, addr), ACL_SUCCESS);
   EXPECT_EQ(addr, nullptr);
 }
 
@@ -514,10 +527,14 @@ TEST_F(SkEventRecorderTest, GetGmAddrForDeviceReturnsNullWhenDisabled) {
 TEST_F(SkEventRecorderTest, GetGmAddrForDeviceReturnsNullForInvalidDeviceId) {
   SkEventRecorder::Instance().enabled = true;
 
-  void *addressBeyondMaxDevice = SkEventRecorder::Instance().GetGmAddrForDevice(SK_EVENT_MAX_DEVICE_NUM);
+  void *addressBeyondMaxDevice = nullptr;
+  EXPECT_EQ(SkEventRecorder::Instance().GetGmAddrForDevice(SK_EVENT_MAX_DEVICE_NUM, addressBeyondMaxDevice),
+            ACL_ERROR_INVALID_PARAM);
   EXPECT_EQ(addressBeyondMaxDevice, nullptr);
 
-  void *addressExceedingMaxDevice = SkEventRecorder::Instance().GetGmAddrForDevice(SK_EVENT_MAX_DEVICE_NUM + 1);
+  void *addressExceedingMaxDevice = nullptr;
+  EXPECT_EQ(SkEventRecorder::Instance().GetGmAddrForDevice(SK_EVENT_MAX_DEVICE_NUM + 1, addressExceedingMaxDevice),
+            ACL_ERROR_INVALID_PARAM);
   EXPECT_EQ(addressExceedingMaxDevice, nullptr);
 }
 
@@ -535,11 +552,13 @@ TEST_F(SkEventRecorderTest, GetGmAddrForDeviceReturnsCachedAddr) {
   InitMockDeviceCtx();
   SkEventRecorder::Instance().enabled = true;
 
-  void *firstCallAddr = SkEventRecorder::Instance().GetGmAddrForDevice(0);
+  void *firstCallAddr = nullptr;
+  EXPECT_EQ(SkEventRecorder::Instance().GetGmAddrForDevice(0, firstCallAddr), ACL_SUCCESS);
   EXPECT_NE(firstCallAddr, nullptr);
 
   // 第二次调用应该返回相同地址（fast path）
-  void *secondCallAddr = SkEventRecorder::Instance().GetGmAddrForDevice(0);
+  void *secondCallAddr = nullptr;
+  EXPECT_EQ(SkEventRecorder::Instance().GetGmAddrForDevice(0, secondCallAddr), ACL_SUCCESS);
   EXPECT_EQ(firstCallAddr, secondCallAddr);
 
   CleanupMockDeviceCtx();
@@ -794,8 +813,10 @@ TEST_F(SkEventRecorderTest, DeviceCtxInitialState) {
 TEST_F(SkEventRecorderTest, MultipleInitCalls) {
   setenv("ASCEND_PROF_SK_ON", "64", 1);
 
-  bool result1 = SkEventRecorder::Instance().Init();
-  bool result2 = SkEventRecorder::Instance().Init();
+  aclError result1 = SkEventRecorder::Instance().Init();
+  aclError result2 = SkEventRecorder::Instance().Init();
+  EXPECT_EQ(result1, ACL_SUCCESS);
+  EXPECT_EQ(result2, ACL_SUCCESS);
 
   EXPECT_TRUE(SkEventRecorder::Instance().IsEnabled());
 
@@ -913,10 +934,12 @@ TEST_F(SkEventRecorderTest, GetGmAddrForDeviceDoubleCheckLocking) {
   SkEventRecorder::Instance().enabled = true;
 
   // 第一次调用 - slow path
-  void *addr1 = SkEventRecorder::Instance().GetGmAddrForDevice(0);
+  void *addr1 = nullptr;
+  EXPECT_EQ(SkEventRecorder::Instance().GetGmAddrForDevice(0, addr1), ACL_SUCCESS);
 
   // 第二次调用 - fast path（active 已设置）
-  void *addr2 = SkEventRecorder::Instance().GetGmAddrForDevice(0);
+  void *addr2 = nullptr;
+  EXPECT_EQ(SkEventRecorder::Instance().GetGmAddrForDevice(0, addr2), ACL_SUCCESS);
 
   if (addr1 != nullptr && addr2 != nullptr) {
     EXPECT_EQ(addr1, addr2);
@@ -1332,8 +1355,8 @@ TEST_F(SkEventRecorderTest, EnvValueTooLarge) {
   // 5121KB > 5MB，应失败
   setenv("ASCEND_PROF_SK_ON", "5121", 1);
 
-  bool result = SkEventRecorder::Instance().Init();
-  EXPECT_FALSE(result);
+  aclError result = SkEventRecorder::Instance().Init();
+  EXPECT_EQ(result, ACL_SUCCESS);
   EXPECT_FALSE(SkEventRecorder::Instance().IsEnabled());
 }
 
@@ -1617,4 +1640,234 @@ TEST_F(SkGetSkFuncNameTest, LargeScopeId_ValidOutput) {
       CreateKernelNodeWithFuncName(1, "k1"),
   };
   EXPECT_EQ(GetSkFuncName(nodes, 65535, "s"), "sk_65535_s_start_k1_end_k1");
+}
+
+TEST_F(SkEventRecorderTest, InitDeviceOutputFileRejectsOpenFailure) {
+  SkEventDeviceCtx ctx;
+  ctx.outputDir = "/dev/null";
+  auto &recorder = SkEventRecorder::Instance();
+  EXPECT_FALSE(recorder.InitDeviceOutputFile(&ctx, 0));
+  EXPECT_NE(recorder.error_.load(), ACL_SUCCESS);
+  EXPECT_FALSE(ctx.outputFp.IsValid());
+}
+
+TEST_F(SkEventRecorderTest, DifferentDeviceNeverReceivesCachedAddress) {
+  InitMockDeviceCtx();
+  auto &recorder = SkEventRecorder::Instance();
+  recorder.enabled.store(true);
+  recorder.dumpDeviceId = 0;
+  void *addr = reinterpret_cast<void *>(1);
+  EXPECT_EQ(recorder.GetGmAddrForDevice(1, addr), ACL_ERROR_INVALID_PARAM);
+  EXPECT_EQ(addr, nullptr);
+  EXPECT_EQ(recorder.error_.load(), ACL_SUCCESS);
+  EXPECT_TRUE(recorder.IsEnabled());
+  EXPECT_TRUE(recorder.deviceCtxs.active.load());
+  EXPECT_EQ(recorder.GetGmAddrForDevice(0, addr), ACL_SUCCESS);
+  EXPECT_EQ(addr, recorder.deviceCtxs.gmAddr.get());
+  EXPECT_NE(addr, nullptr);
+  CleanupMockDeviceCtx();
+}
+
+TEST_F(SkEventRecorderTest, ThreadStartupFailureIsReportedAndJoinedWithoutRetry) {
+  auto &recorder = SkEventRecorder::Instance();
+  setenv("ASCEND_PROF_SK_ON", "64", 1);
+  MOCKER(aclrtSetDevice).stubs().will(returnValue(ACL_ERROR_INVALID_PARAM));
+  EXPECT_EQ(recorder.Init(), ACL_ERROR_INVALID_PARAM);
+  EXPECT_EQ(recorder.error_.load(), ACL_ERROR_INVALID_PARAM);
+  EXPECT_FALSE(recorder.globalRunning.load());
+  ASSERT_FALSE(recorder.threadStarted_);
+  recorder.SkProfilingShutdown();
+  EXPECT_FALSE(recorder.threadStarted_);
+  EXPECT_EQ(recorder.Init(), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(SkEventRecorderTest, NodeAndScopeNamesAreEscapedInParseableJson) {
+  InitMockDeviceCtx();
+  auto &recorder = SkEventRecorder::Instance();
+  auto *ctx = &recorder.deviceCtxs;
+  const std::string path = ctx->outputDir + "/escaped.json";
+  ASSERT_TRUE(ctx->outputFp.Open(path.c_str(), "w+b"));
+  ASSERT_EQ(fwrite("[{}]", 1, 4, ctx->outputFp.Get()), 4U);
+  const std::string modelId = "model_100_1";
+  const std::string name = "quoted\"name\\with\nnewline\t节点";
+  SkKernelEventRecord record{};
+  record.modelIdIndex = recorder.RegisterModelId(modelId);
+  record.skId = 4;
+  record.startTime = 100;
+  record.endTime = 251;
+  recorder.AddSkNameMapping(modelId, 4, name);
+  EXPECT_TRUE(recorder.WriteNodeEventToJson(ctx, &record, 0, {name, 1}));
+  EXPECT_TRUE(recorder.WriteSkEventToJson(ctx, &record, 0));
+  ASSERT_EQ(fflush(ctx->outputFp.Get()), 0);
+  const auto data = nlohmann::json::parse(ReadWholeFile(path));
+  ASSERT_EQ(data.size(), 3U);
+  EXPECT_EQ(data[0]["name"].get<std::string>(), "[0/0]" + name);
+  EXPECT_EQ(data[1]["name"].get<std::string>(), "[0/0] " + name);
+  EXPECT_TRUE(data[0]["dur"].is_number());
+  CleanupMockDeviceCtx();
+}
+
+TEST_F(SkEventRecorderTest, WriteFailureOnDumpThreadLeavesJoinToHost) {
+  auto &recorder = SkEventRecorder::Instance();
+  recorder.enabled.store(true);
+  recorder.globalRunning.store(true);
+  SkEventDeviceCtx ctx;
+  ASSERT_TRUE(ctx.outputFp.Open("/dev/full", "w"));
+  ASSERT_EQ(setvbuf(ctx.outputFp.Get(), nullptr, _IONBF, 0), 0);
+  struct Args {
+    SkEventRecorder *recorder;
+    SkEventDeviceCtx *ctx;
+  } args{&recorder, &ctx};
+  auto run = [](void *raw) -> void * {
+    auto *args = static_cast<Args *>(raw);
+    SkKernelEventRecord record{};
+    record.endTime = 1;
+    EXPECT_FALSE(args->recorder->WriteSkEventToJson(args->ctx, &record, 0));
+    return nullptr;
+  };
+  ASSERT_EQ(pthread_create(&recorder.dumpThread, nullptr, run, &args), 0);
+  recorder.threadStarted_ = true;
+  recorder.SkProfilingShutdown();
+  EXPECT_FALSE(recorder.threadStarted_);
+  EXPECT_FALSE(recorder.IsEnabled());
+  EXPECT_NE(recorder.error_.load(), ACL_SUCCESS);
+}
+
+TEST_F(SkGetSkFuncNameTest, NullNodeReturnsFailureSentinel) {
+  EXPECT_TRUE(GetSkFuncName({nullptr}, 1, "scope").empty());
+}
+
+TEST_F(SkEventRecorderTest, CopyFailureStopsRecorderAndRestoresCaptureMode) {
+  InitMockDeviceCtx();
+  auto &recorder = SkEventRecorder::Instance();
+  recorder.enabled.store(true);
+  recorder.globalRunning.store(true);
+  MOCKER(aclmdlRICaptureThreadExchangeMode).expects(exactly(2)).will(returnValue(ACL_SUCCESS));
+  MOCKER(aclrtMemcpy).stubs().will(returnValue(ACL_ERROR_INVALID_PARAM));
+  recorder.DumpDeviceData(&recorder.deviceCtxs);
+  EXPECT_EQ(recorder.error_.load(), ACL_ERROR_INVALID_PARAM);
+  EXPECT_FALSE(recorder.IsEnabled());
+  EXPECT_FALSE(recorder.globalRunning.load());
+  GlobalMockObject::verify();
+  CleanupMockDeviceCtx();
+}
+
+TEST_F(SkEventRecorderTest, AsynchronousFailureIsReturnedByNextBufferRequest) {
+  auto &recorder = SkEventRecorder::Instance();
+  recorder.ReportError(ACL_ERROR_INVALID_PARAM);
+  void *address = reinterpret_cast<void *>(1);
+  EXPECT_EQ(recorder.GetGmAddrForDevice(0, address), ACL_ERROR_INVALID_PARAM);
+  EXPECT_EQ(address, nullptr);
+  recorder.SkProfilingShutdown();
+  EXPECT_EQ(recorder.error_.load(), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(SkEventRecorderTest, InvalidUtf8IsRejectedBeforeWriting) {
+  auto &recorder = SkEventRecorder::Instance();
+  SkEventDeviceCtx ctx;
+  ASSERT_TRUE(ctx.outputFp.Open("/dev/null", "w"));
+  SkKernelEventRecord record{};
+  record.endTime = 1;
+  EXPECT_FALSE(recorder.WriteNodeEventToJson(&ctx, &record, 0, {std::string(1, static_cast<char>(0xff)), 1}));
+  EXPECT_EQ(recorder.error_.load(), ACL_ERROR_INVALID_PARAM);
+}
+
+TEST_F(SkEventRecorderTest, OptimizerFailureIsNotReplacedByRecorderFailure) {
+  sk::test::Model model;
+  auto stream = model.AddStream();
+  model.AddKernel(stream, "first");
+  model.AddKernel(stream, "second");
+  auto fail = +[](SuperKernelOptimizer *, SuperKernelGraph &) -> bool {
+    SkEventRecorder::Instance().ReportError(ACL_ERROR_INVALID_PARAM);
+    return false;
+  };
+  MOCKER_CPP(&SuperKernelOptimizer::Process).stubs().will(invoke(fail));
+  EXPECT_EQ(aclskOptimize(model.Handle(), nullptr), ACL_ERROR_FAILURE);
+  EXPECT_EQ(model.SuccessfulUpdates(), 0U);
+  GlobalMockObject::verify();
+}
+
+TEST_F(SkEventRecorderTest, GraphUpdateFailureKeepsItsOwnErrorCode) {
+  sk::test::Model model;
+  auto stream = model.AddStream();
+  model.AddKernel(stream, "first");
+  model.AddKernel(stream, "second");
+  auto fail = +[](aclmdlRI) -> aclError {
+    SkEventRecorder::Instance().ReportError(ACL_ERROR_INVALID_PARAM);
+    return -89;
+  };
+  MOCKER(aclmdlRIUpdate).stubs().will(invoke(fail));
+  EXPECT_EQ(aclskOptimize(model.Handle(), nullptr), -89);
+  EXPECT_EQ(model.SuccessfulUpdates(), 0U);
+  GlobalMockObject::verify();
+}
+
+TEST_F(SkEventRecorderTest, TimelineNumbersIgnoreGlobalCppLocale) {
+  struct CommaDecimal : std::numpunct<char> {
+    char do_decimal_point() const override {
+      return ',';
+    }
+  };
+  struct RestoreLocale {
+    std::locale previous = std::locale();
+    ~RestoreLocale() {
+      std::locale::global(previous);
+    }
+  } restore;
+  std::locale::global(std::locale(std::locale::classic(), new CommaDecimal));
+  InitMockDeviceCtx();
+  auto &recorder = SkEventRecorder::Instance();
+  auto *ctx = &recorder.deviceCtxs;
+  const std::string path = ctx->outputDir + "/locale.json";
+  ASSERT_TRUE(ctx->outputFp.Open(path.c_str(), "w+b"));
+  ASSERT_EQ(fwrite("[{}]", 1, 4, ctx->outputFp.Get()), 4U);
+  SkKernelEventRecord record{};
+  record.startTime = 1;
+  record.endTime = 251;
+  ASSERT_TRUE(recorder.WriteSkEventToJson(ctx, &record, 0));
+  ASSERT_EQ(fflush(ctx->outputFp.Get()), 0);
+  const auto parsed = nlohmann::json::parse(ReadWholeFile(path));
+  ASSERT_EQ(parsed.size(), 2U);
+  EXPECT_TRUE(parsed[0]["ts"].is_number_float());
+  EXPECT_DOUBLE_EQ(parsed[0]["dur"].get<double>(), 250.0 / GetSkRuntimeConfig().tickUsMultiplier);
+  CleanupMockDeviceCtx();
+}
+
+TEST_F(SkEventRecorderTest, ProfilingCallbackFailureKeepsLocalRecorderAvailable) {
+  setenv("ASCEND_PROF_SK_ON", "64", 1);
+  MOCKER(MsprofRegisterCallback).stubs().will(returnValue(-1));
+  auto &recorder = SkEventRecorder::Instance();
+  EXPECT_EQ(recorder.Init(), ACL_SUCCESS);
+  EXPECT_TRUE(recorder.IsEnabled());
+  EXPECT_TRUE(recorder.threadStarted_);
+  void *address = nullptr;
+  EXPECT_EQ(recorder.GetGmAddrForDevice(0, address), ACL_SUCCESS);
+  EXPECT_NE(address, nullptr);
+  EXPECT_TRUE(recorder.deviceCtxs.outputFp.IsValid());
+  recorder.SkProfilingShutdown();
+  EXPECT_EQ(recorder.error_.load(), ACL_SUCCESS);
+  EXPECT_FALSE(recorder.threadStarted_);
+}
+
+TEST_F(SkEventRecorderTest, OutputOpenFailureStopsRecorderWithoutAnotherAllocation) {
+  setenv("ASCEND_PROF_SK_ON", "64", 1);
+  auto &recorder = SkEventRecorder::Instance();
+  ASSERT_EQ(recorder.Init(), ACL_SUCCESS);
+  MOCKER(SkEventRecorder::CreateOutputDir).stubs().will(returnValue(std::string("/dev/null")));
+  auto allocate = +[](void **address, size_t size, aclrtMemMallocPolicy) -> aclError {
+    *address = malloc(size);
+    return *address == nullptr ? ACL_ERROR_FAILURE : ACL_SUCCESS;
+  };
+  MOCKER(aclrtMalloc).expects(once()).will(invoke(allocate));
+  MOCKER(aclrtMemset).expects(once()).will(returnValue(ACL_SUCCESS));
+  void *address = reinterpret_cast<void *>(1);
+  EXPECT_EQ(recorder.GetGmAddrForDevice(0, address), ACL_ERROR_FAILURE);
+  EXPECT_EQ(address, nullptr);
+  EXPECT_FALSE(recorder.IsEnabled());
+  EXPECT_FALSE(recorder.threadStarted_);
+  EXPECT_EQ(recorder.deviceCtxs.gmAddr.get(), nullptr);
+  EXPECT_EQ(recorder.deviceCtxs.hostBuf.get(), nullptr);
+  EXPECT_FALSE(recorder.deviceCtxs.outputFp.IsValid());
+  EXPECT_EQ(recorder.GetGmAddrForDevice(0, address), ACL_ERROR_FAILURE);
+  EXPECT_EQ(address, nullptr);
 }
