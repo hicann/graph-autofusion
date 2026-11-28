@@ -72,7 +72,8 @@ if sk_check_driver_version_for_aot; then
     run_sample "aot/example03_kernel_pybind" \
         bash "${BASEPATH}/aot/example03_kernel_pybind/run.sh" --npu-arch="${NPU_ARCH}"
 else
-    echo "[WARNING][AOT-SKIP] AOT examples skipped; treating the environment skip as success."
+    echo "[ERROR][DRIVER-ENV] driver environment check failed; cannot run AOT examples."
+    exit 1
 fi
 
 echo "Run all examples success"
