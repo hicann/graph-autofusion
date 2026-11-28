@@ -12,6 +12,7 @@
 #define SK_EVENT_RECORDER_H
 
 #include <atomic>
+#include <condition_variable>
 #include <pthread.h>
 #include <cstdint>
 #include <unordered_map>
@@ -66,12 +67,12 @@ class SkEventRecorder {
   static SkEventRecorder &Instance();
 
   // 初始化（检查环境变量，如果开启则初始化）
-  bool Init();
+  aclError Init();
 
   // 为指定 device 分配 GM 空间并返回地址
-  void *GetGmAddrForDevice(uint32_t deviceId);
+  aclError GetGmAddrForDevice(uint32_t deviceId, void *&gmAddr);
 
-  // 关闭所有资源
+  // 停止并回收后台线程，释放 host 搬运资源
   void SkProfilingShutdown();
 
   // 是否启用
@@ -127,6 +128,7 @@ class SkEventRecorder {
 
   void DumpModelData(SkEventRecorder *recorder);
 
+  void ReportError(aclError error);
   // 拷贝并解析 GM 数据
   void DumpDeviceData(SkEventDeviceCtx *ctx);
   bool DumpEventRecord(SkEventDeviceCtx *ctx, const SkKernelEventRecord *record, uint32_t core);
@@ -145,11 +147,16 @@ class SkEventRecorder {
   static void SetProfSignal(uint32_t val);
 
  private:
-  std::atomic_bool enabled{false};        // 打点是否执行
-  std::atomic_bool globalRunning{false};  // 全局打点解析线程运行状态
-  pthread_t dumpThread;                   // 全局打点解析后台线程
-  std::once_flag initFlag_;               // 保证 Init() 创建后台线程只执行一次
-  std::mutex mutex;
+  std::atomic_bool enabled{false};            // 打点是否执行
+  std::atomic_bool globalRunning{false};      // 全局打点解析线程运行状态
+  std::atomic<aclError> error_{ACL_SUCCESS};  // 首次失败，区分正常未开启和故障停用
+  std::mutex lifecycleMutex_;                 // 串行化线程创建和 join，获取顺序先于 mutex
+  std::condition_variable startupCv_;
+  bool startupDone_ = false;     // 由 mutex 保护，后台线程已完成 SetDevice
+  bool threadStarted_ = false;   // 由 lifecycleMutex_ 保护，线程已创建但尚未 join
+  pthread_t dumpThread{};        // 全局打点解析后台线程
+  std::once_flag initFlag_;      // 保证 Init() 创建后台线程只执行一次
+  std::mutex mutex;              // 保护设备上下文创建和 startupDone_
   std::mutex profBasePathMutex;  // 保护 profBasePath 的互斥锁
   std::string profBasePath;      // 缓存的 profiling 输出路径
   SkEventDeviceCtx deviceCtxs;   // device上下文列表
