@@ -554,9 +554,12 @@ void *SkEventRecorder::DumpThreadFunc(void *arg) {
 
 namespace {
 bool EscapeProfilingJsonString(const std::string &value, std::string &escaped) {
+  constexpr size_t JSON_STRING_CONTENT_OFFSET = 1;
+  constexpr size_t JSON_STRING_QUOTES_LENGTH = 2;
   try {
     const std::string quoted = nlohmann::json(value).dump();
-    escaped.assign(quoted, 1, quoted.size() - 2);
+    // dump() 的结果包含首尾双引号，原格式串已提供双引号，此处只取转义后的内容。
+    escaped.assign(quoted, JSON_STRING_CONTENT_OFFSET, quoted.size() - JSON_STRING_QUOTES_LENGTH);
     return true;
   } catch (const nlohmann::json::type_error &) {
     // 非法 UTF-8 转换为调用方现有的错误返回，避免异常逃出后台线程。
