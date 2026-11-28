@@ -145,6 +145,60 @@ af::Status CollectIndirectLoadEntry(const ascir::HintGraph &graph, af::AscNodePt
   return af::SUCCESS;
 }
 
+namespace {
+// [L2 降级预判] 在候选图副本上走完整链（SetTemplateId → 归一化 →
+// FinalizeLoweringMetadata → PlanSimtEmission），预测结构性 L2 候选是否降级。
+// 契约：pre_judged 仅在 PlanSimtEmission 真正执行后置 true——任何早退分支
+// （归一化失败/元数据失败）保持 false + GELOGW，调用方据此回退正常计算，
+// 绝不将零值 plan 当真 plan 复用（SimtEmissionPlan{} 的 register_merge=false
+// 恰好是合法 L4 档位，静默复用会把 L2 主路径打到 L4）。
+af::Status PreJudgeL2Degradation(const af::AscGraph &graph, const std::vector<af::AscNodePtr> &members,
+                                 const ascgen_utils::indirect_load::SimtFusedMergeInfo &merge_info,
+                                 ascir::TemplateId template_id, SimtEmissionPlan &early_plan, bool &will_degrade,
+                                 bool &pre_judged) {
+  will_degrade = false;
+  pre_judged = false;
+  ascir::ImplGraph pre_graph(graph.GetName().c_str());
+  GE_ASSERT_TRUE(pre_graph.CopyFrom(graph), "Failed to copy graph for L2 degradation pre-judgment.");
+  std::vector<af::AscNodePtr> pre_members;
+  for (const af::AscNodePtr &member : members) {
+    const af::AscNodePtr pre_member = pre_graph.FindNode(member->GetName().c_str());
+    GE_ASSERT_NOTNULL(pre_member, "Pre-judgment member[%s] not found in copy.", member->GetNamePtr());
+    GE_ASSERT_SUCCESS(::ascir::SetTemplateId(pre_member, template_id));
+    pre_members.emplace_back(pre_member);
+  }
+  bool pre_legal = true;
+  GE_ASSERT_SUCCESS(NormalizeSimtAxesForGroupTemplate(pre_graph, pre_members, nullptr, pre_legal, 0UL));
+  if (!pre_legal) {
+    GELOGW("[IndirectLoad] Pre-judge bailed: normalization failed, falling back to normal plan.");
+    return af::SUCCESS;
+  }
+  bool pre_all_u32 = true;
+  for (const af::AscNodePtr &pre_member : pre_members) {
+    bool metadata_ok = false;
+    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::FinalizeLoweringMetadata(pre_member, metadata_ok));
+    if (!metadata_ok) {
+      GELOGW("[IndirectLoad] Pre-judge bailed: metadata failed for node[%s], falling back to normal plan.",
+             pre_member->GetNamePtr());
+      return af::SUCCESS;
+    }
+    ascgen_utils::indirect_load::IndirectLoadLoweringMetadata metadata;
+    GE_ASSERT_SUCCESS(ascgen_utils::indirect_load::GetLoweringMetadata(pre_member, metadata));
+    if (metadata.simt.policy.offset_width != ascgen_utils::indirect_load::SimtOffsetWidth::kUint32) {
+      pre_all_u32 = false;
+      break;
+    }
+  }
+  GE_ASSERT_SUCCESS(PlanSimtEmission(merge_info, pre_all_u32, early_plan));
+  will_degrade = !early_plan.register_merge;
+  pre_judged = true;
+  GELOGI("[IndirectLoad] L2 degradation pre-judgment: will_degrade=%s (N=%zu, demand=%llu).",
+         will_degrade ? "true" : "false", static_cast<size_t>(merge_info.member_count),
+         static_cast<unsigned long long>(early_plan.demand));
+  return af::SUCCESS;
+}
+}  // namespace
+
 // 多 gather 水平融合候选流水：逐 IL 复用单 gather 的分析/校验/标注/元数据机制，仅轴归一化
 // 改为共享模板轴（NormalizeSimdAxesForGroupTemplate / NormalizeSimtAxesForGroupTemplate）。
 // G≥R、复合 Norm 等输出侧校验对组内各路判定必然一致（axis 相同、输出边界相同），逐 IL 执行
@@ -223,7 +277,54 @@ af::Status ApplyGraphPassGroup(af::AscGraph &graph, const IndirectLoadGroup &gro
     GE_ASSERT_SUCCESS(ClearSimtTemplateRoles(graph));
   }
   std::vector<RewrittenGraphAnalysis> analyses(members.size());
+  // [共享生产者视图隔离] AnalyzeRewrittenGraph 的 ApplyTemplatePathLayouts 会把成员 input/index
+  // 的直接生产者物理视图就地写回（ApplyPhysicalView 改 sched.axis 与 output 的 axis/repeats/
+  // strides）。组成员共享同一生产者（如同一个 index Broadcast）时，后分析的成员会读到被前
+  // 一个成员改写过的视图，导致各成员 TemplateLogicalView/policy 不一致（如 index sizes
+  // [56240,8] 与 [1,8] 分裂，第二路寻址错误）。逐成员分析前把直接生产者恢复到分析前快照，
+  // 保证所有成员从同一视图出发；最终视图由最后一个成员的分析写回（组内布局一致）。
+  struct DirectProducerViewSnapshot {
+    std::string name;
+    std::vector<ascir::AxisId> sched_axis;
+    std::vector<ascir::AxisId> axis;
+    std::vector<af::Expression> repeats;
+    std::vector<af::Expression> strides;
+  };
+  std::vector<DirectProducerViewSnapshot> producer_snapshots;
+  std::set<std::string> recorded_producers;
+  for (const af::AscNodePtr &member : members) {
+    for (size_t input_idx = 0UL; input_idx < static_cast<size_t>(kIndirectLoadInputCount); ++input_idx) {
+      const af::AscNodePtr producer = ascgen_utils::indirect_load::GetInputProducer(member, input_idx);
+      if (producer == nullptr || producer->outputs().empty() || producer->outputs()[0] == nullptr ||
+          !recorded_producers.insert(producer->GetName()).second) {
+        continue;
+      }
+      const auto &output_attr = producer->outputs()[0]->attr;
+      producer_snapshots.push_back(
+          {producer->GetName(), producer->attr.sched.axis, output_attr.axis, output_attr.repeats, output_attr.strides});
+    }
+  }
+  const auto restore_direct_producers = [&producer_snapshots](const af::AscNodePtr &member) {
+    for (size_t input_idx = 0UL; input_idx < static_cast<size_t>(kIndirectLoadInputCount); ++input_idx) {
+      const af::AscNodePtr producer = ascgen_utils::indirect_load::GetInputProducer(member, input_idx);
+      if (producer == nullptr || producer->outputs().empty() || producer->outputs()[0] == nullptr) {
+        continue;
+      }
+      for (const auto &snapshot : producer_snapshots) {
+        if (snapshot.name != producer->GetName()) {
+          continue;
+        }
+        producer->attr.sched.axis = snapshot.sched_axis;
+        auto &output_attr = producer->outputs()[0]->attr;
+        output_attr.axis = snapshot.axis;
+        output_attr.repeats = snapshot.repeats;
+        output_attr.strides = snapshot.strides;
+        break;
+      }
+    }
+  };
   for (size_t index = 0UL; index < members.size(); ++index) {
+    restore_direct_producers(members[index]);
     GE_ASSERT_SUCCESS(AnalyzeRewrittenGraph(graph, members[index], template_id, is_candidate_legal, analyses[index]));
     if (!is_candidate_legal) {
       return af::SUCCESS;
@@ -249,6 +350,9 @@ af::Status ApplyGraphPassGroup(af::AscGraph &graph, const IndirectLoadGroup &gro
   // 其后仍有保留轴）时与单 gather 同口径拒绝本候选，由其余候选/回退承接。post_reduce 在
   // 下方组员计划收窄处置空，故先保存。
   af::AscNodePtr group_post_reduce = nullptr;
+  bool l2_will_degrade = false;
+  SimtEmissionPlan early_emission_plan = {};
+  bool l2_pre_judged = false;
   if (is_simt) {
     group_post_reduce = analyses.front().post_reduce;
     if (group_post_reduce != nullptr) {
@@ -389,7 +493,19 @@ af::Status ApplyGraphPassGroup(af::AscGraph &graph, const IndirectLoadGroup &gro
         return af::SUCCESS;
       }
     }
-    GE_ASSERT_SUCCESS(NormalizeSimtAxesForGroupTemplate(graph, members, group_post_reduce, is_candidate_legal));
+    // [结构型 UB 归并的轴布局] 结构判定已确定该组不可能走寄存器归并（链不可标量折叠 /
+    // 无 Store / 空链）且无共享 Reduce 时，输出链只能由普通向量代码在 tile 循环内消费：
+    // 取 boundary=rank-1（outer=行/批、inner=最内轴），与边界化单 gather 同形态，避免整空间
+    // 布局导致调用被提升、输出链脱离循环。其它形态（L2 结构候选、有 Reduce 的组）不变。
+    const size_t group_output_rank = members.front()->outputs()[0]->attr.axis.size();
+    if (merge_info.l2_structural && group_post_reduce == nullptr) {
+      GE_ASSERT_SUCCESS(PreJudgeL2Degradation(graph, members, merge_info, template_id, early_emission_plan,
+                                              l2_will_degrade, l2_pre_judged));
+    }
+    const bool use_l3_layout =
+        (group_post_reduce == nullptr) && (group_output_rank > 1UL) && (!merge_info.l2_structural || l2_will_degrade);
+    GE_ASSERT_SUCCESS(NormalizeSimtAxesForGroupTemplate(graph, members, group_post_reduce, is_candidate_legal,
+                                                        use_l3_layout ? (group_output_rank - 1UL) : 0UL));
     if (!is_candidate_legal) {
       return af::SUCCESS;
     }
@@ -398,8 +514,10 @@ af::Status ApplyGraphPassGroup(af::AscGraph &graph, const IndirectLoadGroup &gro
     // 下游视图与模板轴系失配（Reduce 对齐推断读到不在本张量轴列表里的轴 id）。成员 value
     // tensor 的视图播种（actual_size 的直接来源）同位补齐——单 gather 靠输出重定向的 id
     // 绑定隐式完成，组路径必须显式播种。无共享 Reduce 的组保持原行为。
-    if (group_post_reduce != nullptr) {
-      GE_ASSERT_SUCCESS(SeedPostReduceInputVectorizedView(members.front(), group_post_reduce));
+    if (group_post_reduce != nullptr || use_l3_layout) {
+      if (group_post_reduce != nullptr) {
+        GE_ASSERT_SUCCESS(SeedPostReduceInputVectorizedView(members.front(), group_post_reduce));
+      }
       GE_ASSERT_SUCCESS(SeedGroupMemberValueVectorizedViews(members, is_candidate_legal));
       if (!is_candidate_legal) {
         return af::SUCCESS;
@@ -471,7 +589,11 @@ af::Status ApplyGraphPassGroup(af::AscGraph &graph, const IndirectLoadGroup &gro
     }
     // [发射计划落定] 形态/压力/线程档一次性判定（单一真值源，见 PlanSimtEmission）。
     SimtEmissionPlan emission_plan;
-    GE_ASSERT_SUCCESS(PlanSimtEmission(merge_info, all_offset_uint32, emission_plan));
+    if (l2_pre_judged) {
+      emission_plan = early_emission_plan;
+    } else {
+      GE_ASSERT_SUCCESS(PlanSimtEmission(merge_info, all_offset_uint32, emission_plan));
+    }
     use_fused_emission = emission_plan.use_fused;
     merge_info.register_merge = emission_plan.register_merge;
     merge_info.max_thread_tier = emission_plan.max_thread_tier;
@@ -761,7 +883,7 @@ af::Status ApplyGraphPassMixed(af::AscGraph &graph, const std::vector<af::AscNod
 // 多 gather 水平融合候选生成（并存竞标制）：全部形态在调度期并存生成、进同一竞争
 // 池交 CalcScore 竞标——L1/L4 共模板候选（SIMD×2 + SIMT×1，SIMT 内部按寄存器压力
 // 模型定型 L2/L3/L4）+ L5 混模板候选（异构选择时产出，同构跳过）+ L6 SK 分段桥接
-// 候选（打分恒 0 的终态兜底，仅当其余候选均被否决或垫底时胜出）。统一打分为成员偏好
+// 候选（打分为 0，可参与 ATT 性能比较）。统一打分为成员偏好
 // 满足模型（GenerateGroupScoreFunc），同一套组聚合输入对全部形态可比；tiling 期
 // 资源失败的兜底由 SK 在场结构性成立（单 gather 四候选并存机制的组路径推广）。
 af::Status GenerateGroupCandidates(ascir::HintGraph &graph, const IndirectLoadGroup &group,
@@ -931,7 +1053,7 @@ af::Status GenerateGroupCandidates(ascir::HintGraph &graph, const IndirectLoadGr
   }
   // [L6 SK 分段桥接候选]（并存兜底，打分恒 0）：逐成员复用单 gather SK 流水（workspace
   // 边界把各路 IL 隔入独立段、归并/输出链作为消费段独立调度——各段保留各自调度）。
-  // 仅当其余候选均被否决或垫底时胜出——tiling 期资源失败的兜底由此结构性成立；SK 自身
+  // ATT 按性能估值比较可用的兜底候选；SK 自身
   // 不可行（Transpose / 复合 Norm / SK 校验否决 / dtype 门控）时无此候选。
   if (!sk_blocked) {
     ascir::ImplGraph candidate_graph(graph.GetName().c_str());

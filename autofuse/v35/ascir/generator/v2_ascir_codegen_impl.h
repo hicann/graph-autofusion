@@ -1363,8 +1363,8 @@ class FrexpAscIrCodegenImplV2 : public AscIrCodegenV2 {
     GE_ASSERT_TRUE(!IsNodeHasScalarInput(node), "Node %s[%s] does not support scalar input", node.GetTypePtr(),
                    node.GetNamePtr());
     AscNodeOutputs node_outputs = node.outputs;
-    GE_ASSERT_TRUE(node_outputs().size() == 2U, "Node %s[%s] output tensor size is not equal with 2", node.GetTypePtr(),
-                   node.GetNamePtr());
+    GE_ASSERT_TRUE(node_outputs().size() == 2U, "Node %s[%s] output tensor size %zu is not equal to 2",
+                   node.GetTypePtr(), node.GetNamePtr(), node_outputs().size());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithOutput(node, 0U),
                       "Node %s[%s] check mantissa shape consistency failed", node.GetTypePtr(), node.GetNamePtr());
     GE_ASSERT_SUCCESS(ValidateShapeConsistencyWithOutput(node, 1U),
@@ -3397,7 +3397,24 @@ class MulAscIrCodegenImplV2 : public AscIrCodegenV2 {
     }
     const auto input_nodes = node.GetInDataNodes();
     const auto producer = std::find_if(input_nodes.begin(), input_nodes.end(), [](const NodePtr &input_node) {
-      return input_node != nullptr && input_node->GetType() == "Prod";
+      NodePtr current = input_node;
+      if (current != nullptr && current->GetType() == "Cast" && current->GetInDataNodesSize() == 1U) {
+        const auto cast_inputs = current->GetInDataNodes();
+        NodePtr previous = !cast_inputs.empty() ? *cast_inputs.begin() : nullptr;
+        const auto current_dtype = static_cast<AscNode *>(current.get())->outputs[0].attr.dtype;
+        const auto previous_dtype = previous == nullptr ? ge::DataType::DT_UNDEFINED
+                                                        : static_cast<AscNode *>(previous.get())->outputs[0].attr.dtype;
+        const auto producer_dtype = previous == nullptr || previous->GetInDataNodesSize() != 1U
+                                        ? ge::DataType::DT_UNDEFINED
+                                        : static_cast<AscNode *>(previous.get())->inputs[0].attr.dtype;
+        if (current_dtype != ge::DataType::DT_INT8 || previous == nullptr || previous->GetType() != "Cast" ||
+            previous->GetInDataNodesSize() != 1U || previous_dtype != ge::DataType::DT_UINT8 ||
+            producer_dtype != ge::DataType::DT_INT16) {
+          return false;
+        }
+        current = *previous->GetInDataNodes().begin();
+      }
+      return current != nullptr && current->GetType() == "Prod";
     });
     if (producer == input_nodes.end()) {
       return {};
@@ -3517,10 +3534,16 @@ class MinimumAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
     return HasSameSimtBinaryArithmeticDtype(node);
   }
-  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
-                                                       const std::vector<std::string> &inputs,
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
                                                        std::string &expr) const override {
-    expr = "(" + inputs[0] + " < " + inputs[1] + " ? " + inputs[0] + " : " + inputs[1] + ")";
+    // torch.minimum 语义要求 NaN 传播：裸三目 (x < y ? x : y) 在首输入为 NaN 时会静默取第二输入。
+    // 浮点先判 (x != x) 保 NaN；整型无 NaN，保持原三目避免多余比较。
+    if (IsSimtFloatDtype(GetSimtOutputDtype(node))) {
+      expr = "((" + inputs[0] + " != " + inputs[0] + ") || (" + inputs[0] + " < " + inputs[1] + ")) ? " + inputs[0] +
+             " : " + inputs[1];
+    } else {
+      expr = "(" + inputs[0] + " < " + inputs[1] + " ? " + inputs[0] + " : " + inputs[1] + ")";
+    }
     return ge::GRAPH_SUCCESS;
   }
   [[nodiscard]] bool IsInplaceSupported(const AscNode &minimum_node) const override {
@@ -3579,10 +3602,16 @@ class MaximumAscIrCodegenImplV2 : public AscIrCodegenV2 {
   [[nodiscard]] bool IsSimtScalarSupported(const AscNode &node) const override {
     return HasSameSimtBinaryArithmeticDtype(node);
   }
-  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr([[maybe_unused]] const AscNode &node,
-                                                       const std::vector<std::string> &inputs,
+  [[nodiscard]] ge::graphStatus GenerateSimtScalarExpr(const AscNode &node, const std::vector<std::string> &inputs,
                                                        std::string &expr) const override {
-    expr = "(" + inputs[0] + " > " + inputs[1] + " ? " + inputs[0] + " : " + inputs[1] + ")";
+    // torch.maximum 语义要求 NaN 传播：裸三目 (x > y ? x : y) 在首输入为 NaN 时会静默取第二输入。
+    // 浮点先判 (x != x) 保 NaN；整型无 NaN，保持原三目避免多余比较。
+    if (IsSimtFloatDtype(GetSimtOutputDtype(node))) {
+      expr = "((" + inputs[0] + " != " + inputs[0] + ") || (" + inputs[0] + " > " + inputs[1] + ")) ? " + inputs[0] +
+             " : " + inputs[1];
+    } else {
+      expr = "(" + inputs[0] + " > " + inputs[1] + " ? " + inputs[0] + " : " + inputs[1] + ")";
+    }
     return ge::GRAPH_SUCCESS;
   }
   [[nodiscard]] bool IsInplaceSupported(const AscNode &maximum_node) const override {
@@ -4475,7 +4504,7 @@ class AtanAscIrCodegenImplV2 : public SimtFloatUnaryAscIrCodegenImplV2 {
   }
   [[nodiscard]] std::pair<std::vector<ge::DataType>, std::vector<ge::DataType>> GetConversionDtype(
       const AscNode &node) override {
-    std::map<ge::DataType, ge::DataType> dtype_conversion_map = {{DT_BF16, DT_FLOAT}};
+    std::map<ge::DataType, ge::DataType> dtype_conversion_map = {{DT_BF16, DT_FLOAT}, {DT_FLOAT16, DT_FLOAT}};
     return GetConversionFromDtypeMap(node, dtype_conversion_map);
   }
   [[nodiscard]] std::vector<std::string> LoadApiHeaderFiles([[maybe_unused]] bool is_dynamic) const override {

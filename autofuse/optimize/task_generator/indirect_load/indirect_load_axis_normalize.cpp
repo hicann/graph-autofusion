@@ -324,7 +324,10 @@ af::Status RestoreSkTemplateAxes(std::vector<ascir::ImplGraph> &grouped_graphs) 
                    "IndirectLoad partitioned graph[%s] has unexpected template.", graph.GetName().c_str());
     ascir::AxisId input_inner_axis = af::kIdNone;
     GE_ASSERT_SUCCESS(BuildSkInputInnerAxis(graph, indirect_load, axis_index, input_inner_axis));
-    GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, axis_index, ascir::TemplateId::kIndirectLoadSK,
+    // 与候选生成保持一致：axis=0 的退化形态改用输出 rank 作 boundary，避免
+    // outer 退化为合成单轴导致 IL 全量驻留被 UB filter 淘汰。
+    const size_t sk_boundary = axis_index == 0UL ? indirect_load->outputs()[0]->attr.axis.size() : axis_index;
+    GE_ASSERT_SUCCESS(NormalizeAxesForTemplate(graph, indirect_load, sk_boundary, ascir::TemplateId::kIndirectLoadSK,
                                                input_inner_axis, af::kIdNone));
   }
   return af::SUCCESS;
@@ -593,9 +596,16 @@ bool CollectSimtGroupIndexRegion(const af::AscGraph &graph, const af::AscNodePtr
 //   形态（归约段后有 Retained 后缀）固定单行——多行窗口 会把多组 RA 段并进同一
 //   Reduce 窗口，归约语义错误，k=1 是正确性约束。
 af::Status NormalizeSimtAxesForGroupTemplate(af::AscGraph &graph, const std::vector<af::AscNodePtr> &members,
-                                             const af::AscNodePtr &group_post_reduce, bool &is_candidate_legal) {
+                                             const af::AscNodePtr &group_post_reduce, bool &is_candidate_legal,
+                                             size_t boundary_override) {
   GE_ASSERT_TRUE(!members.empty(), "IndirectLoad gather group members must be non-empty.");
   size_t boundary = members.front()->outputs()[0]->attr.axis.size();
+  // 无共享 Reduce 的组：结构判定已确定该组只能走 UB 归并时，调用方以 boundary_override
+  // 指定 template boundary（rank-1：outer=行/批、inner=最内连续轴），使 gather 与输出链
+  // 落在同一 tile 循环内；缺省 0 保持原语义（boundary=输出 rank）。
+  if (group_post_reduce == nullptr && boundary_override != 0UL && boundary_override < boundary) {
+    boundary = boundary_override;
+  }
   bool solve_tile_size = false;
   if (group_post_reduce != nullptr) {
     // 形状保持的专用 Norm
@@ -708,6 +718,18 @@ af::Status NormalizeTemplateAxes(af::AscGraph &graph, const af::AscNodePtr &indi
     // 形状保持的专用 Norm 节点走不了 stride 推导，其尾轴内部归约、各行独立的
     // 语义与 AR 后置 Reduce 一致，同样开启可求解 tile。
     if (IsShapePreservingTailAxisNorm(analysis.post_reduce)) {
+      solve_tile = true;
+    }
+    // [边界化轴布局] 边界化时输出链整体退出求值器，value 逐 tile 写 UB 局部目标，走
+    // post-Reduce 同构的 outer/inner 分离布局：boundary 覆写为 rank-1（outer=行、
+    // inner=尾轴向量化段），tile 行数按 UB 容量求解（多行 tile）。否则 boundary 保持
+    // 输出 rank 的整空间合并轴，codegen 会误入整核调用形态（loop_size/block_dim_offset）。
+    // 判定已限定 post_reduce==nullptr（post-Reduce 优先），boundary 此处必为输出 rank。
+    if (ascgen_utils::indirect_load::IsSimtBoundaryFusion(indirect_load) && analysis.post_reduce == nullptr) {
+      const size_t output_rank = indirect_load->outputs()[0]->attr.axis.size();
+      GE_ASSERT_TRUE(output_rank > 1UL, "IndirectLoad SIMT boundary fusion requires a separable row axis, node[%s].",
+                     indirect_load->GetNamePtr());
+      boundary = output_rank - 1UL;
       solve_tile = true;
     }
     GE_ASSERT_SUCCESS(NormalizeSimtAxesForTemplate(graph, indirect_load, boundary, solve_tile));

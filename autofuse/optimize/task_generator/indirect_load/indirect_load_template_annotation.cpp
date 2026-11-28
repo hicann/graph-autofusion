@@ -133,7 +133,14 @@ af::Status AnnotateSimdTemplateRoles(const RewrittenGraphAnalysis &analysis) {
 
 af::Status ValidateSimtTemplateRegion(const RewrittenGraphAnalysis &analysis, bool &is_candidate_legal) {
   is_candidate_legal = false;
-  if (!af::ops::IsOps<af::ascir_op::Load>(analysis.input_boundary) || analysis.index_region.empty()) {
+  if (!af::ops::IsOps<af::ascir_op::Load>(analysis.input_boundary)) {
+    GELOGI("[IndirectLoad] Reject SIMT: input boundary[%s(%s)] is not a Load node",
+           analysis.input_boundary == nullptr ? "null" : analysis.input_boundary->GetNamePtr(),
+           analysis.input_boundary == nullptr ? "-" : analysis.input_boundary->GetTypePtr());
+    return af::SUCCESS;
+  }
+  if (analysis.index_region.empty()) {
+    GELOGI("[IndirectLoad] Reject SIMT: index region is empty (size=%zu)", analysis.index_region.size());
     return af::SUCCESS;
   }
   for (const af::AscNodePtr &node : analysis.index_region) {
@@ -142,13 +149,16 @@ af::Status ValidateSimtTemplateRegion(const RewrittenGraphAnalysis &analysis, bo
     }
     // Compile-time Scalar values are emitted as local constants by the SIMT evaluator.
     // ScalarData is runtime input and still requires an explicit context/GM binding.
-    if (af::ops::IsOps<af::ascir_op::Arange>(node)) {
-      continue;
-    }
     if (af::ops::IsOps<af::ascir_op::ScalarData>(node) || HasControlEdge(node)) {
+      GELOGI("[IndirectLoad] Reject SIMT: node[%s(%s)] has ScalarData or control edge", node->GetNamePtr(),
+             node->GetTypePtr());
       return af::SUCCESS;
     }
     const bool is_gm_boundary = af::ops::IsOps<af::ascir_op::Load>(node) || af::ops::IsOps<af::ascir_op::Store>(node);
+    // Arange 不再无条件豁免：其 SIMT 专用发射路径 EmitSimtArangeExpr 有前置条件
+    // （ArangeAscIrCodegenImplV2::IsSimtScalarSupported：零输入、int32/int64、单一
+    // varying 轴），与发射期同一 V2 能力查询，不可发射时在此拒绝候选（index 链无法
+    // 退出求值器——index 计算必须折叠），而不是放行到 codegen 硬失败。
     if (!is_gm_boundary && !CanEmitSimtScalar(node)) {
       GELOGD("[IndirectLoad] SIMT scalar codegen does not support node[%s, %s].", node->GetNamePtr(),
              node->GetTypePtr());
@@ -269,6 +279,13 @@ af::Status AnnotateSimtSideInputClosure(const af::AscNodePtr &branch_node, const
 
 af::Status AnnotateSimtFanoutBranches(const af::AscNodePtr &indirect_load, const RewrittenGraphAnalysis &analysis,
                                       NodeSet &normal_schedule_nodes) {
+  // [边界化] 输出链已退出标量求值器（gather-only SIMT）：主输出链与扇出分支均不再
+  // 标注 SIMT 求值器角色，整链（含 side-input 闭包）交普通 VF 调度消费——此处若照常
+  // 标注 kSimtInlineTransform/kSimtFanoutBranch 会把降级形态重新拉回标量求值器，
+  // 发射期必然断言失败。
+  if (ascgen_utils::indirect_load::IsSimtBoundaryFusion(indirect_load)) {
+    return af::SUCCESS;
+  }
   const af::AscNodePtr selected_root = analysis.post_reduce == nullptr
                                            ? analysis.output_store
                                            : ascgen_utils::indirect_load::GetSimtPostReduceLocalProducer(indirect_load);

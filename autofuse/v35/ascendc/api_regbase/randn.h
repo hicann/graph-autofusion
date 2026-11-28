@@ -82,10 +82,14 @@ __aicore__ inline void RandnExtend(const LocalTensor<T> &dst, const LocalTensor<
     return;
   }
 
-  ASCENDC_ASSERT(((count % PHILOX_NORMAL_RANDOM_BLOCK_COUNT) == 0U),
-                 { KERNEL_LOG(KERNEL_ERROR, "RandnExtend count must be divisible by 4!"); });
-  ASCENDC_ASSERT((count <= PHILOX_NORMAL_RANDOM_MAX_COUNT),
-                 { KERNEL_LOG(KERNEL_ERROR, "RandnExtend count should be less than or equal to 65535!"); });
+  ASCENDC_ASSERT(((count % PHILOX_NORMAL_RANDOM_BLOCK_COUNT) == 0U), {
+    KERNEL_LOG(KERNEL_ERROR, "RandnExtend count must be divisible by %u, got %u", PHILOX_NORMAL_RANDOM_BLOCK_COUNT,
+               count);
+  });
+  ASCENDC_ASSERT((count <= PHILOX_NORMAL_RANDOM_MAX_COUNT), {
+    KERNEL_LOG(KERNEL_ERROR, "RandnExtend count should be less than or equal to %u, got %u",
+               PHILOX_NORMAL_RANDOM_MAX_COUNT, count);
+  });
 
   __ubuf__ float *dstUb = (__ubuf__ float *)dst.GetPhyAddr();
   __ubuf__ float *srcUb = (__ubuf__ float *)uniformTmp.GetPhyAddr();

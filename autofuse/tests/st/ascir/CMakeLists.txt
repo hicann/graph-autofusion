@@ -26,6 +26,34 @@ add_executable(test_ascir_st
     reg_func/test_reg_func_axpy.cpp
     reg_func/test_reg_func_unsupported.cpp
     reg_func_v2/test_reg_func_sin_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_acosh_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_asin_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_asinh_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_atan_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_atanh_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_ceil_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_cos_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_cosh_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_digamma_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_erfc_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_lgamma_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_transpose_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_modified_bessel_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_polygamma_v2.cpp
+    ${CODE_ROOT_DIR}/tests/v35/ut/ascir/reg_func_v2/test_reg_func_scaled_modified_bessel_v2.cpp
+    reg_func_v2/test_reg_func_erf_v2.cpp
+    reg_func_v2/test_reg_func_gelu_v2.cpp
+    reg_func_v2/test_reg_func_mod_v2.cpp
+    reg_func_v2/test_reg_func_pow_v2.cpp
+    reg_func_v2/test_reg_func_tanh_v2.cpp
+    reg_func_v2/test_reg_func_igamma_v2.cpp
+    reg_func_v2/test_reg_func_igammac_v2.cpp
+    reg_func_v2/test_reg_func_sinh_v2.cpp
+    reg_func_v2/test_reg_func_tan_v2.cpp
+    reg_func_v2/test_reg_func_trunc_v2.cpp
+    reg_func_v2/test_reg_func_xor_v2.cpp
+    reg_func_v2/test_reg_func_bucketize_v2.cpp
+    reg_func_v2/test_reg_func_softmax_v2.cpp
     generator/test_rand_dtype_contract_st.cpp
     code_dumper/code_dumper_unittest.cc
     ascir_utils/ascir_utils_st.cpp

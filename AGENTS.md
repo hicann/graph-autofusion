@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-Graph-autofusion 是面向昇腾（Ascend）芯片的融合加速组件集合，当前包含 SuperKernel 和 Autofuse 两个主要组件。项目通过 SuperKernel、自动融合、ASCIR/AscendC codegen 等能力减少任务调度和数据搬运开销。
+Graph-autofusion 是面向昇腾（Ascend）芯片的融合加速组件集合，当前包含 SuperKernel、Autofuse、Multistream（多流规划）和 model_specialization（模型特化）等主要组件。项目通过 SuperKernel、自动融合、ASCIR/AscendC codegen 等能力减少任务调度和数据搬运开销。
 
 ### 关键目录
 
@@ -12,6 +12,8 @@ Graph-autofusion 是面向昇腾（Ascend）芯片的融合加速组件集合，
 |------|------|
 | `super_kernel/` | SuperKernel 组件源码、Python/C++ 测试、设备端验证用例 |
 | `autofuse/` | Autofuse 自动融合组件源码、优化 pass、codegen、测试框架 |
+| `multistream/` | Multistream 纯 Python 多流规划组件 |
+| `model_specialization/` | 模型特化组件（特化 kernel、源码与测试） |
 | `cmake/` | CMake 公共脚本、依赖和打包逻辑 |
 | `scripts/` | 构建、测试、OAT 检查等脚本 |
 | `docs/` | 构建、设计、规范和组件说明文档 |
@@ -69,6 +71,16 @@ sh build.sh -s --module=autofuse_e2e -j 8
 - [x] 编码红线：已检查资源生命周期、ABI/API、图改写确定性和运行时接口约束，无违反
 - [x] 测试设计：新增 optimize UT 和 codegen E2E ST，覆盖正向和异常输入
 ```
+
+### 时序图配色
+
+特性设计、问题分析和 PR 说明中，凡涉及流程变更的时序图，都应标出原流程、变更后的流程及对应的关键步骤。图旁提供图例，图内同时使用颜色和文字标签。
+
+- **浅红「原流程」**标出修改前的调用顺序、关键分支和已确认的问题点。
+- **浅绿「当前实现」**标出修改后的调用顺序，并注明新增或调整的步骤。
+- **浅蓝「拟议方案」**标出尚未落地的目标流程或后续改动。方案仍在设计阶段时，用此颜色标注目标流程。
+
+Mermaid `sequenceDiagram` 优先用 `rect rgba(...)` 标注相关步骤，用 `Note over` 写明阶段和关键变化。共用步骤可沿用默认样式，便于对照。
 
 ## 开发规范
 

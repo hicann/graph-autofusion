@@ -421,11 +421,13 @@ bool PerOpMaxCoreSplitPass::Run(std::vector<SuperKernelScopeInfo> &scopes) {
   SK_LOGI("[PerOpMaxCore] %s pass starting", GetName().c_str());
   scopes.clear();
 
-  int64_t maxDeviceCubeNum = 0;
-  int64_t maxDeviceVectorNum = 0;
-  if (GetDeviceCoreNums(maxDeviceCubeNum, maxDeviceVectorNum) != ACL_SUCCESS) {
+  const auto ret = LockDetector::GetDeviceCores();
+  if (ret != ACL_SUCCESS) {
+    SK_LOGE("[PerOpMaxCore] Failed to get device core counts, ret=%d", ret);
     return false;
   }
+  const int64_t maxDeviceCubeNum = LockDetector::GetDeviceCubeNum();
+  const int64_t maxDeviceVectorNum = LockDetector::GetDeviceVecNum();
 
   const auto &headNodes = graph_.GetHeadNodes();
   for (uint64_t headNodeId : headNodes) {
@@ -553,8 +555,14 @@ std::vector<uint64_t> ScopeSplitPass::GetKernelNodeIds(const SuperKernelScopeInf
 
 // ============ InitialScopeSplitPass Implementation ============
 
-InitialScopeSplitPass::InitialScopeSplitPass(SuperKernelGraph &inputGraph, SkHeapType heapType)
-    : ScopeSplitPass(inputGraph), nodeHeap_(inputGraph, heapType) {}
+InitialScopeSplitPass::InitialScopeSplitPass(SuperKernelGraph &inputGraph, SkHeapType heapType,
+                                             const ScopeRecommendation *recommendation)
+    : ScopeSplitPass(inputGraph), nodeHeap_(inputGraph, heapType), recommendation_(recommendation) {}
+
+bool InitialScopeSplitPass::IsRecommendedNode(const SuperKernelBaseNode &node) const {
+  return recommendation_ == nullptr ||
+         recommendation_->GetCandidateId(node.GetNodeId()) != ScopeRecommendation::INVALID_CANDIDATE_ID;
+}
 
 void InitialScopeSplitPass::InitStreamStates() {
   SK_LOGI("[SplitScope] initializing stream states for %s", GetName().c_str());
@@ -651,7 +659,7 @@ bool InitialScopeSplitPass::SkipUnfusibleNodesForStream(uint32_t streamIdx) {
       SK_LOGE("Stream %u: node %lu not found (graph integrity error)", streamIdx, state.currentNodeId);
       return false;
     }
-    if (node->IsFusible()) {
+    if (node->IsFusible() && IsRecommendedNode(*node)) {
       SK_LOGI("Stream %u: Found fusible node %s, stop skipping", streamIdx, node->Format().c_str());
       break;
     }
@@ -779,9 +787,12 @@ bool InitialScopeSplitPass::DetermineCurrentScopeBitFlags() {
 
   if (minNode != nullptr) {
     currentScopeBitFlags_ = minNode->GetScopeBitFlags();
+    currentCandidateId_ = recommendation_ == nullptr ? ScopeRecommendation::INVALID_CANDIDATE_ID
+                                                     : recommendation_->GetCandidateId(minNode->GetNodeId());
     std::string scopeNames = ScopeSplitPass::GetScopeNamesFromBitFlags(currentScopeBitFlags_, graph_);
-    SK_LOGI("Found min node %s, scopeBitFlags=%s, scopeNames=[%s], active streams=%u", minNode->Format().c_str(),
-            graph_.BitsetToString(currentScopeBitFlags_).c_str(), scopeNames.c_str(), activeStreams);
+    SK_LOGI("Found min node %s, scopeBitFlags=%s, scopeNames=[%s], candidate=%lu, active streams=%u",
+            minNode->Format().c_str(), graph_.BitsetToString(currentScopeBitFlags_).c_str(), scopeNames.c_str(),
+            currentCandidateId_, activeStreams);
     return true;
   }
 
@@ -822,6 +833,13 @@ void InitialScopeSplitPass::TryAddNodeToHeap(uint32_t streamIdx) {
     SK_LOGD("Stream %u: node %lu already processed, advancing", streamIdx, state.currentNodeId);
     state.currentNodeId = node->GetNextNodeId();
     TryAddNodeToHeap(streamIdx);
+    return;
+  }
+
+  if (recommendation_ != nullptr && recommendation_->GetCandidateId(node->GetNodeId()) != currentCandidateId_) {
+    SK_LOGI("Stream %u: node %s belongs to a different recommended range, terminating current scope", streamIdx,
+            node->Format().c_str());
+    state.isTerminated = true;
     return;
   }
 
@@ -1447,9 +1465,15 @@ bool SingleScopeDeadlockRefinePass::Run(std::vector<SuperKernelScopeInfo> &scope
   std::vector<SuperKernelScopeInfo> refinedScopes;
   size_t splitCount = 0;
 
-  if (!scopes.empty() && GetDeviceCoreNums(maxCubeNum_, maxVectorNum_) != ACL_SUCCESS) {
-    scopes.clear();
-    return false;
+  if (!scopes.empty()) {
+    const auto ret = LockDetector::GetDeviceCores();
+    if (ret != ACL_SUCCESS) {
+      SK_LOGE("[SingleScopeDeadlockRefine] Failed to get device core counts, ret=%d", ret);
+      scopes.clear();
+      return false;
+    }
+    maxCubeNum_ = LockDetector::GetDeviceCubeNum();
+    maxVectorNum_ = LockDetector::GetDeviceVecNum();
   }
 
   lockDetector_.SetScopeInfos(scopes);
@@ -1566,13 +1590,13 @@ bool ParallelScopeDeadlockRefinePass::Run(std::vector<SuperKernelScopeInfo> &sco
     PrintScopeResults(scopes, graph_, GetName().c_str());
     return true;
   }
-  int64_t maxCubeNum = 0;
-  int64_t maxVectorNum = 0;
-  const auto ret = GetDeviceCoreNums(maxCubeNum, maxVectorNum);
+  const auto ret = LockDetector::GetDeviceCores();
   if (ret != ACL_SUCCESS) {
     SK_LOGE("[ParallelResource] Failed to get device core counts, ret=%d", ret);
     return false;
   }
+  const int64_t maxCubeNum = LockDetector::GetDeviceCubeNum();
+  const int64_t maxVectorNum = LockDetector::GetDeviceVecNum();
   ScopeCoreInfoCalculator calculator(maxCubeNum, maxVectorNum);
   while (scopes.size() >= 2) {
     for (auto &scope : scopes) {
@@ -1816,10 +1840,14 @@ bool ScheModeKernelSplitPass::Run(std::vector<SuperKernelScopeInfo> &scopes) {
   if (scopes.empty()) {
     return true;
   }
-  if (GetDeviceCoreNums(maxCubeNum_, maxVectorNum_) != ACL_SUCCESS) {
+  const auto ret = LockDetector::GetDeviceCores();
+  if (ret != ACL_SUCCESS) {
+    SK_LOGE("[ScheModeSplit] Failed to get device core counts, ret=%d", ret);
     scopes.clear();
     return false;
   }
+  maxCubeNum_ = LockDetector::GetDeviceCubeNum();
+  maxVectorNum_ = LockDetector::GetDeviceVecNum();
 
   for (size_t i = 0; i < scopes.size(); ++i) {
     SK_LOGD("[ScheModeSplit] Processing scope index %zu with %zu nodes", i, scopes[i].GetNodes().size());
@@ -1869,10 +1897,25 @@ SuperKernelScopeSplitter::SuperKernelScopeSplitter(SuperKernelGraph &inputGraph,
     SK_LOGI("[ScopeSplitter] DEBUG_PER_OP_MAX_CORE_NUM enabled");
     passes_.push_back(std::make_unique<PerOpMaxCoreSplitPass>(inputGraph));
   } else {
+    bool enableRecommendedScopes = false;
+    const auto *extended = opts.GetOption(aclskOptionType::OPT_EXTEND_OPTION);
+    if (extended != nullptr) {
+      const auto values = extended->GetMapValue();
+      const auto recommendationOption = values.find("recommended_fusion_scopes");
+      enableRecommendedScopes =
+          recommendationOption != values.end() && !recommendationOption->second.empty() &&
+          (recommendationOption->second.front() == "1" || recommendationOption->second.front() == "true");
+    }
+    if (enableRecommendedScopes) {
+      SK_LOGI("[ScopeSplitter] recommended_fusion_scopes enabled");
+      recommendationReady_ = recommendation_.Analyze(graph_);
+    }
+
     if (enableTaskBreakerBypass_) {
       SK_LOGI("[ScopeSplitter] taskBreakerBypass enabled");
     }
-    passes_.push_back(std::make_unique<InitialScopeSplitPass>(inputGraph, heapType));
+    passes_.push_back(std::make_unique<InitialScopeSplitPass>(inputGraph, heapType,
+                                                              enableRecommendedScopes ? &recommendation_ : nullptr));
     passes_.push_back(std::make_unique<ScheModeKernelSplitPass>(inputGraph));
     passes_.push_back(std::make_unique<SingleScopeDeadlockRefinePass>(inputGraph, *opts_));
     if (enableTaskBreakerBypass_) {
@@ -1921,11 +1964,13 @@ bool SuperKernelScopeSplitter::FinalizeScopeCoreInfo() {
     return true;
   }
 
-  int64_t maxDeviceCubeNum = 0;
-  int64_t maxDeviceVectorNum = 0;
-  if (GetDeviceCoreNums(maxDeviceCubeNum, maxDeviceVectorNum) != ACL_SUCCESS) {
+  const auto ret = LockDetector::GetDeviceCores();
+  if (ret != ACL_SUCCESS) {
+    SK_LOGE("[ScopeCoreFinalize] Failed to get device core counts, ret=%d", ret);
     return false;
   }
+  const int64_t maxDeviceCubeNum = LockDetector::GetDeviceCubeNum();
+  const int64_t maxDeviceVectorNum = LockDetector::GetDeviceVecNum();
 
   ScopeCoreInfoCalculator coreInfoCalculator(maxDeviceCubeNum, maxDeviceVectorNum);
   for (auto &scope : scopeInfos_) {
@@ -1949,6 +1994,10 @@ bool SuperKernelScopeSplitter::FinalizeScopeCoreInfo() {
 
 bool SuperKernelScopeSplitter::SplitGraph() {
   SK_LOGI("[ScopeSplitPipeline] starting scope splitting pipeline");
+  if (!recommendationReady_) {
+    SK_LOGE("[ScopeSplitPipeline] recommended scope analysis failed");
+    return false;
+  }
   InitDefaultNodeFusibility();
   splitResultReporter_.Reset();
   scopeInfos_.clear();

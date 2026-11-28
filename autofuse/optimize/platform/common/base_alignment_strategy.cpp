@@ -343,19 +343,24 @@ af::Status BaseAlignmentStrategy::AddRemovePadForOneNode(ascir::ImplGraph &impl_
 }
 
 bool BaseAlignmentStrategy::FindCompactReduceInput(const af::AscNodePtr &node, af::InDataAnchorPtr &reduce_input,
-                                                   af::OutDataAnchorPtr &reduce_output) const {
+                                                   af::OutDataAnchorPtr &reduce_output, size_t start_index) const {
   if (node->attr.api.compute_type != af::ComputeType::kComputeElewise) {
     return false;
   }
 
-  bool has_aligned_broadcast = false;
-  size_t linked_input_count = 0UL;
+  // A downstream consumer can pull this node to aligned even when none of its inputs were aligned initially.
+  const auto output_state = tensor_to_align_type_.find(&node->outputs[0].attr);
+  if (output_state == tensor_to_align_type_.end() || output_state->second.align_type != AlignmentType::kAligned) {
+    return false;
+  }
   for (const auto &in_anchor : node->GetAllInDataAnchorsPtr()) {
+    if (static_cast<size_t>(in_anchor->GetIdx()) < start_index) {
+      continue;
+    }
     const auto peer_out = in_anchor->GetPeerOutAnchor();
     if (peer_out == nullptr) {
       continue;
     }
-    ++linked_input_count;
     const auto producer = std::dynamic_pointer_cast<af::AscNode>(peer_out->GetOwnerNode());
     if (producer == nullptr) {
       continue;
@@ -364,9 +369,7 @@ bool BaseAlignmentStrategy::FindCompactReduceInput(const af::AscNodePtr &node, a
     if (state_iter == tensor_to_align_type_.end()) {
       continue;
     }
-    if (af::ops::IsOps<af::ascir_op::Broadcast>(producer) && state_iter->second.align_type == AlignmentType::kAligned) {
-      has_aligned_broadcast = true;
-    } else if (af::ops::IsOps<af::ascir_op::Sum>(producer)) {
+    if (ScheduleUtils::IsReduce(producer) && state_iter->second.align_type == AlignmentType::kNotAligned) {
       const auto &reduce_attr = af::AscTensorAttr::GetTensorAttr(*peer_out);
       if (!reduce_attr.vectorized_axis.empty()) {
         const auto axis = reduce_attr.vectorized_axis.back();
@@ -375,15 +378,15 @@ bool BaseAlignmentStrategy::FindCompactReduceInput(const af::AscNodePtr &node, a
         const bool compact_output = axis_iter != reduce_attr.axis.end() && axis_index < reduce_attr.strides.size() &&
                                     af::SymbolicUtils::StaticCheckEq(reduce_attr.strides[axis_index],
                                                                      af::sym::kSymbolZero) == af::TriBool::kTrue;
-        // Compact Reduce 的尾轴 stride 为零，即使反向传播已把状态改成 kAligned，物理布局仍是 not-aligned。
         if (compact_output) {
           reduce_input = node->GetInDataAnchor(in_anchor->GetIdx());
           reduce_output = peer_out;
+          return true;
         }
       }
     }
   }
-  return linked_input_count == 2UL && has_aligned_broadcast && reduce_input != nullptr && reduce_output != nullptr;
+  return false;
 }
 
 af::Status BaseAlignmentStrategy::InsertPadForCompactReduce(ascir::ImplGraph &impl_graph,
@@ -428,10 +431,14 @@ af::Status BaseAlignmentStrategy::AddPadForCompactReduce(ascir::ImplGraph &impl_
                                                          bool &inserted) {
   af::InDataAnchorPtr reduce_input;
   af::OutDataAnchorPtr reduce_output;
-  if (!FindCompactReduceInput(node, reduce_input, reduce_output)) {
-    return af::SUCCESS;
+  size_t start_index = 0UL;
+  while (FindCompactReduceInput(node, reduce_input, reduce_output, start_index)) {
+    start_index = static_cast<size_t>(reduce_input->GetIdx()) + 1UL;
+    bool edge_inserted = false;
+    GE_ASSERT_SUCCESS(InsertPadForCompactReduce(impl_graph, reduce_input, reduce_output, edge_inserted));
+    inserted = inserted || edge_inserted;
   }
-  return InsertPadForCompactReduce(impl_graph, reduce_input, reduce_output, inserted);
+  return af::SUCCESS;
 }
 
 af::Status BaseAlignmentStrategy::CheckIsNoNeedPad(const af::AscNodePtr &node, af::AscTensorAttr &out_attr,
@@ -552,6 +559,11 @@ void BaseAlignmentStrategy::SetAlignInfoForNodeInputs(AlignmentType aligned_type
                                                       std::set<af::Node *> &visited_nodes,
                                                       std::queue<af::Node *> &node_queue) {
   for (const auto &input : node->inputs()) {
+    // Shared scalars must not connect the row-layout constraints of their consumers.
+    if (ascgen_utils::IsScalarInput(input->attr.repeats)) {
+      GELOGD("Stop alignment propagation through scalar input of node[%s].", node->GetNamePtr());
+      continue;
+    }
     auto asc_node = std::dynamic_pointer_cast<af::AscNode>(input->anchor.GetOwnerNode());
     if ((asc_node == nullptr) || ShouldSkipRegularAlignment(asc_node)) {
       GELOGD("SetAlignInfoForNodeInputs: skip input node[%s] (null or should skip).",
@@ -563,6 +575,11 @@ void BaseAlignmentStrategy::SetAlignInfoForNodeInputs(AlignmentType aligned_type
     if (align_info.align_type == aligned_type) {
       GELOGD("SetAlignInfoForNodeInputs: input[%s] already [%s], skip.", asc_node->GetNamePtr(),
              AlignmentTypeToString(aligned_type));
+      continue;
+    }
+
+    // Reduce writes compact results; an aligned consumer needs an edge-local Pad, not a producer layout change.
+    if (ScheduleUtils::IsReduce(asc_node) && align_info.align_type == AlignmentType::kNotAligned) {
       continue;
     }
 
@@ -699,9 +716,11 @@ af::Status BaseAlignmentStrategy::SetVectorizedStridesForTensor(const af::NodePt
   const auto &output_vec_axis = output_attr.vectorized_axis;
   GE_ASSERT_TRUE(!output_vec_axis.empty(), "Node [%s] output tensor has empty vectorized_axis.", node->GetNamePtr());
   GE_ASSERT_TRUE(output_attr.axis.size() == output_attr.repeats.size(),
-                 "Node [%s] output tensor axis and repeats size mismatch.", node->GetNamePtr());
+                 "Node [%s] output tensor axis size [%zu] and repeats size [%zu] mismatch.", node->GetNamePtr(),
+                 output_attr.axis.size(), output_attr.repeats.size());
   GE_ASSERT_TRUE(output_attr.axis.size() == output_attr.strides.size(),
-                 "Node [%s] output tensor axis and strides size mismatch.", node->GetNamePtr());
+                 "Node [%s] output tensor axis size [%zu] and strides size [%zu] mismatch.", node->GetNamePtr(),
+                 output_attr.axis.size(), output_attr.strides.size());
 
   const auto dtype_size = af::GetSizeByDataType(output_attr.dtype);
   GE_ASSERT_TRUE(dtype_size > 0, "Node [%s] output tensor dtype is invalid.", node->GetNamePtr());

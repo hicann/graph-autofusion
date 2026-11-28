@@ -1907,7 +1907,10 @@ TEST_F(TestCodegenTiling, InductorAivOnlyLaunchCoversNativeAndEpilogueBlocks) {
   const auto end = body.find("return 0;", begin);
   ASSERT_NE(end, std::string::npos);
   const auto call_cube_tiling = this->GenCallCubeTilingForInductor(fused, {}, codegen::PgoShapeStringStream{});
-  const auto helpers_begin = call_cube_tiling.find("static inline constexpr bool is_cv_safety_aiv_only_mode");
+  // GenInductorCvSafetyFallback输出的启动块表达式引用kCvTaskRatio，真实生成链路中
+  // GenTilingFuncForInductor将其与CallCubeTiling输出在同一编译单元，此处提取区间
+  // 需从kCvTaskRatio定义起始，保证helpers片段与body拼接后定义完整。
+  const auto helpers_begin = call_cube_tiling.find("constexpr uint32_t kCvTaskRatio");
   const auto helpers_end = call_cube_tiling.find("// Global variable", helpers_begin);
   ASSERT_NE(helpers_begin, std::string::npos);
   ASSERT_NE(helpers_end, std::string::npos);
@@ -4454,7 +4457,8 @@ TEST_F(TestCodegenTiling, SplitHeaderGenerateForPgoShouldIncludeDirectEntryDepen
     if (source.find("Loaded PGO block_dim %u is outside core budget [1, %u]") != std::string::npos) {
       found_pgo_core_budget_check = true;
     }
-    if (source.find("tiling_i32.size() != expect_num") != std::string::npos &&
+    if (source.find("for (size_t index = 0; index < expect_num; ++index)") != std::string::npos &&
+        source.find("Invalid PGO tiling data length.") != std::string::npos &&
         source.find("memcpy_s(&tiling_data, sizeof(tiling_data), tiling_i32.data(), sizeof(tiling_data)) != EOK") !=
             std::string::npos) {
       found_pgo_config_validation = true;
@@ -4939,14 +4943,104 @@ TEST_F(TestCodegenTiling, NBroadCastConsumerAlignmentIsIndependentOfTheCubeFragm
   EXPECT_EQ(graph.GetAllAxis()[0]->align, original_align);
 }
 
-TEST_F(TestCodegenTiling, GeDynamicCvPreservesAllUbCandidatesAndCommonBoundary) {
+TEST_F(TestCodegenTiling, CvStageSizeResolvesConstantAndSymbolicCandidates) {
+  af::AscGraph scalar("scalar");
+  const auto one = scalar.CreateSizeVar(int64_t{1});
+  auto scalar_axis = scalar.CreateAxis("a0a1t", one);
+  scalar.FindAxis(scalar_axis.id)->type = af::Axis::kAxisTypeTileInner;
+  af::AscGraph dynamic("dynamic");
+  auto dynamic_axis = dynamic.CreateAxis("renamed_axis", dynamic.CreateSizeVar("vector_width"));
+  dynamic.FindAxis(dynamic_axis.id)->type = af::Axis::kAxisTypeTileInner;
+  af::AscGraph m_broadcast("m_broadcast");
+  auto broadcast_axis = m_broadcast.CreateAxis("nt", m_broadcast.CreateSizeVar(int64_t{7}));
+  m_broadcast.FindAxis(broadcast_axis.id)->type = af::Axis::kAxisTypeTileInner;
+  af::ascir_op::Data input("input", m_broadcast);
+  ASSERT_EQ(ascir::SetCvBroadcastShape(m_broadcast.FindNode("input"), {af::Symbol(3), af::Symbol(7)}, broadcast_axis.id,
+                                       {af::Symbol(1), af::Symbol(7)}),
+            af::SUCCESS);
+  ascir::ScheduleGroup group;
+  group.impl_graphs = {scalar, dynamic, m_broadcast};
+  ascir::ScheduledResult result;
+  result.schedule_groups = {group};
+  result.cube_type = ascir::CubeTemplateType::kUBFuse;
+  ascir::FusedScheduledResult fields;
+  fields.node_idx_to_scheduled_results = {{result}};
+  auto header = codegen::TilingData("Autofuse").Generate(fields);
+  const std::string sdk_include = "#include \"kernel_tiling/kernel_tiling.h\"\n";
+  ASSERT_NE(header.find(sdk_include), std::string::npos);
+  header.erase(header.find(sdk_include), sdk_include.size());
+  ascir::FusedScheduledResult fused;
+  fused.node_idx_to_scheduled_results = {{result}};
+  std::stringstream helper;
+  AppendCvUbStageSizeSelection(fused, fields, helper);
+  EXPECT_NE(header.find("#define GET_CV_STAGE_SIZE"), std::string::npos);
+  EXPECT_EQ(header.find("a0a1t_size"), std::string::npos);
+  EXPECT_EQ(helper.str().find("get_a0a1t_size"), std::string::npos);
+  EXPECT_TRUE(CompileAndRunCode(header + helper.str() + R"(
+int main() {
+  AutofuseTilingData data{};
+  data.set_vector_width(64U);
+  return GetCvUbStageSize(data, 0U) == 1U && GetCvUbStageSize(data, 1U) == 64U &&
+         GetCvUbStageSize(data, 2U) == 21U && GetCvUbStageSize(data, 3U) == 0U ? 0 : 1;
+}
+)"));
+}
+
+TEST_F(TestCodegenTiling, CvCommonStageAccessorIsEmittedByTilingDataGeneration) {
+  af::AscGraph graph("common_constant_stage");
+  const auto axis = graph.CreateAxis("constant_stage", graph.CreateSizeVar(int64_t{1}));
+  graph.FindAxis(axis.id)->type = af::Axis::kAxisTypeTileInner;
+  ascir::ScheduleGroup group;
+  group.impl_graphs = {graph};
+  ascir::ScheduledResult result;
+  result.cube_type = ascir::CubeTemplateType::kCommon;
+  result.schedule_groups = {group};
+  ascir::FusedScheduledResult fused;
+  fused.node_idx_to_scheduled_results = {{result}};
+  auto header = codegen::TilingData("Autofuse").Generate(fused);
+  const std::string sdk_include = "#include \"kernel_tiling/kernel_tiling.h\"\n";
+  ASSERT_NE(header.find(sdk_include), std::string::npos);
+  header.erase(header.find(sdk_include), sdk_include.size());
+  ASSERT_NE(header.find("#define GET_CV_STAGE_SIZE"), std::string::npos);
+  EXPECT_TRUE(CompileAndRunCode(header + R"(
+int main() {
+  AutofuseTilingData data{};
+  return GET_CV_STAGE_SIZE(data) == 1U ? 0 : 1;
+}
+)"));
+}
+
+TEST_F(TestCodegenTiling, CvStageAccessorCompilesWithoutConstantFields) {
+  af::AscGraph graph("stage_accessor");
+  auto scalar = graph.CreateAxis("a0a1t", graph.CreateSizeVar(int64_t{1}));
+  graph.FindAxis(scalar.id)->type = af::Axis::kAxisTypeTileInner;
+  auto dynamic = graph.CreateAxis("renamed", graph.CreateSizeVar("vector_width"));
+  graph.FindAxis(dynamic.id)->type = af::Axis::kAxisTypeTileInner;
+  for (const bool first_inner : {true, false}) {
+    std::stringstream accessor;
+    codegen::AppendCvStageSizeAccessor(graph, first_inner, accessor);
+    const auto source = accessor.str() + R"(
+#include <cstdint>
+struct Data {uint32_t vector_width = 32U;};
+struct Wrapper {Data tiling_data; uint32_t stage_size_name;};
+int main() {
+  const Data device_data{};
+  Wrapper host{};
+  host.stage_size_name = GET_CV_STAGE_SIZE(host.tiling_data);
+  return host.stage_size_name == GET_CV_STAGE_SIZE(device_data) && host.stage_size_name == )" +
+                        (first_inner ? "1U" : "32U") + " ? 0 : 1; }\n";
+    EXPECT_TRUE(CompileAndRunCode(source));
+  }
+}
+
+namespace {
+void CreateMultiCandidateCvStageGraph(ascir::FusedScheduledResult &fused, af::AscGraph &original) {
   af::AscGraph graph("matmul_multi_candidates");
   CreateMatmulElemwiseDynamicGraph(graph);
   optimize::Optimizer optimizer(optimize::OptimizerOptions{});
-  ascir::FusedScheduledResult fused;
   ASSERT_EQ(optimizer.Optimize(graph, fused), af::SUCCESS);
   auto &ub = fused.node_idx_to_scheduled_results[0][0];
-  const auto original = ub.schedule_groups[0].impl_graphs[0];
+  original = ub.schedule_groups[0].impl_graphs[0];
   ub.schedule_groups[0].impl_graphs.clear();
   // Candidate identities and buffer policies come from the optimizer order, not their numeric position.
   size_t candidate = 0U;
@@ -4970,6 +5064,34 @@ TEST_F(TestCodegenTiling, GeDynamicCvPreservesAllUbCandidatesAndCommonBoundary) 
   auto common = ub;
   common.cube_type = ascir::CubeTemplateType::kCommon;
   fused.node_idx_to_scheduled_results[0].push_back(common);
+}
+
+void CheckCvUbStageSizeSelection(const std::string &host, const std::string &stage_field) {
+  const auto helper = host.find("static inline uint32_t GetCvUbStageSize(");
+  ASSERT_NE(helper, std::string::npos);
+  const auto helper_end = host.find("\n}\n", helper);
+  ASSERT_NE(helper_end, std::string::npos);
+  const std::string tiling_data =
+      "#include <cstdint>\nstruct AutofuseTilingData { uint32_t " + stage_field + " = 64U; };\n";
+  const std::string check_stage_sizes = R"(
+int main() {
+  const AutofuseTilingData data{};
+  return GetCvUbStageSize(data, 0U) == 64U && GetCvUbStageSize(data, 1U) == 64U &&
+                 GetCvUbStageSize(data, 2U) == 64U && GetCvUbStageSize(data, 3U) == 64U &&
+                 GetCvUbStageSize(data, 4U) == 0U
+             ? 0
+             : 1;
+}
+)";
+  EXPECT_TRUE(CompileAndRunCode(tiling_data + host.substr(helper, helper_end + 3U - helper) + check_stage_sizes));
+}
+}  // namespace
+
+TEST_F(TestCodegenTiling, GeDynamicCvPreservesAllUbCandidatesAndCommonBoundary) {
+  ascir::FusedScheduledResult fused;
+  af::AscGraph original("cv_stage_original");
+  CreateMultiCandidateCvStageGraph(fused, original);
+  ASSERT_FALSE(original.GetAllAxis().empty());
 
   const auto files = this->Generate(fused, {{"s0", "64"}, {"s1", "64"}}, "", "0");
   const auto &host = files.at(codegen::kTilingDefAndConstIdentify);
@@ -4979,8 +5101,14 @@ TEST_F(TestCodegenTiling, GeDynamicCvPreservesAllUbCandidatesAndCommonBoundary) 
   EXPECT_NE(host.find("get_tiling_key() - 4"), std::string::npos);
   EXPECT_NE(host.find("ub_mode = (non_db ? 0U : 1U)"), std::string::npos);
   EXPECT_NE(host.find("GetCvUbStageSize(tiling->tiling_data, ub_case)"), std::string::npos);
-  EXPECT_NE(host.find("case 1U: return data.get_cv_stage_1_size();"), std::string::npos);
-  EXPECT_NE(host.find("case 2U: return data.get_cv_stage_0_size();"), std::string::npos);
+  std::string stage_field;
+  for (const auto &axis : original.GetAllAxis()) {
+    if (axis->type == af::Axis::kAxisTypeTileInner) {
+      stage_field = axis->size.Str().get();
+    }
+  }
+  EXPECT_NE(host.find("case 1U: return data." + stage_field + ";"), std::string::npos);
+  EXPECT_NE(host.find("case 2U: return data." + stage_field + ";"), std::string::npos);
 
   // The n-broadcast Inductor path must preserve this same candidate/key/DB
   // mapping instead of assuming that cases 0 and 1 are the two buffer modes.
@@ -4997,29 +5125,7 @@ TEST_F(TestCodegenTiling, GeDynamicCvPreservesAllUbCandidatesAndCommonBoundary) 
   EXPECT_NE(inductor_host.find("ub_case < 4U"), std::string::npos);
   EXPECT_NE(inductor_host.find("get_tiling_key() - 4"), std::string::npos);
   EXPECT_NE(inductor_host.find("GetCvUbStageSize(tiling->tiling_data, ub_case)"), std::string::npos);
-  const auto helper = inductor_host.find("static inline uint32_t GetCvUbStageSize(");
-  ASSERT_NE(helper, std::string::npos);
-  const auto helper_end = inductor_host.find("\n}\n", helper);
-  ASSERT_NE(helper_end, std::string::npos);
-  const std::string tiling_data = R"(
-#include <cstdint>
-struct AutofuseTilingData {
-  uint32_t get_cv_stage_0_size() const { return 64U; }
-  uint32_t get_cv_stage_1_size() const { return 32U; }
-};
-)";
-  const std::string check_stage_sizes = R"(
-int main() {
-  const AutofuseTilingData data{};
-  return GetCvUbStageSize(data, 0U) == 64U && GetCvUbStageSize(data, 1U) == 32U &&
-                 GetCvUbStageSize(data, 2U) == 64U && GetCvUbStageSize(data, 3U) == 32U &&
-                 GetCvUbStageSize(data, 4U) == 0U
-             ? 0
-             : 1;
-}
-)";
-  EXPECT_TRUE(
-      CompileAndRunCode(tiling_data + inductor_host.substr(helper, helper_end + 3U - helper) + check_stage_sizes));
+  CheckCvUbStageSizeSelection(inductor_host, stage_field);
 
   const auto budget_guard = inductor_host.find("if (cv_cube_reserve + 256U >= limit->ub_size) {continue;}");
   const auto budget = inductor_host.find("set_ub_size((limit->ub_size - 256U - cv_cube_reserve) / cv_row_capacity)");
@@ -5781,6 +5887,36 @@ TEST_F(TestCodegenTiling, TfAndInductorPgoShouldSortAclDurationsConsistently) {
   EXPECT_EQ(inductor_source.find("mspti"), std::string::npos);
 }
 
+TEST_F(TestCodegenTiling, PgoProfilingSourceShouldKeepLifecycleOrder) {
+  std::stringstream ss;
+  this->GenPgoAclProfiling(ss, false);
+  const auto source = ss.str();
+  const auto begin = source.find("int PgoBeginCandidate(void *collector)");
+  const auto init = source.find("int InitAclPgoEvents()");
+  const auto destroy = source.find("void DestroyAclPgoEvents()");
+  const auto measure = source.find("int MeasureAclPgoLaunch(");
+  const auto loop = source.find("for (uint64_t launch_count = 0U;");
+  ASSERT_NE(begin, std::string::npos);
+  ASSERT_NE(init, std::string::npos);
+  ASSERT_NE(destroy, std::string::npos);
+  ASSERT_NE(measure, std::string::npos);
+  ASSERT_NE(loop, std::string::npos);
+  EXPECT_LT(begin, init);
+  EXPECT_LT(init, destroy);
+  EXPECT_LT(destroy, measure);
+  EXPECT_LT(measure, loop);
+}
+
+TEST_F(TestCodegenTiling, PgoAutofuseTilingSplitShouldPreserveGeneratedShape) {
+  enable_autofuse_pgo_ = true;
+  auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
+  codegen::PgoShapeStringStream pgo_shape_dim;
+  const auto source = this->GenPgoAutofuseTiling(fused_schedule_result, pgo_shape_dim, "AutofuseTilingData", false);
+  EXPECT_NE(source.find("extern \"C\" int64_t AutofuseTilingWithConfig"), std::string::npos);
+  EXPECT_NE(source.find("  auto pgo_tiling = *tiling;"), std::string::npos);
+  EXPECT_NE(source.find("  return 0;"), std::string::npos);
+}
+
 TEST_F(TestCodegenTiling, TfPgoGeneratedSourceContractShouldRemainStable) {
   auto fused_schedule_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
   fused_schedule_result.node_idx_to_scheduled_results[0].resize(1);
@@ -5795,10 +5931,11 @@ TEST_F(TestCodegenTiling, TfPgoGeneratedSourceContractShouldRemainStable) {
   EXPECT_NE(source.find("AutofusePgoCollectorBegin(collector, PGO_GRAPH_NAME)"), std::string::npos);
   EXPECT_NE(source.find("int PgoBeginCandidate(void *collector)"), std::string::npos);
   EXPECT_NE(source.find("const int begin_status = PgoBeginCandidate(g_pgo_collector);"), std::string::npos);
+  EXPECT_NE(source.find("#define DLOGE(fmt, ...) DLOGW(fmt, ##__VA_ARGS__)"), std::string::npos);
   EXPECT_EQ(source.find("int PgoBeginCandidate(void *collector, AutofuseTilingData *tiling_data, "
                         "uint32_t workspace_size)"),
             std::string::npos);
-  EXPECT_NE(source.find("DLOGE(\"InitAclPgoEvents failed, status: %d\", status)"), std::string::npos);
+  EXPECT_NE(source.find("DLOGI(\"InitAclPgoEvents failed, status: %d\", status)"), std::string::npos);
   EXPECT_EQ(source.find("get_tiling_data_repr_fn(tiling_data)"), std::string::npos);
   EXPECT_EQ(source.find("kInductorPgoRunnerAbi"), std::string::npos);
   EXPECT_EQ(source.find("kPgoTopnMagic"), std::string::npos);
@@ -6886,8 +7023,12 @@ TEST_F(TestCodegenTiling, AppendsDefaultCandidateWhenPgoMissesDefault) {
   EXPECT_NE(tiling_impl.find("if (!default_repr.empty() && !found_default_candidate) {"), std::string::npos);
   EXPECT_NE(tiling_impl.find("default_solution.tiling_data = default_tiling;"), std::string::npos);
   EXPECT_NE(tiling_impl.find("default_solution.is_default = true;"), std::string::npos);
-  EXPECT_NE(tiling_impl.find("if (!found_default_candidate) {"), std::string::npos);
+  EXPECT_NE(tiling_impl.find("if (!default_repr.empty() && !found_default_candidate) {\n"
+                             "    if (response.error_message.empty()) {"),
+            std::string::npos);
   EXPECT_NE(tiling_impl.find("default topn candidate not found"), std::string::npos);
+  EXPECT_EQ(tiling_impl.find("response.error_message = \"GetTiling failed for default topn config\""),
+            std::string::npos);
 }
 
 // Task 1 Step 2: multi-group semantic annotations — must match TF PGO real implementation
@@ -7297,6 +7438,134 @@ TEST_F(TestCodegenTiling, GenerateForPgoShouldProtectDsoLifetime) {
   AssertCommonPgoLoaderLifetime(GenerateForPgo(fused_schedule_result, "/tmp"));
 }
 
+namespace {
+constexpr char kPgoSearchStubs[] = R"(
+#include <algorithm>
+#include <cassert>
+#include <cfloat>
+#include <cstdint>
+#include <fstream>
+#include <utility>
+#include <vector>
+#define OP_LOGE(...)
+#define OP_LOGW(...)
+#define OP_LOGI(...)
+#define OP_LOGD(...)
+
+struct AutofuseTilingData {
+  uint32_t block_dim;
+  uint64_t workspace;
+  uint32_t get_block_dim() const { return block_dim; }
+  void set_block_dim(uint32_t value) { block_dim = value; }
+};
+struct AutofuseTilingDataPerf {
+  AutofuseTilingData tiling_data;
+  double best_perf{DBL_MAX};
+};
+struct PgoTensorArgs {};
+using ProfilingCallback = long (*)(PgoTensorArgs *, void *, uint64_t, AutofuseTilingData *, double *);
+using ProfilingBatchCallback = long (*)(PgoTensorArgs *, void *, uint64_t, std::vector<AutofuseTilingDataPerf> *);
+struct ResLimit { uint32_t aiv_num{24}; uint64_t ub_size{4096}; };
+struct PgoConfig {
+  static PgoConfig &Instance() { static PgoConfig config; return config; }
+  int pgo_algorithm{0};
+  bool need_change_solver_run{false};
+  int pgo_threshold_index{0};
+  int pgo_threshold_list_size{1};
+  ProfilingCallback single_callback{nullptr};
+  ProfilingBatchCallback batch_callback{nullptr};
+};
+ResLimit GetResLimit(const ResLimit *) { return {}; }
+bool GetWorkspaceSize(const AutofuseTilingData &tiling, uint64_t &workspace) {
+  workspace = tiling.workspace;
+  return true;
+}
+bool CheckedWorkspaceAdd(uint64_t lhs, uint64_t rhs, uint64_t &out) {
+  return !__builtin_add_overflow(lhs, rhs, &out);
+}
+int AutofuseTiling(AutofuseTilingData *, uint64_t *, uint32_t *, uint32_t, uint64_t) { return -1; }
+AutofuseTilingDataPerf saved_winner{};
+void PgoSaveTilingKey(const AutofuseTilingData &tiling, double perf, std::ofstream &) {
+  saved_winner = {tiling, perf};
+}
+void SavePGOSearchTilingData(char *, std::vector<AutofuseTilingDataPerf> &) {}
+std::vector<AutofuseTilingDataPerf> NormalizePgoMeasuredCandidates(std::vector<AutofuseTilingDataPerf> raw) {
+  return raw;
+}
+namespace optiling {
+bool IsEqual(double lhs, double rhs) { return lhs == rhs; }
+bool PGOSearchTilingKey(std::vector<AutofuseTilingDataPerf> &candidates, AutofuseTilingData &, int32_t,
+                       AutofuseTilingData *, PgoTensorArgs *, void *, uint64_t workspace, double &best_perf) {
+  assert(workspace == 0);
+  best_perf = 3.0;
+  candidates = {{{10, 2048}, 3.0}, {{7, 512}, 3.0}};
+  return true;
+}
+bool PGOByCoreNumSearchTilingKey(std::vector<AutofuseTilingDataPerf> &candidates, AutofuseTilingData *, uint32_t) {
+  candidates = {{{10, 2048}, DBL_MAX}, {{7, 512}, DBL_MAX}};
+  return true;
+}
+}
+)";
+
+constexpr char kPgoSearchChecks[] = R"(
+int main() {
+  constexpr uint64_t kWorkspaceReserve = 16ULL * 1024ULL * 1024ULL;
+  auto &config = PgoConfig::Instance();
+  config.batch_callback = +[](PgoTensorArgs *, void *stream, uint64_t workspace,
+                              std::vector<AutofuseTilingDataPerf> *profiles) -> long {
+    auto &state = *static_cast<std::pair<bool, int> *>(stream);
+    ++state.second;
+    assert(workspace == 2048 + kWorkspaceReserve);
+    if (state.first) {
+      profiles->at(0).best_perf = 5.0;
+      profiles->at(1).best_perf = 3.0;
+    }
+    return 0;
+  };
+
+  char config_path[] = "/dev/null";
+  AutofuseTilingData tiling{24, 0};
+  uint64_t workspace = 123;
+  uint32_t block_dim = 99;
+  assert(PgoTilingSearchPGO(nullptr, config_path, &tiling, &workspace, &block_dim) == 0);
+  assert(tiling.get_block_dim() == 7 && block_dim == 7);
+  assert(workspace == 512 + kWorkspaceReserve);
+  assert(saved_winner.tiling_data.get_block_dim() == 7 && saved_winner.tiling_data.workspace == 512);
+  assert(saved_winner.best_perf == 3.0);
+
+  config.pgo_algorithm = 1;
+  std::pair<bool, int> state{false, 0};
+  config.pgo_threshold_list_size = 0;
+  saved_winner = {};
+  assert(PgoTilingSearchByCoreNum(nullptr, config_path, &tiling, &workspace, &block_dim,
+                                   nullptr, nullptr, &state) == -1);
+  assert(state.second == 0 && saved_winner.tiling_data.get_block_dim() == 0);
+  config.pgo_threshold_list_size = 1;
+  assert(PgoTilingSearchByCoreNum(nullptr, config_path, &tiling, &workspace, &block_dim,
+                                   nullptr, nullptr, &state) == -1);
+  assert(state.second == 1 && saved_winner.tiling_data.get_block_dim() == 0);
+
+  state.first = true;
+  assert(PgoTilingSearchByCoreNum(nullptr, config_path, &tiling, &workspace, &block_dim,
+                                   nullptr, nullptr, &state) == 0);
+  assert(state.second == 2 && tiling.get_block_dim() == 7 && block_dim == 7);
+  assert(workspace == 512 + kWorkspaceReserve);
+  assert(saved_winner.tiling_data.get_block_dim() == 7 && saved_winner.tiling_data.workspace == 512);
+  assert(saved_winner.best_perf == 3.0);
+}
+)";
+}  // namespace
+
+TEST_F(TestCodegenTiling, PgoSearchPublishesWinnerResourcesOnlyWithValidMeasurement) {
+  auto schedule = GenMultiGroupFusedScheduleResult();
+  codegen::PgoShapeStringStream shape;
+  const auto type = "AutofuseTilingData";
+  ASSERT_TRUE(CompileAndRunCode(std::string(kPgoSearchStubs) + GenSavePGOConfigTilingDataFunc() +
+                                GenPgoTilingSearchByCoreNum(schedule, shape, type, false, "0") +
+                                GenPgoTilingSearchPGO(schedule, shape, type, false, "0") + kPgoSearchChecks));
+}
+
 TEST_F(TestCodegenTiling, GenerateForPgoShouldLoadFindBestTilingKeyOnlyWhenSupported) {
   auto supported_result = this->GenBasicFusedScheduleResult({af::Symbol(64), af::Symbol(128)});
   auto unsupported_result = supported_result;
@@ -7346,8 +7615,8 @@ void AssertDlopenRunnerProfiling(const std::string &runner) {
   ASSERT_NE(unsupported_branch, std::string::npos);
   EXPECT_LT(unsupported_branch, unsupported_warning);
   EXPECT_NE(runner.find("result = kPgoProfileUnsupported;"), std::string::npos);
-  EXPECT_NE(runner.find("DLOGE(\"InitAclPgoEvents failed, status: %d\", status)"), std::string::npos);
-  EXPECT_NE(runner.find("DLOGE(\"PgoBeginCandidate failed, status: %d\", begin_status)"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"InitAclPgoEvents failed, status: %d\", status)"), std::string::npos);
+  EXPECT_NE(runner.find("DLOGI(\"PgoBeginCandidate failed, status: %d\", begin_status)"), std::string::npos);
   EXPECT_NE(runner.find("DLOGE(\"AutofusePgoCollectorRecordLaunch failed, status: %d\", record_status)"),
             std::string::npos);
   EXPECT_NE(runner.find("DLOGE(\"WrapperOnlyLaunch failed, ERROR: %d\", launch_status)"), std::string::npos);
@@ -8005,12 +8274,12 @@ TEST_F(TestCodegenTiling, InductorMatmulDispatchShouldPruneOnlyUnreachableBasicS
     ASSERT_FALSE(launch.empty());
 
     // ASWT retains Basic-only-platform and non-full-load Slice/Fixpipe fallbacks.
-    // K=0/ToMul/ToMultiMul return Basic keys independently of offset_x.
+    // K=0/ToMul/ToFmaMul return Basic keys independently of offset_x.
     const std::vector<std::string> retained = {
         "0, 0, 0, MatMulV3BasicTilingData",    "0, 1, 0, MatMulV3BasicTilingData",
         "0, 2, 0, MatMulV3BasicTilingData",    "0, 0, 1, MatMulV3BasicTilingData",
         "0, 0, 2, MatMulV3BasicTilingData",    "2, 0, 0, MatMulV3KEqZeroBasicTilingData",
-        "3, 0, 0, MatMulToMulBasicTilingData", "4, 0, 0, MatMulToVectorBasicTilingData"};
+        "3, 0, 0, MatMulToMulBasicTilingData", "4, 0, 0, MatMulFmaTilingData"};
     for (const auto &strategy : retained) {
       EXPECT_NE(launch.find("_DISPATCH_MATMUL(1, " + strategy + ");"), std::string::npos) << strategy;
     }
@@ -8089,12 +8358,12 @@ TEST_F(TestCodegenTiling, InductorRtLaunchDispatchShouldPruneTensorOnlyBasicMode
     }
 
     // Basic 平台可达模式保留 api_level=1 发射（实例化由平台守卫设备编译期裁剪）；
-    // K=0/ToMul/ToMultiMul 与 offset_x 无关，仅 api_level=1 存在。
+    // K=0/ToMul/ToFmaMul 与 offset_x 无关，仅 api_level=1 存在。
     const std::vector<std::string> retained = {
         "0, 0, 0, MatMulV3BasicTilingData",    "0, 1, 0, MatMulV3BasicTilingData",
         "0, 2, 0, MatMulV3BasicTilingData",    "0, 0, 1, MatMulV3BasicTilingData",
         "0, 0, 2, MatMulV3BasicTilingData",    "2, 0, 0, MatMulV3KEqZeroBasicTilingData",
-        "3, 0, 0, MatMulToMulBasicTilingData", "4, 0, 0, MatMulToVectorBasicTilingData"};
+        "3, 0, 0, MatMulToMulBasicTilingData", "4, 0, 0, MatMulFmaTilingData"};
     for (const auto &strategy : retained) {
       EXPECT_NE(entry.find("_DISPATCH_MATMUL(1, " + strategy + ");"), std::string::npos) << strategy;
     }
@@ -9429,4 +9698,59 @@ int main() {
 }
 )LOG";
   ASSERT_TRUE(CompileAndRunCode(source));
+}
+
+TEST_F(TestCodegenTiling, CvCoreLimitRatioMatchesTheGeneratedKernelType) {
+  af::AscGraph graph("conv_core_limit_ratio");
+  CreateConv2DGraphWithGroups(graph);
+  ascir::ScheduleGroup group;
+  group.impl_graphs.push_back(graph);
+  ascir::ScheduledResult result;
+  result.cube_type = ascir::CubeTemplateType::kUBFuse;
+  result.schedule_groups.push_back(group);
+  ascir::FusedScheduledResult fused;
+  fused.node_idx_to_scheduled_results = {{result}};
+
+  for (const auto &target : std::vector<std::pair<std::string, uint32_t>>{{"3510", 2U}, {"5102", 1U}}) {
+    ge::PlatformContext::GetInstance().SetPlatform(target.first);
+    std::stringstream source;
+    codegen::AppendCvCoreLimitHelperDefs(source, fused);
+    EXPECT_NE(source.str().find("constexpr uint32_t kCvTaskRatio = " + std::to_string(target.second) + "U;"),
+              std::string::npos);
+    EXPECT_EQ(codegen::GetKernelTaskType(fused), "KERNEL_TYPE_MIX_AIC_1_" + std::to_string(target.second));
+  }
+  fused.node_idx_to_scheduled_results[0][0].cube_type = ascir::CubeTemplateType::kFixpip;
+  std::stringstream cube_only;
+  codegen::AppendCvCoreLimitHelperDefs(cube_only, fused);
+  EXPECT_EQ(codegen::GetKernelTaskType(fused), "KERNEL_TYPE_AIC_ONLY");
+  EXPECT_EQ(cube_only.str().find("aiv_limit / kCvTaskRatio"), std::string::npos);
+  EXPECT_EQ(cube_only.str().find("extern \"C\" bool GetCvCoreLimits"), std::string::npos);
+}
+
+TEST_F(TestCodegenTiling, InductorCvTilingPassesCoreLimitsBeforeAssigningWorkAndKeysTheCache) {
+  af::AscGraph graph("bmm_core_limit");
+  CreateBatchMatmulElemwiseFusedGraph(graph);
+  optimize::Optimizer optimizer(optimize::OptimizerOptions{});
+  ascir::FusedScheduledResult fused;
+  ASSERT_EQ(optimizer.Optimize(graph, fused), af::SUCCESS);
+  ASSERT_TRUE(ascgen_utils::IsCubeFusedScheduled(fused));
+  codegen::Codegen generator(codegen::CodegenOptions{});
+  codegen::CodegenResult result;
+  ASSERT_EQ(generator.GenerateForInductor(fused, result), af::SUCCESS);
+  const auto &source = result.tiling;
+  EXPECT_LT(source.find("std::lock_guard<std::mutex> lock(cube_tiling_mutex)"),
+            source.find("const uint32_t requested_aic = cv_aic_num"));
+  EXPECT_NE(source.find("limit->aic_num, limit->aiv_num, ws_size"), std::string::npos);
+  EXPECT_NE(source.find("compile_info.aicore_num = cv_aic_num;"), std::string::npos);
+  EXPECT_NE(source.find("compile_info.aiv_num = cv_aiv_num;"), std::string::npos);
+  EXPECT_NE(source.find("cached_requested_aic == requested_aic"), std::string::npos);
+  EXPECT_NE(source.find("cached_requested_aiv == requested_aiv"), std::string::npos);
+  EXPECT_NE(source.find("cv_aic_num = cached_effective_aic"), std::string::npos);
+  EXPECT_NE(source.find("cv_aiv_num = cached_effective_aiv"), std::string::npos);
+  EXPECT_EQ(source.find("cube_block_dim * 2 < vec_block_dim"), std::string::npos);
+  EXPECT_NE(source.find("GenConstTilingDataWithCoreLimits(char* config_file, int aic_num"), std::string::npos);
+  EXPECT_NE(source.find("limit.aic_num = aic_num;"), std::string::npos);
+  EXPECT_NE(source.find("&workspace_size, &block_dim, &limit)"), std::string::npos);
+  EXPECT_NE(source.find("return GenConstTilingDataWithCoreLimits(config_file, 0, aiv_num, ub_size);"),
+            std::string::npos);
 }

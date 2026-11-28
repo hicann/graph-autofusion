@@ -73,7 +73,7 @@ Status ScheduleGroupGraphPartitioner::PartitionByConnectivity(const ::ascir::Imp
     GE_ASSERT_NOTNULL(node);
     if (node->GetOutDataNodes().empty()) {
       output_nodes.emplace_back(node);
-      GELOGI("Output node: %s[%s]", node->GetName().c_str(), node->GetType().c_str());
+      GELOGD("Output node: %s[%s]", node->GetName().c_str(), node->GetType().c_str());
     }
     ++num_nodes;
   }
@@ -415,7 +415,7 @@ Status ScheduleGroupGraphPartitioner::MergeGraphs(::ascir::ImplGraph &dst,
                                                   const std::vector<size_t> &group) {
   for (size_t idx : group) {
     const auto &src = grouped_graphs[idx];
-    GELOGI("MergeGraphs: merging %s into %s", src.GetName().c_str(), dst.GetName().c_str());
+    GELOGD("MergeGraphs: merging %s into %s", src.GetName().c_str(), dst.GetName().c_str());
 
     af::NodeCloneMap node_clone_map;
     for (const auto &node : src.GetAllNodes()) {
@@ -436,6 +436,7 @@ Status ScheduleGroupGraphPartitioner::MergeGraphs(::ascir::ImplGraph &dst,
       GE_CHK_STATUS_RET(af::GraphUtils::RelinkGraphEdges(asc_node, node_clone_map), "RelinkGraphEdges failed");
     }
   }
+  GELOGI("MergeGraphs: merged %zu graph(s) into %s", group.size(), dst.GetName().c_str());
 
   GE_CHK_STATUS_RET(ScheduleUtils::TopologicalSorting(dst), "Failed to sort merged graph");
   return af::SUCCESS;

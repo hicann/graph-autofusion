@@ -18,11 +18,21 @@
 
 namespace codegen {
 
+// Resolve the stage budget from the size expression, which may have no tiling-data field.
+__attribute__((visibility("hidden"))) std::string GenCvStageSizeExpr(const af::Expression &size,
+                                                                     const std::string &tiling_data);
+__attribute__((visibility("hidden"))) void AppendCvStageSizeAccessor(const af::AscGraph &graph, bool first_inner,
+                                                                     std::stringstream &ss);
+
 // A [K, B, N] storage exposed as a zero-offset [B, K, N] B input.
 __attribute__((visibility("hidden"))) ge::AscNodePtr GetBmmInputView(const ge::AscNodePtr &node);
 __attribute__((visibility("hidden"))) ge::AscNodePtr FindBmmInputView(const ascir::FusedScheduledResult &fused);
 __attribute__((visibility("hidden"))) bool IsRegisterBmmInputPackSupported();
 __attribute__((visibility("hidden"))) bool CanPackBmmInput(const ge::AscNodePtr &view);
+
+std::string GetKernelTaskType(const ascir::FusedScheduledResult &result);
+__attribute__((visibility("hidden"))) void AppendCvCoreLimitHelperDefs(std::stringstream &ss,
+                                                                       const ascir::FusedScheduledResult &result);
 
 __attribute__((visibility("hidden"))) void AppendCvBaseAlignHelperDefs(std::stringstream &ss);
 __attribute__((visibility("hidden"))) void AppendCvPlatformSelectionDefs(std::stringstream &ss, bool avoid_tensor_api,
