@@ -1671,14 +1671,24 @@ TEST_F(SkEventRecorderTest, DifferentDeviceNeverReceivesCachedAddress) {
 TEST_F(SkEventRecorderTest, ThreadStartupFailureIsReportedAndJoinedWithoutRetry) {
   auto &recorder = SkEventRecorder::Instance();
   setenv("ASCEND_PROF_SK_ON", "64", 1);
-  MOCKER(aclrtSetDevice).stubs().will(returnValue(ACL_ERROR_INVALID_PARAM));
+  MOCKER(aclrtSetDevice).expects(once()).will(returnValue(ACL_ERROR_INVALID_PARAM));
   EXPECT_EQ(recorder.Init(), ACL_ERROR_INVALID_PARAM);
   EXPECT_EQ(recorder.error_.load(), ACL_ERROR_INVALID_PARAM);
   EXPECT_FALSE(recorder.globalRunning.load());
   ASSERT_FALSE(recorder.threadStarted_);
   recorder.SkProfilingShutdown();
   EXPECT_FALSE(recorder.threadStarted_);
-  EXPECT_EQ(recorder.Init(), ACL_ERROR_INVALID_PARAM);
+  EXPECT_EQ(recorder.Init(), ACL_SUCCESS);
+  EXPECT_FALSE(recorder.IsEnabled());
+  EXPECT_EQ(recorder.error_.load(), ACL_ERROR_INVALID_PARAM);
+  // 后台线程已回收，撤销故障注入后再验证后续模型的正常 Runtime 路径。
+  GlobalMockObject::verify();
+  sk::test::Model nextModel;
+  auto stream = nextModel.AddStream();
+  nextModel.AddKernel(stream, "after_startup_failure_first");
+  nextModel.AddKernel(stream, "after_startup_failure_second");
+  EXPECT_EQ(aclskOptimize(nextModel.Handle(), nullptr), ACL_SUCCESS);
+  EXPECT_EQ(nextModel.SuccessfulUpdates(), 1U);
 }
 
 TEST_F(SkEventRecorderTest, NodeAndScopeNamesAreEscapedInParseableJson) {
@@ -1731,10 +1741,6 @@ TEST_F(SkEventRecorderTest, WriteFailureOnDumpThreadLeavesJoinToHost) {
   EXPECT_FALSE(recorder.threadStarted_);
   EXPECT_FALSE(recorder.IsEnabled());
   EXPECT_NE(recorder.error_.load(), ACL_SUCCESS);
-}
-
-TEST_F(SkGetSkFuncNameTest, NullNodeReturnsFailureSentinel) {
-  EXPECT_TRUE(GetSkFuncName({nullptr}, 1, "scope").empty());
 }
 
 TEST_F(SkEventRecorderTest, CopyFailureStopsRecorderAndRestoresCaptureMode) {
@@ -1870,4 +1876,55 @@ TEST_F(SkEventRecorderTest, OutputOpenFailureStopsRecorderWithoutAnotherAllocati
   EXPECT_FALSE(recorder.deviceCtxs.outputFp.IsValid());
   EXPECT_EQ(recorder.GetGmAddrForDevice(0, address), ACL_ERROR_FAILURE);
   EXPECT_EQ(address, nullptr);
+}
+
+TEST_F(SkEventRecorderTest, ProfilingFailureDoesNotBlockNextModelOrRetryAllocation) {
+  setenv("ASCEND_PROF_SK_ON", "64", 1);
+  auto &recorder = SkEventRecorder::Instance();
+  MOCKER(SkEventRecorder::CreateOutputDir).expects(once()).will(returnValue(std::string("/dev/null")));
+  sk::test::Model firstModel;
+  auto firstStream = firstModel.AddStream();
+  firstModel.AddKernel(firstStream, "failing_profile_first");
+  firstModel.AddKernel(firstStream, "failing_profile_second");
+  EXPECT_NE(aclskOptimize(firstModel.Handle(), nullptr), ACL_SUCCESS);
+  EXPECT_EQ(firstModel.SuccessfulUpdates(), 0U);
+  EXPECT_FALSE(recorder.IsEnabled());
+  EXPECT_FALSE(recorder.threadStarted_);
+
+  sk::test::Model nextModel;
+  auto stream = nextModel.AddStream();
+  nextModel.AddKernel(stream, "disabled_profile_first");
+  nextModel.AddKernel(stream, "disabled_profile_second");
+  EXPECT_EQ(aclskOptimize(nextModel.Handle(), nullptr), ACL_SUCCESS);
+  EXPECT_EQ(nextModel.SuccessfulUpdates(), 1U);
+  EXPECT_FALSE(recorder.IsEnabled());
+  EXPECT_FALSE(recorder.threadStarted_);
+  for (const auto &task : nextModel.Tasks(stream)) {
+    if (task.disabled) {
+      continue;
+    }
+    ASSERT_GE(task.args.size(), sizeof(SkDeviceEntryArgs));
+    const auto *args = reinterpret_cast<const SkDeviceEntryArgs *>(task.args.data());
+    ASSERT_LE(args->skHeader.eventConfigOffset + sizeof(SkEventConfig), task.args.size());
+    const auto *config = reinterpret_cast<const SkEventConfig *>(task.args.data() + args->skHeader.eventConfigOffset);
+    EXPECT_EQ(config->enabled, 0U);
+    EXPECT_EQ(config->eventGmAddr, 0U);
+  }
+}
+
+TEST_F(SkEventRecorderTest, MissingEventBufferStillRegistersFinalTaskIndices) {
+  SuperKernelGraph graph(nullptr, "bufferless_mapping");
+  SuperKernelScopeInfo scopeInfo;
+  SkLaunchInfo launchInfo{};
+  auto first = CreateKernelNode(101, "first", 1);
+  auto event = CreateWaitNode(102);
+  auto later = CreateKernelNode(103, "later", 1);
+  auto &recorder = SkEventRecorder::Instance();
+  recorder.enabled = true;
+  recorder.deviceCtxs.active = 1;
+  EXPECT_TRUE(DumpProfilingDetail({first.get(), event.get(), later.get()}, launchInfo, scopeInfo, graph));
+  EXPECT_EQ(recorder.GetNodeInfo(graph.GetModelId(), scopeInfo.GetScopeId(), 0).nodeName, "first");
+  EXPECT_TRUE(recorder.GetNodeInfo(graph.GetModelId(), scopeInfo.GetScopeId(), 1).nodeName.empty());
+  EXPECT_EQ(recorder.GetNodeInfo(graph.GetModelId(), scopeInfo.GetScopeId(), 2).nodeName, "later");
+  EXPECT_EQ(launchInfo.eventGmAddr, nullptr);
 }

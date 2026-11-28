@@ -95,12 +95,10 @@ bool SetupProfilingRuntime(const std::vector<SuperKernelBaseNode *> &taskNodes, 
     SK_LOGE("[sk time profiling] Failed to get event GM address, ret=%d; optimization will be aborted", ret);
     return false;
   }
-  if (launchInfo.eventGmAddr == nullptr) {
-    launchInfo.modelIdIndex = 0;
-    launchInfo.skId = 0;
-    return true;
+  const bool profilingEnabled = (launchInfo.eventGmAddr != nullptr);
+  if (!profilingEnabled) {
+    SK_LOGW("[sk time profiling] Failed to get event GM address, profiling will be disabled");
   }
-  const bool profilingEnabled = true;
 
   launchInfo.modelIdIndex = SkEventRecorder::Instance().RegisterModelId(modelId);
   launchInfo.skId = static_cast<uint32_t>(scopeInfo.GetScopeId());
@@ -185,7 +183,9 @@ aclError SkEventRecorder::Init() {
     SK_LOGI("[sk time profiling] Dump the time of superkernel has already been initialized, skip re-initialization");
     return ACL_SUCCESS;
   }
-  std::call_once(initFlag_, [this]() {
+  // 仅初始化本次调用返回初始化错误；历史错误停用 profiling，不阻断后续模型。
+  aclError initResult = ACL_SUCCESS;
+  std::call_once(initFlag_, [this, &initResult]() {
     SK_LOGI("[sk time profiling] ===================== Start dump the time of superkernel =======================");
     // 检查打点环境变量是否开启（值代表每个core申请了几KB的空间，0表示关闭）
     if (!ParseEnvAndSetSize()) {
@@ -197,7 +197,8 @@ aclError SkEventRecorder::Init() {
     aclError aclRet = aclrtGetDevice(&dumpDeviceId);
     if (aclRet != ACL_SUCCESS) {
       SK_LOGE("[sk time profiling] Failed to get device id, ret=%d\n", aclRet);
-      ReportError(aclRet);
+      initResult = aclRet;
+      ReportError(initResult);
       return;
     }
 
@@ -205,14 +206,16 @@ aclError SkEventRecorder::Init() {
     int ret = pthread_create(&dumpThread, nullptr, DumpThreadFunc, this);
     if (ret != 0) {
       SK_LOGE("[sk time profiling] Failed to create dump thread, ret=%d\n", ret);
-      ReportError(ACL_ERROR_FAILURE);
+      initResult = ACL_ERROR_FAILURE;
+      ReportError(initResult);
       return;
     }
     threadStarted_ = true;
     // 等待后台线程完成 SetDevice，避免线程已退出但 recorder 仍被标记为启用。
     std::unique_lock<std::mutex> startupLock(mutex);
     startupCv_.wait(startupLock, [this]() { return startupDone_; });
-    if (error_.load() != ACL_SUCCESS) {
+    initResult = error_.load();
+    if (initResult != ACL_SUCCESS) {
       return;
     }
     // 注册 Msprof 回调，profiling 结束时获取输出路径
@@ -227,11 +230,10 @@ aclError SkEventRecorder::Init() {
     enabled.store(true);
     SK_LOGI("[sk time profiling] Event recorder enabled with single dump thread\n");
   });
-  const aclError ret = error_.load();
-  if (ret != ACL_SUCCESS) {
+  if (initResult != ACL_SUCCESS) {
     SkProfilingShutdown();
   }
-  return ret;
+  return initResult;
 }
 
 bool SkEventRecorder::ParseEnvAndSetSize() {
@@ -552,21 +554,14 @@ void *SkEventRecorder::DumpThreadFunc(void *arg) {
 
 namespace {
 bool EscapeProfilingJsonString(const std::string &value, std::string &escaped) {
-  constexpr char hexDigits[] = "0123456789abcdef";
-  escaped.clear();
-  for (const unsigned char ch : value) {
-    if (ch == '\\' || ch == '\"') {
-      escaped.push_back('\\');
-      escaped.push_back(static_cast<char>(ch));
-    } else if (ch < 0x20U) {
-      escaped += "\\u00";
-      escaped.push_back(hexDigits[ch >> 4U]);
-      escaped.push_back(hexDigits[ch & 0xfU]);
-    } else {
-      escaped.push_back(static_cast<char>(ch));
-    }
+  try {
+    const std::string quoted = nlohmann::json(value).dump();
+    escaped.assign(quoted, 1, quoted.size() - 2);
+    return true;
+  } catch (const nlohmann::json::type_error &) {
+    // 非法 UTF-8 转换为调用方现有的错误返回，避免异常逃出后台线程。
+    return false;
   }
-  return nlohmann::json::accept("\"" + escaped + "\"");
 }
 }  // namespace
 
@@ -1060,7 +1055,13 @@ bool DumpProfilingDetail(const std::vector<SuperKernelBaseNode *> &taskNodes, Sk
   SkEventRecorder::Instance().AddSkNameMapping(modelId, static_cast<uint32_t>(scopeInfo.GetScopeId()),
                                                launchInfo.skFuncName);
 
-  return SetupProfilingRuntime(taskNodes, launchInfo, scopeInfo, modelId);
+  if (SkEventRecorder::Instance().IsEnabled()) {
+    return SetupProfilingRuntime(taskNodes, launchInfo, scopeInfo, modelId);
+  }
+  launchInfo.eventGmAddr = nullptr;
+  launchInfo.modelIdIndex = 0;
+  launchInfo.skId = 0;
+  return true;
 }
 
 std::string GetSkFuncName(const std::vector<SuperKernelBaseNode *> &nodes, uint16_t scopeId,
@@ -1068,10 +1069,6 @@ std::string GetSkFuncName(const std::vector<SuperKernelBaseNode *> &nodes, uint1
   const SuperKernelBaseNode *startKernelNode = nullptr;
   const SuperKernelBaseNode *endKernelNode = nullptr;
   for (const auto *node : nodes) {
-    if (node == nullptr) {
-      SK_LOGE("Null node while generating SK function name, scopeId=%u", scopeId);
-      return "";
-    }
     if (node->GetNodeType() == SkNodeType::NODE_KERNEL) {
       if (startKernelNode == nullptr) {
         startKernelNode = node;

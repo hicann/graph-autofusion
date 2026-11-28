@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
       model.AddKernel(stream, "profile_first");
       model.AddKernel(stream, "profile_second");
       const aclError ret = aclskOptimize(model.Handle(), nullptr);
-      if (scenario == "memset_failure" || scenario == "directory_failure") {
+      if (i == 0 && (scenario == "memset_failure" || scenario == "directory_failure")) {
         Require(ret != ACL_SUCCESS, "recorder failure must abort optimization");
         Require(model.SuccessfulUpdates() == 0, "failed recorder must not update model");
         continue;

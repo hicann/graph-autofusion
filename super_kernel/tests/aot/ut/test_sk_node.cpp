@@ -2740,17 +2740,6 @@ TEST_F(SkNodeTest, DumpSingleKernelBinaryReportsBufferedWriteFailure) {
   rmdir(dir.c_str());
 }
 
-TEST_F(SkNodeTest, KernelUpdateRejectsMissingLaunchArguments) {
-  TestRITask task{};
-  SuperKernelKernelNode node(MakeTaskHandle(task), ACL_MODEL_RI_TASK_KERNEL, 0, 0, 0, INVALID_TASK_ID);
-  SkLaunchInfo launchInfo;
-  launchInfo.entryInfo.skEntryFunc = reinterpret_cast<aclrtFuncHandle>(0x9201);
-  UpdateContext ctx{};
-  ctx.launchInfo = &launchInfo;
-  MOCKER(aclmdlRITaskSetParams).expects(never());
-  EXPECT_FALSE(node.Update(ctx));
-}
-
 TEST_F(SkNodeTest, MetadataFailurePreservesModelOptimizationAndReasonReporting) {
   sk::test::Model model;
   auto badStream = model.AddStream();

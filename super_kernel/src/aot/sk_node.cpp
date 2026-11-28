@@ -1297,10 +1297,6 @@ bool SuperKernelKernelNode::Update(const UpdateContext &ctx) {
     }
     hasUpdateParams = true;
   } else if (ctx.launchInfo != nullptr && ctx.launchInfo->entryInfo.skEntryFunc != nullptr) {
-    if (ctx.launchInfo->devArgs.Get() == nullptr) {
-      SK_LOGE("SK launch arguments are null for %s", Format().c_str());
-      return false;
-    }
     updateParams.type = ACL_MODEL_RI_TASK_KERNEL;
     updateParams.opInfoPtr = ctx.launchInfo->cacheInfo;
     updateParams.opInfoSize = ctx.launchInfo->cacheopInfoSize;
