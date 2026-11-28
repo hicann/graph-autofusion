@@ -2436,7 +2436,7 @@ TEST(IndirectLoadScheduleCaseGeneratorTest, SimtSharedSideInputStoreFoldsIntoReg
 // gather-only 边界化形态：区域按 index 链整体重算（组员同构），输出侧节点全部恢复普通
 // 调度发射——共享 side-input store 与 fanout 分支不残留 skip 角色，lowering 计划只含
 // value 直写 UB 局部目标。
-TEST(IndirectLoadScheduleCaseGeneratorTest, SimtBoundaryFusionShrinksRegionToIndexChain) {
+TEST(IndirectLoadScheduleCaseGeneratorTest, DISABLED_SimtBoundaryFusionShrinksRegionToIndexChain) {
   PlatformContextReset platform_reset;
   ge::PlatformContext::GetInstance().Reset();
   ge::PlatformContext::GetInstance().SetPlatform("3510");

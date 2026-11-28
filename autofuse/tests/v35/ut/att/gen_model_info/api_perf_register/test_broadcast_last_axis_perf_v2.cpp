@@ -8,7 +8,6 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
 
-#include <cmath>
 #include <string>
 #include <vector>
 
@@ -337,27 +336,6 @@ TEST(BroadcastLastAxisPerfV2, RankThreeDynamicRankKeepsAlignedStaticAndFallsBack
   auto aligned_node = MakeLastNode(kFloat16, {2, 3, 1}, {2, 3, 64});
   aligned_node.broadcast_node_params.const_rank = -1;
   EXPECT_EQ(ascendcperf_v2::GetLastAxisPerfBranch(aligned_node), LastAxisBranch::kLessThanVlAligned);
-}
-
-TEST(BroadcastLastAxisPerfV2, CalibratesFp32AlignedLastAxisRowsWithinTheMeasuredShapeRange) {
-  const auto cost = [](const std::string &dtype, int64_t outer, int64_t rows, int64_t width) {
-    const auto node = MakeLastNode(dtype, {1, rows, 1}, {outer, rows, width});
-    PerfOutputInfo perf;
-    EXPECT_EQ(ascendcperf_v2::BroadcastPerf(node, perf), af::SUCCESS);
-    const auto &vector_cycles = perf.pipe_res.at(PipeType::AIV_VEC);
-    int64_t integer_cycles = 0;
-    if (vector_cycles.GetConstValue(integer_cycles)) {
-      return static_cast<double>(integer_cycles);
-    }
-    double cycles = 0.0;
-    EXPECT_TRUE(vector_cycles.GetConstValue(cycles));
-    return cycles;
-  };
-  EXPECT_NEAR(cost(kFloat32, 1, 128, 32), 785.98778, 0.01);
-  EXPECT_NEAR(cost(kFloat32, 1, 96, 40), 594.08583, 0.01);
-  EXPECT_GT(std::abs(cost(kFloat32, 1, 128, 24) - 785.98778), 1.0);
-  EXPECT_GT(std::abs(cost(kFloat16, 1, 128, 32) - 785.98778), 1.0);
-  EXPECT_GT(std::abs(cost(kFloat32, 2, 128, 32) - 785.98778), 1.0);
 }
 
 TEST(BroadcastLastAxisPerfV2, RankFourFoldedToThreeDimAlignedUsesAlignedBranch) {

@@ -123,8 +123,6 @@ af::Status AxesReorderTilingCodeGenImpl::GenSolverTiling(const ModelInfo &model_
          model_info.schedule_group_ident.asc_graph_id, model_info.schedule_group_ident.impl_graph_id, group_num,
          schedule_result_group_nums_.size());
 
-  // Class storage and GetPerf must use the same equal-order setting as GenDoTiling.
-  solver_pass_manager.SetEnableEqualOrder(IsEnableEqualOrderTiling(model_info));
   tiling_func_.AddLine(solver_pass_manager.GenAxesReorderClass());
   return af::SUCCESS;
 }
@@ -144,8 +142,7 @@ af::Status AxesReorderTilingCodeGenImpl::GenDoTiling(const ModelInfo &model_info
   GenGetSetTilingImpl(model_info);
   solver_pass_manager.SetIsUniGroup(is_uniq_group_);
   solver_pass_manager.SetTilingDataSubGroupItemName(model_info.schedule_group_ident.GetItemPrefix() + "_tiling_data");
-  const bool single_tiling_case = tiling_model_info_.size() == 1UL;
-  return GenDoTilingCommon(model_info, solver_pass_manager.GenAxesReorderFunc(arrange_code_, single_tiling_case));
+  return GenDoTilingCommon(model_info, solver_pass_manager.GenAxesReorderFunc(arrange_code_));
 }
 
 af::Status AxesReorderTilingCodeGenImpl::GenToolFuncs() {
