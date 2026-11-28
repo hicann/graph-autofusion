@@ -42,7 +42,7 @@ TEST(AotProfilingSystemTest, InvalidAndDisabledEnvironmentPreservesOptimization)
   }
 }
 
-TEST(AotProfilingSystemTest, RecorderFailuresDoNotPreventOptimizationOrProcessExit) {
+TEST(AotProfilingSystemTest, RecorderFailuresAbortOptimizationAndAllowProcessExit) {
   for (const std::string scenario : {"memset_failure", "directory_failure", "empty_path"}) {
     SCOPED_TRACE(scenario);
     sk::test::TemporaryDirectory directory;
